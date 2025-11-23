@@ -4,7 +4,7 @@ import * as path from 'path';
 import { Readable } from 'stream';
 
 export interface SessionMetadata {
-  sessionId: string;
+  sessionPath: string; // Format: {owner}/{repo}/{branch}
   createdAt: string;
   lastModified: string;
   size?: number;
@@ -68,8 +68,8 @@ export class StorageService {
   /**
    * Upload a session tarball to MinIO
    */
-  async uploadSession(sessionId: string, tarballPath: string): Promise<void> {
-    const objectName = `${sessionId}/session.tar.gz`;
+  async uploadSession(sessionPath: string, tarballPath: string): Promise<void> {
+    const objectName = `${sessionPath}/session.tar.gz`;
 
     try {
       // Verify file exists
@@ -81,14 +81,14 @@ export class StorageService {
       const stats = fs.statSync(tarballPath);
       const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
 
-      console.log(`Uploading session ${sessionId} (${sizeMB} MB)...`);
+      console.log(`Uploading session ${sessionPath} (${sizeMB} MB)...`);
 
       // Upload to MinIO
       await this.minio.fPutObject(this.bucket, objectName, tarballPath);
 
-      console.log(`Session ${sessionId} uploaded successfully`);
+      console.log(`Session ${sessionPath} uploaded successfully`);
     } catch (error) {
-      console.error(`Failed to upload session ${sessionId}:`, error);
+      console.error(`Failed to upload session ${sessionPath}:`, error);
       throw error;
     }
   }
@@ -96,18 +96,18 @@ export class StorageService {
   /**
    * Upload a session tarball from a stream
    */
-  async uploadSessionStream(sessionId: string, stream: Readable, size?: number): Promise<void> {
-    const objectName = `${sessionId}/session.tar.gz`;
+  async uploadSessionStream(sessionPath: string, stream: Readable, size?: number): Promise<void> {
+    const objectName = `${sessionPath}/session.tar.gz`;
 
     try {
-      console.log(`Uploading session ${sessionId} from stream...`);
+      console.log(`Uploading session ${sessionPath} from stream...`);
 
       // Upload to MinIO from stream
       await this.minio.putObject(this.bucket, objectName, stream, size);
 
-      console.log(`Session ${sessionId} uploaded successfully from stream`);
+      console.log(`Session ${sessionPath} uploaded successfully from stream`);
     } catch (error) {
-      console.error(`Failed to upload session ${sessionId} from stream:`, error);
+      console.error(`Failed to upload session ${sessionPath} from stream:`, error);
       throw error;
     }
   }
@@ -115,11 +115,11 @@ export class StorageService {
   /**
    * Download a session tarball from MinIO
    */
-  async downloadSession(sessionId: string, destinationPath: string): Promise<boolean> {
-    const objectName = `${sessionId}/session.tar.gz`;
+  async downloadSession(sessionPath: string, destinationPath: string): Promise<boolean> {
+    const objectName = `${sessionPath}/session.tar.gz`;
 
     try {
-      console.log(`Downloading session ${sessionId}...`);
+      console.log(`Downloading session ${sessionPath}...`);
 
       // Ensure destination directory exists
       const destDir = path.dirname(destinationPath);
@@ -130,14 +130,14 @@ export class StorageService {
       // Download from MinIO
       await this.minio.fGetObject(this.bucket, objectName, destinationPath);
 
-      console.log(`Session ${sessionId} downloaded successfully`);
+      console.log(`Session ${sessionPath} downloaded successfully`);
       return true;
     } catch (err: any) {
       if (err.code === 'NotFound' || err.code === 'NoSuchKey') {
-        console.log(`Session ${sessionId} not found in MinIO`);
+        console.log(`Session ${sessionPath} not found in MinIO`);
         return false;
       }
-      console.error(`Failed to download session ${sessionId}:`, err);
+      console.error(`Failed to download session ${sessionPath}:`, err);
       throw err;
     }
   }
@@ -145,15 +145,15 @@ export class StorageService {
   /**
    * Get a session tarball as a stream
    */
-  async getSessionStream(sessionId: string): Promise<Readable> {
-    const objectName = `${sessionId}/session.tar.gz`;
+  async getSessionStream(sessionPath: string): Promise<Readable> {
+    const objectName = `${sessionPath}/session.tar.gz`;
 
     try {
-      console.log(`Streaming session ${sessionId}...`);
+      console.log(`Streaming session ${sessionPath}...`);
       const stream = await this.minio.getObject(this.bucket, objectName);
       return stream;
     } catch (error) {
-      console.error(`Failed to stream session ${sessionId}:`, error);
+      console.error(`Failed to stream session ${sessionPath}:`, error);
       throw error;
     }
   }
@@ -168,13 +168,14 @@ export class StorageService {
 
       return new Promise((resolve, reject) => {
         stream.on('data', (obj) => {
-          // Extract session ID from path: {sessionId}/session.tar.gz
+          // Extract session path from object name: {owner}/{repo}/{branch}/session.tar.gz
           if (obj.name) {
-            const sessionId = obj.name.split('/')[0];
+            // Remove the "/session.tar.gz" suffix to get the session path
+            const sessionPath = obj.name.replace('/session.tar.gz', '');
 
-            if (!sessions.has(sessionId)) {
-              sessions.set(sessionId, {
-                sessionId,
+            if (!sessions.has(sessionPath)) {
+              sessions.set(sessionPath, {
+                sessionPath,
                 createdAt: obj.lastModified?.toISOString() || new Date().toISOString(),
                 lastModified: obj.lastModified?.toISOString() || new Date().toISOString(),
                 size: obj.size,
@@ -201,8 +202,8 @@ export class StorageService {
   /**
    * Check if a session exists in MinIO
    */
-  async sessionExists(sessionId: string): Promise<boolean> {
-    const objectName = `${sessionId}/session.tar.gz`;
+  async sessionExists(sessionPath: string): Promise<boolean> {
+    const objectName = `${sessionPath}/session.tar.gz`;
 
     try {
       await this.minio.statObject(this.bucket, objectName);
@@ -218,13 +219,13 @@ export class StorageService {
   /**
    * Get session metadata
    */
-  async getSessionMetadata(sessionId: string): Promise<SessionMetadata | null> {
-    const objectName = `${sessionId}/session.tar.gz`;
+  async getSessionMetadata(sessionPath: string): Promise<SessionMetadata | null> {
+    const objectName = `${sessionPath}/session.tar.gz`;
 
     try {
       const stat = await this.minio.statObject(this.bucket, objectName);
       return {
-        sessionId,
+        sessionPath,
         createdAt: stat.lastModified?.toISOString() || new Date().toISOString(),
         lastModified: stat.lastModified?.toISOString() || new Date().toISOString(),
         size: stat.size,
@@ -240,14 +241,14 @@ export class StorageService {
   /**
    * Delete a session from MinIO
    */
-  async deleteSession(sessionId: string): Promise<void> {
-    const objectName = `${sessionId}/session.tar.gz`;
+  async deleteSession(sessionPath: string): Promise<void> {
+    const objectName = `${sessionPath}/session.tar.gz`;
 
     try {
       await this.minio.removeObject(this.bucket, objectName);
-      console.log(`Session ${sessionId} deleted successfully`);
+      console.log(`Session ${sessionPath} deleted successfully`);
     } catch (error) {
-      console.error(`Failed to delete session ${sessionId}:`, error);
+      console.error(`Failed to delete session ${sessionPath}:`, error);
       throw error;
     }
   }
@@ -255,12 +256,12 @@ export class StorageService {
   /**
    * Delete multiple sessions from MinIO
    */
-  async deleteSessions(sessionIds: string[]): Promise<void> {
-    const objectNames = sessionIds.map(id => `${id}/session.tar.gz`);
+  async deleteSessions(sessionPaths: string[]): Promise<void> {
+    const objectNames = sessionPaths.map(path => `${path}/session.tar.gz`);
 
     try {
       await this.minio.removeObjects(this.bucket, objectNames);
-      console.log(`Deleted ${sessionIds.length} sessions successfully`);
+      console.log(`Deleted ${sessionPaths.length} sessions successfully`);
     } catch (error) {
       console.error(`Failed to delete sessions:`, error);
       throw error;

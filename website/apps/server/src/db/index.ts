@@ -65,9 +65,11 @@ if (usePostgres) {
     );
 
     CREATE TABLE IF NOT EXISTS chat_sessions (
-      id SERIAL PRIMARY KEY,
+      id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      ai_worker_session_id TEXT,
+      session_path TEXT UNIQUE,
+      repository_owner TEXT,
+      repository_name TEXT,
       user_request TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       repository_url TEXT,
@@ -81,7 +83,7 @@ if (usePostgres) {
 
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
-      chat_session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       images JSONB,
@@ -122,6 +124,32 @@ if (usePostgres) {
           WHERE table_name = 'users' AND column_name = 'display_name'
         ) THEN
           ALTER TABLE users ADD COLUMN display_name TEXT;
+        END IF;
+        -- Refactor session ID to use {owner}/{repo}/{branch} format
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'chat_sessions' AND column_name = 'session_path'
+        ) THEN
+          ALTER TABLE chat_sessions ADD COLUMN session_path TEXT;
+          ALTER TABLE chat_sessions ADD COLUMN repository_owner TEXT;
+          ALTER TABLE chat_sessions ADD COLUMN repository_name TEXT;
+        END IF;
+        -- Drop old ai_worker_session_id column if session_path exists
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'chat_sessions' AND column_name = 'session_path'
+        ) AND EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'chat_sessions' AND column_name = 'ai_worker_session_id'
+        ) THEN
+          ALTER TABLE chat_sessions DROP COLUMN IF EXISTS ai_worker_session_id;
+        END IF;
+        -- Add unique constraint on session_path if not exists
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'chat_sessions_session_path_unique'
+        ) THEN
+          ALTER TABLE chat_sessions ADD CONSTRAINT chat_sessions_session_path_unique UNIQUE (session_path);
         END IF;
       END $$;
     `);
@@ -173,9 +201,11 @@ if (usePostgres) {
     );
 
     CREATE TABLE IF NOT EXISTS chat_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
-      ai_worker_session_id TEXT,
+      session_path TEXT UNIQUE,
+      repository_owner TEXT,
+      repository_name TEXT,
       user_request TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       repository_url TEXT,
@@ -190,7 +220,7 @@ if (usePostgres) {
 
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      chat_session_id INTEGER NOT NULL,
+      chat_session_id TEXT NOT NULL,
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       images TEXT,
@@ -214,6 +244,25 @@ if (usePostgres) {
     if (!hasBaseBranchColumn) {
       sqlite.exec('ALTER TABLE chat_sessions ADD COLUMN base_branch TEXT;');
       console.log('SQLite migration: Added base_branch column to chat_sessions');
+    }
+
+    // Refactor session ID to use {owner}/{repo}/{branch} format
+    const hasSessionPathColumn = chatSessionsInfo.some((col) => col.name === 'session_path');
+    if (!hasSessionPathColumn) {
+      sqlite.exec('ALTER TABLE chat_sessions ADD COLUMN session_path TEXT;');
+      console.log('SQLite migration: Added session_path column to chat_sessions');
+    }
+
+    const hasRepositoryOwnerColumn = chatSessionsInfo.some((col) => col.name === 'repository_owner');
+    if (!hasRepositoryOwnerColumn) {
+      sqlite.exec('ALTER TABLE chat_sessions ADD COLUMN repository_owner TEXT;');
+      console.log('SQLite migration: Added repository_owner column to chat_sessions');
+    }
+
+    const hasRepositoryNameColumn = chatSessionsInfo.some((col) => col.name === 'repository_name');
+    if (!hasRepositoryNameColumn) {
+      sqlite.exec('ALTER TABLE chat_sessions ADD COLUMN repository_name TEXT;');
+      console.log('SQLite migration: Added repository_name column to chat_sessions');
     }
 
     const messagesInfo = sqlite.pragma('table_info(messages)') as Array<{ name: string }>;

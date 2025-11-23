@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { db } from '../db/index';
 import { chatSessions, messages, users } from '../db/index';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { ensureValidToken } from '../lib/claudeAuth';
 import type { ClaudeAuth } from '@webedt/shared';
 import { generateSessionTitle } from '../lib/titleGenerator';
+import { parseRepoUrl, generateSessionPath } from '../utils/sessionPathHelper';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -71,16 +73,17 @@ const executeHandler = async (req: any, res: any) => {
     console.log('[Execute] ========================================================');
 
     if (!userRequest && !resumeSessionId) {
-      res.status(400).json({ success: false, error: 'userRequest or resumeSessionId is required' });
+      res.status(400).json({ success: false, error: 'userRequest or chatSessionId is required' });
       return;
     }
 
     // Validate that both github params and resumeSessionId are not provided together
     // When resuming a session, the repository is already available in the session workspace
+    // Note: resumeSessionId is deprecated, but kept for backward compatibility
     if (resumeSessionId && repositoryUrl) {
       res.status(400).json({
         success: false,
-        error: 'Cannot provide both "github" and "resumeSessionId". When resuming a session, the repository is already available in the session workspace.',
+        error: 'Cannot provide both "github" and session resumption. When resuming a session, the repository is already available in the session workspace.',
       });
       return;
     }
@@ -95,13 +98,16 @@ const executeHandler = async (req: any, res: any) => {
 
     // Check if we're continuing an existing session or creating a new one
     if (chatSessionId) {
-      // Load existing session
+      // Load existing session - support both UUID and sessionPath lookups
       const existingSessions = await db
         .select()
         .from(chatSessions)
         .where(
           and(
-            eq(chatSessions.id, Number(chatSessionId)),
+            or(
+              eq(chatSessions.id, chatSessionId as string),
+              eq(chatSessions.sessionPath, chatSessionId as string)
+            ),
             eq(chatSessions.userId, authReq.user.id)
           )
         )
@@ -148,21 +154,43 @@ const executeHandler = async (req: any, res: any) => {
         }
       }
 
+      // Parse repository URL to extract owner and repo name
+      let repositoryOwner: string | null = null;
+      let repositoryName: string | null = null;
+
+      if (repositoryUrl) {
+        try {
+          const parsed = parseRepoUrl(repositoryUrl as string);
+          repositoryOwner = parsed.owner;
+          repositoryName = parsed.repo;
+        } catch (error) {
+          console.error('[Execute] Failed to parse repository URL:', error);
+          // Continue anyway - owner/name are optional
+        }
+      }
+
+      // Generate UUID for new session
+      const sessionUuid = uuidv4();
+
       // Create new chat session in database
       chatSession = (await db
         .insert(chatSessions)
         .values({
+          id: sessionUuid,
           userId: authReq.user.id,
           userRequest: (userRequest as string) || 'New session',
           status: 'pending',
           repositoryUrl: (repositoryUrl as string) || null,
+          repositoryOwner,
+          repositoryName,
           baseBranch: (baseBranch as string) || 'main', // Default to main if not provided
           branch: null, // Will be populated when branch is created by the worker
+          sessionPath: null, // Will be populated after branch is created
           locked: false, // Will be locked after first message
         })
         .returning())[0];
 
-      console.log(`[Execute] Created new chatSession: ${chatSession.id}`);
+      console.log(`[Execute] Created new chatSession with UUID: ${chatSession.id}`);
     }
 
     // Store user message and lock the session
@@ -335,23 +363,21 @@ const executeHandler = async (req: any, res: any) => {
       userRequest: parsedUserRequest,
       codingAssistantProvider: 'ClaudeAgentSDK',
       codingAssistantAuthentication: claudeAuth,
+      websiteSessionId: chatSession.id, // Always pass the UUID
       // Always use the autoCommit setting from the session (persisted in DB)
       // This ensures resumed sessions respect the initial setting
       autoCommit: chatSession.autoCommit,
+      // Add database config for persistence
+      database: {
+        accessToken: authReq.session?.id || '', // Use session ID for database access
+      },
     };
 
-    console.log(`[Execute] Session resumption debug:
-      - resumeSessionId from query: ${resumeSessionId || 'N/A'}
-      - chatSession.id: ${chatSession.id}
-      - chatSession.aiWorkerSessionId: ${chatSession.aiWorkerSessionId || 'N/A'}
+    console.log(`[Execute] Session debug:
+      - resumeSessionId from query (deprecated): ${resumeSessionId || 'N/A'}
+      - websiteSessionId (chatSession.id): ${chatSession.id}
+      - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
     `);
-
-    if (resumeSessionId) {
-      executePayload.resumeSessionId = resumeSessionId;
-      console.log(`[Execute] Added resumeSessionId to payload: ${resumeSessionId}`);
-    } else {
-      console.log(`[Execute] No resumeSessionId provided, starting new session`);
-    }
 
     if (repositoryUrl && authReq.user.githubAccessToken) {
       // New session - use parameters from request
@@ -372,13 +398,12 @@ const executeHandler = async (req: any, res: any) => {
     console.log(`[Execute] ========== OUTBOUND **MAIN** REQUEST TO AI WORKER ==========`);
     console.log(`[Execute] Request type: MAIN user request (separate from title generation)`);
     console.log(`[Execute] Destination: ${aiWorkerUrl}/execute`);
-    console.log(`[Execute] Chat Session ID: ${chatSession.id}`);
-    console.log(`[Execute] Resume Session ID: ${resumeSessionId || 'N/A'}`);
+    console.log(`[Execute] Website Session ID (UUID): ${chatSession.id}`);
+    console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'Not yet created'}`);
     console.log(`[Execute] User Request: ${truncateContent(executePayload.userRequest)}`);
     console.log(`[Execute] Repository: ${executePayload.github?.repoUrl || 'N/A'}`);
     console.log(`[Execute] Branch: ${executePayload.github?.branch || 'N/A'}`);
     console.log(`[Execute] Auto Commit: ${executePayload.autoCommit ?? 'N/A'}`);
-    console.log(`[Execute] Auto Commit Source: ${repositoryUrl ? 'request parameter' : resumeSessionId && chatSession.repositoryUrl ? 'database (resumed session)' : 'none'}`);
     console.log(`[Execute] Full Payload (sanitized): ${JSON.stringify(sanitizedPayload, null, 2)}`);
     console.log(`[Execute] ==================================================================`);
 
@@ -555,16 +580,34 @@ const executeHandler = async (req: any, res: any) => {
                 console.log(`[Execute] Session Name: ${eventData.sessionName}`);
               }
 
-              // Update branch name if received from worker
+              // Update branch name and sessionPath if received from worker
               if (eventData.type === 'branch_created' && eventData.branchName) {
                 console.log(`[Execute] Branch created: ${eventData.branchName}`);
+
+                // Calculate sessionPath if we have owner, repo, and branch
+                let sessionPath: string | null = null;
+                if (chatSession.repositoryOwner && chatSession.repositoryName) {
+                  sessionPath = generateSessionPath(
+                    chatSession.repositoryOwner,
+                    chatSession.repositoryName,
+                    eventData.branchName
+                  );
+                  console.log(`[Execute] Generated sessionPath: ${sessionPath}`);
+                }
+
                 await db
                   .update(chatSessions)
-                  .set({ branch: eventData.branchName })
+                  .set({
+                    branch: eventData.branchName,
+                    sessionPath: sessionPath
+                  })
                   .where(eq(chatSessions.id, chatSession.id));
 
                 // Update local session object
                 chatSession.branch = eventData.branchName;
+                if (sessionPath) {
+                  chatSession.sessionPath = sessionPath;
+                }
               }
 
               if (eventData.type === 'session_name' && eventData.branchName) {
@@ -587,21 +630,21 @@ const executeHandler = async (req: any, res: any) => {
                 currentEvent = eventData.type;
               }
 
-              // Store ai-worker session ID
+              // Store AI worker session path
               if (eventData.sessionId) {
-                console.log(`[Execute] Received sessionId from AI worker: ${eventData.sessionId}, current aiWorkerSessionId: ${chatSession.aiWorkerSessionId || 'N/A'}`);
+                console.log(`[Execute] Received sessionPath from AI worker: ${eventData.sessionId}, current sessionPath: ${chatSession.sessionPath || 'N/A'}`);
 
-                if (!chatSession.aiWorkerSessionId) {
+                if (!chatSession.sessionPath) {
                   await db
                     .update(chatSessions)
-                    .set({ aiWorkerSessionId: eventData.sessionId })
+                    .set({ sessionPath: eventData.sessionId })
                     .where(eq(chatSessions.id, chatSession.id));
 
                   // Update local chatSession object
-                  chatSession.aiWorkerSessionId = eventData.sessionId;
-                  console.log(`[Execute] Stored aiWorkerSessionId: ${eventData.sessionId} for chatSession: ${chatSession.id}`);
+                  chatSession.sessionPath = eventData.sessionId;
+                  console.log(`[Execute] Stored sessionPath: ${eventData.sessionId} for chatSession: ${chatSession.id}`);
                 } else {
-                  console.log(`[Execute] aiWorkerSessionId already set, skipping update`);
+                  console.log(`[Execute] sessionPath already set, skipping update`);
                 }
               } else {
                 console.log(`[Execute] No sessionId in event data:`, JSON.stringify(eventData).substring(0, 200));
@@ -686,7 +729,7 @@ const executeHandler = async (req: any, res: any) => {
       console.log(`[Execute] ========== SSE STREAM COMPLETED ==========`);
       console.log(`[Execute] Total events received: ${eventCounter}`);
       console.log(`[Execute] Chat Session ID: ${chatSession.id}`);
-      console.log(`[Execute] AI Worker Session ID: ${chatSession.aiWorkerSessionId || 'N/A'}`);
+      console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'N/A'}`);
       console.log(`[Execute] ==================================================`);
 
       // Mark as completed

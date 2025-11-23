@@ -28,16 +28,18 @@ export const sessions = pgTable('sessions', {
 });
 
 export const chatSessions = pgTable('chat_sessions', {
-  id: serial('id').primaryKey(),
+  id: text('id').primaryKey(), // UUID instead of serial
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  aiWorkerSessionId: text('ai_worker_session_id'),
+  sessionPath: text('session_path').unique(), // Format: {owner}/{repo}/{branch} - populated after branch creation
+  repositoryOwner: text('repository_owner'),
+  repositoryName: text('repository_name'),
   userRequest: text('user_request').notNull(),
   status: text('status').notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'error'
   repositoryUrl: text('repository_url'),
   baseBranch: text('base_branch'),
-  branch: text('branch'),
+  branch: text('branch'), // Working branch name - populated when branch is created
   locked: boolean('locked').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
@@ -45,7 +47,7 @@ export const chatSessions = pgTable('chat_sessions', {
 
 export const messages = pgTable('messages', {
   id: serial('id').primaryKey(),
-  chatSessionId: integer('chat_session_id')
+  chatSessionId: text('chat_session_id')
     .notNull()
     .references(() => chatSessions.id, { onDelete: 'cascade' }),
   type: text('type').notNull(), // 'user' | 'assistant' | 'system' | 'error'

@@ -32,8 +32,11 @@ export interface ExecuteRequest {
   codingAssistantProvider: string;
   codingAssistantAuthentication: string;
 
-  // Optional: Session management
-  resumeSessionId?: string;
+  // Optional: Website session ID (UUID)
+  // For new sessions: undefined (will be generated)
+  // For resuming: provide the UUID
+  // This is separate from the provider's internal session ID (stored in metadata)
+  websiteSessionId?: string;
 
   // Optional: GitHub integration
   github?: {
@@ -46,8 +49,7 @@ export interface ExecuteRequest {
 
   // Optional: Database persistence
   database?: {
-    sessionId: string;
-    accessToken: string;
+    accessToken: string; // Uses websiteSessionId for session identification
   };
 
   // Optional: Workspace configuration
@@ -140,15 +142,18 @@ export interface ExecutionContext {
 
 // Session metadata stored in volume
 export interface SessionMetadata {
-  sessionId: string;
+  sessionId: string; // UUID primary identifier
+  sessionPath?: string; // Format: {owner}/{repo}/{branch} - populated after branch creation
+  repositoryOwner?: string;
+  repositoryName?: string;
+  branch?: string; // Working branch for this session - populated after branch creation
   providerSessionId?: string; // Internal provider session ID (e.g., Claude Code's session_id)
   provider: string;
   createdAt: string;
   updatedAt: string;
   github?: {
     repoUrl: string;
-    branch: string; // Parent branch from which the session was created
+    baseBranch: string; // Parent branch from which the session was created
     clonedPath: string;
-    createdBranch?: string; // Auto-created branch for this session
   };
 }
