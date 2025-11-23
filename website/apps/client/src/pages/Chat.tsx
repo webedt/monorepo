@@ -32,7 +32,6 @@ export default function Chat() {
     const parsed = Number(sessionId);
     return isNaN(parsed) ? null : parsed;
   });
-  const [aiWorkerSessionId, setAiWorkerSessionId] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
@@ -298,16 +297,6 @@ export default function Chat() {
     };
   }, [sessionId]);
 
-  // Sync aiWorkerSessionId from query data when loading an existing session
-  useEffect(() => {
-    if (currentSessionData?.data?.aiWorkerSessionId) {
-      console.log(
-        '[Chat] Syncing aiWorkerSessionId from query:',
-        currentSessionData.data.aiWorkerSessionId
-      );
-      setAiWorkerSessionId(currentSessionData.data.aiWorkerSessionId);
-    }
-  }, [currentSessionData]);
 
   // Handle pre-selected settings from NewSession hub
   useEffect(() => {
@@ -389,12 +378,6 @@ export default function Chat() {
 
         // Don't display this as a message
         return;
-      }
-
-      // Capture AI worker session ID from connected event
-      if (eventType === 'connected' && data?.sessionId) {
-        console.log('[Chat] Captured aiWorkerSessionId from connected event:', data.sessionId);
-        setAiWorkerSessionId(data.sessionId);
       }
 
       // Skip system events (but NOT commit_progress or github_pull_progress)
@@ -705,21 +688,10 @@ export default function Chat() {
       console.log('[Chat] Continuing existing chatSession:', currentSessionId);
     }
 
-    console.log('[Chat] Session resumption check:', {
-      currentSessionId,
-      aiWorkerSessionId,
-      fromQuery: currentSessionData?.data?.aiWorkerSessionId,
-    });
+    // Only send repository parameters for new sessions (not resuming)
+    if (!currentSessionId) {
+      console.log('[Chat] New session - sending repository parameters');
 
-    if (aiWorkerSessionId) {
-      requestParams.resumeSessionId = aiWorkerSessionId;
-      console.log('[Chat] Resuming AI worker session with ID:', aiWorkerSessionId);
-      // When resuming a session, do NOT send repository parameters
-      // The repository is already available in the session workspace
-    } else {
-      console.log('[Chat] Starting new AI worker session - no aiWorkerSessionId available');
-
-      // Only send repository parameters when starting a new session
       if (selectedRepo) {
         requestParams.repositoryUrl = selectedRepo;
       }
@@ -730,6 +702,9 @@ export default function Chat() {
 
       // Auto-commit is now always enabled
       requestParams.autoCommit = true;
+    } else {
+      console.log('[Chat] Resuming existing session:', currentSessionId);
+      // When resuming, repository is already in the session workspace
     }
 
     // Debug: Log the exact parameters being sent
@@ -770,13 +745,8 @@ export default function Chat() {
       console.log('[Chat] Retrying with existing chatSession:', currentSessionId);
     }
 
-    if (aiWorkerSessionId) {
-      requestParams.resumeSessionId = aiWorkerSessionId;
-      console.log('[Chat] Retrying with AI worker session ID:', aiWorkerSessionId);
-      // When resuming a session, do NOT send repository parameters
-      // The repository is already available in the session workspace
-    } else {
-      // Only send repository parameters when starting a new session
+    // Only send repository parameters for new sessions (not resuming)
+    if (!currentSessionId) {
       if (lastRequest.selectedRepo) {
         requestParams.repositoryUrl = lastRequest.selectedRepo;
       }
@@ -787,6 +757,9 @@ export default function Chat() {
 
       // Auto-commit is now always enabled
       requestParams.autoCommit = true;
+    } else {
+      // When resuming, repository is already in the session workspace
+      console.log('[Chat] Retrying resumed session - repository already in workspace');
     }
 
     // Always use POST

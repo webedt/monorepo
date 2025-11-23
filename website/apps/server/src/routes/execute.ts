@@ -47,13 +47,11 @@ const truncateContent = (content: any, maxLength: number = 500): string => {
 const executeHandler = async (req: any, res: any) => {
   const authReq = req as AuthRequest;
   let chatSession: any;
-  let resumeSessionId: string | undefined;
 
   try {
     // Support both GET (query) and POST (body) parameters
     const params = req.method === 'POST' ? req.body : req.query;
     const { userRequest, repositoryUrl, baseBranch, chatSessionId } = params;
-    resumeSessionId = params.resumeSessionId;
 
     // Auto-commit is now always enabled
     const autoCommit = true;
@@ -68,23 +66,11 @@ const executeHandler = async (req: any, res: any) => {
       baseBranch,
       autoCommit,
       chatSessionId,
-      resumeSessionId,
     });
     console.log('[Execute] ========================================================');
 
-    if (!userRequest && !resumeSessionId) {
+    if (!userRequest && !chatSessionId) {
       res.status(400).json({ success: false, error: 'userRequest or chatSessionId is required' });
-      return;
-    }
-
-    // Validate that both github params and resumeSessionId are not provided together
-    // When resuming a session, the repository is already available in the session workspace
-    // Note: resumeSessionId is deprecated, but kept for backward compatibility
-    if (resumeSessionId && repositoryUrl) {
-      res.status(400).json({
-        success: false,
-        error: 'Cannot provide both "github" and session resumption. When resuming a session, the repository is already available in the session workspace.',
-      });
       return;
     }
 
@@ -354,7 +340,6 @@ const executeHandler = async (req: any, res: any) => {
     };
 
     console.log(`[Execute] Session debug:
-      - resumeSessionId from query (deprecated): ${resumeSessionId || 'N/A'}
       - chatSession.id (database UUID): ${chatSession.id}
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
       - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
@@ -784,7 +769,6 @@ const executeHandler = async (req: any, res: any) => {
     console.error('[Execute] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     console.error('[Execute] Chat Session ID:', chatSession?.id || 'N/A');
     console.error('[Execute] User ID:', authReq?.user?.id || 'N/A');
-    console.error('[Execute] Resume Session ID:', resumeSessionId || 'N/A');
     console.error('[Execute] ===================================================');
 
     // Try to update session status if session was created, but don't fail if it doesn't work

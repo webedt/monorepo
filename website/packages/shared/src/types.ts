@@ -79,7 +79,7 @@ export interface ExecuteRequest {
   userRequest: string;
   codingAssistantProvider: 'ClaudeAgentSDK' | 'Codex';
   codingAssistantAuthentication: ClaudeAuth;
-  resumeSessionId?: string;
+  websiteSessionId?: string;
   github?: {
     repoUrl: string;
     branch?: string;
