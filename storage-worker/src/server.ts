@@ -122,7 +122,7 @@ app.get('/api/storage-worker/sessions/:sessionPath/download', async (req: Reques
 
   try {
     // Check if session exists
-    const exists = await storageService.sessionExists(sessionId);
+    const exists = await storageService.sessionExists(sessionPath);
     if (!exists) {
       res.status(404).json({
         error: 'session_not_found',
@@ -133,7 +133,7 @@ app.get('/api/storage-worker/sessions/:sessionPath/download', async (req: Reques
     }
 
     // Get session stream
-    const stream = await storageService.getSessionStream(sessionId);
+    const stream = await storageService.getSessionStream(sessionPath);
 
     // Set headers for file download
     res.setHeader('Content-Type', 'application/gzip');
@@ -196,7 +196,7 @@ app.get('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: R
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
-    const metadata = await storageService.getSessionMetadata(sessionId);
+    const metadata = await storageService.getSessionMetadata(sessionPath);
 
     if (!metadata) {
       res.status(404).json({
@@ -229,7 +229,7 @@ app.head('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: 
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
-    const exists = await storageService.sessionExists(sessionId);
+    const exists = await storageService.sessionExists(sessionPath);
 
     if (exists) {
       res.status(200).end();
@@ -250,7 +250,7 @@ app.delete('/api/storage-worker/sessions/:sessionPath', async (req: Request, res
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
-    await storageService.deleteSession(sessionId);
+    await storageService.deleteSession(sessionPath);
 
     res.json({
       sessionPath,
