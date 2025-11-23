@@ -32,7 +32,9 @@ export const chatSessions = pgTable('chat_sessions', {
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  aiWorkerSessionId: text('ai_worker_session_id'),
+  sessionPath: text('session_path').unique(), // Format: {owner}/{repo}/{branch}
+  repositoryOwner: text('repository_owner'),
+  repositoryName: text('repository_name'),
   userRequest: text('user_request').notNull(),
   status: text('status').notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'error'
   repositoryUrl: text('repository_url'),

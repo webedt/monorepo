@@ -49,7 +49,7 @@ export class StorageClient {
   /**
    * Download session from storage to local workspace
    */
-  async downloadSession(sessionId: string, localPath: string): Promise<boolean> {
+  async downloadSession(sessionPath: string, localPath: string): Promise<boolean> {
     if (!this.enabled) {
       // Without storage worker, just create empty directory
       if (!fs.existsSync(localPath)) {
@@ -59,12 +59,14 @@ export class StorageClient {
     }
 
     const tarPath = `${localPath}-complete.tar.gz`;
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionId}/download`;
+    // URL-encode session path for API call
+    const encodedSessionPath = encodeURIComponent(sessionPath);
+    const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}/download`;
 
     try {
       logger.info('Downloading session from storage', {
         component: 'StorageClient',
-        sessionId,
+        sessionPath,
         url
       });
 
@@ -80,7 +82,7 @@ export class StorageClient {
         // New session - create empty workspace
         logger.info('Session not found in storage, creating new workspace', {
           component: 'StorageClient',
-          sessionId
+          sessionPath
         });
         fs.mkdirSync(localPath, { recursive: true });
         return false;
@@ -132,7 +134,7 @@ export class StorageClient {
 
       logger.info('Session downloaded successfully', {
         component: 'StorageClient',
-        sessionId,
+        sessionPath,
         localPath
       });
 
@@ -140,7 +142,7 @@ export class StorageClient {
     } catch (err: any) {
       logger.error('Failed to download session', err, {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
       throw err;
     }
@@ -149,11 +151,11 @@ export class StorageClient {
   /**
    * Upload session from local workspace to storage
    */
-  async uploadSession(sessionId: string, localPath: string): Promise<void> {
+  async uploadSession(sessionPath: string, localPath: string): Promise<void> {
     if (!this.enabled) {
       logger.info('Storage worker disabled, skipping upload', {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
       return;
     }
@@ -166,7 +168,7 @@ export class StorageClient {
     try {
       logger.info('Uploading session to storage', {
         component: 'StorageClient',
-        sessionId,
+        sessionPath,
         localPath
       });
 
@@ -201,7 +203,9 @@ export class StorageClient {
       );
 
       // Upload to storage worker
-      const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionId}/upload`;
+      // URL-encode session path for API call
+      const encodedSessionPath = encodeURIComponent(sessionPath);
+      const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}/upload`;
       await this.uploadFile(url, tarPath);
 
       // Cleanup
@@ -210,12 +214,12 @@ export class StorageClient {
 
       logger.info('Session uploaded successfully', {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
     } catch (error) {
       logger.error('Failed to upload session', error, {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
       throw error;
     }
@@ -244,10 +248,12 @@ export class StorageClient {
   /**
    * Check if session exists
    */
-  async sessionExists(sessionId: string): Promise<boolean> {
+  async sessionExists(sessionPath: string): Promise<boolean> {
     if (!this.enabled) return false;
 
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionId}`;
+    // URL-encode session path for API call
+    const encodedSessionPath = encodeURIComponent(sessionPath);
+    const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}`;
 
     try {
       await this.makeRequest(url, 'HEAD');
@@ -263,21 +269,23 @@ export class StorageClient {
   /**
    * Delete session
    */
-  async deleteSession(sessionId: string): Promise<void> {
+  async deleteSession(sessionPath: string): Promise<void> {
     if (!this.enabled) return;
 
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionId}`;
+    // URL-encode session path for API call
+    const encodedSessionPath = encodeURIComponent(sessionPath);
+    const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}`;
 
     try {
       await this.makeRequest(url, 'DELETE');
       logger.info('Session deleted from storage', {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
     } catch (error) {
       logger.error('Failed to delete session', error, {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
       throw error;
     }
@@ -286,7 +294,7 @@ export class StorageClient {
   /**
    * Get session metadata from local workspace
    */
-  async getMetadata(sessionId: string, localPath: string): Promise<SessionMetadata | null> {
+  async getMetadata(sessionPath: string, localPath: string): Promise<SessionMetadata | null> {
     const metadataPath = path.join(localPath, '.session-metadata.json');
 
     if (!fs.existsSync(metadataPath)) {
@@ -299,7 +307,7 @@ export class StorageClient {
     } catch (error) {
       logger.error('Failed to read metadata', error, {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
       return null;
     }
@@ -308,7 +316,7 @@ export class StorageClient {
   /**
    * Save session metadata to local workspace
    */
-  saveMetadata(sessionId: string, localPath: string, metadata: SessionMetadata): void {
+  saveMetadata(sessionPath: string, localPath: string, metadata: SessionMetadata): void {
     const metadataPath = path.join(localPath, '.session-metadata.json');
 
     try {
@@ -317,7 +325,7 @@ export class StorageClient {
     } catch (error) {
       logger.error('Failed to save metadata', error, {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
       throw error;
     }
@@ -326,7 +334,7 @@ export class StorageClient {
   /**
    * Get stream events from session directory
    */
-  getStreamEvents(sessionId: string, localPath: string): SSEEvent[] {
+  getStreamEvents(sessionPath: string, localPath: string): SSEEvent[] {
     const eventsPath = path.join(localPath, '.stream-events.jsonl');
 
     if (!fs.existsSync(eventsPath)) {
@@ -340,7 +348,7 @@ export class StorageClient {
     } catch (error) {
       logger.error('Failed to read stream events', error, {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
       return [];
     }
@@ -349,7 +357,7 @@ export class StorageClient {
   /**
    * Append stream event to session directory
    */
-  appendStreamEvent(sessionId: string, localPath: string, event: SSEEvent): void {
+  appendStreamEvent(sessionPath: string, localPath: string, event: SSEEvent): void {
     const eventsPath = path.join(localPath, '.stream-events.jsonl');
 
     try {
@@ -358,7 +366,7 @@ export class StorageClient {
     } catch (error) {
       logger.error('Failed to append stream event', error, {
         component: 'StorageClient',
-        sessionId
+        sessionPath
       });
     }
   }
