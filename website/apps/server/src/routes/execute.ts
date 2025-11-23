@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { db } from '../db/index';
 import { chatSessions, messages, users } from '../db/index';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { ensureValidToken } from '../lib/claudeAuth';
 import type { ClaudeAuth } from '@webedt/shared';
 import { generateSessionTitle } from '../lib/titleGenerator';
-import { parseRepoUrl } from '../utils/sessionPathHelper';
+import { parseRepoUrl, generateSessionPath } from '../utils/sessionPathHelper';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -96,13 +97,16 @@ const executeHandler = async (req: any, res: any) => {
 
     // Check if we're continuing an existing session or creating a new one
     if (chatSessionId) {
-      // Load existing session
+      // Load existing session - support both UUID and sessionPath lookups
       const existingSessions = await db
         .select()
         .from(chatSessions)
         .where(
           and(
-            eq(chatSessions.id, Number(chatSessionId)),
+            or(
+              eq(chatSessions.id, chatSessionId as string),
+              eq(chatSessions.sessionPath, chatSessionId as string)
+            ),
             eq(chatSessions.userId, authReq.user.id)
           )
         )
@@ -164,10 +168,14 @@ const executeHandler = async (req: any, res: any) => {
         }
       }
 
+      // Generate UUID for new session
+      const sessionUuid = uuidv4();
+
       // Create new chat session in database
       chatSession = (await db
         .insert(chatSessions)
         .values({
+          id: sessionUuid,
           userId: authReq.user.id,
           userRequest: (userRequest as string) || 'New session',
           status: 'pending',
@@ -176,12 +184,12 @@ const executeHandler = async (req: any, res: any) => {
           repositoryName,
           baseBranch: (baseBranch as string) || 'main', // Default to main if not provided
           branch: null, // Will be populated when branch is created by the worker
-          sessionPath: null, // Will be populated when AI worker returns session path
+          sessionPath: null, // Will be populated after branch is created
           locked: false, // Will be locked after first message
         })
         .returning())[0];
 
-      console.log(`[Execute] Created new chatSession: ${chatSession.id}`);
+      console.log(`[Execute] Created new chatSession with UUID: ${chatSession.id}`);
     }
 
     // Store user message and lock the session
@@ -574,16 +582,34 @@ const executeHandler = async (req: any, res: any) => {
                 console.log(`[Execute] Session Name: ${eventData.sessionName}`);
               }
 
-              // Update branch name if received from worker
+              // Update branch name and sessionPath if received from worker
               if (eventData.type === 'branch_created' && eventData.branchName) {
                 console.log(`[Execute] Branch created: ${eventData.branchName}`);
+
+                // Calculate sessionPath if we have owner, repo, and branch
+                let sessionPath: string | null = null;
+                if (chatSession.repositoryOwner && chatSession.repositoryName) {
+                  sessionPath = generateSessionPath(
+                    chatSession.repositoryOwner,
+                    chatSession.repositoryName,
+                    eventData.branchName
+                  );
+                  console.log(`[Execute] Generated sessionPath: ${sessionPath}`);
+                }
+
                 await db
                   .update(chatSessions)
-                  .set({ branch: eventData.branchName })
+                  .set({
+                    branch: eventData.branchName,
+                    sessionPath: sessionPath
+                  })
                   .where(eq(chatSessions.id, chatSession.id));
 
                 // Update local session object
                 chatSession.branch = eventData.branchName;
+                if (sessionPath) {
+                  chatSession.sessionPath = sessionPath;
+                }
               }
 
               if (eventData.type === 'session_name' && eventData.branchName) {

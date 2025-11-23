@@ -67,56 +67,23 @@ export class Orchestrator {
     let providerSessionId: string | undefined;
     let workspacePath: string | undefined;
 
-    // Determine session path (resume existing or create new)
+    // Determine session identifier (resume existing or create new)
+    // When called from website, resumeSessionId will always be provided (UUID)
     const isResuming = !!request.resumeSessionId;
-    let sessionPath: string;
+    const sessionId: string = isResuming ? request.resumeSessionId! : uuidv4();
     let repositoryOwner: string | undefined;
     let repositoryName: string | undefined;
     let branchName: string | undefined;
 
-    if (isResuming) {
-      // Resuming existing session - use provided session path
-      sessionPath = request.resumeSessionId!;
-    } else if (request.github) {
-      // New GitHub session - generate session path from {owner}/{repo}/{branch}
+    // Parse repository info if provided (for metadata and branch creation)
+    if (request.github) {
       const { owner, repo } = parseRepoUrl(request.github.repoUrl);
       repositoryOwner = owner;
       repositoryName = repo;
-
-      // Generate branch name early (before session creation)
-      const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
-      if (!apiKey) {
-        throw new Error('Cannot create session: no API key found in authentication');
-      }
-
-      const llmHelper = new LLMHelper(apiKey);
-
-      // Extract text from request for branch name generation
-      const requestText = typeof request.userRequest === 'string'
-        ? request.userRequest
-        : request.userRequest
-            .filter(b => b.type === 'text')
-            .map(b => (b as any).text)
-            .join(' ');
-
-      // Generate base branch name from user request
-      const baseBranchName = await llmHelper.generateBranchName(requestText);
-
-      // Append unique suffix to ensure uniqueness (8 chars of UUID)
-      const uniqueSuffix = uuidv4().substring(0, 8);
-      branchName = `${baseBranchName}-${uniqueSuffix}`;
-
-      // Create session path from owner/repo/branch
-      sessionPath = generateSessionPath(owner, repo, branchName);
-    } else {
-      // No GitHub integration - use UUID-based session path for backwards compatibility
-      sessionPath = `session/${uuidv4()}`;
     }
 
-    // Session root path (never changes - used for response/metadata storage)
-    // Convert session path to filesystem-safe directory name
-    const sessionDirName = sessionPathToDir(sessionPath);
-    const sessionRoot = path.join(this.tmpDir, sessionDirName);
+    // Session root path (uses UUID for filesystem safety)
+    const sessionRoot = path.join(this.tmpDir, `session-${sessionId}`);
 
     // Local workspace path (ephemeral - in /tmp, may change to repo directory)
     workspacePath = sessionRoot;
@@ -127,11 +94,11 @@ export class Orchestrator {
 
       // Persist to session root (not repo directory) - will be uploaded to MinIO at end
       try {
-        this.sessionStorage.appendStreamEvent(sessionPath, sessionRoot, event);
+        this.sessionStorage.appendStreamEvent(sessionId, sessionRoot, event);
       } catch (err) {
         logger.error('Failed to persist event', err, {
           component: 'Orchestrator',
-          sessionPath
+          sessionId
         });
       }
 
@@ -152,7 +119,7 @@ export class Orchestrator {
         ).catch(err => {
           logger.error('Failed to persist chunk to DB', err, {
             component: 'Orchestrator',
-            sessionPath
+            sessionId
           });
         });
       }
@@ -165,17 +132,17 @@ export class Orchestrator {
       // Step 2: Download session from MinIO (or create new)
       logger.info('Downloading session from storage', {
         component: 'Orchestrator',
-        sessionPath,
+        sessionId,
         isResuming,
         provider: request.codingAssistantProvider
       });
 
-      const sessionExisted = await this.sessionStorage.downloadSession(sessionPath, workspacePath);
+      const sessionExisted = await this.sessionStorage.downloadSession(sessionId, workspacePath);
 
       // Load metadata if session exists
       let metadata: SessionMetadata | null = null;
       if (sessionExisted) {
-        metadata = await this.sessionStorage.getMetadata(sessionPath, workspacePath);
+        metadata = await this.sessionStorage.getMetadata(sessionId, workspacePath);
 
         if (metadata) {
           providerSessionId = metadata.providerSessionId;
@@ -187,7 +154,7 @@ export class Orchestrator {
           }
           logger.info('Loaded session metadata', {
             component: 'Orchestrator',
-            sessionPath,
+            sessionId,
             providerSessionId
           });
         }
@@ -195,11 +162,9 @@ export class Orchestrator {
 
       // Create metadata if new session
       if (!metadata) {
-        if (!repositoryOwner || !repositoryName || !branchName) {
-          throw new Error('Cannot create session metadata: missing repository info');
-        }
         metadata = {
-          sessionPath,
+          sessionId,
+          sessionPath: undefined, // Will be populated after branch creation
           repositoryOwner,
           repositoryName,
           branch: branchName,
@@ -207,15 +172,15 @@ export class Orchestrator {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
-        this.sessionStorage.saveMetadata(sessionPath, workspacePath, metadata);
+        this.sessionStorage.saveMetadata(sessionId, workspacePath, metadata);
       }
 
       // Step 3: Send connection event
       sendEvent({
         type: 'connected',
-        sessionId: sessionPath, // Keep 'sessionId' field name for backwards compatibility with clients
+        sessionId: sessionId,
         resuming: isResuming,
-        resumedFrom: isResuming ? sessionPath : undefined,
+        resumedFrom: isResuming ? sessionId : undefined,
         provider: request.codingAssistantProvider,
         timestamp: new Date().toISOString()
       });
@@ -250,7 +215,7 @@ export class Orchestrator {
         workspacePath = pullResult.targetPath;
 
         // Save updated metadata
-        this.sessionStorage.saveMetadata(sessionPath, sessionRoot, metadata);
+        this.sessionStorage.saveMetadata(sessionId, sessionRoot, metadata);
 
         sendEvent({
           type: 'github_pull_progress',
@@ -264,47 +229,84 @@ export class Orchestrator {
 
         logger.info('Repository cloned', {
           component: 'Orchestrator',
-          sessionPath,
+          sessionId,
           repoUrl: request.github.repoUrl,
           branch: pullResult.branch
         });
 
-        // Step 4.5: Create the new branch (name was already generated during session ID creation)
+        // Step 4.5: Generate branch name and create the new branch
         try {
           sendEvent({
             type: 'message',
-            message: 'Creating new branch for this session...',
+            message: 'Generating branch name for this session...',
+            timestamp: new Date().toISOString()
+          });
+
+          // Extract API key for LLM helper
+          const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
+          if (!apiKey) {
+            throw new Error('Cannot generate branch name: API key not available');
+          }
+
+          const llmHelper = new LLMHelper(apiKey);
+          const userRequestText = this.serializeUserRequest(request.userRequest);
+          branchName = await llmHelper.generateBranchName(userRequestText, pullResult.branch);
+
+          logger.info('Generated branch name', {
+            component: 'Orchestrator',
+            sessionId,
+            branchName,
+            parentBranch: pullResult.branch
+          });
+
+          sendEvent({
+            type: 'message',
+            message: `Creating branch: ${branchName}`,
             timestamp: new Date().toISOString()
           });
 
           const gitHelper = new GitHelper(workspacePath);
 
+          // Create and checkout the new branch
+          await gitHelper.createBranch(branchName);
+
+          // Generate sessionPath now that we have the branch name
+          const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
+
+          // Update metadata with branch name and sessionPath
+          metadata.branch = branchName;
+          metadata.sessionPath = sessionPath;
+          metadata.repositoryOwner = repositoryOwner;
+          metadata.repositoryName = repositoryName;
+          this.sessionStorage.saveMetadata(sessionId, sessionRoot, metadata);
+
           sendEvent({
             type: 'branch_created',
-            branchName: branchName!,
+            branchName: branchName,
             parentBranch: pullResult.branch,
+            sessionPath: sessionPath,
             message: `Created and checked out branch: ${branchName}`,
             timestamp: new Date().toISOString()
           });
 
-          // Create and checkout the new branch
-          await gitHelper.createBranch(branchName!);
-
           logger.info('Branch created for session', {
             component: 'Orchestrator',
+            sessionId,
             sessionPath,
             branchName,
             parentBranch: pullResult.branch
           });
-
-          // Metadata already has the branch name from creation
-          this.sessionStorage.saveMetadata(sessionPath, sessionRoot, metadata);
         } catch (error) {
-          logger.error('Failed to create branch (critical error)', error, {
+          logger.error('Failed to create branch', error, {
             component: 'Orchestrator',
-            sessionPath
+            sessionId
           });
-          throw error; // Branch creation is now critical since it's part of the session ID
+          // Branch creation failure is non-critical - session can still work without GitHub integration
+          sendEvent({
+            type: 'message',
+            message: `Warning: Failed to create branch - ${error instanceof Error ? error.message : String(error)}`,
+            timestamp: new Date().toISOString()
+          });
         }
       } else if (metadata.github && isResuming) {
         // Resuming session with GitHub - workspace path should be repo directory
@@ -359,14 +361,14 @@ export class Orchestrator {
             const newProviderSessionId = event.data.session_id;
             logger.info('Provider session initialized', {
               component: 'Orchestrator',
-              sessionPath,
+              sessionId,
               providerSessionId: newProviderSessionId
             });
 
             // Update metadata with provider session ID
             metadata!.providerSessionId = newProviderSessionId;
             this.sessionStorage.saveMetadata(
-              sessionPath,
+              sessionId,
               sessionRoot,
               metadata!
             );
@@ -450,7 +452,7 @@ export class Orchestrator {
 
               logger.info('Auto-commit completed', {
                 component: 'Orchestrator',
-                sessionPath,
+                sessionId,
                 commitHash,
                 commitMessage,
                 branch: targetBranch
@@ -480,7 +482,7 @@ export class Orchestrator {
 
                 logger.info('Push completed', {
                   component: 'Orchestrator',
-                  sessionPath,
+                  sessionId,
                   commitHash,
                   branch: targetBranch
                 });
@@ -488,7 +490,7 @@ export class Orchestrator {
                 // Push failure is non-critical - commit is still saved locally
                 logger.error('Failed to push to remote (non-critical)', pushError, {
                   component: 'Orchestrator',
-                  sessionPath,
+                  sessionId,
                   branch: targetBranch
                 });
 
@@ -514,14 +516,14 @@ export class Orchestrator {
           } else {
             logger.info('No changes to auto-commit', {
               component: 'Orchestrator',
-              sessionPath,
+              sessionId,
               branch: currentBranch
             });
           }
         } catch (error) {
           logger.error('Failed to auto-commit changes', error, {
             component: 'Orchestrator',
-            sessionPath
+            sessionId
           });
           // Continue without auto-commit - not critical
           sendEvent({
@@ -537,16 +539,16 @@ export class Orchestrator {
       // Step 7: Upload session to MinIO
       logger.info('Uploading session to storage', {
         component: 'Orchestrator',
-        sessionPath
+        sessionId
       });
 
-      await this.sessionStorage.uploadSession(sessionPath, sessionRoot);
+      await this.sessionStorage.uploadSession(sessionId, sessionRoot);
 
       // Step 8: Send completion event
       const duration = Date.now() - startTime;
       sendEvent({
         type: 'completed',
-        sessionId: sessionPath, // Keep 'sessionId' field name for backwards compatibility
+        sessionId: sessionId,
         duration_ms: duration,
         timestamp: new Date().toISOString()
       });
@@ -569,7 +571,7 @@ export class Orchestrator {
 
       logger.info('Session completed successfully', {
         component: 'Orchestrator',
-        sessionPath,
+        sessionId,
         provider: request.codingAssistantProvider,
         durationMs: duration
       });
@@ -579,12 +581,12 @@ export class Orchestrator {
         fs.rmSync(sessionRoot, { recursive: true, force: true });
         logger.info('Local workspace cleaned up', {
           component: 'Orchestrator',
-          sessionPath
+          sessionId
         });
       } catch (err) {
         logger.error('Failed to cleanup local workspace', err, {
           component: 'Orchestrator',
-          sessionPath
+          sessionId
         });
       }
 
@@ -592,7 +594,7 @@ export class Orchestrator {
     } catch (error) {
       logger.error('Error during execution', error, {
         component: 'Orchestrator',
-        sessionPath,
+        sessionId,
         provider: request.codingAssistantProvider
       });
 
@@ -607,12 +609,12 @@ export class Orchestrator {
       // Try to upload session even on error (preserve state)
       try {
         if (workspacePath && fs.existsSync(sessionRoot)) {
-          await this.sessionStorage.uploadSession(sessionPath, sessionRoot);
+          await this.sessionStorage.uploadSession(sessionId, sessionRoot);
         }
       } catch (uploadErr) {
         logger.error('Failed to upload session after error', uploadErr, {
           component: 'Orchestrator',
-          sessionPath
+          sessionId
         });
       }
 
@@ -624,7 +626,7 @@ export class Orchestrator {
       } catch (cleanupErr) {
         logger.error('Failed to cleanup local workspace after error', cleanupErr, {
           component: 'Orchestrator',
-          sessionPath
+          sessionId
         });
       }
 
@@ -643,7 +645,7 @@ export class Orchestrator {
           }
         ).catch(err => logger.error('Failed to update error status in DB', err, {
           component: 'Orchestrator',
-          sessionPath
+          sessionId
         }));
       }
 

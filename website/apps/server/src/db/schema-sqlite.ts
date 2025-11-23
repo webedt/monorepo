@@ -27,18 +27,18 @@ export const sessions = sqliteTable('sessions', {
 });
 
 export const chatSessions = sqliteTable('chat_sessions', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+  id: text('id').primaryKey(), // UUID instead of autoincrement
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  sessionPath: text('session_path').unique(), // Format: {owner}/{repo}/{branch}
+  sessionPath: text('session_path').unique(), // Format: {owner}/{repo}/{branch} - populated after branch creation
   repositoryOwner: text('repository_owner'),
   repositoryName: text('repository_name'),
   userRequest: text('user_request').notNull(),
   status: text('status').notNull().default('pending'),
   repositoryUrl: text('repository_url'),
   baseBranch: text('base_branch'),
-  branch: text('branch'),
+  branch: text('branch'), // Working branch name - populated when branch is created
   locked: integer('locked', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -46,7 +46,7 @@ export const chatSessions = sqliteTable('chat_sessions', {
 
 export const messages = sqliteTable('messages', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  chatSessionId: integer('chat_session_id')
+  chatSessionId: text('chat_session_id')
     .notNull()
     .references(() => chatSessions.id, { onDelete: 'cascade' }),
   type: text('type').notNull(),

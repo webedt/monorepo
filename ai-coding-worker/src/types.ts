@@ -140,10 +140,11 @@ export interface ExecutionContext {
 
 // Session metadata stored in volume
 export interface SessionMetadata {
-  sessionPath: string; // Format: {owner}/{repo}/{branch}
-  repositoryOwner: string;
-  repositoryName: string;
-  branch: string; // Working branch for this session
+  sessionId: string; // UUID primary identifier
+  sessionPath?: string; // Format: {owner}/{repo}/{branch} - populated after branch creation
+  repositoryOwner?: string;
+  repositoryName?: string;
+  branch?: string; // Working branch for this session - populated after branch creation
   providerSessionId?: string; // Internal provider session ID (e.g., Claude Code's session_id)
   provider: string;
   createdAt: string;

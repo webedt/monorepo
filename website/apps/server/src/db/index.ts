@@ -65,7 +65,7 @@ if (usePostgres) {
     );
 
     CREATE TABLE IF NOT EXISTS chat_sessions (
-      id SERIAL PRIMARY KEY,
+      id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       session_path TEXT UNIQUE,
       repository_owner TEXT,
@@ -83,7 +83,7 @@ if (usePostgres) {
 
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
-      chat_session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       images JSONB,
@@ -201,7 +201,7 @@ if (usePostgres) {
     );
 
     CREATE TABLE IF NOT EXISTS chat_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       session_path TEXT UNIQUE,
       repository_owner TEXT,
@@ -220,7 +220,7 @@ if (usePostgres) {
 
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      chat_session_id INTEGER NOT NULL,
+      chat_session_id TEXT NOT NULL,
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       images TEXT,
