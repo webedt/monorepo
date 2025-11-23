@@ -1,0 +1,97 @@
+import { Router } from 'express';
+import { db } from '../db/index';
+import { users } from '../db/index';
+import { eq } from 'drizzle-orm';
+import type { AuthRequest } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
+
+const router = Router();
+
+// Update Claude authentication
+router.post('/claude-auth', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    let claudeAuth = req.body.claudeAuth || req.body;
+
+    // Handle wrapped format: extract from claudeAiOauth if present
+    if (claudeAuth.claudeAiOauth) {
+      claudeAuth = claudeAuth.claudeAiOauth;
+    }
+
+    // Validate Claude auth structure
+    if (!claudeAuth || !claudeAuth.accessToken || !claudeAuth.refreshToken) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid Claude auth. Must include accessToken and refreshToken.',
+      });
+      return;
+    }
+
+    // Update user with Claude auth
+    await db
+      .update(users)
+      .set({ claudeAuth })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Claude authentication updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update Claude auth error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update Claude authentication' });
+  }
+});
+
+// Remove Claude authentication
+router.delete('/claude-auth', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    await db
+      .update(users)
+      .set({ claudeAuth: null })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Claude authentication removed' },
+    });
+  } catch (error) {
+    console.error('Remove Claude auth error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove Claude authentication' });
+  }
+});
+
+// Update image resize max dimension
+router.post('/image-resize-setting', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { maxDimension } = req.body;
+
+    // Validate that maxDimension is a valid number
+    const validDimensions = [512, 1024, 2048, 4096, 8000];
+    if (!validDimensions.includes(maxDimension)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid max dimension. Must be one of: 512, 1024, 2048, 4096, 8000',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ imageResizeMaxDimension: maxDimension })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Image resize setting updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update image resize setting error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update image resize setting' });
+  }
+});
+
+export default router;

@@ -1,0 +1,153 @@
+name: Website - Cleanup Dokploy App on Branch Delete
+
+on:
+  delete:
+    branches:
+      - '**'  # Trigger on any branch deletion
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  cleanup:
+    runs-on: self-hosted
+    if: github.event.ref_type == 'branch'
+
+    steps:
+      - name: Generate application name
+        id: metadata
+        run: |
+          # Extract repository owner and name
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]' | tr '/' '-')
+          REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+
+          # Add project name for monorepo
+          PROJECT="website"
+
+          # Get deleted branch name (preserve case to match deploy workflow)
+          BRANCH=$(echo "${{ github.event.ref }}" | tr '/' '-')
+
+          # Generate the same app name that was used during creation (with project)
+          APP_NAME="${OWNER}-${REPO}-${PROJECT}-${BRANCH}"
+
+          echo "app_name=${APP_NAME}" >> $GITHUB_OUTPUT
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+          echo "project=${PROJECT}" >> $GITHUB_OUTPUT
+
+          echo "🗑️  Branch Deletion Detected"
+          echo "  - Repository: ${{ github.repository }}"
+          echo "  - Project: ${PROJECT}"
+          echo "  - Deleted Branch: ${BRANCH}"
+          echo "  - Application Name: ${APP_NAME}"
+          echo ""
+          echo "Will attempt to delete associated Dokploy application..."
+
+      - name: Find and delete Dokploy application
+        id: delete_app
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_PROJECT_ID: ${{ vars.DOKPLOY_PROJECT_ID }}
+          DOKPLOY_ENVIRONMENT_ID: ${{ vars.DOKPLOY_ENVIRONMENT_ID }}
+          APP_NAME: ${{ steps.metadata.outputs.app_name }}
+        run: |
+          # Strip trailing slash from DOKPLOY_URL if present
+          DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          echo "🔍 Looking for application '${APP_NAME}'..."
+
+          # Get all projects to find our application
+          PROJECTS=$(curl -s -X 'GET' \
+            "${DOKPLOY_URL}/api/project.all" \
+            -H 'accept: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}")
+
+          # Find the application ID by name
+          APP_ID=$(echo "$PROJECTS" | jq -r --arg name "$APP_NAME" '
+            .[] | select(.projectId == env.DOKPLOY_PROJECT_ID) |
+            .environments[]? | select(.environmentId == env.DOKPLOY_ENVIRONMENT_ID) |
+            .applications[]? | select(.name == $name) | .applicationId
+          ' | head -n1)
+
+          if [ -n "$APP_ID" ] && [ "$APP_ID" != "null" ]; then
+            echo "✅ Found application: ${APP_ID}"
+            echo "application_id=${APP_ID}" >> $GITHUB_OUTPUT
+            echo "application_found=true" >> $GITHUB_OUTPUT
+
+            echo "🗑️  Deleting application..."
+
+            # Delete the application using tRPC endpoint
+            DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+              "${DOKPLOY_URL}/api/trpc/application.delete" \
+              -H 'accept: application/json' \
+              -H 'Content-Type: application/json' \
+              -H "x-api-key: ${DOKPLOY_API_KEY}" \
+              -d "{
+                \"json\": {
+                  \"applicationId\": \"${APP_ID}\"
+                }
+              }")
+
+            DELETE_HTTP_CODE=$(echo "$DELETE_RESPONSE" | tail -n1)
+            DELETE_BODY=$(echo "$DELETE_RESPONSE" | sed '$d')
+
+            if [ "$DELETE_HTTP_CODE" -ge 200 ] && [ "$DELETE_HTTP_CODE" -lt 300 ]; then
+              echo "✅ Application deleted successfully!"
+              echo "  - Application Name: ${APP_NAME}"
+              echo "  - Application ID: ${APP_ID}"
+              echo "  - Response Code: ${DELETE_HTTP_CODE}"
+              echo "deletion_status=success" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Failed to delete application (HTTP ${DELETE_HTTP_CODE})"
+              echo "Response: ${DELETE_BODY}"
+              echo "deletion_status=failed" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "ℹ️  Application '${APP_NAME}' not found in Dokploy."
+            echo "Possible reasons:"
+            echo "  - Application was already deleted manually"
+            echo "  - Application was never created (deployment may have failed)"
+            echo "  - Application exists in a different project or environment"
+            echo ""
+            echo "No cleanup needed."
+            echo "application_found=false" >> $GITHUB_OUTPUT
+            echo "deletion_status=not_found" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cleanup Summary
+        if: always()
+        run: |
+          echo "## 🗑️ Dokploy Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Branch Deletion" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project**: ${{ steps.metadata.outputs.project }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deleted Branch**: \`${{ github.event.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application Name**: \`${{ steps.metadata.outputs.app_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.delete_app.outputs.application_found }}" = "true" ]; then
+            echo "### Dokploy Application" >> $GITHUB_STEP_SUMMARY
+            echo "- **Application ID**: \`${{ steps.delete_app.outputs.application_id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status**: " >> $GITHUB_STEP_SUMMARY
+
+            if [ "${{ steps.delete_app.outputs.deletion_status }}" = "success" ]; then
+              echo "  ✅ **Successfully deleted**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "  ❌ **Deletion failed**" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "### Result" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️  No Dokploy application found to delete." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **Cleanup workflow completed successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Cleanup workflow failed**" >> $GITHUB_STEP_SUMMARY
+          fi
