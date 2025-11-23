@@ -201,7 +201,7 @@ The application will be available at:
 
 ### 5. View Previous Sessions
 
-- Dashboard shows all your sessions
+- Dashboard shows all my sessions
 - Click on any session to view its chat history
 - Sessions include status (pending, running, completed, error)
 

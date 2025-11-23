@@ -184,9 +184,9 @@ export default function Sessions() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
         <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold text-base-content mb-2">Your Sessions</h1>
+          <h1 className="text-3xl font-bold text-base-content mb-2">My Sessions</h1>
           <p className="text-sm text-base-content/70">
-            Quick start below, or view and manage all your sessions
+            Quick start below, or view and manage all my sessions
           </p>
         </div>
 
