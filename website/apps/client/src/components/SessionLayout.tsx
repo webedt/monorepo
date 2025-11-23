@@ -91,7 +91,7 @@ export default function SessionLayout({
       timeZoneName: 'short'
     });
 
-    const shortSha = VERSION_SHA ? VERSION_SHA.substring(0, 7) : 'unknown';
+    const shortSha = VERSION_SHA?.substring(0, 7) ?? 'unknown';
     return `${shortSha} [${formattedDate}]`;
   };
 
