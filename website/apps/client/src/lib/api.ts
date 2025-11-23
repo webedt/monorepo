@@ -113,6 +113,12 @@ export const userApi = {
       method: 'POST',
       body: { maxDimension },
     }),
+
+  updateDisplayName: (displayName: string) =>
+    fetchApi('/api/user/display-name', {
+      method: 'POST',
+      body: { displayName },
+    }),
 };
 
 // Sessions API
