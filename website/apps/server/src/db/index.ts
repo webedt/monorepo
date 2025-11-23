@@ -49,6 +49,7 @@ if (usePostgres) {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
+      display_name TEXT,
       password_hash TEXT NOT NULL,
       github_id TEXT UNIQUE,
       github_access_token TEXT,
@@ -116,6 +117,12 @@ if (usePostgres) {
         ) THEN
           ALTER TABLE users ADD COLUMN image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024;
         END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'display_name'
+        ) THEN
+          ALTER TABLE users ADD COLUMN display_name TEXT;
+        END IF;
       END $$;
     `);
   }).then(() => {
@@ -149,6 +156,7 @@ if (usePostgres) {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
+      display_name TEXT,
       password_hash TEXT NOT NULL,
       github_id TEXT UNIQUE,
       github_access_token TEXT,
@@ -220,6 +228,12 @@ if (usePostgres) {
     if (!hasImageResizeColumn) {
       sqlite.exec('ALTER TABLE users ADD COLUMN image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024;');
       console.log('SQLite migration: Added image_resize_max_dimension column to users');
+    }
+
+    const hasDisplayNameColumn = usersInfo.some((col) => col.name === 'display_name');
+    if (!hasDisplayNameColumn) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN display_name TEXT;');
+      console.log('SQLite migration: Added display_name column to users');
     }
   } catch (err) {
     console.error('Error applying SQLite migrations:', err);
