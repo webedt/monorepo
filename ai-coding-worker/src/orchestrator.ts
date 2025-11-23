@@ -290,7 +290,7 @@ export class Orchestrator {
 
       if (shouldAutoCommit) {
         try {
-          const repoPath = path.join(this.tmpDir, `session-${sessionId}`, metadata.github.clonedPath);
+          const repoPath = path.join(this.tmpDir, `session-${sessionId}`, metadata.github!.clonedPath);
           const gitHelper = new GitHelper(repoPath);
 
           // Get current branch name (this is the parent branch)
