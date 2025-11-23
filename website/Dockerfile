@@ -15,6 +15,12 @@ COPY tsconfig.base.json ./
 
 # Copy all packages
 COPY packages ./packages
+
+# Cache bust to ensure fresh code is copied
+# Change the date/commit to invalidate cache
+RUN echo "Cache bust: 2025-11-23T17:45:00Z commit:0f8f296"
+
+# Copy apps (this will be rebuilt when cache is invalidated)
 COPY apps ./apps
 
 # Copy scripts directory for version generation

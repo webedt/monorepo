@@ -124,8 +124,8 @@ function updateVersionTs(version, timestamp, sha) {
   const content = `// Auto-generated from git tags and commits
 // Run 'pnpm version:generate' to update
 export const VERSION = '${version}';
-export const VERSION_TIMESTAMP = ${timestamp ? `'${timestamp}'` : 'null'};
-export const VERSION_SHA = ${sha ? `'${sha}'` : 'null'};
+export const VERSION_TIMESTAMP: string | null = ${timestamp ? `'${timestamp}'` : 'null'};
+export const VERSION_SHA: string | null = ${sha ? `'${sha}'` : 'null'};
 `;
   fs.writeFileSync(versionPath, content);
 }
