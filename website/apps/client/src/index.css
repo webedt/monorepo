@@ -52,3 +52,23 @@ body {
 [data-theme='retro'] .text-2xl {
   font-size: 2rem;
 }
+
+/* Customize bumblebee theme to be more yellow and black */
+[data-theme='bumblebee'] {
+  --p: 45 100% 50%; /* Primary: bright yellow */
+  --s: 0 0% 0%; /* Secondary: black */
+  --a: 45 100% 60%; /* Accent: lighter yellow */
+  --n: 0 0% 15%; /* Neutral: dark gray */
+  --b1: 45 100% 85%; /* Base background: light yellow */
+  --b2: 45 100% 75%; /* Base 200: medium yellow */
+  --b3: 45 100% 65%; /* Base 300: darker yellow */
+  --bc: 0 0% 10%; /* Base content: almost black text */
+  --pc: 0 0% 10%; /* Primary content: black text on yellow */
+  --sc: 45 100% 90%; /* Secondary content: light yellow text on black */
+  --ac: 0 0% 10%; /* Accent content: black text */
+  --nc: 45 100% 90%; /* Neutral content: light yellow text */
+  --in: 195 100% 50%; /* Info */
+  --su: 140 60% 50%; /* Success */
+  --wa: 40 100% 50%; /* Warning */
+  --er: 0 70% 50%; /* Error */
+}
