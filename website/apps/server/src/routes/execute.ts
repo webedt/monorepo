@@ -130,30 +130,6 @@ const executeHandler = async (req: any, res: any) => {
         .set({ status: 'running' })
         .where(eq(chatSessions.id, chatSession.id));
     } else {
-      // Check if there's already a locked session for this repo/branch combination
-      if (repositoryUrl && baseBranch) {
-        const existingLockedSession = await db
-          .select()
-          .from(chatSessions)
-          .where(
-            and(
-              eq(chatSessions.userId, authReq.user.id),
-              eq(chatSessions.repositoryUrl, repositoryUrl as string),
-              eq(chatSessions.baseBranch, baseBranch as string),
-              eq(chatSessions.locked, true)
-            )
-          )
-          .limit(1);
-
-        if (existingLockedSession.length > 0) {
-          res.status(400).json({
-            success: false,
-            error: `Repository ${repositoryUrl} on branch ${baseBranch} is locked by an existing session. Please complete or delete the existing session first.`,
-          });
-          return;
-        }
-      }
-
       // Parse repository URL to extract owner and repo name
       let repositoryOwner: string | null = null;
       let repositoryName: string | null = null;
