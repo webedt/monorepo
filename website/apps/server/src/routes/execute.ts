@@ -340,7 +340,9 @@ const executeHandler = async (req: any, res: any) => {
       userRequest: parsedUserRequest,
       codingAssistantProvider: 'ClaudeAgentSDK',
       codingAssistantAuthentication: claudeAuth,
-      websiteSessionId: chatSession.id, // Always pass the UUID
+      // Use sessionPath if available (resuming), otherwise use chat session ID (new session)
+      // The AI worker will return the sessionPath in the connected event for new sessions
+      websiteSessionId: chatSession.sessionPath || chatSession.id,
       // Always use the autoCommit setting from the session (persisted in DB)
       // This ensures resumed sessions respect the initial setting
       autoCommit: chatSession.autoCommit,
@@ -353,8 +355,10 @@ const executeHandler = async (req: any, res: any) => {
 
     console.log(`[Execute] Session debug:
       - resumeSessionId from query (deprecated): ${resumeSessionId || 'N/A'}
-      - websiteSessionId (chatSession.id): ${chatSession.id}
+      - chatSession.id (database UUID): ${chatSession.id}
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
+      - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
+      - isResuming: ${!!chatSession.sessionPath}
     `);
 
     if (repositoryUrl && authReq.user.githubAccessToken) {
