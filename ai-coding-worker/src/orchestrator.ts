@@ -272,7 +272,7 @@ export class Orchestrator {
             component: 'Orchestrator',
             websiteSessionId,
             branchName,
-            parentBranch: pullResult.branch
+            baseBranch: pullResult.branch
           });
 
           sendEvent({
@@ -299,7 +299,7 @@ export class Orchestrator {
           sendEvent({
             type: 'branch_created',
             branchName: branchName,
-            parentBranch: pullResult.branch,
+            baseBranch: pullResult.branch,
             sessionPath: sessionPath,
             message: `Created and checked out branch: ${branchName}`,
             timestamp: new Date().toISOString()
@@ -310,7 +310,7 @@ export class Orchestrator {
             websiteSessionId,
             sessionPath,
             branchName,
-            parentBranch: pullResult.branch
+            baseBranch: pullResult.branch
           });
         } catch (error) {
           logger.error('Failed to create branch', error, {

@@ -323,7 +323,7 @@ export default function NewSession() {
             {/* Base Branch Selector */}
             <div className="flex-1">
               <label className="label py-1">
-                <span className="label-text font-semibold text-sm">Parent Branch</span>
+                <span className="label-text font-semibold text-sm">Base Branch</span>
               </label>
               <div className="relative branch-dropdown">
                 <button
