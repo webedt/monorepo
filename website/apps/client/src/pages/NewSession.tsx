@@ -151,10 +151,10 @@ export default function NewSession() {
   }, [selectedRepo, hasLoadedFromStorage]);
 
   // Fetch branches for the selected repository
-  const fetchBranches = async () => {
-    if (!selectedRepo) return;
+  const fetchBranches = async (repoCloneUrl: string) => {
+    if (!repoCloneUrl) return;
 
-    const match = selectedRepo.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+    const match = repoCloneUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
     if (!match) return;
 
     const [, owner, repo] = match;
@@ -164,14 +164,27 @@ export default function NewSession() {
       const response = await githubApi.getBranches(owner, repo);
       const branchNames = response.data.map((b: any) => b.name);
       setBranches(branchNames);
-      setIsBranchDropdownOpen(true);
     } catch (error) {
       console.error('Failed to fetch branches:', error);
-      alert('Failed to fetch branches. Please try again.');
+      setBranches([]);
     } finally {
       setIsLoadingBranches(false);
     }
   };
+
+  // Auto-fetch branches and set default branch when repository changes
+  useEffect(() => {
+    if (selectedRepo && hasLoadedFromStorage) {
+      const selectedRepoData = sortedRepositories.find((r) => r.cloneUrl === selectedRepo);
+      if (selectedRepoData) {
+        setBaseBranch(selectedRepoData.defaultBranch || 'main');
+        fetchBranches(selectedRepo);
+      }
+    } else if (!selectedRepo) {
+      setBranches([]);
+      setBaseBranch('main');
+    }
+  }, [selectedRepo, hasLoadedFromStorage]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -312,68 +325,56 @@ export default function NewSession() {
               <label className="label py-1">
                 <span className="label-text font-semibold text-sm">Parent Branch</span>
               </label>
-              <div className="relative flex items-center border border-base-300 rounded-lg h-9 pr-0 overflow-hidden hover:border-base-content/20 transition-colors">
-                <input
-                  type="text"
-                  value={baseBranch}
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                  placeholder="main"
-                  className="flex-1 px-3 text-sm bg-transparent focus:outline-none disabled:opacity-50"
-                  disabled={!selectedRepo}
-                />
-                <div className="relative branch-dropdown flex-shrink-0 border-l border-base-300">
-                  <button
-                    type="button"
-                    onClick={fetchBranches}
-                    disabled={!selectedRepo || isLoadingBranches}
-                    className="h-9 w-9 flex items-center justify-center hover:bg-base-200 transition-colors disabled:opacity-50"
-                    title="Browse branches"
-                  >
-                    {isLoadingBranches ? (
-                      <span className="loading loading-spinner loading-sm"></span>
-                    ) : (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                    )}
-                  </button>
-                  {isBranchDropdownOpen && (
-                    <div className="absolute top-full right-0 mt-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
-                      <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
-                        <input
-                          type="text"
-                          placeholder="Search branches..."
-                          value={branchSearchQuery}
-                          onChange={(e) => setBranchSearchQuery(e.target.value)}
-                          className="input input-bordered input-sm w-full"
-                          autoFocus
-                        />
-                      </div>
-                      <div className="overflow-y-auto max-h-64">
-                        {filteredBranches.length > 0 ? (
-                          filteredBranches.map((branchName) => (
-                            <button
-                              key={branchName}
-                              type="button"
-                              onClick={() => {
-                                setBaseBranch(branchName);
-                                setIsBranchDropdownOpen(false);
-                                setBranchSearchQuery('');
-                              }}
-                              className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${baseBranch === branchName ? 'bg-primary/10 font-semibold' : ''}`}
-                            >
-                              {branchName}
-                            </button>
-                          ))
-                        ) : (
-                          <div className="p-4 text-xs text-base-content/50 text-center">
-                            No branches found
-                          </div>
-                        )}
-                      </div>
+              <div className="relative branch-dropdown">
+                <button
+                  type="button"
+                  onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+                  className="relative flex items-center justify-between w-full h-9 px-3 text-sm border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
+                  disabled={!selectedRepo || isLoadingBranches}
+                >
+                  <span className="truncate">
+                    {isLoadingBranches ? 'Loading...' : baseBranch || 'main'}
+                  </span>
+                  <svg className="w-4 h-4 ml-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {isBranchDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-2 w-full max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
+                    <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                      <input
+                        type="text"
+                        placeholder="Search branches..."
+                        value={branchSearchQuery}
+                        onChange={(e) => setBranchSearchQuery(e.target.value)}
+                        className="input input-bordered input-sm w-full"
+                        autoFocus
+                      />
                     </div>
-                  )}
-                </div>
+                    <div className="overflow-y-auto max-h-64">
+                      {filteredBranches.length > 0 ? (
+                        filteredBranches.map((branchName) => (
+                          <button
+                            key={branchName}
+                            type="button"
+                            onClick={() => {
+                              setBaseBranch(branchName);
+                              setIsBranchDropdownOpen(false);
+                              setBranchSearchQuery('');
+                            }}
+                            className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${baseBranch === branchName ? 'bg-primary/10 font-semibold' : ''}`}
+                          >
+                            {branchName}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="p-4 text-xs text-base-content/50 text-center">
+                          {isLoadingBranches ? 'Loading branches...' : 'No branches found'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
