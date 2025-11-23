@@ -72,7 +72,7 @@ Features:
 ### `test-resume.json`
 Resume a previous session.
 
-**Note:** Replace the `resumeSessionId` with an actual session ID from a previous request.
+**Note:** Replace the `websiteSessionId` with an actual session ID from a previous request.
 
 ```bash
 curl -X POST http://localhost:5001/execute \
