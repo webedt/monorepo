@@ -239,7 +239,8 @@ app.post('/execute', async (req: Request, res: Response) => {
   console.log('  - codingAssistantProvider:', request.codingAssistantProvider);
   console.log('  - codingAssistantAuthentication type:', typeof request.codingAssistantAuthentication);
   console.log('  - codingAssistantAuthentication value:', redactSensitiveData(request.codingAssistantAuthentication).substring(0, 200) + '...');
-  console.log('  - resumeSessionId:', request.resumeSessionId || 'N/A');
+  console.log('  - websiteSessionId:', request.websiteSessionId || 'N/A');
+  console.log('  - websiteSessionId type:', typeof request.websiteSessionId);
   console.log('  - github:', request.github ? redactSensitiveData(request.github) : 'N/A');
   console.log('  - database:', request.database ? 'Configured' : 'N/A');
   console.log('  - providerOptions:', request.providerOptions ? JSON.stringify(request.providerOptions) : 'N/A');

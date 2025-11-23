@@ -67,6 +67,16 @@ export class Orchestrator {
     let providerSessionId: string | undefined;
     let workspacePath: string | undefined;
 
+    // Debug: Log incoming websiteSessionId
+    logger.info('Received execute request', {
+      component: 'Orchestrator',
+      websiteSessionId: request.websiteSessionId,
+      hasWebsiteSessionId: !!request.websiteSessionId,
+      websiteSessionIdType: typeof request.websiteSessionId,
+      hasDatabaseConfig: !!request.database,
+      hasGithubConfig: !!request.github
+    });
+
     // Determine website session identifier (resume existing or create new)
     // This is separate from the provider's internal session ID (stored in metadata)
     const isResuming = !!request.websiteSessionId;
