@@ -370,6 +370,7 @@ const executeHandler = async (req: any, res: any) => {
       autoCommit: chatSession.autoCommit,
       // Add database config for persistence
       database: {
+        sessionId: chatSession.id, // Session UUID for persistence
         accessToken: authReq.session?.id || '', // Use session ID for database access
       },
     };
