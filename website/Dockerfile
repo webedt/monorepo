@@ -1,9 +1,6 @@
 # Multi-stage build for WebEDT monorepo
 FROM node:20-alpine AS base
 
-# Install git (needed for version generation)
-RUN apk add --no-cache git
-
 # Install pnpm
 RUN npm install -g pnpm
 
@@ -23,12 +20,6 @@ RUN echo "Cache bust: 2025-11-23T18:00:00Z commit:d9488ab"
 # Copy apps (this will be rebuilt when cache is invalidated)
 COPY apps ./apps
 
-# Copy scripts directory for version generation
-COPY scripts ./scripts
-
-# Copy .git directory for version generation
-COPY .git ./.git
-
 # Install all dependencies
 RUN pnpm install --frozen-lockfile
 
@@ -37,10 +28,8 @@ FROM base AS build
 
 WORKDIR /app
 
-# Generate version info from git before building
-RUN node scripts/generate-version.js --update
-
 # Build client (React/Vite app)
+# Note: Version files are pre-generated before Docker build
 RUN pnpm --filter @webedt/client build
 
 # Build server (Express API)

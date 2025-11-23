@@ -33,6 +33,25 @@ https://github.etdofresh.com/webedt/website/develop/
 - Example: Branch `claude/test-feature` becomes `/webedt/website/claude-test-feature/`
 - The path prefix is stripped by Dokploy before forwarding requests to your app
 
+### Dokploy Build Configuration
+
+**IMPORTANT**: This project requires a pre-build step to generate version information before Docker builds.
+
+**Required Pre-Build Command:**
+```bash
+cd website && ./pre-build.sh
+```
+
+This command must be configured in Dokploy's "Pre Build Command" field. It generates version files from git history that are then included in the Docker build.
+
+**Why This Is Needed:**
+- Version information is calculated from git tags and commit count
+- The `.git` directory is not available in Docker build context
+- Pre-build script generates `package.json` version and `apps/client/src/version.ts` before Docker build
+- These generated files are then copied into the Docker image during the build
+
+**Without the pre-build command, the deployment will fail** because the Docker build will not have access to git history for version generation.
+
 ### Critical Path Requirements for Strip Path
 
 **IMPORTANT**: This project supports both root-based and path-based deployments using runtime base path detection.
