@@ -2,8 +2,6 @@ name: Website - Deploy to Dokploy
 
 on:
   push:
-    branches-ignore:
-      - main
     paths:
       - "website/**"
       - ".github/workflows/website-deploy-dokploy.yml"
