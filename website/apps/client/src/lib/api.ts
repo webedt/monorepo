@@ -135,6 +135,25 @@ export const sessionsApi = {
     }),
 };
 
+// Storage Worker API
+export const storageWorkerApi = {
+  listSessions: () => fetchApi('/api/storage-worker/sessions'),
+
+  getSession: (sessionId: string) => fetchApi(`/api/storage-worker/sessions/${sessionId}`),
+
+  sessionExists: async (sessionId: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionId}`, {
+        method: 'HEAD',
+        credentials: 'include',
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  },
+};
+
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;
