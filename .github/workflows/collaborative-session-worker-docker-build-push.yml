@@ -13,7 +13,7 @@ env:
   IMAGE_NAME: collaborative-session-worker
 
 jobs:
-  build-and-push:
+  build-and-push-collaborative-session-worker:
     runs-on: ubuntu-latest
 
     steps:
