@@ -151,6 +151,45 @@ if (usePostgres) {
         ) THEN
           ALTER TABLE chat_sessions ADD CONSTRAINT chat_sessions_session_path_unique UNIQUE (session_path);
         END IF;
+        -- Add auto_commit column if not exists
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'chat_sessions' AND column_name = 'auto_commit'
+        ) THEN
+          ALTER TABLE chat_sessions ADD COLUMN auto_commit BOOLEAN NOT NULL DEFAULT FALSE;
+        END IF;
+        -- Migrate chat_sessions.id from INTEGER to TEXT (UUID)
+        -- This migration is needed when upgrading from old schema with SERIAL id to new UUID-based id
+        DO $migration$
+        DECLARE
+          id_data_type TEXT;
+        BEGIN
+          -- Check current data type of id column
+          SELECT data_type INTO id_data_type
+          FROM information_schema.columns
+          WHERE table_name = 'chat_sessions' AND column_name = 'id';
+
+          -- If id is integer-based (integer, bigint, serial, bigserial), migrate to TEXT
+          IF id_data_type IN ('integer', 'bigint', 'smallint') THEN
+            RAISE NOTICE 'Migrating chat_sessions.id from % to TEXT (UUID)', id_data_type;
+
+            -- Drop foreign key constraint from messages table
+            ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_chat_session_id_fkey;
+
+            -- Convert existing integer IDs to UUID format (pad with zeros and format as UUID)
+            -- This is a data-preserving migration that converts old integer IDs to UUID strings
+            ALTER TABLE chat_sessions ALTER COLUMN id TYPE TEXT USING LPAD(id::TEXT, 8, '0') || '-0000-0000-0000-000000000000';
+            ALTER TABLE messages ALTER COLUMN chat_session_id TYPE TEXT USING LPAD(chat_session_id::TEXT, 8, '0') || '-0000-0000-0000-000000000000';
+
+            -- Re-add foreign key constraint
+            ALTER TABLE messages ADD CONSTRAINT messages_chat_session_id_fkey
+              FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE;
+
+            RAISE NOTICE 'Successfully migrated chat_sessions.id to TEXT (UUID format)';
+          ELSIF id_data_type = 'text' THEN
+            RAISE NOTICE 'chat_sessions.id is already TEXT, no migration needed';
+          END IF;
+        END $migration$;
       END $$;
     `);
   }).then(() => {
