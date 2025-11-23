@@ -147,7 +147,8 @@ export interface SessionMetadata {
   updatedAt: string;
   github?: {
     repoUrl: string;
-    branch: string;
+    branch: string; // Parent branch from which the session was created
     clonedPath: string;
+    createdBranch?: string; // Auto-created branch for this session
   };
 }
