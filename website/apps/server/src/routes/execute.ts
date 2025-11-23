@@ -139,7 +139,7 @@ const executeHandler = async (req: any, res: any) => {
             and(
               eq(chatSessions.userId, authReq.user.id),
               eq(chatSessions.repositoryUrl, repositoryUrl as string),
-              eq(chatSessions.branch, baseBranch as string),
+              eq(chatSessions.baseBranch, baseBranch as string),
               eq(chatSessions.locked, true)
             )
           )
@@ -186,6 +186,7 @@ const executeHandler = async (req: any, res: any) => {
           baseBranch: (baseBranch as string) || 'main', // Default to main if not provided
           branch: null, // Will be populated when branch is created by the worker
           sessionPath: null, // Will be populated after branch is created
+          autoCommit: true, // Auto-commit is now always enabled
           locked: false, // Will be locked after first message
         })
         .returning())[0];
