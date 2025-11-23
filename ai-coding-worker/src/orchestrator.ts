@@ -164,6 +164,7 @@ export class Orchestrator {
       });
 
       // Step 4: Pull GitHub repository (only for new sessions with GitHub config)
+      let createdBranchName: string | undefined;
       if (request.github && !isResuming) {
         sendEvent({
           type: 'message',
@@ -211,9 +212,75 @@ export class Orchestrator {
           repoUrl: request.github.repoUrl,
           branch: pullResult.branch
         });
+
+        // Step 4.5: Create a new branch immediately after cloning
+        try {
+          const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
+
+          if (apiKey) {
+            sendEvent({
+              type: 'message',
+              message: 'Creating new branch for this session...',
+              timestamp: new Date().toISOString()
+            });
+
+            const llmHelper = new LLMHelper(apiKey);
+            const gitHelper = new GitHelper(workspacePath);
+
+            // Extract text from request for branch name generation
+            const requestText = typeof request.userRequest === 'string'
+              ? request.userRequest
+              : request.userRequest
+                  .filter(b => b.type === 'text')
+                  .map(b => (b as any).text)
+                  .join(' ');
+
+            // Generate base branch name from user request
+            const baseBranchName = await llmHelper.generateBranchName(requestText);
+
+            // Append unique suffix to ensure uniqueness (8 chars of UUID)
+            const uniqueSuffix = uuidv4().substring(0, 8);
+            createdBranchName = `${baseBranchName}-${uniqueSuffix}`;
+
+            sendEvent({
+              type: 'branch_created',
+              branchName: createdBranchName,
+              parentBranch: pullResult.branch,
+              message: `Created and checked out branch: ${createdBranchName}`,
+              timestamp: new Date().toISOString()
+            });
+
+            // Create and checkout the new branch
+            await gitHelper.createBranch(createdBranchName);
+
+            logger.info('Branch created for session', {
+              component: 'Orchestrator',
+              sessionId,
+              branchName: createdBranchName,
+              parentBranch: pullResult.branch
+            });
+
+            // Update metadata with created branch
+            metadata.github.createdBranch = createdBranchName;
+            this.sessionStorage.saveMetadata(sessionId, path.join(this.tmpDir, `session-${sessionId}`), metadata);
+          } else {
+            logger.warn('Cannot create branch: no API key found in authentication', {
+              component: 'Orchestrator',
+              sessionId
+            });
+          }
+        } catch (error) {
+          logger.error('Failed to create branch (non-critical, continuing)', error, {
+            component: 'Orchestrator',
+            sessionId
+          });
+          // Continue without branch creation - not critical
+        }
       } else if (metadata.github && isResuming) {
         // Resuming session with GitHub - workspace path should be repo directory
         workspacePath = path.join(this.tmpDir, `session-${sessionId}`, metadata.github.clonedPath);
+        // Restore createdBranchName if it exists
+        createdBranchName = metadata.github.createdBranch;
       }
 
       // Update DB with session metadata
@@ -293,8 +360,8 @@ export class Orchestrator {
           const repoPath = path.join(this.tmpDir, `session-${sessionId}`, metadata.github!.clonedPath);
           const gitHelper = new GitHelper(repoPath);
 
-          // Get current branch name (this is the parent branch)
-          const parentBranch = await gitHelper.getCurrentBranch();
+          // Get current branch name
+          const currentBranch = await gitHelper.getCurrentBranch();
 
           // Check if there are changes to commit
           const hasChanges = await gitHelper.hasChanges();
@@ -304,46 +371,19 @@ export class Orchestrator {
               type: 'commit_progress',
               stage: 'analyzing',
               message: 'Analyzing changes for auto-commit...',
-              branch: parentBranch,
+              branch: currentBranch,
               timestamp: new Date().toISOString()
             });
 
-            // Prepare for new branch creation
             const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
-
-            // Default to parent branch if we can't create a new one (shouldn't happen with valid apiKey)
-            let targetBranch = parentBranch;
 
             if (apiKey) {
               const llmHelper = new LLMHelper(apiKey);
 
-              // 1. Generate unique branch name
-              // Extract text from request for prompt
-              const requestText = typeof request.userRequest === 'string'
-                  ? request.userRequest
-                  : request.userRequest
-                      .filter(b => b.type === 'text')
-                      .map(b => (b as any).text)
-                      .join(' ');
+              // Use the current branch (which is the pre-created branch if branch creation happened)
+              const targetBranch = currentBranch;
 
-              const baseBranchName = await llmHelper.generateBranchName(requestText);
-
-              // Append random suffix to ensure uniqueness (8 chars of UUID)
-              const uniqueSuffix = uuidv4().substring(0, 8);
-              targetBranch = `${baseBranchName}-${uniqueSuffix}`;
-
-              sendEvent({
-                type: 'commit_progress',
-                stage: 'creating_branch',
-                message: `Creating and switching to new branch: ${targetBranch}`,
-                branch: targetBranch,
-                timestamp: new Date().toISOString()
-              });
-
-              // Create and switch to new branch
-              await gitHelper.createBranch(targetBranch);
-
-              // 2. Get git status and diff (on new branch)
+              // Get git status and diff for commit message generation
               const gitStatus = await gitHelper.getStatus();
               const gitDiff = await gitHelper.getDiff();
 
@@ -355,7 +395,7 @@ export class Orchestrator {
                 timestamp: new Date().toISOString()
               });
 
-              // 3. Generate commit message
+              // Generate commit message
               const commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
 
               sendEvent({
@@ -367,7 +407,7 @@ export class Orchestrator {
                 timestamp: new Date().toISOString()
               });
 
-              // 4. Create commit
+              // Create commit
               const commitHash = await gitHelper.commitAll(commitMessage);
 
               sendEvent({
@@ -385,11 +425,10 @@ export class Orchestrator {
                 sessionId,
                 commitHash,
                 commitMessage,
-                branch: targetBranch,
-                parentBranch
+                branch: targetBranch
               });
 
-              // 5. Push to remote
+              // Push to remote
               sendEvent({
                 type: 'commit_progress',
                 stage: 'pushing',
@@ -448,7 +487,7 @@ export class Orchestrator {
             logger.info('No changes to auto-commit', {
               component: 'Orchestrator',
               sessionId,
-              branch: parentBranch
+              branch: currentBranch
             });
           }
         } catch (error) {
