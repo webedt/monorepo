@@ -277,7 +277,6 @@ export default function Chat() {
       setEditTitle('');
       setDeletingSession(false);
       setCurrentSessionId(null);
-      setAiWorkerSessionId(null);
       setIsLocked(false);
       setLastRequest(null);
       messageIdCounter.current = 0;
