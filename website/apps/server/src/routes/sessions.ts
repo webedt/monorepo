@@ -35,9 +35,9 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = parseInt(req.params.id);
+    const sessionId = req.params.id; // Support both UUID and sessionPath
 
-    if (isNaN(sessionId)) {
+    if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
     }
@@ -70,9 +70,9 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.get('/:id/messages', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = parseInt(req.params.id);
+    const sessionId = req.params.id;
 
-    if (isNaN(sessionId)) {
+    if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
     }
@@ -128,10 +128,10 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = parseInt(req.params.id);
+    const sessionId = req.params.id;
     const { userRequest } = req.body;
 
-    if (isNaN(sessionId)) {
+    if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
     }
@@ -172,13 +172,55 @@ router.patch('/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Unlock a chat session (allows creating new sessions for same repo/branch)
+router.post('/:id/unlock', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Unlock session
+    const [unlockedSession] = await db
+      .update(chatSessions)
+      .set({ locked: false })
+      .where(eq(chatSessions.id, sessionId))
+      .returning();
+
+    res.json({ success: true, data: unlockedSession });
+  } catch (error) {
+    console.error('Unlock session error:', error);
+    res.status(500).json({ success: false, error: 'Failed to unlock session' });
+  }
+});
+
 // Delete a chat session
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
-    const sessionId = parseInt(req.params.id);
+    const sessionId = req.params.id;
 
-    if (isNaN(sessionId)) {
+    if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
     }
