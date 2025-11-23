@@ -228,6 +228,44 @@ For detailed information about each project, see the respective CLAUDE.md files:
   - Version management
   - Deployment URLs and links
 
+## Website Deployment Link Requirements
+
+**CRITICAL REQUIREMENT (Website Project):** When working on the `/website` project and completing ANY task that involves code changes, commits, or pushes, you MUST ALWAYS display clickable links to:
+
+1. The GitHub repository (linked to the specific branch)
+2. The deployment site (using path-based routing)
+
+**Required Format:**
+
+```
+**Links:**
+
+GitHub Branch: [https://github.com/webedt/website/tree/{branch-name}](https://github.com/webedt/website/tree/{branch-name})
+Live Site: [https://github.etdofresh.com/{owner}/{repo}/{branch}/](https://github.etdofresh.com/{owner}/{repo}/{branch}/)
+```
+
+**Deployment URL Construction:**
+
+The deployment URL uses path-based routing: `https://github.etdofresh.com/{owner}/{repo}/{branch}/`
+
+- Owner and repo are converted to lowercase
+- Branch name preserves original case
+- Slashes in branch names are replaced with dashes
+- Example: `claude/test-feature` → `https://github.etdofresh.com/webedt/website/claude-test-feature/`
+
+**Example:**
+
+```
+Branch: claude/ideal-user-flow-01Ca8egaVDRvUdzutNsFZeAJ
+
+**Links:**
+
+GitHub Branch: [https://github.com/webedt/website/tree/claude/ideal-user-flow-01Ca8egaVDRvUdzutNsFZeAJ](https://github.com/webedt/website/tree/claude/ideal-user-flow-01Ca8egaVDRvUdzutNsFZeAJ)
+Live Site: [https://github.etdofresh.com/webedt/website/claude-ideal-user-flow-01Ca8egaVDRvUdzutNsFZeAJ/](https://github.etdofresh.com/webedt/website/claude-ideal-user-flow-01Ca8egaVDRvUdzutNsFZeAJ/)
+```
+
+See [website/CLAUDE.md](website/CLAUDE.md) for complete details on path-based routing and deployment URLs.
+
 ## Working with Multiple Projects
 
 When working across multiple projects:
