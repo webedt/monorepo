@@ -73,7 +73,7 @@ Commit message:`
   /**
    * Generate a branch name from user request
    */
-  async generateBranchName(userRequest: string): Promise<string> {
+  async generateBranchName(userRequest: string, parentBranch: string): Promise<string> {
     try {
       const response = await this.client.messages.create({
         model: 'claude-haiku-4-5-20251001',
@@ -85,14 +85,17 @@ Commit message:`
 Rules:
 - Lowercase only
 - Use hyphens as separators
-- Max 50 characters
+- Max 40 characters (excluding prefix)
 - No special characters
-- Only return the branch name, nothing else
+- Only return the descriptive part, nothing else (no "claude/" prefix)
+- Focus on the main action or feature
+
+Parent branch: ${parentBranch}
 
 User request:
 ${userRequest.substring(0, 1000)}
 
-Branch name:`
+Branch name (descriptive part only):`
           }
         ]
       });
@@ -102,22 +105,26 @@ Branch name:`
         throw new Error('Unexpected response type from LLM');
       }
 
-      let branchName = content.text.trim();
-      // Ensure it's a valid branch name
-      branchName = branchName.replace(/[^a-z0-9-\/]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      let descriptivePart = content.text.trim();
+      // Ensure it's a valid branch name part
+      descriptivePart = descriptivePart
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .substring(0, 40);
 
-      logger.info('Generated branch name', {
+      logger.info('Generated branch name descriptive part', {
         component: 'LLMHelper',
-        branchName
+        descriptivePart
       });
 
-      return branchName;
+      return descriptivePart;
     } catch (error) {
       logger.error('Failed to generate branch name', error, {
         component: 'LLMHelper'
       });
       // Fallback
-      return `feature/auto-request`;
+      return `auto-request`;
     }
   }
 }

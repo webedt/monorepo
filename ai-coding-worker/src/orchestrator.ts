@@ -250,7 +250,13 @@ export class Orchestrator {
 
           const llmHelper = new LLMHelper(apiKey);
           const userRequestText = this.serializeUserRequest(request.userRequest);
-          branchName = await llmHelper.generateBranchName(userRequestText, pullResult.branch);
+          const descriptivePart = await llmHelper.generateBranchName(userRequestText, pullResult.branch);
+
+          // Extract last 8 characters of session ID for suffix
+          const sessionIdSuffix = websiteSessionId.slice(-8);
+
+          // Construct full branch name: claude/{descriptive}-{sessionIdSuffix}
+          branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
 
           logger.info('Generated branch name', {
             component: 'Orchestrator',
