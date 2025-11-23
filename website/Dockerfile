@@ -13,6 +13,10 @@ WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
 COPY tsconfig.base.json ./
 
+# Cache bust to ensure fresh code is copied (commit: 9c27b97)
+# Update this comment with new commit SHA to invalidate Docker cache
+ARG CACHEBUST=1
+
 # Copy all packages
 COPY packages ./packages
 COPY apps ./apps
