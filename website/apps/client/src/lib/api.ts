@@ -172,7 +172,7 @@ export function createExecuteEventSource(data: {
   baseBranch?: string;
   branch?: string;
   autoCommit?: boolean;
-  chatSessionId?: string;
+  websiteSessionId?: string;
 }) {
   const params = new URLSearchParams();
   Object.entries(data).forEach(([key, value]) => {

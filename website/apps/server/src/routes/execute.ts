@@ -51,7 +51,7 @@ const executeHandler = async (req: any, res: any) => {
   try {
     // Support both GET (query) and POST (body) parameters
     const params = req.method === 'POST' ? req.body : req.query;
-    const { userRequest, repositoryUrl, baseBranch, chatSessionId } = params;
+    const { userRequest, repositoryUrl, baseBranch, websiteSessionId } = params;
 
     // Auto-commit is now always enabled
     const autoCommit = true;
@@ -65,12 +65,12 @@ const executeHandler = async (req: any, res: any) => {
       repositoryUrl,
       baseBranch,
       autoCommit,
-      chatSessionId,
+      websiteSessionId,
     });
     console.log('[Execute] ========================================================');
 
-    if (!userRequest && !chatSessionId) {
-      res.status(400).json({ success: false, error: 'userRequest or chatSessionId is required' });
+    if (!userRequest && !websiteSessionId) {
+      res.status(400).json({ success: false, error: 'userRequest or websiteSessionId is required' });
       return;
     }
 
@@ -83,7 +83,7 @@ const executeHandler = async (req: any, res: any) => {
     }
 
     // Check if we're continuing an existing session or creating a new one
-    if (chatSessionId) {
+    if (websiteSessionId) {
       // Load existing session - support both UUID and sessionPath lookups
       const existingSessions = await db
         .select()
@@ -91,8 +91,8 @@ const executeHandler = async (req: any, res: any) => {
         .where(
           and(
             or(
-              eq(chatSessions.id, chatSessionId as string),
-              eq(chatSessions.sessionPath, chatSessionId as string)
+              eq(chatSessions.id, websiteSessionId as string),
+              eq(chatSessions.sessionPath, websiteSessionId as string)
             ),
             eq(chatSessions.userId, authReq.user.id)
           )
@@ -102,13 +102,13 @@ const executeHandler = async (req: any, res: any) => {
       if (existingSessions.length === 0) {
         res.status(404).json({
           success: false,
-          error: 'Chat session not found',
+          error: 'Session not found',
         });
         return;
       }
 
       chatSession = existingSessions[0];
-      console.log(`[Execute] Resuming existing chatSession: ${chatSession.id}`);
+      console.log(`[Execute] Resuming existing session: ${chatSession.id}`);
 
       // Update session status to running
       await db
@@ -256,18 +256,18 @@ const executeHandler = async (req: any, res: any) => {
       'Connection': 'keep-alive',
     });
 
-    // Send session-created event only if this is a new session (not resuming existing chatSession)
-    if (!chatSessionId) {
+    // Send session-created event only if this is a new session (not resuming)
+    if (!websiteSessionId) {
       res.write(`event: session-created\n`);
-      res.write(`data: ${JSON.stringify({ chatSessionId: chatSession.id })}\n\n`);
-      console.log(`[Execute] Sent session-created event for new chatSession: ${chatSession.id}`);
+      res.write(`data: ${JSON.stringify({ websiteSessionId: chatSession.id })}\n\n`);
+      console.log(`[Execute] Sent session-created event for new session: ${chatSession.id}`);
       // Note: session_name event will be sent by background title generation when ready
     } else {
-      console.log(`[Execute] Resuming chatSession ${chatSession.id}, not sending session-created event`);
+      console.log(`[Execute] Resuming session ${chatSession.id}, not sending session-created event`);
     }
 
     // Generate session title for new sessions (not resuming) - run in background AFTER main request starts
-    if (!chatSessionId && userRequest) {
+    if (!websiteSessionId && userRequest) {
       // Fire and forget - delay 2 seconds to let main request establish connection first
       (async () => {
         try {
@@ -714,7 +714,7 @@ const executeHandler = async (req: any, res: any) => {
       // Check if response is still writable before writing
       if (!res.writableEnded) {
         res.write(`event: completed\n`);
-        res.write(`data: ${JSON.stringify({ chatSessionId: chatSession.id, completed: true })}\n\n`);
+        res.write(`data: ${JSON.stringify({ websiteSessionId: chatSession.id, completed: true })}\n\n`);
         res.end();
       }
     } catch (streamError) {
