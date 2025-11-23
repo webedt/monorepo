@@ -7,6 +7,7 @@ import { requireAuth } from '../middleware/auth';
 import { ensureValidToken } from '../lib/claudeAuth';
 import type { ClaudeAuth } from '@webedt/shared';
 import { generateSessionTitle } from '../lib/titleGenerator';
+import { parseRepoUrl } from '../utils/sessionPathHelper';
 
 const router = Router();
 
@@ -148,6 +149,21 @@ const executeHandler = async (req: any, res: any) => {
         }
       }
 
+      // Parse repository URL to extract owner and repo name
+      let repositoryOwner: string | null = null;
+      let repositoryName: string | null = null;
+
+      if (repositoryUrl) {
+        try {
+          const parsed = parseRepoUrl(repositoryUrl as string);
+          repositoryOwner = parsed.owner;
+          repositoryName = parsed.repo;
+        } catch (error) {
+          console.error('[Execute] Failed to parse repository URL:', error);
+          // Continue anyway - owner/name are optional
+        }
+      }
+
       // Create new chat session in database
       chatSession = (await db
         .insert(chatSessions)
@@ -156,8 +172,11 @@ const executeHandler = async (req: any, res: any) => {
           userRequest: (userRequest as string) || 'New session',
           status: 'pending',
           repositoryUrl: (repositoryUrl as string) || null,
+          repositoryOwner,
+          repositoryName,
           baseBranch: (baseBranch as string) || 'main', // Default to main if not provided
           branch: null, // Will be populated when branch is created by the worker
+          sessionPath: null, // Will be populated when AI worker returns session path
           locked: false, // Will be locked after first message
         })
         .returning())[0];
@@ -343,7 +362,7 @@ const executeHandler = async (req: any, res: any) => {
     console.log(`[Execute] Session resumption debug:
       - resumeSessionId from query: ${resumeSessionId || 'N/A'}
       - chatSession.id: ${chatSession.id}
-      - chatSession.aiWorkerSessionId: ${chatSession.aiWorkerSessionId || 'N/A'}
+      - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
     `);
 
     if (resumeSessionId) {
@@ -587,21 +606,21 @@ const executeHandler = async (req: any, res: any) => {
                 currentEvent = eventData.type;
               }
 
-              // Store ai-worker session ID
+              // Store AI worker session path
               if (eventData.sessionId) {
-                console.log(`[Execute] Received sessionId from AI worker: ${eventData.sessionId}, current aiWorkerSessionId: ${chatSession.aiWorkerSessionId || 'N/A'}`);
+                console.log(`[Execute] Received sessionPath from AI worker: ${eventData.sessionId}, current sessionPath: ${chatSession.sessionPath || 'N/A'}`);
 
-                if (!chatSession.aiWorkerSessionId) {
+                if (!chatSession.sessionPath) {
                   await db
                     .update(chatSessions)
-                    .set({ aiWorkerSessionId: eventData.sessionId })
+                    .set({ sessionPath: eventData.sessionId })
                     .where(eq(chatSessions.id, chatSession.id));
 
                   // Update local chatSession object
-                  chatSession.aiWorkerSessionId = eventData.sessionId;
-                  console.log(`[Execute] Stored aiWorkerSessionId: ${eventData.sessionId} for chatSession: ${chatSession.id}`);
+                  chatSession.sessionPath = eventData.sessionId;
+                  console.log(`[Execute] Stored sessionPath: ${eventData.sessionId} for chatSession: ${chatSession.id}`);
                 } else {
-                  console.log(`[Execute] aiWorkerSessionId already set, skipping update`);
+                  console.log(`[Execute] sessionPath already set, skipping update`);
                 }
               } else {
                 console.log(`[Execute] No sessionId in event data:`, JSON.stringify(eventData).substring(0, 200));
@@ -686,7 +705,7 @@ const executeHandler = async (req: any, res: any) => {
       console.log(`[Execute] ========== SSE STREAM COMPLETED ==========`);
       console.log(`[Execute] Total events received: ${eventCounter}`);
       console.log(`[Execute] Chat Session ID: ${chatSession.id}`);
-      console.log(`[Execute] AI Worker Session ID: ${chatSession.aiWorkerSessionId || 'N/A'}`);
+      console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'N/A'}`);
       console.log(`[Execute] ==================================================`);
 
       // Mark as completed
