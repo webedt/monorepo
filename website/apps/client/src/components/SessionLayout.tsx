@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { useAuthStore } from '@/lib/store';
+import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi, sessionsApi, githubApi } from '@/lib/api';
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -30,6 +30,7 @@ export default function SessionLayout({
   children,
 }: SessionLayoutProps) {
   const { user, isAuthenticated, clearUser } = useAuthStore();
+  const repoStore = useRepoStore();
   const navigate = useNavigate();
   const location = useLocation();
   const { sessionId } = useParams();
@@ -57,13 +58,13 @@ export default function SessionLayout({
     enabled: !!user?.githubAccessToken && !!sessionId && !repositoriesProp,
   });
 
-  // Use fetched data if props not provided
-  const selectedRepo = selectedRepoProp ?? sessionData?.data?.repositoryUrl ?? '';
-  const baseBranch = baseBranchProp ?? sessionData?.data?.baseBranch ?? 'main';
+  // Use data with priority: props > store > session data > defaults
+  const selectedRepo = selectedRepoProp ?? (repoStore.selectedRepo || sessionData?.data?.repositoryUrl || '');
+  const baseBranch = baseBranchProp ?? (repoStore.baseBranch || sessionData?.data?.baseBranch || 'main');
   const branch = sessionData?.data?.branch ?? '';
   const repositories = repositoriesProp ?? reposData?.data ?? [];
   const isLoadingRepos = isLoadingReposProp ?? isLoadingReposQuery;
-  const isLocked = isLockedProp ?? (!!sessionId && !!sessionData?.data);
+  const isLocked = isLockedProp ?? (repoStore.isLocked || (!!sessionId && !!sessionData?.data));
 
   const handleLogout = async () => {
     try {

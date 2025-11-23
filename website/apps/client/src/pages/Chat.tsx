@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
 import { useEventSource } from '@/hooks/useEventSource';
-import { useAuthStore } from '@/lib/store';
+import { useAuthStore, useRepoStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
 import SessionLayout from '@/components/SessionLayout';
@@ -50,6 +50,22 @@ export default function Chat() {
     mediaType: string;
     fileName: string;
   } | null>(null);
+
+  // Get repo store actions
+  const repoStore = useRepoStore();
+
+  // Sync local state with global store
+  useEffect(() => {
+    repoStore.setSelectedRepo(selectedRepo);
+  }, [selectedRepo]);
+
+  useEffect(() => {
+    repoStore.setBaseBranch(baseBranch);
+  }, [baseBranch]);
+
+  useEffect(() => {
+    repoStore.setIsLocked(isLocked);
+  }, [isLocked]);
 
   // Load session details first to check status
   const { data: sessionDetailsData } = useQuery({

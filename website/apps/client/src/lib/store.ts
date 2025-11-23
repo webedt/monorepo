@@ -18,3 +18,23 @@ export const useAuthStore = create<AuthState>((set) => ({
   clearUser: () => set({ user: null, isAuthenticated: false, isLoading: false }),
   setLoading: (isLoading) => set({ isLoading }),
 }));
+
+interface RepoConnectionState {
+  selectedRepo: string;
+  baseBranch: string;
+  isLocked: boolean;
+  setSelectedRepo: (repo: string) => void;
+  setBaseBranch: (branch: string) => void;
+  setIsLocked: (locked: boolean) => void;
+  clearRepoConnection: () => void;
+}
+
+export const useRepoStore = create<RepoConnectionState>((set) => ({
+  selectedRepo: '',
+  baseBranch: '',
+  isLocked: false,
+  setSelectedRepo: (repo) => set({ selectedRepo: repo }),
+  setBaseBranch: (branch) => set({ baseBranch: branch }),
+  setIsLocked: (locked) => set({ isLocked: locked }),
+  clearRepoConnection: () => set({ selectedRepo: '', baseBranch: '', isLocked: false }),
+}));
