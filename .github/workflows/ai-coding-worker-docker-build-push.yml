@@ -2,8 +2,6 @@ name: AI Coding Worker - Build and Push Docker Image
 
 on:
   push:
-    branches:
-      - main
     paths:
       - "ai-coding-worker/**"
       - ".github/workflows/ai-coding-worker-docker-build-push.yml"
