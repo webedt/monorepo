@@ -1,5 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
+import { storageWorkerApi } from '@/lib/api';
 
 type FileNode = {
   name: string;
@@ -15,9 +18,40 @@ type FolderNode = {
 
 type TreeNode = FileNode | FolderNode;
 
+interface SessionMetadata {
+  sessionId: string;
+  createdAt: string;
+  lastModified: string;
+  size?: number;
+}
+
 export default function Code() {
+  const { sessionId } = useParams<{ sessionId?: string }>();
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(sessionId || null);
   const [selectedFile, setSelectedFile] = useState('Button.jsx');
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['src', 'components']));
+
+  // Fetch all sessions
+  const { data: sessionsData, isLoading: isLoadingSessions, error: sessionsError } = useQuery({
+    queryKey: ['storage-sessions'],
+    queryFn: storageWorkerApi.listSessions,
+  });
+
+  // Fetch specific session if sessionId is provided
+  const { data: sessionData, isLoading: isLoadingSession } = useQuery({
+    queryKey: ['storage-session', selectedSessionId],
+    queryFn: () => storageWorkerApi.getSession(selectedSessionId!),
+    enabled: !!selectedSessionId,
+  });
+
+  const sessions: SessionMetadata[] = sessionsData?.sessions || [];
+
+  // Update selected session when URL param changes
+  useEffect(() => {
+    if (sessionId) {
+      setSelectedSessionId(sessionId);
+    }
+  }, [sessionId]);
 
   const toggleFolder = (folder: string) => {
     setExpandedFolders(prev => {
@@ -178,12 +212,161 @@ export default Button;`;
     </div>
   );
 
+  // Sessions List View
+  const SessionsList = () => (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-base-content mb-2">Code Sessions</h1>
+        <p className="text-sm text-base-content/70">
+          Select a session to view its code workspace
+        </p>
+      </div>
+
+      {isLoadingSessions && (
+        <div className="text-center py-12">
+          <span className="loading loading-spinner loading-lg text-primary"></span>
+          <p className="mt-2 text-base-content/70">Loading sessions...</p>
+        </div>
+      )}
+
+      {sessionsError && (
+        <div className="alert alert-error">
+          <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{sessionsError instanceof Error ? sessionsError.message : 'Failed to load sessions'}</span>
+        </div>
+      )}
+
+      {!isLoadingSessions && !sessionsError && sessions.length === 0 && (
+        <div className="text-center py-12">
+          <svg
+            className="mx-auto h-12 w-12 text-base-content/40"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+            />
+          </svg>
+          <h3 className="mt-2 text-sm font-medium text-base-content">No sessions</h3>
+          <p className="mt-1 text-sm text-base-content/70">
+            No code sessions found in storage.
+          </p>
+        </div>
+      )}
+
+      {!isLoadingSessions && !sessionsError && sessions.length > 0 && (
+        <div className="bg-base-100 shadow overflow-hidden sm:rounded-md">
+          <ul className="divide-y divide-base-300">
+            {sessions.map((session) => (
+              <li key={session.sessionId}>
+                <div
+                  onClick={() => setSelectedSessionId(session.sessionId)}
+                  className="px-4 py-4 sm:px-6 hover:bg-base-200 cursor-pointer"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-primary truncate">
+                        {session.sessionId}
+                      </p>
+                      <div className="mt-1 flex items-center gap-4 text-sm text-base-content/70">
+                        <span>
+                          Created: {new Date(session.createdAt).toLocaleString()}
+                        </span>
+                        {session.size && (
+                          <span>
+                            Size: {(session.size / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="ml-4 flex-shrink-0">
+                      <svg
+                        className="w-5 h-5 text-base-content/40"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+
+  // Session Detail View (with mock code editor for now)
+  const SessionDetailView = () => {
+    if (!selectedSessionId) {
+      return <SessionsList />;
+    }
+
+    if (isLoadingSession) {
+      return (
+        <div className="flex items-center justify-center h-[calc(100vh-112px)]">
+          <div className="text-center">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
+            <p className="mt-2 text-base-content/70">Loading session...</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-[calc(100vh-112px)] flex flex-col">
+        {/* Session Header */}
+        <div className="bg-base-100 border-b border-base-300 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedSessionId(null)}
+                className="btn btn-ghost btn-sm btn-circle"
+              >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path
+                    fillRule="evenodd"
+                    d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+              <div>
+                <h2 className="text-sm font-semibold text-base-content">{selectedSessionId}</h2>
+                {sessionData && (
+                  <p className="text-xs text-base-content/70">
+                    Last modified: {new Date(sessionData.lastModified).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Code Editor */}
+        <div className="flex-1">
+          <CodeEditor />
+        </div>
+      </div>
+    );
+  };
+
   // Always use SessionLayout to show status bar
   return (
     <SessionLayout>
-      <div className="h-[calc(100vh-112px)]">
-        <CodeEditor />
-      </div>
+      {selectedSessionId ? <SessionDetailView /> : <SessionsList />}
     </SessionLayout>
   );
 }
