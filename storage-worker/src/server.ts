@@ -40,8 +40,8 @@ app.get('/health', (req: Request, res: Response) => {
  * Upload a session tarball
  * Expects multipart/form-data with a file field named 'tarball'
  */
-app.post('/api/storage-worker/sessions/:sessionId/upload', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+app.post('/api/storage-worker/sessions/:sessionPath/upload', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
@@ -62,23 +62,23 @@ app.post('/api/storage-worker/sessions/:sessionId/upload', async (req: Request, 
 
           // Save to temp file
           const tmpDir = os.tmpdir();
-          const tmpFile = path.join(tmpDir, `${sessionId}-${Date.now()}.tar.gz`);
+          const tmpFile = path.join(tmpDir, `${sessionPath}-${Date.now()}.tar.gz`);
           fs.writeFileSync(tmpFile, buffer);
 
           // Upload to MinIO
-          await storageService.uploadSession(sessionId, tmpFile);
+          await storageService.uploadSession(sessionPath, tmpFile);
 
           // Cleanup temp file
           fs.unlinkSync(tmpFile);
 
           res.json({
-            sessionId,
+            sessionPath,
             uploaded: true,
             size: buffer.length,
             containerId: CONTAINER_ID,
           });
         } catch (error) {
-          console.error(`Error uploading session ${sessionId}:`, error);
+          console.error(`Error uploading session ${sessionPath}:`, error);
           res.status(500).json({
             error: 'upload_failed',
             message: error instanceof Error ? error.message : 'Failed to upload session',
@@ -103,7 +103,7 @@ app.post('/api/storage-worker/sessions/:sessionId/upload', async (req: Request, 
       });
     }
   } catch (error) {
-    console.error(`Error uploading session ${sessionId}:`, error);
+    console.error(`Error uploading session ${sessionPath}:`, error);
     res.status(500).json({
       error: 'upload_failed',
       message: error instanceof Error ? error.message : 'Failed to upload session',
@@ -116,8 +116,8 @@ app.post('/api/storage-worker/sessions/:sessionId/upload', async (req: Request, 
  * Download a session tarball
  * Returns the tarball file as application/gzip
  */
-app.get('/api/storage-worker/sessions/:sessionId/download', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+app.get('/api/storage-worker/sessions/:sessionPath/download', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
@@ -126,7 +126,7 @@ app.get('/api/storage-worker/sessions/:sessionId/download', async (req: Request,
     if (!exists) {
       res.status(404).json({
         error: 'session_not_found',
-        message: `Session ${sessionId} not found`,
+        message: `Session ${sessionPath} not found`,
         containerId: CONTAINER_ID,
       });
       return;
@@ -137,13 +137,13 @@ app.get('/api/storage-worker/sessions/:sessionId/download', async (req: Request,
 
     // Set headers for file download
     res.setHeader('Content-Type', 'application/gzip');
-    res.setHeader('Content-Disposition', `attachment; filename="${sessionId}.tar.gz"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${sessionPath}.tar.gz"`);
 
     // Pipe stream to response
     stream.pipe(res);
 
     stream.on('error', (error) => {
-      console.error(`Error streaming session ${sessionId}:`, error);
+      console.error(`Error streaming session ${sessionPath}:`, error);
       if (!res.headersSent) {
         res.status(500).json({
           error: 'download_failed',
@@ -153,7 +153,7 @@ app.get('/api/storage-worker/sessions/:sessionId/download', async (req: Request,
       }
     });
   } catch (error) {
-    console.error(`Error downloading session ${sessionId}:`, error);
+    console.error(`Error downloading session ${sessionPath}:`, error);
     if (!res.headersSent) {
       res.status(500).json({
         error: 'download_failed',
@@ -191,8 +191,8 @@ app.get('/api/storage-worker/sessions', async (req: Request, res: Response) => {
 /**
  * Get session metadata
  */
-app.get('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+app.get('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
@@ -201,7 +201,7 @@ app.get('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Res
     if (!metadata) {
       res.status(404).json({
         error: 'session_not_found',
-        message: `Session ${sessionId} not found`,
+        message: `Session ${sessionPath} not found`,
         containerId: CONTAINER_ID,
       });
       return;
@@ -212,7 +212,7 @@ app.get('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Res
       containerId: CONTAINER_ID,
     });
   } catch (error) {
-    console.error(`Error getting session metadata ${sessionId}:`, error);
+    console.error(`Error getting session metadata ${sessionPath}:`, error);
     res.status(500).json({
       error: 'metadata_failed',
       message: error instanceof Error ? error.message : 'Failed to get session metadata',
@@ -224,8 +224,8 @@ app.get('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Res
 /**
  * Check if session exists
  */
-app.head('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+app.head('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
@@ -237,7 +237,7 @@ app.head('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Re
       res.status(404).end();
     }
   } catch (error) {
-    console.error(`Error checking session ${sessionId}:`, error);
+    console.error(`Error checking session ${sessionPath}:`, error);
     res.status(500).end();
   }
 });
@@ -245,20 +245,20 @@ app.head('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Re
 /**
  * Delete a session
  */
-app.delete('/api/storage-worker/sessions/:sessionId', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+app.delete('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
   try {
     await storageService.deleteSession(sessionId);
 
     res.json({
-      sessionId,
+      sessionPath,
       deleted: true,
       containerId: CONTAINER_ID,
     });
   } catch (error) {
-    console.error(`Error deleting session ${sessionId}:`, error);
+    console.error(`Error deleting session ${sessionPath}:`, error);
     res.status(500).json({
       error: 'delete_failed',
       message: error instanceof Error ? error.message : 'Failed to delete session',
@@ -271,24 +271,24 @@ app.delete('/api/storage-worker/sessions/:sessionId', async (req: Request, res: 
  * Delete multiple sessions
  */
 app.post('/api/storage-worker/sessions/bulk-delete', async (req: Request, res: Response) => {
-  const { sessionIds } = req.body;
+  const { sessionPaths } = req.body;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
-  if (!Array.isArray(sessionIds)) {
+  if (!Array.isArray(sessionPaths)) {
     res.status(400).json({
       error: 'invalid_request',
-      message: 'sessionIds must be an array',
+      message: 'sessionPaths must be an array',
       containerId: CONTAINER_ID,
     });
     return;
   }
 
   try {
-    await storageService.deleteSessions(sessionIds);
+    await storageService.deleteSessions(sessionPaths);
 
     res.json({
-      deletedCount: sessionIds.length,
-      sessionIds,
+      deletedCount: sessionPaths.length,
+      sessionPaths,
       containerId: CONTAINER_ID,
     });
   } catch (error) {
@@ -311,12 +311,12 @@ app.use((req: Request, res: Response) => {
     message: `Endpoint not found: ${req.method} ${req.path}`,
     availableEndpoints: [
       'GET    /health',
-      'POST   /api/storage-worker/sessions/:sessionId/upload',
-      'GET    /api/storage-worker/sessions/:sessionId/download',
+      'POST   /api/storage-worker/sessions/:sessionPath/upload',
+      'GET    /api/storage-worker/sessions/:sessionPath/download',
       'GET    /api/storage-worker/sessions',
-      'GET    /api/storage-worker/sessions/:sessionId',
-      'HEAD   /api/storage-worker/sessions/:sessionId',
-      'DELETE /api/storage-worker/sessions/:sessionId',
+      'GET    /api/storage-worker/sessions/:sessionPath',
+      'HEAD   /api/storage-worker/sessions/:sessionPath',
+      'DELETE /api/storage-worker/sessions/:sessionPath',
       'POST   /api/storage-worker/sessions/bulk-delete',
     ],
     containerId: CONTAINER_ID,
