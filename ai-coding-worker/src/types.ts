@@ -32,8 +32,11 @@ export interface ExecuteRequest {
   codingAssistantProvider: string;
   codingAssistantAuthentication: string;
 
-  // Optional: Session management
-  resumeSessionId?: string;
+  // Optional: Website session ID (UUID)
+  // For new sessions: undefined (will be generated)
+  // For resuming: provide the UUID
+  // This is separate from the provider's internal session ID (stored in metadata)
+  websiteSessionId?: string;
 
   // Optional: GitHub integration
   github?: {
@@ -46,8 +49,7 @@ export interface ExecuteRequest {
 
   // Optional: Database persistence
   database?: {
-    sessionId: string;
-    accessToken: string;
+    accessToken: string; // Uses websiteSessionId for session identification
   };
 
   // Optional: Workspace configuration

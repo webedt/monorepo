@@ -73,16 +73,17 @@ const executeHandler = async (req: any, res: any) => {
     console.log('[Execute] ========================================================');
 
     if (!userRequest && !resumeSessionId) {
-      res.status(400).json({ success: false, error: 'userRequest or resumeSessionId is required' });
+      res.status(400).json({ success: false, error: 'userRequest or chatSessionId is required' });
       return;
     }
 
     // Validate that both github params and resumeSessionId are not provided together
     // When resuming a session, the repository is already available in the session workspace
+    // Note: resumeSessionId is deprecated, but kept for backward compatibility
     if (resumeSessionId && repositoryUrl) {
       res.status(400).json({
         success: false,
-        error: 'Cannot provide both "github" and "resumeSessionId". When resuming a session, the repository is already available in the session workspace.',
+        error: 'Cannot provide both "github" and session resumption. When resuming a session, the repository is already available in the session workspace.',
       });
       return;
     }
@@ -362,23 +363,21 @@ const executeHandler = async (req: any, res: any) => {
       userRequest: parsedUserRequest,
       codingAssistantProvider: 'ClaudeAgentSDK',
       codingAssistantAuthentication: claudeAuth,
+      websiteSessionId: chatSession.id, // Always pass the UUID
       // Always use the autoCommit setting from the session (persisted in DB)
       // This ensures resumed sessions respect the initial setting
       autoCommit: chatSession.autoCommit,
+      // Add database config for persistence
+      database: {
+        accessToken: authReq.user.sessionToken || '', // Use session token for database access
+      },
     };
 
-    console.log(`[Execute] Session resumption debug:
-      - resumeSessionId from query: ${resumeSessionId || 'N/A'}
-      - chatSession.id: ${chatSession.id}
+    console.log(`[Execute] Session debug:
+      - resumeSessionId from query (deprecated): ${resumeSessionId || 'N/A'}
+      - websiteSessionId (chatSession.id): ${chatSession.id}
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
     `);
-
-    if (resumeSessionId) {
-      executePayload.resumeSessionId = resumeSessionId;
-      console.log(`[Execute] Added resumeSessionId to payload: ${resumeSessionId}`);
-    } else {
-      console.log(`[Execute] No resumeSessionId provided, starting new session`);
-    }
 
     if (repositoryUrl && authReq.user.githubAccessToken) {
       // New session - use parameters from request
@@ -399,13 +398,12 @@ const executeHandler = async (req: any, res: any) => {
     console.log(`[Execute] ========== OUTBOUND **MAIN** REQUEST TO AI WORKER ==========`);
     console.log(`[Execute] Request type: MAIN user request (separate from title generation)`);
     console.log(`[Execute] Destination: ${aiWorkerUrl}/execute`);
-    console.log(`[Execute] Chat Session ID: ${chatSession.id}`);
-    console.log(`[Execute] Resume Session ID: ${resumeSessionId || 'N/A'}`);
+    console.log(`[Execute] Website Session ID (UUID): ${chatSession.id}`);
+    console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'Not yet created'}`);
     console.log(`[Execute] User Request: ${truncateContent(executePayload.userRequest)}`);
     console.log(`[Execute] Repository: ${executePayload.github?.repoUrl || 'N/A'}`);
     console.log(`[Execute] Branch: ${executePayload.github?.branch || 'N/A'}`);
     console.log(`[Execute] Auto Commit: ${executePayload.autoCommit ?? 'N/A'}`);
-    console.log(`[Execute] Auto Commit Source: ${repositoryUrl ? 'request parameter' : resumeSessionId && chatSession.repositoryUrl ? 'database (resumed session)' : 'none'}`);
     console.log(`[Execute] Full Payload (sanitized): ${JSON.stringify(sanitizedPayload, null, 2)}`);
     console.log(`[Execute] ==================================================================`);
 

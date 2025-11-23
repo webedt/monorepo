@@ -67,10 +67,10 @@ export class Orchestrator {
     let providerSessionId: string | undefined;
     let workspacePath: string | undefined;
 
-    // Determine session identifier (resume existing or create new)
-    // When called from website, resumeSessionId will always be provided (UUID)
-    const isResuming = !!request.resumeSessionId;
-    const sessionId: string = isResuming ? request.resumeSessionId! : uuidv4();
+    // Determine website session identifier (resume existing or create new)
+    // This is separate from the provider's internal session ID (stored in metadata)
+    const isResuming = !!request.websiteSessionId;
+    const websiteSessionId: string = isResuming ? request.websiteSessionId! : uuidv4();
     let repositoryOwner: string | undefined;
     let repositoryName: string | undefined;
     let branchName: string | undefined;
@@ -83,7 +83,7 @@ export class Orchestrator {
     }
 
     // Session root path (uses UUID for filesystem safety)
-    const sessionRoot = path.join(this.tmpDir, `session-${sessionId}`);
+    const sessionRoot = path.join(this.tmpDir, `session-${websiteSessionId}`);
 
     // Local workspace path (ephemeral - in /tmp, may change to repo directory)
     workspacePath = sessionRoot;
@@ -94,11 +94,11 @@ export class Orchestrator {
 
       // Persist to session root (not repo directory) - will be uploaded to MinIO at end
       try {
-        this.sessionStorage.appendStreamEvent(sessionId, sessionRoot, event);
+        this.sessionStorage.appendStreamEvent(websiteSessionId, sessionRoot, event);
       } catch (err) {
         logger.error('Failed to persist event', err, {
           component: 'Orchestrator',
-          sessionId
+          websiteSessionId
         });
       }
 
@@ -106,11 +106,11 @@ export class Orchestrator {
       if (request.database) {
         this.dbClient.appendChunk(
           {
-            sessionId: request.database.sessionId,
+            sessionId: websiteSessionId,
             accessToken: request.database.accessToken
           },
           {
-            sessionId: request.database.sessionId,
+            sessionId: websiteSessionId,
             chunkIndex: chunkIndex++,
             type: event.type,
             content: event,
@@ -119,7 +119,7 @@ export class Orchestrator {
         ).catch(err => {
           logger.error('Failed to persist chunk to DB', err, {
             component: 'Orchestrator',
-            sessionId
+            websiteSessionId
           });
         });
       }
@@ -132,17 +132,17 @@ export class Orchestrator {
       // Step 2: Download session from MinIO (or create new)
       logger.info('Downloading session from storage', {
         component: 'Orchestrator',
-        sessionId,
+        websiteSessionId,
         isResuming,
         provider: request.codingAssistantProvider
       });
 
-      const sessionExisted = await this.sessionStorage.downloadSession(sessionId, workspacePath);
+      const sessionExisted = await this.sessionStorage.downloadSession(websiteSessionId, workspacePath);
 
       // Load metadata if session exists
       let metadata: SessionMetadata | null = null;
       if (sessionExisted) {
-        metadata = await this.sessionStorage.getMetadata(sessionId, workspacePath);
+        metadata = await this.sessionStorage.getMetadata(websiteSessionId, workspacePath);
 
         if (metadata) {
           providerSessionId = metadata.providerSessionId;
@@ -154,7 +154,7 @@ export class Orchestrator {
           }
           logger.info('Loaded session metadata', {
             component: 'Orchestrator',
-            sessionId,
+            websiteSessionId,
             providerSessionId
           });
         }
@@ -163,7 +163,7 @@ export class Orchestrator {
       // Create metadata if new session
       if (!metadata) {
         metadata = {
-          sessionId,
+          sessionId: websiteSessionId,
           sessionPath: undefined, // Will be populated after branch creation
           repositoryOwner,
           repositoryName,
@@ -172,15 +172,15 @@ export class Orchestrator {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
-        this.sessionStorage.saveMetadata(sessionId, workspacePath, metadata);
+        this.sessionStorage.saveMetadata(websiteSessionId, workspacePath, metadata);
       }
 
       // Step 3: Send connection event
       sendEvent({
         type: 'connected',
-        sessionId: sessionId,
+        sessionId: websiteSessionId,
         resuming: isResuming,
-        resumedFrom: isResuming ? sessionId : undefined,
+        resumedFrom: isResuming ? websiteSessionId : undefined,
         provider: request.codingAssistantProvider,
         timestamp: new Date().toISOString()
       });
@@ -215,7 +215,7 @@ export class Orchestrator {
         workspacePath = pullResult.targetPath;
 
         // Save updated metadata
-        this.sessionStorage.saveMetadata(sessionId, sessionRoot, metadata);
+        this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
 
         sendEvent({
           type: 'github_pull_progress',
@@ -229,7 +229,7 @@ export class Orchestrator {
 
         logger.info('Repository cloned', {
           component: 'Orchestrator',
-          sessionId,
+          websiteSessionId,
           repoUrl: request.github.repoUrl,
           branch: pullResult.branch
         });
@@ -254,7 +254,7 @@ export class Orchestrator {
 
           logger.info('Generated branch name', {
             component: 'Orchestrator',
-            sessionId,
+            websiteSessionId,
             branchName,
             parentBranch: pullResult.branch
           });
@@ -278,7 +278,7 @@ export class Orchestrator {
           metadata.sessionPath = sessionPath;
           metadata.repositoryOwner = repositoryOwner;
           metadata.repositoryName = repositoryName;
-          this.sessionStorage.saveMetadata(sessionId, sessionRoot, metadata);
+          this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
 
           sendEvent({
             type: 'branch_created',
@@ -291,7 +291,7 @@ export class Orchestrator {
 
           logger.info('Branch created for session', {
             component: 'Orchestrator',
-            sessionId,
+            websiteSessionId,
             sessionPath,
             branchName,
             parentBranch: pullResult.branch
@@ -299,7 +299,7 @@ export class Orchestrator {
         } catch (error) {
           logger.error('Failed to create branch', error, {
             component: 'Orchestrator',
-            sessionId
+            websiteSessionId
           });
           // Branch creation failure is non-critical - session can still work without GitHub integration
           sendEvent({
@@ -317,7 +317,7 @@ export class Orchestrator {
       if (request.database) {
         await this.dbClient.updateSession(
           {
-            sessionId: request.database.sessionId,
+            sessionId: websiteSessionId,
             accessToken: request.database.accessToken
           },
           {
@@ -361,14 +361,14 @@ export class Orchestrator {
             const newProviderSessionId = event.data.session_id;
             logger.info('Provider session initialized', {
               component: 'Orchestrator',
-              sessionId,
+              websiteSessionId,
               providerSessionId: newProviderSessionId
             });
 
             // Update metadata with provider session ID
             metadata!.providerSessionId = newProviderSessionId;
             this.sessionStorage.saveMetadata(
-              sessionId,
+              websiteSessionId,
               sessionRoot,
               metadata!
             );
@@ -452,7 +452,7 @@ export class Orchestrator {
 
               logger.info('Auto-commit completed', {
                 component: 'Orchestrator',
-                sessionId,
+                websiteSessionId,
                 commitHash,
                 commitMessage,
                 branch: targetBranch
@@ -482,7 +482,7 @@ export class Orchestrator {
 
                 logger.info('Push completed', {
                   component: 'Orchestrator',
-                  sessionId,
+                  websiteSessionId,
                   commitHash,
                   branch: targetBranch
                 });
@@ -490,7 +490,7 @@ export class Orchestrator {
                 // Push failure is non-critical - commit is still saved locally
                 logger.error('Failed to push to remote (non-critical)', pushError, {
                   component: 'Orchestrator',
-                  sessionId,
+                  websiteSessionId,
                   branch: targetBranch
                 });
 
@@ -516,14 +516,14 @@ export class Orchestrator {
           } else {
             logger.info('No changes to auto-commit', {
               component: 'Orchestrator',
-              sessionId,
+              websiteSessionId,
               branch: currentBranch
             });
           }
         } catch (error) {
           logger.error('Failed to auto-commit changes', error, {
             component: 'Orchestrator',
-            sessionId
+            websiteSessionId
           });
           // Continue without auto-commit - not critical
           sendEvent({
@@ -539,16 +539,16 @@ export class Orchestrator {
       // Step 7: Upload session to MinIO
       logger.info('Uploading session to storage', {
         component: 'Orchestrator',
-        sessionId
+        websiteSessionId
       });
 
-      await this.sessionStorage.uploadSession(sessionId, sessionRoot);
+      await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
 
       // Step 8: Send completion event
       const duration = Date.now() - startTime;
       sendEvent({
         type: 'completed',
-        sessionId: sessionId,
+        sessionId: websiteSessionId,
         duration_ms: duration,
         timestamp: new Date().toISOString()
       });
@@ -557,7 +557,7 @@ export class Orchestrator {
       if (request.database) {
         await this.dbClient.updateSession(
           {
-            sessionId: request.database.sessionId,
+            sessionId: websiteSessionId,
             accessToken: request.database.accessToken
           },
           {
@@ -571,7 +571,7 @@ export class Orchestrator {
 
       logger.info('Session completed successfully', {
         component: 'Orchestrator',
-        sessionId,
+        websiteSessionId,
         provider: request.codingAssistantProvider,
         durationMs: duration
       });
@@ -581,12 +581,12 @@ export class Orchestrator {
         fs.rmSync(sessionRoot, { recursive: true, force: true });
         logger.info('Local workspace cleaned up', {
           component: 'Orchestrator',
-          sessionId
+          websiteSessionId
         });
       } catch (err) {
         logger.error('Failed to cleanup local workspace', err, {
           component: 'Orchestrator',
-          sessionId
+          websiteSessionId
         });
       }
 
@@ -594,7 +594,7 @@ export class Orchestrator {
     } catch (error) {
       logger.error('Error during execution', error, {
         component: 'Orchestrator',
-        sessionId,
+        websiteSessionId,
         provider: request.codingAssistantProvider
       });
 
@@ -609,12 +609,12 @@ export class Orchestrator {
       // Try to upload session even on error (preserve state)
       try {
         if (workspacePath && fs.existsSync(sessionRoot)) {
-          await this.sessionStorage.uploadSession(sessionId, sessionRoot);
+          await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
         }
       } catch (uploadErr) {
         logger.error('Failed to upload session after error', uploadErr, {
           component: 'Orchestrator',
-          sessionId
+          websiteSessionId
         });
       }
 
@@ -626,7 +626,7 @@ export class Orchestrator {
       } catch (cleanupErr) {
         logger.error('Failed to cleanup local workspace after error', cleanupErr, {
           component: 'Orchestrator',
-          sessionId
+          websiteSessionId
         });
       }
 
@@ -634,7 +634,7 @@ export class Orchestrator {
       if (request.database) {
         await this.dbClient.updateSession(
           {
-            sessionId: request.database.sessionId,
+            sessionId: websiteSessionId,
             accessToken: request.database.accessToken
           },
           {
@@ -645,7 +645,7 @@ export class Orchestrator {
           }
         ).catch(err => logger.error('Failed to update error status in DB', err, {
           component: 'Orchestrator',
-          sessionId
+          websiteSessionId
         }));
       }
 
@@ -719,10 +719,10 @@ export class Orchestrator {
       );
     }
 
-    // Cannot provide both GitHub and resumeSessionId
-    if (request.github && request.resumeSessionId) {
+    // Cannot provide both GitHub and websiteSessionId (resuming)
+    if (request.github && request.websiteSessionId) {
       throw new Error(
-        'Cannot provide both "github" and "resumeSessionId". ' +
+        'Cannot provide both "github" and "websiteSessionId" for resuming. ' +
         'When resuming a session, the repository is already available in the session workspace.'
       );
     }
@@ -734,11 +734,11 @@ export class Orchestrator {
     }
 
     if (request.database) {
-      if (!request.database.sessionId || request.database.sessionId.trim() === '') {
-        throw new Error('database.sessionId is required when database persistence is enabled');
-      }
       if (!request.database.accessToken || request.database.accessToken.trim() === '') {
         throw new Error('database.accessToken is required when database persistence is enabled');
+      }
+      if (!request.websiteSessionId || request.websiteSessionId.trim() === '') {
+        throw new Error('websiteSessionId is required when database persistence is enabled');
       }
     }
   }
