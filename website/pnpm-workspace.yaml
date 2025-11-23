@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+
+ignoredBuiltDependencies:
+  - '@swc/core'
+  - bcrypt
+  - better-sqlite3
+  - esbuild
+  - sqlite3

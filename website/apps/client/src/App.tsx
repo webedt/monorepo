@@ -1,0 +1,283 @@
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useAuthStore } from '@/lib/store';
+import { authApi } from '@/lib/api';
+import Layout from '@/components/Layout';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import Login from '@/pages/Login';
+import Register from '@/pages/Register';
+import Dashboard from '@/pages/Dashboard';
+import Library from '@/pages/Library';
+import Community from '@/pages/Community';
+import Sessions from '@/pages/Sessions';
+import Chat from '@/pages/Chat';
+import NewSession from '@/pages/NewSession';
+import QuickChatSetup from '@/pages/QuickChatSetup';
+import QuickSessionSetup from '@/pages/QuickSessionSetup';
+import Settings from '@/pages/Settings';
+import Code from '@/pages/Code';
+import Images from '@/pages/Images';
+import Sound from '@/pages/Sound';
+import SceneEditor from '@/pages/SceneEditor';
+import Preview from '@/pages/Preview';
+import ItemPage from '@/pages/ItemPage';
+import LibraryItemPage from '@/pages/LibraryItemPage';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
+
+function App() {
+  const setUser = useAuthStore((state) => state.setUser);
+
+  useEffect(() => {
+    // Check if user is already authenticated
+    authApi
+      .getSession()
+      .then((response) => {
+        setUser(response.data.user);
+      })
+      .catch(() => {
+        // User not authenticated
+        setUser(null);
+      });
+  }, [setUser]);
+
+  // Detect base path for React Router
+  // In development: BASE_URL is './'
+  // In production with Strip Path: we need to detect the actual path from the URL
+  const getBasename = () => {
+    // If BASE_URL is set to something other than './' or '/', use it
+    const viteBase = import.meta.env.BASE_URL;
+    if (viteBase && viteBase !== './' && viteBase !== '/') {
+      return viteBase;
+    }
+
+    // Detect from current pathname for path-based routing
+    // Example: https://github.etdofresh.com/webedt/website/branch/ -> /webedt/website/branch
+    const pathname = window.location.pathname;
+
+    // Check if we're in a path-based deployment (3+ path segments)
+    const pathSegments = pathname.split('/').filter(Boolean);
+    if (pathSegments.length >= 3 && !['login', 'register', 'session', 'sessions', 'settings', 'new-session', 'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community', 'item'].includes(pathSegments[0])) {
+      // Assume format: /owner/repo/branch/...
+      return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+    }
+
+    return '/';
+  };
+
+  const basename = getBasename();
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter basename={basename}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+
+          <Route element={<Layout />}>
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/library"
+              element={
+                <ProtectedRoute>
+                  <Library />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/library/:id"
+              element={
+                <ProtectedRoute>
+                  <LibraryItemPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/community"
+              element={
+                <ProtectedRoute>
+                  <Community />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/sessions"
+              element={
+                <ProtectedRoute>
+                  <Sessions />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/new-session"
+              element={
+                <ProtectedRoute>
+                  <NewSession />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/quick-setup/chat"
+              element={
+                <ProtectedRoute>
+                  <QuickChatSetup />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/quick-setup/:activity"
+              element={
+                <ProtectedRoute>
+                  <QuickSessionSetup />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/item/:id"
+              element={
+                <ProtectedRoute>
+                  <ItemPage />
+                </ProtectedRoute>
+              }
+            />
+          </Route>
+
+          {/* Standalone editor routes (wrapped in SessionLayout internally) */}
+          <Route
+            path="/code"
+            element={
+              <ProtectedRoute>
+                <Code />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/images"
+            element={
+              <ProtectedRoute>
+                <Images />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sound"
+            element={
+              <ProtectedRoute>
+                <Sound />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/scene-editor"
+            element={
+              <ProtectedRoute>
+                <SceneEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/preview"
+            element={
+              <ProtectedRoute>
+                <Preview />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Session routes use SessionLayout (embedded in Chat component) */}
+          <Route
+            path="/session"
+            element={
+              <ProtectedRoute>
+                <Chat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:sessionId"
+            element={
+              <ProtectedRoute>
+                <Chat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:sessionId/chat"
+            element={
+              <ProtectedRoute>
+                <Chat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:sessionId/code"
+            element={
+              <ProtectedRoute>
+                <Code />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:sessionId/images"
+            element={
+              <ProtectedRoute>
+                <Images />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:sessionId/sound"
+            element={
+              <ProtectedRoute>
+                <Sound />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:sessionId/scene-editor"
+            element={
+              <ProtectedRoute>
+                <SceneEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:sessionId/preview"
+            element={
+              <ProtectedRoute>
+                <Preview />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}
+
+export default App;

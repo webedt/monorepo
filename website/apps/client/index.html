@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebEDT - AI Coding Assistant</title>
+
+    <!-- Runtime base path detection for both root and path-based routing -->
+    <script>
+      (function() {
+        const pathname = window.location.pathname;
+        const pathSegments = pathname.split('/').filter(Boolean);
+
+        // Check for path-based deployment pattern: /owner/repo/branch/...
+        // Exclude known app routes from first segment check
+        const appRoutes = ['login', 'register', 'session', 'sessions', 'settings', 'new-session',
+                          'code', 'images', 'sound', 'scene-editor', 'preview', 'quick-setup', 'item'];
+
+        let basePath = '/'; // Default for root-based deployments
+
+        if (pathSegments.length >= 3 && !appRoutes.includes(pathSegments[0])) {
+          // Path-based deployment: /owner/repo/branch/
+          basePath = '/' + pathSegments[0] + '/' + pathSegments[1] + '/' + pathSegments[2] + '/';
+        }
+
+        // Always inject base tag for consistent behavior with relative paths
+        document.write('<base href="' + basePath + '">');
+      })();
+    </script>
+
+    <!-- Pixel font for retro theme -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

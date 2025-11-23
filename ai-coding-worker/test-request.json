@@ -1,0 +1,5 @@
+{
+  "userRequest": "Create a hello.txt file with the text: Hello from AI Coding Worker!",
+  "codingAssistantProvider": "FROM_ENV",
+  "codingAssistantAuthentication": "FROM_ENV"
+}
