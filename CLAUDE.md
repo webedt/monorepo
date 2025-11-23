@@ -280,7 +280,8 @@ When working across multiple projects:
 1. **Always check the project-specific CLAUDE.md** for special requirements
 2. **Use consistent git commit messages** across all projects
 3. **Test changes locally** before pushing
-4. **Consider dependencies** between projects if changes affect multiple services
+4. **Build and verify compilation** - Run `npm run build` (or `pnpm run build`) before committing and pushing to ensure there are no TypeScript or build errors
+5. **Consider dependencies** between projects if changes affect multiple services
 
 ## Repository Links
 

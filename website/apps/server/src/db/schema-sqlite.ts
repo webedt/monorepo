@@ -39,6 +39,7 @@ export const chatSessions = sqliteTable('chat_sessions', {
   repositoryUrl: text('repository_url'),
   baseBranch: text('base_branch'),
   branch: text('branch'), // Working branch name - populated when branch is created
+  autoCommit: integer('auto_commit', { mode: 'boolean' }).notNull().default(false),
   locked: integer('locked', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
