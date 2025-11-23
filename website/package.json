@@ -1,6 +1,6 @@
 {
   "name": "webedt-website",
-  "version": "0.0.404",
+  "version": "0.0.16",
   "description": "AI coding worker website with authentication and GitHub integration",
   "private": true,
   "scripts": {
