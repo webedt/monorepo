@@ -2,5 +2,5 @@
   "codingAssistantProvider": "FROM_ENV",
   "codingAssistantAuthentication": "FROM_ENV",
   "userRequest": "Now create a newfile.txt with the text: This is a resumed session!",
-  "resumeSessionId": "ab58e9ea-bbd6-4766-a41e-dc20ca4d03e5"
+  "websiteSessionId": "ab58e9ea-bbd6-4766-a41e-dc20ca4d03e5"
 }

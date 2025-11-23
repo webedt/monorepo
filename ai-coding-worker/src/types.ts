@@ -95,6 +95,14 @@ export interface GitHubPullProgressEvent extends SSEEvent {
   };
 }
 
+export interface BranchCreatedEvent extends SSEEvent {
+  type: 'branch_created';
+  branchName: string;
+  parentBranch: string;
+  sessionPath: string;
+  message: string;
+}
+
 export interface AssistantMessageEvent extends SSEEvent {
   type: 'assistant_message';
   content: any;

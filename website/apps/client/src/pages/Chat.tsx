@@ -32,7 +32,6 @@ export default function Chat() {
     const parsed = Number(sessionId);
     return isNaN(parsed) ? null : parsed;
   });
-  const [aiWorkerSessionId, setAiWorkerSessionId] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
@@ -298,16 +297,6 @@ export default function Chat() {
     };
   }, [sessionId]);
 
-  // Sync aiWorkerSessionId from query data when loading an existing session
-  useEffect(() => {
-    if (currentSessionData?.data?.aiWorkerSessionId) {
-      console.log(
-        '[Chat] Syncing aiWorkerSessionId from query:',
-        currentSessionData.data.aiWorkerSessionId
-      );
-      setAiWorkerSessionId(currentSessionData.data.aiWorkerSessionId);
-    }
-  }, [currentSessionData]);
 
   // Handle pre-selected settings from NewSession hub
   useEffect(() => {
@@ -371,30 +360,24 @@ export default function Chat() {
       const { eventType, data } = event;
 
       // Handle session-created event - update URL to the actual session ID
-      if (eventType === 'session-created' && data?.chatSessionId) {
-        console.log('[Chat] Session created with ID:', data.chatSessionId);
-        setCurrentSessionId(data.chatSessionId);
+      if (eventType === 'session-created' && data?.websiteSessionId) {
+        console.log('[Chat] Session created with ID:', data.websiteSessionId);
+        setCurrentSessionId(data.websiteSessionId);
 
         // Navigate to the actual session URL if we're on /session/new
         if (!sessionId || sessionId === 'new') {
-          console.log('[Chat] Navigating to session:', data.chatSessionId);
+          console.log('[Chat] Navigating to session:', data.websiteSessionId);
           // Preserve the section path (e.g., /session/new/chat -> /session/{id}/chat)
           const currentPath = location.pathname;
           const section = currentPath.split('/').pop(); // Get the last segment
           const targetPath = section && section !== 'new'
-            ? `/session/${data.chatSessionId}/${section}`
-            : `/session/${data.chatSessionId}/chat`;
+            ? `/session/${data.websiteSessionId}/${section}`
+            : `/session/${data.websiteSessionId}/chat`;
           navigate(targetPath, { replace: true });
         }
 
         // Don't display this as a message
         return;
-      }
-
-      // Capture AI worker session ID from connected event
-      if (eventType === 'connected' && data?.sessionId) {
-        console.log('[Chat] Captured aiWorkerSessionId from connected event:', data.sessionId);
-        setAiWorkerSessionId(data.sessionId);
       }
 
       // Skip system events (but NOT commit_progress or github_pull_progress)
@@ -525,9 +508,9 @@ export default function Chat() {
       setIsExecuting(false);
       setStreamUrl(null);
       // Capture session ID from completion event
-      if (data?.chatSessionId) {
-        console.log('[Chat] Execution completed, setting currentSessionId:', data.chatSessionId);
-        setCurrentSessionId(data.chatSessionId);
+      if (data?.websiteSessionId) {
+        console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
+        setCurrentSessionId(data.websiteSessionId);
         // Lock the fields after first submission completes
         // This prevents users from changing repo/branch after a session has started
         if (!isLocked && selectedRepo) {
@@ -536,12 +519,12 @@ export default function Chat() {
         }
         // Invalidate queries to refetch session data and messages from database
         // This syncs the final state after SSE stream completes
-        queryClient.invalidateQueries({ queryKey: ['currentSession', data.chatSessionId] });
-        queryClient.invalidateQueries({ queryKey: ['session', String(data.chatSessionId)] });
+        queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
+        queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
 
         // Poll for generated title every 3 seconds for up to 60 seconds
         // (Title generation happens in background and completes ~15-20s after main request)
-        const sessionIdToCheck = String(data.chatSessionId);
+        const sessionIdToCheck = String(data.websiteSessionId);
 
         // Start polling after a short delay to allow navigation and initial query to complete
         setTimeout(async () => {
@@ -596,14 +579,14 @@ export default function Chat() {
         }, 1000); // 1 second delay to allow navigation and query to load
 
         // Navigate to the session URL if not already there
-        if (!sessionId || Number(sessionId) !== data.chatSessionId) {
-          console.log('[Chat] Navigating to session:', data.chatSessionId);
+        if (!sessionId || Number(sessionId) !== data.websiteSessionId) {
+          console.log('[Chat] Navigating to session:', data.websiteSessionId);
           // Preserve the section path (e.g., /session/new/chat -> /session/{id}/chat)
           const currentPath = location.pathname;
           const section = currentPath.split('/').pop(); // Get the last segment
-          const targetPath = section && section !== 'new' && section !== String(data.chatSessionId)
-            ? `/session/${data.chatSessionId}/${section}`
-            : `/session/${data.chatSessionId}/chat`;
+          const targetPath = section && section !== 'new' && section !== String(data.websiteSessionId)
+            ? `/session/${data.websiteSessionId}/${section}`
+            : `/session/${data.websiteSessionId}/chat`;
           navigate(targetPath, { replace: true });
         }
       }
@@ -701,25 +684,14 @@ export default function Chat() {
     };
 
     if (currentSessionId) {
-      requestParams.chatSessionId = currentSessionId;
-      console.log('[Chat] Continuing existing chatSession:', currentSessionId);
+      requestParams.websiteSessionId = currentSessionId;
+      console.log('[Chat] Continuing existing session:', currentSessionId);
     }
 
-    console.log('[Chat] Session resumption check:', {
-      currentSessionId,
-      aiWorkerSessionId,
-      fromQuery: currentSessionData?.data?.aiWorkerSessionId,
-    });
+    // Only send repository parameters for new sessions (not resuming)
+    if (!currentSessionId) {
+      console.log('[Chat] New session - sending repository parameters');
 
-    if (aiWorkerSessionId) {
-      requestParams.resumeSessionId = aiWorkerSessionId;
-      console.log('[Chat] Resuming AI worker session with ID:', aiWorkerSessionId);
-      // When resuming a session, do NOT send repository parameters
-      // The repository is already available in the session workspace
-    } else {
-      console.log('[Chat] Starting new AI worker session - no aiWorkerSessionId available');
-
-      // Only send repository parameters when starting a new session
       if (selectedRepo) {
         requestParams.repositoryUrl = selectedRepo;
       }
@@ -730,6 +702,9 @@ export default function Chat() {
 
       // Auto-commit is now always enabled
       requestParams.autoCommit = true;
+    } else {
+      console.log('[Chat] Resuming existing session:', currentSessionId);
+      // When resuming, repository is already in the session workspace
     }
 
     // Debug: Log the exact parameters being sent
@@ -766,17 +741,12 @@ export default function Chat() {
     };
 
     if (currentSessionId) {
-      requestParams.chatSessionId = currentSessionId;
-      console.log('[Chat] Retrying with existing chatSession:', currentSessionId);
+      requestParams.websiteSessionId = currentSessionId;
+      console.log('[Chat] Retrying with existing session:', currentSessionId);
     }
 
-    if (aiWorkerSessionId) {
-      requestParams.resumeSessionId = aiWorkerSessionId;
-      console.log('[Chat] Retrying with AI worker session ID:', aiWorkerSessionId);
-      // When resuming a session, do NOT send repository parameters
-      // The repository is already available in the session workspace
-    } else {
-      // Only send repository parameters when starting a new session
+    // Only send repository parameters for new sessions (not resuming)
+    if (!currentSessionId) {
       if (lastRequest.selectedRepo) {
         requestParams.repositoryUrl = lastRequest.selectedRepo;
       }
@@ -787,6 +757,9 @@ export default function Chat() {
 
       // Auto-commit is now always enabled
       requestParams.autoCommit = true;
+    } else {
+      // When resuming, repository is already in the session workspace
+      console.log('[Chat] Retrying resumed session - repository already in workspace');
     }
 
     // Always use POST

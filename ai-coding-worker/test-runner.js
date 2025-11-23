@@ -42,8 +42,8 @@ async function sendRequest(testFile) {
     console.log(`   GitHub repo: ${request.github.repoUrl}`);
     console.log(`   Auto-commit: ${request.autoCommit || false}`);
   }
-  if (request.resumeSessionId) {
-    console.log(`   Resume session: ${request.resumeSessionId}`);
+  if (request.websiteSessionId) {
+    console.log(`   Website session: ${request.websiteSessionId}`);
   }
   console.log('');
 

@@ -136,7 +136,7 @@ Worker exits (ephemeral model)
   - Provider's internal session ID for resume
   - GitHub repo info (repoUrl, branch, clonedPath)
 - Stream events logged to `.stream-events.jsonl` (JSONL format)
-- Sessions can be resumed using `resumeSessionId` in request
+- Sessions can be resumed using `websiteSessionId` in request
 - If workspace is missing on resume, attempts recovery from GitHub metadata
 
 ### Ephemeral Worker Model

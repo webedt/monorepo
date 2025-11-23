@@ -102,7 +102,7 @@ interface ExecuteRequest {
   codingAssistantAuthentication: string | object;
 
   // Optional: Resume from existing session
-  resumeSessionId?: string;
+  websiteSessionId?: string;
 
   // Optional: GitHub integration
   github?: {
@@ -181,7 +181,7 @@ interface ExecuteRequest {
   "codingAssistantAuthentication": {
     "claudeAiOauth": { "..." }
   },
-  "resumeSessionId": "9de73868-722a-4f1e-9c17-080ae9683442"
+  "websiteSessionId": "9de73868-722a-4f1e-9c17-080ae9683442"
 }
 ```
 
@@ -450,7 +450,7 @@ sessions/
     └── {repo-name}/              # Cloned repository (if GitHub integration used)
 ```
 
-Sessions persist across worker restarts and can be resumed using `resumeSessionId`.
+Sessions persist across worker restarts and can be resumed using `websiteSessionId`.
 
 ---
 

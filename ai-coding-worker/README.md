@@ -232,7 +232,7 @@ Main execution endpoint. Accepts JSON payload with:
 - `codingAssistantAuthentication`: Provider credentials (OAuth JSON or API key)
 
 **Optional**:
-- `resumeSessionId`: Resume existing session
+- `websiteSessionId`: Resume existing session
 - `github`: GitHub repo integration (repoUrl, branch, accessToken)
 - `autoCommit`: Enable auto-commit after execution (creates branch, commits, pushes)
 - `database`: DB persistence settings
@@ -312,7 +312,7 @@ sessions/
     └── {repo-name}/              # Cloned repository (if GitHub used)
 ```
 
-Sessions can be resumed using the `resumeSessionId` parameter. If the local workspace is missing (e.g., worker restarted), the system will recover from MinIO and re-clone from GitHub if needed.
+Sessions can be resumed using the `websiteSessionId` parameter. If the local workspace is missing (e.g., worker restarted), the system will recover from MinIO and re-clone from GitHub if needed.
 
 ## Database Integration (Optional)
 
