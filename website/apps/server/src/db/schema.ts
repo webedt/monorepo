@@ -3,6 +3,7 @@ import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzl
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
+  displayName: text('display_name'),
   passwordHash: text('password_hash').notNull(),
   githubId: text('github_id').unique(),
   githubAccessToken: text('github_access_token'),

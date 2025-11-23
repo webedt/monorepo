@@ -997,7 +997,7 @@ export default function Chat() {
                     )}
 
                     <p className="text-xs mt-1 opacity-70">
-                      {message.type === 'user' ? user?.email : message.type === 'assistant' ? 'Claude' : message.type === 'system' ? 'System' : 'Error'} • {new Date(message.timestamp).toLocaleTimeString()}
+                      {message.type === 'user' ? (user?.displayName || user?.email) : message.type === 'assistant' ? 'Claude' : message.type === 'system' ? 'System' : 'Error'} • {new Date(message.timestamp).toLocaleTimeString()}
                     </p>
                     {message.type === 'error' && lastRequest && !isExecuting && (
                       <button

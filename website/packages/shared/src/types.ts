@@ -2,6 +2,7 @@
 export interface User {
   id: number;
   email: string;
+  displayName?: string | null;
   githubId: string | null;
   githubAccessToken: string | null;
   claudeAuth: ClaudeAuth | null;

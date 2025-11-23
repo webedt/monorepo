@@ -94,4 +94,47 @@ router.post('/image-resize-setting', requireAuth, async (req, res) => {
   }
 });
 
+// Update display name
+router.post('/display-name', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { displayName } = req.body;
+
+    // Validate display name (optional field, but if provided should be reasonable)
+    if (displayName !== null && displayName !== undefined && displayName !== '') {
+      if (typeof displayName !== 'string') {
+        res.status(400).json({
+          success: false,
+          error: 'Display name must be a string',
+        });
+        return;
+      }
+
+      if (displayName.length > 100) {
+        res.status(400).json({
+          success: false,
+          error: 'Display name must be 100 characters or less',
+        });
+        return;
+      }
+    }
+
+    // Set to null if empty string
+    const finalDisplayName = displayName === '' ? null : displayName;
+
+    await db
+      .update(users)
+      .set({ displayName: finalDisplayName })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Display name updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update display name error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update display name' });
+  }
+});
+
 export default router;

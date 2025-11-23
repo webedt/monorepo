@@ -9,6 +9,7 @@ export default function Settings() {
   const [claudeAuthJson, setClaudeAuthJson] = useState('');
   const [claudeError, setClaudeError] = useState('');
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
+  const [displayName, setDisplayName] = useState(user?.displayName || '');
 
   // Format token expiration time
   const formatTokenExpiration = (expiresAt: number) => {
@@ -55,6 +56,10 @@ export default function Settings() {
     }
   }, [user?.imageResizeMaxDimension]);
 
+  useEffect(() => {
+    setDisplayName(user?.displayName || '');
+  }, [user?.displayName]);
+
   const disconnectGitHub = useMutation({
     mutationFn: githubApi.disconnect,
     onSuccess: async () => {
@@ -100,6 +105,17 @@ export default function Settings() {
     },
   });
 
+  const updateDisplayName = useMutation({
+    mutationFn: userApi.updateDisplayName,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Display name updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update display name: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
   const handleClaudeAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setClaudeError('');
@@ -129,6 +145,43 @@ export default function Settings() {
               <p className="text-sm text-base-content/70">
                 <span className="font-medium">User ID:</span> {user?.id}
               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Display Name */}
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title mb-2">Display Name</h2>
+            <div className="space-y-4">
+              <p className="text-sm text-base-content/70">
+                Set a custom display name that will be shown in your profile and chat messages. If not set, your email will be displayed.
+              </p>
+              <div className="form-control w-full max-w-md">
+                <label className="label">
+                  <span className="label-text">Display Name</span>
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Enter your display name"
+                  className="input input-bordered w-full"
+                  maxLength={100}
+                />
+                <label className="label">
+                  <span className="label-text-alt text-base-content/60">
+                    {displayName.length}/100 characters
+                  </span>
+                </label>
+              </div>
+              <button
+                onClick={() => updateDisplayName.mutate(displayName)}
+                disabled={updateDisplayName.isPending || displayName === (user?.displayName || '')}
+                className="btn btn-primary"
+              >
+                {updateDisplayName.isPending ? 'Saving...' : 'Save Display Name'}
+              </button>
             </div>
           </div>
         </div>

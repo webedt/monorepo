@@ -75,7 +75,9 @@ export default function Layout() {
   }
 
   // Get user initials for avatar
-  const userInitials = user?.email
+  const userInitials = user?.displayName
+    ? user.displayName.substring(0, 2).toUpperCase()
+    : user?.email
     ? user.email.substring(0, 2).toUpperCase()
     : '??';
 
@@ -256,9 +258,16 @@ export default function Layout() {
 
                 {userMenuOpen && (
                   <div className="absolute right-0 top-full mt-2 w-56 bg-base-100 rounded-lg shadow-xl border border-base-300 py-2 z-50">
-                    {/* User email - non-clickable */}
-                    <div className="px-4 py-2 text-sm text-base-content/70 border-b border-base-300">
-                      📧 {user?.email}
+                    {/* User info - non-clickable */}
+                    <div className="px-4 py-2 text-sm border-b border-base-300">
+                      {user?.displayName ? (
+                        <>
+                          <div className="font-medium text-base-content">{user.displayName}</div>
+                          <div className="text-xs text-base-content/60 mt-0.5">{user.email}</div>
+                        </>
+                      ) : (
+                        <div className="text-base-content/70">📧 {user?.email}</div>
+                      )}
                     </div>
 
                     {/* Store link */}
