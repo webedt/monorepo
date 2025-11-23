@@ -64,6 +64,7 @@ router.post('/register', async (req, res) => {
           user: {
             id: newUser.id,
             email: newUser.email,
+            displayName: newUser.displayName,
             githubId: newUser.githubId,
             githubAccessToken: newUser.githubAccessToken,
             claudeAuth: newUser.claudeAuth,
@@ -129,6 +130,7 @@ router.post('/login', async (req, res) => {
           user: {
             id: user.id,
             email: user.email,
+            displayName: user.displayName,
             githubId: user.githubId,
             githubAccessToken: user.githubAccessToken,
             claudeAuth: user.claudeAuth,
@@ -191,6 +193,7 @@ router.get('/session', async (req, res) => {
         user: {
           id: freshUser.id,
           email: freshUser.email,
+          displayName: freshUser.displayName,
           githubId: freshUser.githubId,
           githubAccessToken: freshUser.githubAccessToken,
           claudeAuth: freshUser.claudeAuth,
