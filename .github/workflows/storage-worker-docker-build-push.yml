@@ -13,7 +13,7 @@ env:
   IMAGE_NAME: storage-worker
 
 jobs:
-  build-and-push:
+  build-and-push-storage-worker:
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -13,7 +13,7 @@ env:
   IMAGE_NAME: ai-coding-worker
 
 jobs:
-  build-and-push:
+  build-and-push-ai-coding-worker:
     runs-on: ubuntu-latest
     permissions:
       contents: read
