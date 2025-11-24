@@ -149,14 +149,6 @@ export class Orchestrator {
 
       const sessionExisted = await this.sessionStorage.downloadSession(websiteSessionId, workspacePath);
 
-      // Validate that github params aren't provided when resuming an existing session
-      if (sessionExisted && request.github) {
-        throw new Error(
-          'Cannot provide "github" when resuming an existing session. ' +
-          'The repository is already available in the session workspace.'
-        );
-      }
-
       // Load metadata if session exists
       let metadata: SessionMetadata | null = null;
       if (sessionExisted) {
