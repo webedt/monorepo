@@ -142,7 +142,7 @@ export class Orchestrator {
       // Load metadata if session exists
       let metadata: SessionMetadata | null = null;
       if (sessionExisted) {
-        metadata = await this.sessionStorage.getMetadata(websiteSessionId, workspacePath);
+        metadata = await this.sessionStorage.getMetadata(websiteSessionId, sessionRoot);
 
         if (metadata) {
           providerSessionId = metadata.providerSessionId;
