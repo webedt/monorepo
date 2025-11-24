@@ -26,16 +26,10 @@ RUN pnpm install --frozen-lockfile
 # Build stage
 FROM base AS build
 
-# Install git for version generation
-RUN apk add --no-cache git
-
 WORKDIR /app
 
-# Copy .git to generate version from commit history
-COPY .git ./.git
-
-# Generate version from git history, then remove .git to keep image clean
-RUN pnpm version:generate && rm -rf .git
+# Note: Version is pre-generated in version.ts before committing
+# Run 'pnpm version:generate' locally to update the version
 
 # Build client (React/Vite app)
 RUN pnpm --filter @webedt/client build
