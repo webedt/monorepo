@@ -291,9 +291,6 @@ const executeHandler = async (req: any, res: any) => {
       userRequest: parsedUserRequest,
       codingAssistantProvider: 'ClaudeAgentSDK',
       codingAssistantAuthentication: claudeAuth,
-      // Always use the chat session UUID for websiteSessionId
-      // sessionPath is metadata stored separately (owner/repo/branch format)
-      websiteSessionId: chatSession.id,
       // Always use the autoCommit setting from the session (persisted in DB)
       // This ensures resumed sessions respect the initial setting
       autoCommit: chatSession.autoCommit,
@@ -304,14 +301,22 @@ const executeHandler = async (req: any, res: any) => {
       },
     };
 
+    // Only send websiteSessionId when resuming an existing session
+    // For new sessions, omit this field so the AI worker knows to pull GitHub and generate title
+    if (websiteSessionId) {
+      executePayload.websiteSessionId = chatSession.id;
+    }
+
     console.log(`[Execute] Session debug:
       - chatSession.id (database UUID): ${chatSession.id}
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
-      - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
-      - isResuming: ${!!chatSession.sessionPath}
+      - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId || 'NOT SET (new session)'}
+      - isResuming: ${!!websiteSessionId}
     `);
 
-    if (repositoryUrl && authReq.user.githubAccessToken) {
+    // Only send GitHub config for new sessions (not resuming)
+    // For resuming sessions, the AI worker will load GitHub info from session metadata
+    if (!websiteSessionId && repositoryUrl && authReq.user.githubAccessToken) {
       // New session - use parameters from request
       executePayload.github = {
         repoUrl: repositoryUrl as string,
