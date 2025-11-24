@@ -291,8 +291,7 @@ const executeHandler = async (req: any, res: any) => {
       userRequest: parsedUserRequest,
       codingAssistantProvider: 'ClaudeAgentSDK',
       codingAssistantAuthentication: claudeAuth,
-      // Always use the chat session UUID for websiteSessionId
-      // sessionPath is metadata stored separately (owner/repo/branch format)
+      // Always send websiteSessionId so AI worker knows where to store session data
       websiteSessionId: chatSession.id,
       // Always use the autoCommit setting from the session (persisted in DB)
       // This ensures resumed sessions respect the initial setting
@@ -308,20 +307,17 @@ const executeHandler = async (req: any, res: any) => {
       - chatSession.id (database UUID): ${chatSession.id}
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
       - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
-      - isResuming: ${!!chatSession.sessionPath}
+      - userProvidedSessionId (resuming): ${!!websiteSessionId}
     `);
 
+    // Always send GitHub config if available - AI worker will determine if it needs to clone
     if (repositoryUrl && authReq.user.githubAccessToken) {
-      // New session - use parameters from request
       executePayload.github = {
         repoUrl: repositoryUrl as string,
         // Checkout the base branch and let the worker create/manage the working branch
         branch: (baseBranch as string) || 'main',
         accessToken: authReq.user.githubAccessToken,
       };
-
-      // Auto-commit is now always enabled
-      executePayload.autoCommit = true;
     }
 
     // Log outbound request to AI worker
