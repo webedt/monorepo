@@ -172,7 +172,7 @@ export class Orchestrator {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
-        this.sessionStorage.saveMetadata(websiteSessionId, workspacePath, metadata);
+        this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
       }
 
       // Step 3: Send connection event

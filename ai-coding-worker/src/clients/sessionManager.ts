@@ -84,7 +84,7 @@ export class SessionManager {
     provider: string,
     github?: {
       repoUrl: string;
-      branch: string;
+      baseBranch: string;
       clonedPath: string;
     }
   ): SessionMetadata {
