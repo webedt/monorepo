@@ -16,8 +16,8 @@ export class StorageClient {
   private enabled: boolean;
 
   constructor() {
-    // Default to /api/storage-worker if STORAGE_WORKER_URL is not set
-    const storageUrl = process.env.STORAGE_WORKER_URL || '/api/storage-worker';
+    // Default to internal Docker service URL if STORAGE_WORKER_URL is not set
+    const storageUrl = process.env.STORAGE_WORKER_URL || 'http://webedt-app-storage-worker-t1avua_storage-worker:3000';
     this.enabled = true;
     this.baseUrl = storageUrl.replace(/\/$/, '');
     this.timeout = parseInt(process.env.STORAGE_WORKER_TIMEOUT || '60000', 10);
