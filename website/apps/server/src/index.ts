@@ -16,6 +16,7 @@ import executeRoutes from './routes/execute';
 import sessionsRoutes from './routes/sessions';
 import userRoutes from './routes/user';
 import transcribeRoutes from './routes/transcribe';
+import storageWorkerRoutes from './routes/storage-worker';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -41,6 +42,7 @@ app.use('/api/user', userRoutes);
 app.use('/api', executeRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api', transcribeRoutes);
+app.use('/api', storageWorkerRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -75,13 +77,15 @@ app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
   console.log(`AI Worker URL: ${process.env.AI_WORKER_URL}`);
+  console.log(`Storage Worker URL: ${process.env.STORAGE_WORKER_URL}`);
 
   // Log environment variables (redacting sensitive values)
   const redactKeys = ['GITHUB_CLIENT_SECRET', 'SESSION_SECRET'];
   const envVars = Object.keys(process.env)
     .filter(key => key.startsWith('PORT') || key.startsWith('NODE_ENV') ||
                    key.startsWith('AI_') || key.startsWith('ALLOWED_') ||
-                   key.startsWith('GITHUB_') || key.startsWith('SESSION_'))
+                   key.startsWith('GITHUB_') || key.startsWith('SESSION_') ||
+                   key.startsWith('STORAGE_'))
     .sort()
     .map(key => {
       const value = process.env[key];

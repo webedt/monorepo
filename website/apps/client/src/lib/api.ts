@@ -154,9 +154,30 @@ export const sessionsApi = {
 
 // Storage Worker API
 export const storageWorkerApi = {
-  listSessions: () => fetchApi('/api/storage-worker/sessions'),
+  listSessions: async () => {
+    const response = await fetchApi('/api/storage-worker/sessions');
+    // Map sessionPath to sessionId for compatibility with frontend
+    if (response.sessions) {
+      response.sessions = response.sessions.map((session: any) => ({
+        sessionId: session.sessionPath, // Use sessionPath as the ID
+        createdAt: session.createdAt,
+        lastModified: session.lastModified,
+        size: session.size,
+      }));
+    }
+    return response;
+  },
 
-  getSession: (sessionId: string) => fetchApi(`/api/storage-worker/sessions/${sessionId}`),
+  getSession: async (sessionId: string) => {
+    const response = await fetchApi(`/api/storage-worker/sessions/${sessionId}`);
+    // Map sessionPath to sessionId for compatibility
+    return {
+      sessionId: response.sessionPath || sessionId,
+      createdAt: response.createdAt,
+      lastModified: response.lastModified,
+      size: response.size,
+    };
+  },
 
   sessionExists: async (sessionId: string): Promise<boolean> => {
     try {
