@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/index';
 import { chatSessions, messages } from '../db/index';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, inArray, and } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 
@@ -211,6 +211,59 @@ router.post('/:id/unlock', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Unlock session error:', error);
     res.status(500).json({ success: false, error: 'Failed to unlock session' });
+  }
+});
+
+// Bulk delete chat sessions
+router.post('/bulk-delete', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ success: false, error: 'Invalid session IDs' });
+      return;
+    }
+
+    // Verify all sessions exist and belong to the user
+    const sessions = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          inArray(chatSessions.id, ids),
+          eq(chatSessions.userId, authReq.user!.id)
+        )
+      );
+
+    if (sessions.length !== ids.length) {
+      res.status(403).json({
+        success: false,
+        error: 'One or more sessions not found or access denied'
+      });
+      return;
+    }
+
+    // Delete all sessions (cascade will delete messages)
+    await db
+      .delete(chatSessions)
+      .where(
+        and(
+          inArray(chatSessions.id, ids),
+          eq(chatSessions.userId, authReq.user!.id)
+        )
+      );
+
+    res.json({
+      success: true,
+      data: {
+        message: `${ids.length} session${ids.length !== 1 ? 's' : ''} deleted`,
+        count: ids.length
+      }
+    });
+  } catch (error) {
+    console.error('Bulk delete sessions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete sessions' });
   }
 });
 
