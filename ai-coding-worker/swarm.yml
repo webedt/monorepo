@@ -1,42 +1,6 @@
 version: '3.8'
 
 services:
-  minio:
-    image: minio/minio:latest
-    ports:
-      - target: 9000
-        published: 9000
-        protocol: tcp
-        mode: ingress
-      - target: 9001
-        published: 9001
-        protocol: tcp
-        mode: ingress
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio-data:/data
-    networks:
-      - worker-network
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager  # Run MinIO on manager node for stability
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 2G
-        reservations:
-          cpus: '0.25'
-          memory: 512M
-
   ai-coding-worker:
     image: dockerregistry.etdofresh.com/ai-coding-worker:latest
     ports:
@@ -47,15 +11,8 @@ services:
     environment:
       - PORT=5000
       - TMP_DIR=/tmp
-      - MINIO_ENDPOINT=minio
-      - MINIO_PORT=9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_USE_SSL=false
-      - MINIO_BUCKET=sessions
+      - STORAGE_WORKER_URL=${STORAGE_WORKER_URL:-}
       - DB_BASE_URL=${DB_BASE_URL:-}
-    networks:
-      - worker-network
     deploy:
       replicas: 10
       restart_policy:
@@ -73,12 +30,3 @@ services:
       rollback_config:
         parallelism: 1
         delay: 10s
-
-networks:
-  worker-network:
-    driver: overlay
-    attachable: true
-
-volumes:
-  minio-data:
-    driver: local
