@@ -270,24 +270,53 @@ export class Orchestrator {
           // Step 4.5: Generate session title and branch name (only for new sessions)
           if (!isResuming) {
             try {
-              sendEvent({
-                type: 'message',
-                message: 'Generating session title and branch name...',
-                timestamp: new Date().toISOString()
-              });
-
               // Extract API key for LLM helper
               const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
-              if (!apiKey) {
-                throw new Error('Cannot generate session title and branch name: API key not available');
-              }
 
-              const llmHelper = new LLMHelper(apiKey);
-              const userRequestText = this.serializeUserRequest(request.userRequest);
-              const { title, branchName: descriptivePart } = await llmHelper.generateSessionTitleAndBranch(
-                userRequestText,
-                pullResult.branch
-              );
+              // Check if we have a valid API key (not OAuth token)
+              // OAuth tokens (sk-ant-oat*) don't work for direct API calls
+              const isOAuthOnly = apiKey?.startsWith('sk-ant-oat');
+
+              let title: string;
+              let descriptivePart: string;
+
+              if (!apiKey || isOAuthOnly) {
+                // Skip LLM generation for OAuth-only sessions (one-off calls)
+                // Use fallback values immediately
+                title = 'New Session';
+                descriptivePart = 'auto-request';
+
+                logger.info('Skipping LLM-based title generation (OAuth-only or no API key)', {
+                  component: 'Orchestrator',
+                  websiteSessionId,
+                  hasApiKey: !!apiKey,
+                  isOAuthOnly
+                });
+              } else {
+                // Generate title and branch name using LLM
+                sendEvent({
+                  type: 'message',
+                  message: 'Generating session title and branch name...',
+                  timestamp: new Date().toISOString()
+                });
+
+                const llmHelper = new LLMHelper(apiKey);
+                const userRequestText = this.serializeUserRequest(request.userRequest);
+                const result = await llmHelper.generateSessionTitleAndBranch(
+                  userRequestText,
+                  pullResult.branch
+                );
+
+                title = result.title;
+                descriptivePart = result.branchName;
+
+                logger.info('Generated session title and branch name with LLM', {
+                  component: 'Orchestrator',
+                  websiteSessionId,
+                  sessionTitle: title,
+                  descriptivePart
+                });
+              }
 
               // Extract last 8 characters of session ID for suffix
               const sessionIdSuffix = websiteSessionId.slice(-8);
@@ -295,7 +324,7 @@ export class Orchestrator {
               // Construct full branch name: claude/{descriptive}-{sessionIdSuffix}
               branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
 
-              logger.info('Generated session title and branch name', {
+              logger.info('Prepared session title and branch name', {
                 component: 'Orchestrator',
                 websiteSessionId,
                 sessionTitle: title,
@@ -460,11 +489,26 @@ export class Orchestrator {
 
             const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
 
-            if (apiKey) {
-              const llmHelper = new LLMHelper(apiKey);
+            // Use the current branch (which is the pre-created branch if branch creation happened)
+            const targetBranch = currentBranch;
 
-              // Use the current branch (which is the pre-created branch if branch creation happened)
-              const targetBranch = currentBranch;
+            // Check if we have a valid API key (not OAuth token)
+            const isOAuthOnly = apiKey?.startsWith('sk-ant-oat');
+            let commitMessage: string;
+
+            if (!apiKey || isOAuthOnly) {
+              // Skip LLM generation for OAuth-only sessions, use fallback
+              commitMessage = 'chore: auto-commit changes';
+
+              logger.info('Skipping LLM-based commit message generation (OAuth-only or no API key)', {
+                component: 'Orchestrator',
+                websiteSessionId,
+                hasApiKey: !!apiKey,
+                isOAuthOnly
+              });
+            } else {
+              // Generate commit message using LLM
+              const llmHelper = new LLMHelper(apiKey);
 
               // Get git status and diff for commit message generation
               const gitStatus = await gitHelper.getStatus();
@@ -479,93 +523,93 @@ export class Orchestrator {
               });
 
               // Generate commit message
-              const commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
+              commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
+            }
+
+            sendEvent({
+              type: 'commit_progress',
+              stage: 'committing',
+              message: `Attempting to commit changes to branch: ${targetBranch}`,
+              branch: targetBranch,
+              commitMessage,
+              timestamp: new Date().toISOString()
+            });
+
+            // Create commit
+            const commitHash = await gitHelper.commitAll(commitMessage);
+
+            sendEvent({
+              type: 'commit_progress',
+              stage: 'committed',
+              message: 'Changes committed successfully',
+              branch: targetBranch,
+              commitMessage,
+              commitHash,
+              timestamp: new Date().toISOString()
+            });
+
+            logger.info('Auto-commit completed', {
+              component: 'Orchestrator',
+              websiteSessionId,
+              commitHash,
+              commitMessage,
+              branch: targetBranch
+            });
+
+            // Push to remote
+            sendEvent({
+              type: 'commit_progress',
+              stage: 'pushing',
+              message: `Attempting to push branch ${targetBranch} to remote...`,
+              branch: targetBranch,
+              commitHash,
+              timestamp: new Date().toISOString()
+            });
+
+            try {
+              await gitHelper.push();
 
               sendEvent({
                 type: 'commit_progress',
-                stage: 'committing',
-                message: `Attempting to commit changes to branch: ${targetBranch}`,
+                stage: 'pushed',
+                message: `Successfully pushed branch ${targetBranch} to remote`,
                 branch: targetBranch,
-                commitMessage,
-                timestamp: new Date().toISOString()
-              });
-
-              // Create commit
-              const commitHash = await gitHelper.commitAll(commitMessage);
-
-              sendEvent({
-                type: 'commit_progress',
-                stage: 'committed',
-                message: 'Changes committed successfully',
-                branch: targetBranch,
-                commitMessage,
                 commitHash,
                 timestamp: new Date().toISOString()
               });
 
-              logger.info('Auto-commit completed', {
+              logger.info('Push completed', {
                 component: 'Orchestrator',
                 websiteSessionId,
                 commitHash,
-                commitMessage,
+                branch: targetBranch
+              });
+            } catch (pushError) {
+              // Push failure is non-critical - commit is still saved locally
+              logger.error('Failed to push to remote (non-critical)', pushError, {
+                component: 'Orchestrator',
+                websiteSessionId,
                 branch: targetBranch
               });
 
-              // Push to remote
               sendEvent({
                 type: 'commit_progress',
-                stage: 'pushing',
-                message: `Attempting to push branch ${targetBranch} to remote...`,
+                stage: 'push_failed',
+                message: `Failed to push branch ${targetBranch} to remote (commit saved locally)`,
                 branch: targetBranch,
-                commitHash,
-                timestamp: new Date().toISOString()
-              });
-
-              try {
-                await gitHelper.push();
-
-                sendEvent({
-                  type: 'commit_progress',
-                  stage: 'pushed',
-                  message: `Successfully pushed branch ${targetBranch} to remote`,
-                  branch: targetBranch,
-                  commitHash,
-                  timestamp: new Date().toISOString()
-                });
-
-                logger.info('Push completed', {
-                  component: 'Orchestrator',
-                  websiteSessionId,
-                  commitHash,
-                  branch: targetBranch
-                });
-              } catch (pushError) {
-                // Push failure is non-critical - commit is still saved locally
-                logger.error('Failed to push to remote (non-critical)', pushError, {
-                  component: 'Orchestrator',
-                  websiteSessionId,
-                  branch: targetBranch
-                });
-
-                sendEvent({
-                  type: 'commit_progress',
-                  stage: 'push_failed',
-                  message: `Failed to push branch ${targetBranch} to remote (commit saved locally)`,
-                  branch: targetBranch,
-                  error: pushError instanceof Error ? pushError.message : String(pushError),
-                  timestamp: new Date().toISOString()
-                });
-              }
-
-              // Send final completion event
-              sendEvent({
-                type: 'commit_progress',
-                stage: 'completed',
-                message: 'Auto-commit process completed',
-                branch: targetBranch,
+                error: pushError instanceof Error ? pushError.message : String(pushError),
                 timestamp: new Date().toISOString()
               });
             }
+
+            // Send final completion event
+            sendEvent({
+              type: 'commit_progress',
+              stage: 'completed',
+              message: 'Auto-commit process completed',
+              branch: targetBranch,
+              timestamp: new Date().toISOString()
+            });
           } else {
             logger.info('No changes to auto-commit', {
               component: 'Orchestrator',
