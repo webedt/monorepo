@@ -692,15 +692,11 @@ export default function Chat() {
       console.log('[Chat] New session - sending repository parameters');
 
       if (selectedRepo) {
-        requestParams.repositoryUrl = selectedRepo;
+        requestParams.github = {
+          repoUrl: selectedRepo,
+          branch: baseBranch || 'main',
+        };
       }
-
-      if (baseBranch) {
-        requestParams.baseBranch = baseBranch;
-      }
-
-      // Auto-commit is now always enabled
-      requestParams.autoCommit = true;
     } else {
       console.log('[Chat] Resuming existing session:', currentSessionId);
       // When resuming, repository is already in the session workspace
