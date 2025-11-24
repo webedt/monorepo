@@ -505,14 +505,14 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                         <button
                           type="button"
                           onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
-                          className="btn btn-xs btn-outline normal-case"
+                          className="btn btn-sm btn-outline normal-case h-7 min-h-0 px-3"
                           disabled={isExecuting || isLocked}
                         >
                           {selectedRepo
                             ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName ||
                               'No repository'
                             : 'No repository'}
-                          <svg className="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-3.5 h-3.5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                           </svg>
                         </button>
@@ -576,15 +576,15 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                       {/* Only show branch inputs when repository is selected */}
                       {selectedRepo && (
                         <>
-                          {/* Base Branch (Parent) */}
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-base-content/50 font-medium uppercase">Parent</span>
+                          {/* Base Branch */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-base-content/70 font-medium">Base Branch:</span>
                             <input
                               type="text"
                               value={baseBranch}
                               onChange={(e) => setBaseBranch?.(e.target.value)}
                               placeholder="main"
-                              className="input input-bordered input-xs w-24"
+                              className="input input-bordered input-sm w-28 h-7"
                               disabled={isExecuting || isLocked}
                             />
                             {/* Branch selector button */}
@@ -593,13 +593,13 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                                 type="button"
                                 onClick={fetchBranches}
                                 disabled={isExecuting || isLocked || isLoadingBranches}
-                                className="btn btn-xs btn-circle btn-ghost"
+                                className="btn btn-sm btn-circle btn-ghost h-7 w-7 min-h-0"
                                 title="Browse branches"
                               >
                                 {isLoadingBranches ? (
                                   <span className="loading loading-spinner loading-xs"></span>
                                 ) : (
-                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                   </svg>
                                 )}
