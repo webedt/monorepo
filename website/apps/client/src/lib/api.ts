@@ -130,22 +130,22 @@ export const userApi = {
 export const sessionsApi = {
   list: () => fetchApi('/api/sessions'),
 
-  get: (id: number) => fetchApi(`/api/sessions/${id}`),
+  get: (id: string) => fetchApi(`/api/sessions/${id}`),
 
-  getMessages: (id: number) => fetchApi(`/api/sessions/${id}/messages`),
+  getMessages: (id: string) => fetchApi(`/api/sessions/${id}/messages`),
 
-  update: (id: number, userRequest: string) =>
+  update: (id: string, userRequest: string) =>
     fetchApi(`/api/sessions/${id}`, {
       method: 'PATCH',
       body: { userRequest },
     }),
 
-  delete: (id: number) =>
+  delete: (id: string) =>
     fetchApi(`/api/sessions/${id}`, {
       method: 'DELETE',
     }),
 
-  deleteBulk: (ids: number[]) =>
+  deleteBulk: (ids: string[]) =>
     fetchApi('/api/sessions/bulk-delete', {
       method: 'POST',
       body: { ids },

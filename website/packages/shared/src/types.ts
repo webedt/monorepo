@@ -1,6 +1,6 @@
 // User types
 export interface User {
-  id: number;
+  id: string;
   email: string;
   displayName?: string | null;
   githubId: string | null;
@@ -21,8 +21,8 @@ export interface ClaudeAuth {
 
 // Session types
 export interface ChatSession {
-  id: number;
-  userId: number;
+  id: string;
+  userId: string;
   aiWorkerSessionId: string | null;
   userRequest: string;
   status: SessionStatus;
@@ -44,7 +44,7 @@ export interface ImageAttachment {
 
 export interface Message {
   id: number;
-  chatSessionId: number;
+  chatSessionId: string;
   type: MessageType;
   content: string;
   images?: ImageAttachment[] | null;

@@ -12,12 +12,12 @@ export default function Sessions() {
   const user = useAuthStore((state) => state.user);
 
   // Session editing and deletion state
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Bulk selection state
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeletingBulk, setIsDeletingBulk] = useState(false);
 
   // Chat input state
@@ -70,7 +70,7 @@ export default function Sessions() {
   }, [selectedRepo, hasLoadedFromStorage]);
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, title }: { id: number; title: string }) =>
+    mutationFn: ({ id, title }: { id: string; title: string }) =>
       sessionsApi.update(id, title),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -80,7 +80,7 @@ export default function Sessions() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => sessionsApi.delete(id),
+    mutationFn: (id: string) => sessionsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setDeletingId(null);
@@ -89,7 +89,7 @@ export default function Sessions() {
   });
 
   const deleteBulkMutation = useMutation({
-    mutationFn: (ids: number[]) => sessionsApi.deleteBulk(ids),
+    mutationFn: (ids: string[]) => sessionsApi.deleteBulk(ids),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setIsDeletingBulk(false);
@@ -156,7 +156,7 @@ export default function Sessions() {
     setEditTitle(session.userRequest);
   };
 
-  const handleSaveEdit = (id: number) => {
+  const handleSaveEdit = (id: string) => {
     if (editTitle.trim()) {
       updateMutation.mutate({ id, title: editTitle.trim() });
     }
@@ -167,11 +167,11 @@ export default function Sessions() {
     setEditTitle('');
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     setDeletingId(id);
   };
 
-  const confirmDelete = (id: number) => {
+  const confirmDelete = (id: string) => {
     deleteMutation.mutate(id);
   };
 
@@ -180,7 +180,7 @@ export default function Sessions() {
   };
 
   // Bulk selection handlers
-  const handleToggleSelect = (id: number) => {
+  const handleToggleSelect = (id: string) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
