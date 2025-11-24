@@ -547,13 +547,13 @@ export default function SessionLayout({
                   {isLocked ? (
                     <>
                       {/* Grey dot when session is active but missing repository (offline/local state) */}
-                      <div className="w-2 h-2 rounded-full bg-base-content/30"></div>
+                      <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
                       <span className="text-xs font-medium text-base-content/50">Offline</span>
                     </>
                   ) : (
                     <>
                       {/* Grey dot for setup pages, new session, sessions list, quick-setup, etc. */}
-                      <div className="w-2 h-2 rounded-full bg-base-content/30"></div>
+                      <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
                       <span className="text-xs font-medium text-base-content/50">Offline</span>
                     </>
                   )}

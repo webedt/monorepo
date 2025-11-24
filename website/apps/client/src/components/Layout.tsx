@@ -357,7 +357,7 @@ export default function Layout() {
             {/* Show offline status for editor pages */}
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-base-content/30"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
                 <span className="text-xs font-medium text-base-content/50">Offline</span>
               </div>
             </div>
