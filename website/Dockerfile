@@ -26,10 +26,18 @@ RUN pnpm install --frozen-lockfile
 # Build stage
 FROM base AS build
 
+# Install git for version generation
+RUN apk add --no-cache git
+
 WORKDIR /app
 
+# Copy .git to generate version from commit history
+COPY .git ./.git
+
+# Generate version from git history, then remove .git to keep image clean
+RUN pnpm version:generate && rm -rf .git
+
 # Build client (React/Vite app)
-# Note: Version files are pre-generated before Docker build
 RUN pnpm --filter @webedt/client build
 
 # Build server (Express API)
