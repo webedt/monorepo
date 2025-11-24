@@ -16,6 +16,10 @@ export default function Sessions() {
   const [editTitle, setEditTitle] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+
   // Chat input state
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
@@ -80,6 +84,16 @@ export default function Sessions() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setDeletingId(null);
+      setSelectedIds([]);
+    },
+  });
+
+  const deleteBulkMutation = useMutation({
+    mutationFn: (ids: number[]) => sessionsApi.deleteBulk(ids),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      setIsDeletingBulk(false);
+      setSelectedIds([]);
     },
   });
 
@@ -165,20 +179,50 @@ export default function Sessions() {
     setDeletingId(null);
   };
 
+  // Bulk selection handlers
+  const handleToggleSelect = (id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.length === sessions.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(sessions.map((s) => s.id));
+    }
+  };
+
+  const handleBulkDelete = () => {
+    setIsDeletingBulk(true);
+  };
+
+  const confirmBulkDelete = () => {
+    deleteBulkMutation.mutate(selectedIds);
+  };
+
+  const cancelBulkDelete = () => {
+    setIsDeletingBulk(false);
+  };
+
   // Handle Enter key in delete modal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (deletingId && e.key === 'Enter' && !deleteMutation.isPending) {
         e.preventDefault();
         confirmDelete(deletingId);
+      } else if (isDeletingBulk && e.key === 'Enter' && !deleteBulkMutation.isPending) {
+        e.preventDefault();
+        confirmBulkDelete();
       }
     };
 
-    if (deletingId) {
+    if (deletingId || isDeletingBulk) {
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [deletingId, deleteMutation.isPending]);
+  }, [deletingId, isDeletingBulk, deleteMutation.isPending, deleteBulkMutation.isPending]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -247,13 +291,64 @@ export default function Sessions() {
       )}
 
       {!isLoading && !error && sessions.length > 0 && (
-        <div className="bg-base-100 shadow overflow-hidden sm:rounded-md">
-          <ul className="divide-y divide-base-300">
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <div className="px-4 py-4 sm:px-6 hover:bg-base-200">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
+        <>
+          {/* Bulk actions bar */}
+          {selectedIds.length > 0 && (
+            <div className="bg-primary/10 border border-primary rounded-md px-4 py-3 mb-4 flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <span className="text-sm font-medium">
+                  {selectedIds.length} session{selectedIds.length !== 1 ? 's' : ''} selected
+                </span>
+                <button
+                  onClick={() => setSelectedIds([])}
+                  className="btn btn-ghost btn-xs"
+                >
+                  Clear selection
+                </button>
+              </div>
+              <button
+                onClick={handleBulkDelete}
+                className="btn btn-error btn-sm"
+              >
+                Delete selected
+              </button>
+            </div>
+          )}
+
+          <div className="bg-base-100 shadow overflow-hidden sm:rounded-md">
+            {/* Select all header */}
+            <div className="px-4 py-3 border-b border-base-300 bg-base-200/50">
+              <label className="flex items-center space-x-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-sm"
+                  checked={sessions.length > 0 && selectedIds.length === sessions.length}
+                  onChange={handleSelectAll}
+                />
+                <span className="text-sm font-medium">
+                  Select all ({sessions.length})
+                </span>
+              </label>
+            </div>
+
+            <ul className="divide-y divide-base-300">
+              {sessions.map((session) => (
+                <li key={session.id}>
+                  <div className="px-4 py-4 sm:px-6 hover:bg-base-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3 flex-1 min-w-0">
+                        {/* Checkbox */}
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-sm"
+                          checked={selectedIds.includes(session.id)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            handleToggleSelect(session.id);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <div className="flex-1 min-w-0">
                       {editingId === session.id ? (
                         <div className="flex items-center space-x-2">
                           <input
@@ -352,12 +447,14 @@ export default function Sessions() {
                         </div>
                       )}
                     </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </>
       )}
 
       {/* Delete confirmation modal */}
@@ -385,6 +482,37 @@ export default function Sessions() {
                 disabled={deleteMutation.isPending}
               >
                 {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk delete confirmation modal */}
+      {isDeletingBulk && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg mb-4">
+              Delete {selectedIds.length} Session{selectedIds.length !== 1 ? 's' : ''}
+            </h3>
+            <p className="text-sm text-base-content/70 mb-6">
+              Are you sure you want to delete {selectedIds.length} session{selectedIds.length !== 1 ? 's' : ''}?
+              This action cannot be undone and will delete all messages in {selectedIds.length === 1 ? 'this session' : 'these sessions'}.
+            </p>
+            <div className="modal-action">
+              <button
+                onClick={cancelBulkDelete}
+                className="btn btn-ghost"
+                disabled={deleteBulkMutation.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBulkDelete}
+                className="btn btn-error"
+                disabled={deleteBulkMutation.isPending}
+              >
+                {deleteBulkMutation.isPending ? 'Deleting...' : `Delete ${selectedIds.length} session${selectedIds.length !== 1 ? 's' : ''}`}
               </button>
             </div>
           </div>

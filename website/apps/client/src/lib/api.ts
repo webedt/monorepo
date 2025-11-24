@@ -144,6 +144,12 @@ export const sessionsApi = {
     fetchApi(`/api/sessions/${id}`, {
       method: 'DELETE',
     }),
+
+  deleteBulk: (ids: number[]) =>
+    fetchApi('/api/sessions/bulk-delete', {
+      method: 'POST',
+      body: { ids },
+    }),
 };
 
 // Storage Worker API
