@@ -9,6 +9,8 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
+    networks:
+      - dokploy-network
     deploy:
       replicas: 1
       placement:
@@ -25,6 +27,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: sessions
+    networks:
+      - dokploy-network
     deploy:
       replicas: 2
       update_config:
@@ -34,6 +38,10 @@ services:
         condition: on-failure
         delay: 5s
         max_attempts: 3
+
+networks:
+  dokploy-network:
+    external: true
 
 volumes:
   minio-data:
