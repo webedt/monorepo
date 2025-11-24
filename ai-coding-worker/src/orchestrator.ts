@@ -338,9 +338,72 @@ export class Orchestrator {
             timestamp: new Date().toISOString()
           });
         }
-      } else if (metadata.github && isResuming) {
+      } else if (isResuming && (metadata.github || request.github)) {
         // Resuming session with GitHub - workspace path should be repo directory
-        workspacePath = path.join(sessionRoot, metadata.github.clonedPath);
+        if (metadata.github && metadata.github.clonedPath) {
+          // Use cloned path from metadata
+          workspacePath = path.join(sessionRoot, metadata.github.clonedPath);
+          logger.info('Using cloned repo from metadata', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            clonedPath: metadata.github.clonedPath,
+            workspacePath
+          });
+        } else if (request.github) {
+          // Metadata missing github info, but request has it - detect or clone repo
+          logger.warn('Metadata missing github info on resume, attempting to pull repository', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            repoUrl: request.github.repoUrl
+          });
+
+          sendEvent({
+            type: 'message',
+            message: `Pulling repository: ${request.github.repoUrl}`,
+            timestamp: new Date().toISOString()
+          });
+
+          const pullResult = await this.githubClient.pullRepository({
+            repoUrl: request.github.repoUrl,
+            branch: request.github.branch,
+            directory: request.github.directory,
+            accessToken: request.github.accessToken,
+            workspaceRoot: workspacePath
+          });
+
+          // Extract relative path for metadata
+          const repoName = pullResult.targetPath.replace(workspacePath + '/', '');
+
+          // Update metadata with GitHub info
+          metadata.github = {
+            repoUrl: request.github.repoUrl,
+            baseBranch: pullResult.branch,
+            clonedPath: repoName
+          };
+
+          // Update workspace path to cloned repo
+          workspacePath = pullResult.targetPath;
+
+          // Save updated metadata
+          this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+          sendEvent({
+            type: 'github_pull_progress',
+            data: {
+              type: 'completed',
+              message: pullResult.wasCloned ? 'Repository cloned successfully' : 'Repository already exists',
+              targetPath: pullResult.targetPath
+            },
+            timestamp: new Date().toISOString()
+          });
+
+          logger.info('Repository setup complete on resume', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            repoUrl: request.github.repoUrl,
+            workspacePath
+          });
+        }
       }
 
       // Update DB with session metadata
