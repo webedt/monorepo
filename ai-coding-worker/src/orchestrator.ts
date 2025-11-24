@@ -149,6 +149,14 @@ export class Orchestrator {
 
       const sessionExisted = await this.sessionStorage.downloadSession(websiteSessionId, workspacePath);
 
+      // Validate that github params aren't provided when resuming an existing session
+      if (sessionExisted && request.github) {
+        throw new Error(
+          'Cannot provide "github" when resuming an existing session. ' +
+          'The repository is already available in the session workspace.'
+        );
+      }
+
       // Load metadata if session exists
       let metadata: SessionMetadata | null = null;
       if (sessionExisted) {
@@ -746,14 +754,6 @@ export class Orchestrator {
       throw new Error(
         `Unsupported provider: ${request.codingAssistantProvider}. ` +
         `Supported providers: ${ProviderFactory.getSupportedProviders().join(', ')}`
-      );
-    }
-
-    // Cannot provide both GitHub and websiteSessionId (resuming)
-    if (request.github && request.websiteSessionId) {
-      throw new Error(
-        'Cannot provide both "github" and "websiteSessionId" for resuming. ' +
-        'When resuming a session, the repository is already available in the session workspace.'
       );
     }
 
