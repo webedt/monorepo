@@ -291,6 +291,8 @@ const executeHandler = async (req: any, res: any) => {
       userRequest: parsedUserRequest,
       codingAssistantProvider: 'ClaudeAgentSDK',
       codingAssistantAuthentication: claudeAuth,
+      // Always send websiteSessionId so AI worker knows where to store session data
+      websiteSessionId: chatSession.id,
       // Always use the autoCommit setting from the session (persisted in DB)
       // This ensures resumed sessions respect the initial setting
       autoCommit: chatSession.autoCommit,
@@ -301,32 +303,21 @@ const executeHandler = async (req: any, res: any) => {
       },
     };
 
-    // Only send websiteSessionId when resuming an existing session
-    // For new sessions, omit this field so the AI worker knows to pull GitHub and generate title
-    if (websiteSessionId) {
-      executePayload.websiteSessionId = chatSession.id;
-    }
-
     console.log(`[Execute] Session debug:
       - chatSession.id (database UUID): ${chatSession.id}
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
-      - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId || 'NOT SET (new session)'}
-      - isResuming: ${!!websiteSessionId}
+      - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
+      - userProvidedSessionId (resuming): ${!!websiteSessionId}
     `);
 
-    // Only send GitHub config for new sessions (not resuming)
-    // For resuming sessions, the AI worker will load GitHub info from session metadata
-    if (!websiteSessionId && repositoryUrl && authReq.user.githubAccessToken) {
-      // New session - use parameters from request
+    // Always send GitHub config if available - AI worker will determine if it needs to clone
+    if (repositoryUrl && authReq.user.githubAccessToken) {
       executePayload.github = {
         repoUrl: repositoryUrl as string,
         // Checkout the base branch and let the worker create/manage the working branch
         branch: (baseBranch as string) || 'main',
         accessToken: authReq.user.githubAccessToken,
       };
-
-      // Auto-commit is now always enabled
-      executePayload.autoCommit = true;
     }
 
     // Log outbound request to AI worker

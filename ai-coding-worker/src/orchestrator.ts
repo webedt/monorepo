@@ -77,10 +77,12 @@ export class Orchestrator {
       hasGithubConfig: !!request.github
     });
 
-    // Determine website session identifier (resume existing or create new)
-    // This is separate from the provider's internal session ID (stored in metadata)
-    const isResuming = !!request.websiteSessionId;
-    const websiteSessionId: string = isResuming ? request.websiteSessionId! : uuidv4();
+    // websiteSessionId is required and always provided by the website
+    if (!request.websiteSessionId) {
+      throw new Error('websiteSessionId is required');
+    }
+
+    const websiteSessionId: string = request.websiteSessionId;
     let repositoryOwner: string | undefined;
     let repositoryName: string | undefined;
     let branchName: string | undefined;
@@ -139,15 +141,15 @@ export class Orchestrator {
       // Step 1: Validate request
       this.validateRequest(request);
 
-      // Step 2: Download session from MinIO (or create new)
+      // Step 2: Download session from storage (determines if this is a new or resuming session)
       logger.info('Downloading session from storage', {
         component: 'Orchestrator',
         websiteSessionId,
-        isResuming,
         provider: request.codingAssistantProvider
       });
 
       const sessionExisted = await this.sessionStorage.downloadSession(websiteSessionId, workspacePath);
+      const isResuming = sessionExisted; // Determined by storage, not request params
 
       // Load metadata if session exists
       let metadata: SessionMetadata | null = null;
@@ -156,16 +158,16 @@ export class Orchestrator {
 
         if (metadata) {
           providerSessionId = metadata.providerSessionId;
-          // Extract session info from metadata if resuming
-          if (isResuming) {
-            repositoryOwner = metadata.repositoryOwner;
-            repositoryName = metadata.repositoryName;
-            branchName = metadata.branch;
-          }
+          // Extract session info from metadata
+          repositoryOwner = metadata.repositoryOwner;
+          repositoryName = metadata.repositoryName;
+          branchName = metadata.branch;
+
           logger.info('Loaded session metadata', {
             component: 'Orchestrator',
             websiteSessionId,
-            providerSessionId
+            providerSessionId,
+            isResuming: true
           });
         }
       }
@@ -183,6 +185,12 @@ export class Orchestrator {
           updatedAt: new Date().toISOString()
         };
         this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+        logger.info('Created new session metadata', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          isResuming: false
+        });
       }
 
       // Step 3: Send connection event
@@ -195,168 +203,23 @@ export class Orchestrator {
         timestamp: new Date().toISOString()
       });
 
-      // Step 4: Pull GitHub repository (only for new sessions with GitHub config)
-      if (request.github && !isResuming) {
-        sendEvent({
-          type: 'message',
-          message: `Pulling repository: ${request.github.repoUrl}`,
-          timestamp: new Date().toISOString()
-        });
+      // Step 4: Setup GitHub repository if provided
+      if (request.github) {
+        // Check if repo already exists in session
+        const repoAlreadyExists = metadata.github?.clonedPath &&
+          fs.existsSync(path.join(sessionRoot, metadata.github.clonedPath));
 
-        const pullResult = await this.githubClient.pullRepository({
-          repoUrl: request.github.repoUrl,
-          branch: request.github.branch,
-          directory: request.github.directory,
-          accessToken: request.github.accessToken,
-          workspaceRoot: workspacePath
-        });
-
-        // Extract relative path for metadata
-        const repoName = pullResult.targetPath.replace(workspacePath + '/', '');
-
-        // Update metadata with GitHub info
-        metadata.github = {
-          repoUrl: request.github.repoUrl,
-          baseBranch: pullResult.branch,
-          clonedPath: repoName
-        };
-
-        // Update workspace path to cloned repo
-        workspacePath = pullResult.targetPath;
-
-        // Save updated metadata
-        this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
-
-        sendEvent({
-          type: 'github_pull_progress',
-          data: {
-            type: 'completed',
-            message: pullResult.wasCloned ? 'Repository cloned successfully' : 'Repository updated successfully',
-            targetPath: pullResult.targetPath
-          },
-          timestamp: new Date().toISOString()
-        });
-
-        logger.info('Repository cloned', {
-          component: 'Orchestrator',
-          websiteSessionId,
-          repoUrl: request.github.repoUrl,
-          branch: pullResult.branch
-        });
-
-        // Step 4.5: Generate session title and branch name, then create the branch
-        try {
-          sendEvent({
-            type: 'message',
-            message: 'Generating session title and branch name...',
-            timestamp: new Date().toISOString()
-          });
-
-          // Extract API key for LLM helper
-          const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
-          if (!apiKey) {
-            throw new Error('Cannot generate session title and branch name: API key not available');
-          }
-
-          const llmHelper = new LLMHelper(apiKey);
-          const userRequestText = this.serializeUserRequest(request.userRequest);
-          const { title, branchName: descriptivePart } = await llmHelper.generateSessionTitleAndBranch(
-            userRequestText,
-            pullResult.branch
-          );
-
-          // Extract last 8 characters of session ID for suffix
-          const sessionIdSuffix = websiteSessionId.slice(-8);
-
-          // Construct full branch name: claude/{descriptive}-{sessionIdSuffix}
-          branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
-
-          logger.info('Generated session title and branch name', {
+        if (repoAlreadyExists) {
+          // Repo exists - use it from metadata
+          workspacePath = path.join(sessionRoot, metadata.github!.clonedPath);
+          logger.info('Using existing cloned repo from session', {
             component: 'Orchestrator',
             websiteSessionId,
-            sessionTitle: title,
-            branchName,
-            baseBranch: pullResult.branch
-          });
-
-          sendEvent({
-            type: 'message',
-            message: `Creating branch: ${branchName}`,
-            timestamp: new Date().toISOString()
-          });
-
-          const gitHelper = new GitHelper(workspacePath);
-
-          // Create and checkout the new branch
-          await gitHelper.createBranch(branchName);
-
-          // Generate sessionPath now that we have the branch name
-          const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
-
-          // Update metadata with branch name, sessionPath, and title
-          metadata.branch = branchName;
-          metadata.sessionPath = sessionPath;
-          metadata.repositoryOwner = repositoryOwner;
-          metadata.repositoryName = repositoryName;
-          metadata.sessionTitle = title;
-          this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
-
-          sendEvent({
-            type: 'branch_created',
-            branchName: branchName,
-            baseBranch: pullResult.branch,
-            sessionPath: sessionPath,
-            message: `Created and checked out branch: ${branchName}`,
-            timestamp: new Date().toISOString()
-          });
-
-          // Send session_name event with the generated title
-          sendEvent({
-            type: 'session_name',
-            sessionName: title,
-            branchName: branchName,
-            timestamp: new Date().toISOString()
-          });
-
-          logger.info('Branch created and session title generated', {
-            component: 'Orchestrator',
-            websiteSessionId,
-            sessionPath,
-            sessionTitle: title,
-            branchName,
-            baseBranch: pullResult.branch
-          });
-        } catch (error) {
-          logger.error('Failed to create branch and generate title', error, {
-            component: 'Orchestrator',
-            websiteSessionId
-          });
-          // Branch creation failure is non-critical - session can still work without GitHub integration
-          sendEvent({
-            type: 'message',
-            message: `Warning: Failed to create branch - ${error instanceof Error ? error.message : String(error)}`,
-            timestamp: new Date().toISOString()
-          });
-        }
-      } else if (isResuming && (metadata.github || request.github)) {
-        // Resuming session with GitHub - workspace path should be repo directory
-        if (metadata.github && metadata.github.clonedPath) {
-          // Use cloned path from metadata
-          workspacePath = path.join(sessionRoot, metadata.github.clonedPath);
-          logger.info('Using cloned repo from metadata', {
-            component: 'Orchestrator',
-            websiteSessionId,
-            clonedPath: metadata.github.clonedPath,
+            clonedPath: metadata.github!.clonedPath,
             workspacePath
           });
-        } else if (request.github) {
-          // Metadata missing github info, but request has it - detect or clone repo
-          logger.warn('Metadata missing github info on resume, attempting to pull repository', {
-            component: 'Orchestrator',
-            websiteSessionId,
-            repoUrl: request.github.repoUrl
-          });
-
+        } else {
+          // Repo doesn't exist - clone/pull it
           sendEvent({
             type: 'message',
             message: `Pulling repository: ${request.github.repoUrl}`,
@@ -391,18 +254,115 @@ export class Orchestrator {
             type: 'github_pull_progress',
             data: {
               type: 'completed',
-              message: pullResult.wasCloned ? 'Repository cloned successfully' : 'Repository already exists',
+              message: pullResult.wasCloned ? 'Repository cloned successfully' : 'Repository updated successfully',
               targetPath: pullResult.targetPath
             },
             timestamp: new Date().toISOString()
           });
 
-          logger.info('Repository setup complete on resume', {
+          logger.info('Repository cloned', {
             component: 'Orchestrator',
             websiteSessionId,
             repoUrl: request.github.repoUrl,
-            workspacePath
+            branch: pullResult.branch
           });
+
+          // Step 4.5: Generate session title and branch name (only for new sessions)
+          if (!isResuming) {
+            try {
+              sendEvent({
+                type: 'message',
+                message: 'Generating session title and branch name...',
+                timestamp: new Date().toISOString()
+              });
+
+              // Extract API key for LLM helper
+              const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
+              if (!apiKey) {
+                throw new Error('Cannot generate session title and branch name: API key not available');
+              }
+
+              const llmHelper = new LLMHelper(apiKey);
+              const userRequestText = this.serializeUserRequest(request.userRequest);
+              const { title, branchName: descriptivePart } = await llmHelper.generateSessionTitleAndBranch(
+                userRequestText,
+                pullResult.branch
+              );
+
+              // Extract last 8 characters of session ID for suffix
+              const sessionIdSuffix = websiteSessionId.slice(-8);
+
+              // Construct full branch name: claude/{descriptive}-{sessionIdSuffix}
+              branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
+
+              logger.info('Generated session title and branch name', {
+                component: 'Orchestrator',
+                websiteSessionId,
+                sessionTitle: title,
+                branchName,
+                baseBranch: pullResult.branch
+              });
+
+              sendEvent({
+                type: 'message',
+                message: `Creating branch: ${branchName}`,
+                timestamp: new Date().toISOString()
+              });
+
+              const gitHelper = new GitHelper(workspacePath);
+
+              // Create and checkout the new branch
+              await gitHelper.createBranch(branchName);
+
+              // Generate sessionPath now that we have the branch name
+              const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
+
+              // Update metadata with branch name, sessionPath, and title
+              metadata.branch = branchName;
+              metadata.sessionPath = sessionPath;
+              metadata.repositoryOwner = repositoryOwner;
+              metadata.repositoryName = repositoryName;
+              metadata.sessionTitle = title;
+              this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+              sendEvent({
+                type: 'branch_created',
+                branchName: branchName,
+                baseBranch: pullResult.branch,
+                sessionPath: sessionPath,
+                message: `Created and checked out branch: ${branchName}`,
+                timestamp: new Date().toISOString()
+              });
+
+              // Send session_name event with the generated title
+              sendEvent({
+                type: 'session_name',
+                sessionName: title,
+                branchName: branchName,
+                timestamp: new Date().toISOString()
+              });
+
+              logger.info('Branch created and session title generated', {
+                component: 'Orchestrator',
+                websiteSessionId,
+                sessionPath,
+                sessionTitle: title,
+                branchName,
+                baseBranch: pullResult.branch
+              });
+            } catch (error) {
+              logger.error('Failed to create branch and generate title', error, {
+                component: 'Orchestrator',
+                websiteSessionId
+              });
+              // Branch creation failure is non-critical - session can still work without GitHub integration
+              sendEvent({
+                type: 'message',
+                message: `Warning: Failed to create branch - ${error instanceof Error ? error.message : String(error)}`,
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
         }
       }
 
@@ -818,12 +778,13 @@ export class Orchestrator {
       }
     }
 
+    if (!request.websiteSessionId || request.websiteSessionId.trim() === '') {
+      throw new Error('websiteSessionId is required');
+    }
+
     if (request.database) {
       if (!request.database.accessToken || request.database.accessToken.trim() === '') {
         throw new Error('database.accessToken is required when database persistence is enabled');
-      }
-      if (!request.websiteSessionId || request.websiteSessionId.trim() === '') {
-        throw new Error('websiteSessionId is required when database persistence is enabled');
       }
     }
   }
