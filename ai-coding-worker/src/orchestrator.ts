@@ -749,14 +749,6 @@ export class Orchestrator {
       );
     }
 
-    // Cannot provide both GitHub and websiteSessionId (resuming)
-    if (request.github && request.websiteSessionId) {
-      throw new Error(
-        'Cannot provide both "github" and "websiteSessionId" for resuming. ' +
-        'When resuming a session, the repository is already available in the session workspace.'
-      );
-    }
-
     if (request.github) {
       if (!request.github.repoUrl || request.github.repoUrl.trim() === '') {
         throw new Error('github.repoUrl is required when github integration is enabled');
