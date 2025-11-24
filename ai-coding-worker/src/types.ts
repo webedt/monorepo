@@ -103,6 +103,12 @@ export interface BranchCreatedEvent extends SSEEvent {
   message: string;
 }
 
+export interface SessionNameEvent extends SSEEvent {
+  type: 'session_name';
+  sessionName: string;
+  branchName?: string;
+}
+
 export interface AssistantMessageEvent extends SSEEvent {
   type: 'assistant_message';
   content: any;
@@ -152,6 +158,7 @@ export interface ExecutionContext {
 export interface SessionMetadata {
   sessionId: string; // UUID primary identifier
   sessionPath?: string; // Format: {owner}/{repo}/{branch} - populated after branch creation
+  sessionTitle?: string; // Human-readable session title - populated after generation
   repositoryOwner?: string;
   repositoryName?: string;
   branch?: string; // Working branch for this session - populated after branch creation

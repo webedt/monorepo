@@ -328,9 +328,23 @@ export default function Chat() {
     if (state?.startStream && state?.streamParams && !streamUrl) {
       console.log('[Chat] Auto-starting stream from navigation state:', state.streamParams);
 
+      // Filter out github/repository parameters if we're resuming an existing session
+      let params = { ...state.streamParams };
+      if (currentSessionId || (sessionId && sessionId !== 'new')) {
+        // Remove github-related parameters when resuming
+        delete params.github;
+        delete params.repositoryUrl;
+        delete params.baseBranch;
+        delete params.autoCommit;
+
+        // Add websiteSessionId for resuming
+        params.websiteSessionId = currentSessionId || sessionId;
+        console.log('[Chat] Filtered params for resuming session:', params);
+      }
+
       // Always use POST
       setStreamMethod('POST');
-      setStreamBody(state.streamParams);
+      setStreamBody(params);
       setStreamUrl(`${API_BASE_URL}/api/execute`);
 
       setIsExecuting(true);
@@ -692,15 +706,11 @@ export default function Chat() {
       console.log('[Chat] New session - sending repository parameters');
 
       if (selectedRepo) {
-        requestParams.repositoryUrl = selectedRepo;
+        requestParams.github = {
+          repoUrl: selectedRepo,
+          branch: baseBranch || 'main',
+        };
       }
-
-      if (baseBranch) {
-        requestParams.baseBranch = baseBranch;
-      }
-
-      // Auto-commit is now always enabled
-      requestParams.autoCommit = true;
     } else {
       console.log('[Chat] Resuming existing session:', currentSessionId);
       // When resuming, repository is already in the session workspace
