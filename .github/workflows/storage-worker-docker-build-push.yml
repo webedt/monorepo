@@ -2,8 +2,6 @@ name: Storage Worker - Build and Push Docker Image
 
 on:
   push:
-    branches:
-      - main
     paths:
       - "storage-worker/**"
       - ".github/workflows/storage-worker-docker-build-push.yml"

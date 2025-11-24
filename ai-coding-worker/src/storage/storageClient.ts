@@ -16,19 +16,9 @@ export class StorageClient {
   private enabled: boolean;
 
   constructor() {
-    // Check if storage-worker is configured
-    const storageUrl = process.env.STORAGE_WORKER_URL;
-    this.enabled = !!storageUrl;
-
-    if (!this.enabled || !storageUrl) {
-      logger.info('Storage worker not configured, session storage disabled', {
-        component: 'StorageClient'
-      });
-      this.baseUrl = '';
-      this.timeout = 60000;
-      return;
-    }
-
+    // Default to /api/storage-worker if STORAGE_WORKER_URL is not set
+    const storageUrl = process.env.STORAGE_WORKER_URL || '/api/storage-worker';
+    this.enabled = true;
     this.baseUrl = storageUrl.replace(/\/$/, '');
     this.timeout = parseInt(process.env.STORAGE_WORKER_TIMEOUT || '60000', 10);
 

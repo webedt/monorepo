@@ -291,9 +291,9 @@ const executeHandler = async (req: any, res: any) => {
       userRequest: parsedUserRequest,
       codingAssistantProvider: 'ClaudeAgentSDK',
       codingAssistantAuthentication: claudeAuth,
-      // Use sessionPath if available (resuming), otherwise use chat session ID (new session)
-      // The AI worker will return the sessionPath in the connected event for new sessions
-      websiteSessionId: chatSession.sessionPath || chatSession.id,
+      // Always use the chat session UUID for websiteSessionId
+      // sessionPath is metadata stored separately (owner/repo/branch format)
+      websiteSessionId: chatSession.id,
       // Always use the autoCommit setting from the session (persisted in DB)
       // This ensures resumed sessions respect the initial setting
       autoCommit: chatSession.autoCommit,

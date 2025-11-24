@@ -23,8 +23,8 @@ echo "✅ TypeScript build complete"
 echo ""
 
 # Step 2: Build Docker image
-echo "🐳 Step 2/4: Building Docker image..."
-docker build -t ${REGISTRY}/${IMAGE_NAME}:latest .
+echo "🐳 Step 2/4: Building Docker image (with --no-cache)..."
+docker build --no-cache -t ${REGISTRY}/${IMAGE_NAME}:latest .
 echo "✅ Docker image built"
 echo ""
 

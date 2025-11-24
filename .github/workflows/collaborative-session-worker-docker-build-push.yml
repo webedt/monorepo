@@ -2,8 +2,6 @@ name: Collaborative Session Worker - Build and Push Docker Image
 
 on:
   push:
-    branches:
-      - main
     paths:
       - "collaborative-session-worker/**"
       - ".github/workflows/collaborative-session-worker-docker-build-push.yml"

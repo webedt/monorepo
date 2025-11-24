@@ -493,7 +493,7 @@ export default function SessionLayout({
 
                   {/* Read-only base branch when locked */}
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-base-content/70">Parent Branch:</span>
+                    <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
                     <span className="text-sm text-base-content">{baseBranch}</span>
                   </div>
 
@@ -527,7 +527,7 @@ export default function SessionLayout({
 
                   {/* Base Branch */}
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-base-content/70">Parent Branch:</span>
+                    <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
                     <input
                       type="text"
                       value={baseBranch}

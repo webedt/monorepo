@@ -67,6 +67,16 @@ export class Orchestrator {
     let providerSessionId: string | undefined;
     let workspacePath: string | undefined;
 
+    // Debug: Log incoming websiteSessionId
+    logger.info('Received execute request', {
+      component: 'Orchestrator',
+      websiteSessionId: request.websiteSessionId,
+      hasWebsiteSessionId: !!request.websiteSessionId,
+      websiteSessionIdType: typeof request.websiteSessionId,
+      hasDatabaseConfig: !!request.database,
+      hasGithubConfig: !!request.github
+    });
+
     // Determine website session identifier (resume existing or create new)
     // This is separate from the provider's internal session ID (stored in metadata)
     const isResuming = !!request.websiteSessionId;
@@ -266,7 +276,7 @@ export class Orchestrator {
             websiteSessionId,
             sessionTitle: title,
             branchName,
-            parentBranch: pullResult.branch
+            baseBranch: pullResult.branch
           });
 
           sendEvent({
@@ -294,7 +304,7 @@ export class Orchestrator {
           sendEvent({
             type: 'branch_created',
             branchName: branchName,
-            parentBranch: pullResult.branch,
+            baseBranch: pullResult.branch,
             sessionPath: sessionPath,
             message: `Created and checked out branch: ${branchName}`,
             timestamp: new Date().toISOString()
@@ -314,7 +324,7 @@ export class Orchestrator {
             sessionPath,
             sessionTitle: title,
             branchName,
-            parentBranch: pullResult.branch
+            baseBranch: pullResult.branch
           });
         } catch (error) {
           logger.error('Failed to create branch and generate title', error, {

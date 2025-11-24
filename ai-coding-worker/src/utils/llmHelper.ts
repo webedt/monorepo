@@ -165,7 +165,7 @@ Response:`
    * Generate a branch name from user request
    * @deprecated Use generateSessionTitleAndBranch instead for better efficiency
    */
-  async generateBranchName(userRequest: string, parentBranch: string): Promise<string> {
+  async generateBranchName(userRequest: string, baseBranch: string): Promise<string> {
     try {
       const response = await this.client.messages.create({
         model: 'claude-haiku-4-5-20251001',
@@ -182,7 +182,7 @@ Rules:
 - Only return the descriptive part, nothing else (no "claude/" prefix)
 - Focus on the main action or feature
 
-Parent branch: ${parentBranch}
+Base branch: ${baseBranch}
 
 User request:
 ${userRequest.substring(0, 1000)}
