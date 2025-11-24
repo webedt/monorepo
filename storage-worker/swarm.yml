@@ -9,8 +9,6 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
-    networks:
-      - storage-network
     deploy:
       replicas: 1
       placement:
@@ -27,8 +25,6 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: sessions
-    networks:
-      - storage-network
     deploy:
       replicas: 2
       update_config:
@@ -38,11 +34,6 @@ services:
         condition: on-failure
         delay: 5s
         max_attempts: 3
-
-networks:
-  storage-network:
-    driver: overlay
-    attachable: true
 
 volumes:
   minio-data:
