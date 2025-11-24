@@ -42,11 +42,10 @@ export default function SessionLayout({
   const { data: sessionData } = useQuery({
     queryKey: ['session-for-layout', sessionId],
     queryFn: () => {
-      const id = Number(sessionId);
-      if (isNaN(id)) {
+      if (!sessionId || sessionId === 'new') {
         throw new Error('Invalid session ID');
       }
-      return sessionsApi.get(id);
+      return sessionsApi.get(sessionId);
     },
     enabled: !!sessionId && sessionId !== 'new' && !selectedRepoProp,
   });
