@@ -786,7 +786,7 @@ export default function Chat() {
       isLoadingRepos={isLoadingRepos}
       isLocked={isLocked}
     >
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col flex-1">
       {/* Header - only show for existing sessions with messages */}
       {messages.length > 0 && (
         <div className="bg-base-100 border-b border-base-300 p-4">

@@ -564,7 +564,7 @@ export default function SessionLayout({
       </div>
 
       {/* Main Content */}
-      <main className="flex-1">
+      <main className="flex-1 flex flex-col">
         {children}
       </main>
     </div>
