@@ -577,74 +577,74 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                       {selectedRepo && (
                         <>
                           {/* Base Branch */}
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-base-content/70 font-medium">Base Branch:</span>
-                            <input
-                              type="text"
-                              value={baseBranch}
-                              onChange={(e) => setBaseBranch?.(e.target.value)}
-                              placeholder="main"
-                              className="input input-bordered input-sm w-28 h-7"
-                              disabled={isExecuting || isLocked}
-                            />
-                            {/* Branch selector button */}
-                            <div className="relative branch-dropdown">
-                              <button
-                                type="button"
-                                onClick={fetchBranches}
-                                disabled={isExecuting || isLocked || isLoadingBranches}
-                                className="btn btn-sm btn-circle btn-ghost h-7 w-7 min-h-0"
-                                title="Browse branches"
-                              >
-                                {isLoadingBranches ? (
+                          <div className="relative branch-dropdown">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!isBranchDropdownOpen && branches.length === 0) {
+                                  fetchBranches();
+                                } else {
+                                  setIsBranchDropdownOpen(!isBranchDropdownOpen);
+                                }
+                              }}
+                              disabled={isExecuting || isLocked || isLoadingBranches}
+                              className="btn btn-sm btn-outline normal-case h-7 min-h-0 px-3"
+                              title="Select base branch"
+                            >
+                              <span className="text-xs text-base-content/70 font-medium mr-1">Base Branch:</span>
+                              {isLoadingBranches ? (
+                                <>
                                   <span className="loading loading-spinner loading-xs"></span>
-                                ) : (
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </>
+                              ) : (
+                                <>
+                                  {baseBranch || 'main'}
+                                  <svg className="w-3.5 h-3.5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                   </svg>
-                                )}
-                              </button>
-                              {isBranchDropdownOpen && (
-                                <div className="absolute bottom-full left-0 mb-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
-                                  {/* Search input */}
-                                  <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
-                                    <input
-                                      type="text"
-                                      placeholder="Search branches..."
-                                      value={branchSearchQuery}
-                                      onChange={(e) => setBranchSearchQuery(e.target.value)}
-                                      className="input input-bordered input-xs w-full"
-                                      autoFocus
-                                    />
-                                  </div>
-                                  {/* Branch list */}
-                                  <div className="overflow-y-auto max-h-64">
-                                    {filteredBranches.length > 0 ? (
-                                      filteredBranches.map((branchName) => (
-                                        <button
-                                          key={branchName}
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            setBaseBranch?.(branchName);
-                                            setIsBranchDropdownOpen(false);
-                                            setBranchSearchQuery('');
-                                          }}
-                                          className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${baseBranch === branchName ? 'bg-primary/10 font-semibold' : ''}`}
-                                        >
-                                          {branchName}
-                                        </button>
-                                      ))
-                                    ) : (
-                                      <div className="p-4 text-xs text-base-content/50 text-center">
-                                        No branches found
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
+                                </>
                               )}
-                            </div>
+                            </button>
+                            {isBranchDropdownOpen && (
+                              <div className="absolute bottom-full left-0 mb-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
+                                {/* Search input */}
+                                <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                                  <input
+                                    type="text"
+                                    placeholder="Search branches..."
+                                    value={branchSearchQuery}
+                                    onChange={(e) => setBranchSearchQuery(e.target.value)}
+                                    className="input input-bordered input-xs w-full"
+                                    autoFocus
+                                  />
+                                </div>
+                                {/* Branch list */}
+                                <div className="overflow-y-auto max-h-64">
+                                  {filteredBranches.length > 0 ? (
+                                    filteredBranches.map((branchName) => (
+                                      <button
+                                        key={branchName}
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setBaseBranch?.(branchName);
+                                          setIsBranchDropdownOpen(false);
+                                          setBranchSearchQuery('');
+                                        }}
+                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${baseBranch === branchName ? 'bg-primary/10 font-semibold' : ''}`}
+                                      >
+                                        {branchName}
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <div className="p-4 text-xs text-base-content/50 text-center">
+                                      {branches.length === 0 ? 'No branches loaded' : 'No branches found'}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </>
                       )}
