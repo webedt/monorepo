@@ -1,5 +1,5 @@
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { useAuthStore } from '@/lib/store';
+import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
 import { useState, useRef, useEffect } from 'react';
 import ThemeSelector from './ThemeSelector';
@@ -16,11 +16,15 @@ interface NavItem {
 
 export default function Layout() {
   const { user, isAuthenticated, clearUser } = useAuthStore();
+  const { selectedRepo, baseBranch, isLocked } = useRepoStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Check if connected to a repository
+  const isConnected = !!selectedRepo && isLocked;
 
   const handleLogout = async () => {
     try {
@@ -350,17 +354,35 @@ export default function Layout() {
         </div>
       </nav>
 
-      {/* Second Bar - Status Indicator (Only shown in editor mode) */}
-      {isEditorMode && (
+      {/* Second Bar - Status Indicator (shown when connected or in editor mode) */}
+      {(isEditorMode || isConnected) && (
         <div className="bg-base-100 border-b border-base-300">
           <div className="px-4 h-12 flex items-center justify-center gap-4">
-            {/* Show offline status for editor pages */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
-                <span className="text-xs font-medium text-base-content/50">Offline</span>
+            {isConnected ? (
+              /* Show connection details when connected */
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-success animate-pulse"></div>
+                  <span className="text-xs font-medium text-base-content/50">Connected</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-base-content/70">Repository:</span>
+                  <span className="text-sm text-base-content">{selectedRepo}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
+                  <span className="text-sm text-base-content">{baseBranch}</span>
+                </div>
               </div>
-            </div>
+            ) : (
+              /* Show offline status when not connected */
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
+                  <span className="text-xs font-medium text-base-content/50">Offline</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
