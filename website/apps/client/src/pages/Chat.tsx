@@ -328,9 +328,23 @@ export default function Chat() {
     if (state?.startStream && state?.streamParams && !streamUrl) {
       console.log('[Chat] Auto-starting stream from navigation state:', state.streamParams);
 
+      // Filter out github/repository parameters if we're resuming an existing session
+      let params = { ...state.streamParams };
+      if (currentSessionId || (sessionId && sessionId !== 'new')) {
+        // Remove github-related parameters when resuming
+        delete params.github;
+        delete params.repositoryUrl;
+        delete params.baseBranch;
+        delete params.autoCommit;
+
+        // Add websiteSessionId for resuming
+        params.websiteSessionId = currentSessionId || sessionId;
+        console.log('[Chat] Filtered params for resuming session:', params);
+      }
+
       // Always use POST
       setStreamMethod('POST');
-      setStreamBody(state.streamParams);
+      setStreamBody(params);
       setStreamUrl(`${API_BASE_URL}/api/execute`);
 
       setIsExecuting(true);
