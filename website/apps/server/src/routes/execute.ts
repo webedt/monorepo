@@ -6,7 +6,6 @@ import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { ensureValidToken } from '../lib/claudeAuth';
 import type { ClaudeAuth } from '@webedt/shared';
-import { generateSessionTitle } from '../lib/titleGenerator';
 import { parseRepoUrl, generateSessionPath } from '../utils/sessionPathHelper';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -261,43 +260,9 @@ const executeHandler = async (req: any, res: any) => {
       res.write(`event: session-created\n`);
       res.write(`data: ${JSON.stringify({ websiteSessionId: chatSession.id })}\n\n`);
       console.log(`[Execute] Sent session-created event for new session: ${chatSession.id}`);
-      // Note: session_name event will be sent by background title generation when ready
+      // Note: session_name event will be sent by ai-coding-worker after title generation
     } else {
       console.log(`[Execute] Resuming session ${chatSession.id}, not sending session-created event`);
-    }
-
-    // Generate session title for new sessions (not resuming) - run in background AFTER main request starts
-    if (!websiteSessionId && userRequest) {
-      // Fire and forget - delay 2 seconds to let main request establish connection first
-      (async () => {
-        try {
-          console.log('[Execute] Will generate session title in 2 seconds (after main request starts)...');
-          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
-
-          console.log('[Execute] Generating session title for new session (background)...');
-          const aiWorkerUrl = process.env.AI_WORKER_URL || 'http://localhost:5001';
-          const generatedTitle = await generateSessionTitle(userRequest, claudeAuth, aiWorkerUrl);
-          console.log('[Execute] Generated title:', generatedTitle);
-
-          // Update database with generated title
-          await db
-            .update(chatSessions)
-            .set({ userRequest: generatedTitle })
-            .where(eq(chatSessions.id, chatSession.id));
-
-          console.log('[Execute] Updated session title in database');
-
-          // Send session_name event to client if response is still writable
-          if (!res.writableEnded) {
-            res.write(`event: session_name\n`);
-            res.write(`data: ${JSON.stringify({ type: 'session_name', sessionName: generatedTitle, timestamp: new Date().toISOString() })}\n\n`);
-            console.log(`[Execute] Sent session_name event: ${generatedTitle}`);
-          }
-        } catch (error) {
-          console.error('[Execute] Failed to generate session title (background):', error);
-          // Continue anyway - not critical
-        }
-      })();
     }
 
     // Prepare request to ai-coding-worker
@@ -577,15 +542,26 @@ const executeHandler = async (req: any, res: any) => {
                 }
               }
 
-              if (eventData.type === 'session_name' && eventData.branchName) {
-                 // Also update branch if provided in session_name event
-                 console.log(`[Execute] Branch name from session metadata: ${eventData.branchName}`);
-                 await db
-                  .update(chatSessions)
-                  .set({ branch: eventData.branchName })
-                  .where(eq(chatSessions.id, chatSession.id));
+              if (eventData.type === 'session_name') {
+                 // Update session title from ai-coding-worker
+                 if (eventData.sessionName) {
+                   console.log(`[Execute] Session title from AI worker: ${eventData.sessionName}`);
+                   await db
+                    .update(chatSessions)
+                    .set({ userRequest: eventData.sessionName })
+                    .where(eq(chatSessions.id, chatSession.id));
+                 }
 
-                 chatSession.branch = eventData.branchName;
+                 // Also update branch if provided in session_name event
+                 if (eventData.branchName) {
+                   console.log(`[Execute] Branch name from session metadata: ${eventData.branchName}`);
+                   await db
+                    .update(chatSessions)
+                    .set({ branch: eventData.branchName })
+                    .where(eq(chatSessions.id, chatSession.id));
+
+                   chatSession.branch = eventData.branchName;
+                 }
               }
 
               if (eventData.error) {

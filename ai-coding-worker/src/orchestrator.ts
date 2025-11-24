@@ -234,23 +234,26 @@ export class Orchestrator {
           branch: pullResult.branch
         });
 
-        // Step 4.5: Generate branch name and create the new branch
+        // Step 4.5: Generate session title and branch name, then create the branch
         try {
           sendEvent({
             type: 'message',
-            message: 'Generating branch name for this session...',
+            message: 'Generating session title and branch name...',
             timestamp: new Date().toISOString()
           });
 
           // Extract API key for LLM helper
           const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
           if (!apiKey) {
-            throw new Error('Cannot generate branch name: API key not available');
+            throw new Error('Cannot generate session title and branch name: API key not available');
           }
 
           const llmHelper = new LLMHelper(apiKey);
           const userRequestText = this.serializeUserRequest(request.userRequest);
-          const descriptivePart = await llmHelper.generateBranchName(userRequestText, pullResult.branch);
+          const { title, branchName: descriptivePart } = await llmHelper.generateSessionTitleAndBranch(
+            userRequestText,
+            pullResult.branch
+          );
 
           // Extract last 8 characters of session ID for suffix
           const sessionIdSuffix = websiteSessionId.slice(-8);
@@ -258,9 +261,10 @@ export class Orchestrator {
           // Construct full branch name: claude/{descriptive}-{sessionIdSuffix}
           branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
 
-          logger.info('Generated branch name', {
+          logger.info('Generated session title and branch name', {
             component: 'Orchestrator',
             websiteSessionId,
+            sessionTitle: title,
             branchName,
             parentBranch: pullResult.branch
           });
@@ -279,11 +283,12 @@ export class Orchestrator {
           // Generate sessionPath now that we have the branch name
           const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
 
-          // Update metadata with branch name and sessionPath
+          // Update metadata with branch name, sessionPath, and title
           metadata.branch = branchName;
           metadata.sessionPath = sessionPath;
           metadata.repositoryOwner = repositoryOwner;
           metadata.repositoryName = repositoryName;
+          metadata.sessionTitle = title;
           this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
 
           sendEvent({
@@ -295,15 +300,24 @@ export class Orchestrator {
             timestamp: new Date().toISOString()
           });
 
-          logger.info('Branch created for session', {
+          // Send session_name event with the generated title
+          sendEvent({
+            type: 'session_name',
+            sessionName: title,
+            branchName: branchName,
+            timestamp: new Date().toISOString()
+          });
+
+          logger.info('Branch created and session title generated', {
             component: 'Orchestrator',
             websiteSessionId,
             sessionPath,
+            sessionTitle: title,
             branchName,
             parentBranch: pullResult.branch
           });
         } catch (error) {
-          logger.error('Failed to create branch', error, {
+          logger.error('Failed to create branch and generate title', error, {
             component: 'Orchestrator',
             websiteSessionId
           });
