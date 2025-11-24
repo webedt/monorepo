@@ -13,7 +13,8 @@ export class ProviderFactory {
     providerName: string,
     authentication: string,
     workspace: string,
-    options?: Record<string, any>
+    options?: Record<string, any>,
+    isResuming?: boolean
   ): BaseProvider {
     const normalizedName = providerName.toLowerCase().trim();
 
@@ -21,7 +22,7 @@ export class ProviderFactory {
       case 'claude-code':
       case 'claude':
       case 'claudeagentsdk':
-        return new ClaudeCodeProvider(authentication, workspace, options?.model);
+        return new ClaudeCodeProvider(authentication, workspace, options?.model, isResuming);
 
       case 'codex':
       case 'cursor':

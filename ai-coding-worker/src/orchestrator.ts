@@ -393,7 +393,8 @@ export class Orchestrator {
         request.codingAssistantProvider,
         request.codingAssistantAuthentication,
         workspacePath,
-        request.providerOptions
+        request.providerOptions,
+        isResuming // Pass resuming flag to provider
       );
 
       // Step 6: Execute provider and stream results

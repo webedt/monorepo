@@ -10,12 +10,18 @@ import type { MessageParam } from '@anthropic-ai/sdk/resources';
 export class ClaudeCodeProvider extends BaseProvider {
   private model: string;
 
-  constructor(authentication: string, workspace: string, model?: string) {
+  constructor(authentication: string, workspace: string, model?: string, isResuming?: boolean) {
     super(authentication, workspace);
     this.model = model || 'claude-sonnet-4-5-20250929';
 
-    // Write authentication to ~/.claude/.credentials.json
-    CredentialManager.writeClaudeCredentials(authentication);
+    // Only write credentials for new sessions
+    // When resuming, credentials are already restored from storage
+    if (!isResuming) {
+      CredentialManager.writeClaudeCredentials(authentication);
+      console.log('[ClaudeCodeProvider] Credentials written for new session');
+    } else {
+      console.log('[ClaudeCodeProvider] Resuming session, using restored credentials');
+    }
   }
 
   /**
