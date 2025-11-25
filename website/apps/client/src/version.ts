@@ -1,5 +1,5 @@
 // Auto-generated from git tags and commits
 // Run 'pnpm version:generate' to update
-export const VERSION = '0.0.127';
-export const VERSION_TIMESTAMP: string | null = '2025-11-24T15:42:50-06:00';
-export const VERSION_SHA: string | null = '777d093a6f63f4df135e38d53d7c6e25e3b21031';
+export const VERSION = '0.0.137';
+export const VERSION_TIMESTAMP: string | null = '2025-11-25T08:22:11-06:00';
+export const VERSION_SHA: string | null = '4bd2082f759d12db19b8847f31cf586dfe2d3c58';
