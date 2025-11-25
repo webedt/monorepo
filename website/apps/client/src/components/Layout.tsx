@@ -177,6 +177,7 @@ export default function Layout() {
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
         navItems={navItems}
+        title={isEditorMode ? 'Editor' : 'The Hub'}
       />
 
       {/* Top Navigation Bar */}
