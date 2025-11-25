@@ -270,27 +270,23 @@ export class Orchestrator {
           // Step 4.5: Generate session title and branch name (only for new sessions)
           if (!isResuming) {
             try {
-              // Extract API key for LLM helper
-              const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
-
-              // Check if we have a valid API key (not OAuth token)
-              // OAuth tokens (sk-ant-oat*) don't work for direct API calls
-              const isOAuthOnly = apiKey?.startsWith('sk-ant-oat');
+              // Extract user's auth token
+              const userAuth = this.extractApiKey(request.codingAssistantAuthentication);
 
               let title: string;
               let descriptivePart: string;
 
-              if (!apiKey || isOAuthOnly) {
-                // Skip LLM generation for OAuth-only sessions (one-off calls)
-                // Use fallback values immediately
+              // Try to create LLM helper with fallback to environment API key
+              const llmHelper = LLMHelper.createWithFallback(userAuth);
+
+              if (!llmHelper) {
+                // No API key available - use fallback values
                 title = 'New Session';
                 descriptivePart = 'auto-request';
 
-                logger.info('Skipping LLM-based title generation (OAuth-only or no API key)', {
+                logger.info('Using fallback title/branch (no API key available)', {
                   component: 'Orchestrator',
-                  websiteSessionId,
-                  hasApiKey: !!apiKey,
-                  isOAuthOnly
+                  websiteSessionId
                 });
               } else {
                 // Generate title and branch name using LLM
@@ -300,7 +296,6 @@ export class Orchestrator {
                   timestamp: new Date().toISOString()
                 });
 
-                const llmHelper = new LLMHelper(apiKey);
                 const userRequestText = this.serializeUserRequest(request.userRequest);
                 const result = await llmHelper.generateSessionTitleAndBranch(
                   userRequestText,

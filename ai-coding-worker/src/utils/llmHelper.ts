@@ -21,6 +21,37 @@ export class LLMHelper {
   }
 
   /**
+   * Create an LLMHelper instance with the best available API key.
+   * Priority:
+   * 1. User-provided API key (if it's a real API key, not OAuth)
+   * 2. Environment variable ANTHROPIC_API_KEY
+   *
+   * Returns null if no valid API key is available for direct API calls.
+   */
+  static createWithFallback(userAuth?: string | null): LLMHelper | null {
+    // Check if user provided a real API key (not OAuth)
+    if (userAuth && userAuth.startsWith('sk-ant-api')) {
+      logger.info('LLMHelper: Using user-provided API key', { component: 'LLMHelper' });
+      return new LLMHelper(userAuth);
+    }
+
+    // Fall back to environment variable
+    const envApiKey = process.env.ANTHROPIC_API_KEY;
+    if (envApiKey) {
+      logger.info('LLMHelper: Using ANTHROPIC_API_KEY from environment', { component: 'LLMHelper' });
+      return new LLMHelper(envApiKey);
+    }
+
+    // No valid API key available
+    logger.info('LLMHelper: No API key available for direct API calls', {
+      component: 'LLMHelper',
+      hasUserAuth: !!userAuth,
+      isOAuth: userAuth?.startsWith('sk-ant-oat')
+    });
+    return null;
+  }
+
+  /**
    * Generate a commit message from git diff output
    */
   async generateCommitMessage(gitStatus: string, gitDiff: string): Promise<string> {
