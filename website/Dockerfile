@@ -13,11 +13,7 @@ COPY tsconfig.base.json ./
 # Copy all packages
 COPY packages ./packages
 
-# Cache bust to ensure fresh code is copied
-# Change the date/commit to invalidate cache
-RUN echo "Cache bust: 2025-11-23T18:00:00Z commit:d9488ab"
-
-# Copy apps (this will be rebuilt when cache is invalidated)
+# Copy apps
 COPY apps ./apps
 
 # Install all dependencies
@@ -28,8 +24,22 @@ FROM base AS build
 
 WORKDIR /app
 
-# Note: Version is pre-generated in version.ts before committing
-# Run 'pnpm version:generate' locally to update the version
+# Build args for version info (passed from GitHub Actions via Dokploy)
+ARG BUILD_VERSION=0.0.0
+ARG BUILD_TIMESTAMP=
+ARG BUILD_SHA=
+
+# Generate version.ts from build args
+RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
+    SHA_VALUE="${BUILD_SHA:-}" && \
+    if [ -n "$TIMESTAMP_VALUE" ]; then TIMESTAMP_EXPORT="'$TIMESTAMP_VALUE'"; else TIMESTAMP_EXPORT="null"; fi && \
+    if [ -n "$SHA_VALUE" ]; then SHA_EXPORT="'$SHA_VALUE'"; else SHA_EXPORT="null"; fi && \
+    echo "// Auto-generated from build args" > /app/apps/client/src/version.ts && \
+    echo "// Version: ${BUILD_VERSION}" >> /app/apps/client/src/version.ts && \
+    echo "export const VERSION = '${BUILD_VERSION}';" >> /app/apps/client/src/version.ts && \
+    echo "export const VERSION_TIMESTAMP: string | null = $TIMESTAMP_EXPORT;" >> /app/apps/client/src/version.ts && \
+    echo "export const VERSION_SHA: string | null = $SHA_EXPORT;" >> /app/apps/client/src/version.ts && \
+    echo "✓ Generated version.ts: VERSION=${BUILD_VERSION}, SHA=${SHA_VALUE:0:7}"
 
 # Build client (React/Vite app)
 RUN pnpm --filter @webedt/client build

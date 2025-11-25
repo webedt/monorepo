@@ -49,22 +49,19 @@ https://github.etdofresh.com/webedt/monorepo/website/claude-rename-session-013mm
 
 ### Dokploy Build Configuration
 
-**IMPORTANT**: This project requires a pre-build step to generate version information before Docker builds.
+Version information is automatically passed to Docker builds via build args from GitHub Actions. No pre-build step is required.
 
-**Required Pre-Build Command:**
-```bash
-cd website && ./pre-build.sh
-```
+**How It Works:**
+1. GitHub Actions workflow calculates version from git tags and commits
+2. Version info (BUILD_VERSION, BUILD_TIMESTAMP, BUILD_SHA) is passed to Dokploy via the API
+3. Dokploy passes these as Docker build args during the build
+4. Dockerfile generates `apps/client/src/version.ts` from these build args
 
-This command must be configured in Dokploy's "Pre Build Command" field. It generates version files from git history that are then included in the Docker build.
-
-**Why This Is Needed:**
-- Version information is calculated from git tags and commit count
-- The `.git` directory is not available in Docker build context
-- Pre-build script generates `package.json` version and `apps/client/src/version.ts` before Docker build
-- These generated files are then copied into the Docker image during the build
-
-**Without the pre-build command, the deployment will fail** because the Docker build will not have access to git history for version generation.
+**Benefits:**
+- No `.git` directory needed in Docker build context
+- No pre-build command required in Dokploy
+- Version is always accurate for the exact commit being deployed
+- Works automatically for all branches
 
 ### Monorepo Path-Based Routing Requirements
 
@@ -441,21 +438,28 @@ See `GIT_COMMIT_MESSAGE_INSTRUCTIONS.md` for complete rules and examples.
 
 ## Version Management
 
-Version numbers are **automatically calculated** during Docker builds based on git tags and commit count.
+Version numbers are **automatically calculated** by GitHub Actions and passed to Docker builds via build args.
 
 ### Build-Time Version Calculation
 
-When a Docker image is built:
-1. The Dockerfile runs `node scripts/generate-version.js --update`
-2. Version is calculated from git tags and commit count
-3. `package.json` and `apps/client/src/version.ts` are generated with the correct version
-4. No commits needed - versions are generated, not committed
+When deploying via GitHub Actions:
+1. GitHub Actions calculates version from git tags and commit count
+2. Version info is passed to Dokploy API as build args (BUILD_VERSION, BUILD_TIMESTAMP, BUILD_SHA)
+3. Dockerfile generates `apps/client/src/version.ts` from these build args
+4. No `.git` directory needed in Docker build context
+
+### Version Format
+
+- `MAJOR.MINOR.PATCH` where PATCH = commits since tag
+- Example: Tag `v1.2.0` + 5 commits = `1.2.5`
+- No tags: `0.0.{total_commits}`
 
 ### Benefits
 
 - ✅ No extra commits on main for version updates
 - ✅ Version is always accurate for the exact commit being built
 - ✅ Works automatically for all branches and deployments
+- ✅ No `.git` directory dependency in Docker builds
 
 ### Development Commands (Optional)
 
