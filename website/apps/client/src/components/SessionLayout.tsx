@@ -36,6 +36,7 @@ export default function SessionLayout({
   const { sessionId } = useParams();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showVersionDetails, setShowVersionDetails] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Fetch session data when sessionId exists and no props provided
@@ -75,24 +76,23 @@ export default function SessionLayout({
     }
   };
 
-  // Format tooltip with short SHA and datetime
-  const getVersionTooltip = () => {
-    if (!VERSION_TIMESTAMP) return 'Version information';
+  // Get short SHA for display
+  const getShortSha = () => VERSION_SHA?.substring(0, 7) ?? 'unknown';
+
+  // Format timestamp for display
+  const getFormattedTimestamp = () => {
+    if (!VERSION_TIMESTAMP) return '';
 
     const date = new Date(VERSION_TIMESTAMP);
-    const formattedDate = date.toLocaleString('en-US', {
+    return date.toLocaleString('en-US', {
       timeZone: 'America/Chicago',
       month: 'short',
       day: 'numeric',
       year: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
-      second: '2-digit',
       timeZoneName: 'short'
     });
-
-    const shortSha = VERSION_SHA?.substring(0, 7) ?? 'unknown';
-    return `${shortSha} [${formattedDate}]`;
   };
 
   // Close user menu when clicking outside
@@ -197,35 +197,37 @@ export default function SessionLayout({
               </button>
 
               {/* Logo - Desktop Only */}
-              <Link
-                to="/"
-                className="hidden md:flex flex-col justify-center py-2"
-              >
-                <span className="font-semibold text-lg leading-tight">WebEDT</span>
-                <span
-                  className="text-[9px] text-base-content/40 leading-tight cursor-help"
-                  title={getVersionTooltip()}
+              <div className="hidden md:flex flex-col justify-center py-2">
+                <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <button
+                  onClick={() => setShowVersionDetails(!showVersionDetails)}
+                  className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60 text-left"
                 >
-                  v{VERSION}
-                </span>
-              </Link>
+                  {showVersionDetails ? (
+                    <span>{getShortSha()} [{getFormattedTimestamp()}]</span>
+                  ) : (
+                    <span>v{VERSION}</span>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Center - Logo (mobile) & Navigation Items (desktop) */}
             <div className="flex-1 flex items-center justify-center">
               {/* Logo - Mobile Only (Centered) */}
-              <Link
-                to="/"
-                className="md:hidden flex flex-col items-center justify-center py-2"
-              >
-                <span className="font-semibold text-lg leading-tight">WebEDT</span>
-                <span
-                  className="text-[9px] text-base-content/40 leading-tight cursor-help"
-                  title={getVersionTooltip()}
+              <div className="md:hidden flex flex-col items-center justify-center py-2">
+                <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <button
+                  onClick={() => setShowVersionDetails(!showVersionDetails)}
+                  className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60"
                 >
-                  v{VERSION}
-                </span>
-              </Link>
+                  {showVersionDetails ? (
+                    <span>{getShortSha()} [{getFormattedTimestamp()}]</span>
+                  ) : (
+                    <span>v{VERSION}</span>
+                  )}
+                </button>
+              </div>
 
               {/* Navigation Items - Desktop Only */}
               <div className="hidden md:flex items-center gap-1">
