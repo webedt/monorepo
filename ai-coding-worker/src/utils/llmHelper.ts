@@ -2,9 +2,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { logger } from './logger';
 
 /**
- * Helper for making one-off LLM requests for commit message generation
+ * Helper for making one-off LLM requests for commit message and branch name generation
  * Uses Haiku for fast, cost-effective responses
- * Supports both API keys and OAuth tokens
+ * Supports both API keys and OAuth tokens via the Anthropic SDK
  */
 export class LLMHelper {
   private client: Anthropic;
@@ -14,41 +14,12 @@ export class LLMHelper {
     if (authToken.startsWith('sk-ant-oat')) {
       // OAuth token - use authToken parameter
       this.client = new Anthropic({ authToken });
+      logger.info('LLMHelper: Initialized with OAuth token', { component: 'LLMHelper' });
     } else {
       // API key - use apiKey parameter
       this.client = new Anthropic({ apiKey: authToken });
+      logger.info('LLMHelper: Initialized with API key', { component: 'LLMHelper' });
     }
-  }
-
-  /**
-   * Create an LLMHelper instance with the best available API key.
-   * Priority:
-   * 1. User-provided API key (if it's a real API key, not OAuth)
-   * 2. Environment variable ANTHROPIC_API_KEY
-   *
-   * Returns null if no valid API key is available for direct API calls.
-   */
-  static createWithFallback(userAuth?: string | null): LLMHelper | null {
-    // Check if user provided a real API key (not OAuth)
-    if (userAuth && userAuth.startsWith('sk-ant-api')) {
-      logger.info('LLMHelper: Using user-provided API key', { component: 'LLMHelper' });
-      return new LLMHelper(userAuth);
-    }
-
-    // Fall back to environment variable
-    const envApiKey = process.env.ANTHROPIC_API_KEY;
-    if (envApiKey) {
-      logger.info('LLMHelper: Using ANTHROPIC_API_KEY from environment', { component: 'LLMHelper' });
-      return new LLMHelper(envApiKey);
-    }
-
-    // No valid API key available
-    logger.info('LLMHelper: No API key available for direct API calls', {
-      component: 'LLMHelper',
-      hasUserAuth: !!userAuth,
-      isOAuth: userAuth?.startsWith('sk-ant-oat')
-    });
-    return null;
   }
 
   /**

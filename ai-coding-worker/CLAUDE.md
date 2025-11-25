@@ -221,7 +221,6 @@ case 'new-provider':
 - `PORT` (default: 5000) - Server port
 - `WORKSPACE_DIR` (default: /workspace) - Session workspace root
 - `DB_BASE_URL` - Optional database API URL
-- `ANTHROPIC_API_KEY` - API key for LLM-based branch/title generation when user only has OAuth token
 
 ### Swarm Configuration (swarm.yml)
 - `replicas: 10` - Number of worker instances

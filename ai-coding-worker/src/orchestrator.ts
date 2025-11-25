@@ -270,32 +270,31 @@ export class Orchestrator {
           // Step 4.5: Generate session title and branch name (only for new sessions)
           if (!isResuming) {
             try {
-              // Extract user's auth token
+              // Extract user's auth token (works with both OAuth and API keys)
               const userAuth = this.extractApiKey(request.codingAssistantAuthentication);
 
               let title: string;
               let descriptivePart: string;
 
-              // Try to create LLM helper with fallback to environment API key
-              const llmHelper = LLMHelper.createWithFallback(userAuth);
-
-              if (!llmHelper) {
-                // No API key available - use fallback values
+              if (!userAuth) {
+                // No auth token available - use fallback values
                 title = 'New Session';
                 descriptivePart = 'auto-request';
 
-                logger.info('Using fallback title/branch (no API key available)', {
+                logger.info('Using fallback title/branch (no auth token available)', {
                   component: 'Orchestrator',
                   websiteSessionId
                 });
               } else {
                 // Generate title and branch name using LLM
+                // LLMHelper supports both OAuth tokens and API keys
                 sendEvent({
                   type: 'message',
                   message: 'Generating session title and branch name...',
                   timestamp: new Date().toISOString()
                 });
 
+                const llmHelper = new LLMHelper(userAuth);
                 const userRequestText = this.serializeUserRequest(request.userRequest);
                 const result = await llmHelper.generateSessionTitleAndBranch(
                   userRequestText,
