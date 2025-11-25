@@ -2,9 +2,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { logger } from './logger';
 
 /**
- * Helper for making one-off LLM requests for commit message generation
+ * Helper for making one-off LLM requests for commit message and branch name generation
  * Uses Haiku for fast, cost-effective responses
- * Supports both API keys and OAuth tokens
+ * Supports both API keys and OAuth tokens via the Anthropic SDK
  */
 export class LLMHelper {
   private client: Anthropic;
@@ -14,9 +14,11 @@ export class LLMHelper {
     if (authToken.startsWith('sk-ant-oat')) {
       // OAuth token - use authToken parameter
       this.client = new Anthropic({ authToken });
+      logger.info('LLMHelper: Initialized with OAuth token', { component: 'LLMHelper' });
     } else {
       // API key - use apiKey parameter
       this.client = new Anthropic({ apiKey: authToken });
+      logger.info('LLMHelper: Initialized with API key', { component: 'LLMHelper' });
     }
   }
 
