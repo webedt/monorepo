@@ -14,14 +14,11 @@ export class ClaudeCodeProvider extends BaseProvider {
     super(authentication, workspace);
     this.model = model || 'claude-sonnet-4-5-20250929';
 
-    // Only write credentials for new sessions
-    // When resuming, credentials are already restored from storage
-    if (!isResuming) {
-      CredentialManager.writeClaudeCredentials(authentication);
-      console.log('[ClaudeCodeProvider] Credentials written for new session');
-    } else {
-      console.log('[ClaudeCodeProvider] Resuming session, using restored credentials');
-    }
+    // Always write credentials to ensure we have the latest tokens
+    // Even when resuming, the request may contain refreshed OAuth tokens
+    // that are newer than what's stored in session storage
+    CredentialManager.writeClaudeCredentials(authentication);
+    console.log('[ClaudeCodeProvider] Credentials written', { isResuming: !!isResuming });
   }
 
   /**
