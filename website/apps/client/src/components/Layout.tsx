@@ -111,12 +111,6 @@ export default function Layout() {
       label: 'Community',
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>,
       isActive: location.pathname.startsWith('/community')
-    },
-    {
-      to: '/new-session',
-      label: 'Editor',
-      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>,
-      isActive: location.pathname === '/new-session' || location.pathname.startsWith('/session') || location.pathname.startsWith('/quick-setup')
     }
   ];
 
@@ -263,8 +257,30 @@ export default function Layout() {
               </div>
             </div>
 
-            {/* Right side - Theme, User menu */}
+            {/* Right side - Mode Toggle, Theme, User menu */}
             <div className="flex items-center gap-3">
+              {/* Mode Toggle - Switch between Hub and Editor */}
+              <Link
+                to={isEditorMode ? '/' : '/new-session'}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              >
+                {isEditorMode ? (
+                  <>
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>
+                    </svg>
+                    <span className="hidden sm:inline">The Hub</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                    </svg>
+                    <span className="hidden sm:inline">Editor</span>
+                  </>
+                )}
+              </Link>
+
               <ThemeSelector />
 
               {/* User Avatar with Dropdown */}

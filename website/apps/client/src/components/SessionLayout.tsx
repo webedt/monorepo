@@ -383,8 +383,19 @@ export default function SessionLayout({
               </div>
             </div>
 
-            {/* Right side - Theme, User menu */}
+            {/* Right side - Mode Toggle, Theme, User menu */}
             <div className="flex items-center gap-3">
+              {/* Mode Toggle - Navigate back to Hub */}
+              <Link
+                to="/"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>
+                </svg>
+                <span className="hidden sm:inline">The Hub</span>
+              </Link>
+
               <ThemeSelector />
 
               {/* User Avatar with Dropdown */}
