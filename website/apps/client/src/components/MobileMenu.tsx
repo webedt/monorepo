@@ -13,9 +13,10 @@ interface MobileMenuProps {
   isOpen: boolean;
   onClose: () => void;
   navItems: NavItem[];
+  title?: string;
 }
 
-export default function MobileMenu({ isOpen, onClose, navItems }: MobileMenuProps) {
+export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu' }: MobileMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu when clicking outside
@@ -57,7 +58,7 @@ export default function MobileMenu({ isOpen, onClose, navItems }: MobileMenuProp
         <div className="flex flex-col h-full">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-base-300">
-            <span className="font-semibold text-lg">Menu</span>
+            <span className="font-semibold text-lg">{title}</span>
             <button
               onClick={onClose}
               className="btn btn-sm btn-ghost btn-circle"
