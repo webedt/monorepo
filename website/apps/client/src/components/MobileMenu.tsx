@@ -14,9 +14,10 @@ interface MobileMenuProps {
   onClose: () => void;
   navItems: NavItem[];
   title?: string;
+  isEditorMode?: boolean;
 }
 
-export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu' }: MobileMenuProps) {
+export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', isEditorMode = false }: MobileMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu when clicking outside
@@ -99,6 +100,34 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu' }
                   </Link>
                 )
               ))}
+            </div>
+
+            {/* Mode Toggle Divider */}
+            <div className="border-t border-base-300 my-3"></div>
+
+            {/* Mode Toggle - Switch between Hub and Editor */}
+            <div className="px-2">
+              <Link
+                to={isEditorMode ? '/' : '/new-session'}
+                onClick={onClose}
+                className="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              >
+                {isEditorMode ? (
+                  <>
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>
+                    </svg>
+                    <span>Switch to The Hub</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                    </svg>
+                    <span>Switch to Editor</span>
+                  </>
+                )}
+              </Link>
             </div>
           </nav>
         </div>
