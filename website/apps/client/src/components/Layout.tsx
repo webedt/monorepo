@@ -381,6 +381,7 @@ export default function Layout() {
                   <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
                   <span className="text-xs font-medium text-base-content/50">Offline</span>
                 </div>
+                <span className="text-xs text-base-content/40">- Select a tool below to connect</span>
               </div>
             )}
           </div>
