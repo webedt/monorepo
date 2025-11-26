@@ -102,10 +102,26 @@ export class StorageClient {
       const claudeExtractPath = path.join(tmpExtractDir, '.claude');
       if (fs.existsSync(claudeExtractPath)) {
         const claudeDestPath = path.join(homeDir, '.claude');
+        logger.info('Restoring ~/.claude from session backup', {
+          component: 'StorageClient',
+          sessionPath,
+          claudeExtractPath,
+          claudeDestPath
+        });
         if (fs.existsSync(claudeDestPath)) {
           fs.rmSync(claudeDestPath, { recursive: true, force: true });
         }
         await this.copyDirectory(claudeExtractPath, claudeDestPath);
+        logger.info('Restored ~/.claude successfully', {
+          component: 'StorageClient',
+          sessionPath
+        });
+      } else {
+        logger.info('No ~/.claude found in session backup', {
+          component: 'StorageClient',
+          sessionPath,
+          claudeExtractPath
+        });
       }
 
       // Restore ~/.codex if it exists
@@ -173,7 +189,23 @@ export class StorageClient {
       // Copy ~/.claude if exists
       if (fs.existsSync(claudeDir)) {
         const claudeDestDir = path.join(tmpPackageDir, '.claude');
+        logger.info('Backing up ~/.claude to session storage', {
+          component: 'StorageClient',
+          sessionPath,
+          claudeDir,
+          claudeDestDir
+        });
         await this.copyDirectory(claudeDir, claudeDestDir);
+        logger.info('Backed up ~/.claude successfully', {
+          component: 'StorageClient',
+          sessionPath
+        });
+      } else {
+        logger.info('No ~/.claude directory to backup', {
+          component: 'StorageClient',
+          sessionPath,
+          claudeDir
+        });
       }
 
       // Copy ~/.codex if exists

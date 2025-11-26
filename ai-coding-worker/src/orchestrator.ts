@@ -10,6 +10,7 @@ import { Response } from 'express';
 import { logger } from './utils/logger';
 import { LLMHelper } from './utils/llmHelper';
 import { GitHelper } from './utils/gitHelper';
+import { CredentialManager } from './utils/credentialManager';
 import { parseRepoUrl, generateSessionPath, sessionPathToDir } from './utils/sessionPathHelper';
 
 /**
@@ -270,47 +271,22 @@ export class Orchestrator {
           // Step 4.5: Generate session title and branch name (only for new sessions)
           if (!isResuming) {
             try {
-              // Extract user's auth token (works with both OAuth and API keys)
-              const userAuth = this.extractApiKey(request.codingAssistantAuthentication);
-
               let title: string;
               let descriptivePart: string;
 
-              if (!userAuth) {
-                // No auth token available - use fallback values
-                title = 'New Session';
-                descriptivePart = 'auto-request';
+              // TODO: OAuth tokens don't work with Claude API for direct calls
+              // The SDK handles auth internally, but we can't make separate API calls
+              // For now, use fallback values. Future options:
+              // 1. Use API key instead of OAuth for LLMHelper
+              // 2. Extract title from first response after main execution
+              // 3. Use a different title generation approach
+              title = 'New Session';
+              descriptivePart = 'auto-request';
 
-                logger.info('Using fallback title/branch (no auth token available)', {
-                  component: 'Orchestrator',
-                  websiteSessionId
-                });
-              } else {
-                // Generate title and branch name using LLM
-                // LLMHelper supports both OAuth tokens and API keys
-                sendEvent({
-                  type: 'message',
-                  message: 'Generating session title and branch name...',
-                  timestamp: new Date().toISOString()
-                });
-
-                const llmHelper = new LLMHelper(userAuth);
-                const userRequestText = this.serializeUserRequest(request.userRequest);
-                const result = await llmHelper.generateSessionTitleAndBranch(
-                  userRequestText,
-                  pullResult.branch
-                );
-
-                title = result.title;
-                descriptivePart = result.branchName;
-
-                logger.info('Generated session title and branch name with LLM', {
-                  component: 'Orchestrator',
-                  websiteSessionId,
-                  sessionTitle: title,
-                  descriptivePart
-                });
-              }
+              logger.info('Using fallback title/branch (OAuth not supported for direct API calls)', {
+                component: 'Orchestrator',
+                websiteSessionId
+              });
 
               // Extract last 8 characters of session ID for suffix
               const sessionIdSuffix = websiteSessionId.slice(-8);
@@ -482,30 +458,22 @@ export class Orchestrator {
               timestamp: new Date().toISOString()
             });
 
-            const apiKey = this.extractApiKey(request.codingAssistantAuthentication);
-
             // Use the current branch (which is the pre-created branch if branch creation happened)
             const targetBranch = currentBranch;
 
-            // Check if we have a valid API key (not OAuth token)
-            const isOAuthOnly = apiKey?.startsWith('sk-ant-oat');
             let commitMessage: string;
 
-            if (!apiKey || isOAuthOnly) {
-              // Skip LLM generation for OAuth-only sessions, use fallback
+            // Check if Claude credentials are available for LLM-based commit messages
+            if (!LLMHelper.isConfigured()) {
+              // Credentials not available - use fallback commit message
               commitMessage = 'chore: auto-commit changes';
 
-              logger.info('Skipping LLM-based commit message generation (OAuth-only or no API key)', {
+              logger.info('Skipping LLM-based commit message generation (Claude credentials not configured)', {
                 component: 'Orchestrator',
-                websiteSessionId,
-                hasApiKey: !!apiKey,
-                isOAuthOnly
+                websiteSessionId
               });
             } else {
-              // Generate commit message using LLM
-              const llmHelper = new LLMHelper(apiKey);
-
-              // Get git status and diff for commit message generation
+              // Generate commit message using LLM (uses same credentials as main execute)
               const gitStatus = await gitHelper.getStatus();
               const gitDiff = await gitHelper.getDiff();
 
@@ -517,7 +485,7 @@ export class Orchestrator {
                 timestamp: new Date().toISOString()
               });
 
-              // Generate commit message
+              const llmHelper = new LLMHelper(workspacePath);
               commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
             }
 
