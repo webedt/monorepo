@@ -353,14 +353,14 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             // Trigger submit after a brief delay to ensure state is updated
             // Note: We intentionally do NOT stop recording - user can continue speaking
             setTimeout(() => {
-              // Use the form ref to submit, or find the submit button
-              const submitBtn = formRef.current?.querySelector('button[type="submit"]') as HTMLButtonElement;
-              if (submitBtn) {
+              // Find the submit button dynamically (not via formRef, which may be stale after navigation)
+              // Look for the ChatInput form's submit button in the DOM
+              const submitBtn = document.querySelector('form button[type="submit"]') as HTMLButtonElement;
+              if (submitBtn && !submitBtn.disabled) {
                 console.log('[Voice] Clicking submit button (recording continues), text:', accumulatedTranscript);
                 submitBtn.click();
               } else {
-                console.log('[Voice] No submit button found, trying form dispatch');
-                formRef.current?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                console.log('[Voice] No enabled submit button found, text may have been cleared');
               }
             }, 150);
           }
