@@ -1,9 +1,70 @@
 import { Router } from 'express';
+import { Octokit } from '@octokit/rest';
 import { db } from '../db/index';
-import { chatSessions, messages } from '../db/index';
+import { chatSessions, messages, users } from '../db/index';
+import type { ChatSession } from '../db/schema';
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
+
+const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
+
+// Helper function to delete a GitHub branch
+async function deleteGitHubBranch(
+  githubAccessToken: string,
+  owner: string,
+  repo: string,
+  branch: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const octokit = new Octokit({ auth: githubAccessToken });
+    await octokit.git.deleteRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    });
+    console.log(`[Sessions] Deleted GitHub branch ${owner}/${repo}/${branch}`);
+    return { success: true, message: 'Branch deleted' };
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    // 422 or 404 means the branch doesn't exist (already deleted or never existed)
+    if (err.status === 422 || err.status === 404) {
+      console.log(`[Sessions] GitHub branch ${owner}/${repo}/${branch} not found (already deleted)`);
+      return { success: true, message: 'Branch already deleted or does not exist' };
+    }
+    console.error(`[Sessions] Failed to delete GitHub branch ${owner}/${repo}/${branch}:`, error);
+    return { success: false, message: 'Failed to delete branch' };
+  }
+}
+
+// Helper function to delete session from storage worker
+async function deleteFromStorageWorker(sessionPath: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      // 404 means session doesn't exist in storage (never uploaded or already deleted)
+      if (response.status === 404) {
+        console.log(`[Sessions] Storage session ${sessionPath} not found (already deleted)`);
+        return { success: true, message: 'Session not found in storage' };
+      }
+      const error = await response.text();
+      console.error(`[Sessions] Failed to delete storage session ${sessionPath}:`, error);
+      return { success: false, message: 'Failed to delete from storage' };
+    }
+
+    console.log(`[Sessions] Deleted storage session ${sessionPath}`);
+    return { success: true, message: 'Storage session deleted' };
+  } catch (error) {
+    console.error(`[Sessions] Error deleting storage session ${sessionPath}:`, error);
+    return { success: false, message: 'Error deleting from storage' };
+  }
+}
 
 const router = Router();
 
@@ -244,7 +305,40 @@ router.post('/bulk-delete', requireAuth, async (req, res) => {
       return;
     }
 
-    // Delete all sessions (cascade will delete messages)
+    const cleanupResults: {
+      branches: { sessionId: string; success: boolean; message: string }[];
+      storage: { sessionPath: string; success: boolean; message: string }[];
+    } = {
+      branches: [],
+      storage: []
+    };
+
+    // Delete GitHub branches for all sessions that have branch info
+    if (authReq.user?.githubAccessToken) {
+      const branchDeletions = sessions
+        .filter((s: ChatSession) => s.branch && s.repositoryOwner && s.repositoryName)
+        .map(async (session: ChatSession) => {
+          const result = await deleteGitHubBranch(
+            authReq.user!.githubAccessToken!,
+            session.repositoryOwner!,
+            session.repositoryName!,
+            session.branch!
+          );
+          return { sessionId: session.id, ...result };
+        });
+      cleanupResults.branches = await Promise.all(branchDeletions);
+    }
+
+    // Delete from storage worker for all sessions that have sessionPath
+    const storageDeletions = sessions
+      .filter((s: ChatSession) => s.sessionPath)
+      .map(async (session: ChatSession) => {
+        const result = await deleteFromStorageWorker(session.sessionPath!);
+        return { sessionPath: session.sessionPath!, ...result };
+      });
+    cleanupResults.storage = await Promise.all(storageDeletions);
+
+    // Delete all sessions from database (cascade will delete messages)
     await db
       .delete(chatSessions)
       .where(
@@ -258,7 +352,8 @@ router.post('/bulk-delete', requireAuth, async (req, res) => {
       success: true,
       data: {
         message: `${ids.length} session${ids.length !== 1 ? 's' : ''} deleted`,
-        count: ids.length
+        count: ids.length,
+        cleanup: cleanupResults
       }
     });
   } catch (error) {
@@ -295,10 +390,33 @@ router.delete('/:id', requireAuth, async (req, res) => {
       return;
     }
 
-    // Delete session (cascade will delete messages)
+    const cleanupResults: { branch?: { success: boolean; message: string }; storage?: { success: boolean; message: string } } = {};
+
+    // Delete GitHub branch if branch info exists
+    if (session.branch && session.repositoryOwner && session.repositoryName && authReq.user?.githubAccessToken) {
+      cleanupResults.branch = await deleteGitHubBranch(
+        authReq.user.githubAccessToken,
+        session.repositoryOwner,
+        session.repositoryName,
+        session.branch
+      );
+    }
+
+    // Delete from storage worker if sessionPath exists
+    if (session.sessionPath) {
+      cleanupResults.storage = await deleteFromStorageWorker(session.sessionPath);
+    }
+
+    // Delete session from database (cascade will delete messages)
     await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
 
-    res.json({ success: true, data: { message: 'Session deleted' } });
+    res.json({
+      success: true,
+      data: {
+        message: 'Session deleted',
+        cleanup: cleanupResults
+      }
+    });
   } catch (error) {
     console.error('Delete session error:', error);
     res.status(500).json({ success: false, error: 'Failed to delete session' });
