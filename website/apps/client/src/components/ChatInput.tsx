@@ -2,6 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 're
 import { Link } from 'react-router-dom';
 import type { GitHubRepository, User } from '@webedt/shared';
 import { githubApi } from '@/lib/api';
+import { useVoiceRecordingStore } from '@/lib/store';
 
 export interface ImageAttachment {
   id: string;
@@ -54,21 +55,29 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const mediaRecorderRef = useRef<any>(null); // Stores Web Speech API recognition instance
   const voiceKeywordsRef = useRef<string[]>([]); // Ref to track current voice keywords (avoids stale closure)
-  const keepRecordingRef = useRef(false); // Track if we want to keep recording after onend
-  const voiceTranscriptRef = useRef(''); // Accumulates voice transcript during recording session
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
-  // Voice recording state
-  const [isRecording, setIsRecording] = useState(false);
+  // Global voice recording state (persists across navigation)
+  const voiceStore = useVoiceRecordingStore();
+  const isRecording = voiceStore.isRecording;
 
   // Keep voiceKeywordsRef in sync with user's voice command keywords
   useEffect(() => {
     voiceKeywordsRef.current = user?.voiceCommandKeywords || [];
     console.log('[Voice] Keywords updated:', voiceKeywordsRef.current);
   }, [user?.voiceCommandKeywords]);
+
+  // Sync input with global voice transcript when component mounts (for navigation persistence)
+  useEffect(() => {
+    // If there's an active recording with accumulated transcript, sync to input
+    if (voiceStore.isRecording && voiceStore.transcript && !input) {
+      console.log('[Voice] Syncing transcript from global store:', voiceStore.transcript);
+      setInput(voiceStore.transcript);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
 
   // Repository search state
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
@@ -278,15 +287,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
       }
 
       // Clean up any existing recognition instance first
-      if (mediaRecorderRef.current) {
-        try {
-          (mediaRecorderRef.current as any).stop();
-        } catch (e) {
-          // Ignore errors when stopping
-        }
-        mediaRecorderRef.current = null;
-      }
-      keepRecordingRef.current = false;
+      voiceStore.stopRecording();
 
       const recognition = new SpeechRecognition();
       recognition.continuous = true; // Keep listening until manually stopped
@@ -295,8 +296,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
       recognition.onstart = () => {
         console.log('Voice input started - speak now...');
-        keepRecordingRef.current = true;
-        setIsRecording(true);
+        voiceStore.setKeepRecording(true);
+        voiceStore.setIsRecording(true);
         resolve();
       };
 
@@ -335,22 +336,19 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             }
           }
 
-          // Accumulate transcript (survives pauses during recording)
-          if (voiceTranscriptRef.current) {
-            voiceTranscriptRef.current += '\n' + newTranscript;
-          } else {
-            voiceTranscriptRef.current = newTranscript;
-          }
-          console.log('[Voice] Accumulated transcript:', voiceTranscriptRef.current);
+          // Calculate the new accumulated transcript (avoiding stale closure)
+          const currentTranscript = useVoiceRecordingStore.getState().transcript;
+          const accumulatedTranscript = currentTranscript ? currentTranscript + '\n' + newTranscript : newTranscript;
 
-          // Update the input field with accumulated transcript
-          setInput(voiceTranscriptRef.current);
+          // Update global store and input field
+          voiceStore.setTranscript(accumulatedTranscript);
+          console.log('[Voice] Accumulated transcript:', accumulatedTranscript);
+          setInput(accumulatedTranscript);
 
           // Auto-submit if keyword was detected (keep recording active)
-          if (shouldAutoSubmit && voiceTranscriptRef.current.trim()) {
-            const textToSubmit = voiceTranscriptRef.current;
+          if (shouldAutoSubmit && accumulatedTranscript.trim()) {
             // Clear the accumulated transcript for next voice session
-            voiceTranscriptRef.current = '';
+            voiceStore.clearTranscript();
 
             // Trigger submit after a brief delay to ensure state is updated
             // Note: We intentionally do NOT stop recording - user can continue speaking
@@ -358,7 +356,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               // Use the form ref to submit, or find the submit button
               const submitBtn = formRef.current?.querySelector('button[type="submit"]') as HTMLButtonElement;
               if (submitBtn) {
-                console.log('[Voice] Clicking submit button (recording continues), text:', textToSubmit);
+                console.log('[Voice] Clicking submit button (recording continues), text:', accumulatedTranscript);
                 submitBtn.click();
               } else {
                 console.log('[Voice] No submit button found, trying form dispatch');
@@ -374,44 +372,47 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         if (event.error !== 'no-speech' && event.error !== 'aborted') {
           alert(`Speech recognition error: ${event.error}`);
         }
-        setIsRecording(false);
-        mediaRecorderRef.current = null;
+        voiceStore.setIsRecording(false);
+        voiceStore.setRecognition(null);
       };
 
       recognition.onend = () => {
-        console.log('Voice input ended, keepRecording:', keepRecordingRef.current);
+        // Use getState() to get fresh values (avoid stale closure)
+        const store = useVoiceRecordingStore.getState();
+        console.log('Voice input ended, keepRecording:', store.keepRecording);
         // If we want to keep recording, restart recognition
-        if (keepRecordingRef.current) {
+        if (store.keepRecording) {
           console.log('Restarting recognition to keep recording active...');
           // Use setTimeout to avoid "already started" errors
           setTimeout(() => {
-            if (keepRecordingRef.current && mediaRecorderRef.current) {
+            const currentStore = useVoiceRecordingStore.getState();
+            if (currentStore.keepRecording && currentStore.recognition) {
               try {
                 recognition.start();
                 // Explicitly ensure isRecording stays true (onstart might not fire on restart)
-                setIsRecording(true);
+                currentStore.setIsRecording(true);
                 console.log('Recognition restarted successfully');
               } catch (error) {
                 console.error('Failed to restart recognition:', error);
-                keepRecordingRef.current = false;
-                setIsRecording(false);
-                mediaRecorderRef.current = null;
+                currentStore.setKeepRecording(false);
+                currentStore.setIsRecording(false);
+                currentStore.setRecognition(null);
               }
             } else {
               // If keepRecording was turned off during the timeout, clean up
-              setIsRecording(false);
-              mediaRecorderRef.current = null;
+              currentStore.setIsRecording(false);
+              currentStore.setRecognition(null);
             }
           }, 100);
           // Don't set isRecording to false yet - we're attempting to continue
           return;
         }
-        setIsRecording(false);
-        mediaRecorderRef.current = null;
+        store.setIsRecording(false);
+        store.setRecognition(null);
       };
 
-      // Store recognition instance so we can stop it later
-      mediaRecorderRef.current = recognition as any;
+      // Store recognition instance in global store so it persists across navigation
+      voiceStore.setRecognition(recognition);
 
       // Start recognition
       try {
@@ -426,28 +427,14 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
   // Stop Web Speech API recording
   const stopWebSpeechRecording = () => {
-    // Set flag to false FIRST so onend doesn't restart recording
-    keepRecordingRef.current = false;
-
-    const recognition = mediaRecorderRef.current as any;
-    if (recognition && recognition.stop) {
-      try {
-        recognition.stop();
-      } catch (error) {
-        console.error('Error stopping recognition:', error);
-      }
-    }
-
-    // Clear ref and state regardless of whether stop() was called
-    mediaRecorderRef.current = null;
-    setIsRecording(false);
+    // Use global store's stopRecording which handles all cleanup
+    voiceStore.stopRecording();
   };
 
   // Toggle recording on/off
   const toggleRecording = () => {
-    // Use both state and ref to determine actual recording status
-    // This handles the case where recognition is restarting (ref is true but state might briefly be false)
-    const actuallyRecording = isRecording || keepRecordingRef.current || mediaRecorderRef.current;
+    // Use global store to determine actual recording status
+    const actuallyRecording = voiceStore.isRecording || voiceStore.keepRecording || voiceStore.recognition;
 
     if (actuallyRecording) {
       stopRecording();
