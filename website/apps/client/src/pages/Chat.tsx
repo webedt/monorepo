@@ -198,6 +198,7 @@ export default function Chat() {
   });
 
   const existingPr = prData?.find((pr: GitHubPullRequest) => pr.state === 'open');
+  const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged === true);
 
   const handleCreatePR = async () => {
     if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
@@ -961,8 +962,22 @@ export default function Chat() {
                             </button>
                           )}
 
+                          {/* PR Merged button - show when PR was already merged */}
+                          {!existingPr && mergedPr && (
+                            <button
+                              onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
+                              className="btn btn-sm btn-success"
+                              title={`PR #${mergedPr.number} was merged`}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
+                                <path fillRule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                              </svg>
+                              PR #{mergedPr.number} Merged
+                            </button>
+                          )}
+
                           {/* No PR button - show when no commits to merge */}
-                          {!existingPr && noPrNeeded && (
+                          {!existingPr && !mergedPr && noPrNeeded && (
                             <button
                               className="btn btn-sm btn-ghost btn-disabled"
                               disabled
@@ -975,8 +990,8 @@ export default function Chat() {
                             </button>
                           )}
 
-                          {/* Create PR button - show if no open PR exists and not noPrNeeded */}
-                          {!existingPr && !noPrNeeded && (
+                          {/* Create PR button - show if no open PR exists, not merged, and not noPrNeeded */}
+                          {!existingPr && !mergedPr && !noPrNeeded && (
                             <button
                               onClick={handleCreatePR}
                               className="btn btn-sm btn-primary"
@@ -994,8 +1009,8 @@ export default function Chat() {
                             </button>
                           )}
 
-                          {/* Auto PR button - hide when no commits to merge */}
-                          {!noPrNeeded && (
+                          {/* Auto PR button - hide when no commits to merge or PR already merged */}
+                          {!existingPr && !mergedPr && !noPrNeeded && (
                             <button
                               onClick={handleAutoPR}
                               className="btn btn-sm btn-accent"
