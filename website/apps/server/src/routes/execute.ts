@@ -112,6 +112,7 @@ const executeHandler = async (req: any, res: any) => {
 
       chatSession = existingSessions[0];
       console.log(`[Execute] Resuming existing session: ${chatSession.id}`);
+      console.log(`[Execute] Session stored repo: ${chatSession.repositoryUrl || 'N/A'}, branch: ${chatSession.baseBranch || 'N/A'}`);
 
       // Update session status to running
       await db
@@ -315,10 +316,14 @@ const executeHandler = async (req: any, res: any) => {
     `);
 
     // Always send GitHub config if available - AI worker will determine if it needs to clone
-    if (repoUrl && authReq.user.githubAccessToken) {
+    // When resuming, fall back to the session's stored repository info
+    const effectiveRepoUrl = repoUrl || chatSession.repositoryUrl;
+    const effectiveBranch = repoUrl ? branch : (chatSession.baseBranch || 'main');
+
+    if (effectiveRepoUrl && authReq.user.githubAccessToken) {
       executePayload.github = {
-        repoUrl: repoUrl as string,
-        branch: branch as string,
+        repoUrl: effectiveRepoUrl as string,
+        branch: effectiveBranch as string,
         accessToken: authReq.user.githubAccessToken,
       };
     }
