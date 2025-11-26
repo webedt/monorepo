@@ -53,8 +53,10 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 }, ref) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const mediaRecorderRef = useRef<any>(null); // Stores Web Speech API recognition instance
   const inputRef = useRef(input); // Ref to track current input value for speech recognition
+  const voiceKeywordsRef = useRef<string[]>([]); // Ref to track current voice keywords (avoids stale closure)
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
@@ -65,6 +67,12 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
+
+  // Keep voiceKeywordsRef in sync with user's voice command keywords
+  useEffect(() => {
+    voiceKeywordsRef.current = user?.voiceCommandKeywords || [];
+    console.log('[Voice] Keywords updated:', voiceKeywordsRef.current);
+  }, [user?.voiceCommandKeywords]);
 
   // Repository search state
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
@@ -300,16 +308,22 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           let shouldAutoSubmit = false;
 
           // Check for voice command keywords at the end of the transcript
-          const keywords = user?.voiceCommandKeywords || [];
+          // Use voiceKeywordsRef to get latest keywords (avoids stale closure)
+          const keywords = voiceKeywordsRef.current;
+          console.log('[Voice] Checking transcript:', newTranscript);
+          console.log('[Voice] Active keywords:', keywords);
+
           if (keywords.length > 0) {
             const lowerTranscript = newTranscript.toLowerCase();
             for (const keyword of keywords) {
               // Check if transcript ends with the keyword (with optional trailing punctuation)
               const keywordPattern = new RegExp(`\\b${keyword}[.!?,;:\\s]*$`, 'i');
+              console.log('[Voice] Testing keyword:', keyword, 'Pattern:', keywordPattern, 'Match:', keywordPattern.test(lowerTranscript));
               if (keywordPattern.test(lowerTranscript)) {
                 // Remove the keyword from the end of the transcript
                 newTranscript = newTranscript.replace(keywordPattern, '').trim();
                 shouldAutoSubmit = true;
+                console.log('[Voice] Keyword matched! Will auto-submit. New transcript:', newTranscript);
                 break;
               }
             }
@@ -328,11 +342,16 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             }
             // Trigger submit after a brief delay to ensure state is updated
             setTimeout(() => {
-              const form = document.querySelector('form');
-              if (form) {
-                form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+              // Use the form ref to submit, or find the submit button
+              const submitBtn = formRef.current?.querySelector('button[type="submit"]') as HTMLButtonElement;
+              if (submitBtn) {
+                console.log('[Voice] Clicking submit button');
+                submitBtn.click();
+              } else {
+                console.log('[Voice] No submit button found, trying form dispatch');
+                formRef.current?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
               }
-            }, 100);
+            }, 150);
           }
         }
       };
@@ -445,7 +464,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   }));
 
   return (
-    <form onSubmit={onSubmit} className={centered ? 'w-full max-w-3xl' : 'max-w-4xl mx-auto w-full'}>
+    <form ref={formRef} onSubmit={onSubmit} className={centered ? 'w-full max-w-3xl' : 'max-w-4xl mx-auto w-full'}>
       {/* Image previews */}
       {images.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
