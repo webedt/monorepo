@@ -79,6 +79,7 @@ export default function Chat() {
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
+  const [noPrNeeded, setNoPrNeeded] = useState(false);
 
   // Get repo store actions
   const repoStore = useRepoStore();
@@ -234,8 +235,16 @@ export default function Chat() {
       ]);
 
       refetchPr();
+      setNoPrNeeded(false);
     } catch (err: any) {
-      setPrError(err.message || 'Failed to create PR');
+      const errorMsg = err.message || 'Failed to create PR';
+      // Check if the error is about no commits to merge
+      if (errorMsg.toLowerCase().includes('no commits') || errorMsg.toLowerCase().includes('nothing to merge')) {
+        setNoPrNeeded(true);
+        setPrError(null);
+      } else {
+        setPrError(errorMsg);
+      }
     } finally {
       setPrLoading(null);
     }
@@ -283,12 +292,17 @@ export default function Chat() {
       ]);
 
       refetchPr();
+      setNoPrNeeded(false);
     } catch (err: any) {
-      // Check if partial success (PR created but not merged)
-      if (err.message?.includes('conflict')) {
+      const errorMsg = err.message || 'Failed to complete Auto PR';
+      // Check if the error is about no commits to merge
+      if (errorMsg.toLowerCase().includes('no commits') || errorMsg.toLowerCase().includes('nothing to merge')) {
+        setNoPrNeeded(true);
+        setPrError(null);
+      } else if (errorMsg.includes('conflict')) {
         setPrError('Merge conflict detected. Please resolve conflicts manually.');
       } else {
-        setPrError(err.message || 'Failed to complete Auto PR');
+        setPrError(errorMsg);
       }
       refetchPr();
     } finally {
@@ -927,8 +941,22 @@ export default function Chat() {
                             </button>
                           )}
 
-                          {/* Create PR button - show if no open PR exists */}
-                          {!existingPr && (
+                          {/* No PR button - show when no commits to merge */}
+                          {!existingPr && noPrNeeded && (
+                            <button
+                              className="btn btn-sm btn-ghost btn-disabled"
+                              disabled
+                              title="No commits to merge - branch is up to date with base"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
+                                <path fillRule="evenodd" d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                              </svg>
+                              No PR
+                            </button>
+                          )}
+
+                          {/* Create PR button - show if no open PR exists and not noPrNeeded */}
+                          {!existingPr && !noPrNeeded && (
                             <button
                               onClick={handleCreatePR}
                               className="btn btn-sm btn-primary"
@@ -946,22 +974,24 @@ export default function Chat() {
                             </button>
                           )}
 
-                          {/* Auto PR button - always show */}
-                          <button
-                            onClick={handleAutoPR}
-                            className="btn btn-sm btn-accent"
-                            disabled={prLoading !== null}
-                            title="Create PR, merge base branch, and merge PR in one click"
-                          >
-                            {prLoading === 'auto' ? (
-                              <span className="loading loading-spinner loading-xs mr-1"></span>
-                            ) : (
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
-                              </svg>
-                            )}
-                            Auto PR
-                          </button>
+                          {/* Auto PR button - hide when no commits to merge */}
+                          {!noPrNeeded && (
+                            <button
+                              onClick={handleAutoPR}
+                              className="btn btn-sm btn-accent"
+                              disabled={prLoading !== null}
+                              title="Create PR, merge base branch, and merge PR in one click"
+                            >
+                              {prLoading === 'auto' ? (
+                                <span className="loading loading-spinner loading-xs mr-1"></span>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                              Auto PR
+                            </button>
+                          )}
                         </>
                       )}
 
