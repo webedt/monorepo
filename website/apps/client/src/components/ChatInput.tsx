@@ -58,6 +58,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const inputRef = useRef(input); // Ref to track current input value for speech recognition
   const voiceKeywordsRef = useRef<string[]>([]); // Ref to track current voice keywords (avoids stale closure)
   const keepRecordingRef = useRef(false); // Track if we want to keep recording after onend
+  const clearNextInputRef = useRef(false); // Flag to clear input on next speech (after auto-submit)
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
@@ -304,8 +305,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         }
 
         if (transcript.trim()) {
-          // Use inputRef.current to get the latest input value (avoids stale closure)
-          const currentInput = inputRef.current;
           let newTranscript = transcript.trim();
           let shouldAutoSubmit = false;
 
@@ -331,11 +330,22 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             }
           }
 
+          // Check if we should clear previous input (after auto-submit)
+          let currentInput = '';
+          if (clearNextInputRef.current) {
+            console.log('[Voice] Clearing previous input (post auto-submit)');
+            clearNextInputRef.current = false;
+          } else {
+            currentInput = inputRef.current;
+          }
+
           const newText = currentInput ? `${currentInput}\n${newTranscript}` : newTranscript;
           setInput(newText);
 
           // Auto-submit if keyword was detected (keep recording active)
           if (shouldAutoSubmit && newText.trim()) {
+            // Set flag to clear input on next speech segment
+            clearNextInputRef.current = true;
             // Trigger submit after a brief delay to ensure state is updated
             // Note: We intentionally do NOT stop recording - user can continue speaking
             setTimeout(() => {
@@ -344,13 +354,9 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               if (submitBtn) {
                 console.log('[Voice] Clicking submit button (recording continues)');
                 submitBtn.click();
-                // Clear inputRef after submit so next speech segment starts fresh
-                // This prevents concatenation with previous submitted text
-                inputRef.current = '';
               } else {
                 console.log('[Voice] No submit button found, trying form dispatch');
                 formRef.current?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                inputRef.current = '';
               }
             }, 150);
           }
@@ -368,16 +374,24 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
       recognition.onend = () => {
         console.log('Voice input ended, keepRecording:', keepRecordingRef.current);
-        // If we want to keep recording (auto-submit mode), restart recognition
-        if (keepRecordingRef.current && mediaRecorderRef.current) {
+        // If we want to keep recording, restart recognition
+        if (keepRecordingRef.current) {
           console.log('Restarting recognition to keep recording active...');
-          try {
-            recognition.start();
-            // Don't set isRecording to false - we're continuing
-            return;
-          } catch (error) {
-            console.error('Failed to restart recognition:', error);
-          }
+          // Use setTimeout to avoid "already started" errors
+          setTimeout(() => {
+            if (keepRecordingRef.current) {
+              try {
+                recognition.start();
+                console.log('Recognition restarted successfully');
+              } catch (error) {
+                console.error('Failed to restart recognition:', error);
+                setIsRecording(false);
+                mediaRecorderRef.current = null;
+              }
+            }
+          }, 100);
+          // Don't set isRecording to false - we're continuing
+          return;
         }
         setIsRecording(false);
         mediaRecorderRef.current = null;
