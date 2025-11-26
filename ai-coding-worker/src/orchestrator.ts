@@ -10,6 +10,7 @@ import { Response } from 'express';
 import { logger } from './utils/logger';
 import { LLMHelper } from './utils/llmHelper';
 import { GitHelper } from './utils/gitHelper';
+import { CredentialManager } from './utils/credentialManager';
 import { parseRepoUrl, generateSessionPath, sessionPathToDir } from './utils/sessionPathHelper';
 
 /**
@@ -273,7 +274,13 @@ export class Orchestrator {
               let title: string;
               let descriptivePart: string;
 
-              // Check if Claude credentials are available (written by CredentialManager during provider setup)
+              // Write credentials early so LLMHelper can use them
+              // (Provider normally writes them, but that happens later)
+              if (request.codingAssistantProvider === 'ClaudeAgentSDK') {
+                CredentialManager.writeClaudeCredentials(request.codingAssistantAuthentication);
+              }
+
+              // Check if Claude credentials are available
               if (!LLMHelper.isConfigured()) {
                 // Credentials not available - use fallback values
                 title = 'New Session';
@@ -284,7 +291,7 @@ export class Orchestrator {
                   websiteSessionId
                 });
               } else {
-                // Generate title and branch name using LLM (uses same credentials as main execute)
+                // Generate title and branch name using LLM
                 sendEvent({
                   type: 'message',
                   message: 'Generating session title and branch name...',
