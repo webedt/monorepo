@@ -1,24 +1,35 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { logger } from './logger';
+import { CredentialManager } from './credentialManager';
 
 /**
  * Helper for making one-off LLM requests for commit message and branch name generation
  * Uses Haiku for fast, cost-effective responses
- * Supports both API keys and OAuth tokens via the Anthropic SDK
+ * Reads credentials from ~/.claude/.credentials.json (same as Claude Agent SDK)
  */
 export class LLMHelper {
   private client: Anthropic;
 
-  constructor(authToken: string) {
-    // Detect if OAuth token (starts with sk-ant-oat) or API key (starts with sk-ant-api)
-    if (authToken.startsWith('sk-ant-oat')) {
-      // OAuth token - use authToken parameter
-      this.client = new Anthropic({ authToken });
-      logger.info('LLMHelper: Initialized with OAuth token', { component: 'LLMHelper' });
-    } else {
-      // API key - use apiKey parameter
-      this.client = new Anthropic({ apiKey: authToken });
-      logger.info('LLMHelper: Initialized with API key', { component: 'LLMHelper' });
+  constructor() {
+    // Read credentials from the file written by CredentialManager
+    // This ensures we use the same auth as the Claude Agent SDK
+    const credentialPath = CredentialManager.getClaudeCredentialPath();
+    const credentials = CredentialManager.readCredentialFile(credentialPath);
+
+    // Check for OAuth tokens first (claudeAiOauth format)
+    if (credentials.claudeAiOauth?.accessToken) {
+      const accessToken = credentials.claudeAiOauth.accessToken;
+      this.client = new Anthropic({ authToken: accessToken });
+      logger.info('LLMHelper: Initialized with OAuth token from credentials file', { component: 'LLMHelper' });
+    }
+    // Fall back to API key
+    else if (credentials.apiKey) {
+      this.client = new Anthropic({ apiKey: credentials.apiKey });
+      logger.info('LLMHelper: Initialized with API key from credentials file', { component: 'LLMHelper' });
+    }
+    // Unknown format
+    else {
+      throw new Error('No valid authentication found in credentials file');
     }
   }
 
@@ -160,65 +171,6 @@ Response:`
         title: 'New Session',
         branchName: 'auto-request'
       };
-    }
-  }
-
-  /**
-   * Generate a branch name from user request
-   * @deprecated Use generateSessionTitleAndBranch instead for better efficiency
-   */
-  async generateBranchName(userRequest: string, baseBranch: string): Promise<string> {
-    try {
-      const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 100,
-        messages: [
-          {
-            role: 'user',
-            content: `Generate a concise, valid git branch name based on the following user request.
-Rules:
-- Lowercase only
-- Use hyphens as separators
-- Max 40 characters (excluding prefix)
-- No special characters
-- Only return the descriptive part, nothing else (no "claude/" prefix)
-- Focus on the main action or feature
-
-Base branch: ${baseBranch}
-
-User request:
-${userRequest.substring(0, 1000)}
-
-Branch name (descriptive part only):`
-          }
-        ]
-      });
-
-      const content = response.content[0];
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from LLM');
-      }
-
-      let descriptivePart = content.text.trim();
-      // Ensure it's a valid branch name part
-      descriptivePart = descriptivePart
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .substring(0, 40);
-
-      logger.info('Generated branch name descriptive part', {
-        component: 'LLMHelper',
-        descriptivePart
-      });
-
-      return descriptivePart;
-    } catch (error) {
-      logger.error('Failed to generate branch name', error, {
-        component: 'LLMHelper'
-      });
-      // Fallback
-      return `auto-request`;
     }
   }
 }
