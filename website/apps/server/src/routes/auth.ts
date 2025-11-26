@@ -68,6 +68,8 @@ router.post('/register', async (req, res) => {
             githubId: newUser.githubId,
             githubAccessToken: newUser.githubAccessToken,
             claudeAuth: newUser.claudeAuth,
+            imageResizeMaxDimension: newUser.imageResizeMaxDimension,
+            voiceCommandKeywords: newUser.voiceCommandKeywords || [],
           },
         },
       });
@@ -134,6 +136,8 @@ router.post('/login', async (req, res) => {
             githubId: user.githubId,
             githubAccessToken: user.githubAccessToken,
             claudeAuth: user.claudeAuth,
+            imageResizeMaxDimension: user.imageResizeMaxDimension,
+            voiceCommandKeywords: user.voiceCommandKeywords || [],
           },
         },
       });
@@ -197,6 +201,8 @@ router.get('/session', async (req, res) => {
           githubId: freshUser.githubId,
           githubAccessToken: freshUser.githubAccessToken,
           claudeAuth: freshUser.claudeAuth,
+          imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
+          voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
         },
         session: authReq.session,
       },

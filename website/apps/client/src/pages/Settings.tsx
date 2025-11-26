@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { githubApi, userApi, authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
+
+// Pre-defined voice command keywords that cannot be deleted
+const DEFAULT_KEYWORDS = ['over', 'submit', 'enter', 'period'];
 
 export default function Settings() {
   const user = useAuthStore((state) => state.user);
@@ -10,6 +13,12 @@ export default function Settings() {
   const [claudeError, setClaudeError] = useState('');
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
+
+  // Voice command keywords state
+  const [voiceKeywords, setVoiceKeywords] = useState<string[]>(user?.voiceCommandKeywords || []);
+  const [newKeyword, setNewKeyword] = useState('');
+  const [isKeywordDropdownOpen, setIsKeywordDropdownOpen] = useState(false);
+  const keywordDropdownRef = useRef<HTMLDivElement>(null);
 
   // Format token expiration time
   const formatTokenExpiration = (expiresAt: number) => {
@@ -59,6 +68,24 @@ export default function Settings() {
   useEffect(() => {
     setDisplayName(user?.displayName || '');
   }, [user?.displayName]);
+
+  useEffect(() => {
+    setVoiceKeywords(user?.voiceCommandKeywords || []);
+  }, [user?.voiceCommandKeywords]);
+
+  // Close keyword dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (keywordDropdownRef.current && !keywordDropdownRef.current.contains(event.target as Node)) {
+        setIsKeywordDropdownOpen(false);
+      }
+    };
+
+    if (isKeywordDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isKeywordDropdownOpen]);
 
   const disconnectGitHub = useMutation({
     mutationFn: githubApi.disconnect,
@@ -115,6 +142,37 @@ export default function Settings() {
       alert(`Failed to update display name: ${error instanceof Error ? error.message : 'Unknown error'}`);
     },
   });
+
+  const updateVoiceKeywords = useMutation({
+    mutationFn: userApi.updateVoiceCommandKeywords,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Voice command keywords updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update voice command keywords: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  // Helper functions for voice command keywords
+  const isDefaultKeyword = (keyword: string) => DEFAULT_KEYWORDS.includes(keyword.toLowerCase());
+
+  const addKeyword = (keyword: string) => {
+    const normalized = keyword.trim().toLowerCase();
+    if (normalized && !voiceKeywords.includes(normalized)) {
+      setVoiceKeywords([...voiceKeywords, normalized]);
+    }
+    setNewKeyword('');
+    setIsKeywordDropdownOpen(false);
+  };
+
+  const removeKeyword = (keyword: string) => {
+    if (!isDefaultKeyword(keyword)) {
+      setVoiceKeywords(voiceKeywords.filter(k => k !== keyword));
+    }
+  };
+
+  const availableDefaultKeywords = DEFAULT_KEYWORDS.filter(k => !voiceKeywords.includes(k));
 
   const handleClaudeAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -368,6 +426,140 @@ export default function Settings() {
                   className="btn btn-primary min-w-[140px]"
                 >
                   {updateImageResizeSetting.isPending ? 'Saving...' : 'Save Setting'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Voice Command Keywords */}
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title mb-2">Voice Command Keywords</h2>
+
+            <div className="space-y-6">
+              <p className="text-sm text-base-content/70 leading-relaxed">
+                Configure keywords that will automatically submit your voice input when spoken at the end of your message. For example, saying "update the readme file over" will submit "update the readme file" as your request.
+              </p>
+
+              <div className="divider my-4"></div>
+
+              {/* Selected Keywords Display */}
+              <div className="form-control w-full">
+                <div className="mb-3">
+                  <span className="font-medium text-base text-base-content">Active Keywords</span>
+                </div>
+                <div className="flex flex-wrap gap-2 min-h-[2.5rem] p-3 bg-base-200 rounded-lg">
+                  {voiceKeywords.length === 0 ? (
+                    <span className="text-sm text-base-content/50">No keywords selected. Add keywords below to enable voice auto-submit.</span>
+                  ) : (
+                    voiceKeywords.map((keyword) => (
+                      <span
+                        key={keyword}
+                        className={`badge gap-1 ${isDefaultKeyword(keyword) ? 'badge-primary' : 'badge-secondary'}`}
+                      >
+                        {keyword}
+                        {!isDefaultKeyword(keyword) && (
+                          <button
+                            type="button"
+                            onClick={() => removeKeyword(keyword)}
+                            className="hover:text-error"
+                            title="Remove keyword"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        )}
+                      </span>
+                    ))
+                  )}
+                </div>
+                <div className="mt-2">
+                  <span className="text-sm text-base-content/60">
+                    Pre-defined keywords (highlighted) cannot be removed
+                  </span>
+                </div>
+              </div>
+
+              {/* Add Keywords Section */}
+              <div className="form-control w-full max-w-md" ref={keywordDropdownRef}>
+                <div className="mb-3">
+                  <span className="font-medium text-base text-base-content">Add Keywords</span>
+                </div>
+
+                {/* Dropdown for default keywords */}
+                {availableDefaultKeywords.length > 0 && (
+                  <div className="relative mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsKeywordDropdownOpen(!isKeywordDropdownOpen)}
+                      className="btn btn-outline w-full justify-between"
+                    >
+                      Select from suggested keywords
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {isKeywordDropdownOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-full bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
+                        {availableDefaultKeywords.map((keyword) => (
+                          <button
+                            key={keyword}
+                            type="button"
+                            onClick={() => addKeyword(keyword)}
+                            className="w-full text-left px-4 py-2 text-sm hover:bg-base-200"
+                          >
+                            {keyword}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Custom keyword input */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newKeyword}
+                    onChange={(e) => setNewKeyword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newKeyword.trim()) {
+                        e.preventDefault();
+                        addKeyword(newKeyword);
+                      }
+                    }}
+                    placeholder="Add custom keyword..."
+                    className="input input-bordered flex-1"
+                    maxLength={30}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addKeyword(newKeyword)}
+                    disabled={!newKeyword.trim() || voiceKeywords.includes(newKeyword.trim().toLowerCase())}
+                    className="btn btn-ghost btn-square"
+                    title="Add keyword"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="mt-2">
+                  <span className="text-sm text-base-content/60">
+                    Press Enter or click + to add a custom keyword
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-start pt-2">
+                <button
+                  onClick={() => updateVoiceKeywords.mutate(voiceKeywords)}
+                  disabled={updateVoiceKeywords.isPending || JSON.stringify(voiceKeywords) === JSON.stringify(user?.voiceCommandKeywords || [])}
+                  className="btn btn-primary min-w-[140px]"
+                >
+                  {updateVoiceKeywords.isPending ? 'Saving...' : 'Save Keywords'}
                 </button>
               </div>
             </div>

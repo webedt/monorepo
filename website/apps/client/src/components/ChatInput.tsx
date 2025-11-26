@@ -2,6 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 're
 import { Link } from 'react-router-dom';
 import type { GitHubRepository, User } from '@webedt/shared';
 import { githubApi } from '@/lib/api';
+import { useVoiceRecordingStore } from '@/lib/store';
 
 export interface ImageAttachment {
   id: string;
@@ -53,18 +54,30 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 }, ref) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<any>(null); // Stores Web Speech API recognition instance
-  const inputRef = useRef(input); // Ref to track current input value for speech recognition
+  const formRef = useRef<HTMLFormElement>(null);
+  const voiceKeywordsRef = useRef<string[]>([]); // Ref to track current voice keywords (avoids stale closure)
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
-  // Voice recording state
-  const [isRecording, setIsRecording] = useState(false);
+  // Global voice recording state (persists across navigation)
+  const voiceStore = useVoiceRecordingStore();
+  const isRecording = voiceStore.isRecording;
 
-  // Keep inputRef in sync with input prop
+  // Keep voiceKeywordsRef in sync with user's voice command keywords
   useEffect(() => {
-    inputRef.current = input;
-  }, [input]);
+    voiceKeywordsRef.current = user?.voiceCommandKeywords || [];
+    console.log('[Voice] Keywords updated:', voiceKeywordsRef.current);
+  }, [user?.voiceCommandKeywords]);
+
+  // Sync input with global voice transcript when component mounts (for navigation persistence)
+  useEffect(() => {
+    // If there's an active recording with accumulated transcript, sync to input
+    if (voiceStore.isRecording && voiceStore.transcript && !input) {
+      console.log('[Voice] Syncing transcript from global store:', voiceStore.transcript);
+      setInput(voiceStore.transcript);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
 
   // Repository search state
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
@@ -273,6 +286,9 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         return;
       }
 
+      // Clean up any existing recognition instance first
+      voiceStore.stopRecording();
+
       const recognition = new SpeechRecognition();
       recognition.continuous = true; // Keep listening until manually stopped
       recognition.interimResults = false;
@@ -280,7 +296,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
       recognition.onstart = () => {
         console.log('Voice input started - speak now...');
-        setIsRecording(true);
+        voiceStore.setKeepRecording(true);
+        voiceStore.setIsRecording(true);
         resolve();
       };
 
@@ -294,10 +311,59 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         }
 
         if (transcript.trim()) {
-          // Use inputRef.current to get the latest input value (avoids stale closure)
-          const currentInput = inputRef.current;
-          const newText = currentInput ? `${currentInput}\n${transcript.trim()}` : transcript.trim();
-          setInput(newText);
+          let newTranscript = transcript.trim();
+          let shouldAutoSubmit = false;
+
+          // Check for voice command keywords at the end of the transcript
+          // Use voiceKeywordsRef to get latest keywords (avoids stale closure)
+          const keywords = voiceKeywordsRef.current;
+          console.log('[Voice] Checking transcript:', newTranscript);
+          console.log('[Voice] Active keywords:', keywords);
+
+          if (keywords.length > 0) {
+            const lowerTranscript = newTranscript.toLowerCase();
+            for (const keyword of keywords) {
+              // Check if transcript ends with the keyword (with optional trailing punctuation)
+              const keywordPattern = new RegExp(`\\b${keyword}[.!?,;:\\s]*$`, 'i');
+              console.log('[Voice] Testing keyword:', keyword, 'Pattern:', keywordPattern, 'Match:', keywordPattern.test(lowerTranscript));
+              if (keywordPattern.test(lowerTranscript)) {
+                // Remove the keyword from the end of the transcript
+                newTranscript = newTranscript.replace(keywordPattern, '').trim();
+                shouldAutoSubmit = true;
+                console.log('[Voice] Keyword matched! Will auto-submit. New transcript:', newTranscript);
+                break;
+              }
+            }
+          }
+
+          // Calculate the new accumulated transcript (avoiding stale closure)
+          const currentTranscript = useVoiceRecordingStore.getState().transcript;
+          const accumulatedTranscript = currentTranscript ? currentTranscript + '\n' + newTranscript : newTranscript;
+
+          // Update global store and input field
+          voiceStore.setTranscript(accumulatedTranscript);
+          console.log('[Voice] Accumulated transcript:', accumulatedTranscript);
+          setInput(accumulatedTranscript);
+
+          // Auto-submit if keyword was detected (keep recording active)
+          if (shouldAutoSubmit && accumulatedTranscript.trim()) {
+            // Clear the accumulated transcript for next voice session
+            voiceStore.clearTranscript();
+
+            // Trigger submit after a brief delay to ensure state is updated
+            // Note: We intentionally do NOT stop recording - user can continue speaking
+            setTimeout(() => {
+              // Find the submit button dynamically (not via formRef, which may be stale after navigation)
+              // Look for the ChatInput form's submit button in the DOM
+              const submitBtn = document.querySelector('form button[type="submit"]') as HTMLButtonElement;
+              if (submitBtn && !submitBtn.disabled) {
+                console.log('[Voice] Clicking submit button (recording continues), text:', accumulatedTranscript);
+                submitBtn.click();
+              } else {
+                console.log('[Voice] No enabled submit button found, text may have been cleared');
+              }
+            }, 150);
+          }
         }
       };
 
@@ -306,18 +372,47 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         if (event.error !== 'no-speech' && event.error !== 'aborted') {
           alert(`Speech recognition error: ${event.error}`);
         }
-        setIsRecording(false);
-        mediaRecorderRef.current = null;
+        voiceStore.setIsRecording(false);
+        voiceStore.setRecognition(null);
       };
 
       recognition.onend = () => {
-        console.log('Voice input ended');
-        setIsRecording(false);
-        mediaRecorderRef.current = null;
+        // Use getState() to get fresh values (avoid stale closure)
+        const store = useVoiceRecordingStore.getState();
+        console.log('Voice input ended, keepRecording:', store.keepRecording);
+        // If we want to keep recording, restart recognition
+        if (store.keepRecording) {
+          console.log('Restarting recognition to keep recording active...');
+          // Use setTimeout to avoid "already started" errors
+          setTimeout(() => {
+            const currentStore = useVoiceRecordingStore.getState();
+            if (currentStore.keepRecording && currentStore.recognition) {
+              try {
+                recognition.start();
+                // Explicitly ensure isRecording stays true (onstart might not fire on restart)
+                currentStore.setIsRecording(true);
+                console.log('Recognition restarted successfully');
+              } catch (error) {
+                console.error('Failed to restart recognition:', error);
+                currentStore.setKeepRecording(false);
+                currentStore.setIsRecording(false);
+                currentStore.setRecognition(null);
+              }
+            } else {
+              // If keepRecording was turned off during the timeout, clean up
+              currentStore.setIsRecording(false);
+              currentStore.setRecognition(null);
+            }
+          }, 100);
+          // Don't set isRecording to false yet - we're attempting to continue
+          return;
+        }
+        store.setIsRecording(false);
+        store.setRecognition(null);
       };
 
-      // Store recognition instance so we can stop it later
-      mediaRecorderRef.current = recognition as any;
+      // Store recognition instance in global store so it persists across navigation
+      voiceStore.setRecognition(recognition);
 
       // Start recognition
       try {
@@ -332,20 +427,16 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
   // Stop Web Speech API recording
   const stopWebSpeechRecording = () => {
-    const recognition = mediaRecorderRef.current as any;
-    if (recognition && recognition.stop) {
-      try {
-        recognition.stop();
-      } catch (error) {
-        console.error('Error stopping recognition:', error);
-      }
-      setIsRecording(false);
-    }
+    // Use global store's stopRecording which handles all cleanup
+    voiceStore.stopRecording();
   };
 
   // Toggle recording on/off
   const toggleRecording = () => {
-    if (isRecording) {
+    // Use global store to determine actual recording status
+    const actuallyRecording = voiceStore.isRecording || voiceStore.keepRecording || voiceStore.recognition;
+
+    if (actuallyRecording) {
       stopRecording();
     } else {
       startRecording();
@@ -409,7 +500,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   }));
 
   return (
-    <form onSubmit={onSubmit} className={centered ? 'w-full max-w-3xl' : 'max-w-4xl mx-auto w-full'}>
+    <form ref={formRef} onSubmit={onSubmit} className={centered ? 'w-full max-w-3xl' : 'max-w-4xl mx-auto w-full'}>
       {/* Image previews */}
       {images.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
@@ -705,15 +796,15 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             className="hidden"
           />
 
-          {/* Microphone button */}
+          {/* Microphone button - stays enabled while recording even during execution */}
           <button
             type="button"
             onClick={toggleRecording}
-            disabled={isExecuting || !user?.claudeAuth}
-            className={`flex items-center justify-center w-10 h-10 rounded-full shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            disabled={!isRecording && (isExecuting || !user?.claudeAuth)}
+            className={`flex items-center justify-center w-10 h-10 rounded-full shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 ${
               isRecording
                 ? 'bg-red-500 hover:bg-red-600 text-white focus:ring-red-400 animate-pulse'
-                : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 focus:ring-gray-400'
+                : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 focus:ring-gray-400 disabled:opacity-50 disabled:cursor-not-allowed'
             }`}
             title={
               isRecording

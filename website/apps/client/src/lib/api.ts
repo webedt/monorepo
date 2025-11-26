@@ -157,6 +157,12 @@ export const userApi = {
       method: 'POST',
       body: { displayName },
     }),
+
+  updateVoiceCommandKeywords: (keywords: string[]) =>
+    fetchApi('/api/user/voice-command-keywords', {
+      method: 'POST',
+      body: { keywords },
+    }),
 };
 
 // Sessions API

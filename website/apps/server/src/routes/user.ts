@@ -137,4 +137,51 @@ router.post('/display-name', requireAuth, async (req, res) => {
   }
 });
 
+// Update voice command keywords
+router.post('/voice-command-keywords', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { keywords } = req.body;
+
+    // Validate keywords is an array
+    if (!Array.isArray(keywords)) {
+      res.status(400).json({
+        success: false,
+        error: 'Keywords must be an array',
+      });
+      return;
+    }
+
+    // Validate all items are non-empty strings and normalize them
+    const normalizedKeywords = keywords
+      .filter((k: any): k is string => typeof k === 'string' && k.trim().length > 0)
+      .map((k: string) => k.trim().toLowerCase());
+
+    // Remove duplicates
+    const uniqueKeywords = [...new Set(normalizedKeywords)];
+
+    // Limit to 20 keywords max
+    if (uniqueKeywords.length > 20) {
+      res.status(400).json({
+        success: false,
+        error: 'Maximum of 20 keywords allowed',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ voiceCommandKeywords: uniqueKeywords })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Voice command keywords updated successfully', keywords: uniqueKeywords },
+    });
+  } catch (error) {
+    console.error('Update voice command keywords error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update voice command keywords' });
+  }
+});
+
 export default router;
