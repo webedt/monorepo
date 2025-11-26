@@ -396,14 +396,15 @@ export default function NewSession() {
         </div>
 
         {/* Activity Selection */}
-        <div className="bg-base-100 rounded-2xl shadow-xl p-4">
+        <div className="bg-base-100 rounded-2xl shadow-xl p-4 relative">
           <h2 className="text-xl font-bold text-center mb-4">What would you like to do?</h2>
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             {activities.map((activity) => (
               <button
                 key={activity.id}
                 onClick={() => handleActivityClick(activity.id)}
-                className="flex flex-col items-center justify-center p-4 bg-base-200 hover:bg-base-300 rounded-lg transition-all hover:scale-105 active:scale-95 border-2 border-transparent hover:border-primary"
+                disabled={isLoadingRepos}
+                className="flex flex-col items-center justify-center p-4 bg-base-200 hover:bg-base-300 rounded-lg transition-all hover:scale-105 active:scale-95 border-2 border-transparent hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:border-transparent"
               >
                 <div className="text-primary mb-2">
                   {activity.icon}
@@ -412,6 +413,12 @@ export default function NewSession() {
               </button>
             ))}
           </div>
+          {/* Loading overlay */}
+          {isLoadingRepos && (
+            <div className="absolute inset-0 bg-base-100/80 rounded-2xl flex items-center justify-center">
+              <span className="loading loading-spinner loading-lg text-primary"></span>
+            </div>
+          )}
         </div>
       </div>
     </div>
