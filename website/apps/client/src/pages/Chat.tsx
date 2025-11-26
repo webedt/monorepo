@@ -1273,6 +1273,14 @@ export default function Chat() {
           <div className="flex-1 overflow-y-auto p-4">
             <div className="max-w-4xl mx-auto space-y-4">
               {messages.map((message) => (
+                message.type === 'system' ? (
+                  // Compact inline status update - no panel, faint text, inline timestamp
+                  <div key={message.id} className="text-xs text-base-content/40 py-0.5">
+                    <span className="opacity-60">{new Date(message.timestamp).toLocaleTimeString()}</span>
+                    <span className="mx-2">•</span>
+                    <LinkifyText text={message.content} className="opacity-80" />
+                  </div>
+                ) : (
                 <div
                   key={message.id}
                   className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -1330,7 +1338,7 @@ export default function Chat() {
                     )}
 
                     <p className="text-xs mt-1 opacity-70">
-                      {message.type === 'user' ? (user?.displayName || user?.email) : message.type === 'assistant' ? 'Claude' : message.type === 'system' ? 'System' : 'Error'} • {new Date(message.timestamp).toLocaleTimeString()}
+                      {message.type === 'user' ? (user?.displayName || user?.email) : message.type === 'assistant' ? 'Claude' : 'Error'} • {new Date(message.timestamp).toLocaleTimeString()}
                     </p>
                     {message.type === 'error' && lastRequest && !isExecuting && (
                       <button
@@ -1354,6 +1362,7 @@ export default function Chat() {
                     )}
                   </div>
                 </div>
+                )
               ))}
 
               {isConnected && isExecuting && (
