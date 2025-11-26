@@ -170,6 +170,41 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req, res) => {
   }
 });
 
+// Delete a branch
+router.delete('/repos/:owner/:repo/branches/:branch', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo, branch } = req.params;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Delete the branch using the git references API
+    await octokit.git.deleteRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    });
+
+    console.log(`[GitHub] Deleted branch ${owner}/${repo}/${branch}`);
+    res.json({ success: true, data: { message: 'Branch deleted' } });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    // 422 means the branch doesn't exist (already deleted or never existed)
+    if (err.status === 422 || err.status === 404) {
+      console.log(`[GitHub] Branch ${req.params.owner}/${req.params.repo}/${req.params.branch} not found (already deleted)`);
+      res.json({ success: true, data: { message: 'Branch already deleted or does not exist' } });
+      return;
+    }
+    console.error('GitHub delete branch error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete branch' });
+  }
+});
+
 // Disconnect GitHub
 router.post('/disconnect', requireAuth, async (req, res) => {
   try {
