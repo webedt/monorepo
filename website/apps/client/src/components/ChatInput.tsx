@@ -57,6 +57,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const mediaRecorderRef = useRef<any>(null); // Stores Web Speech API recognition instance
   const inputRef = useRef(input); // Ref to track current input value for speech recognition
   const voiceKeywordsRef = useRef<string[]>([]); // Ref to track current voice keywords (avoids stale closure)
+  const keepRecordingRef = useRef(false); // Track if we want to keep recording after onend
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
@@ -288,6 +289,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
       recognition.onstart = () => {
         console.log('Voice input started - speak now...');
+        keepRecordingRef.current = true;
         setIsRecording(true);
         resolve();
       };
@@ -342,9 +344,13 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               if (submitBtn) {
                 console.log('[Voice] Clicking submit button (recording continues)');
                 submitBtn.click();
+                // Clear inputRef after submit so next speech segment starts fresh
+                // This prevents concatenation with previous submitted text
+                inputRef.current = '';
               } else {
                 console.log('[Voice] No submit button found, trying form dispatch');
                 formRef.current?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                inputRef.current = '';
               }
             }, 150);
           }
@@ -361,7 +367,18 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
       };
 
       recognition.onend = () => {
-        console.log('Voice input ended');
+        console.log('Voice input ended, keepRecording:', keepRecordingRef.current);
+        // If we want to keep recording (auto-submit mode), restart recognition
+        if (keepRecordingRef.current && mediaRecorderRef.current) {
+          console.log('Restarting recognition to keep recording active...');
+          try {
+            recognition.start();
+            // Don't set isRecording to false - we're continuing
+            return;
+          } catch (error) {
+            console.error('Failed to restart recognition:', error);
+          }
+        }
         setIsRecording(false);
         mediaRecorderRef.current = null;
       };
@@ -384,6 +401,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const stopWebSpeechRecording = () => {
     const recognition = mediaRecorderRef.current as any;
     if (recognition && recognition.stop) {
+      // Set flag to false so onend doesn't restart recording
+      keepRecordingRef.current = false;
       try {
         recognition.stop();
       } catch (error) {
