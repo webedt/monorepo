@@ -277,6 +277,17 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         return;
       }
 
+      // Clean up any existing recognition instance first
+      if (mediaRecorderRef.current) {
+        try {
+          (mediaRecorderRef.current as any).stop();
+        } catch (e) {
+          // Ignore errors when stopping
+        }
+        mediaRecorderRef.current = null;
+      }
+      keepRecordingRef.current = false;
+
       const recognition = new SpeechRecognition();
       recognition.continuous = true; // Keep listening until manually stopped
       recognition.interimResults = false;
@@ -374,18 +385,25 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           console.log('Restarting recognition to keep recording active...');
           // Use setTimeout to avoid "already started" errors
           setTimeout(() => {
-            if (keepRecordingRef.current) {
+            if (keepRecordingRef.current && mediaRecorderRef.current) {
               try {
                 recognition.start();
+                // Explicitly ensure isRecording stays true (onstart might not fire on restart)
+                setIsRecording(true);
                 console.log('Recognition restarted successfully');
               } catch (error) {
                 console.error('Failed to restart recognition:', error);
+                keepRecordingRef.current = false;
                 setIsRecording(false);
                 mediaRecorderRef.current = null;
               }
+            } else {
+              // If keepRecording was turned off during the timeout, clean up
+              setIsRecording(false);
+              mediaRecorderRef.current = null;
             }
           }, 100);
-          // Don't set isRecording to false - we're continuing
+          // Don't set isRecording to false yet - we're attempting to continue
           return;
         }
         setIsRecording(false);
@@ -408,22 +426,30 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
   // Stop Web Speech API recording
   const stopWebSpeechRecording = () => {
+    // Set flag to false FIRST so onend doesn't restart recording
+    keepRecordingRef.current = false;
+
     const recognition = mediaRecorderRef.current as any;
     if (recognition && recognition.stop) {
-      // Set flag to false so onend doesn't restart recording
-      keepRecordingRef.current = false;
       try {
         recognition.stop();
       } catch (error) {
         console.error('Error stopping recognition:', error);
       }
-      setIsRecording(false);
     }
+
+    // Clear ref and state regardless of whether stop() was called
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
   };
 
   // Toggle recording on/off
   const toggleRecording = () => {
-    if (isRecording) {
+    // Use both state and ref to determine actual recording status
+    // This handles the case where recognition is restarting (ref is true but state might briefly be false)
+    const actuallyRecording = isRecording || keepRecordingRef.current || mediaRecorderRef.current;
+
+    if (actuallyRecording) {
       stopRecording();
     } else {
       startRecording();
