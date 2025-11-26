@@ -176,8 +176,13 @@ export default function QuickChatSetup() {
                   className="relative flex items-center justify-between w-full h-12 px-4 border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
                   disabled={!hasGithubAuth || isLoadingRepos}
                 >
-                  <span className="truncate">
-                    {isLoadingRepos ? 'Loading...' : selectedRepo
+                  <span className="truncate flex items-center gap-2">
+                    {isLoadingRepos ? (
+                      <>
+                        <span className="loading loading-spinner loading-xs"></span>
+                        Loading...
+                      </>
+                    ) : selectedRepo
                       ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName || 'No repository'
                       : 'No repository'}
                   </span>
@@ -309,12 +314,20 @@ export default function QuickChatSetup() {
           </div>
 
           {/* Action button */}
-          <div className="flex justify-center pt-4">
+          <div className="flex justify-center pt-4 relative">
             <button
               onClick={handleStart}
-              className="btn btn-primary px-12"
+              disabled={isLoadingRepos}
+              className="btn btn-primary px-12 disabled:opacity-50"
             >
-              Start Session
+              {isLoadingRepos ? (
+                <>
+                  <span className="loading loading-spinner loading-sm"></span>
+                  Loading...
+                </>
+              ) : (
+                'Start Session'
+              )}
             </button>
           </div>
         </div>
