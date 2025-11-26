@@ -75,9 +75,11 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   else if (data.type === 'message' && data.message) {
     content = data.message;
     eventLabel = '💬';
+    messageType = 'system';
   } else if (data.type === 'session_name' && data.sessionName) {
     content = `Session: ${data.sessionName}`;
     eventLabel = '📝';
+    messageType = 'system';
   } else if (data.type === 'assistant_message' && data.data) {
     const msgData = data.data;
 
@@ -103,11 +105,13 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
       return null;
     }
   }
-  // Fallback to direct fields
+  // Fallback to direct fields - treat as system status messages
   else if (typeof data === 'string') {
     content = data;
+    messageType = 'system';
   } else if (data.message) {
     content = data.message;
+    messageType = 'system';
   } else if (data.content) {
     if (Array.isArray(data.content)) {
       const textBlocks = data.content
@@ -115,14 +119,18 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
         .map((block: any) => block.text);
       if (textBlocks.length > 0) {
         content = textBlocks.join('\n');
+        messageType = 'system';
       }
     } else if (typeof data.content === 'string') {
       content = data.content;
+      messageType = 'system';
     }
   } else if (data.text) {
     content = data.text;
+    messageType = 'system';
   } else if (data.result) {
     content = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
+    messageType = 'system';
   }
 
   // Skip if no meaningful content
@@ -720,11 +728,13 @@ export default function Chat() {
       else if (data.type === 'message' && data.message) {
         content = data.message;
         eventLabel = '💬';
+        messageType = 'system';
       } else if (data.type === 'session_name' && data.sessionName) {
         // Session name - auto-save if not manually edited
         const newTitle = data.sessionName;
         content = `Session: ${newTitle}`;
         eventLabel = '📝';
+        messageType = 'system';
 
         // Auto-update the session title if:
         // 1. User hasn't manually edited the title
@@ -769,11 +779,13 @@ export default function Chat() {
           return;
         }
       }
-      // Fallback to direct fields
+      // Fallback to direct fields - treat as system status messages
       else if (typeof data === 'string') {
         content = data;
+        messageType = 'system';
       } else if (data.message) {
         content = data.message;
+        messageType = 'system';
       } else if (data.content) {
         if (Array.isArray(data.content)) {
           const textBlocks = data.content
@@ -781,14 +793,18 @@ export default function Chat() {
             .map((block: any) => block.text);
           if (textBlocks.length > 0) {
             content = textBlocks.join('\n');
+            messageType = 'system';
           }
         } else if (typeof data.content === 'string') {
           content = data.content;
+          messageType = 'system';
         }
       } else if (data.text) {
         content = data.text;
+        messageType = 'system';
       } else if (data.result) {
         content = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
+        messageType = 'system';
       }
 
       // Skip if no meaningful content
