@@ -29,29 +29,63 @@ export class LLMHelper {
   private async runQuery(prompt: string): Promise<string> {
     let result = '';
 
-    const queryStream = query({
-      prompt,
-      options: {
-        model: 'claude-haiku-4-5-20251001',
-        cwd: this.workspace,
-        allowDangerouslySkipPermissions: true,
-        permissionMode: 'bypassPermissions',
-        maxTurns: 1, // Single turn, just need the response
-      }
+    logger.info('LLMHelper: Starting query', {
+      component: 'LLMHelper',
+      promptLength: prompt.length,
+      workspace: this.workspace
     });
 
-    for await (const message of queryStream) {
-      // Extract text from assistant messages
-      if (message.type === 'assistant' && message.message?.content) {
-        const content = message.message.content;
-        if (Array.isArray(content)) {
-          for (const item of content) {
-            if (item.type === 'text' && item.text) {
-              result += item.text;
+    try {
+      const queryStream = query({
+        prompt,
+        options: {
+          model: 'claude-haiku-4-5-20251001',
+          cwd: this.workspace,
+          allowDangerouslySkipPermissions: true,
+          permissionMode: 'bypassPermissions',
+          maxTurns: 1, // Single turn, just need the response
+        }
+      });
+
+      for await (const message of queryStream) {
+        logger.info('LLMHelper: Received message', {
+          component: 'LLMHelper',
+          messageType: message.type,
+          subtype: (message as any).subtype
+        });
+
+        // Extract text from assistant messages
+        if (message.type === 'assistant' && message.message?.content) {
+          const content = message.message.content;
+          if (Array.isArray(content)) {
+            for (const item of content) {
+              if (item.type === 'text' && item.text) {
+                result += item.text;
+              }
             }
           }
         }
+
+        // Check for errors
+        if (message.type === 'result' && (message as any).is_error) {
+          logger.error('LLMHelper: Query returned error result', null, {
+            component: 'LLMHelper',
+            result: (message as any).result
+          });
+        }
       }
+
+      logger.info('LLMHelper: Query completed', {
+        component: 'LLMHelper',
+        resultLength: result.length,
+        resultPreview: result.substring(0, 100)
+      });
+
+    } catch (error) {
+      logger.error('LLMHelper: Query stream error', error, {
+        component: 'LLMHelper'
+      });
+      throw error;
     }
 
     return result.trim();
@@ -101,6 +135,12 @@ Commit message:`;
     parentBranch: string
   ): Promise<{ title: string; branchName: string }> {
     try {
+      logger.info('LLMHelper: Generating session title and branch name', {
+        component: 'LLMHelper',
+        userRequestLength: userRequest.length,
+        parentBranch
+      });
+
       const prompt = `Based on the following user request, generate BOTH a session title and a git branch name.
 
 User request:
@@ -129,6 +169,11 @@ Rules for BRANCH:
 Response:`;
 
       const text = await this.runQuery(prompt);
+
+      logger.info('LLMHelper: Raw LLM response', {
+        component: 'LLMHelper',
+        response: text
+      });
 
       // Parse the response
       const titleMatch = text.match(/TITLE:\s*(.+)/i);
