@@ -57,6 +57,7 @@ if (usePostgres) {
       github_access_token TEXT,
       claude_auth JSONB,
       image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024,
+      voice_command_keywords JSONB DEFAULT '[]'::jsonb,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
 
@@ -134,6 +135,12 @@ if (usePostgres) {
           WHERE table_name = 'users' AND column_name = 'display_name'
         ) THEN
           ALTER TABLE users ADD COLUMN display_name TEXT;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'voice_command_keywords'
+        ) THEN
+          ALTER TABLE users ADD COLUMN voice_command_keywords JSONB DEFAULT '[]'::jsonb;
         END IF;
         -- Refactor session ID to use {owner}/{repo}/{branch} format
         IF NOT EXISTS (
@@ -240,6 +247,7 @@ if (usePostgres) {
       github_access_token TEXT,
       claude_auth TEXT,
       image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024,
+      voice_command_keywords TEXT DEFAULT '[]',
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
@@ -342,6 +350,12 @@ if (usePostgres) {
     if (!hasDisplayNameColumn) {
       sqlite.exec('ALTER TABLE users ADD COLUMN display_name TEXT;');
       console.log('SQLite migration: Added display_name column to users');
+    }
+
+    const hasVoiceCommandKeywordsColumn = usersInfo.some((col) => col.name === 'voice_command_keywords');
+    if (!hasVoiceCommandKeywordsColumn) {
+      sqlite.exec("ALTER TABLE users ADD COLUMN voice_command_keywords TEXT DEFAULT '[]';");
+      console.log('SQLite migration: Added voice_command_keywords column to users');
     }
   } catch (err) {
     console.error('Error applying SQLite migrations:', err);
