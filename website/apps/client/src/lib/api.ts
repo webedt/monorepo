@@ -167,6 +167,8 @@ export const sessionsApi = {
 
   getMessages: (id: string) => fetchApi(`/api/sessions/${id}/messages`),
 
+  getEvents: (id: string) => fetchApi(`/api/sessions/${id}/events`),
+
   createMessage: (id: string, type: string, content: string) =>
     fetchApi(`/api/sessions/${id}/messages`, {
       method: 'POST',

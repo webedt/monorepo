@@ -62,6 +62,17 @@ export const messages = pgTable('messages', {
   timestamp: timestamp('timestamp').defaultNow().notNull(),
 });
 
+// Raw SSE events table - stores events exactly as received for replay
+export const events = pgTable('events', {
+  id: serial('id').primaryKey(),
+  chatSessionId: text('chat_session_id')
+    .notNull()
+    .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull(), // SSE event name: 'commit_progress', 'github_pull_progress', 'assistant_message', etc.
+  eventData: json('event_data').notNull(), // Raw JSON data from SSE event
+  timestamp: timestamp('timestamp').defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -70,3 +81,5 @@ export type ChatSession = typeof chatSessions.$inferSelect;
 export type NewChatSession = typeof chatSessions.$inferInsert;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type Event = typeof events.$inferSelect;
+export type NewEvent = typeof events.$inferInsert;

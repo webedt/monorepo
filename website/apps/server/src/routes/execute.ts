@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/index';
-import { chatSessions, messages, users } from '../db/index';
+import { chatSessions, messages, users, events } from '../db/index';
 import { eq, and, or } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
@@ -597,65 +597,17 @@ const executeHandler = async (req: any, res: any) => {
                 console.log(`[Execute] No sessionId in event data:`, JSON.stringify(eventData).substring(0, 200));
               }
 
-              // Store assistant messages (extract content from various event structures)
-              // Add emoji prefixes to match client-side display for consistency when loading from DB
-              let messageContent: string | null = null;
-              let emojiPrefix = '';
+              // Store raw SSE event to database for replay
+              // Determine the effective event type (from SSE event line or data.type)
+              const effectiveEventType = currentEvent || eventData.type || 'unknown';
 
-              // Handle SSE event types (commit_progress, github_pull_progress)
-              if (currentEvent === 'commit_progress') {
-                messageContent = typeof eventData === 'string' ? eventData : (eventData.message || JSON.stringify(eventData));
-                emojiPrefix = '📤 ';
-              } else if (currentEvent === 'github_pull_progress') {
-                messageContent = typeof eventData === 'string' ? eventData : (eventData.message || JSON.stringify(eventData));
-                emojiPrefix = '⬇️ ';
-              }
-              // Extract content from different event types
-              else if (eventData.type === 'message' && eventData.message) {
-                messageContent = eventData.message;
-                emojiPrefix = '💬 ';
-              } else if (eventData.type === 'session_name' && eventData.sessionName) {
-                messageContent = `Session: ${eventData.sessionName}`;
-                emojiPrefix = '📝 ';
-              } else if (eventData.type === 'assistant_message' && eventData.data) {
-                const msgData = eventData.data;
-
-                // Handle assistant message with Claude response
-                if (msgData.type === 'assistant' && msgData.message?.content) {
-                  const contentBlocks = msgData.message.content;
-                  if (Array.isArray(contentBlocks)) {
-                    const textParts = contentBlocks
-                      .filter((block: any) => block.type === 'text' && block.text)
-                      .map((block: any) => block.text);
-                    if (textParts.length > 0) {
-                      messageContent = textParts.join('\n');
-                      emojiPrefix = '🤖 ';
-                    }
-                  }
-                }
-                // Skip result type - content already saved from assistant message
-                // (result contains duplicate content that was already in the assistant message)
-                else if (msgData.type === 'result') {
-                  // Don't save result messages to prevent duplicates
-                  messageContent = null;
-                }
-              }
-              // Fallback to direct fields
-              else if (eventData.message) {
-                messageContent = eventData.message;
-                emojiPrefix = '💬 ';
-              } else if (eventData.content) {
-                messageContent = typeof eventData.content === 'string' ? eventData.content : JSON.stringify(eventData.content);
-              } else if (eventData.text) {
-                messageContent = eventData.text;
-              }
-
-              // Save to database if we extracted content (with emoji prefix for consistency)
-              if (messageContent) {
-                await db.insert(messages).values({
+              // Skip certain events that don't need to be stored
+              const skipEventTypes = ['completed', 'error'];
+              if (!skipEventTypes.includes(effectiveEventType)) {
+                await db.insert(events).values({
                   chatSessionId: chatSession.id,
-                  type: 'assistant',
-                  content: emojiPrefix + messageContent,
+                  eventType: effectiveEventType,
+                  eventData: eventData,
                 });
               }
 
