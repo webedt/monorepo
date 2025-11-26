@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
+import type { GitHubPullRequest } from '@webedt/shared';
 import { useEventSource } from '@/hooks/useEventSource';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
@@ -47,6 +48,9 @@ export default function Chat() {
     mediaType: string;
     fileName: string;
   } | null>(null);
+  const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
+  const [prError, setPrError] = useState<string | null>(null);
+  const [prSuccess, setPrSuccess] = useState<string | null>(null);
 
   // Get repo store actions
   const repoStore = useRepoStore();
@@ -144,6 +148,99 @@ export default function Chat() {
       navigate('/dashboard');
     },
   });
+
+  // Query to check for existing PR
+  const { data: prData, refetch: refetchPr } = useQuery({
+    queryKey: ['pr', session?.repositoryOwner, session?.repositoryName, session?.branch],
+    queryFn: async () => {
+      if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch) {
+        return null;
+      }
+      const response = await githubApi.getPulls(
+        session.repositoryOwner,
+        session.repositoryName,
+        session.branch,
+        session.baseBranch || undefined
+      );
+      return response.data as GitHubPullRequest[];
+    },
+    enabled: !!session?.repositoryOwner && !!session?.repositoryName && !!session?.branch,
+    refetchOnWindowFocus: false,
+  });
+
+  const existingPr = prData?.find((pr: GitHubPullRequest) => pr.state === 'open');
+  const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged);
+
+  const handleCreatePR = async () => {
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('create');
+    setPrError(null);
+    setPrSuccess(null);
+
+    try {
+      const response = await githubApi.createPull(
+        session.repositoryOwner,
+        session.repositoryName,
+        {
+          title: session.userRequest || `Merge ${session.branch} into ${session.baseBranch}`,
+          head: session.branch,
+          base: session.baseBranch,
+        }
+      );
+      setPrSuccess(`PR #${response.data.number} created successfully!`);
+      refetchPr();
+    } catch (err: any) {
+      setPrError(err.message || 'Failed to create PR');
+    } finally {
+      setPrLoading(null);
+    }
+  };
+
+  const handleViewPR = () => {
+    const pr = existingPr || mergedPr;
+    if (pr?.htmlUrl) {
+      window.open(pr.htmlUrl, '_blank');
+    }
+  };
+
+  const handleAutoPR = async () => {
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('auto');
+    setPrError(null);
+    setPrSuccess(null);
+
+    try {
+      const response = await githubApi.autoPR(
+        session.repositoryOwner,
+        session.repositoryName,
+        session.branch,
+        {
+          base: session.baseBranch,
+          title: session.userRequest || `Merge ${session.branch} into ${session.baseBranch}`,
+        }
+      );
+      setPrSuccess(`Auto PR completed! PR #${response.data.pr?.number} merged successfully.`);
+      refetchPr();
+    } catch (err: any) {
+      // Check if partial success (PR created but not merged)
+      if (err.message?.includes('conflict')) {
+        setPrError('Merge conflict detected. Please resolve conflicts manually.');
+      } else {
+        setPrError(err.message || 'Failed to complete Auto PR');
+      }
+      refetchPr();
+    } finally {
+      setPrLoading(null);
+    }
+  };
 
   const handleEditTitle = () => {
     if (session) {
@@ -759,6 +856,65 @@ export default function Chat() {
                   </h1>
                   {session && (
                     <div className="flex items-center space-x-2">
+                      {/* PR Buttons - only show if session has branch info */}
+                      {session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
+                        <>
+                          {/* View PR button - show if PR exists */}
+                          {(existingPr || mergedPr) && (
+                            <button
+                              onClick={handleViewPR}
+                              className={`btn btn-sm ${mergedPr ? 'btn-success' : 'btn-info'}`}
+                              title={mergedPr ? `View merged PR #${mergedPr.number}` : `View PR #${existingPr?.number}`}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
+                                <path fillRule="evenodd" d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                              </svg>
+                              {mergedPr ? 'Merged' : `PR #${existingPr?.number}`}
+                            </button>
+                          )}
+
+                          {/* Create PR button - show if no open PR exists and not merged */}
+                          {!existingPr && !mergedPr && (
+                            <button
+                              onClick={handleCreatePR}
+                              className="btn btn-sm btn-primary"
+                              disabled={prLoading !== null}
+                              title="Create a pull request"
+                            >
+                              {prLoading === 'create' ? (
+                                <span className="loading loading-spinner loading-xs mr-1"></span>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
+                                  <path fillRule="evenodd" d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
+                                </svg>
+                              )}
+                              Create PR
+                            </button>
+                          )}
+
+                          {/* Auto PR button - show if not already merged */}
+                          {!mergedPr && (
+                            <button
+                              onClick={handleAutoPR}
+                              className="btn btn-sm btn-accent"
+                              disabled={prLoading !== null}
+                              title="Create PR, merge base branch, and merge PR in one click"
+                            >
+                              {prLoading === 'auto' ? (
+                                <span className="loading loading-spinner loading-xs mr-1"></span>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                              Auto PR
+                            </button>
+                          )}
+                        </>
+                      )}
+
+                      <div className="border-l border-base-300 h-6 mx-1"></div>
+
                       <button
                         onClick={handleEditTitle}
                         className="btn btn-ghost btn-sm btn-circle"
@@ -812,6 +968,23 @@ export default function Chat() {
                 <span className="text-sm">
                   Add Claude credentials in settings to use the AI assistant
                 </span>
+              </div>
+            )}
+
+            {/* PR Status Messages */}
+            {prSuccess && (
+              <div className="alert alert-success mt-4">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="text-sm">{prSuccess}</span>
+                <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+              </div>
+            )}
+
+            {prError && (
+              <div className="alert alert-error mt-4">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="text-sm">{prError}</span>
+                <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
               </div>
             )}
           </div>

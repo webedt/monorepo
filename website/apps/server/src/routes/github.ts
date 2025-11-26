@@ -205,6 +205,377 @@ router.delete('/repos/:owner/:repo/branches/:branch', requireAuth, async (req, r
   }
 });
 
+// Get pull request for a branch
+router.get('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const { head, base } = req.query;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // List PRs filtered by head branch
+    const { data: pulls } = await octokit.pulls.list({
+      owner,
+      repo,
+      head: head ? `${owner}:${head}` : undefined,
+      base: base as string | undefined,
+      state: 'all',
+      per_page: 10,
+    });
+
+    const formattedPulls = pulls.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      state: pr.state,
+      htmlUrl: pr.html_url,
+      head: {
+        ref: pr.head.ref,
+        sha: pr.head.sha,
+      },
+      base: {
+        ref: pr.base.ref,
+        sha: pr.base.sha,
+      },
+      mergeable: (pr as any).mergeable ?? null,
+      merged: (pr as any).merged ?? false,
+      createdAt: pr.created_at,
+      updatedAt: pr.updated_at,
+    }));
+
+    res.json({ success: true, data: formattedPulls });
+  } catch (error) {
+    console.error('GitHub get pulls error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch pull requests' });
+  }
+});
+
+// Create a pull request
+router.post('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const { title, head, base, body } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!head || !base) {
+      res.status(400).json({ success: false, error: 'Head and base branches are required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    const { data: pr } = await octokit.pulls.create({
+      owner,
+      repo,
+      title: title || `Merge ${head} into ${base}`,
+      head,
+      base,
+      body: body || '',
+    });
+
+    console.log(`[GitHub] Created PR #${pr.number} for ${owner}/${repo}: ${head} -> ${base}`);
+
+    res.json({
+      success: true,
+      data: {
+        number: pr.number,
+        title: pr.title,
+        state: pr.state,
+        htmlUrl: pr.html_url,
+        head: {
+          ref: pr.head.ref,
+          sha: pr.head.sha,
+        },
+        base: {
+          ref: pr.base.ref,
+          sha: pr.base.sha,
+        },
+        mergeable: pr.mergeable,
+        merged: pr.merged,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string; response?: { data?: { errors?: Array<{ message?: string }> } } };
+    console.error('GitHub create PR error:', error);
+
+    // Handle case where PR already exists
+    if (err.status === 422 && err.response?.data?.errors?.some((e: { message?: string }) => e.message?.includes('already exists'))) {
+      res.status(409).json({ success: false, error: 'A pull request already exists for this branch' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to create pull request' });
+  }
+});
+
+// Merge a pull request
+router.post('/repos/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo, pull_number } = req.params;
+    const { merge_method, commit_title, commit_message } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    const { data: result } = await octokit.pulls.merge({
+      owner,
+      repo,
+      pull_number: parseInt(pull_number, 10),
+      merge_method: merge_method || 'merge',
+      commit_title,
+      commit_message,
+    });
+
+    console.log(`[GitHub] Merged PR #${pull_number} for ${owner}/${repo}`);
+
+    res.json({
+      success: true,
+      data: {
+        merged: result.merged,
+        message: result.message,
+        sha: result.sha,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub merge PR error:', error);
+
+    if (err.status === 405) {
+      res.status(405).json({ success: false, error: 'Pull request is not mergeable' });
+      return;
+    }
+    if (err.status === 409) {
+      res.status(409).json({ success: false, error: 'Merge conflict - head branch must be updated' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to merge pull request' });
+  }
+});
+
+// Merge base branch into feature branch (update branch)
+router.post('/repos/:owner/:repo/branches/:branch/merge-base', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo, branch } = req.params;
+    const { base } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!base) {
+      res.status(400).json({ success: false, error: 'Base branch is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Use the merge API to merge base into the feature branch
+    const { data: result } = await octokit.repos.merge({
+      owner,
+      repo,
+      base: branch, // The branch to merge into (feature branch)
+      head: base,   // The branch to merge from (base branch like main)
+      commit_message: `Merge ${base} into ${branch}`,
+    });
+
+    console.log(`[GitHub] Merged ${base} into ${branch} for ${owner}/${repo}`);
+
+    res.json({
+      success: true,
+      data: {
+        sha: result.sha,
+        message: `Successfully merged ${base} into ${branch}`,
+        commit: {
+          sha: result.sha,
+          message: result.commit?.message,
+        },
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub merge base error:', error);
+
+    // 204 means nothing to merge (already up to date)
+    if (err.status === 204) {
+      res.json({ success: true, data: { message: 'Branch is already up to date', sha: null } });
+      return;
+    }
+    // 409 means merge conflict
+    if (err.status === 409) {
+      res.status(409).json({ success: false, error: 'Merge conflict - manual resolution required' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to merge base branch' });
+  }
+});
+
+// Auto PR: Create PR, merge base branch, and merge PR in one operation
+router.post('/repos/:owner/:repo/branches/:branch/auto-pr', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo, branch } = req.params;
+    const { base, title, body } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!base) {
+      res.status(400).json({ success: false, error: 'Base branch is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+    const results: {
+      step: string;
+      pr?: { number: number; htmlUrl: string };
+      mergeBase?: { sha: string | null; message: string };
+      mergePr?: { merged: boolean; sha: string };
+    } = { step: 'started' };
+
+    // Step 1: Check if PR already exists
+    let prNumber: number | null = null;
+    let prUrl: string | null = null;
+
+    const { data: existingPulls } = await octokit.pulls.list({
+      owner,
+      repo,
+      head: `${owner}:${branch}`,
+      base,
+      state: 'open',
+    });
+
+    if (existingPulls.length > 0) {
+      prNumber = existingPulls[0].number;
+      prUrl = existingPulls[0].html_url;
+      console.log(`[GitHub] Using existing PR #${prNumber} for ${owner}/${repo}`);
+    } else {
+      // Create new PR
+      try {
+        const { data: pr } = await octokit.pulls.create({
+          owner,
+          repo,
+          title: title || `Merge ${branch} into ${base}`,
+          head: branch,
+          base,
+          body: body || '',
+        });
+        prNumber = pr.number;
+        prUrl = pr.html_url;
+        console.log(`[GitHub] Created PR #${prNumber} for ${owner}/${repo}`);
+      } catch (createError: unknown) {
+        const createErr = createError as { status?: number; message?: string };
+        // If no commits between branches, cannot create PR
+        if (createErr.status === 422) {
+          res.status(422).json({
+            success: false,
+            error: 'No commits between branches - nothing to merge'
+          });
+          return;
+        }
+        throw createError;
+      }
+    }
+
+    results.step = 'pr_created';
+    results.pr = { number: prNumber!, htmlUrl: prUrl! };
+
+    // Step 2: Try to merge base into the feature branch (update branch)
+    try {
+      const { data: mergeResult } = await octokit.repos.merge({
+        owner,
+        repo,
+        base: branch,
+        head: base,
+        commit_message: `Merge ${base} into ${branch}`,
+      });
+      results.step = 'base_merged';
+      results.mergeBase = { sha: mergeResult.sha, message: `Merged ${base} into ${branch}` };
+      console.log(`[GitHub] Merged ${base} into ${branch}`);
+    } catch (mergeError: unknown) {
+      const mergeErr = mergeError as { status?: number; message?: string };
+      // 204 = already up to date, 409 = conflict
+      if (mergeErr.status === 204) {
+        results.step = 'base_merged';
+        results.mergeBase = { sha: null, message: 'Branch already up to date' };
+      } else if (mergeErr.status === 409) {
+        // Return partial success - PR created but needs manual conflict resolution
+        res.status(409).json({
+          success: false,
+          error: 'Merge conflict when updating branch - manual resolution required',
+          data: results,
+        });
+        return;
+      } else {
+        throw mergeError;
+      }
+    }
+
+    // Step 3: Merge the PR
+    // Wait a moment for GitHub to process the merge
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    try {
+      const { data: prMergeResult } = await octokit.pulls.merge({
+        owner,
+        repo,
+        pull_number: prNumber!,
+        merge_method: 'merge',
+      });
+      results.step = 'completed';
+      results.mergePr = { merged: prMergeResult.merged, sha: prMergeResult.sha };
+      console.log(`[GitHub] Merged PR #${prNumber} for ${owner}/${repo}`);
+    } catch (prMergeError: unknown) {
+      const prMergeErr = prMergeError as { status?: number; message?: string };
+      if (prMergeErr.status === 405) {
+        res.status(405).json({
+          success: false,
+          error: 'PR is not mergeable - check branch protection rules',
+          data: results,
+        });
+        return;
+      }
+      if (prMergeErr.status === 409) {
+        res.status(409).json({
+          success: false,
+          error: 'Merge conflict when merging PR',
+          data: results,
+        });
+        return;
+      }
+      throw prMergeError;
+    }
+
+    res.json({
+      success: true,
+      data: results,
+    });
+  } catch (error) {
+    console.error('GitHub auto PR error:', error);
+    res.status(500).json({ success: false, error: 'Failed to complete auto PR' });
+  }
+});
+
 // Disconnect GitHub
 router.post('/disconnect', requireAuth, async (req, res) => {
   try {

@@ -98,6 +98,39 @@ export const githubApi = {
     fetchApi('/api/github/disconnect', {
       method: 'POST',
     }),
+
+  // Pull Request operations
+  getPulls: (owner: string, repo: string, head?: string, base?: string) => {
+    const params = new URLSearchParams();
+    if (head) params.append('head', head);
+    if (base) params.append('base', base);
+    const queryString = params.toString();
+    return fetchApi(`/api/github/repos/${owner}/${repo}/pulls${queryString ? `?${queryString}` : ''}`);
+  },
+
+  createPull: (owner: string, repo: string, data: { title?: string; head: string; base: string; body?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/pulls`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  mergePull: (owner: string, repo: string, pullNumber: number, data?: { merge_method?: string; commit_title?: string; commit_message?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, {
+      method: 'POST',
+      body: data || {},
+    }),
+
+  mergeBase: (owner: string, repo: string, branch: string, base: string) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/branches/${branch}/merge-base`, {
+      method: 'POST',
+      body: { base },
+    }),
+
+  autoPR: (owner: string, repo: string, branch: string, data: { base: string; title?: string; body?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/branches/${branch}/auto-pr`, {
+      method: 'POST',
+      body: data,
+    }),
 };
 
 // User API
