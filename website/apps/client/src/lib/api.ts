@@ -167,6 +167,12 @@ export const sessionsApi = {
 
   getMessages: (id: string) => fetchApi(`/api/sessions/${id}/messages`),
 
+  createMessage: (id: string, type: string, content: string) =>
+    fetchApi(`/api/sessions/${id}/messages`, {
+      method: 'POST',
+      body: { type, content },
+    }),
+
   update: (id: string, userRequest: string) =>
     fetchApi(`/api/sessions/${id}`, {
       method: 'PATCH',

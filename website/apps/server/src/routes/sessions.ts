@@ -127,6 +127,64 @@ router.get('/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Create a message for a session
+router.post('/:id/messages', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+    const { type, content } = req.body;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    if (!type || !content) {
+      res.status(400).json({ success: false, error: 'Type and content are required' });
+      return;
+    }
+
+    // Validate message type
+    const validTypes = ['user', 'assistant', 'system', 'error'];
+    if (!validTypes.includes(type)) {
+      res.status(400).json({ success: false, error: 'Invalid message type' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Create message
+    const [newMessage] = await db
+      .insert(messages)
+      .values({
+        chatSessionId: sessionId,
+        type,
+        content,
+      })
+      .returning();
+
+    res.json({ success: true, data: newMessage });
+  } catch (error) {
+    console.error('Create message error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create message' });
+  }
+});
+
 // Get messages for a session
 router.get('/:id/messages', requireAuth, async (req, res) => {
   try {

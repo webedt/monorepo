@@ -222,6 +222,7 @@ export default function Chat() {
       setPrSuccess(`PR #${response.data.number} created successfully!`);
 
       // Add message to chat history
+      const prMessageContent = `🔀 Pull Request #${response.data.number} created\n\n${response.data.htmlUrl}`;
       messageIdCounter.current += 1;
       setMessages((prev) => [
         ...prev,
@@ -229,10 +230,19 @@ export default function Chat() {
           id: Date.now() + messageIdCounter.current,
           chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
           type: 'system',
-          content: `🔀 Pull Request #${response.data.number} created\n\n${response.data.htmlUrl}`,
+          content: prMessageContent,
           timestamp: new Date(),
         },
       ]);
+
+      // Persist message to database
+      if (sessionId && sessionId !== 'new') {
+        try {
+          await sessionsApi.createMessage(sessionId, 'system', prMessageContent);
+        } catch (err) {
+          console.error('Failed to persist PR message to database:', err);
+        }
+      }
 
       refetchPr();
       setNoPrNeeded(false);
@@ -279,6 +289,7 @@ export default function Chat() {
       setPrSuccess(`Auto PR completed! PR #${response.data.pr?.number} merged successfully.`);
 
       // Add message to chat history
+      const autoPrMessageContent = `🚀 Auto PR completed!\n\nPR #${response.data.pr?.number} created and merged into ${session.baseBranch}\n\n${response.data.pr?.htmlUrl}`;
       messageIdCounter.current += 1;
       setMessages((prev) => [
         ...prev,
@@ -286,10 +297,19 @@ export default function Chat() {
           id: Date.now() + messageIdCounter.current,
           chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
           type: 'system',
-          content: `🚀 Auto PR completed!\n\nPR #${response.data.pr?.number} created and merged into ${session.baseBranch}\n\n${response.data.pr?.htmlUrl}`,
+          content: autoPrMessageContent,
           timestamp: new Date(),
         },
       ]);
+
+      // Persist message to database
+      if (sessionId && sessionId !== 'new') {
+        try {
+          await sessionsApi.createMessage(sessionId, 'system', autoPrMessageContent);
+        } catch (err) {
+          console.error('Failed to persist Auto PR message to database:', err);
+        }
+      }
 
       refetchPr();
       setNoPrNeeded(false);
