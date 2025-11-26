@@ -4,7 +4,7 @@ import { githubApi, userApi, authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 
 // Pre-defined voice command keywords that cannot be deleted
-const DEFAULT_KEYWORDS = ['over', 'submit', 'enter', 'and'];
+const DEFAULT_KEYWORDS = ['over', 'submit', 'enter', 'period'];
 
 export default function Settings() {
   const user = useAuthStore((state) => state.user);
