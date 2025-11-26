@@ -895,7 +895,7 @@ export default function Chat() {
       <div className="flex flex-col flex-1">
       {/* Header - only show for existing sessions with messages */}
       {messages.length > 0 && (
-        <div className="bg-base-100 border-b border-base-300 p-4 sticky top-0 z-40">
+        <div className="bg-base-100 border-b border-base-300 p-4 sticky top-[104px] z-40">
           <div className="max-w-7xl mx-auto">
             <div className="flex items-center justify-between mb-2">
               {editingTitle && session ? (
