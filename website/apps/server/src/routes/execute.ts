@@ -598,13 +598,25 @@ const executeHandler = async (req: any, res: any) => {
               }
 
               // Store assistant messages (extract content from various event structures)
+              // Add emoji prefixes to match client-side display for consistency when loading from DB
               let messageContent: string | null = null;
+              let emojiPrefix = '';
 
+              // Handle SSE event types (commit_progress, github_pull_progress)
+              if (currentEvent === 'commit_progress') {
+                messageContent = typeof eventData === 'string' ? eventData : (eventData.message || JSON.stringify(eventData));
+                emojiPrefix = '📤 ';
+              } else if (currentEvent === 'github_pull_progress') {
+                messageContent = typeof eventData === 'string' ? eventData : (eventData.message || JSON.stringify(eventData));
+                emojiPrefix = '⬇️ ';
+              }
               // Extract content from different event types
-              if (eventData.type === 'message' && eventData.message) {
+              else if (eventData.type === 'message' && eventData.message) {
                 messageContent = eventData.message;
+                emojiPrefix = '💬 ';
               } else if (eventData.type === 'session_name' && eventData.sessionName) {
                 messageContent = `Session: ${eventData.sessionName}`;
+                emojiPrefix = '📝 ';
               } else if (eventData.type === 'assistant_message' && eventData.data) {
                 const msgData = eventData.data;
 
@@ -617,6 +629,7 @@ const executeHandler = async (req: any, res: any) => {
                       .map((block: any) => block.text);
                     if (textParts.length > 0) {
                       messageContent = textParts.join('\n');
+                      emojiPrefix = '🤖 ';
                     }
                   }
                 }
@@ -630,18 +643,19 @@ const executeHandler = async (req: any, res: any) => {
               // Fallback to direct fields
               else if (eventData.message) {
                 messageContent = eventData.message;
+                emojiPrefix = '💬 ';
               } else if (eventData.content) {
                 messageContent = typeof eventData.content === 'string' ? eventData.content : JSON.stringify(eventData.content);
               } else if (eventData.text) {
                 messageContent = eventData.text;
               }
 
-              // Save to database if we extracted content
+              // Save to database if we extracted content (with emoji prefix for consistency)
               if (messageContent) {
                 await db.insert(messages).values({
                   chatSessionId: chatSession.id,
                   type: 'assistant',
-                  content: messageContent,
+                  content: emojiPrefix + messageContent,
                 });
               }
 
