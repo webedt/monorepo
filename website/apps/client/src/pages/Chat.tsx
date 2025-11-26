@@ -1041,6 +1041,7 @@ export default function Chat() {
     <SessionLayout
       selectedRepo={selectedRepo}
       baseBranch={baseBranch}
+      branch={session?.branch ?? undefined}
       onRepoChange={setSelectedRepo}
       onBaseBranchChange={setBaseBranch}
       repositories={repositories}

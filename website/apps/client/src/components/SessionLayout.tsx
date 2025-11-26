@@ -11,6 +11,7 @@ import type { GitHubRepository } from '@webedt/shared';
 interface SessionLayoutProps {
   selectedRepo?: string;
   baseBranch?: string;
+  branch?: string;
   onRepoChange?: (repo: string) => void;
   onBaseBranchChange?: (branch: string) => void;
   repositories?: GitHubRepository[];
@@ -22,6 +23,7 @@ interface SessionLayoutProps {
 export default function SessionLayout({
   selectedRepo: selectedRepoProp,
   baseBranch: baseBranchProp,
+  branch: branchProp,
   onRepoChange,
   onBaseBranchChange,
   repositories: repositoriesProp,
@@ -61,7 +63,7 @@ export default function SessionLayout({
   // Use data with priority: props > store > session data > defaults
   const selectedRepo = selectedRepoProp ?? (repoStore.selectedRepo || sessionData?.data?.repositoryUrl || '');
   const baseBranch = baseBranchProp ?? (repoStore.baseBranch || sessionData?.data?.baseBranch || 'main');
-  const branch = sessionData?.data?.branch ?? '';
+  const branch = branchProp ?? sessionData?.data?.branch ?? '';
   const repositories = repositoriesProp ?? reposData?.data ?? [];
   const isLoadingRepos = isLoadingReposProp ?? isLoadingReposQuery;
   const isLocked = isLockedProp ?? (repoStore.isLocked || (!!sessionId && !!sessionData?.data));
