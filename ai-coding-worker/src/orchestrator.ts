@@ -287,12 +287,48 @@ export class Orchestrator {
                 timestamp: new Date().toISOString()
               });
 
-              const llmHelper = new LLMHelper();
+              // Debug: Show credential file path being used
+              const credPath = CredentialManager.getClaudeCredentialPath();
+              sendEvent({
+                type: 'debug',
+                message: `Reading credentials from: ${credPath}`,
+                timestamp: new Date().toISOString()
+              });
+
+              let llmHelper: LLMHelper;
+              try {
+                llmHelper = new LLMHelper();
+                sendEvent({
+                  type: 'debug',
+                  message: 'LLMHelper initialized successfully',
+                  timestamp: new Date().toISOString()
+                });
+              } catch (initError) {
+                sendEvent({
+                  type: 'debug',
+                  message: `LLMHelper init failed: ${initError instanceof Error ? initError.message : String(initError)}`,
+                  timestamp: new Date().toISOString()
+                });
+                throw initError;
+              }
+
               const userRequestText = this.serializeUserRequest(request.userRequest);
+              sendEvent({
+                type: 'debug',
+                message: `Calling generateSessionTitleAndBranch with request: "${userRequestText.substring(0, 100)}..."`,
+                timestamp: new Date().toISOString()
+              });
+
               const result = await llmHelper.generateSessionTitleAndBranch(
                 userRequestText,
                 pullResult.branch
               );
+
+              sendEvent({
+                type: 'debug',
+                message: `LLM returned: title="${result.title}", branchName="${result.branchName}"`,
+                timestamp: new Date().toISOString()
+              });
 
               const title = result.title;
               const descriptivePart = result.branchName;
@@ -366,16 +402,70 @@ export class Orchestrator {
                 baseBranch: pullResult.branch
               });
             } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              const errorStack = error instanceof Error ? error.stack : undefined;
+
               logger.error('Failed to create branch and generate title', error, {
                 component: 'Orchestrator',
                 websiteSessionId
               });
-              // Branch creation failure is non-critical - session can still work without GitHub integration
+
+              // Send detailed debug info about the failure
               sendEvent({
-                type: 'message',
-                message: `Warning: Failed to create branch - ${error instanceof Error ? error.message : String(error)}`,
+                type: 'debug',
+                message: `LLM naming failed: ${errorMessage}`,
+                error: errorMessage,
+                stack: errorStack,
                 timestamp: new Date().toISOString()
               });
+
+              // Use fallback values
+              const title = 'New Session';
+              const descriptivePart = 'auto-request';
+              const sessionIdSuffix = websiteSessionId.slice(-8);
+              branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
+
+              sendEvent({
+                type: 'debug',
+                message: `Using fallback: title="${title}", branch="${branchName}"`,
+                timestamp: new Date().toISOString()
+              });
+
+              // Still create the branch with fallback name
+              try {
+                const gitHelper = new GitHelper(workspacePath);
+                await gitHelper.createBranch(branchName);
+
+                const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
+                metadata.branch = branchName;
+                metadata.sessionPath = sessionPath;
+                metadata.repositoryOwner = repositoryOwner;
+                metadata.repositoryName = repositoryName;
+                metadata.sessionTitle = title;
+                this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+                sendEvent({
+                  type: 'branch_created',
+                  branchName: branchName,
+                  baseBranch: pullResult.branch,
+                  sessionPath: sessionPath,
+                  message: `Created and checked out branch: ${branchName}`,
+                  timestamp: new Date().toISOString()
+                });
+
+                sendEvent({
+                  type: 'session_name',
+                  sessionName: title,
+                  branchName: branchName,
+                  timestamp: new Date().toISOString()
+                });
+              } catch (branchError) {
+                sendEvent({
+                  type: 'message',
+                  message: `Warning: Failed to create branch - ${branchError instanceof Error ? branchError.message : String(branchError)}`,
+                  timestamp: new Date().toISOString()
+                });
+              }
             }
           }
         }

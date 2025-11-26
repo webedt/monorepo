@@ -91,14 +91,19 @@ Commit message:`
     userRequest: string,
     parentBranch: string
   ): Promise<{ title: string; branchName: string }> {
-    try {
-      const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 150,
-        messages: [
-          {
-            role: 'user',
-            content: `Based on the following user request, generate BOTH a session title and a git branch name.
+    logger.info('generateSessionTitleAndBranch called', {
+      component: 'LLMHelper',
+      userRequestLength: userRequest.length,
+      parentBranch
+    });
+
+    const response = await this.client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 150,
+      messages: [
+        {
+          role: 'user',
+          content: `Based on the following user request, generate BOTH a session title and a git branch name.
 
 User request:
 ${userRequest.substring(0, 1000)}
@@ -124,53 +129,52 @@ Rules for BRANCH:
 - Focus on the main action or feature
 
 Response:`
-          }
-        ]
-      });
+        }
+      ]
+    });
 
-      const content = response.content[0];
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from LLM');
-      }
+    logger.info('LLM API response received', {
+      component: 'LLMHelper',
+      contentLength: response.content.length
+    });
 
-      const text = content.text.trim();
-
-      // Parse the response
-      const titleMatch = text.match(/TITLE:\s*(.+)/i);
-      const branchMatch = text.match(/BRANCH:\s*(.+)/i);
-
-      let title = titleMatch ? titleMatch[1].trim() : 'New Session';
-      let branchName = branchMatch ? branchMatch[1].trim() : 'auto-request';
-
-      // Clean up title (ensure max 60 chars, remove quotes if present)
-      title = title
-        .replace(/^["']|["']$/g, '')
-        .substring(0, 60);
-
-      // Ensure branch name is valid
-      branchName = branchName
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .substring(0, 40);
-
-      logger.info('Generated session title and branch name', {
-        component: 'LLMHelper',
-        title,
-        branchName
-      });
-
-      return { title, branchName };
-    } catch (error) {
-      logger.error('Failed to generate session title and branch name', error, {
-        component: 'LLMHelper'
-      });
-      // Fallback
-      return {
-        title: 'New Session',
-        branchName: 'auto-request'
-      };
+    const content = response.content[0];
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type from LLM');
     }
+
+    const text = content.text.trim();
+    logger.info('LLM raw response', {
+      component: 'LLMHelper',
+      text
+    });
+
+    // Parse the response
+    const titleMatch = text.match(/TITLE:\s*(.+)/i);
+    const branchMatch = text.match(/BRANCH:\s*(.+)/i);
+
+    let title = titleMatch ? titleMatch[1].trim() : 'New Session';
+    let branchName = branchMatch ? branchMatch[1].trim() : 'auto-request';
+
+    // Clean up title (ensure max 60 chars, remove quotes if present)
+    title = title
+      .replace(/^["']|["']$/g, '')
+      .substring(0, 60);
+
+    // Ensure branch name is valid
+    branchName = branchName
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .substring(0, 40);
+
+    logger.info('Generated session title and branch name', {
+      component: 'LLMHelper',
+      title,
+      branchName
+    });
+
+    return { title, branchName };
   }
 }
