@@ -142,6 +142,14 @@ export class Orchestrator {
       // Step 1: Validate request
       this.validateRequest(request);
 
+      // Step 1.5: Write credentials early so LLMHelper can use them
+      // This ensures the same credentials used by the provider are available for LLM-based naming
+      CredentialManager.writeClaudeCredentials(request.codingAssistantAuthentication);
+      logger.info('Credentials written for LLM naming', {
+        component: 'Orchestrator',
+        websiteSessionId
+      });
+
       // Step 2: Download session from storage (determines if this is a new or resuming session)
       logger.info('Downloading session from storage', {
         component: 'Orchestrator',
@@ -271,21 +279,43 @@ export class Orchestrator {
           // Step 4.5: Generate session title and branch name (only for new sessions)
           if (!isResuming) {
             try {
-              let title: string;
-              let descriptivePart: string;
+              // Generate title and branch name using LLM
+              // LLMHelper reads credentials from ~/.claude/.credentials.json (written in Step 1.5)
+              sendEvent({
+                type: 'message',
+                message: 'Generating session title and branch name...',
+                timestamp: new Date().toISOString()
+              });
 
-              // TODO: OAuth tokens don't work with Claude API for direct calls
-              // The SDK handles auth internally, but we can't make separate API calls
-              // For now, use fallback values. Future options:
-              // 1. Use API key instead of OAuth for LLMHelper
-              // 2. Extract title from first response after main execution
-              // 3. Use a different title generation approach
-              title = 'New Session';
-              descriptivePart = 'auto-request';
+              // LLMHelper uses Claude Agent SDK (same auth as main execution)
+              const llmHelper = new LLMHelper(workspacePath);
 
-              logger.info('Using fallback title/branch (OAuth not supported for direct API calls)', {
+              const userRequestText = this.serializeUserRequest(request.userRequest);
+              sendEvent({
+                type: 'debug',
+                message: `Calling generateSessionTitleAndBranch with request: "${userRequestText.substring(0, 100)}..."`,
+                timestamp: new Date().toISOString()
+              });
+
+              const result = await llmHelper.generateSessionTitleAndBranch(
+                userRequestText,
+                pullResult.branch
+              );
+
+              sendEvent({
+                type: 'debug',
+                message: `LLM returned: title="${result.title}", branchName="${result.branchName}"`,
+                timestamp: new Date().toISOString()
+              });
+
+              const title = result.title;
+              const descriptivePart = result.branchName;
+
+              logger.info('Generated session title and branch name with LLM', {
                 component: 'Orchestrator',
-                websiteSessionId
+                websiteSessionId,
+                sessionTitle: title,
+                descriptivePart
               });
 
               // Extract last 8 characters of session ID for suffix
@@ -350,16 +380,70 @@ export class Orchestrator {
                 baseBranch: pullResult.branch
               });
             } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              const errorStack = error instanceof Error ? error.stack : undefined;
+
               logger.error('Failed to create branch and generate title', error, {
                 component: 'Orchestrator',
                 websiteSessionId
               });
-              // Branch creation failure is non-critical - session can still work without GitHub integration
+
+              // Send detailed debug info about the failure
               sendEvent({
-                type: 'message',
-                message: `Warning: Failed to create branch - ${error instanceof Error ? error.message : String(error)}`,
+                type: 'debug',
+                message: `LLM naming failed: ${errorMessage}`,
+                error: errorMessage,
+                stack: errorStack,
                 timestamp: new Date().toISOString()
               });
+
+              // Use fallback values
+              const title = 'New Session';
+              const descriptivePart = 'auto-request';
+              const sessionIdSuffix = websiteSessionId.slice(-8);
+              branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
+
+              sendEvent({
+                type: 'debug',
+                message: `Using fallback: title="${title}", branch="${branchName}"`,
+                timestamp: new Date().toISOString()
+              });
+
+              // Still create the branch with fallback name
+              try {
+                const gitHelper = new GitHelper(workspacePath);
+                await gitHelper.createBranch(branchName);
+
+                const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
+                metadata.branch = branchName;
+                metadata.sessionPath = sessionPath;
+                metadata.repositoryOwner = repositoryOwner;
+                metadata.repositoryName = repositoryName;
+                metadata.sessionTitle = title;
+                this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+                sendEvent({
+                  type: 'branch_created',
+                  branchName: branchName,
+                  baseBranch: pullResult.branch,
+                  sessionPath: sessionPath,
+                  message: `Created and checked out branch: ${branchName}`,
+                  timestamp: new Date().toISOString()
+                });
+
+                sendEvent({
+                  type: 'session_name',
+                  sessionName: title,
+                  branchName: branchName,
+                  timestamp: new Date().toISOString()
+                });
+              } catch (branchError) {
+                sendEvent({
+                  type: 'message',
+                  message: `Warning: Failed to create branch - ${branchError instanceof Error ? branchError.message : String(branchError)}`,
+                  timestamp: new Date().toISOString()
+                });
+              }
             }
           }
         }
@@ -461,33 +545,23 @@ export class Orchestrator {
             // Use the current branch (which is the pre-created branch if branch creation happened)
             const targetBranch = currentBranch;
 
-            let commitMessage: string;
+            // Generate commit message using LLM (via Claude Agent SDK)
+            const llmHelper = new LLMHelper(workspacePath);
 
-            // Check if Claude credentials are available for LLM-based commit messages
-            if (!LLMHelper.isConfigured()) {
-              // Credentials not available - use fallback commit message
-              commitMessage = 'chore: auto-commit changes';
+            // Get git status and diff for commit message generation
+            const gitStatus = await gitHelper.getStatus();
+            const gitDiff = await gitHelper.getDiff();
 
-              logger.info('Skipping LLM-based commit message generation (Claude credentials not configured)', {
-                component: 'Orchestrator',
-                websiteSessionId
-              });
-            } else {
-              // Generate commit message using LLM (uses same credentials as main execute)
-              const gitStatus = await gitHelper.getStatus();
-              const gitDiff = await gitHelper.getDiff();
+            sendEvent({
+              type: 'commit_progress',
+              stage: 'generating_message',
+              message: 'Generating commit message...',
+              branch: targetBranch,
+              timestamp: new Date().toISOString()
+            });
 
-              sendEvent({
-                type: 'commit_progress',
-                stage: 'generating_message',
-                message: 'Generating commit message...',
-                branch: targetBranch,
-                timestamp: new Date().toISOString()
-              });
-
-              const llmHelper = new LLMHelper(workspacePath);
-              commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
-            }
+            // Generate commit message
+            const commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
 
             sendEvent({
               type: 'commit_progress',
@@ -711,39 +785,6 @@ export class Orchestrator {
 
       res.end();
       throw error; // Re-throw to trigger worker exit
-    }
-  }
-
-  /**
-   * Extract API key from authentication string
-   * Handles both OAuth JSON format and plain API keys
-   */
-  private extractApiKey(authentication: string): string | null {
-    try {
-      const parsed = JSON.parse(authentication);
-
-      // OAuth format: { claudeAiOauth: { accessToken: "..." } }
-      if (parsed.claudeAiOauth?.accessToken) {
-        return parsed.claudeAiOauth.accessToken;
-      }
-
-      // Unwrapped OAuth format: { accessToken: "...", refreshToken: "..." }
-      if (parsed.accessToken) {
-        return parsed.accessToken;
-      }
-
-      // Plain API key in object: { apiKey: "..." }
-      if (parsed.apiKey) {
-        return parsed.apiKey;
-      }
-
-      return null;
-    } catch {
-      // If not JSON, might be plain API key
-      if (authentication.startsWith('sk-ant-')) {
-        return authentication;
-      }
-      return null;
     }
   }
 
