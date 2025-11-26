@@ -50,7 +50,11 @@ const executeHandler = async (req: any, res: any) => {
   try {
     // Support both GET (query) and POST (body) parameters
     const params = req.method === 'POST' ? req.body : req.query;
-    const { userRequest, repositoryUrl, baseBranch, websiteSessionId } = params;
+    const { userRequest, websiteSessionId, github } = params;
+
+    // Extract GitHub config: { repoUrl, branch }
+    const repoUrl = github?.repoUrl;
+    const branch = github?.branch || 'main';
 
     // Auto-commit is now always enabled
     const autoCommit = true;
@@ -61,8 +65,8 @@ const executeHandler = async (req: any, res: any) => {
     console.log('[Execute] All params:', JSON.stringify(params, null, 2));
     console.log('[Execute] Extracted values:', {
       userRequest: typeof userRequest === 'string' ? userRequest.substring(0, 50) : userRequest,
-      repositoryUrl,
-      baseBranch,
+      repoUrl,
+      branch,
       autoCommit,
       websiteSessionId,
     });
@@ -119,9 +123,9 @@ const executeHandler = async (req: any, res: any) => {
       let repositoryOwner: string | null = null;
       let repositoryName: string | null = null;
 
-      if (repositoryUrl) {
+      if (repoUrl) {
         try {
-          const parsed = parseRepoUrl(repositoryUrl as string);
+          const parsed = parseRepoUrl(repoUrl as string);
           repositoryOwner = parsed.owner;
           repositoryName = parsed.repo;
         } catch (error) {
@@ -141,10 +145,10 @@ const executeHandler = async (req: any, res: any) => {
           userId: authReq.user.id,
           userRequest: (userRequest as string) || 'New session',
           status: 'pending',
-          repositoryUrl: (repositoryUrl as string) || null,
+          repositoryUrl: (repoUrl as string) || null,
           repositoryOwner,
           repositoryName,
-          baseBranch: (baseBranch as string) || 'main', // Default to main if not provided
+          baseBranch: (branch as string) || 'main',
           branch: null, // Will be populated when branch is created by the worker
           sessionPath: null, // Will be populated after branch is created
           autoCommit: true, // Auto-commit is now always enabled
@@ -311,11 +315,10 @@ const executeHandler = async (req: any, res: any) => {
     `);
 
     // Always send GitHub config if available - AI worker will determine if it needs to clone
-    if (repositoryUrl && authReq.user.githubAccessToken) {
+    if (repoUrl && authReq.user.githubAccessToken) {
       executePayload.github = {
-        repoUrl: repositoryUrl as string,
-        // Checkout the base branch and let the worker create/manage the working branch
-        branch: (baseBranch as string) || 'main',
+        repoUrl: repoUrl as string,
+        branch: branch as string,
         accessToken: authReq.user.githubAccessToken,
       };
     }
