@@ -257,8 +257,13 @@ export default function NewSession() {
                   className="relative flex items-center justify-between w-full h-9 px-3 text-sm border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
                   disabled={!hasGithubAuth || isLoadingRepos}
                 >
-                  <span className="truncate">
-                    {isLoadingRepos ? 'Loading...' : selectedRepo
+                  <span className="truncate flex items-center gap-2">
+                    {isLoadingRepos ? (
+                      <>
+                        <span className="loading loading-spinner loading-xs"></span>
+                        Loading...
+                      </>
+                    ) : selectedRepo
                       ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName || 'No repository'
                       : 'No repository'}
                   </span>
@@ -332,8 +337,13 @@ export default function NewSession() {
                   className="relative flex items-center justify-between w-full h-9 px-3 text-sm border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
                   disabled={!selectedRepo || isLoadingBranches}
                 >
-                  <span className="truncate">
-                    {isLoadingBranches ? 'Loading...' : baseBranch || 'main'}
+                  <span className="truncate flex items-center gap-2">
+                    {isLoadingBranches ? (
+                      <>
+                        <span className="loading loading-spinner loading-xs"></span>
+                        Loading...
+                      </>
+                    ) : baseBranch || 'main'}
                   </span>
                   <svg className="w-4 h-4 ml-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -368,8 +378,13 @@ export default function NewSession() {
                           </button>
                         ))
                       ) : (
-                        <div className="p-4 text-xs text-base-content/50 text-center">
-                          {isLoadingBranches ? 'Loading branches...' : 'No branches found'}
+                        <div className="p-4 text-xs text-base-content/50 text-center flex items-center justify-center gap-2">
+                          {isLoadingBranches ? (
+                            <>
+                              <span className="loading loading-spinner loading-xs"></span>
+                              Loading branches...
+                            </>
+                          ) : 'No branches found'}
                         </div>
                       )}
                     </div>
@@ -381,14 +396,15 @@ export default function NewSession() {
         </div>
 
         {/* Activity Selection */}
-        <div className="bg-base-100 rounded-2xl shadow-xl p-4">
+        <div className="bg-base-100 rounded-2xl shadow-xl p-4 relative">
           <h2 className="text-xl font-bold text-center mb-4">What would you like to do?</h2>
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             {activities.map((activity) => (
               <button
                 key={activity.id}
                 onClick={() => handleActivityClick(activity.id)}
-                className="flex flex-col items-center justify-center p-4 bg-base-200 hover:bg-base-300 rounded-lg transition-all hover:scale-105 active:scale-95 border-2 border-transparent hover:border-primary"
+                disabled={isLoadingRepos}
+                className="flex flex-col items-center justify-center p-4 bg-base-200 hover:bg-base-300 rounded-lg transition-all hover:scale-105 active:scale-95 border-2 border-transparent hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:border-transparent"
               >
                 <div className="text-primary mb-2">
                   {activity.icon}
@@ -397,6 +413,12 @@ export default function NewSession() {
               </button>
             ))}
           </div>
+          {/* Loading overlay */}
+          {isLoadingRepos && (
+            <div className="absolute inset-0 bg-base-100/80 rounded-2xl flex items-center justify-center">
+              <span className="loading loading-spinner loading-lg text-primary"></span>
+            </div>
+          )}
         </div>
       </div>
     </div>
