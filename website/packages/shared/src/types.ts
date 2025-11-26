@@ -24,10 +24,16 @@ export interface ChatSession {
   id: string;
   userId: string;
   aiWorkerSessionId: string | null;
+  sessionPath: string | null;
+  repositoryOwner: string | null;
+  repositoryName: string | null;
   userRequest: string;
   status: SessionStatus;
   repositoryUrl: string | null;
+  baseBranch: string | null;
   branch: string | null;
+  autoCommit: boolean;
+  locked: boolean;
   createdAt: Date;
   completedAt: Date | null;
 }
@@ -72,6 +78,32 @@ export interface GitHubBranch {
     sha: string;
     url: string;
   };
+}
+
+export interface GitHubPullRequest {
+  number: number;
+  title: string;
+  state: 'open' | 'closed';
+  htmlUrl: string;
+  head: {
+    ref: string;
+    sha: string;
+  };
+  base: {
+    ref: string;
+    sha: string;
+  };
+  mergeable: boolean | null;
+  merged: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AutoPRResult {
+  step: string;
+  pr?: { number: number; htmlUrl: string };
+  mergeBase?: { sha: string | null; message: string };
+  mergePr?: { merged: boolean; sha: string };
 }
 
 // AI Worker types (from API.md)
