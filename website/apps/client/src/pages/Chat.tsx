@@ -10,6 +10,34 @@ import { ImageViewer } from '@/components/ImageViewer';
 import SessionLayout from '@/components/SessionLayout';
 import type { Message, GitHubRepository, ChatSession } from '@webedt/shared';
 
+// Helper to render text with clickable links
+function LinkifyText({ text, className }: { text: string; className?: string }) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+
+  return (
+    <span className={className}>
+      {parts.map((part, i) => {
+        if (part.match(urlRegex)) {
+          return (
+            <a
+              key={i}
+              href={part}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-info underline hover:text-info-content"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {part}
+            </a>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </span>
+  );
+}
+
 export default function Chat() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
@@ -192,6 +220,20 @@ export default function Chat() {
         }
       );
       setPrSuccess(`PR #${response.data.number} created successfully!`);
+
+      // Add message to chat history
+      messageIdCounter.current += 1;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + messageIdCounter.current,
+          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+          type: 'system',
+          content: `🔀 Pull Request #${response.data.number} created\n\n${response.data.htmlUrl}`,
+          timestamp: new Date(),
+        },
+      ]);
+
       refetchPr();
     } catch (err: any) {
       setPrError(err.message || 'Failed to create PR');
@@ -228,6 +270,20 @@ export default function Chat() {
         }
       );
       setPrSuccess(`Auto PR completed! PR #${response.data.pr?.number} merged successfully.`);
+
+      // Add message to chat history
+      messageIdCounter.current += 1;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + messageIdCounter.current,
+          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+          type: 'system',
+          content: `🚀 Auto PR completed!\n\nPR #${response.data.pr?.number} created and merged into ${session.baseBranch}\n\n${response.data.pr?.htmlUrl}`,
+          timestamp: new Date(),
+        },
+      ]);
+
       refetchPr();
     } catch (err: any) {
       // Check if partial success (PR created but not merged)
@@ -1058,7 +1114,9 @@ export default function Chat() {
                         : 'bg-base-100 text-base-content border border-base-300'
                     }`}
                   >
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    <p className="text-sm whitespace-pre-wrap">
+                      <LinkifyText text={message.content} />
+                    </p>
 
                     {/* Display images if present */}
                     {message.images && message.images.length > 0 && (
