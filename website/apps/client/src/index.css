@@ -72,3 +72,25 @@ body {
   --wa: 40 100% 50%; /* Warning */
   --er: 0 70% 50%; /* Error */
 }
+
+/* Markdown content styling */
+.markdown-content {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.markdown-content pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdown-content code {
+  word-break: break-word;
+}
+
+/* Ensure code blocks don't overflow in chat messages */
+.markdown-content pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+}
