@@ -274,47 +274,19 @@ export class Orchestrator {
               let title: string;
               let descriptivePart: string;
 
-              // Write credentials early so LLMHelper can use them
-              // (Provider normally writes them, but that happens later)
-              if (request.codingAssistantProvider === 'ClaudeAgentSDK') {
-                CredentialManager.writeClaudeCredentials(request.codingAssistantAuthentication);
-              }
+              // TODO: OAuth tokens don't work with Claude API for direct calls
+              // The SDK handles auth internally, but we can't make separate API calls
+              // For now, use fallback values. Future options:
+              // 1. Use API key instead of OAuth for LLMHelper
+              // 2. Extract title from first response after main execution
+              // 3. Use a different title generation approach
+              title = 'New Session';
+              descriptivePart = 'auto-request';
 
-              // Check if Claude credentials are available
-              if (!LLMHelper.isConfigured()) {
-                // Credentials not available - use fallback values
-                title = 'New Session';
-                descriptivePart = 'auto-request';
-
-                logger.info('Using fallback title/branch (Claude credentials not configured)', {
-                  component: 'Orchestrator',
-                  websiteSessionId
-                });
-              } else {
-                // Generate title and branch name using LLM
-                sendEvent({
-                  type: 'message',
-                  message: 'Generating session title and branch name...',
-                  timestamp: new Date().toISOString()
-                });
-
-                const llmHelper = new LLMHelper(workspacePath);
-                const userRequestText = this.serializeUserRequest(request.userRequest);
-                const result = await llmHelper.generateSessionTitleAndBranch(
-                  userRequestText,
-                  pullResult.branch
-                );
-
-                title = result.title;
-                descriptivePart = result.branchName;
-
-                logger.info('Generated session title and branch name with LLM', {
-                  component: 'Orchestrator',
-                  websiteSessionId,
-                  sessionTitle: title,
-                  descriptivePart
-                });
-              }
+              logger.info('Using fallback title/branch (OAuth not supported for direct API calls)', {
+                component: 'Orchestrator',
+                websiteSessionId
+              });
 
               // Extract last 8 characters of session ID for suffix
               const sessionIdSuffix = websiteSessionId.slice(-8);
