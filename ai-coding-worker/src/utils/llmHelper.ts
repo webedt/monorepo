@@ -1,36 +1,54 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { logger } from './logger';
-import { CredentialManager } from './credentialManager';
 
 /**
  * Helper for making one-off LLM requests for commit message and branch name generation
+ * Uses Claude Agent SDK (same as main execution) to leverage OAuth authentication
  * Uses Haiku for fast, cost-effective responses
- * Reads credentials from ~/.claude/.credentials.json (same as Claude Agent SDK)
  */
 export class LLMHelper {
-  private client: Anthropic;
+  private cwd: string;
 
-  constructor() {
-    // Read credentials from the file written by CredentialManager
-    // This ensures we use the same auth as the Claude Agent SDK
-    const credentialPath = CredentialManager.getClaudeCredentialPath();
-    const credentials = CredentialManager.readCredentialFile(credentialPath);
+  constructor(cwd?: string) {
+    this.cwd = cwd || '/tmp';
+    logger.info('LLMHelper: Initialized with Claude Agent SDK', { component: 'LLMHelper', cwd: this.cwd });
+  }
 
-    // Check for OAuth tokens first (claudeAiOauth format)
-    if (credentials.claudeAiOauth?.accessToken) {
-      const accessToken = credentials.claudeAiOauth.accessToken;
-      this.client = new Anthropic({ authToken: accessToken });
-      logger.info('LLMHelper: Initialized with OAuth token from credentials file', { component: 'LLMHelper' });
+  /**
+   * Run a quick query using Claude Agent SDK
+   */
+  private async runQuery(prompt: string, maxTurns: number = 1): Promise<string> {
+    const options: Options = {
+      model: 'claude-haiku-4-5-20251001',
+      cwd: this.cwd,
+      maxTurns,
+      allowDangerouslySkipPermissions: true,
+      permissionMode: 'bypassPermissions',
+    };
+
+    let result = '';
+
+    const queryStream = query({ prompt, options });
+
+    for await (const message of queryStream) {
+      // Capture the final result (only on success subtype)
+      if (message.type === 'result' && message.subtype === 'success') {
+        result = message.result;
+      }
+      // Also capture assistant text messages
+      else if (message.type === 'assistant' && message.message?.content) {
+        const content = message.message.content;
+        if (Array.isArray(content)) {
+          for (const item of content) {
+            if (item.type === 'text' && item.text) {
+              result = item.text;
+            }
+          }
+        }
+      }
     }
-    // Fall back to API key
-    else if (credentials.apiKey) {
-      this.client = new Anthropic({ apiKey: credentials.apiKey });
-      logger.info('LLMHelper: Initialized with API key from credentials file', { component: 'LLMHelper' });
-    }
-    // Unknown format
-    else {
-      throw new Error('No valid authentication found in credentials file');
-    }
+
+    return result;
   }
 
   /**
@@ -38,17 +56,11 @@ export class LLMHelper {
    */
   async generateCommitMessage(gitStatus: string, gitDiff: string): Promise<string> {
     try {
-      const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 200,
-        messages: [
-          {
-            role: 'user',
-            content: `Analyze the following git changes and generate a concise, conventional commit message. Follow these rules:
-- Use conventional commit format (e.g., "feat:", "fix:", "refactor:", "docs:", etc.)
+      const prompt = `Analyze the following git changes and generate a concise commit message. Follow these rules:
+- Use imperative mood (e.g., "Add feature" not "Added feature")
 - Keep the summary line under 72 characters
 - Be specific about what changed
-- Only return the commit message, nothing else
+- Only return the commit message text, nothing else - no explanations, no markdown
 
 Git status:
 ${gitStatus}
@@ -56,30 +68,22 @@ ${gitStatus}
 Git diff:
 ${gitDiff.substring(0, 4000)}
 
-Commit message:`
-          }
-        ]
-      });
+Return ONLY the commit message:`;
 
-      const content = response.content[0];
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from LLM');
-      }
-
-      const commitMessage = content.text.trim();
+      const result = await this.runQuery(prompt);
+      const commitMessage = result.trim();
 
       logger.info('Generated commit message', {
         component: 'LLMHelper',
         commitMessage
       });
 
-      return commitMessage;
+      return commitMessage || 'Update files';
     } catch (error) {
       logger.error('Failed to generate commit message', error, {
         component: 'LLMHelper'
       });
-      // Fallback commit message
-      return 'chore: auto-commit changes';
+      return 'Update files';
     }
   }
 
@@ -97,61 +101,41 @@ Commit message:`
       parentBranch
     });
 
-    const response = await this.client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
-      messages: [
-        {
-          role: 'user',
-          content: `Based on the following user request, generate BOTH a session title and a git branch name.
+    const prompt = `Based on the following user request, generate BOTH a session title and a git branch name.
 
 User request:
 ${userRequest.substring(0, 1000)}
 
 Parent branch: ${parentBranch}
 
-Return your response in this exact format:
+Return your response in this EXACT format (two lines only, no other text):
 TITLE: [3-6 word human-readable title]
 BRANCH: [lowercase-hyphenated-branch-name]
 
 Rules for TITLE:
-- 3-6 words
-- Human-readable, descriptive
+- 3-6 words, human-readable, descriptive
 - Capitalize properly
 - No special characters except spaces
+- Max 60 characters
 
 Rules for BRANCH:
-- Lowercase only
-- Use hyphens as separators
-- Max 40 characters
-- No special characters
+- Lowercase only, use hyphens as separators
+- Max 40 characters, no special characters
 - Only the descriptive part (no "claude/" prefix)
 - Focus on the main action or feature
 
-Response:`
-        }
-      ]
-    });
+Return ONLY the two lines in the exact format above:`;
 
-    logger.info('LLM API response received', {
+    const result = await this.runQuery(prompt);
+
+    logger.info('Claude Agent SDK response', {
       component: 'LLMHelper',
-      contentLength: response.content.length
-    });
-
-    const content = response.content[0];
-    if (content.type !== 'text') {
-      throw new Error('Unexpected response type from LLM');
-    }
-
-    const text = content.text.trim();
-    logger.info('LLM raw response', {
-      component: 'LLMHelper',
-      text
+      result
     });
 
     // Parse the response
-    const titleMatch = text.match(/TITLE:\s*(.+)/i);
-    const branchMatch = text.match(/BRANCH:\s*(.+)/i);
+    const titleMatch = result.match(/TITLE:\s*(.+)/i);
+    const branchMatch = result.match(/BRANCH:\s*(.+)/i);
 
     let title = titleMatch ? titleMatch[1].trim() : 'New Session';
     let branchName = branchMatch ? branchMatch[1].trim() : 'auto-request';

@@ -287,30 +287,8 @@ export class Orchestrator {
                 timestamp: new Date().toISOString()
               });
 
-              // Debug: Show credential file path being used
-              const credPath = CredentialManager.getClaudeCredentialPath();
-              sendEvent({
-                type: 'debug',
-                message: `Reading credentials from: ${credPath}`,
-                timestamp: new Date().toISOString()
-              });
-
-              let llmHelper: LLMHelper;
-              try {
-                llmHelper = new LLMHelper();
-                sendEvent({
-                  type: 'debug',
-                  message: 'LLMHelper initialized successfully',
-                  timestamp: new Date().toISOString()
-                });
-              } catch (initError) {
-                sendEvent({
-                  type: 'debug',
-                  message: `LLMHelper init failed: ${initError instanceof Error ? initError.message : String(initError)}`,
-                  timestamp: new Date().toISOString()
-                });
-                throw initError;
-              }
+              // LLMHelper uses Claude Agent SDK (same auth as main execution)
+              const llmHelper = new LLMHelper(workspacePath);
 
               const userRequestText = this.serializeUserRequest(request.userRequest);
               sendEvent({
@@ -567,9 +545,8 @@ export class Orchestrator {
             // Use the current branch (which is the pre-created branch if branch creation happened)
             const targetBranch = currentBranch;
 
-            // Generate commit message using LLM
-            // LLMHelper reads credentials from ~/.claude/.credentials.json (written in Step 1.5)
-            const llmHelper = new LLMHelper();
+            // Generate commit message using LLM (via Claude Agent SDK)
+            const llmHelper = new LLMHelper(workspacePath);
 
             // Get git status and diff for commit message generation
             const gitStatus = await gitHelper.getStatus();
