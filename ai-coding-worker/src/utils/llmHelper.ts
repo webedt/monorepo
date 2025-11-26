@@ -1,5 +1,6 @@
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { logger } from './logger';
+import { CredentialManager } from './credentialManager';
 
 /**
  * Helper for making one-off LLM requests for commit message and branch name generation
@@ -12,6 +13,14 @@ export class LLMHelper {
   constructor(cwd?: string) {
     this.cwd = cwd || '/tmp';
     logger.info('LLMHelper: Initialized with Claude Agent SDK', { component: 'LLMHelper', cwd: this.cwd });
+  }
+
+  /**
+   * Check if Claude credentials are available
+   */
+  static isConfigured(): boolean {
+    const credPath = CredentialManager.getClaudeCredentialPath();
+    return CredentialManager.credentialFileExists(credPath);
   }
 
   /**
