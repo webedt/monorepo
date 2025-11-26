@@ -55,20 +55,14 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const mediaRecorderRef = useRef<any>(null); // Stores Web Speech API recognition instance
-  const inputRef = useRef(input); // Ref to track current input value for speech recognition
   const voiceKeywordsRef = useRef<string[]>([]); // Ref to track current voice keywords (avoids stale closure)
   const keepRecordingRef = useRef(false); // Track if we want to keep recording after onend
-  const clearNextInputRef = useRef(false); // Flag to clear input on next speech (after auto-submit)
+  const voiceTranscriptRef = useRef(''); // Accumulates voice transcript during recording session
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
-
-  // Keep inputRef in sync with input prop
-  useEffect(() => {
-    inputRef.current = input;
-  }, [input]);
 
   // Keep voiceKeywordsRef in sync with user's voice command keywords
   useEffect(() => {
@@ -330,29 +324,30 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             }
           }
 
-          // Check if we should clear previous input (after auto-submit)
-          let currentInput = '';
-          if (clearNextInputRef.current) {
-            console.log('[Voice] Clearing previous input (post auto-submit)');
-            clearNextInputRef.current = false;
+          // Accumulate transcript (survives pauses during recording)
+          if (voiceTranscriptRef.current) {
+            voiceTranscriptRef.current += '\n' + newTranscript;
           } else {
-            currentInput = inputRef.current;
+            voiceTranscriptRef.current = newTranscript;
           }
+          console.log('[Voice] Accumulated transcript:', voiceTranscriptRef.current);
 
-          const newText = currentInput ? `${currentInput}\n${newTranscript}` : newTranscript;
-          setInput(newText);
+          // Update the input field with accumulated transcript
+          setInput(voiceTranscriptRef.current);
 
           // Auto-submit if keyword was detected (keep recording active)
-          if (shouldAutoSubmit && newText.trim()) {
-            // Set flag to clear input on next speech segment
-            clearNextInputRef.current = true;
+          if (shouldAutoSubmit && voiceTranscriptRef.current.trim()) {
+            const textToSubmit = voiceTranscriptRef.current;
+            // Clear the accumulated transcript for next voice session
+            voiceTranscriptRef.current = '';
+
             // Trigger submit after a brief delay to ensure state is updated
             // Note: We intentionally do NOT stop recording - user can continue speaking
             setTimeout(() => {
               // Use the form ref to submit, or find the submit button
               const submitBtn = formRef.current?.querySelector('button[type="submit"]') as HTMLButtonElement;
               if (submitBtn) {
-                console.log('[Voice] Clicking submit button (recording continues)');
+                console.log('[Voice] Clicking submit button (recording continues), text:', textToSubmit);
                 submitBtn.click();
               } else {
                 console.log('[Voice] No submit button found, trying form dispatch');
@@ -788,15 +783,15 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             className="hidden"
           />
 
-          {/* Microphone button */}
+          {/* Microphone button - stays enabled while recording even during execution */}
           <button
             type="button"
             onClick={toggleRecording}
-            disabled={isExecuting || !user?.claudeAuth}
-            className={`flex items-center justify-center w-10 h-10 rounded-full shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            disabled={!isRecording && (isExecuting || !user?.claudeAuth)}
+            className={`flex items-center justify-center w-10 h-10 rounded-full shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 ${
               isRecording
                 ? 'bg-red-500 hover:bg-red-600 text-white focus:ring-red-400 animate-pulse'
-                : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 focus:ring-gray-400'
+                : 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 focus:ring-gray-400 disabled:opacity-50 disabled:cursor-not-allowed'
             }`}
             title={
               isRecording
