@@ -332,20 +332,15 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           const newText = currentInput ? `${currentInput}\n${newTranscript}` : newTranscript;
           setInput(newText);
 
-          // Auto-submit if keyword was detected
+          // Auto-submit if keyword was detected (keep recording active)
           if (shouldAutoSubmit && newText.trim()) {
-            // Stop recording first
-            try {
-              recognition.stop();
-            } catch (error) {
-              console.error('Error stopping recognition:', error);
-            }
             // Trigger submit after a brief delay to ensure state is updated
+            // Note: We intentionally do NOT stop recording - user can continue speaking
             setTimeout(() => {
               // Use the form ref to submit, or find the submit button
               const submitBtn = formRef.current?.querySelector('button[type="submit"]') as HTMLButtonElement;
               if (submitBtn) {
-                console.log('[Voice] Clicking submit button');
+                console.log('[Voice] Clicking submit button (recording continues)');
                 submitBtn.click();
               } else {
                 console.log('[Voice] No submit button found, trying form dispatch');
