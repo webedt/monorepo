@@ -660,8 +660,8 @@ export default function Chat() {
         return;
       }
 
-      // Add event label if present
-      const finalContent = eventLabel ? `${eventLabel}\n${content}` : content;
+      // Add event label if present (inline emoji before message)
+      const finalContent = eventLabel ? `${eventLabel} ${content}` : content;
 
       messageIdCounter.current += 1;
       setMessages((prev) => [
