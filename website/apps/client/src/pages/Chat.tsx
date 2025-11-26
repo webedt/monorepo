@@ -7,6 +7,7 @@ import { useEventSource } from '@/hooks/useEventSource';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import SessionLayout from '@/components/SessionLayout';
 import type { Message, GitHubRepository, ChatSession } from '@webedt/shared';
 
@@ -1310,9 +1311,9 @@ export default function Chat() {
                         : 'bg-base-100 text-base-content border border-base-300'
                     }`}
                   >
-                    <p className="text-sm whitespace-pre-wrap">
-                      <LinkifyText text={message.content} />
-                    </p>
+                    <div className="text-sm">
+                      <MarkdownRenderer content={message.content} />
+                    </div>
 
                     {/* Display images if present */}
                     {message.images && message.images.length > 0 && (
