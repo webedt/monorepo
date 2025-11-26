@@ -1,25 +1,60 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { logger } from './logger';
+import { CredentialManager } from './credentialManager';
 
 /**
  * Helper for making one-off LLM requests for commit message and branch name generation
  * Uses Haiku for fast, cost-effective responses
- * Supports both API keys and OAuth tokens via the Anthropic SDK
+ * Uses the same Claude credentials as the main execute function (from ~/.claude/.credentials.json)
  */
 export class LLMHelper {
-  private client: Anthropic;
+  private workspace: string;
 
-  constructor(authToken: string) {
-    // Detect if OAuth token (starts with sk-ant-oat) or API key (starts with sk-ant-api)
-    if (authToken.startsWith('sk-ant-oat')) {
-      // OAuth token - use authToken parameter
-      this.client = new Anthropic({ authToken });
-      logger.info('LLMHelper: Initialized with OAuth token', { component: 'LLMHelper' });
-    } else {
-      // API key - use apiKey parameter
-      this.client = new Anthropic({ apiKey: authToken });
-      logger.info('LLMHelper: Initialized with API key', { component: 'LLMHelper' });
+  constructor(workspace: string) {
+    this.workspace = workspace;
+  }
+
+  /**
+   * Check if Claude credentials are available
+   */
+  static isConfigured(): boolean {
+    const credPath = CredentialManager.getClaudeCredentialPath();
+    return CredentialManager.credentialFileExists(credPath);
+  }
+
+  /**
+   * Run a simple query using Claude Agent SDK
+   * Returns the text response from the assistant
+   */
+  private async runQuery(prompt: string): Promise<string> {
+    let result = '';
+
+    const queryStream = query({
+      prompt,
+      options: {
+        model: 'claude-haiku-4-5-20251001',
+        cwd: this.workspace,
+        allowDangerouslySkipPermissions: true,
+        permissionMode: 'bypassPermissions',
+        maxTurns: 1, // Single turn, just need the response
+      }
+    });
+
+    for await (const message of queryStream) {
+      // Extract text from assistant messages
+      if (message.type === 'assistant' && message.message?.content) {
+        const content = message.message.content;
+        if (Array.isArray(content)) {
+          for (const item of content) {
+            if (item.type === 'text' && item.text) {
+              result += item.text;
+            }
+          }
+        }
+      }
     }
+
+    return result.trim();
   }
 
   /**
@@ -27,17 +62,11 @@ export class LLMHelper {
    */
   async generateCommitMessage(gitStatus: string, gitDiff: string): Promise<string> {
     try {
-      const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 200,
-        messages: [
-          {
-            role: 'user',
-            content: `Analyze the following git changes and generate a concise, conventional commit message. Follow these rules:
+      const prompt = `Analyze the following git changes and generate a concise, conventional commit message. Follow these rules:
 - Use conventional commit format (e.g., "feat:", "fix:", "refactor:", "docs:", etc.)
 - Keep the summary line under 72 characters
 - Be specific about what changed
-- Only return the commit message, nothing else
+- Only return the commit message, nothing else - no explanation, just the commit message text
 
 Git status:
 ${gitStatus}
@@ -45,29 +74,20 @@ ${gitStatus}
 Git diff:
 ${gitDiff.substring(0, 4000)}
 
-Commit message:`
-          }
-        ]
-      });
+Commit message:`;
 
-      const content = response.content[0];
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from LLM');
-      }
-
-      const commitMessage = content.text.trim();
+      const commitMessage = await this.runQuery(prompt);
 
       logger.info('Generated commit message', {
         component: 'LLMHelper',
         commitMessage
       });
 
-      return commitMessage;
+      return commitMessage || 'chore: auto-commit changes';
     } catch (error) {
       logger.error('Failed to generate commit message', error, {
         component: 'LLMHelper'
       });
-      // Fallback commit message
       return 'chore: auto-commit changes';
     }
   }
@@ -81,20 +101,14 @@ Commit message:`
     parentBranch: string
   ): Promise<{ title: string; branchName: string }> {
     try {
-      const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 150,
-        messages: [
-          {
-            role: 'user',
-            content: `Based on the following user request, generate BOTH a session title and a git branch name.
+      const prompt = `Based on the following user request, generate BOTH a session title and a git branch name.
 
 User request:
 ${userRequest.substring(0, 1000)}
 
 Parent branch: ${parentBranch}
 
-Return your response in this exact format:
+Return your response in this exact format (no other text):
 TITLE: [3-6 word human-readable title]
 BRANCH: [lowercase-hyphenated-branch-name]
 
@@ -112,17 +126,9 @@ Rules for BRANCH:
 - Only the descriptive part (no "claude/" prefix)
 - Focus on the main action or feature
 
-Response:`
-          }
-        ]
-      });
+Response:`;
 
-      const content = response.content[0];
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from LLM');
-      }
-
-      const text = content.text.trim();
+      const text = await this.runQuery(prompt);
 
       // Parse the response
       const titleMatch = text.match(/TITLE:\s*(.+)/i);
@@ -155,70 +161,10 @@ Response:`
       logger.error('Failed to generate session title and branch name', error, {
         component: 'LLMHelper'
       });
-      // Fallback
       return {
         title: 'New Session',
         branchName: 'auto-request'
       };
-    }
-  }
-
-  /**
-   * Generate a branch name from user request
-   * @deprecated Use generateSessionTitleAndBranch instead for better efficiency
-   */
-  async generateBranchName(userRequest: string, baseBranch: string): Promise<string> {
-    try {
-      const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 100,
-        messages: [
-          {
-            role: 'user',
-            content: `Generate a concise, valid git branch name based on the following user request.
-Rules:
-- Lowercase only
-- Use hyphens as separators
-- Max 40 characters (excluding prefix)
-- No special characters
-- Only return the descriptive part, nothing else (no "claude/" prefix)
-- Focus on the main action or feature
-
-Base branch: ${baseBranch}
-
-User request:
-${userRequest.substring(0, 1000)}
-
-Branch name (descriptive part only):`
-          }
-        ]
-      });
-
-      const content = response.content[0];
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from LLM');
-      }
-
-      let descriptivePart = content.text.trim();
-      // Ensure it's a valid branch name part
-      descriptivePart = descriptivePart
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .substring(0, 40);
-
-      logger.info('Generated branch name descriptive part', {
-        component: 'LLMHelper',
-        descriptivePart
-      });
-
-      return descriptivePart;
-    } catch (error) {
-      logger.error('Failed to generate branch name', error, {
-        component: 'LLMHelper'
-      });
-      // Fallback
-      return `auto-request`;
     }
   }
 }
