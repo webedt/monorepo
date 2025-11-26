@@ -21,6 +21,7 @@ export let users: any;
 export let sessions: any;
 export let chatSessions: any;
 export let messages: any;
+export let events: any;
 
 if (usePostgres) {
   console.log('Using PostgreSQL database');
@@ -42,6 +43,7 @@ if (usePostgres) {
   sessions = schemaPg.sessions;
   chatSessions = schemaPg.chatSessions;
   messages = schemaPg.messages;
+  events = schemaPg.events;
 
   // Create PostgreSQL tables if they don't exist
   console.log('Creating PostgreSQL tables...');
@@ -87,6 +89,14 @@ if (usePostgres) {
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       images JSONB,
+      timestamp TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id SERIAL PRIMARY KEY,
+      chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      event_data JSONB NOT NULL,
       timestamp TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `).then(() => {
@@ -216,6 +226,7 @@ if (usePostgres) {
   sessions = schemaSqlite.sessions;
   chatSessions = schemaSqlite.chatSessions;
   messages = schemaSqlite.messages;
+  events = schemaSqlite.events;
 
   // Create SQLite tables
   console.log('Creating SQLite tables...');
@@ -263,6 +274,15 @@ if (usePostgres) {
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       images TEXT,
+      timestamp INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_session_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_data TEXT NOT NULL,
       timestamp INTEGER NOT NULL DEFAULT (unixepoch()),
       FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
     );

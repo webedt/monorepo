@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { Octokit } from '@octokit/rest';
 import { db } from '../db/index';
-import { chatSessions, messages, users } from '../db/index';
+import { chatSessions, messages, users, events } from '../db/index';
 import type { ChatSession } from '../db/schema';
-import { eq, desc, inArray, and } from 'drizzle-orm';
+import { eq, desc, inArray, and, asc } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 
@@ -240,6 +240,54 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Get messages error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch messages' });
+  }
+});
+
+// Get events for a session (raw SSE events for replay)
+router.get('/:id/events', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Get events ordered by timestamp (ascending for replay order)
+    const sessionEvents = await db
+      .select()
+      .from(events)
+      .where(eq(events.chatSessionId, sessionId))
+      .orderBy(asc(events.timestamp));
+
+    res.json({
+      success: true,
+      data: {
+        events: sessionEvents,
+        total: sessionEvents.length,
+      },
+    });
+  } catch (error) {
+    console.error('Get events error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch events' });
   }
 });
 

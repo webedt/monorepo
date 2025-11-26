@@ -38,6 +38,110 @@ function LinkifyText({ text, className }: { text: string; className?: string }) 
   );
 }
 
+// Database event type
+interface DbEvent {
+  id: number;
+  chatSessionId: string;
+  eventType: string;
+  eventData: any;
+  timestamp: Date;
+}
+
+// Helper to convert raw SSE events from database to displayable messages
+function convertEventToMessage(event: DbEvent, sessionId: string): Message | null {
+  const eventType = event.eventType;
+  const data = event.eventData;
+
+  let content: string | null = null;
+  let messageType: 'assistant' | 'system' = 'assistant';
+  let eventLabel = '';
+
+  // Skip if data is undefined or null
+  if (!data) {
+    return null;
+  }
+
+  // Handle git commit and pull progress events
+  if (eventType === 'commit_progress') {
+    content = typeof data === 'string' ? data : (data.message || JSON.stringify(data));
+    eventLabel = '📤';
+    messageType = 'system';
+  } else if (eventType === 'github_pull_progress') {
+    content = typeof data === 'string' ? data : (data.message || JSON.stringify(data));
+    eventLabel = '⬇️';
+    messageType = 'system';
+  }
+  // Extract content from different event types
+  else if (data.type === 'message' && data.message) {
+    content = data.message;
+    eventLabel = '💬';
+  } else if (data.type === 'session_name' && data.sessionName) {
+    content = `Session: ${data.sessionName}`;
+    eventLabel = '📝';
+  } else if (data.type === 'assistant_message' && data.data) {
+    const msgData = data.data;
+
+    // Handle assistant message with Claude response
+    if (msgData.type === 'assistant' && msgData.message?.content) {
+      const contentBlocks = msgData.message.content;
+      if (Array.isArray(contentBlocks)) {
+        const textParts = contentBlocks
+          .filter((block: any) => block.type === 'text' && block.text)
+          .map((block: any) => block.text);
+        if (textParts.length > 0) {
+          content = textParts.join('\n');
+          eventLabel = '🤖';
+        }
+      }
+    }
+    // Skip result type - content already displayed from assistant message
+    else if (msgData.type === 'result') {
+      return null;
+    }
+    // Skip system init messages
+    else if (msgData.type === 'system' && msgData.subtype === 'init') {
+      return null;
+    }
+  }
+  // Fallback to direct fields
+  else if (typeof data === 'string') {
+    content = data;
+  } else if (data.message) {
+    content = data.message;
+  } else if (data.content) {
+    if (Array.isArray(data.content)) {
+      const textBlocks = data.content
+        .filter((block: any) => block.type === 'text' && block.text)
+        .map((block: any) => block.text);
+      if (textBlocks.length > 0) {
+        content = textBlocks.join('\n');
+      }
+    } else if (typeof data.content === 'string') {
+      content = data.content;
+    }
+  } else if (data.text) {
+    content = data.text;
+  } else if (data.result) {
+    content = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
+  }
+
+  // Skip if no meaningful content
+  if (!content) {
+    return null;
+  }
+
+  // Add event label if present (inline emoji before message)
+  const finalContent = eventLabel ? `${eventLabel} ${content}` : content;
+
+  return {
+    id: event.id,
+    chatSessionId: sessionId,
+    type: messageType,
+    content: finalContent,
+    timestamp: new Date(event.timestamp),
+  };
+}
+
 export default function Chat() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
@@ -113,14 +217,31 @@ export default function Chat() {
     },
   });
 
-  // Load existing session messages if sessionId provided
-  const { data: sessionData } = useQuery({
-    queryKey: ['session', sessionId],
+  // Load user messages from messages table (user-submitted messages)
+  const { data: messagesData } = useQuery({
+    queryKey: ['session-messages', sessionId],
     queryFn: () => {
       if (!sessionId || sessionId === 'new') {
         throw new Error('Invalid session ID');
       }
       return sessionsApi.getMessages(sessionId);
+    },
+    enabled: !!sessionId && sessionId !== 'new',
+    refetchInterval: () => {
+      if (isExecuting) return false;
+      const session = sessionDetailsData?.data;
+      return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
+    },
+  });
+
+  // Load existing session events if sessionId provided (raw SSE events for replay)
+  const { data: eventsData } = useQuery({
+    queryKey: ['session-events', sessionId],
+    queryFn: () => {
+      if (!sessionId || sessionId === 'new') {
+        throw new Error('Invalid session ID');
+      }
+      return sessionsApi.getEvents(sessionId);
     },
     enabled: !!sessionId && sessionId !== 'new',
     // Poll every 2 seconds if session is running or pending, but NOT while SSE stream is active
@@ -366,11 +487,28 @@ export default function Chat() {
     }
   }, [deletingSession, deleteMutation.isPending]);
 
+  // Merge user messages with converted events
   useEffect(() => {
-    if (sessionData?.data?.messages) {
-      setMessages(sessionData.data.messages);
-    }
-  }, [sessionData]);
+    if (!sessionId) return;
+
+    // Get user messages from the messages table (type: 'user')
+    const userMessages: Message[] = messagesData?.data?.messages?.filter(
+      (m: Message) => m.type === 'user'
+    ) || [];
+
+    // Convert raw events to displayable messages
+    const dbEvents: DbEvent[] = eventsData?.data?.events || [];
+    const eventMessages = dbEvents
+      .map((event) => convertEventToMessage(event, sessionId))
+      .filter((msg): msg is Message => msg !== null);
+
+    // Merge and sort by timestamp
+    const allMessages = [...userMessages, ...eventMessages].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    setMessages(allMessages);
+  }, [eventsData, messagesData, sessionId]);
 
   // Update locked state and repository settings when session data changes
   useEffect(() => {
@@ -660,8 +798,8 @@ export default function Chat() {
         return;
       }
 
-      // Add event label if present
-      const finalContent = eventLabel ? `${eventLabel}\n${content}` : content;
+      // Add event label if present (inline emoji before message)
+      const finalContent = eventLabel ? `${eventLabel} ${content}` : content;
 
       messageIdCounter.current += 1;
       setMessages((prev) => [

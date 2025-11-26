@@ -61,6 +61,17 @@ export const messages = sqliteTable('messages', {
   timestamp: integer('timestamp', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+// Raw SSE events table - stores events exactly as received for replay
+export const events = sqliteTable('events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  chatSessionId: text('chat_session_id')
+    .notNull()
+    .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull(), // SSE event name
+  eventData: text('event_data', { mode: 'json' }).notNull(), // Raw JSON data
+  timestamp: integer('timestamp', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -69,3 +80,5 @@ export type ChatSession = typeof chatSessions.$inferSelect;
 export type NewChatSession = typeof chatSessions.$inferInsert;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type Event = typeof events.$inferSelect;
+export type NewEvent = typeof events.$inferInsert;
