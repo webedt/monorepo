@@ -197,7 +197,6 @@ export default function Chat() {
   });
 
   const existingPr = prData?.find((pr: GitHubPullRequest) => pr.state === 'open');
-  const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged);
 
   const handleCreatePR = async () => {
     if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
@@ -243,9 +242,8 @@ export default function Chat() {
   };
 
   const handleViewPR = () => {
-    const pr = existingPr || mergedPr;
-    if (pr?.htmlUrl) {
-      window.open(pr.htmlUrl, '_blank');
+    if (existingPr?.htmlUrl) {
+      window.open(existingPr.htmlUrl, '_blank');
     }
   };
 
@@ -915,22 +913,22 @@ export default function Chat() {
                       {/* PR Buttons - only show if session has branch info */}
                       {session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
                         <>
-                          {/* View PR button - show if PR exists */}
-                          {(existingPr || mergedPr) && (
+                          {/* View PR button - show only if PR is open */}
+                          {existingPr && (
                             <button
                               onClick={handleViewPR}
-                              className={`btn btn-sm ${mergedPr ? 'btn-success' : 'btn-info'}`}
-                              title={mergedPr ? `View merged PR #${mergedPr.number}` : `View PR #${existingPr?.number}`}
+                              className="btn btn-sm btn-info"
+                              title={`View open PR #${existingPr.number}`}
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
                                 <path fillRule="evenodd" d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
                               </svg>
-                              {mergedPr ? 'Merged' : `PR #${existingPr?.number}`}
+                              View PR #{existingPr.number}
                             </button>
                           )}
 
-                          {/* Create PR button - show if no open PR exists and not merged */}
-                          {!existingPr && !mergedPr && (
+                          {/* Create PR button - show if no open PR exists */}
+                          {!existingPr && (
                             <button
                               onClick={handleCreatePR}
                               className="btn btn-sm btn-primary"
@@ -948,24 +946,22 @@ export default function Chat() {
                             </button>
                           )}
 
-                          {/* Auto PR button - show if not already merged */}
-                          {!mergedPr && (
-                            <button
-                              onClick={handleAutoPR}
-                              className="btn btn-sm btn-accent"
-                              disabled={prLoading !== null}
-                              title="Create PR, merge base branch, and merge PR in one click"
-                            >
-                              {prLoading === 'auto' ? (
-                                <span className="loading loading-spinner loading-xs mr-1"></span>
-                              ) : (
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                  <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
-                                </svg>
-                              )}
-                              Auto PR
-                            </button>
-                          )}
+                          {/* Auto PR button - always show */}
+                          <button
+                            onClick={handleAutoPR}
+                            className="btn btn-sm btn-accent"
+                            disabled={prLoading !== null}
+                            title="Create PR, merge base branch, and merge PR in one click"
+                          >
+                            {prLoading === 'auto' ? (
+                              <span className="loading loading-spinner loading-xs mr-1"></span>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                            Auto PR
+                          </button>
                         </>
                       )}
 
