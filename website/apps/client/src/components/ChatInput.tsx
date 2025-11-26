@@ -296,8 +296,44 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         if (transcript.trim()) {
           // Use inputRef.current to get the latest input value (avoids stale closure)
           const currentInput = inputRef.current;
-          const newText = currentInput ? `${currentInput}\n${transcript.trim()}` : transcript.trim();
+          let newTranscript = transcript.trim();
+          let shouldAutoSubmit = false;
+
+          // Check for voice command keywords at the end of the transcript
+          const keywords = user?.voiceCommandKeywords || [];
+          if (keywords.length > 0) {
+            const lowerTranscript = newTranscript.toLowerCase();
+            for (const keyword of keywords) {
+              // Check if transcript ends with the keyword (with optional trailing punctuation)
+              const keywordPattern = new RegExp(`\\b${keyword}[.!?,;:\\s]*$`, 'i');
+              if (keywordPattern.test(lowerTranscript)) {
+                // Remove the keyword from the end of the transcript
+                newTranscript = newTranscript.replace(keywordPattern, '').trim();
+                shouldAutoSubmit = true;
+                break;
+              }
+            }
+          }
+
+          const newText = currentInput ? `${currentInput}\n${newTranscript}` : newTranscript;
           setInput(newText);
+
+          // Auto-submit if keyword was detected
+          if (shouldAutoSubmit && newText.trim()) {
+            // Stop recording first
+            try {
+              recognition.stop();
+            } catch (error) {
+              console.error('Error stopping recognition:', error);
+            }
+            // Trigger submit after a brief delay to ensure state is updated
+            setTimeout(() => {
+              const form = document.querySelector('form');
+              if (form) {
+                form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+              }
+            }, 100);
+          }
         }
       };
 

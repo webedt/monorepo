@@ -16,6 +16,7 @@ export const users = pgTable('users', {
     rateLimitTier: string;
   }>(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
+  voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

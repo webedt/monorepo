@@ -7,6 +7,7 @@ export interface User {
   githubAccessToken: string | null;
   claudeAuth: ClaudeAuth | null;
   imageResizeMaxDimension: number;
+  voiceCommandKeywords: string[];
   createdAt: Date;
 }
 
