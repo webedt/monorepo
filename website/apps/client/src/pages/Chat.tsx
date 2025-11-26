@@ -63,12 +63,15 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   }
 
   // Handle git commit and pull progress events
+  // These events may have nested data structure: { data: { message: "..." }, type: "...", timestamp: "..." }
   if (eventType === 'commit_progress') {
-    content = typeof data === 'string' ? data : (data.message || JSON.stringify(data));
+    const message = data.data?.message || data.message;
+    content = typeof data === 'string' ? data : (message || JSON.stringify(data));
     eventLabel = '📤';
     messageType = 'system';
   } else if (eventType === 'github_pull_progress') {
-    content = typeof data === 'string' ? data : (data.message || JSON.stringify(data));
+    const message = data.data?.message || data.message;
+    content = typeof data === 'string' ? data : (message || JSON.stringify(data));
     eventLabel = '⬇️';
     messageType = 'system';
   }
@@ -716,12 +719,15 @@ export default function Chat() {
       }
 
       // Handle git commit and pull progress events
+      // These events may have nested data structure: { data: { message: "..." }, type: "...", timestamp: "..." }
       if (eventType === 'commit_progress') {
-        content = typeof data === 'string' ? data : (data.message || JSON.stringify(data));
+        const message = data.data?.message || data.message;
+        content = typeof data === 'string' ? data : (message || JSON.stringify(data));
         eventLabel = '📤';
         messageType = 'system';
       } else if (eventType === 'github_pull_progress') {
-        content = typeof data === 'string' ? data : (data.message || JSON.stringify(data));
+        const message = data.data?.message || data.message;
+        content = typeof data === 'string' ? data : (message || JSON.stringify(data));
         eventLabel = '⬇️';
         messageType = 'system';
       }
