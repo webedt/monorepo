@@ -95,10 +95,12 @@ docker stack rm unified-worker-stack
    - `ClaudeCodeProvider` - Uses `@anthropic-ai/claude-agent-sdk`
    - `CodexProvider` - Stub for Codex/Cursor integration
 
-5. **Clients**:
+5. **Clients & Utilities**:
    - `GitHubClient` - Clones/pulls repositories using simple-git
+   - `GitHelper` - Git operations (branch, commit, push)
    - `DBClient` - Stub for database persistence
    - `CredentialManager` - Writes provider credentials to filesystem
+   - `LLMHelper` - Uses Claude Agent SDK to generate session names and commit messages
 
 ### Request Flow
 
@@ -107,23 +109,27 @@ Client → POST /execute
     ↓
 server.ts: Check worker status (idle/busy)
     ↓
-orchestrator.ts: Validate request
+orchestrator.ts: Step 1 - Validate request
     ↓
-SessionManager: Create/resume session workspace
+orchestrator.ts: Step 1.5 - Write credentials early (for LLM naming)
     ↓
-GitHubClient: Clone repository (if specified)
+SessionManager: Step 2 - Download/create session workspace
     ↓
-ProviderFactory: Create provider instance
+GitHubClient: Step 4 - Clone repository (if specified)
     ↓
-CredentialManager: Write credentials to ~/.claude/.credentials.json
+LLMHelper: Step 4.5 - Generate session title & branch name (new sessions only)
     ↓
-Provider: Execute user request (streaming)
+GitHelper: Create branch (claude/{name}-{sessionSuffix})
+    ↓
+ProviderFactory: Step 5 - Create provider instance
+    ↓
+Provider: Step 6 - Execute user request (streaming)
     ↓
 SSE events → Client
     ↓
-SessionManager: Persist events to .stream-events.jsonl
+GitHelper: Step 7 - Auto-commit & push changes (if autoCommit enabled)
     ↓
-DBClient: Optional database persistence
+SessionManager: Step 8 - Upload session to storage
     ↓
 Worker exits (ephemeral model)
 ```
@@ -211,9 +217,48 @@ case 'new-provider':
 - `connected` - Initial connection with session ID
 - `message` - Progress messages
 - `github_pull_progress` - Repo clone/pull status
+- `branch_created` - Git branch created with session name
+- `session_name` - Generated session title and branch name
+- `debug` - Debug information (for troubleshooting)
 - `assistant_message` - Provider output (forwarded as-is)
+- `commit_progress` - Auto-commit progress stages
 - `completed` - Job finished with duration
 - `error` - Error occurred with code
+
+### LLM-Based Session Naming
+
+For new sessions, the worker generates a human-readable session title and git branch name using the Claude Agent SDK (Haiku model). This happens in Step 4.5 of the orchestrator flow.
+
+**How it works:**
+1. Credentials are written to `~/.claude/.credentials.json` (Step 1.5)
+2. `LLMHelper` uses Claude Agent SDK `query()` with OAuth auth (same as main execution)
+3. Haiku generates: `TITLE: [3-6 words]` and `BRANCH: [lowercase-hyphenated]`
+4. Branch name format: `claude/{descriptive-part}-{last8CharsOfSessionId}`
+
+**Why Claude Agent SDK (not direct API):**
+- OAuth tokens (`sk-ant-oat...`) only work with Claude Agent SDK
+- Direct Anthropic API calls require API keys (`sk-ant-api...`)
+- Using SDK ensures same authentication mechanism as main execution
+
+**SSE events emitted:**
+```
+message: "Generating session title and branch name..."
+debug: "LLMHelper initialized with Claude Agent SDK"
+debug: "Calling generateSessionTitleAndBranch with request: ..."
+debug: "LLM returned: title=..., branchName=..."
+message: "Creating branch: claude/explore-repository-abc12345"
+branch_created: { branchName, baseBranch, sessionPath }
+session_name: { sessionName, branchName }
+```
+
+**Fallback behavior:**
+If LLM naming fails, falls back to:
+- Title: "New Session"
+- Branch: `claude/auto-request-{sessionIdSuffix}`
+
+**Key files:**
+- [llmHelper.ts](src/utils/llmHelper.ts) - Claude Agent SDK wrapper for LLM calls
+- [orchestrator.ts:279-469](src/orchestrator.ts#L279-L469) - Session naming flow
 
 ## Configuration
 
