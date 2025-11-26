@@ -54,11 +54,17 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<any>(null); // Stores Web Speech API recognition instance
+  const inputRef = useRef(input); // Ref to track current input value for speech recognition
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
+
+  // Keep inputRef in sync with input prop
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
 
   // Repository search state
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
@@ -288,8 +294,9 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         }
 
         if (transcript.trim()) {
-          // Append transcribed text to existing input
-          const newText = input ? `${input}\n${transcript.trim()}` : transcript.trim();
+          // Use inputRef.current to get the latest input value (avoids stale closure)
+          const currentInput = inputRef.current;
+          const newText = currentInput ? `${currentInput}\n${transcript.trim()}` : transcript.trim();
           setInput(newText);
         }
       };
