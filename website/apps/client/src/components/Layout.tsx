@@ -176,7 +176,8 @@ export default function Layout() {
         isEditorMode={isEditorMode}
       />
 
-      {/* Top Navigation Bar */}
+      {/* Top Navigation Bar - Sticky Header */}
+      <header className="sticky top-0 z-50">
       <nav className="bg-base-100 border-b border-base-300">
         <div className="px-4">
           <div className="flex items-center h-14">
@@ -402,6 +403,7 @@ export default function Layout() {
           </div>
         </div>
       )}
+      </header>
 
       {/* Main Content */}
       <main className="flex-1">
