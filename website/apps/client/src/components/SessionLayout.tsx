@@ -555,7 +555,7 @@ export default function SessionLayout({
                   <span className={`text-base-content/70 ${branchExpanded ? '' : 'truncate'}`}>
                     {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || 'unknown'}/{baseBranch}
                     {branch && (
-                      <> → <span className="font-medium">{branchExpanded || branch.length <= 30 ? branch : branch.substring(0, 30) + '…'}</span></>
+                      <> → <span className="font-medium">{branchExpanded || branch.length <= 20 ? branch : branch.substring(0, 20) + '…'}</span></>
                     )}
                   </span>
                 </button>
