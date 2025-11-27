@@ -1100,6 +1100,104 @@ export default function Chat() {
     setStreamUrl(`${API_BASE_URL}/api/execute`);
   };
 
+  // Create session actions for the consolidated top bar
+  const sessionActions = session && messages.length > 0 && (
+    <>
+      {/* PR Buttons - only show if session has branch info */}
+      {session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
+        <>
+          {/* View PR button - show only if PR is open */}
+          {existingPr && (
+            <button
+              onClick={handleViewPR}
+              className="btn btn-xs btn-info"
+              title={`View open PR #${existingPr.number}`}
+            >
+              View PR #{existingPr.number}
+            </button>
+          )}
+
+          {/* PR Merged button - show when PR was already merged */}
+          {!existingPr && mergedPr && (
+            <button
+              onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
+              className="btn btn-xs btn-success"
+              title={`PR #${mergedPr.number} was merged`}
+            >
+              PR #{mergedPr.number} Merged
+            </button>
+          )}
+
+          {/* Create PR button - show if no open PR exists and not merged */}
+          {!existingPr && !mergedPr && (
+            <button
+              onClick={handleCreatePR}
+              className="btn btn-xs btn-primary"
+              disabled={prLoading !== null}
+              title="Create a pull request"
+            >
+              {prLoading === 'create' ? (
+                <span className="loading loading-spinner loading-xs"></span>
+              ) : (
+                'Create PR'
+              )}
+            </button>
+          )}
+
+          {/* Auto PR button - hide when PR already merged */}
+          {!existingPr && !mergedPr && (
+            <button
+              onClick={handleAutoPR}
+              className="btn btn-xs btn-accent"
+              disabled={prLoading !== null}
+              title="Create PR, merge base branch, and merge PR in one click"
+            >
+              {prLoading === 'auto' ? (
+                <span className="loading loading-spinner loading-xs"></span>
+              ) : (
+                'Auto PR'
+              )}
+            </button>
+          )}
+        </>
+      )}
+
+      {/* Edit and Delete buttons */}
+      <button
+        onClick={handleEditTitle}
+        className="btn btn-ghost btn-xs btn-circle"
+        title="Edit session title"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-4 w-4"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+        </svg>
+      </button>
+      <button
+        onClick={handleDeleteSession}
+        className="btn btn-ghost btn-xs btn-circle text-error"
+        title="Delete session"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-4 w-4"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+    </>
+  );
+
   return (
     <SessionLayout
       selectedRepo={selectedRepo}
@@ -1110,160 +1208,45 @@ export default function Chat() {
       repositories={repositories}
       isLoadingRepos={isLoadingRepos}
       isLocked={isLocked}
+      sessionActions={sessionActions}
     >
       <div className="flex flex-col flex-1">
-      {/* Header - only show for existing sessions with messages */}
+      {/* Alerts/Warnings Area - only show for existing sessions with messages */}
       {messages.length > 0 && (
-        <div className="bg-base-100 border-b border-base-300 p-4 sticky top-[104px] z-40">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex items-center justify-between mb-2">
-              {editingTitle && session ? (
-                <div className="flex items-center space-x-2 flex-1">
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    className="flex-1 input input-bordered"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveTitle();
-                      if (e.key === 'Escape') handleCancelEdit();
-                    }}
-                  />
-                  <button
-                    onClick={handleSaveTitle}
-                    className="btn btn-success btn-sm"
-                    disabled={updateMutation.isPending}
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={handleCancelEdit}
-                    className="btn btn-ghost btn-sm"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <h1 className="text-2xl font-bold text-base-content">
-                    {session ? session.userRequest : 'Chat Session'}
-                  </h1>
-                  {session && (
-                    <div className="flex items-center space-x-2">
-                      {/* PR Buttons - only show if session has branch info */}
-                      {session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
-                        <>
-                          {/* View PR button - show only if PR is open */}
-                          {existingPr && (
-                            <button
-                              onClick={handleViewPR}
-                              className="btn btn-sm btn-info"
-                              title={`View open PR #${existingPr.number}`}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
-                                <path fillRule="evenodd" d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                              </svg>
-                              View PR #{existingPr.number}
-                            </button>
-                          )}
-
-                          {/* PR Merged button - show when PR was already merged */}
-                          {!existingPr && mergedPr && (
-                            <button
-                              onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
-                              className="btn btn-sm btn-success"
-                              title={`PR #${mergedPr.number} was merged`}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
-                                <path fillRule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                              </svg>
-                              PR #{mergedPr.number} Merged
-                            </button>
-                          )}
-
-                          {/* Create PR button - show if no open PR exists and not merged */}
-                          {!existingPr && !mergedPr && (
-                            <button
-                              onClick={handleCreatePR}
-                              className="btn btn-sm btn-primary"
-                              disabled={prLoading !== null}
-                              title="Create a pull request"
-                            >
-                              {prLoading === 'create' ? (
-                                <span className="loading loading-spinner loading-xs mr-1"></span>
-                              ) : (
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
-                                  <path fillRule="evenodd" d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                                </svg>
-                              )}
-                              Create PR
-                            </button>
-                          )}
-
-                          {/* Auto PR button - hide when PR already merged */}
-                          {!existingPr && !mergedPr && (
-                            <button
-                              onClick={handleAutoPR}
-                              className="btn btn-sm btn-accent"
-                              disabled={prLoading !== null}
-                              title="Create PR, merge base branch, and merge PR in one click"
-                            >
-                              {prLoading === 'auto' ? (
-                                <span className="loading loading-spinner loading-xs mr-1"></span>
-                              ) : (
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                  <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
-                                </svg>
-                              )}
-                              Auto PR
-                            </button>
-                          )}
-                        </>
-                      )}
-
-                      <div className="border-l border-base-300 h-6 mx-1"></div>
-
-                      <button
-                        onClick={handleEditTitle}
-                        className="btn btn-ghost btn-sm btn-circle"
-                        title="Edit session title"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                        >
-                          <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={handleDeleteSession}
-                        className="btn btn-ghost btn-sm btn-circle text-error"
-                        title="Delete session"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+        <div className="bg-base-100 border-b border-base-300 p-4">
+          <div className="max-w-7xl mx-auto space-y-2">
+            {/* Title editing mode */}
+            {editingTitle && session && (
+              <div className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="flex-1 input input-bordered input-sm"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') handleCancelEdit();
+                  }}
+                />
+                <button
+                  onClick={handleSaveTitle}
+                  className="btn btn-success btn-sm"
+                  disabled={updateMutation.isPending}
+                >
+                  Save
+                </button>
+                <button
+                  onClick={handleCancelEdit}
+                  className="btn btn-ghost btn-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
 
             {!user?.githubAccessToken && (
-              <div className="alert alert-warning mt-4">
+              <div className="alert alert-warning">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                 <span className="text-sm">
                   Connect GitHub in settings to work with repositories
@@ -1272,7 +1255,7 @@ export default function Chat() {
             )}
 
             {!user?.claudeAuth && (
-              <div className="alert alert-error mt-4">
+              <div className="alert alert-error">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 <span className="text-sm">
                   Add Claude credentials in settings to use the AI assistant
@@ -1282,7 +1265,7 @@ export default function Chat() {
 
             {/* PR Status Messages */}
             {prSuccess && (
-              <div className="alert alert-success mt-4">
+              <div className="alert alert-success">
                 <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <span className="text-sm">{prSuccess}</span>
                 <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
@@ -1290,7 +1273,7 @@ export default function Chat() {
             )}
 
             {prError && (
-              <div className="alert alert-error mt-4">
+              <div className="alert alert-error">
                 <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <span className="text-sm">{prError}</span>
                 <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
