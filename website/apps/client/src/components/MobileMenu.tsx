@@ -22,18 +22,33 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
 
   // Close menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as HTMLElement;
+
+      // Don't close if clicking on the hamburger button (has aria-label "Toggle menu")
+      if (target.closest('[aria-label="Toggle menu"]')) {
+        return;
+      }
+
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         onClose();
       }
     };
 
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+      // Use a small delay to avoid conflict with the toggle button
+      const timer = setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('touchstart', handleClickOutside);
+      }, 100);
+
       // Prevent body scroll when menu is open
       document.body.style.overflow = 'hidden';
+
       return () => {
+        clearTimeout(timer);
         document.removeEventListener('mousedown', handleClickOutside);
+        document.removeEventListener('touchstart', handleClickOutside);
         document.body.style.overflow = 'unset';
       };
     }
@@ -108,8 +123,7 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
             {/* Mode Toggle - Switch between Hub and Editor */}
             <div className="px-2">
               <Link
-                to={isEditorMode ? '/' : '/new-session'}
-                onClick={onClose}
+                to={isEditorMode ? '/' : '/sessions'}
                 className="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
               >
                 {isEditorMode ? (

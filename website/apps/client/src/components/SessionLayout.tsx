@@ -184,7 +184,7 @@ export default function SessionLayout({
       />
 
       {/* Top Navigation Bar - Sticky Header */}
-      <header className="sticky top-0 z-50">
+      <header className="sticky top-0 z-[60]">
       <nav className="bg-base-100 border-b border-base-300">
         <div className="px-4">
           <div className="flex items-center h-14">
@@ -192,9 +192,9 @@ export default function SessionLayout({
             <div className="flex items-center">
               {/* Hamburger Menu Button - Mobile Only */}
               <button
-                onClick={() => setMobileMenuOpen(true)}
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="md:hidden flex items-center justify-center w-10 h-10 rounded-lg hover:bg-base-200 transition-colors mr-2"
-                aria-label="Open menu"
+                aria-label="Toggle menu"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/>
