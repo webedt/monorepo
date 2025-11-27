@@ -61,7 +61,6 @@ export default function Preview() {
     enabled: !!sessionId && sessionId !== 'new',
   });
 
-  const session: ChatSession | undefined = sessionData?.data;
   const previewUrl = (sessionData?.data as any)?.previewUrl || null;
 
   return (
