@@ -22,7 +22,8 @@ interface SessionLayoutProps {
   repositories?: GitHubRepository[];
   isLoadingRepos?: boolean;
   isLocked?: boolean;
-  sessionActions?: React.ReactNode;
+  titleActions?: React.ReactNode; // Edit and Delete buttons for title line
+  prActions?: React.ReactNode; // PR buttons for branch line
   children: React.ReactNode;
 }
 
@@ -35,7 +36,8 @@ export default function SessionLayout({
   repositories: repositoriesProp,
   isLoadingRepos: isLoadingReposProp,
   isLocked: isLockedProp,
-  sessionActions,
+  titleActions,
+  prActions,
   children,
 }: SessionLayoutProps) {
   const { user, isAuthenticated, clearUser } = useAuthStore();
@@ -520,7 +522,7 @@ export default function SessionLayout({
           {hasRepository && isLocked ? (
             /* Compact two-line layout for active sessions */
             <div className="max-w-7xl mx-auto">
-              {/* Line 1: Page icon + title (left) + actions (right) */}
+              {/* Line 1: Page icon + title (left) + edit/delete icons (right) */}
               <div className="flex items-center justify-between gap-4 mb-1">
                 {/* Left: Icon + Title */}
                 <button
@@ -534,16 +536,16 @@ export default function SessionLayout({
                   </h2>
                 </button>
 
-                {/* Right: Action buttons */}
-                {sessionActions && (
+                {/* Right: Edit and Delete icon buttons */}
+                {titleActions && (
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {sessionActions}
+                    {titleActions}
                   </div>
                 )}
               </div>
 
-              {/* Line 2: Repository branch info as single pill */}
-              <div className="flex items-center gap-2 text-xs">
+              {/* Line 2: Repository branch info as single pill + PR buttons */}
+              <div className="flex items-center justify-between gap-2 text-xs">
                 <button
                   onClick={() => setBranchExpanded(!branchExpanded)}
                   className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full max-w-full hover:bg-base-300 transition-colors cursor-pointer"
@@ -557,6 +559,13 @@ export default function SessionLayout({
                     )}
                   </span>
                 </button>
+
+                {/* PR action buttons */}
+                {prActions && (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {prActions}
+                  </div>
+                )}
               </div>
             </div>
           ) : hasRepository && !isLocked ? (

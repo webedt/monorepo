@@ -1100,69 +1100,9 @@ export default function Chat() {
     setStreamUrl(`${API_BASE_URL}/api/execute`);
   };
 
-  // Create session actions for the consolidated top bar
-  const sessionActions = session && messages.length > 0 && (
+  // Create title actions (Edit and Delete buttons) for the title line
+  const titleActions = session && messages.length > 0 && (
     <>
-      {/* PR Buttons - only show if session has branch info */}
-      {session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
-        <>
-          {/* View PR button - show only if PR is open */}
-          {existingPr && (
-            <button
-              onClick={handleViewPR}
-              className="btn btn-xs btn-info"
-              title={`View open PR #${existingPr.number}`}
-            >
-              View PR #{existingPr.number}
-            </button>
-          )}
-
-          {/* PR Merged button - show when PR was already merged */}
-          {!existingPr && mergedPr && (
-            <button
-              onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
-              className="btn btn-xs btn-success"
-              title={`PR #${mergedPr.number} was merged`}
-            >
-              PR #{mergedPr.number} Merged
-            </button>
-          )}
-
-          {/* Create PR button - show if no open PR exists and not merged */}
-          {!existingPr && !mergedPr && (
-            <button
-              onClick={handleCreatePR}
-              className="btn btn-xs btn-primary"
-              disabled={prLoading !== null}
-              title="Create a pull request"
-            >
-              {prLoading === 'create' ? (
-                <span className="loading loading-spinner loading-xs"></span>
-              ) : (
-                'Create PR'
-              )}
-            </button>
-          )}
-
-          {/* Auto PR button - hide when PR already merged */}
-          {!existingPr && !mergedPr && (
-            <button
-              onClick={handleAutoPR}
-              className="btn btn-xs btn-accent"
-              disabled={prLoading !== null}
-              title="Create PR, merge base branch, and merge PR in one click"
-            >
-              {prLoading === 'auto' ? (
-                <span className="loading loading-spinner loading-xs"></span>
-              ) : (
-                'Auto PR'
-              )}
-            </button>
-          )}
-        </>
-      )}
-
-      {/* Edit and Delete buttons */}
       <button
         onClick={handleEditTitle}
         className="btn btn-ghost btn-xs btn-circle"
@@ -1198,6 +1138,65 @@ export default function Chat() {
     </>
   );
 
+  // Create PR actions for the branch line
+  const prActions = session && messages.length > 0 && session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
+    <>
+      {/* View PR button - show only if PR is open */}
+      {existingPr && (
+        <button
+          onClick={handleViewPR}
+          className="btn btn-xs btn-info"
+          title={`View open PR #${existingPr.number}`}
+        >
+          View PR #{existingPr.number}
+        </button>
+      )}
+
+      {/* PR Merged button - show when PR was already merged */}
+      {!existingPr && mergedPr && (
+        <button
+          onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
+          className="btn btn-xs btn-success"
+          title={`PR #${mergedPr.number} was merged`}
+        >
+          PR #{mergedPr.number} Merged
+        </button>
+      )}
+
+      {/* Create PR button - show if no open PR exists and not merged */}
+      {!existingPr && !mergedPr && (
+        <button
+          onClick={handleCreatePR}
+          className="btn btn-xs btn-primary"
+          disabled={prLoading !== null}
+          title="Create a pull request"
+        >
+          {prLoading === 'create' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Create PR'
+          )}
+        </button>
+      )}
+
+      {/* Auto PR button - hide when PR already merged */}
+      {!existingPr && !mergedPr && (
+        <button
+          onClick={handleAutoPR}
+          className="btn btn-xs btn-accent"
+          disabled={prLoading !== null}
+          title="Create PR, merge base branch, and merge PR in one click"
+        >
+          {prLoading === 'auto' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Auto PR'
+          )}
+        </button>
+      )}
+    </>
+  );
+
   return (
     <SessionLayout
       selectedRepo={selectedRepo}
@@ -1208,7 +1207,8 @@ export default function Chat() {
       repositories={repositories}
       isLoadingRepos={isLoadingRepos}
       isLocked={isLocked}
-      sessionActions={sessionActions}
+      titleActions={titleActions}
+      prActions={prActions}
     >
       <div className="flex flex-col flex-1">
       {/* Alerts/Warnings Area - only show for existing sessions with messages */}
