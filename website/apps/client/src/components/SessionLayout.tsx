@@ -22,6 +22,8 @@ interface SessionLayoutProps {
   repositories?: GitHubRepository[];
   isLoadingRepos?: boolean;
   isLocked?: boolean;
+  titleActions?: React.ReactNode; // Edit and Delete buttons for title line
+  prActions?: React.ReactNode; // PR buttons for branch line
   children: React.ReactNode;
 }
 
@@ -34,6 +36,8 @@ export default function SessionLayout({
   repositories: repositoriesProp,
   isLoadingRepos: isLoadingReposProp,
   isLocked: isLockedProp,
+  titleActions,
+  prActions,
   children,
 }: SessionLayoutProps) {
   const { user, isAuthenticated, clearUser } = useAuthStore();
@@ -46,6 +50,8 @@ export default function SessionLayout({
   const [showVersionDetails, setShowVersionDetails] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [branchExpanded, setBranchExpanded] = useState(false);
+  const [titleExpanded, setTitleExpanded] = useState(false);
 
   // Fetch session data when sessionId exists and no props provided
   const { data: sessionData } = useQuery({
@@ -510,98 +516,97 @@ export default function SessionLayout({
         </div>
       </nav>
 
-      {/* Second Bar - Repository Controls / Connection Status */}
+      {/* Second Bar - Repository Controls / Connection Status - Consolidated Design */}
       <div className="bg-base-100 border-b border-base-300">
-        <div className="px-4 h-12 flex items-center justify-center gap-4">
-          {hasRepository ? (
-            <>
-              {isLocked ? (
-                <>
-                  {/* Connection indicator when locked */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-success animate-pulse"></div>
-                      <span className="text-xs font-medium text-base-content/50">Connected</span>
-                    </div>
-                  </div>
+        <div className="px-4 py-2">
+          {hasRepository && isLocked ? (
+            /* Compact two-line layout for active sessions */
+            <div className="max-w-7xl mx-auto flex flex-col gap-1">
+              {/* Line 1: Page icon + title (left) + edit/delete icons (right) */}
+              <div className="flex items-center justify-between gap-4">
+                {/* Left: Icon + Title */}
+                <button
+                  onClick={() => setTitleExpanded(!titleExpanded)}
+                  className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-70 transition-opacity cursor-pointer"
+                  title={titleExpanded ? "Click to collapse" : "Click to expand full title"}
+                >
+                  <span className="text-lg">📁</span>
+                  <h2 className={`text-sm font-medium text-base-content ${titleExpanded ? '' : 'truncate'}`}>
+                    {sessionData?.data?.userRequest || 'Session'}
+                  </h2>
+                </button>
 
-                  {/* Read-only repository info when locked */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-base-content/70">Repository:</span>
-                    <span className="text-sm text-base-content">
-                      {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || selectedRepo}
-                    </span>
+                {/* Right: Edit and Delete icon buttons ONLY */}
+                {titleActions && (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {titleActions}
                   </div>
-
-                  {/* Read-only base branch when locked */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
-                    <span className="text-sm text-base-content">{baseBranch}</span>
-                  </div>
-
-                  {/* Read-only branch when locked */}
-                  {branch && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-base-content/70">Branch:</span>
-                      <span className="text-sm text-base-content">{branch}</span>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  {/* Editable repository controls when not locked */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-base-content/70">Repository:</span>
-                    <select
-                      value={selectedRepo}
-                      onChange={(e) => onRepoChange?.(e.target.value)}
-                      disabled={isLoadingRepos}
-                      className="select select-sm select-bordered"
-                    >
-                      <option value="">No repository</option>
-                      {repositories.map((repo: GitHubRepository) => (
-                        <option key={repo.id} value={repo.cloneUrl}>
-                          {repo.fullName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Base Branch */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
-                    <input
-                      type="text"
-                      value={baseBranch}
-                      onChange={(e) => onBaseBranchChange?.(e.target.value)}
-                      className="input input-sm input-bordered w-32"
-                      placeholder="main"
-                    />
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              {/* Show offline or no repository status */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  {isLocked ? (
-                    <>
-                      {/* Grey dot when session is active but missing repository (offline/local state) */}
-                      <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
-                      <span className="text-xs font-medium text-base-content/50">Offline</span>
-                    </>
-                  ) : (
-                    <>
-                      {/* Grey dot for setup pages, new session, sessions list, quick-setup, etc. */}
-                      <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
-                      <span className="text-xs font-medium text-base-content/50">Offline</span>
-                    </>
-                  )}
-                </div>
+                )}
               </div>
-            </>
+
+              {/* Line 2: Repository branch info as single pill + PR buttons */}
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <button
+                  onClick={() => setBranchExpanded(!branchExpanded)}
+                  className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full max-w-full hover:bg-base-300 transition-colors cursor-pointer"
+                  title={branchExpanded ? "Click to collapse" : "Click to expand full branch name"}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
+                  <span className={`text-base-content/70 ${branchExpanded ? '' : 'truncate'}`}>
+                    {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || 'unknown'}/{baseBranch}
+                    {branch && (
+                      <> → <span className="font-medium">{branchExpanded || branch.length <= 30 ? branch : branch.substring(0, 30) + '…'}</span></>
+                    )}
+                  </span>
+                </button>
+
+                {/* PR action buttons ONLY */}
+                {prActions && (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {prActions}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : hasRepository && !isLocked ? (
+            /* Editable controls for new sessions */
+            <div className="max-w-7xl mx-auto flex items-center justify-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-base-content/70">Repository:</span>
+                <select
+                  value={selectedRepo}
+                  onChange={(e) => onRepoChange?.(e.target.value)}
+                  disabled={isLoadingRepos}
+                  className="select select-sm select-bordered"
+                >
+                  <option value="">No repository</option>
+                  {repositories.map((repo: GitHubRepository) => (
+                    <option key={repo.id} value={repo.cloneUrl}>
+                      {repo.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
+                <input
+                  type="text"
+                  value={baseBranch}
+                  onChange={(e) => onBaseBranchChange?.(e.target.value)}
+                  className="input input-sm input-bordered w-32"
+                  placeholder="main"
+                />
+              </div>
+            </div>
+          ) : (
+            /* Offline/no repository state */
+            <div className="max-w-7xl mx-auto flex items-center justify-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
+                <span className="text-xs font-medium text-base-content/50">Offline</span>
+              </div>
+            </div>
           )}
         </div>
       </div>
