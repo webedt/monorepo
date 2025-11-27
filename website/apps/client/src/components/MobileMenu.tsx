@@ -23,17 +23,30 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
   // Close menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as HTMLElement;
+
+      // Don't close if clicking on the hamburger button (has aria-label "Toggle menu")
+      if (target.closest('[aria-label="Toggle menu"]')) {
+        return;
+      }
+
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         onClose();
       }
     };
 
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('touchstart', handleClickOutside);
+      // Use a small delay to avoid conflict with the toggle button
+      const timer = setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('touchstart', handleClickOutside);
+      }, 100);
+
       // Prevent body scroll when menu is open
       document.body.style.overflow = 'hidden';
+
       return () => {
+        clearTimeout(timer);
         document.removeEventListener('mousedown', handleClickOutside);
         document.removeEventListener('touchstart', handleClickOutside);
         document.body.style.overflow = 'unset';
