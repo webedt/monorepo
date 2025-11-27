@@ -7,6 +7,7 @@ interface NavItem {
   icon: React.ReactNode;
   isActive?: boolean;
   disabled?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
 }
 
 interface MobileMenuProps {
@@ -103,7 +104,12 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
                   <Link
                     key={index}
                     to={item.to}
-                    onClick={onClose}
+                    onClick={(e) => {
+                      if (item.onClick) {
+                        item.onClick(e);
+                      }
+                      onClose();
+                    }}
                     className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded transition-colors ${
                       item.isActive
                         ? 'bg-primary/10 text-primary'

@@ -8,6 +8,11 @@ import MobileMenu from './MobileMenu';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA } from '@/version';
 import type { GitHubRepository } from '@webedt/shared';
 
+// Helper to detect mobile devices
+const isMobileDevice = () => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 interface SessionLayoutProps {
   selectedRepo?: string;
   baseBranch?: string;
@@ -40,6 +45,7 @@ export default function SessionLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showVersionDetails, setShowVersionDetails] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // Fetch session data when sessionId exists and no props provided
   const { data: sessionData } = useQuery({
@@ -78,6 +84,15 @@ export default function SessionLayout({
     }
   };
 
+  // Handle preview click - open in new tab on mobile if we have a preview URL
+  const handlePreviewClick = (e: React.MouseEvent) => {
+    if (isMobileDevice() && previewUrl) {
+      e.preventDefault();
+      window.open(previewUrl, '_blank');
+    }
+    // On desktop or when no preview URL, let the Link navigate normally
+  };
+
   // Get short SHA for display
   const getShortSha = () => VERSION_SHA?.substring(0, 7) ?? 'unknown';
 
@@ -96,6 +111,14 @@ export default function SessionLayout({
       timeZoneName: 'short'
     });
   };
+
+  // Extract preview URL from session data
+  useEffect(() => {
+    if (sessionData?.data) {
+      const url = (sessionData.data as any)?.previewUrl || null;
+      setPreviewUrl(url);
+    }
+  }, [sessionData]);
 
   // Close user menu when clicking outside
   useEffect(() => {
@@ -168,7 +191,8 @@ export default function SessionLayout({
       to: sessionId ? `/session/${sessionId}/preview` : '/quick-setup/preview',
       label: 'Preview',
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>,
-      disabled: location.pathname.includes('/preview')
+      disabled: location.pathname.includes('/preview'),
+      onClick: handlePreviewClick
     }
   ];
 
@@ -379,6 +403,7 @@ export default function SessionLayout({
                 ) : (
                   <Link
                     to={sessionId ? `/session/${sessionId}/preview` : '/quick-setup/preview'}
+                    onClick={handlePreviewClick}
                     className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors text-base-content/70 hover:bg-base-200"
                   >
                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
