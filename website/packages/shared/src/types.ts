@@ -164,3 +164,9 @@ export interface MessageListResponse {
   messages: Message[];
   total: number;
 }
+
+// .webedt configuration types
+export interface WebedtConfig {
+  preview_url?: string;
+  [key: string]: any;
+}
