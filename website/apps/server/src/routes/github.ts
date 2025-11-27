@@ -8,6 +8,17 @@ import { requireAuth } from '../middleware/auth';
 
 const router = Router();
 
+// Helper function to get the frontend URL for redirects
+// Falls back to relative URLs if ALLOWED_ORIGINS is not set
+function getFrontendUrl(path: string): string {
+  const origin = process.env.ALLOWED_ORIGINS?.split(',')[0];
+  if (origin) {
+    return `${origin}${path}`;
+  }
+  // Fallback to relative URL if ALLOWED_ORIGINS is not configured
+  return path;
+}
+
 // Initiate GitHub OAuth
 router.get('/oauth', requireAuth, (req, res) => {
   const authReq = req as AuthRequest;
@@ -35,7 +46,7 @@ router.get('/oauth/callback', async (req, res) => {
     const { code, state } = req.query;
 
     if (!code || !state) {
-      res.redirect(`${process.env.ALLOWED_ORIGINS?.split(',')[0]}/login?error=missing_params`);
+      res.redirect(getFrontendUrl('/login?error=missing_params'));
       return;
     }
 
@@ -44,13 +55,13 @@ router.get('/oauth/callback', async (req, res) => {
     try {
       stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
     } catch (error) {
-      res.redirect(`${process.env.ALLOWED_ORIGINS?.split(',')[0]}/login?error=invalid_state`);
+      res.redirect(getFrontendUrl('/login?error=invalid_state'));
       return;
     }
 
     // Check if state is not too old (prevent replay attacks) - 10 minute timeout
     if (Date.now() - stateData.timestamp > 10 * 60 * 1000) {
-      res.redirect(`${process.env.ALLOWED_ORIGINS?.split(',')[0]}/login?error=state_expired`);
+      res.redirect(getFrontendUrl('/login?error=state_expired'));
       return;
     }
 
@@ -74,9 +85,7 @@ router.get('/oauth/callback', async (req, res) => {
     };
 
     if (tokenData.error) {
-      res.redirect(
-        `${process.env.ALLOWED_ORIGINS?.split(',')[0]}/settings?error=${tokenData.error}`
-      );
+      res.redirect(getFrontendUrl(`/settings?error=${tokenData.error}`));
       return;
     }
 
@@ -95,10 +104,10 @@ router.get('/oauth/callback', async (req, res) => {
       })
       .where(eq(users.id, stateData.userId));
 
-    res.redirect(`${process.env.ALLOWED_ORIGINS?.split(',')[0]}/settings?success=github_connected`);
+    res.redirect(getFrontendUrl('/settings?success=github_connected'));
   } catch (error) {
     console.error('GitHub OAuth error:', error);
-    res.redirect(`${process.env.ALLOWED_ORIGINS?.split(',')[0]}/settings?error=oauth_failed`);
+    res.redirect(getFrontendUrl('/settings?error=oauth_failed'));
   }
 });
 
