@@ -2,7 +2,6 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { sessionsApi } from '@/lib/api';
 import SessionLayout from '@/components/SessionLayout';
-import type { ChatSession } from '@webedt/shared';
 
 function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   if (!previewUrl) {
