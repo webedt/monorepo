@@ -521,9 +521,9 @@ export default function SessionLayout({
         <div className="px-4 py-2">
           {hasRepository && isLocked ? (
             /* Compact two-line layout for active sessions */
-            <div className="max-w-7xl mx-auto">
+            <div className="max-w-7xl mx-auto flex flex-col gap-1">
               {/* Line 1: Page icon + title (left) + edit/delete icons (right) */}
-              <div className="flex items-center justify-between gap-4 mb-1">
+              <div className="flex items-center justify-between gap-4">
                 {/* Left: Icon + Title */}
                 <button
                   onClick={() => setTitleExpanded(!titleExpanded)}
