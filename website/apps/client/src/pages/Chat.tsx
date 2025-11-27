@@ -363,7 +363,7 @@ export default function Chat() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => sessionsApi.delete(id),
     onSuccess: () => {
-      navigate('/dashboard');
+      navigate('/sessions');
     },
   });
 
