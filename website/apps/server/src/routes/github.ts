@@ -22,7 +22,7 @@ router.get('/oauth', requireAuth, (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.GITHUB_OAUTH_CLIENT_ID!,
     redirect_uri: process.env.GITHUB_OAUTH_REDIRECT_URL!,
-    scope: 'repo user:email',
+    scope: 'repo workflow user:email',
     state,
   });
 
