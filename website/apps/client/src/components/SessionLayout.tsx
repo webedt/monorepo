@@ -49,6 +49,7 @@ export default function SessionLayout({
   const userMenuRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [branchExpanded, setBranchExpanded] = useState(false);
+  const [titleExpanded, setTitleExpanded] = useState(false);
 
   // Fetch session data when sessionId exists and no props provided
   const { data: sessionData } = useQuery({
@@ -522,12 +523,16 @@ export default function SessionLayout({
               {/* Line 1: Page icon + title (left) + actions (right) */}
               <div className="flex items-center justify-between gap-4 mb-1">
                 {/* Left: Icon + Title */}
-                <div className="flex items-center gap-2 flex-1 min-w-0">
+                <button
+                  onClick={() => setTitleExpanded(!titleExpanded)}
+                  className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-70 transition-opacity cursor-pointer"
+                  title={titleExpanded ? "Click to collapse" : "Click to expand full title"}
+                >
                   <span className="text-lg">📁</span>
-                  <h2 className="text-sm font-medium text-base-content truncate">
+                  <h2 className={`text-sm font-medium text-base-content ${titleExpanded ? '' : 'truncate'}`}>
                     {sessionData?.data?.userRequest || 'Session'}
                   </h2>
-                </div>
+                </button>
 
                 {/* Right: Action buttons */}
                 {sessionActions && (
