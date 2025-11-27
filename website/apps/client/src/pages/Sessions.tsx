@@ -140,8 +140,10 @@ export default function Sessions() {
         startStream: true,
         streamParams: {
           userRequest: userRequestParam,
-          repositoryUrl: selectedRepo || undefined,
-          baseBranch: baseBranch || undefined,
+          github: (selectedRepo && baseBranch) ? {
+            repoUrl: selectedRepo,
+            branch: baseBranch,
+          } : undefined,
           autoCommit: true,
         }
       }
