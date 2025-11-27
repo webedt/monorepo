@@ -48,6 +48,7 @@ export default function SessionLayout({
   const [showVersionDetails, setShowVersionDetails] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [branchExpanded, setBranchExpanded] = useState(false);
 
   // Fetch session data when sessionId exists and no props provided
   const { data: sessionData } = useQuery({
@@ -538,15 +539,19 @@ export default function SessionLayout({
 
               {/* Line 2: Repository branch info as single pill */}
               <div className="flex items-center gap-2 text-xs">
-                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full max-w-full">
+                <button
+                  onClick={() => setBranchExpanded(!branchExpanded)}
+                  className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full max-w-full hover:bg-base-300 transition-colors cursor-pointer"
+                  title={branchExpanded ? "Click to collapse" : "Click to expand full branch name"}
+                >
                   <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
-                  <span className="text-base-content/70 truncate">
+                  <span className={`text-base-content/70 ${branchExpanded ? '' : 'truncate'}`}>
                     {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || 'unknown'}/{baseBranch}
                     {branch && (
-                      <> → <span className="font-medium">{branch.length > 30 ? branch.substring(0, 30) + '…' : branch}</span></>
+                      <> → <span className="font-medium">{branchExpanded || branch.length <= 30 ? branch : branch.substring(0, 30) + '…'}</span></>
                     )}
                   </span>
-                </div>
+                </button>
               </div>
             </div>
           ) : hasRepository && !isLocked ? (
