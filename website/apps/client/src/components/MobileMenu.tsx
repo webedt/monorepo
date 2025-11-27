@@ -22,7 +22,7 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
 
   // Close menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         onClose();
       }
@@ -30,10 +30,12 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
 
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
       // Prevent body scroll when menu is open
       document.body.style.overflow = 'hidden';
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
+        document.removeEventListener('touchstart', handleClickOutside);
         document.body.style.overflow = 'unset';
       };
     }
