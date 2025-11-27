@@ -206,7 +206,7 @@ export default function QuickSessionSetup() {
       state: {
         preSelectedSettings: {
           repositoryUrl: selectedRepo || undefined,
-          branch: branch || undefined,
+          baseBranch: branch || undefined,
         }
       }
     });

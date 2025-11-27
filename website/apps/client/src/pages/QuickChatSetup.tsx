@@ -138,7 +138,7 @@ export default function QuickChatSetup() {
       state: {
         preSelectedSettings: {
           repositoryUrl: selectedRepo || undefined,
-          branch: branch || undefined,
+          baseBranch: branch || undefined,
           locked: true, // Lock these settings
         }
       }
