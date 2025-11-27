@@ -536,7 +536,7 @@ export default function SessionLayout({
                   </h2>
                 </button>
 
-                {/* Right: Edit and Delete icon buttons */}
+                {/* Right: Edit and Delete icon buttons ONLY */}
                 {titleActions && (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {titleActions}
@@ -560,7 +560,7 @@ export default function SessionLayout({
                   </span>
                 </button>
 
-                {/* PR action buttons */}
+                {/* PR action buttons ONLY */}
                 {prActions && (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {prActions}
