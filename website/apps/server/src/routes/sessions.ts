@@ -6,6 +6,7 @@ import type { ChatSession } from '../db/schema';
 import { eq, desc, inArray, and, asc } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
+import { getPreviewUrl } from '../utils/previewUrlHelper';
 
 const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
 
@@ -120,7 +121,24 @@ router.get('/:id', requireAuth, async (req, res) => {
       return;
     }
 
-    res.json({ success: true, data: session });
+    // Add preview URL if repository info is available
+    let previewUrl: string | null = null;
+    if (session.repositoryOwner && session.repositoryName && session.branch) {
+      previewUrl = await getPreviewUrl(
+        undefined, // workspace path not available in server context
+        session.repositoryOwner,
+        session.repositoryName,
+        session.branch
+      );
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...session,
+        previewUrl
+      }
+    });
   } catch (error) {
     console.error('Get session error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch session' });
