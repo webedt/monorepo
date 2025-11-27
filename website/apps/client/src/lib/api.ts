@@ -242,18 +242,30 @@ export const storageWorkerApi = {
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;
-  repositoryUrl?: string;
-  baseBranch?: string;
-  branch?: string;
+  github?: {
+    repoUrl: string;
+    branch: string;
+  };
   autoCommit?: boolean;
   websiteSessionId?: string;
 }) {
   const params = new URLSearchParams();
-  Object.entries(data).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) {
-      params.append(key, String(value));
-    }
-  });
+
+  // Add non-github params directly
+  if (data.userRequest !== undefined) {
+    params.append('userRequest', String(data.userRequest));
+  }
+  if (data.autoCommit !== undefined) {
+    params.append('autoCommit', String(data.autoCommit));
+  }
+  if (data.websiteSessionId !== undefined) {
+    params.append('websiteSessionId', String(data.websiteSessionId));
+  }
+
+  // Add github params as nested object by stringifying
+  if (data.github) {
+    params.append('github', JSON.stringify(data.github));
+  }
 
   const fullUrl = `${API_BASE_URL}/api/execute?${params}`;
   console.log('[API] Creating EventSource with URL:', fullUrl);

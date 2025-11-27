@@ -50,12 +50,21 @@ const executeHandler = async (req: any, res: any) => {
   try {
     // Support both GET (query) and POST (body) parameters
     const params = req.method === 'POST' ? req.body : req.query;
-    const { userRequest, websiteSessionId, github, repositoryUrl, baseBranch, branch: directBranch } = params;
+    let { userRequest, websiteSessionId, github } = params;
+
+    // If github is a JSON string (from GET query params), parse it
+    if (typeof github === 'string') {
+      try {
+        github = JSON.parse(github);
+      } catch (e) {
+        console.error('[Execute] Failed to parse github parameter:', e);
+        github = undefined;
+      }
+    }
 
     // Extract GitHub config: { repoUrl, branch }
-    // Support both formats: github.repoUrl or direct repositoryUrl parameter
-    const repoUrl = github?.repoUrl || repositoryUrl;
-    const branch = github?.branch || baseBranch || directBranch || 'main';
+    const repoUrl = github?.repoUrl;
+    const branch = github?.branch || 'main';
 
     // Auto-commit is now always enabled
     const autoCommit = true;
