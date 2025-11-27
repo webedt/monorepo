@@ -259,10 +259,10 @@ export default function Layout() {
 
             {/* Right side - Mode Toggle, Theme, User menu */}
             <div className="flex items-center gap-3">
-              {/* Mode Toggle - Switch between Hub and Editor */}
+              {/* Mode Toggle - Switch between Hub and Editor - Desktop Only (inverse of hamburger) */}
               <Link
                 to={isEditorMode ? '/' : '/sessions'}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
               >
                 {isEditorMode ? (
                   <>
