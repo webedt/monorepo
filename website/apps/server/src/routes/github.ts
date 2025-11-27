@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type express from 'express';
 import { Octokit } from '@octokit/rest';
 import { db } from '../db/index';
 import { users } from '../db/index';
@@ -9,25 +10,53 @@ import { requireAuth } from '../middleware/auth';
 const router = Router();
 
 // Helper function to get the frontend URL for redirects
-// Falls back to relative URLs if ALLOWED_ORIGINS is not set
-function getFrontendUrl(path: string): string {
+// Supports: ALLOWED_ORIGINS config, stored origin from state, or relative URLs
+function getFrontendUrl(path: string, storedOrigin?: string): string {
+  // Priority 1: Use origin from OAuth state (supports preview environments)
+  if (storedOrigin) {
+    return `${storedOrigin}${path}`;
+  }
+  // Priority 2: Use ALLOWED_ORIGINS from env config
   const origin = process.env.ALLOWED_ORIGINS?.split(',')[0];
   if (origin) {
     return `${origin}${path}`;
   }
-  // Fallback to relative URL if ALLOWED_ORIGINS is not configured
+  // Priority 3: Fallback to relative URL if nothing is configured
   return path;
+}
+
+// Helper to extract origin from request (protocol + host)
+function getRequestOrigin(req: express.Request): string {
+  const protocol = req.protocol || 'https';
+  const host = req.get('host') || req.get('x-forwarded-host') || '';
+  return `${protocol}://${host}`;
 }
 
 // Initiate GitHub OAuth
 router.get('/oauth', requireAuth, (req, res) => {
   const authReq = req as AuthRequest;
 
-  // Encode user session ID in state for retrieval in callback
+  // Get the origin from Referer header or request origin
+  // This supports preview environments like /preview1, /preview2, etc.
+  const referer = req.get('referer') || req.get('origin');
+  let returnOrigin = getRequestOrigin(req);
+
+  // If we have a referer, extract its origin (protocol + host)
+  if (referer) {
+    try {
+      const refererUrl = new URL(referer);
+      returnOrigin = refererUrl.origin;
+    } catch (e) {
+      // If referer is invalid, fall back to request origin
+    }
+  }
+
+  // Encode user session ID and return origin in state for retrieval in callback
   const state = Buffer.from(JSON.stringify({
     sessionId: authReq.session!.id,
     userId: authReq.user!.id,
     timestamp: Date.now(),
+    returnOrigin, // Store where the user came from
   })).toString('base64');
 
   const params = new URLSearchParams({
@@ -51,7 +80,12 @@ router.get('/oauth/callback', async (req, res) => {
     }
 
     // Decode and validate state parameter
-    let stateData: { sessionId: string; userId: string; timestamp: number };
+    let stateData: {
+      sessionId: string;
+      userId: string;
+      timestamp: number;
+      returnOrigin?: string; // Optional for backwards compatibility
+    };
     try {
       stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
     } catch (error) {
@@ -61,7 +95,7 @@ router.get('/oauth/callback', async (req, res) => {
 
     // Check if state is not too old (prevent replay attacks) - 10 minute timeout
     if (Date.now() - stateData.timestamp > 10 * 60 * 1000) {
-      res.redirect(getFrontendUrl('/login?error=state_expired'));
+      res.redirect(getFrontendUrl('/login?error=state_expired', stateData.returnOrigin));
       return;
     }
 
@@ -85,7 +119,7 @@ router.get('/oauth/callback', async (req, res) => {
     };
 
     if (tokenData.error) {
-      res.redirect(getFrontendUrl(`/settings?error=${tokenData.error}`));
+      res.redirect(getFrontendUrl(`/settings?error=${tokenData.error}`, stateData.returnOrigin));
       return;
     }
 
@@ -104,7 +138,7 @@ router.get('/oauth/callback', async (req, res) => {
       })
       .where(eq(users.id, stateData.userId));
 
-    res.redirect(getFrontendUrl('/settings?success=github_connected'));
+    res.redirect(getFrontendUrl('/settings?success=github_connected', stateData.returnOrigin));
   } catch (error) {
     console.error('GitHub OAuth error:', error);
     res.redirect(getFrontendUrl('/settings?error=oauth_failed'));
