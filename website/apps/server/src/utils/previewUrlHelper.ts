@@ -49,7 +49,9 @@ export async function getPreviewUrl(
     }
 
     // Use default preview URL
-    const defaultUrl = `https://github.etdofresh.com/${owner}/${repo}/${branch}/`;
+    // Replace forward slashes in branch name with dashes for URL safety
+    const safeBranch = branch.replace(/\//g, '-');
+    const defaultUrl = `https://github.etdofresh.com/${owner}/${repo}/${safeBranch}/`;
     console.log('[PreviewUrlHelper] Using default preview URL:', defaultUrl);
 
     return defaultUrl;
@@ -57,7 +59,9 @@ export async function getPreviewUrl(
     console.error('[PreviewUrlHelper] Error generating preview URL:', error);
 
     // Return default URL even on error
-    return `https://github.etdofresh.com/${owner}/${repo}/${branch}/`;
+    // Replace forward slashes in branch name with dashes for URL safety
+    const safeBranch = branch.replace(/\//g, '-');
+    return `https://github.etdofresh.com/${owner}/${repo}/${safeBranch}/`;
   }
 }
 
