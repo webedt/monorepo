@@ -50,11 +50,12 @@ const executeHandler = async (req: any, res: any) => {
   try {
     // Support both GET (query) and POST (body) parameters
     const params = req.method === 'POST' ? req.body : req.query;
-    const { userRequest, websiteSessionId, github } = params;
+    const { userRequest, websiteSessionId, github, repositoryUrl, baseBranch, branch: directBranch } = params;
 
     // Extract GitHub config: { repoUrl, branch }
-    const repoUrl = github?.repoUrl;
-    const branch = github?.branch || 'main';
+    // Support both formats: github.repoUrl or direct repositoryUrl parameter
+    const repoUrl = github?.repoUrl || repositoryUrl;
+    const branch = github?.branch || baseBranch || directBranch || 'main';
 
     // Auto-commit is now always enabled
     const autoCommit = true;
