@@ -257,8 +257,30 @@ export default function Layout() {
               </div>
             </div>
 
-            {/* Right side - Theme, User menu */}
+            {/* Right side - Mode Toggle, Theme, User menu */}
             <div className="flex items-center gap-3">
+              {/* Mode Toggle - Switch between Hub and Editor */}
+              <Link
+                to={isEditorMode ? '/' : '/new-session'}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              >
+                {isEditorMode ? (
+                  <>
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>
+                    </svg>
+                    <span className="hidden sm:inline">The Hub</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                    </svg>
+                    <span className="hidden sm:inline">Editor</span>
+                  </>
+                )}
+              </Link>
+
               <ThemeSelector />
 
               {/* User Avatar with Dropdown */}
