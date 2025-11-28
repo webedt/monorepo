@@ -15,33 +15,18 @@ https://github.com/webedt/website
 
 This project uses Dokploy for deployments with path-based routing. Each deployment gets a unique URL path following this pattern:
 
-**Standalone Repository:**
 ```
 https://github.etdofresh.com/{owner}/{repo}/{branch}/
 ```
 
-**Monorepo (this project):**
-```
-https://github.etdofresh.com/{owner}/{repo}/website/{branch}/
-```
-
 **Examples:**
 
-*Standalone:*
 ```
-https://github.etdofresh.com/webedt/website/main/
-https://github.etdofresh.com/webedt/website/claude-new-feature-01AdzpK5b5h4BkyDcMWtoLGV/
-```
-
-*Monorepo:*
-```
-https://github.etdofresh.com/webedt/monorepo/website/main/
-https://github.etdofresh.com/webedt/monorepo/website/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/
+https://github.etdofresh.com/webedt/monorepo/main/
+https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/
 ```
 
 **Pattern:**
-- Standalone format: `https://github.etdofresh.com/{owner}/{repo}/{branch}/`
-- Monorepo format: `https://github.etdofresh.com/{owner}/{repo}/website/{branch}/`
 - Owner and repo are lowercased
 - Branch name preserves original case (slashes replaced with dashes)
 - Example: Branch `claude/test-feature` becomes `claude-test-feature`
@@ -63,33 +48,31 @@ Version information is automatically passed to Docker builds via build args from
 - Version is always accurate for the exact commit being deployed
 - Works automatically for all branches
 
-### Monorepo Path-Based Routing Requirements
+### Path-Based Routing Requirements
 
-**CRITICAL:** When working in a monorepo, the deployment path is 4 segments instead of 3:
-- Standalone: `/owner/repo/branch/`
-- Monorepo: `/owner/repo/website/branch/`
+**CRITICAL:** This project uses path-based routing with the pattern `/owner/repo/branch/`
 
-**Three files MUST be updated to support monorepo routing:**
+**Three files MUST be updated to support path-based routing:**
 
 1. **`apps/client/index.html`** - Base tag detection
 2. **`apps/client/src/App.tsx`** - React Router basename
 3. **`apps/client/src/lib/api.ts`** - API base URL detection
 
-Each file must check for the monorepo pattern by detecting 4 path segments with `'website'` as the 3rd segment:
+Each file must detect the path-based pattern by checking for 3 path segments:
 
 ```javascript
-if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
-  // Monorepo: /owner/repo/website/branch/
-  basePath = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
-} else {
-  // Standalone: /owner/repo/branch/
+if (pathSegments.length >= 3 && !appRoutes.includes(pathSegments[0])) {
+  // Path-based: /owner/repo/branch/
   basePath = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+} else {
+  // Root-based: /
+  basePath = '/';
 }
 ```
 
 ### Critical Path Requirements for Strip Path
 
-**IMPORTANT**: This project supports both root-based and path-based deployments using runtime base path detection. It also supports both standalone repository and monorepo patterns.
+**IMPORTANT**: This project supports both root-based and path-based deployments using runtime base path detection.
 
 **Vite Configuration:**
 
@@ -104,7 +87,7 @@ export default defineConfig({
 
 **Runtime Base Path Detection:**
 
-The `index.html` includes a script that automatically detects path-based deployments and injects a `<base>` tag. **CRITICAL:** This script MUST handle both standalone and monorepo patterns:
+The `index.html` includes a script that automatically detects path-based deployments and injects a `<base>` tag:
 
 ```html
 <script>
@@ -116,13 +99,8 @@ The `index.html` includes a script that automatically detects path-based deploym
     let basePath = '/'; // Default for root-based deployments
 
     if (pathSegments.length >= 3 && !appRoutes.includes(pathSegments[0])) {
-      // Check for monorepo pattern: /owner/repo/website/branch/
-      if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
-        basePath = '/' + pathSegments[0] + '/' + pathSegments[1] + '/' + pathSegments[2] + '/' + pathSegments[3] + '/';
-      } else {
-        // Standard path-based deployment: /owner/repo/branch/
-        basePath = '/' + pathSegments[0] + '/' + pathSegments[1] + '/' + pathSegments[2] + '/';
-      }
+      // Path-based deployment: /owner/repo/branch/
+      basePath = '/' + pathSegments[0] + '/' + pathSegments[1] + '/' + pathSegments[2] + '/';
     }
 
     document.write('<base href="' + basePath + '">');
@@ -132,13 +110,7 @@ The `index.html` includes a script that automatically detects path-based deploym
 
 **How It Works:**
 
-For **monorepo deployments** (`github.etdofresh.com/owner/repo/website/branch/`):
-- Script detects 4 path segments with 'website' as the 3rd segment
-- Injects `<base href="/owner/repo/website/branch/">`
-- Relative path `./assets/app.js` resolves to `/owner/repo/website/branch/assets/app.js` ✓
-- Deep links work because base path is fixed
-
-For **standalone path-based deployments** (`github.etdofresh.com/owner/repo/branch/`):
+For **path-based deployments** (`github.etdofresh.com/owner/repo/branch/`):
 - Script detects 3+ path segments not matching app routes
 - Injects `<base href="/owner/repo/branch/">`
 - Relative path `./assets/app.js` resolves to `/owner/repo/branch/assets/app.js` ✓
@@ -156,11 +128,10 @@ The `<base>` tag tells the browser where to resolve all relative URLs from, rega
 - Without `<base>`: `/quick-setup/code` + `./assets/app.js` → `/quick-setup/code/assets/app.js` ❌
 - With `<base href="/">`: `/quick-setup/code` + `./assets/app.js` → `/assets/app.js` ✓
 - With `<base href="/owner/repo/branch/">`: any URL + `./assets/app.js` → `/owner/repo/branch/assets/app.js` ✓
-- With `<base href="/owner/repo/website/branch/">`: any URL + `./assets/app.js` → `/owner/repo/website/branch/assets/app.js` ✓
 
 **API Calls in JavaScript/TypeScript:**
 
-For SPAs with client-side routing, API calls must use absolute paths with basename detection. **CRITICAL:** This MUST handle both standalone and monorepo patterns:
+For SPAs with client-side routing, API calls must use absolute paths with basename detection:
 
 ```typescript
 // Detect API base URL from current location
@@ -171,13 +142,9 @@ function getApiBaseUrl(): string {
   const pathname = window.location.pathname;
   const pathSegments = pathname.split('/').filter(Boolean);
 
-  // Check for path-based deployment (owner/repo/branch or owner/repo/website/branch pattern)
+  // Check for path-based deployment (owner/repo/branch pattern)
   if (pathSegments.length >= 3 && !['login', 'register', 'chat', 'settings'].includes(pathSegments[0])) {
-    // Check for monorepo pattern: /owner/repo/website/branch/
-    if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
-      return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
-    }
-    // Standard format: /owner/repo/branch/
+    // Path-based format: /owner/repo/branch/
     return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
   }
 
@@ -191,27 +158,20 @@ const API_BASE_URL = getApiBaseUrl();
 
 **Why This Approach:**
 
-With monorepo path-based routing at `https://github.etdofresh.com/webedt/monorepo/website/main/`:
-- Detected API_BASE_URL: `/webedt/monorepo/website/main`
-- API call: `${API_BASE_URL}/api/auth/login` → `/webedt/monorepo/website/main/api/auth/login`
-- Traefik matches path prefix `/webedt/monorepo/website/main/`
-- Strip Path removes `/webedt/monorepo/website/main/`
+With path-based routing at `https://github.etdofresh.com/webedt/monorepo/main/`:
+- Detected API_BASE_URL: `/webedt/monorepo/main`
+- API call: `${API_BASE_URL}/api/auth/login` → `/webedt/monorepo/main/api/auth/login`
+- Traefik matches path prefix `/webedt/monorepo/main/`
+- Strip Path removes `/webedt/monorepo/main/`
 - Express receives `/api/auth/login` ✓
 
-With standalone path-based routing at `https://github.etdofresh.com/webedt/website/main/`:
-- Detected API_BASE_URL: `/webedt/website/main`
-- API call: `${API_BASE_URL}/api/auth/login` → `/webedt/website/main/api/auth/login`
-- Traefik matches path prefix `/webedt/website/main/`
-- Strip Path removes `/webedt/website/main/`
-- Express receives `/api/auth/login` ✓
-
-Simple relative paths (`./api/...`) don't work because they resolve relative to the current page URL, not the basename. If you're on `/webedt/website/main/login`, then `./api/auth/login` becomes `/webedt/website/main/login/api/auth/login` (wrong!).
+Simple relative paths (`./api/...`) don't work because they resolve relative to the current page URL, not the basename. If you're on `/webedt/monorepo/main/login`, then `./api/auth/login` becomes `/webedt/monorepo/main/login/api/auth/login` (wrong!).
 
 **Important:** The `<base>` tag affects ALL relative URLs including those in JavaScript, so API calls must use the absolute path approach shown above (not relative paths).
 
 **React Router Configuration:**
 
-For Single Page Applications using React Router, you MUST configure the basename. **CRITICAL:** This MUST handle both standalone and monorepo patterns:
+For Single Page Applications using React Router, you MUST configure the basename:
 
 ```typescript
 // In App.tsx or routing setup
@@ -225,13 +185,9 @@ const getBasename = () => {
   const pathname = window.location.pathname;
   const pathSegments = pathname.split('/').filter(Boolean);
 
-  // Check for path-based deployment (owner/repo/branch or owner/repo/website/branch pattern)
+  // Check for path-based deployment (owner/repo/branch pattern)
   if (pathSegments.length >= 3 && !['login', 'register', 'chat', 'settings'].includes(pathSegments[0])) {
-    // Check for monorepo pattern: /owner/repo/website/branch/
-    if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
-      return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
-    }
-    // Standard format: /owner/repo/branch/
+    // Path-based format: /owner/repo/branch/
     return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
   }
 
@@ -245,11 +201,8 @@ const getBasename = () => {
 
 **This ensures React Router navigation produces correct URLs:**
 
-Monorepo:
-- `navigate('/login')` → `https://github.etdofresh.com/webedt/monorepo/website/branch/login` ✓
-
-Standalone:
-- `navigate('/login')` → `https://github.etdofresh.com/webedt/website/branch/login` ✓
+Path-based deployment:
+- `navigate('/login')` → `https://github.etdofresh.com/webedt/monorepo/branch/login` ✓
 
 Without basename, navigation would produce incorrect URLs like `https://github.etdofresh.com/login` ❌
 
@@ -318,32 +271,17 @@ async function getDeploymentLogs(sessionId) {
 
 **Required Format:**
 
-**For Standalone Repository (webedt/website):**
-```
-**Links:**
-
-GitHub Branch: [https://github.com/webedt/website/tree/{branch-name}](https://github.com/webedt/website/tree/{branch-name})
-Live Site: [https://github.etdofresh.com/webedt/website/{branch}/](https://github.etdofresh.com/webedt/website/{branch}/)
-```
-
-**For Monorepo (webedt/monorepo):**
 ```
 **Links:**
 
 GitHub Branch: [https://github.com/webedt/monorepo/tree/{branch-name}](https://github.com/webedt/monorepo/tree/{branch-name})
-Live Site: [https://github.etdofresh.com/webedt/monorepo/website/{branch}/](https://github.etdofresh.com/webedt/monorepo/website/{branch}/)
+Live Site: [https://github.etdofresh.com/webedt/monorepo/{branch}/](https://github.etdofresh.com/webedt/monorepo/{branch}/)
 ```
 
 **How to construct the deployment URL:**
 
-**Standalone:**
 ```
 https://github.etdofresh.com/{owner}/{repo}/{branch}/
-```
-
-**Monorepo (note the extra /website/ segment):**
-```
-https://github.etdofresh.com/{owner}/{repo}/website/{branch}/
 ```
 
 **Branch Name Processing:**
@@ -352,22 +290,20 @@ https://github.etdofresh.com/{owner}/{repo}/website/{branch}/
 3. Slashes in branch names are replaced with dashes
 4. Example: `claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD` → `claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD`
 
-**Construction Steps for Monorepo:**
+**Construction Steps:**
 1. Lowercase the owner: `webedt` → `webedt`
 2. Lowercase the repo: `monorepo` → `monorepo`
-3. Add the `/website/` segment
-4. Replace slashes in branch with dashes (preserve case): `claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD` → `claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD`
-5. Construct URL: `https://github.etdofresh.com/webedt/monorepo/website/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/`
+3. Replace slashes in branch with dashes (preserve case): `claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD` → `claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD`
+4. Construct URL: `https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/`
 
 **Examples:**
 
-**Monorepo:**
 ```
 Branch: main
 **Links:**
 
 GitHub Branch: [https://github.com/webedt/monorepo/tree/main](https://github.com/webedt/monorepo/tree/main)
-Live Site: [https://github.etdofresh.com/webedt/monorepo/website/main/](https://github.etdofresh.com/webedt/monorepo/website/main/)
+Live Site: [https://github.etdofresh.com/webedt/monorepo/main/](https://github.etdofresh.com/webedt/monorepo/main/)
 ```
 
 ```
@@ -375,21 +311,11 @@ Branch: claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD
 **Links:**
 
 GitHub Branch: [https://github.com/webedt/monorepo/tree/claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD](https://github.com/webedt/monorepo/tree/claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD)
-Live Site: [https://github.etdofresh.com/webedt/monorepo/website/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/](https://github.etdofresh.com/webedt/monorepo/website/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/)
-```
-
-**Standalone:**
-```
-Branch: main
-**Links:**
-
-GitHub Branch: [https://github.com/webedt/website/tree/main](https://github.com/webedt/website/tree/main)
-Live Site: [https://github.etdofresh.com/webedt/website/main/](https://github.etdofresh.com/webedt/website/main/)
+Live Site: [https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/](https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/)
 ```
 
 **Important Notes:**
 - ALWAYS show these links at the end of your response when completing a task
-- For monorepo deployments, include the `/website/` segment in the URL
 - The path prefix is stripped by Dokploy before forwarding to your app
 - Branch names preserve original case in URLs
 - Do NOT skip this step - users rely on these links for quick access
