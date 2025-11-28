@@ -399,6 +399,62 @@ router.post('/:id/unlock', requireAuth, async (req, res) => {
   }
 });
 
+// Abort a running session
+router.post('/:id/abort', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Update session status to interrupted
+    await db
+      .update(chatSessions)
+      .set({ status: 'error', completedAt: new Date() })
+      .where(eq(chatSessions.id, sessionId));
+
+    console.log(`[Sessions] Session ${sessionId} aborted by user`);
+
+    // TODO: In a production system, you would also need to signal the AI worker
+    // to stop processing. This could be done via:
+    // 1. A shared Redis pub/sub channel
+    // 2. Direct HTTP call to the worker if session-to-worker mapping exists
+    // 3. WebSocket connection between server and worker
+    // For now, we just update the database status
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Session aborted',
+        sessionId: sessionId
+      }
+    });
+  } catch (error) {
+    console.error('Abort session error:', error);
+    res.status(500).json({ success: false, error: 'Failed to abort session' });
+  }
+});
+
 // Bulk delete chat sessions
 router.post('/bulk-delete', requireAuth, async (req, res) => {
   try {
