@@ -283,7 +283,6 @@ export default function Chat() {
   const [streamBody, setStreamBody] = useState<any>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
-  const [deletingSession, setDeletingSession] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
     if (!sessionId || sessionId === 'new') return null;
     return sessionId;
@@ -667,33 +666,10 @@ export default function Chat() {
   };
 
   const handleDeleteSession = () => {
-    setDeletingSession(true);
-  };
-
-  const confirmDelete = () => {
     if (sessionId && sessionId !== 'new') {
       deleteMutation.mutate(sessionId);
     }
   };
-
-  const cancelDelete = () => {
-    setDeletingSession(false);
-  };
-
-  // Handle Enter key in delete modal
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (deletingSession && e.key === 'Enter' && !deleteMutation.isPending) {
-        e.preventDefault();
-        confirmDelete();
-      }
-    };
-
-    if (deletingSession) {
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [deletingSession, deleteMutation.isPending]);
 
   // Merge user messages with converted events
   useEffect(() => {
@@ -844,7 +820,6 @@ export default function Chat() {
       setStreamUrl(null);
       setEditingTitle(false);
       setEditTitle('');
-      setDeletingSession(false);
       setCurrentSessionId(null);
       setIsLocked(false);
       setLastRequest(null);
@@ -1800,37 +1775,6 @@ export default function Chat() {
             />
           </div>
         </>
-      )}
-
-      {/* Delete confirmation modal */}
-      {deletingSession && (
-        <div className="modal modal-open">
-          <div className="modal-box">
-            <h3 className="font-bold text-lg mb-4">
-              Delete Session
-            </h3>
-            <p className="text-sm text-base-content/70 mb-6">
-              Are you sure you want to delete this session? This action cannot be undone and will
-              delete all messages in this session.
-            </p>
-            <div className="modal-action">
-              <button
-                onClick={cancelDelete}
-                className="btn btn-ghost"
-                disabled={deleteMutation.isPending}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="btn btn-error"
-                disabled={deleteMutation.isPending}
-              >
-                {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Image Viewer Modal */}
