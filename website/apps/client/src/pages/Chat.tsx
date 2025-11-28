@@ -438,20 +438,15 @@ export default function Chat() {
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
   // Sync isExecuting with session status when returning to a running session
-  // IMPORTANT: Only block input when we have an active SSE stream (streamUrl !== null)
-  // This prevents sessions from getting stuck when they're marked "running" but no stream is active
+  // When returning to a running/pending session, show the Processing panel even if no active stream
+  // This gives users visual feedback that the session is still processing
   useEffect(() => {
     if (session?.status === 'running' || session?.status === 'pending') {
-      // Only set isExecuting=true if we have an active stream
-      // If session is "running" but no stream is active, it's likely a stale session
-      // that didn't complete properly - allow user to continue interacting
-      if (!isExecuting && streamUrl) {
+      // Set isExecuting=true for running/pending sessions to show Processing panel
+      // This handles the case when users navigate back to an in-progress session
+      if (!isExecuting) {
         console.log('[Chat] Syncing isExecuting with session status:', session.status);
         setIsExecuting(true);
-      } else if (!streamUrl && isExecuting) {
-        // Stream ended but status wasn't updated - clear executing state
-        console.log('[Chat] Session marked running but no active stream - clearing isExecuting');
-        setIsExecuting(false);
       }
     } else if (session?.status === 'completed' || session?.status === 'error') {
       if (isExecuting) {
@@ -459,7 +454,7 @@ export default function Chat() {
         setIsExecuting(false);
       }
     }
-  }, [session?.status, streamUrl, isExecuting]);
+  }, [session?.status, isExecuting]);
 
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
@@ -1689,7 +1684,7 @@ export default function Chat() {
                 )
               ))}
 
-              {isConnected && isExecuting && (
+              {isExecuting && (
                 <div className="flex justify-start">
                   <div className="bg-base-100 border border-base-300 rounded-lg px-4 py-2">
                     <div className="flex items-center space-x-3">
