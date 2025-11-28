@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi } from '@/lib/api';
 import SessionLayout from '@/components/SessionLayout';
 import type { GitHubPullRequest } from '@webedt/shared';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   if (!previewUrl) {
@@ -84,6 +84,9 @@ export default function Preview() {
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
+
+  // Ref for delete button to auto-focus
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
   // Load session details to get preview URL
   const { data: sessionData, isLoading } = useQuery({
@@ -269,6 +272,13 @@ export default function Preview() {
   const cancelDelete = () => {
     setDeletingSession(false);
   };
+
+  // Auto-focus delete button when delete modal opens
+  useEffect(() => {
+    if (deletingSession && deleteButtonRef.current) {
+      deleteButtonRef.current.focus();
+    }
+  }, [deletingSession]);
 
   // Create title actions (Edit and Delete buttons) for the title line
   const titleActions = session && (
@@ -458,6 +468,7 @@ export default function Preview() {
                     Cancel
                   </button>
                   <button
+                    ref={deleteButtonRef}
                     onClick={confirmDelete}
                     className="btn btn-error"
                     disabled={deleteMutation.isPending}
