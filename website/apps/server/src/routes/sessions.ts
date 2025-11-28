@@ -489,7 +489,7 @@ router.post('/:id/abort', requireAuth, async (req, res) => {
   }
 });
 
-// Bulk delete chat sessions (soft delete)
+// Bulk delete chat sessions (soft delete with branch cleanup)
 router.post('/bulk-delete', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -520,6 +520,39 @@ router.post('/bulk-delete', requireAuth, async (req, res) => {
       return;
     }
 
+    const cleanupResults: {
+      branches: { sessionId: string; success: boolean; message: string }[];
+      storage: { sessionPath: string; success: boolean; message: string }[];
+    } = {
+      branches: [],
+      storage: []
+    };
+
+    // Delete GitHub branches for all sessions that have branch info
+    if (authReq.user?.githubAccessToken) {
+      const branchDeletions = sessions
+        .filter((s: ChatSession) => s.branch && s.repositoryOwner && s.repositoryName)
+        .map(async (session: ChatSession) => {
+          const result = await deleteGitHubBranch(
+            authReq.user!.githubAccessToken!,
+            session.repositoryOwner!,
+            session.repositoryName!,
+            session.branch!
+          );
+          return { sessionId: session.id, ...result };
+        });
+      cleanupResults.branches = await Promise.all(branchDeletions);
+    }
+
+    // Delete from storage worker for all sessions that have sessionPath
+    const storageDeletions = sessions
+      .filter((s: ChatSession) => s.sessionPath)
+      .map(async (session: ChatSession) => {
+        const result = await deleteFromStorageWorker(session.sessionPath!);
+        return { sessionPath: session.sessionPath!, ...result };
+      });
+    cleanupResults.storage = await Promise.all(storageDeletions);
+
     // Soft delete all sessions from database
     await db
       .update(chatSessions)
@@ -536,6 +569,7 @@ router.post('/bulk-delete', requireAuth, async (req, res) => {
       data: {
         message: `${ids.length} session${ids.length !== 1 ? 's' : ''} deleted`,
         count: ids.length,
+        cleanup: cleanupResults
       }
     });
   } catch (error) {
@@ -600,6 +634,8 @@ router.post('/bulk-restore', requireAuth, async (req, res) => {
 });
 
 // Permanently delete chat sessions
+// Note: GitHub branches and storage are already deleted during soft delete,
+// so this only removes the database records permanently
 router.post('/bulk-delete-permanent', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -630,40 +666,8 @@ router.post('/bulk-delete-permanent', requireAuth, async (req, res) => {
       return;
     }
 
-    const cleanupResults: {
-      branches: { sessionId: string; success: boolean; message: string }[];
-      storage: { sessionPath: string; success: boolean; message: string }[];
-    } = {
-      branches: [],
-      storage: []
-    };
-
-    // Delete GitHub branches for all sessions that have branch info
-    if (authReq.user?.githubAccessToken) {
-      const branchDeletions = sessions
-        .filter((s: ChatSession) => s.branch && s.repositoryOwner && s.repositoryName)
-        .map(async (session: ChatSession) => {
-          const result = await deleteGitHubBranch(
-            authReq.user!.githubAccessToken!,
-            session.repositoryOwner!,
-            session.repositoryName!,
-            session.branch!
-          );
-          return { sessionId: session.id, ...result };
-        });
-      cleanupResults.branches = await Promise.all(branchDeletions);
-    }
-
-    // Delete from storage worker for all sessions that have sessionPath
-    const storageDeletions = sessions
-      .filter((s: ChatSession) => s.sessionPath)
-      .map(async (session: ChatSession) => {
-        const result = await deleteFromStorageWorker(session.sessionPath!);
-        return { sessionPath: session.sessionPath!, ...result };
-      });
-    cleanupResults.storage = await Promise.all(storageDeletions);
-
     // Permanently delete all sessions from database (cascade will delete messages)
+    // Note: Branches and storage were already cleaned up during soft delete
     await db
       .delete(chatSessions)
       .where(
@@ -677,8 +681,7 @@ router.post('/bulk-delete-permanent', requireAuth, async (req, res) => {
       success: true,
       data: {
         message: `${ids.length} session${ids.length !== 1 ? 's' : ''} permanently deleted`,
-        count: ids.length,
-        cleanup: cleanupResults
+        count: ids.length
       }
     });
   } catch (error) {
@@ -687,7 +690,7 @@ router.post('/bulk-delete-permanent', requireAuth, async (req, res) => {
   }
 });
 
-// Delete a chat session (soft delete)
+// Delete a chat session (soft delete with branch cleanup)
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -720,6 +723,26 @@ router.delete('/:id', requireAuth, async (req, res) => {
       return;
     }
 
+    const cleanupResults: {
+      branch?: { success: boolean; message: string };
+      storage?: { success: boolean; message: string };
+    } = {};
+
+    // Delete GitHub branch if it exists
+    if (authReq.user?.githubAccessToken && session.branch && session.repositoryOwner && session.repositoryName) {
+      cleanupResults.branch = await deleteGitHubBranch(
+        authReq.user.githubAccessToken,
+        session.repositoryOwner,
+        session.repositoryName,
+        session.branch
+      );
+    }
+
+    // Delete from storage worker if sessionPath exists
+    if (session.sessionPath) {
+      cleanupResults.storage = await deleteFromStorageWorker(session.sessionPath);
+    }
+
     // Soft delete session from database
     await db
       .update(chatSessions)
@@ -729,7 +752,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
     res.json({
       success: true,
       data: {
-        message: 'Session deleted'
+        message: 'Session deleted',
+        cleanup: cleanupResults
       }
     });
   } catch (error) {

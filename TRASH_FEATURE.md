@@ -99,22 +99,24 @@ ALTER TABLE chat_sessions ADD COLUMN deleted_at timestamp;
 
 ## Behavior
 
-### When Deleting a Session
+### When Deleting a Session (Soft Delete / Moving to Trash)
 1. Session's `deletedAt` field is set to current timestamp
 2. Session no longer appears in main sessions list
 3. Session appears in trash modal
-4. GitHub branch and storage are NOT deleted (retained for potential restore)
+4. GitHub branch is deleted (if exists)
+5. Storage worker files are deleted (if exist)
+6. Database record is retained (soft delete)
 
 ### When Restoring a Session
 1. Session's `deletedAt` field is set to `null`
 2. Session reappears in main sessions list
 3. All data and messages are intact
+4. **Note:** GitHub branch and storage files are NOT restored (they were deleted during soft delete)
 
 ### When Permanently Deleting
-1. GitHub branch is deleted (if exists)
-2. Storage worker files are deleted (if exist)
-3. Database record is permanently removed
-4. All associated messages are cascade-deleted
+1. Database record is permanently removed
+2. All associated messages are cascade-deleted
+3. **Note:** GitHub branch and storage were already deleted during soft delete
 
 ## Notes
 
