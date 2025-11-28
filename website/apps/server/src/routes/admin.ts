@@ -1,18 +1,15 @@
-import { Router, Response } from 'express';
+import { Router } from 'express';
 import { db } from '../db/index';
 import { users, sessions } from '../db/schema';
 import { AuthRequest, requireAdmin } from '../middleware/auth';
-import { eq, sql, ne } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { lucia } from '../auth';
 import bcrypt from 'bcrypt';
 
 const router = Router();
 
-// Apply admin middleware to all routes
-router.use(requireAdmin);
-
 // GET /api/admin/users - List all users
-router.get('/users', async (req: AuthRequest, res: Response) => {
+router.get('/users', requireAdmin, async (req, res) => {
   try {
     const allUsers = await db.select({
       id: users.id,
@@ -31,7 +28,7 @@ router.get('/users', async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/admin/users/:id - Get user details
-router.get('/users/:id', async (req: AuthRequest, res: Response) => {
+router.get('/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -61,7 +58,7 @@ router.get('/users/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/admin/users - Create a new user
-router.post('/users', async (req: AuthRequest, res: Response) => {
+router.post('/users', requireAdmin, async (req, res) => {
   try {
     const { email, displayName, password, isAdmin } = req.body;
 
@@ -106,13 +103,14 @@ router.post('/users', async (req: AuthRequest, res: Response) => {
 });
 
 // PATCH /api/admin/users/:id - Update user
-router.patch('/users/:id', async (req: AuthRequest, res: Response) => {
+router.patch('/users/:id', requireAdmin, async (req, res) => {
   try {
+    const authReq = req as AuthRequest;
     const { id } = req.params;
     const { email, displayName, isAdmin, password } = req.body;
 
     // Prevent user from removing their own admin status
-    if (req.user?.id === id && isAdmin === false) {
+    if (authReq.user?.id === id && isAdmin === false) {
       res.status(400).json({ success: false, error: 'Cannot remove your own admin status' });
       return;
     }
@@ -155,12 +153,13 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // DELETE /api/admin/users/:id - Delete user
-router.delete('/users/:id', async (req: AuthRequest, res: Response) => {
+router.delete('/users/:id', requireAdmin, async (req, res) => {
   try {
+    const authReq = req as AuthRequest;
     const { id } = req.params;
 
     // Prevent user from deleting themselves
-    if (req.user?.id === id) {
+    if (authReq.user?.id === id) {
       res.status(400).json({ success: false, error: 'Cannot delete your own account' });
       return;
     }
@@ -180,12 +179,13 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/admin/users/:id/impersonate - Impersonate user
-router.post('/users/:id/impersonate', async (req: AuthRequest, res: Response) => {
+router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
   try {
+    const authReq = req as AuthRequest;
     const { id } = req.params;
 
     // Cannot impersonate yourself
-    if (req.user?.id === id) {
+    if (authReq.user?.id === id) {
       res.status(400).json({ success: false, error: 'Cannot impersonate yourself' });
       return;
     }
@@ -198,8 +198,8 @@ router.post('/users/:id/impersonate', async (req: AuthRequest, res: Response) =>
     }
 
     // Invalidate current session
-    if (req.session) {
-      await lucia.invalidateSession(req.session.id);
+    if (authReq.session) {
+      await lucia.invalidateSession(authReq.session.id);
     }
 
     // Create new session for target user
@@ -221,7 +221,7 @@ router.post('/users/:id/impersonate', async (req: AuthRequest, res: Response) =>
 });
 
 // GET /api/admin/stats - Get admin statistics
-router.get('/stats', async (req: AuthRequest, res: Response) => {
+router.get('/stats', requireAdmin, async (req, res) => {
   try {
     const totalUsers = await db.select({ count: sql<number>`count(*)` }).from(users);
     const totalAdmins = await db.select({ count: sql<number>`count(*)` }).from(users).where(eq(users.isAdmin, true));
