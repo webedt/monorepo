@@ -1,13 +1,14 @@
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi, sessionsApi, githubApi } from '@/lib/api';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA } from '@/version';
 import type { GitHubRepository } from '@webedt/shared';
 import { truncateSessionName } from '@/lib/utils';
+import { TAGLINES } from '@/constants/taglines';
 
 // Helper to detect mobile devices
 const isMobileDevice = () => {
@@ -55,6 +56,11 @@ export default function SessionLayout({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [branchExpanded, setBranchExpanded] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
+
+  // Select a random tagline that stays consistent during the session
+  const randomTagline = useMemo(() => {
+    return TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
+  }, []); // Empty deps array means this only runs once on mount
 
   // Fetch session data when sessionId exists and no props provided
   // Use sessionProp if available to avoid stale data during updates
@@ -241,6 +247,9 @@ export default function SessionLayout({
               {/* Logo - Desktop Only */}
               <div className="hidden md:flex flex-col justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <div className="text-[9px] text-base-content/50 leading-tight italic">
+                  {randomTagline}
+                </div>
                 <button
                   onClick={() => setShowVersionDetails(!showVersionDetails)}
                   className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60 text-left"
@@ -259,6 +268,9 @@ export default function SessionLayout({
               {/* Logo - Mobile Only (Centered) */}
               <div className="md:hidden flex flex-col items-center justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <div className="text-[9px] text-base-content/50 leading-tight italic">
+                  {randomTagline}
+                </div>
                 <button
                   onClick={() => setShowVersionDetails(!showVersionDetails)}
                   className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60"
