@@ -103,9 +103,19 @@ The migration runs automatically on server start.
 3. Click "👑 User Administration" in the dropdown
 4. You'll be taken to `/admin`
 
+### Default Admin Account
+
+**The email `etdofresh@gmail.com` is automatically granted admin privileges:**
+- When registering with this email, you'll be created as an admin
+- If this account already exists, it will be upgraded to admin on server startup
+- This happens automatically - no manual database changes needed!
+
 ### Making a User an Admin
 
-**Option 1: Database (Initial Setup)**
+**Option 1: Use the Default Admin Email**
+Simply register or log in as `etdofresh@gmail.com` - you'll automatically have admin access!
+
+**Option 2: Database (Manual Setup)**
 ```sql
 -- PostgreSQL
 UPDATE users SET is_admin = TRUE WHERE email = 'admin@example.com';
@@ -114,7 +124,7 @@ UPDATE users SET is_admin = TRUE WHERE email = 'admin@example.com';
 UPDATE users SET is_admin = 1 WHERE email = 'admin@example.com';
 ```
 
-**Option 2: Through Admin Panel (Once you have at least one admin)**
+**Option 3: Through Admin Panel (Once you have at least one admin)**
 1. Go to User Administration
 2. Click the edit button (✏️) next to the user
 3. Check the "Administrator" checkbox

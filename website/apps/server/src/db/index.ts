@@ -218,6 +218,17 @@ if (usePostgres) {
     `);
   }).then(() => {
     console.log('PostgreSQL migrations applied successfully!');
+    // Make etdofresh@gmail.com admin if they exist
+    return pool!.query(`
+      UPDATE users
+      SET is_admin = TRUE
+      WHERE email = 'etdofresh@gmail.com' AND is_admin = FALSE
+      RETURNING email;
+    `);
+  }).then((result) => {
+    if (result && result.rows && result.rows.length > 0) {
+      console.log('✓ Set etdofresh@gmail.com as admin');
+    }
   }).catch((err) => {
     console.error('Error creating PostgreSQL tables:', err);
   });
@@ -370,6 +381,17 @@ if (usePostgres) {
     if (!hasIsAdminColumn) {
       sqlite.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;');
       console.log('SQLite migration: Added is_admin column to users');
+    }
+
+    // Make etdofresh@gmail.com admin if they exist
+    const result = sqlite.prepare(`
+      UPDATE users
+      SET is_admin = 1
+      WHERE email = 'etdofresh@gmail.com' AND is_admin = 0
+    `).run();
+
+    if (result.changes > 0) {
+      console.log('✓ Set etdofresh@gmail.com as admin');
     }
   } catch (err) {
     console.error('Error applying SQLite migrations:', err);
