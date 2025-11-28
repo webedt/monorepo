@@ -244,6 +244,7 @@ jobs:
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
             echo "  - Build Path: /"
+            echo "  - Auto Deploy: disabled (GitHub Actions will trigger deployments)"
 
             GITHUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
               "${DOKPLOY_URL}/api/trpc/application.saveGithubProvider" \
@@ -258,7 +259,8 @@ jobs:
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
                   \"buildPath\": \"/\",
-                  \"enableSubmodules\": false
+                  \"enableSubmodules\": false,
+                  \"autoDeploy\": false
                 }
               }")
 
@@ -318,6 +320,7 @@ jobs:
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
             echo "  - Build Path: /"
+            echo "  - Auto Deploy: disabled (GitHub Actions will trigger deployments)"
 
             # Create new application (with server ID for cloud provider)
             CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
@@ -362,7 +365,8 @@ jobs:
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
                   \"buildPath\": \"/\",
-                  \"enableSubmodules\": false
+                  \"enableSubmodules\": false,
+                  \"autoDeploy\": false
                 }
               }")
 
