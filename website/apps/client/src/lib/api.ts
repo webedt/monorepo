@@ -181,7 +181,13 @@ export const userApi = {
 export const sessionsApi = {
   list: () => fetchApi('/api/sessions'),
 
-  listDeleted: () => fetchApi('/api/sessions/deleted'),
+  listDeleted: (params?: { limit?: number; offset?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.limit) queryParams.append('limit', String(params.limit));
+    if (params?.offset) queryParams.append('offset', String(params.offset));
+    const queryString = queryParams.toString();
+    return fetchApi(`/api/sessions/deleted${queryString ? `?${queryString}` : ''}`);
+  },
 
   get: (id: string) => fetchApi(`/api/sessions/${id}`),
 

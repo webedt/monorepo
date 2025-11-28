@@ -98,11 +98,29 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// Get all deleted chat sessions for user
+// Get all deleted chat sessions for user (with pagination)
 router.get('/deleted', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
 
+    // Parse pagination params
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100); // Max 100 per request
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Get total count
+    const totalResult = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.userId, authReq.user!.id),
+          isNotNull(chatSessions.deletedAt)
+        )
+      );
+
+    const total = totalResult.length;
+
+    // Get paginated sessions
     const sessions = await db
       .select()
       .from(chatSessions)
@@ -112,13 +130,18 @@ router.get('/deleted', requireAuth, async (req, res) => {
           isNotNull(chatSessions.deletedAt)
         )
       )
-      .orderBy(desc(chatSessions.deletedAt));
+      .orderBy(desc(chatSessions.deletedAt))
+      .limit(limit)
+      .offset(offset);
 
     res.json({
       success: true,
       data: {
         sessions,
-        total: sessions.length,
+        total,
+        limit,
+        offset,
+        hasMore: offset + sessions.length < total,
       },
     });
   } catch (error) {

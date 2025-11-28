@@ -11,6 +11,7 @@ import Dashboard from '@/pages/Dashboard';
 import Library from '@/pages/Library';
 import Community from '@/pages/Community';
 import Sessions from '@/pages/Sessions';
+import Trash from '@/pages/Trash';
 import Chat from '@/pages/Chat';
 import NewSession from '@/pages/NewSession';
 import QuickChatSetup from '@/pages/QuickChatSetup';
@@ -91,7 +92,7 @@ function App() {
 
     // Check if we're in a path-based deployment (3+ path segments)
     const pathSegments = pathname.split('/').filter(Boolean);
-    if (pathSegments.length >= 3 && !['login', 'register', 'session', 'sessions', 'settings', 'admin', 'new-session', 'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community', 'item'].includes(pathSegments[0])) {
+    if (pathSegments.length >= 3 && !['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin', 'new-session', 'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community', 'item'].includes(pathSegments[0])) {
       // Check for monorepo pattern: /owner/repo/website/branch/
       if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
         return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
@@ -150,6 +151,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Sessions />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/trash"
+              element={
+                <ProtectedRoute>
+                  <Trash />
                 </ProtectedRoute>
               }
             />

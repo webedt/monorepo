@@ -19,10 +19,6 @@ export default function Sessions() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // Trash modal state
-  const [showTrashModal, setShowTrashModal] = useState(false);
-  const [selectedDeletedIds, setSelectedDeletedIds] = useState<string[]>([]);
-
   // Chat input state
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
@@ -41,15 +37,6 @@ export default function Sessions() {
   });
 
   const sessions: ChatSession[] = data?.data?.sessions || [];
-
-  // Load deleted sessions
-  const { data: deletedData, isLoading: isLoadingDeleted } = useQuery({
-    queryKey: ['sessions', 'deleted'],
-    queryFn: sessionsApi.listDeleted,
-    enabled: showTrashModal,
-  });
-
-  const deletedSessions: ChatSession[] = deletedData?.data?.sessions || [];
 
   // Load repositories
   const { data: reposData, isLoading: isLoadingRepos } = useQuery({
@@ -113,22 +100,6 @@ export default function Sessions() {
     },
   });
 
-  const restoreBulkMutation = useMutation({
-    mutationFn: (ids: string[]) => sessionsApi.restoreBulk(ids),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      queryClient.invalidateQueries({ queryKey: ['sessions', 'deleted'] });
-      setSelectedDeletedIds([]);
-    },
-  });
-
-  const deletePermanentBulkMutation = useMutation({
-    mutationFn: (ids: string[]) => sessionsApi.deletePermanentBulk(ids),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sessions', 'deleted'] });
-      setSelectedDeletedIds([]);
-    },
-  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -332,7 +303,7 @@ export default function Sessions() {
                   </span>
                 </label>
                 <button
-                  onClick={() => setShowTrashModal(true)}
+                  onClick={() => navigate('/trash')}
                   className="btn btn-ghost btn-sm"
                   title="View deleted sessions"
                 >
@@ -487,201 +458,6 @@ export default function Sessions() {
             </ul>
           </div>
         </>
-      )}
-
-      {/* Trash modal */}
-      {showTrashModal && (
-        <div className="modal modal-open">
-          <div className="modal-box max-w-4xl">
-            <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Deleted Sessions
-            </h3>
-
-            {isLoadingDeleted && (
-              <div className="text-center py-8">
-                <span className="loading loading-spinner loading-md text-primary"></span>
-              </div>
-            )}
-
-            {!isLoadingDeleted && deletedSessions.length === 0 && (
-              <div className="text-center py-8">
-                <p className="text-base-content/70">No deleted sessions</p>
-              </div>
-            )}
-
-            {!isLoadingDeleted && deletedSessions.length > 0 && (
-              <>
-                {/* Bulk actions bar for deleted sessions */}
-                {selectedDeletedIds.length > 0 && (
-                  <div className="bg-primary/10 border border-primary rounded-md px-4 py-3 mb-4 flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <span className="text-sm font-medium">
-                        {selectedDeletedIds.length} session{selectedDeletedIds.length !== 1 ? 's' : ''} selected
-                      </span>
-                      <button
-                        onClick={() => setSelectedDeletedIds([])}
-                        className="btn btn-ghost btn-xs"
-                      >
-                        Clear selection
-                      </button>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => restoreBulkMutation.mutate(selectedDeletedIds)}
-                        className="btn btn-success btn-sm"
-                        disabled={restoreBulkMutation.isPending}
-                      >
-                        {restoreBulkMutation.isPending ? 'Restoring...' : 'Restore selected'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm(`Permanently delete ${selectedDeletedIds.length} session${selectedDeletedIds.length !== 1 ? 's' : ''}? This cannot be undone.`)) {
-                            deletePermanentBulkMutation.mutate(selectedDeletedIds);
-                          }
-                        }}
-                        className="btn btn-error btn-sm"
-                        disabled={deletePermanentBulkMutation.isPending}
-                      >
-                        {deletePermanentBulkMutation.isPending ? 'Deleting...' : 'Delete permanently'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Select all for deleted sessions */}
-                <div className="px-4 py-3 border-b border-base-300 bg-base-200/50 rounded-t-lg mb-2">
-                  <label className="flex items-center space-x-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="checkbox checkbox-sm"
-                      checked={deletedSessions.length > 0 && selectedDeletedIds.length === deletedSessions.length}
-                      onChange={() => {
-                        if (selectedDeletedIds.length === deletedSessions.length) {
-                          setSelectedDeletedIds([]);
-                        } else {
-                          setSelectedDeletedIds(deletedSessions.map((s) => s.id));
-                        }
-                      }}
-                    />
-                    <span className="text-sm font-medium">
-                      Select all ({deletedSessions.length})
-                    </span>
-                  </label>
-                </div>
-
-                <div className="max-h-96 overflow-y-auto">
-                  <ul className="divide-y divide-base-300">
-                    {deletedSessions.map((session) => (
-                      <li key={session.id}>
-                        <div className="px-4 py-4 hover:bg-base-200">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-3 flex-1 min-w-0">
-                              <input
-                                type="checkbox"
-                                className="checkbox checkbox-sm"
-                                checked={selectedDeletedIds.includes(session.id)}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedDeletedIds((prev) =>
-                                    prev.includes(session.id)
-                                      ? prev.filter((i) => i !== session.id)
-                                      : [...prev, session.id]
-                                  );
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-base-content truncate" title={session.userRequest}>
-                                  {truncateSessionName(session.userRequest, 60)}
-                                </p>
-                                <p className="mt-1 text-sm text-base-content/70">
-                                  {session.repositoryUrl || 'No repository'}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="ml-4 flex-shrink-0 flex items-center space-x-4">
-                              <span className="text-xs text-base-content/70">
-                                Deleted {new Date(session.deletedAt!).toLocaleDateString()}
-                              </span>
-                              <div className="flex items-center space-x-2">
-                                <button
-                                  onClick={() => restoreBulkMutation.mutate([session.id])}
-                                  className="btn btn-ghost btn-xs btn-circle text-success"
-                                  title="Restore session"
-                                  disabled={restoreBulkMutation.isPending}
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="h-5 w-5"
-                                    viewBox="0 0 20 20"
-                                    fill="currentColor"
-                                  >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                                      clipRule="evenodd"
-                                    />
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (confirm('Permanently delete this session? This cannot be undone.')) {
-                                      deletePermanentBulkMutation.mutate([session.id]);
-                                    }
-                                  }}
-                                  className="btn btn-ghost btn-xs btn-circle text-error"
-                                  title="Delete permanently"
-                                  disabled={deletePermanentBulkMutation.isPending}
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="h-5 w-5"
-                                    viewBox="0 0 20 20"
-                                    fill="currentColor"
-                                  >
-                                    <path
-                                      fillRule="evenodd"
-                                      d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                                      clipRule="evenodd"
-                                    />
-                                  </svg>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </>
-            )}
-
-            <div className="modal-action">
-              <button
-                onClick={() => {
-                  setShowTrashModal(false);
-                  setSelectedDeletedIds([]);
-                }}
-                className="btn"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
