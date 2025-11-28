@@ -48,6 +48,50 @@ interface DbEvent {
   timestamp: Date;
 }
 
+// Draft message type
+interface DraftMessage {
+  input: string;
+  images: ImageAttachment[];
+  timestamp: number;
+}
+
+// Local storage helpers for draft messages
+const DRAFT_STORAGE_KEY = 'chatDrafts';
+
+function saveDraft(sessionId: string, input: string, images: ImageAttachment[]) {
+  try {
+    const drafts = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || '{}');
+    drafts[sessionId] = {
+      input,
+      images,
+      timestamp: Date.now(),
+    };
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+  } catch (error) {
+    console.error('Failed to save draft:', error);
+  }
+}
+
+function loadDraft(sessionId: string): DraftMessage | null {
+  try {
+    const drafts = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || '{}');
+    return drafts[sessionId] || null;
+  } catch (error) {
+    console.error('Failed to load draft:', error);
+    return null;
+  }
+}
+
+function clearDraft(sessionId: string) {
+  try {
+    const drafts = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || '{}');
+    delete drafts[sessionId];
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+  } catch (error) {
+    console.error('Failed to clear draft:', error);
+  }
+}
+
 // Helper to convert raw SSE events from database to displayable messages
 function convertEventToMessage(event: DbEvent, sessionId: string): Message | null {
   const eventType = event.eventType;
@@ -282,6 +326,38 @@ export default function Chat() {
   useEffect(() => {
     repoStore.setIsLocked(isLocked);
   }, [isLocked]);
+
+  // Load draft message when session changes
+  useEffect(() => {
+    if (sessionId && sessionId !== 'new') {
+      const draft = loadDraft(sessionId);
+      if (draft) {
+        // Only restore if input is empty (avoid overwriting)
+        if (!input && images.length === 0) {
+          setInput(draft.input);
+          setImages(draft.images);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  // Save draft with debounce when input or images change
+  useEffect(() => {
+    if (!sessionId || sessionId === 'new') return;
+
+    const timeoutId = setTimeout(() => {
+      // Only save if there's content to save
+      if (input.trim() || images.length > 0) {
+        saveDraft(sessionId, input, images);
+      } else {
+        // Clear draft if both are empty
+        clearDraft(sessionId);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [input, images, sessionId]);
 
   // Load session details first to check status
   const { data: sessionDetailsData } = useQuery({
@@ -1106,6 +1182,11 @@ export default function Chat() {
 
     setInput('');
     setImages([]);
+
+    // Clear draft after successful submission
+    if (sessionId && sessionId !== 'new') {
+      clearDraft(sessionId);
+    }
   };
 
   const handleRetry = () => {
