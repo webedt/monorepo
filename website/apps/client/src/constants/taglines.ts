@@ -43,7 +43,7 @@ export const TAGLINES = [
   "We're gonna need a bigger edit.",
   "So you're telling me there's a chance… for edit.",
   "I volunteer as tribute… to edit.",
-  "The spice must flow... edits must grow.",
+  "The edits must flow.",
   "You either die a noob or live long enough to edit.",
   "Say \"edit\" again… I dare you.",
   "Hello there… general… edit.",
