@@ -1691,13 +1691,11 @@ export default function Chat() {
                       <span className="loading loading-spinner loading-sm text-primary"></span>
                       <div className="flex flex-col">
                         <span className="text-sm text-base-content/70">Processing...</span>
-                        {selectedRepo && (
+                        {selectedRepo && session?.branch && (
                           <div className="flex items-center gap-2 mt-1">
-                            {baseBranch && (
-                              <span className="text-xs text-base-content/50">
-                                📂 Parent: <span className="font-medium">{baseBranch}</span>
-                              </span>
-                            )}
+                            <span className="text-xs text-base-content/50">
+                              📂 <span className="font-medium">{session.branch}</span>
+                            </span>
                           </div>
                         )}
                       </div>
