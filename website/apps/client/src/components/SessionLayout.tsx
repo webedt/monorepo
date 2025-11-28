@@ -558,30 +558,8 @@ export default function SessionLayout({
                   </h2>
                 </button>
 
-                {/* Right: Edit and Delete icon buttons ONLY */}
-                {titleActions && (
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {titleActions}
-                  </div>
-                )}
-              </div>
-
-              {/* Line 2: Repository branch info as single pill + PR buttons */}
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setBranchExpanded(!branchExpanded)}
-                    className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full max-w-full hover:bg-base-300 transition-colors cursor-pointer"
-                    title={branchExpanded ? "Click to collapse" : "Click to expand full branch name"}
-                  >
-                    <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
-                    <span className={`text-base-content/70 ${branchExpanded ? '' : 'truncate'}`}>
-                      {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || 'unknown'}/{baseBranch}
-                      {branch && (
-                        <> → <span className="font-medium">{branchExpanded || branch.length <= 20 ? branch : branch.substring(0, 20) + '…'}</span></>
-                      )}
-                    </span>
-                  </button>
+                {/* Right: GitHub icon + Edit and Delete icon buttons */}
+                <div className="flex items-center gap-2 flex-shrink-0">
                   {/* GitHub icon link */}
                   {selectedRepo && (
                     <a
@@ -600,7 +578,25 @@ export default function SessionLayout({
                       </svg>
                     </a>
                   )}
+                  {titleActions}
                 </div>
+              </div>
+
+              {/* Line 2: Repository branch info as single pill + PR buttons */}
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <button
+                  onClick={() => setBranchExpanded(!branchExpanded)}
+                  className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full max-w-full hover:bg-base-300 transition-colors cursor-pointer"
+                  title={branchExpanded ? "Click to collapse" : "Click to expand full branch name"}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
+                  <span className={`text-base-content/70 ${branchExpanded ? '' : 'truncate'}`}>
+                    {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || 'unknown'}/{baseBranch}
+                    {branch && (
+                      <> → <span className="font-medium">{branchExpanded || branch.length <= 20 ? branch : branch.substring(0, 20) + '…'}</span></>
+                    )}
+                  </span>
+                </button>
 
                 {/* PR action buttons ONLY */}
                 {prActions && (
