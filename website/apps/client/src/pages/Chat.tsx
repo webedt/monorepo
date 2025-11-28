@@ -341,6 +341,16 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
+  // Auto-focus input when entering/navigating to chat session
+  useEffect(() => {
+    // Small delay to ensure DOM is fully rendered
+    const timeoutId = setTimeout(() => {
+      chatInputRef.current?.focus();
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [sessionId]);
+
   // Save draft with debounce when input or images change
   useEffect(() => {
     if (!sessionId || sessionId === 'new') return;
