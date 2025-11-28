@@ -6,7 +6,7 @@ import { GitHubClient } from './clients/githubClient';
 import { DBClient } from './clients/dbClient';
 import { StorageClient } from './storage/storageClient';
 import { ProviderFactory } from './providers/ProviderFactory';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { logger } from './utils/logger';
 import { LLMHelper } from './utils/llmHelper';
 import { GitHelper } from './utils/gitHelper';
@@ -62,7 +62,7 @@ export class Orchestrator {
   /**
    * Execute a complete workflow request
    */
-  async execute(request: ExecuteRequest, res: Response): Promise<void> {
+  async execute(request: ExecuteRequest, req: Request, res: Response): Promise<void> {
     const startTime = Date.now();
     let chunkIndex = 0;
     let providerSessionId: string | undefined;

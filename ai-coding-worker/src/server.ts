@@ -259,7 +259,7 @@ app.post('/execute', async (req: Request, res: Response) => {
 
   try {
     // Execute the orchestrated workflow
-    await orchestrator.execute(request, res);
+    await orchestrator.execute(request, req, res);
 
     console.log(`[Container ${containerId}] Execution completed successfully`);
 
