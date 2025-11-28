@@ -108,6 +108,12 @@ export const githubApi = {
     return fetchApi(`/api/github/repos/${owner}/${repo}/pulls${queryString ? `?${queryString}` : ''}`);
   },
 
+  generatePRContent: (owner: string, repo: string, data: { head: string; base: string; userRequest?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/generate-pr-content`, {
+      method: 'POST',
+      body: data,
+    }),
+
   createPull: (owner: string, repo: string, data: { title?: string; head: string; base: string; body?: string }) =>
     fetchApi(`/api/github/repos/${owner}/${repo}/pulls`, {
       method: 'POST',
