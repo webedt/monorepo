@@ -241,22 +241,21 @@ For detailed information about each project, see the respective CLAUDE.md files:
 **Links:**
 
 GitHub Branch: [https://github.com/webedt/monorepo/tree/{branch-name}](https://github.com/webedt/monorepo/tree/{branch-name})
-Live Site: [https://github.etdofresh.com/webedt/monorepo/website/{branch}/](https://github.etdofresh.com/webedt/monorepo/website/{branch}/)
+Live Site: [https://github.etdofresh.com/webedt/monorepo/{branch}/](https://github.etdofresh.com/webedt/monorepo/{branch}/)
 ```
 
 **Deployment URL Construction:**
 
-The deployment URL uses path-based routing with an extra `/website/` segment for the monorepo:
+The deployment URL uses path-based routing:
 
 ```
-https://github.etdofresh.com/{owner}/{repo}/website/{branch}/
+https://github.etdofresh.com/{owner}/{repo}/{branch}/
 ```
 
 - Owner and repo are converted to lowercase
 - Branch name preserves original case
 - Slashes in branch names are replaced with dashes
-- Note the `/website/` segment after the repo name (monorepo-specific)
-- Example: `claude/test-feature` → `https://github.etdofresh.com/webedt/monorepo/website/claude-test-feature/`
+- Example: `claude/test-feature` → `https://github.etdofresh.com/webedt/monorepo/claude-test-feature/`
 
 **Example:**
 
@@ -266,10 +265,8 @@ Branch: claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD
 **Links:**
 
 GitHub Branch: [https://github.com/webedt/monorepo/tree/claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD](https://github.com/webedt/monorepo/tree/claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD)
-Live Site: [https://github.etdofresh.com/webedt/monorepo/website/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/](https://github.etdofresh.com/webedt/monorepo/website/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/)
+Live Site: [https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/](https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/)
 ```
-
-**Important:** The monorepo deployment URL pattern is `/owner/repo/website/branch/` (4 segments) instead of the standalone pattern `/owner/repo/branch/` (3 segments).
 
 See [website/CLAUDE.md](website/CLAUDE.md) for complete details on path-based routing and deployment URLs.
 

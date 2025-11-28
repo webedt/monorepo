@@ -243,7 +243,7 @@ jobs:
             echo "  - Name: ${REPO_NAME}"
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
-            echo "  - Build Path: /website"
+            echo "  - Build Path: /"
 
             GITHUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
               "${DOKPLOY_URL}/api/trpc/application.saveGithubProvider" \
@@ -257,7 +257,7 @@ jobs:
                   \"repository\": \"${REPO_NAME}\",
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
-                  \"buildPath\": \"/website\",
+                  \"buildPath\": \"/\",
                   \"enableSubmodules\": false
                 }
               }")
@@ -317,7 +317,7 @@ jobs:
             echo "  - Name: ${REPO_NAME}"
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
-            echo "  - Build Path: /website"
+            echo "  - Build Path: /"
 
             # Create new application (with server ID for cloud provider)
             CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
@@ -361,7 +361,7 @@ jobs:
                   \"repository\": \"${REPO_NAME}\",
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
-                  \"buildPath\": \"/website\",
+                  \"buildPath\": \"/\",
                   \"enableSubmodules\": false
                 }
               }")
@@ -416,7 +416,7 @@ jobs:
             PROJECT="${{ steps.metadata.outputs.project }}"
             BRANCH="${{ steps.metadata.outputs.branch }}"
             DOMAIN="github.etdofresh.com"
-            PATH_PREFIX="/${OWNER}/${REPO}/${PROJECT}/${BRANCH}/"
+            PATH_PREFIX="/${OWNER}/${REPO}/${BRANCH}/"
 
             # Check if domain already exists to avoid duplicates
             echo "🔍 Checking for existing domains..."
