@@ -203,7 +203,7 @@ export default function SessionLayout({
   ];
 
   return (
-    <div className="min-h-screen bg-base-200 flex flex-col">
+    <div className="h-screen bg-base-200 flex flex-col">
       {/* Mobile Menu */}
       <MobileMenu
         isOpen={mobileMenuOpen}
@@ -613,7 +613,7 @@ export default function SessionLayout({
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col">
+      <main className="flex-1 flex flex-col overflow-hidden">
         {children}
       </main>
     </div>
