@@ -41,7 +41,7 @@ export const TAGLINES = [
   "I'll be back… with edits.",
   "Wubba lubba dub dub-edit.",
   "We're gonna need a bigger edit.",
-  "So you're telling me there's a chance… for edit.",
+  "So you're telling me there's an edit.",
   "I volunteer as tribute… to edit.",
   "The edits must flow.",
   "You either die a noob or live long enough to edit.",
