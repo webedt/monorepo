@@ -39,6 +39,7 @@ RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
     echo "export const VERSION = '${BUILD_VERSION}';" >> /app/apps/client/src/version.ts && \
     echo "export const VERSION_TIMESTAMP: string | null = $TIMESTAMP_EXPORT;" >> /app/apps/client/src/version.ts && \
     echo "export const VERSION_SHA: string | null = $SHA_EXPORT;" >> /app/apps/client/src/version.ts && \
+    echo "export const GITHUB_REPO_URL = 'https://github.com/webedt/monorepo';" >> /app/apps/client/src/version.ts && \
     echo "✓ Generated version.ts: VERSION=${BUILD_VERSION}, SHA=${SHA_VALUE:0:7}"
 
 # Build client (React/Vite app)

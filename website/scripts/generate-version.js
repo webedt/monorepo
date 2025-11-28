@@ -126,6 +126,7 @@ function updateVersionTs(version, timestamp, sha) {
 export const VERSION = '${version}';
 export const VERSION_TIMESTAMP: string | null = ${timestamp ? `'${timestamp}'` : 'null'};
 export const VERSION_SHA: string | null = ${sha ? `'${sha}'` : 'null'};
+export const GITHUB_REPO_URL = 'https://github.com/webedt/monorepo';
 `;
   fs.writeFileSync(versionPath, content);
 }
