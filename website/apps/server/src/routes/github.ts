@@ -348,7 +348,7 @@ router.post('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
       },
     });
   } catch (error: unknown) {
-    const err = error as { status?: number; message?: string; response?: { data?: { errors?: Array<{ message?: string }> } } };
+    const err = error as { status?: number; message?: string; response?: { data?: { errors?: Array<{ message?: string }>; message?: string } } };
     console.error('GitHub create PR error:', error);
 
     // Handle case where PR already exists
@@ -357,7 +357,23 @@ router.post('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to create pull request' });
+    // Extract detailed error message from GitHub API response
+    let errorMessage = 'Failed to create pull request';
+    if (err.response?.data?.message) {
+      errorMessage = err.response.data.message;
+    } else if (err.response?.data?.errors && err.response.data.errors.length > 0) {
+      const errorMessages = err.response.data.errors
+        .map((e: { message?: string }) => e.message)
+        .filter(Boolean)
+        .join('; ');
+      if (errorMessages) {
+        errorMessage = errorMessages;
+      }
+    } else if (err.message) {
+      errorMessage = err.message;
+    }
+
+    res.status(err.status || 500).json({ success: false, error: errorMessage });
   }
 });
 
@@ -613,9 +629,27 @@ router.post('/repos/:owner/:repo/branches/:branch/auto-pr', requireAuth, async (
       success: true,
       data: results,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string; response?: { data?: { errors?: Array<{ message?: string }>; message?: string } } };
     console.error('GitHub auto PR error:', error);
-    res.status(500).json({ success: false, error: 'Failed to complete auto PR' });
+
+    // Extract detailed error message from GitHub API response
+    let errorMessage = 'Failed to complete auto PR';
+    if (err.response?.data?.message) {
+      errorMessage = err.response.data.message;
+    } else if (err.response?.data?.errors && err.response.data.errors.length > 0) {
+      const errorMessages = err.response.data.errors
+        .map((e: { message?: string }) => e.message)
+        .filter(Boolean)
+        .join('; ');
+      if (errorMessages) {
+        errorMessage = errorMessages;
+      }
+    } else if (err.message) {
+      errorMessage = err.message;
+    }
+
+    res.status(err.status || 500).json({ success: false, error: errorMessage });
   }
 });
 
