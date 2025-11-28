@@ -65,5 +65,6 @@ export const TAGLINES = [
   "Smash that edit and subscribe.",
   "The real treasure was the edits we made along the way.",
   "Some men just want to watch the world edit.",
-  "The algorithm demands… edits."
+  "The algorithm demands… edits.",
+  "I git it!"
 ];
