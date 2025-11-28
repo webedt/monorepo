@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi } from '@/lib/api';
 import SessionLayout from '@/components/SessionLayout';
 import type { GitHubPullRequest } from '@webedt/shared';
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 
 function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   const [iframeKey, setIframeKey] = useState(0);
@@ -96,13 +96,9 @@ export default function Preview() {
   const queryClient = useQueryClient();
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
-  const [deletingSession, setDeletingSession] = useState(false);
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
-
-  // Ref for delete button to auto-focus
-  const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
   // Load session details to get preview URL
   const { data: sessionData, isLoading } = useQuery({
@@ -276,25 +272,10 @@ export default function Preview() {
   };
 
   const handleDeleteSession = () => {
-    setDeletingSession(true);
-  };
-
-  const confirmDelete = () => {
     if (sessionId && sessionId !== 'new') {
       deleteMutation.mutate(sessionId);
     }
   };
-
-  const cancelDelete = () => {
-    setDeletingSession(false);
-  };
-
-  // Auto-focus delete button when delete modal opens
-  useEffect(() => {
-    if (deletingSession && deleteButtonRef.current) {
-      deleteButtonRef.current.focus();
-    }
-  }, [deletingSession]);
 
   // Create title actions (Edit and Delete buttons) for the title line
   const titleActions = session && (
@@ -463,38 +444,6 @@ export default function Preview() {
           )}
 
           <PreviewContent previewUrl={previewUrl} />
-
-          {/* Delete confirmation modal */}
-          {deletingSession && (
-            <div className="modal modal-open">
-              <div className="modal-box">
-                <h3 className="font-bold text-lg mb-4">
-                  Delete Session
-                </h3>
-                <p className="text-sm text-base-content/70 mb-6">
-                  Are you sure you want to delete this session? This action cannot be undone and will
-                  delete all messages in this session.
-                </p>
-                <div className="modal-action">
-                  <button
-                    onClick={cancelDelete}
-                    className="btn btn-ghost"
-                    disabled={deleteMutation.isPending}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    ref={deleteButtonRef}
-                    onClick={confirmDelete}
-                    className="btn btn-error"
-                    disabled={deleteMutation.isPending}
-                  >
-                    {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
     </SessionLayout>
