@@ -6,7 +6,7 @@ import { GitHubClient } from './clients/githubClient';
 import { DBClient } from './clients/dbClient';
 import { StorageClient } from './storage/storageClient';
 import { ProviderFactory } from './providers/ProviderFactory';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { logger } from './utils/logger';
 import { LLMHelper } from './utils/llmHelper';
 import { GitHelper } from './utils/gitHelper';
@@ -62,7 +62,7 @@ export class Orchestrator {
   /**
    * Execute a complete workflow request
    */
-  async execute(request: ExecuteRequest, res: Response): Promise<void> {
+  async execute(request: ExecuteRequest, req: Request, res: Response): Promise<void> {
     const startTime = Date.now();
     let chunkIndex = 0;
     let providerSessionId: string | undefined;
@@ -101,9 +101,53 @@ export class Orchestrator {
     // Local workspace path (ephemeral - in /tmp, may change to repo directory)
     workspacePath = sessionRoot;
 
+    // Track client connection state
+    let clientDisconnected = false;
+    let eventsSent = 0;
+
+    req.on('close', () => {
+      logger.warn('Client disconnected - stopping event emission', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        eventsSent
+      });
+      clientDisconnected = true;
+    });
+
+    res.on('error', (err) => {
+      logger.error('Response stream error - client may have disconnected', err, {
+        component: 'Orchestrator',
+        websiteSessionId,
+        eventsSent
+      });
+      clientDisconnected = true;
+    });
+
     // Helper to send SSE events
     const sendEvent = (event: SSEEvent) => {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
+      // Check if client is still connected
+      if (clientDisconnected) {
+        logger.warn('Skipping event - client disconnected', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          eventType: event.type,
+          eventsSent
+        });
+        return;
+      }
+
+      // Write to response stream and check backpressure
+      const canWrite = res.write(`data: ${JSON.stringify(event)}\n\n`);
+      eventsSent++;
+
+      if (!canWrite) {
+        logger.warn('Write buffer full - backpressure detected', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          eventType: event.type,
+          eventsSent
+        });
+      }
 
       // Persist to session root (not repo directory) - will be uploaded to MinIO at end
       try {
@@ -724,6 +768,12 @@ export class Orchestrator {
         });
       }
 
+      logger.info('Closing SSE stream - all events sent', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        totalEventsSent: eventsSent,
+        clientDisconnected
+      });
       res.end();
     } catch (error) {
       logger.error('Error during execution', error, {
@@ -783,6 +833,12 @@ export class Orchestrator {
         }));
       }
 
+      logger.info('Closing SSE stream after error', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        totalEventsSent: eventsSent,
+        clientDisconnected
+      });
       res.end();
       throw error; // Re-throw to trigger worker exit
     }

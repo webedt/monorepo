@@ -259,19 +259,21 @@ app.post('/execute', async (req: Request, res: Response) => {
 
   try {
     // Execute the orchestrated workflow
-    await orchestrator.execute(request, res);
+    await orchestrator.execute(request, req, res);
 
     console.log(`[Container ${containerId}] Execution completed successfully`);
 
     // Exit process after successful completion (ephemeral container model)
-    console.log(`[Container ${containerId}] Exiting process in 1 second...`);
-    setTimeout(() => process.exit(0), 1000);
+    // Wait 10 seconds to ensure all SSE events are consumed by the backend
+    console.log(`[Container ${containerId}] Exiting process in 10 seconds...`);
+    setTimeout(() => process.exit(0), 10000);
   } catch (error) {
     console.error(`[Container ${containerId}] Execution failed:`, error);
 
     // Exit process after error (ephemeral container model)
-    console.log(`[Container ${containerId}] Exiting process in 1 second...`);
-    setTimeout(() => process.exit(1), 1000);
+    // Wait 10 seconds to ensure all SSE events are consumed by the backend
+    console.log(`[Container ${containerId}] Exiting process in 10 seconds...`);
+    setTimeout(() => process.exit(1), 10000);
   }
 });
 
