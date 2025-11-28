@@ -75,12 +75,16 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         signal: controller.signal,
       });
 
+      console.log(`[SSE] Response status: ${response.status}, ok: ${response.ok}`);
+
       if (!response.ok) {
         // Handle 429 (worker busy) with automatic retry
         if (response.status === 429) {
+          console.log('[SSE] Detected 429 status, handling retry logic...');
           let errorData: any = {};
           try {
             errorData = await response.json();
+            console.log('[SSE] 429 response data:', errorData);
           } catch (e) {
             console.error('[SSE] Failed to parse 429 response:', e);
           }
@@ -90,6 +94,9 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           retryAttemptRef.current += 1;
 
           if (retryAttemptRef.current > maxRetryAttempts) {
+            console.error(`[SSE] Max retry attempts (${maxRetryAttempts}) exceeded`);
+            isConnectingRef.current = false;
+            abortControllerRef.current = null;
             throw new Error(`Worker busy after ${maxRetryAttempts} retry attempts. Please try again later.`);
           }
 
@@ -108,22 +115,34 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           abortControllerRef.current = null;
 
           // Retry after the specified delay
+          console.log(`[SSE] Setting timeout to retry in ${retryAfter} seconds...`);
           setTimeout(() => {
+            console.log('[SSE] Retrying connection now...');
             connectWithFetch();
           }, retryAfter * 1000);
+          console.log('[SSE] Returning from 429 handler (should not throw error)');
           return;
         }
 
         // For other errors, read the response and throw
+        console.log(`[SSE] Non-429 error, status: ${response.status}`);
         let errorMessage = `HTTP error! status: ${response.status}`;
         try {
           const errorData = await response.json();
+          console.log('[SSE] Error response data:', errorData);
           if (errorData.error) {
-            errorMessage = errorData.error;
+            // Ensure we use the error string, not the entire object
+            errorMessage = typeof errorData.error === 'string'
+              ? errorData.error
+              : errorData.message || JSON.stringify(errorData);
           }
         } catch (e) {
           // ignore json parse error and use default message
+          console.error('[SSE] Failed to parse error response:', e);
         }
+        isConnectingRef.current = false;
+        abortControllerRef.current = null;
+        console.error('[SSE] Throwing error:', errorMessage);
         throw new Error(errorMessage);
       }
 
