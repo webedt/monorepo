@@ -29,6 +29,12 @@ export default function Sessions() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['sessions'],
     queryFn: sessionsApi.list,
+    refetchInterval: (query) => {
+      // Poll every 3 seconds if there are any running sessions
+      const sessions = query.state.data?.data?.sessions || [];
+      const hasRunning = sessions.some((s: ChatSession) => s.status === 'running');
+      return hasRunning ? 3000 : false;
+    },
   });
 
   const sessions: ChatSession[] = data?.data?.sessions || [];
@@ -390,19 +396,24 @@ export default function Sessions() {
                       )}
                     </div>
                     <div className="ml-4 flex-shrink-0 flex items-center space-x-4">
-                      <span
-                        className={`badge ${
-                          session.status === 'completed'
-                            ? 'badge-success'
-                            : session.status === 'running'
-                            ? 'badge-info'
-                            : session.status === 'error'
-                            ? 'badge-error'
-                            : 'badge-ghost'
-                        }`}
-                      >
-                        {session.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {session.status === 'running' && (
+                          <span className="loading loading-spinner loading-xs text-info"></span>
+                        )}
+                        <span
+                          className={`badge ${
+                            session.status === 'completed'
+                              ? 'badge-success'
+                              : session.status === 'running'
+                              ? 'badge-info'
+                              : session.status === 'error'
+                              ? 'badge-error'
+                              : 'badge-ghost'
+                          }`}
+                        >
+                          {session.status}
+                        </span>
+                      </div>
                       <span className="text-sm text-base-content/70">
                         {new Date(session.createdAt).toLocaleDateString()}
                       </span>
