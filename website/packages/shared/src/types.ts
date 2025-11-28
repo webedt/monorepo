@@ -38,6 +38,7 @@ export interface ChatSession {
   locked: boolean;
   createdAt: Date;
   completedAt: Date | null;
+  deletedAt: Date | null;
 }
 
 export type SessionStatus = 'pending' | 'running' | 'completed' | 'error';
