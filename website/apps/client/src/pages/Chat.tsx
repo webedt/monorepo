@@ -921,7 +921,7 @@ export default function Chat() {
     }
   }, [sessionId]);
 
-  const { isConnected } = useEventSource(streamUrl, {
+  useEventSource(streamUrl, {
     method: streamMethod,
     body: streamBody,
     onMessage: (event) => {
