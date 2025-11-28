@@ -7,7 +7,6 @@ import { useEventSource } from '@/hooks/useEventSource';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
-import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { ChatMessage } from '@/components/ChatMessage';
 import SessionLayout from '@/components/SessionLayout';
 import type { Message, GitHubRepository, ChatSession } from '@webedt/shared';
@@ -1348,7 +1347,7 @@ export default function Chat() {
                 ) : (
                   <ChatMessage
                     key={message.id}
-                    message={message}
+                    message={{ ...message, images: message.images ?? undefined }}
                     userName={user?.displayName || user?.email}
                     onImageClick={setViewingImage}
                     onRetry={handleRetry}
