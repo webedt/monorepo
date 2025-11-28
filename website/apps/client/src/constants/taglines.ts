@@ -15,7 +15,7 @@ export const TAGLINES = [
   "404: 'i' not found",
   "Come with me if you want to edit.",
   "Never gonna give edits up.",
-  "Ship edits, and chew bubble gumand we're all out of gum.",
+  "Ship edits, and chew bubble gum… and we're all out of gum.",
   "May the source be with your edits.",
   "It's dangerous to go alone… take this edit.",
   "This is edit.",
