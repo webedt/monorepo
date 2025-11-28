@@ -132,9 +132,11 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   } else if (data.type === 'assistant_message' && data.data) {
     const msgData = data.data;
 
-    // Extract model information if present
+    // Extract model information if present (check both locations)
     if (data.model) {
       model = data.model;
+    } else if (msgData.type === 'assistant' && msgData.message?.model) {
+      model = msgData.message.model;
     }
 
     // Handle assistant message with Claude response
