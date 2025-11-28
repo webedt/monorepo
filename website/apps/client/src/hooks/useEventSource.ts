@@ -33,10 +33,12 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   const reconnectAttemptRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const inactivityTimeoutRef = useRef<NodeJS.Timeout>();
+  const cleanupTimeoutRef = useRef<NodeJS.Timeout>(); // For deferred cleanup (Strict Mode handling)
   const hasExplicitlyClosedRef = useRef(false);
   const isConnectingRef = useRef(false);
   const retryAttemptRef = useRef(0);
   const lastActivityRef = useRef<number>(Date.now());
+  const isMountedRef = useRef(true); // Track if component is actually mounted
   const maxRetryAttempts = 10; // Maximum retry attempts for 429 errors
 
   // Helper to reset inactivity timeout
@@ -68,6 +70,15 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   }, [inactivityTimeout, onMessage, onCompleted]);
 
   const connect = useCallback(() => {
+    // Cancel any pending cleanup (handles React Strict Mode remount)
+    if (cleanupTimeoutRef.current) {
+      clearTimeout(cleanupTimeoutRef.current);
+      cleanupTimeoutRef.current = undefined;
+      console.log('[SSE] Cancelled pending cleanup (component remounted)');
+    }
+
+    isMountedRef.current = true;
+
     // Prevent duplicate connections
     if (!url || (eventSourceRef.current || abortControllerRef.current) || isConnectingRef.current) return;
 
@@ -463,10 +474,40 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
     }
 
     return () => {
-      disconnect();
+      // Use deferred cleanup to handle React Strict Mode
+      // In Strict Mode, React unmounts and remounts components for effect cleanup testing
+      // By deferring the disconnect, we allow the remount to cancel the cleanup
+      isMountedRef.current = false;
+
+      // If there's no active connection, no need to defer cleanup
+      if (!abortControllerRef.current && !eventSourceRef.current) {
+        return;
+      }
+
+      // Defer the actual disconnect by 100ms
+      // This gives React Strict Mode time to remount and cancel the cleanup
+      cleanupTimeoutRef.current = setTimeout(() => {
+        // Only disconnect if still unmounted after the delay
+        if (!isMountedRef.current) {
+          console.log('[SSE] Deferred cleanup executing - component did not remount');
+          disconnect();
+        }
+      }, 100);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
+
+  // Cleanup on actual component unmount
+  useEffect(() => {
+    return () => {
+      // Clear any pending deferred cleanup
+      if (cleanupTimeoutRef.current) {
+        clearTimeout(cleanupTimeoutRef.current);
+      }
+      // Immediate disconnect on final unmount
+      disconnect();
+    };
+  }, [disconnect]);
 
   return {
     isConnected,
