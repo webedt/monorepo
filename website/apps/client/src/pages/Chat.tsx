@@ -996,12 +996,78 @@ export default function Chat() {
 
           const contentBlocks = msgData.message.content;
           if (Array.isArray(contentBlocks)) {
+            // First check for tool_use blocks to show file operations
+            const toolUseBlocks = contentBlocks.filter((block: any) => block.type === 'tool_use');
+            if (toolUseBlocks.length > 0) {
+              // Create status messages for file operations
+              const toolMessages: string[] = [];
+              for (const toolBlock of toolUseBlocks) {
+                const toolName = toolBlock.name;
+                const toolInput = toolBlock.input || {};
+
+                if (toolName === 'Read') {
+                  const filePath = toolInput.file_path || 'unknown file';
+                  const fileName = filePath.split('/').pop() || filePath;
+                  toolMessages.push(`📖 Reading: ${fileName}`);
+                } else if (toolName === 'Write') {
+                  const filePath = toolInput.file_path || 'unknown file';
+                  const fileName = filePath.split('/').pop() || filePath;
+                  toolMessages.push(`📝 Writing: ${fileName}`);
+                } else if (toolName === 'Edit') {
+                  const filePath = toolInput.file_path || 'unknown file';
+                  const fileName = filePath.split('/').pop() || filePath;
+                  toolMessages.push(`✏️ Editing: ${fileName}`);
+                } else if (toolName === 'Grep') {
+                  const pattern = toolInput.pattern || '';
+                  toolMessages.push(`🔍 Searching for: "${pattern}"`);
+                } else if (toolName === 'Glob') {
+                  const pattern = toolInput.pattern || '';
+                  toolMessages.push(`📁 Finding files: ${pattern}`);
+                } else if (toolName === 'Bash') {
+                  const cmd = toolInput.command || '';
+                  const shortCmd = cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd;
+                  toolMessages.push(`⚡ Running: ${shortCmd}`);
+                } else if (toolName === 'WebFetch') {
+                  const url = toolInput.url || '';
+                  toolMessages.push(`🌐 Fetching: ${url}`);
+                } else if (toolName === 'WebSearch') {
+                  const query = toolInput.query || '';
+                  toolMessages.push(`🔎 Searching web: "${query}"`);
+                } else if (toolName === 'Task') {
+                  const desc = toolInput.description || 'subtask';
+                  toolMessages.push(`🤖 Launching agent: ${desc}`);
+                }
+              }
+
+              if (toolMessages.length > 0) {
+                const toolContent = toolMessages.join('\n');
+                // Create and add the tool message immediately
+                messageIdCounter.current += 1;
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: Date.now() + messageIdCounter.current,
+                    chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+                    type: 'system',
+                    content: toolContent,
+                    timestamp: new Date(),
+                    model: data.model,
+                  },
+                ]);
+                // Don't return here - continue to process text blocks if any
+              }
+            }
+
+            // Then extract text content as before
             const textParts = contentBlocks
               .filter((block: any) => block.type === 'text' && block.text)
               .map((block: any) => block.text);
             if (textParts.length > 0) {
               content = textParts.join('\n');
               eventLabel = '🤖';
+            } else {
+              // If we already showed tool messages, skip showing empty text
+              return;
             }
           }
         }
