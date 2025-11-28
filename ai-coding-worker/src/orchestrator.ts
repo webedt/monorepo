@@ -105,7 +105,12 @@ export class Orchestrator {
     let clientDisconnected = false;
     let eventsSent = 0;
 
-    req.on('close', () => {
+    // IMPORTANT: Use res.on('close') instead of req.on('close')
+    // For POST requests, req.on('close') fires when the request body is fully received,
+    // NOT when the client actually disconnects. The client sends a JSON body and then
+    // waits for SSE events - req.on('close') fires immediately after the body is received.
+    // res.on('close') correctly fires when the response stream is closed (client disconnects).
+    res.on('close', () => {
       logger.warn('Client disconnected - stopping event emission', {
         component: 'Orchestrator',
         websiteSessionId,

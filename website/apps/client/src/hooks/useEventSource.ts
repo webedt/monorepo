@@ -9,6 +9,8 @@ interface UseEventSourceOptions {
   maxReconnectAttempts?: number;
   method?: 'GET' | 'POST';
   body?: any;
+  /** Inactivity timeout in ms - if no events received within this time, consider stream hung (default: 5 minutes) */
+  inactivityTimeout?: number;
 }
 
 export function useEventSource(url: string | null, options: UseEventSourceOptions = {}) {
@@ -21,6 +23,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
     maxReconnectAttempts = 5,
     method = 'GET',
     body,
+    inactivityTimeout = 5 * 60 * 1000, // Default 5 minutes
   } = options;
 
   const [isConnected, setIsConnected] = useState(false);
@@ -29,12 +32,53 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   const abortControllerRef = useRef<AbortController | null>(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const inactivityTimeoutRef = useRef<NodeJS.Timeout>();
+  const cleanupTimeoutRef = useRef<NodeJS.Timeout>(); // For deferred cleanup (Strict Mode handling)
   const hasExplicitlyClosedRef = useRef(false);
   const isConnectingRef = useRef(false);
   const retryAttemptRef = useRef(0);
+  const lastActivityRef = useRef<number>(Date.now());
+  const isMountedRef = useRef(true); // Track if component is actually mounted
   const maxRetryAttempts = 10; // Maximum retry attempts for 429 errors
 
+  // Helper to reset inactivity timeout
+  const resetInactivityTimeout = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+    }
+    inactivityTimeoutRef.current = setTimeout(() => {
+      console.warn(`[SSE] No activity for ${inactivityTimeout / 1000}s - stream may be hung`);
+      // Notify via message so user sees something
+      onMessage?.({
+        eventType: 'system',
+        data: {
+          type: 'message',
+          message: `⚠️ No response received for ${Math.round(inactivityTimeout / 60000)} minutes. The session may be stuck. You can try sending a new message.`
+        }
+      });
+      // Trigger completion to allow user to continue
+      hasExplicitlyClosedRef.current = true;
+      onCompleted?.({ timedOut: true });
+      // Disconnect the hung stream
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setIsConnected(false);
+    }, inactivityTimeout);
+  }, [inactivityTimeout, onMessage, onCompleted]);
+
   const connect = useCallback(() => {
+    // Cancel any pending cleanup (handles React Strict Mode remount)
+    if (cleanupTimeoutRef.current) {
+      clearTimeout(cleanupTimeoutRef.current);
+      cleanupTimeoutRef.current = undefined;
+      console.log('[SSE] Cancelled pending cleanup (component remounted)');
+    }
+
+    isMountedRef.current = true;
+
     // Prevent duplicate connections
     if (!url || (eventSourceRef.current || abortControllerRef.current) || isConnectingRef.current) return;
 
@@ -164,12 +208,16 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       retryAttemptRef.current = 0; // Reset retry counter on successful connection
       onConnected?.();
 
+      // Start inactivity timeout
+      resetInactivityTimeout();
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
 
       let currentEvent = '';
       let currentData = '';
+      let receivedCompletedEvent = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -179,9 +227,15 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           if (currentEvent || currentData) {
             console.log('[SSE] Flushing final event:', currentEvent || 'message', currentData.substring(0, 100));
             handleSSEEvent(currentEvent || 'message', currentData);
+            if (currentEvent === 'completed') {
+              receivedCompletedEvent = true;
+            }
           }
           break;
         }
+
+        // Reset inactivity timeout on any data received
+        resetInactivityTimeout();
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -192,6 +246,9 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
             // Empty line signals end of event
             if (currentEvent || currentData) {
               handleSSEEvent(currentEvent || 'message', currentData);
+              if (currentEvent === 'completed') {
+                receivedCompletedEvent = true;
+              }
               currentEvent = '';
               currentData = '';
             }
@@ -206,9 +263,27 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         }
       }
 
+      // Clear inactivity timeout when stream ends
+      if (inactivityTimeoutRef.current) {
+        clearTimeout(inactivityTimeoutRef.current);
+      }
+
+      // If stream ended without a "completed" event, trigger completion anyway
+      // This handles cases where the server stream ends unexpectedly
+      if (!receivedCompletedEvent && !hasExplicitlyClosedRef.current) {
+        console.log('[SSE] Stream ended without completed event - triggering completion');
+        hasExplicitlyClosedRef.current = true;
+        onCompleted?.({ streamEndedWithoutCompletion: true });
+      }
+
       setIsConnected(false);
       abortControllerRef.current = null;
     } catch (err) {
+      // Clear inactivity timeout on error
+      if (inactivityTimeoutRef.current) {
+        clearTimeout(inactivityTimeoutRef.current);
+      }
+
       if (err instanceof Error && err.name === 'AbortError') {
         console.log('[SSE] Request aborted by user');
         return; // User cancelled
@@ -266,9 +341,13 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         setError(null);
         reconnectAttemptRef.current = 0;
         onConnected?.();
+        // Start inactivity timeout for EventSource as well
+        resetInactivityTimeout();
       };
 
       es.onmessage = (event) => {
+        // Reset inactivity timeout on any message
+        resetInactivityTimeout();
         try {
           const data = JSON.parse(event.data);
           onMessage?.({ eventType: 'message', data });
@@ -278,6 +357,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       };
 
       es.addEventListener('connected', (event: MessageEvent) => {
+        resetInactivityTimeout();
         try {
           const data = JSON.parse(event.data);
           onMessage?.({ eventType: 'connected', data });
@@ -291,6 +371,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
 
       eventTypes.forEach(eventType => {
         es.addEventListener(eventType, (event: MessageEvent) => {
+          resetInactivityTimeout();
           try {
             const data = JSON.parse(event.data);
             onMessage?.({ eventType, data });
@@ -301,6 +382,10 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       });
 
       es.addEventListener('completed', (event: MessageEvent) => {
+        // Clear inactivity timeout on completion
+        if (inactivityTimeoutRef.current) {
+          clearTimeout(inactivityTimeoutRef.current);
+        }
         setIsConnected(false);
         hasExplicitlyClosedRef.current = true;
         try {
@@ -313,6 +398,10 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       });
 
       es.addEventListener('error', (event: MessageEvent) => {
+        // Clear inactivity timeout on error
+        if (inactivityTimeoutRef.current) {
+          clearTimeout(inactivityTimeoutRef.current);
+        }
         try {
           const data = JSON.parse(event.data);
           setIsConnected(false);
@@ -363,6 +452,10 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       clearTimeout(reconnectTimeoutRef.current);
     }
 
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+    }
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -381,10 +474,40 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
     }
 
     return () => {
-      disconnect();
+      // Use deferred cleanup to handle React Strict Mode
+      // In Strict Mode, React unmounts and remounts components for effect cleanup testing
+      // By deferring the disconnect, we allow the remount to cancel the cleanup
+      isMountedRef.current = false;
+
+      // If there's no active connection, no need to defer cleanup
+      if (!abortControllerRef.current && !eventSourceRef.current) {
+        return;
+      }
+
+      // Defer the actual disconnect by 100ms
+      // This gives React Strict Mode time to remount and cancel the cleanup
+      cleanupTimeoutRef.current = setTimeout(() => {
+        // Only disconnect if still unmounted after the delay
+        if (!isMountedRef.current) {
+          console.log('[SSE] Deferred cleanup executing - component did not remount');
+          disconnect();
+        }
+      }, 100);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
+
+  // Cleanup on actual component unmount
+  useEffect(() => {
+    return () => {
+      // Clear any pending deferred cleanup
+      if (cleanupTimeoutRef.current) {
+        clearTimeout(cleanupTimeoutRef.current);
+      }
+      // Immediate disconnect on final unmount
+      disconnect();
+    };
+  }, [disconnect]);
 
   return {
     isConnected,

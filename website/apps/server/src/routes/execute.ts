@@ -377,9 +377,9 @@ const executeHandler = async (req: any, res: any) => {
             signal: controller.signal,
           });
 
-          const containerId = response.headers.get('X-Container-ID') || 'unknown';
+          const workerContainerId = response.headers.get('X-Container-ID') || 'unknown';
           console.log(`[Execute] Successfully connected to AI worker on attempt ${attempt}`);
-          console.log(`[Execute] Worker Container ID: ${containerId}`);
+          console.log(`[Execute] Worker Container ID: ${workerContainerId}`);
           clearTimeout(timeout);
           break; // Success!
 
@@ -666,6 +666,19 @@ const executeHandler = async (req: any, res: any) => {
       console.log(`[Execute] Chat Session ID: ${chatSession.id}`);
       console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'N/A'}`);
       console.log(`[Execute] ==================================================`);
+
+      // Signal ai-coding-worker that we've received all data - allows faster shutdown
+      try {
+        console.log(`[Execute] Signaling AI worker to shutdown (received all data)...`);
+        await fetch(`${aiWorkerUrl}/shutdown`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        console.log(`[Execute] Shutdown signal sent to AI worker`);
+      } catch (shutdownError) {
+        // Non-critical - worker will shutdown on its own after timeout
+        console.log(`[Execute] Failed to signal worker shutdown (non-critical):`, shutdownError);
+      }
 
       // Mark as completed
       try {

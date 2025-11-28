@@ -438,11 +438,20 @@ export default function Chat() {
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
   // Sync isExecuting with session status when returning to a running session
+  // IMPORTANT: Only block input when we have an active SSE stream (streamUrl !== null)
+  // This prevents sessions from getting stuck when they're marked "running" but no stream is active
   useEffect(() => {
     if (session?.status === 'running' || session?.status === 'pending') {
-      if (!isExecuting) {
+      // Only set isExecuting=true if we have an active stream
+      // If session is "running" but no stream is active, it's likely a stale session
+      // that didn't complete properly - allow user to continue interacting
+      if (!isExecuting && streamUrl) {
         console.log('[Chat] Syncing isExecuting with session status:', session.status);
         setIsExecuting(true);
+      } else if (!streamUrl && isExecuting) {
+        // Stream ended but status wasn't updated - clear executing state
+        console.log('[Chat] Session marked running but no active stream - clearing isExecuting');
+        setIsExecuting(false);
       }
     } else if (session?.status === 'completed' || session?.status === 'error') {
       if (isExecuting) {
@@ -450,7 +459,7 @@ export default function Chat() {
         setIsExecuting(false);
       }
     }
-  }, [session?.status]);
+  }, [session?.status, streamUrl, isExecuting]);
 
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
