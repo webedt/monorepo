@@ -617,7 +617,7 @@ export default function SessionLayout({
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col min-h-0">
         {children}
       </main>
     </div>
