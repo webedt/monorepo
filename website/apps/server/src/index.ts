@@ -17,6 +17,7 @@ import sessionsRoutes from './routes/sessions';
 import userRoutes from './routes/user';
 import transcribeRoutes from './routes/transcribe';
 import storageWorkerRoutes from './routes/storage-worker';
+import adminRoutes from './routes/admin';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,6 +40,7 @@ app.use(authMiddleware);
 app.use('/api/auth', authRoutes);
 app.use('/api/github', githubRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api', executeRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api', transcribeRoutes);

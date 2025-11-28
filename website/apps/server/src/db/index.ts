@@ -58,6 +58,7 @@ if (usePostgres) {
       claude_auth JSONB,
       image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024,
       voice_command_keywords JSONB DEFAULT '[]'::jsonb,
+      is_admin BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
 
@@ -141,6 +142,12 @@ if (usePostgres) {
           WHERE table_name = 'users' AND column_name = 'voice_command_keywords'
         ) THEN
           ALTER TABLE users ADD COLUMN voice_command_keywords JSONB DEFAULT '[]'::jsonb;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'is_admin'
+        ) THEN
+          ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE;
         END IF;
         -- Refactor session ID to use {owner}/{repo}/{branch} format
         IF NOT EXISTS (
@@ -248,6 +255,7 @@ if (usePostgres) {
       claude_auth TEXT,
       image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024,
       voice_command_keywords TEXT DEFAULT '[]',
+      is_admin INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
@@ -356,6 +364,12 @@ if (usePostgres) {
     if (!hasVoiceCommandKeywordsColumn) {
       sqlite.exec("ALTER TABLE users ADD COLUMN voice_command_keywords TEXT DEFAULT '[]';");
       console.log('SQLite migration: Added voice_command_keywords column to users');
+    }
+
+    const hasIsAdminColumn = usersInfo.some((col) => col.name === 'is_admin');
+    if (!hasIsAdminColumn) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;');
+      console.log('SQLite migration: Added is_admin column to users');
     }
   } catch (err) {
     console.error('Error applying SQLite migrations:', err);
