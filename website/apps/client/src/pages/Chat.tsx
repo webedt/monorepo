@@ -765,19 +765,18 @@ export default function Chat() {
       const maxScroll = scrollHeight - clientHeight;
       const distanceFromBottom = maxScroll - scrollPosition;
 
-      // Simple logic: show the button to scroll to the opposite end
-      // If closer to top -> show "scroll to bottom"
-      // If closer to bottom -> show "scroll to top"
-      const closerToTop = scrollPosition < distanceFromBottom;
+      // At bottom or closer to bottom -> show "scroll to top"
+      // At top or closer to top -> show "scroll to bottom"
+      const closerToBottom = scrollPosition >= distanceFromBottom;
 
-      if (closerToTop && scrollPosition > 100) {
-        // Closer to top (and scrolled down a bit) - show scroll to bottom/present
-        setShowScrollToTop(false);
-        setShowScrollToPresent(true);
-      } else if (!closerToTop && distanceFromBottom > 100) {
-        // Closer to bottom (and scrolled up a bit) - show scroll to top
+      if (closerToBottom && distanceFromBottom > 100) {
+        // At/near bottom (scrolled up from bottom) - show scroll to top
         setShowScrollToTop(true);
         setShowScrollToPresent(false);
+      } else if (!closerToBottom && scrollPosition > 100) {
+        // At/near top (scrolled down from top) - show scroll to bottom/present
+        setShowScrollToTop(false);
+        setShowScrollToPresent(true);
       } else {
         // Very close to either edge - hide both
         setShowScrollToTop(false);
