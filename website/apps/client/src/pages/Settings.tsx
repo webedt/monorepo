@@ -14,6 +14,7 @@ export default function Settings() {
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [defaultLandingPage, setDefaultLandingPage] = useState<'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
+  const [preferredModel, setPreferredModel] = useState(user?.preferredModel || '');
 
   // Voice command keywords state
   const [voiceKeywords, setVoiceKeywords] = useState<string[]>(user?.voiceCommandKeywords || []);
@@ -77,6 +78,10 @@ export default function Settings() {
   useEffect(() => {
     setDefaultLandingPage(user?.defaultLandingPage || 'store');
   }, [user?.defaultLandingPage]);
+
+  useEffect(() => {
+    setPreferredModel(user?.preferredModel || '');
+  }, [user?.preferredModel]);
 
   // Close keyword dropdown when clicking outside
   useEffect(() => {
@@ -167,6 +172,17 @@ export default function Settings() {
     },
     onError: (error) => {
       alert(`Failed to update default landing page: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const updatePreferredModel = useMutation({
+    mutationFn: userApi.updatePreferredModel,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Preferred model updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update preferred model: ${error instanceof Error ? error.message : 'Unknown error'}`);
     },
   });
 
@@ -635,6 +651,51 @@ export default function Settings() {
                   className="btn btn-primary min-w-[140px]"
                 >
                   {updateDefaultLandingPage.isPending ? 'Saving...' : 'Save Setting'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Preferred Model */}
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title mb-2">Preferred AI Model</h2>
+
+            <div className="space-y-6">
+              <p className="text-sm text-base-content/70 leading-relaxed">
+                Choose your preferred AI model for coding sessions. This setting will be used for all new sessions.
+              </p>
+
+              <div className="divider my-4"></div>
+
+              <div className="form-control w-full">
+                <div className="mb-3">
+                  <span className="font-medium text-base text-base-content">Model Selection</span>
+                </div>
+                <select
+                  value={preferredModel}
+                  onChange={(e) => setPreferredModel(e.target.value)}
+                  className="select select-bordered w-full max-w-md"
+                >
+                  <option value="">Default (empty)</option>
+                  <option value="opus">Opus (opus)</option>
+                  <option value="sonnet">Sonnet (sonnet)</option>
+                </select>
+                <div className="mt-2">
+                  <span className="text-sm text-base-content/60">
+                    Default uses the system's automatic model selection
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-start pt-2">
+                <button
+                  onClick={() => updatePreferredModel.mutate(preferredModel)}
+                  disabled={updatePreferredModel.isPending || preferredModel === (user?.preferredModel || '')}
+                  className="btn btn-primary min-w-[140px]"
+                >
+                  {updatePreferredModel.isPending ? 'Saving...' : 'Save Setting'}
                 </button>
               </div>
             </div>

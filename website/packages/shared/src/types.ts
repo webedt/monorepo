@@ -9,6 +9,7 @@ export interface User {
   imageResizeMaxDimension: number;
   voiceCommandKeywords: string[];
   defaultLandingPage: 'store' | 'library' | 'community' | 'sessions';
+  preferredModel?: string | null;
   isAdmin: boolean;
   createdAt: Date;
 }

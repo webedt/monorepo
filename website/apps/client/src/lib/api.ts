@@ -175,6 +175,12 @@ export const userApi = {
       method: 'POST',
       body: { landingPage },
     }),
+
+  updatePreferredModel: (preferredModel: string) =>
+    fetchApi('/api/user/preferred-model', {
+      method: 'POST',
+      body: { preferredModel },
+    }),
 };
 
 // Sessions API
