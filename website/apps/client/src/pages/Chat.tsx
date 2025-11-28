@@ -763,12 +763,25 @@ export default function Chat() {
       const { scrollTop, scrollHeight, clientHeight } = container;
       const scrollPosition = scrollTop;
       const maxScroll = scrollHeight - clientHeight;
+      const distanceFromBottom = maxScroll - scrollPosition;
 
-      // Show "scroll to top" button when scrolled down more than 200px from top
-      setShowScrollToTop(scrollPosition > 200);
+      // Determine which button to show (mutually exclusive)
+      // Prioritize "scroll to present" when closer to bottom, "scroll to top" when closer to top
+      const closerToTop = scrollPosition < distanceFromBottom;
 
-      // Show "scroll to present" button when scrolled up more than 100px from bottom
-      setShowScrollToPresent(maxScroll - scrollPosition > 100);
+      if (scrollPosition > 200 && closerToTop) {
+        // Scrolled down from top and closer to top - show scroll to top
+        setShowScrollToTop(true);
+        setShowScrollToPresent(false);
+      } else if (distanceFromBottom > 100 && !closerToTop) {
+        // Scrolled up from bottom and closer to bottom - show scroll to present
+        setShowScrollToTop(false);
+        setShowScrollToPresent(true);
+      } else {
+        // Near either edge - hide both
+        setShowScrollToTop(false);
+        setShowScrollToPresent(false);
+      }
     };
 
     // Initial check
