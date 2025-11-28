@@ -46,6 +46,7 @@ export const chatSessions = pgTable('chat_sessions', {
   locked: boolean('locked').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
+  deletedAt: timestamp('deleted_at'), // Soft delete timestamp
 });
 
 export const messages = pgTable('messages', {

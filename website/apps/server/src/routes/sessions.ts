@@ -3,7 +3,7 @@ import { Octokit } from '@octokit/rest';
 import { db } from '../db/index';
 import { chatSessions, messages, users, events } from '../db/index';
 import type { ChatSession } from '../db/schema';
-import { eq, desc, inArray, and, asc } from 'drizzle-orm';
+import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { getPreviewUrl } from '../utils/previewUrlHelper';
@@ -69,7 +69,7 @@ async function deleteFromStorageWorker(sessionPath: string): Promise<{ success: 
 
 const router = Router();
 
-// Get all chat sessions for user
+// Get all chat sessions for user (excluding deleted ones)
 router.get('/', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -77,7 +77,12 @@ router.get('/', requireAuth, async (req, res) => {
     const sessions = await db
       .select()
       .from(chatSessions)
-      .where(eq(chatSessions.userId, authReq.user!.id))
+      .where(
+        and(
+          eq(chatSessions.userId, authReq.user!.id),
+          isNull(chatSessions.deletedAt)
+        )
+      )
       .orderBy(desc(chatSessions.createdAt));
 
     res.json({
@@ -90,6 +95,35 @@ router.get('/', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Get sessions error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch sessions' });
+  }
+});
+
+// Get all deleted chat sessions for user
+router.get('/deleted', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    const sessions = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.userId, authReq.user!.id),
+          isNotNull(chatSessions.deletedAt)
+        )
+      )
+      .orderBy(desc(chatSessions.deletedAt));
+
+    res.json({
+      success: true,
+      data: {
+        sessions,
+        total: sessions.length,
+      },
+    });
+  } catch (error) {
+    console.error('Get deleted sessions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch deleted sessions' });
   }
 });
 
@@ -455,7 +489,7 @@ router.post('/:id/abort', requireAuth, async (req, res) => {
   }
 });
 
-// Bulk delete chat sessions
+// Bulk delete chat sessions (soft delete)
 router.post('/bulk-delete', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -473,7 +507,118 @@ router.post('/bulk-delete', requireAuth, async (req, res) => {
       .where(
         and(
           inArray(chatSessions.id, ids),
+          eq(chatSessions.userId, authReq.user!.id),
+          isNull(chatSessions.deletedAt)
+        )
+      );
+
+    if (sessions.length !== ids.length) {
+      res.status(403).json({
+        success: false,
+        error: 'One or more sessions not found or access denied'
+      });
+      return;
+    }
+
+    // Soft delete all sessions from database
+    await db
+      .update(chatSessions)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          inArray(chatSessions.id, ids),
           eq(chatSessions.userId, authReq.user!.id)
+        )
+      );
+
+    res.json({
+      success: true,
+      data: {
+        message: `${ids.length} session${ids.length !== 1 ? 's' : ''} deleted`,
+        count: ids.length,
+      }
+    });
+  } catch (error) {
+    console.error('Bulk delete sessions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete sessions' });
+  }
+});
+
+// Bulk restore chat sessions
+router.post('/bulk-restore', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ success: false, error: 'Invalid session IDs' });
+      return;
+    }
+
+    // Verify all sessions exist and belong to the user
+    const sessions = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          inArray(chatSessions.id, ids),
+          eq(chatSessions.userId, authReq.user!.id),
+          isNotNull(chatSessions.deletedAt)
+        )
+      );
+
+    if (sessions.length !== ids.length) {
+      res.status(403).json({
+        success: false,
+        error: 'One or more sessions not found or access denied'
+      });
+      return;
+    }
+
+    // Restore all sessions
+    await db
+      .update(chatSessions)
+      .set({ deletedAt: null })
+      .where(
+        and(
+          inArray(chatSessions.id, ids),
+          eq(chatSessions.userId, authReq.user!.id)
+        )
+      );
+
+    res.json({
+      success: true,
+      data: {
+        message: `${ids.length} session${ids.length !== 1 ? 's' : ''} restored`,
+        count: ids.length,
+      }
+    });
+  } catch (error) {
+    console.error('Bulk restore sessions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to restore sessions' });
+  }
+});
+
+// Permanently delete chat sessions
+router.post('/bulk-delete-permanent', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ success: false, error: 'Invalid session IDs' });
+      return;
+    }
+
+    // Verify all sessions exist, belong to the user, and are already soft-deleted
+    const sessions = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          inArray(chatSessions.id, ids),
+          eq(chatSessions.userId, authReq.user!.id),
+          isNotNull(chatSessions.deletedAt)
         )
       );
 
@@ -518,7 +663,7 @@ router.post('/bulk-delete', requireAuth, async (req, res) => {
       });
     cleanupResults.storage = await Promise.all(storageDeletions);
 
-    // Delete all sessions from database (cascade will delete messages)
+    // Permanently delete all sessions from database (cascade will delete messages)
     await db
       .delete(chatSessions)
       .where(
@@ -531,18 +676,18 @@ router.post('/bulk-delete', requireAuth, async (req, res) => {
     res.json({
       success: true,
       data: {
-        message: `${ids.length} session${ids.length !== 1 ? 's' : ''} deleted`,
+        message: `${ids.length} session${ids.length !== 1 ? 's' : ''} permanently deleted`,
         count: ids.length,
         cleanup: cleanupResults
       }
     });
   } catch (error) {
-    console.error('Bulk delete sessions error:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete sessions' });
+    console.error('Bulk permanent delete sessions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to permanently delete sessions' });
   }
 });
 
-// Delete a chat session
+// Delete a chat session (soft delete)
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -557,7 +702,12 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const [session] = await db
       .select()
       .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          isNull(chatSessions.deletedAt)
+        )
+      )
       .limit(1);
 
     if (!session) {
@@ -570,36 +720,72 @@ router.delete('/:id', requireAuth, async (req, res) => {
       return;
     }
 
-    const cleanupResults: { branch?: { success: boolean; message: string }; storage?: { success: boolean; message: string } } = {};
-
-    // Delete GitHub branch if branch info exists
-    if (session.branch && session.repositoryOwner && session.repositoryName && authReq.user?.githubAccessToken) {
-      cleanupResults.branch = await deleteGitHubBranch(
-        authReq.user.githubAccessToken,
-        session.repositoryOwner,
-        session.repositoryName,
-        session.branch
-      );
-    }
-
-    // Delete from storage worker if sessionPath exists
-    if (session.sessionPath) {
-      cleanupResults.storage = await deleteFromStorageWorker(session.sessionPath);
-    }
-
-    // Delete session from database (cascade will delete messages)
-    await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+    // Soft delete session from database
+    await db
+      .update(chatSessions)
+      .set({ deletedAt: new Date() })
+      .where(eq(chatSessions.id, sessionId));
 
     res.json({
       success: true,
       data: {
-        message: 'Session deleted',
-        cleanup: cleanupResults
+        message: 'Session deleted'
       }
     });
   } catch (error) {
     console.error('Delete session error:', error);
     res.status(500).json({ success: false, error: 'Failed to delete session' });
+  }
+});
+
+// Restore a chat session
+router.post('/:id/restore', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership and that it's deleted
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          isNotNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found in trash' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Restore session
+    await db
+      .update(chatSessions)
+      .set({ deletedAt: null })
+      .where(eq(chatSessions.id, sessionId));
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Session restored'
+      }
+    });
+  } catch (error) {
+    console.error('Restore session error:', error);
+    res.status(500).json({ success: false, error: 'Failed to restore session' });
   }
 });
 
