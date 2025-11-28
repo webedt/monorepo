@@ -370,8 +370,8 @@ export class Orchestrator {
               // Extract last 8 characters of session ID for suffix
               const sessionIdSuffix = websiteSessionId.slice(-8);
 
-              // Construct full branch name: claude/{descriptive}-{sessionIdSuffix}
-              branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
+              // Construct full branch name: webedt/{descriptive}-{sessionIdSuffix}
+              branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
 
               logger.info('Prepared session title and branch name', {
                 component: 'Orchestrator',
@@ -450,7 +450,7 @@ export class Orchestrator {
               const title = 'New Session';
               const descriptivePart = 'auto-request';
               const sessionIdSuffix = websiteSessionId.slice(-8);
-              branchName = `claude/${descriptivePart}-${sessionIdSuffix}`;
+              branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
 
               sendEvent({
                 type: 'debug',

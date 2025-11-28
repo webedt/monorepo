@@ -119,7 +119,7 @@ GitHubClient: Step 4 - Clone repository (if specified)
     ↓
 LLMHelper: Step 4.5 - Generate session title & branch name (new sessions only)
     ↓
-GitHelper: Create branch (claude/{name}-{sessionSuffix})
+GitHelper: Create branch (webedt/{name}-{sessionSuffix})
     ↓
 ProviderFactory: Step 5 - Create provider instance
     ↓
@@ -233,7 +233,7 @@ For new sessions, the worker generates a human-readable session title and git br
 1. Credentials are written to `~/.claude/.credentials.json` (Step 1.5)
 2. `LLMHelper` uses Claude Agent SDK `query()` with OAuth auth (same as main execution)
 3. Haiku generates: `TITLE: [3-6 words]` and `BRANCH: [lowercase-hyphenated]`
-4. Branch name format: `claude/{descriptive-part}-{last8CharsOfSessionId}`
+4. Branch name format: `webedt/{descriptive-part}-{last8CharsOfSessionId}`
 
 **Why Claude Agent SDK (not direct API):**
 - OAuth tokens (`sk-ant-oat...`) only work with Claude Agent SDK
@@ -246,7 +246,7 @@ message: "Generating session title and branch name..."
 debug: "LLMHelper initialized with Claude Agent SDK"
 debug: "Calling generateSessionTitleAndBranch with request: ..."
 debug: "LLM returned: title=..., branchName=..."
-message: "Creating branch: claude/explore-repository-abc12345"
+message: "Creating branch: webedt/explore-repository-abc12345"
 branch_created: { branchName, baseBranch, sessionPath }
 session_name: { sessionName, branchName }
 ```
@@ -254,7 +254,7 @@ session_name: { sessionName, branchName }
 **Fallback behavior:**
 If LLM naming fails, falls back to:
 - Title: "New Session"
-- Branch: `claude/auto-request-{sessionIdSuffix}`
+- Branch: `webedt/auto-request-{sessionIdSuffix}`
 
 **Key files:**
 - [llmHelper.ts](src/utils/llmHelper.ts) - Claude Agent SDK wrapper for LLM calls
