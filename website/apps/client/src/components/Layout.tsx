@@ -1,7 +1,7 @@
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA } from '@/version';
