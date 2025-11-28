@@ -8,11 +8,11 @@ import type { MessageParam } from '@anthropic-ai/sdk/resources';
  * Claude Code provider implementation
  */
 export class ClaudeCodeProvider extends BaseProvider {
-  private model: string;
+  private model?: string;
 
   constructor(authentication: string, workspace: string, model?: string, isResuming?: boolean) {
     super(authentication, workspace);
-    this.model = model || 'claude-sonnet-4-5-20250929';
+    this.model = model; // Use SDK default if not specified
 
     // Always write credentials to ensure we have the latest tokens
     // Even when resuming, the request may contain refreshed OAuth tokens
@@ -134,8 +134,12 @@ export class ClaudeCodeProvider extends BaseProvider {
 
     const skipPermissions = providerOptions.skipPermissions ?? true;
 
+    // Determine which model to use (if any)
+    const modelToUse = providerOptions.model || this.model;
+
     const queryOptions: Options = {
-      model: providerOptions.model || this.model,
+      // Only include model if explicitly specified, otherwise let SDK use its default
+      ...(modelToUse ? { model: modelToUse } : {}),
       cwd: this.workspace,
       systemPrompt: `You are Claude Code, running in a containerized environment. The working directory is ${this.workspace}.`,
       allowDangerouslySkipPermissions: skipPermissions,
