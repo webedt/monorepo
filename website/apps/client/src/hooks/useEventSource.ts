@@ -78,40 +78,43 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       if (!response.ok) {
         // Handle 429 (worker busy) with automatic retry
         if (response.status === 429) {
+          let errorData: any = {};
           try {
-            const errorData = await response.json();
-            const retryAfter = errorData.retryAfter || 5; // Default to 5 seconds
-
-            retryAttemptRef.current += 1;
-
-            if (retryAttemptRef.current > maxRetryAttempts) {
-              throw new Error(`Worker busy after ${maxRetryAttempts} retry attempts. Please try again later.`);
-            }
-
-            console.log(`[SSE] Worker busy (429), retry ${retryAttemptRef.current}/${maxRetryAttempts} in ${retryAfter} seconds...`);
-
-            // Notify user we're retrying (optional - could be used for UI feedback)
-            onMessage?.({
-              eventType: 'system',
-              data: {
-                type: 'message',
-                message: `⏳ Worker is busy, retrying in ${retryAfter} seconds (attempt ${retryAttemptRef.current}/${maxRetryAttempts})...`
-              }
-            });
-
-            isConnectingRef.current = false;
-            abortControllerRef.current = null;
-
-            // Retry after the specified delay
-            setTimeout(() => {
-              connectWithFetch();
-            }, retryAfter * 1000);
-            return;
+            errorData = await response.json();
           } catch (e) {
-            // If we can't parse the retry response or hit max retries, fall through to error handling
+            console.error('[SSE] Failed to parse 429 response:', e);
           }
+
+          const retryAfter = errorData.retryAfter || 5; // Default to 5 seconds
+
+          retryAttemptRef.current += 1;
+
+          if (retryAttemptRef.current > maxRetryAttempts) {
+            throw new Error(`Worker busy after ${maxRetryAttempts} retry attempts. Please try again later.`);
+          }
+
+          console.log(`[SSE] Worker busy (429), retry ${retryAttemptRef.current}/${maxRetryAttempts} in ${retryAfter} seconds...`);
+
+          // Notify user we're retrying (optional - could be used for UI feedback)
+          onMessage?.({
+            eventType: 'system',
+            data: {
+              type: 'message',
+              message: `⏳ Worker is busy, retrying in ${retryAfter} seconds (attempt ${retryAttemptRef.current}/${maxRetryAttempts})...`
+            }
+          });
+
+          isConnectingRef.current = false;
+          abortControllerRef.current = null;
+
+          // Retry after the specified delay
+          setTimeout(() => {
+            connectWithFetch();
+          }, retryAfter * 1000);
+          return;
         }
 
+        // For other errors, read the response and throw
         let errorMessage = `HTTP error! status: ${response.status}`;
         try {
           const errorData = await response.json();
