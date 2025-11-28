@@ -152,13 +152,26 @@ export default function Preview() {
     setPrSuccess(null);
 
     try {
+      // First, generate PR content (title and description)
+      const prContent = await githubApi.generatePRContent(
+        session.repositoryOwner,
+        session.repositoryName,
+        {
+          head: session.branch,
+          base: session.baseBranch,
+          userRequest: session.userRequest,
+        }
+      );
+
+      // Then create the PR with the generated content
       const response = await githubApi.createPull(
         session.repositoryOwner,
         session.repositoryName,
         {
-          title: session.userRequest || `Merge ${session.branch} into ${session.baseBranch}`,
+          title: prContent.data.title,
           head: session.branch,
           base: session.baseBranch,
+          body: prContent.data.body,
         }
       );
       setPrSuccess(`PR #${response.data.number} created successfully!`);
@@ -188,13 +201,26 @@ export default function Preview() {
     setPrSuccess(null);
 
     try {
+      // First, generate PR content (title and description)
+      const prContent = await githubApi.generatePRContent(
+        session.repositoryOwner,
+        session.repositoryName,
+        {
+          head: session.branch,
+          base: session.baseBranch,
+          userRequest: session.userRequest,
+        }
+      );
+
+      // Then run auto PR with the generated content
       const response = await githubApi.autoPR(
         session.repositoryOwner,
         session.repositoryName,
         session.branch,
         {
           base: session.baseBranch,
-          title: session.userRequest || `Merge ${session.branch} into ${session.baseBranch}`,
+          title: prContent.data.title,
+          body: prContent.data.body,
         }
       );
       setPrSuccess(`Auto PR completed! PR #${response.data.pr?.number} merged successfully.`);

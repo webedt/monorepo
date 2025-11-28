@@ -298,6 +298,132 @@ router.get('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
   }
 });
 
+// Generate PR title and description
+router.post('/repos/:owner/:repo/generate-pr-content', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const { head, base, userRequest } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!head || !base) {
+      res.status(400).json({ success: false, error: 'Head and base branches are required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Get the comparison between base and head to fetch commits and changes
+    const { data: comparison } = await octokit.repos.compareCommits({
+      owner,
+      repo,
+      base,
+      head,
+    });
+
+    // Generate title
+    let title = userRequest || `Merge ${head} into ${base}`;
+
+    // Truncate title if too long (GitHub recommends max 72 chars for PR titles)
+    if (title.length > 72) {
+      title = title.substring(0, 69) + '...';
+    }
+
+    // Generate description
+    const commits = comparison.commits || [];
+    const files = comparison.files || [];
+
+    let body = '';
+
+    // Add user request summary if available
+    if (userRequest) {
+      body += `## Summary\n\n${userRequest}\n\n`;
+    }
+
+    // Add commits section
+    if (commits.length > 0) {
+      body += `## Commits (${commits.length})\n\n`;
+      commits.forEach(commit => {
+        const message = commit.commit.message.split('\n')[0]; // First line only
+        const sha = commit.sha.substring(0, 7);
+        const author = commit.commit.author?.name || 'Unknown';
+        body += `- \`${sha}\` ${message} - ${author}\n`;
+      });
+      body += '\n';
+    }
+
+    // Add changes summary
+    if (files.length > 0) {
+      const additions = files.reduce((sum, file) => sum + (file.additions || 0), 0);
+      const deletions = files.reduce((sum, file) => sum + (file.deletions || 0), 0);
+
+      body += `## Changes\n\n`;
+      body += `**${files.length}** files changed, **${additions}** insertions(+), **${deletions}** deletions(-)\n\n`;
+
+      // Group files by status
+      const added = files.filter(f => f.status === 'added');
+      const modified = files.filter(f => f.status === 'modified');
+      const removed = files.filter(f => f.status === 'removed');
+      const renamed = files.filter(f => f.status === 'renamed');
+
+      if (added.length > 0) {
+        body += `### Added (${added.length})\n`;
+        added.forEach(f => body += `- ${f.filename}\n`);
+        body += '\n';
+      }
+
+      if (modified.length > 0) {
+        body += `### Modified (${modified.length})\n`;
+        modified.forEach(f => body += `- ${f.filename}\n`);
+        body += '\n';
+      }
+
+      if (renamed.length > 0) {
+        body += `### Renamed (${renamed.length})\n`;
+        renamed.forEach(f => body += `- ${f.previous_filename} → ${f.filename}\n`);
+        body += '\n';
+      }
+
+      if (removed.length > 0) {
+        body += `### Removed (${removed.length})\n`;
+        removed.forEach(f => body += `- ${f.filename}\n`);
+        body += '\n';
+      }
+    }
+
+    // Add footer
+    body += `---\n\n*This pull request was generated automatically*`;
+
+    console.log(`[GitHub] Generated PR content for ${owner}/${repo}: ${head} -> ${base}`);
+
+    res.json({
+      success: true,
+      data: {
+        title,
+        body,
+        stats: {
+          commits: commits.length,
+          files: files.length,
+          additions: files.reduce((sum, file) => sum + (file.additions || 0), 0),
+          deletions: files.reduce((sum, file) => sum + (file.deletions || 0), 0),
+        },
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub generate PR content error:', error);
+
+    res.status(err.status || 500).json({
+      success: false,
+      error: err.message || 'Failed to generate PR content'
+    });
+  }
+});
+
 // Create a pull request
 router.post('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
   try {
