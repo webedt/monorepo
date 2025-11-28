@@ -9,6 +9,7 @@ import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components
 import { ImageViewer } from '@/components/ImageViewer';
 import { ChatMessage } from '@/components/ChatMessage';
 import SessionLayout from '@/components/SessionLayout';
+import { TokenUsageDisplay } from '@/components/TokenUsageDisplay';
 import type { Message, GitHubRepository, ChatSession } from '@webedt/shared';
 
 // Helper to render text with clickable links
@@ -298,6 +299,7 @@ export default function Chat() {
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
+  const [latestTokenUsage, setLatestTokenUsage] = useState<any>(null);
 
   // Scroll button visibility states
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -998,6 +1000,11 @@ export default function Chat() {
 
         // Handle assistant message with Claude response
         if (msgData.type === 'assistant' && msgData.message?.content) {
+          // Capture token usage if available
+          if (msgData.message?.usage) {
+            setLatestTokenUsage(msgData.message.usage);
+          }
+
           const contentBlocks = msgData.message.content;
           if (Array.isArray(contentBlocks)) {
             const textParts = contentBlocks
@@ -1754,6 +1761,10 @@ export default function Chat() {
 
           {/* Input panel at bottom when messages exist */}
           <div className="bg-base-100 border-t border-base-300 p-6 flex-shrink-0">
+            {/* Token usage display */}
+            <div className="max-w-4xl mx-auto mb-3 flex justify-end">
+              <TokenUsageDisplay usageData={latestTokenUsage} />
+            </div>
             <ChatInput
               key="bottom-input"
               ref={chatInputRef}
