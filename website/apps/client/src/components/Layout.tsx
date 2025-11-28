@@ -1,10 +1,81 @@
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA } from '@/version';
+
+const TAGLINES = [
+  "There's not i in webedt",
+  "It edits!",
+  "From that time where we took off the last vowels",
+  "Edit the web, drop the vowels.",
+  "Type less. Ship edits.",
+  "Vowels optional, edits mandatory.",
+  "Keep calm and edit on.",
+  "Much wow. Many edits.",
+  "I can haz edits?",
+  "This is the way (to edit).",
+  "With great power comes great edits.",
+  "Edit long and prosper.",
+  "The cake is a lie; the edits are real.",
+  "404: 'i' not found; edits delivered.",
+  "Come with me if you want to edit.",
+  "Never gonna give edits up.",
+  "Ship edits, and chew bubble gum—and we're all out of gum.",
+  "May the source be with your edits.",
+  "It's dangerous to go alone—take this editor.",
+  "This is edit.",
+  "One does not simply skip edit.",
+  "A wild edit appears!",
+  "Press F to edit.",
+  "Achievement unlocked: edit.",
+  "Take the red pill—see the edit.",
+  "You shall not pass—until you edit.",
+  "All your edit are belong to us.",
+  "Ha-dou-ked-it",
+  "Kamehame… edit!",
+  "Winter is coming—do the edit.",
+  "404: 'i' not found; do edit.",
+  "Edit or do not—there is no try.",
+  "I am once again asking for your edit.",
+  "By the power of Grayskull—edit!",
+  "It's-a me… edit!",
+  "You're finally awake—time to edit.",
+  "Took an arrow to the knee—still did edit.",
+  "Why so serious? Do edit.",
+  "You had me at edit.",
+  "Expecto… edit-toe.",
+  "I'll be back—with edits.",
+  "Wubba lubba dub dub—edit.",
+  "We're gonna need a bigger… edit.",
+  "So you're telling me there's a chance… for edit.",
+  "I volunteer as tribute—to edit.",
+  "The spice must flow—the edit must too.",
+  "You either die a noob or live long enough to edit.",
+  "Say \"edit\" again—I dare you.",
+  "Hello there—general… edit.",
+  "Keep your secrets—share the edit.",
+  "Look at me. I am the edit now.",
+  "It's over 9000—edits!",
+  "You had one job: edit.",
+  "Ermahgerd—nice edit.",
+  "The floor is lava—jump to edit.",
+  "We live in a society—so we edit.",
+  "Do you even edit?",
+  "Big if true—bigger if edit.",
+  "I made this—edit made it better.",
+  "Leeroy Jenkins—into the edit!",
+  "Say hello to my little edit.",
+  "To infinity—and the editor.",
+  "Roads? Where we're going, we only edit.",
+  "Bop it. Twist it. Edit it.",
+  "Smash that like—then edit.",
+  "The real treasure was the edit we made.",
+  "Some men just want to watch the world edit.",
+  "The algorithm demands… edits."
+];
 
 interface NavItem {
   to: string;
@@ -23,6 +94,11 @@ export default function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showVersionDetails, setShowVersionDetails] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Select a random tagline on mount (changes on each page visit/refresh)
+  const tagline = useMemo(() => {
+    return TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
+  }, []);
 
   // Check if connected to a repository
   const isConnected = !!selectedRepo && isLocked;
@@ -197,6 +273,9 @@ export default function Layout() {
               {/* Logo - Desktop Only */}
               <div className="hidden md:flex flex-col justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[200px] truncate" title={tagline}>
+                  {tagline}
+                </div>
                 <button
                   onClick={() => setShowVersionDetails(!showVersionDetails)}
                   className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60 text-left"
@@ -215,6 +294,9 @@ export default function Layout() {
               {/* Logo - Mobile Only (Centered) */}
               <div className="md:hidden flex flex-col items-center justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[150px] truncate" title={tagline}>
+                  {tagline}
+                </div>
                 <button
                   onClick={() => setShowVersionDetails(!showVersionDetails)}
                   className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60"
