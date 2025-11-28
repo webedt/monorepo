@@ -1406,10 +1406,10 @@ export default function Chat() {
       titleActions={titleActions}
       prActions={prActions}
     >
-      <div className="flex flex-col flex-1">
+      <div className="flex flex-col flex-1 overflow-hidden">
       {/* Alerts/Warnings Area - only show for existing sessions with messages */}
       {messages.length > 0 && (
-        <div className="bg-base-100 border-b border-base-300 p-4">
+        <div className="bg-base-100 border-b border-base-300 p-4 flex-shrink-0">
           <div className="max-w-7xl mx-auto space-y-2">
             {/* Title editing mode */}
             {editingTitle && session && (
@@ -1593,7 +1593,7 @@ export default function Chat() {
           </div>
 
           {/* Input panel at bottom when messages exist */}
-          <div className="bg-base-100 border-t border-base-300 p-6">
+          <div className="bg-base-100 border-t border-base-300 p-6 flex-shrink-0">
             <ChatInput
               key="bottom-input"
               ref={chatInputRef}
