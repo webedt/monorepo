@@ -8,6 +8,7 @@ export interface User {
   claudeAuth: ClaudeAuth | null;
   imageResizeMaxDimension: number;
   voiceCommandKeywords: string[];
+  defaultLandingPage: 'store' | 'library' | 'community' | 'sessions';
   isAdmin: boolean;
   createdAt: Date;
 }

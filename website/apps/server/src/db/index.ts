@@ -58,6 +58,7 @@ if (usePostgres) {
       claude_auth JSONB,
       image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024,
       voice_command_keywords JSONB DEFAULT '[]'::jsonb,
+      default_landing_page TEXT NOT NULL DEFAULT 'store',
       is_admin BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
@@ -149,6 +150,12 @@ if (usePostgres) {
           WHERE table_name = 'users' AND column_name = 'is_admin'
         ) THEN
           ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'default_landing_page'
+        ) THEN
+          ALTER TABLE users ADD COLUMN default_landing_page TEXT NOT NULL DEFAULT 'store';
         END IF;
         -- Refactor session ID to use {owner}/{repo}/{branch} format
         IF NOT EXISTS (
@@ -274,6 +281,7 @@ if (usePostgres) {
       claude_auth TEXT,
       image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024,
       voice_command_keywords TEXT DEFAULT '[]',
+      default_landing_page TEXT NOT NULL DEFAULT 'store',
       is_admin INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
@@ -390,6 +398,12 @@ if (usePostgres) {
     if (!hasIsAdminColumn) {
       sqlite.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;');
       console.log('SQLite migration: Added is_admin column to users');
+    }
+
+    const hasDefaultLandingPageColumn = usersInfo.some((col) => col.name === 'default_landing_page');
+    if (!hasDefaultLandingPageColumn) {
+      sqlite.exec("ALTER TABLE users ADD COLUMN default_landing_page TEXT NOT NULL DEFAULT 'store';");
+      console.log('SQLite migration: Added default_landing_page column to users');
     }
 
     const hasDeletedAtColumn = chatSessionsInfo.some((col) => col.name === 'deleted_at');

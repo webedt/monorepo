@@ -34,6 +34,30 @@ const queryClient = new QueryClient({
   },
 });
 
+// Component to handle default landing page routing
+function DefaultRoute() {
+  const user = useAuthStore((state) => state.user);
+
+  // Map landing page values to routes
+  const landingPageRoutes: Record<string, string> = {
+    store: '/',
+    library: '/library',
+    community: '/community',
+    sessions: '/sessions',
+  };
+
+  // If user has a default landing page set and it's not 'store', redirect
+  if (user?.defaultLandingPage && user.defaultLandingPage !== 'store') {
+    const redirectPath = landingPageRoutes[user.defaultLandingPage];
+    if (redirectPath) {
+      return <Navigate to={redirectPath} replace />;
+    }
+  }
+
+  // Otherwise show the Dashboard (Store)
+  return <Dashboard />;
+}
+
 function App() {
   const setUser = useAuthStore((state) => state.setUser);
 
@@ -93,7 +117,7 @@ function App() {
               path="/"
               element={
                 <ProtectedRoute>
-                  <Dashboard />
+                  <DefaultRoute />
                 </ProtectedRoute>
               }
             />

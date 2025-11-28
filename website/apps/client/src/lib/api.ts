@@ -169,6 +169,12 @@ export const userApi = {
       method: 'POST',
       body: { keywords },
     }),
+
+  updateDefaultLandingPage: (landingPage: 'store' | 'library' | 'community' | 'sessions') =>
+    fetchApi('/api/user/default-landing-page', {
+      method: 'POST',
+      body: { landingPage },
+    }),
 };
 
 // Sessions API

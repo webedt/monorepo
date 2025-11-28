@@ -184,4 +184,35 @@ router.post('/voice-command-keywords', requireAuth, async (req, res) => {
   }
 });
 
+// Update default landing page
+router.post('/default-landing-page', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { landingPage } = req.body;
+
+    // Validate landing page is one of the valid options
+    const validPages = ['store', 'library', 'community', 'sessions'];
+    if (!validPages.includes(landingPage)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid landing page. Must be one of: store, library, community, sessions',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ defaultLandingPage: landingPage })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Default landing page updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update default landing page error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update default landing page' });
+  }
+});
+
 export default router;
