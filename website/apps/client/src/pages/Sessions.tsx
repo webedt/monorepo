@@ -5,6 +5,7 @@ import { sessionsApi, githubApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import ChatInput, { type ImageAttachment } from '@/components/ChatInput';
 import type { ChatSession, GitHubRepository } from '@webedt/shared';
+import { truncateSessionName } from '@/lib/utils';
 
 export default function Sessions() {
   const queryClient = useQueryClient();
@@ -386,8 +387,8 @@ export default function Sessions() {
                         </div>
                       ) : (
                         <Link to={`/session/${session.id}`}>
-                          <p className="text-sm font-medium text-primary truncate">
-                            {session.userRequest}
+                          <p className="text-sm font-medium text-primary truncate" title={session.userRequest}>
+                            {truncateSessionName(session.userRequest, 80)}
                           </p>
                           <p className="mt-1 text-sm text-base-content/70">
                             {session.repositoryUrl || 'No repository'}
