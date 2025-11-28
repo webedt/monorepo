@@ -484,9 +484,14 @@ export default function Sessions() {
                           {session.status}
                         </span>
                       </div>
-                      <span className="text-sm text-base-content/70">
-                        {new Date(session.createdAt).toLocaleDateString()}
-                      </span>
+                      <div className="text-right">
+                        <div className="text-sm text-base-content/70">
+                          {new Date(session.createdAt).toLocaleDateString()}
+                        </div>
+                        <div className="text-xs text-base-content/60">
+                          {new Date(session.createdAt).toLocaleTimeString()}
+                        </div>
+                      </div>
                       {editingId !== session.id && (
                         <div className="flex items-center space-x-2">
                           <button
