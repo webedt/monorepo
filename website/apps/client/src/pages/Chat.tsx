@@ -1486,6 +1486,7 @@ export default function Chat() {
       isLocked={isLocked}
       titleActions={titleActions}
       prActions={prActions}
+      session={session}
     >
       <div className="flex flex-col flex-1 overflow-hidden">
       {/* Alerts/Warnings Area - only show for existing sessions with messages */}

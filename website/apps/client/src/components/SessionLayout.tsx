@@ -25,6 +25,7 @@ interface SessionLayoutProps {
   isLocked?: boolean;
   titleActions?: React.ReactNode; // Edit and Delete buttons for title line
   prActions?: React.ReactNode; // PR buttons for branch line
+  session?: any; // Session data passed from parent to avoid stale data
   children: React.ReactNode;
 }
 
@@ -39,6 +40,7 @@ export default function SessionLayout({
   isLocked: isLockedProp,
   titleActions,
   prActions,
+  session: sessionProp,
   children,
 }: SessionLayoutProps) {
   const { user, isAuthenticated, clearUser } = useAuthStore();
@@ -55,7 +57,8 @@ export default function SessionLayout({
   const [titleExpanded, setTitleExpanded] = useState(false);
 
   // Fetch session data when sessionId exists and no props provided
-  const { data: sessionData } = useQuery({
+  // Use sessionProp if available to avoid stale data during updates
+  const { data: sessionDataFromQuery } = useQuery({
     queryKey: ['session-for-layout', sessionId],
     queryFn: () => {
       if (!sessionId || sessionId === 'new') {
@@ -63,8 +66,11 @@ export default function SessionLayout({
       }
       return sessionsApi.get(sessionId);
     },
-    enabled: !!sessionId && sessionId !== 'new' && !selectedRepoProp,
+    enabled: !!sessionId && sessionId !== 'new' && !sessionProp,
   });
+
+  // Prefer sessionProp over fetched data to ensure real-time updates
+  const sessionData = sessionProp ? { data: sessionProp } : sessionDataFromQuery;
 
   // Fetch repositories when needed
   const { data: reposData, isLoading: isLoadingReposQuery } = useQuery({
