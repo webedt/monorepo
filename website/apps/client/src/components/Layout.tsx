@@ -93,6 +93,7 @@ export default function Layout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showVersionDetails, setShowVersionDetails] = useState(false);
+  const [taglineTruncated, setTaglineTruncated] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Select a random tagline on mount (changes on each page visit/refresh)
@@ -273,7 +274,11 @@ export default function Layout() {
               {/* Logo - Desktop Only */}
               <div className="hidden md:flex flex-col justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
-                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[200px] truncate" title={tagline}>
+                <div
+                  className={`text-[10px] text-base-content/30 leading-tight italic max-w-[200px] cursor-pointer hover:text-base-content/40 transition-colors ${taglineTruncated ? 'truncate' : ''}`}
+                  title={tagline}
+                  onClick={() => setTaglineTruncated(!taglineTruncated)}
+                >
                   {tagline}
                 </div>
                 <button
@@ -294,7 +299,11 @@ export default function Layout() {
               {/* Logo - Mobile Only (Centered) */}
               <div className="md:hidden flex flex-col items-center justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
-                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[150px] truncate" title={tagline}>
+                <div
+                  className={`text-[10px] text-base-content/30 leading-tight italic max-w-[150px] cursor-pointer hover:text-base-content/40 transition-colors ${taglineTruncated ? 'truncate' : ''}`}
+                  title={tagline}
+                  onClick={() => setTaglineTruncated(!taglineTruncated)}
+                >
                   {tagline}
                 </div>
                 <button
