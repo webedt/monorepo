@@ -18,6 +18,7 @@ export const users = sqliteTable('users', {
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
   voiceCommandKeywords: text('voice_command_keywords', { mode: 'json' }).$type<string[]>().default([]),
   defaultLandingPage: text('default_landing_page').default('store').notNull(),
+  preferredModel: text('preferred_model'),
   isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });

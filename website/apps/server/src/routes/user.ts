@@ -215,4 +215,38 @@ router.post('/default-landing-page', requireAuth, async (req, res) => {
   }
 });
 
+// Update preferred model
+router.post('/preferred-model', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { preferredModel } = req.body;
+
+    // Validate preferred model is one of the valid options or null/empty
+    const validModels = ['', 'opus', 'sonnet'];
+    if (preferredModel !== null && preferredModel !== undefined && !validModels.includes(preferredModel)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid preferred model. Must be one of: (empty), opus, sonnet',
+      });
+      return;
+    }
+
+    // Set to null if empty string
+    const finalPreferredModel = preferredModel === '' ? null : preferredModel;
+
+    await db
+      .update(users)
+      .set({ preferredModel: finalPreferredModel })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Preferred model updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update preferred model error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update preferred model' });
+  }
+});
+
 export default router;
