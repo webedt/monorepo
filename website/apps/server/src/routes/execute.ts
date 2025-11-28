@@ -316,6 +316,10 @@ const executeHandler = async (req: any, res: any) => {
         sessionId: chatSession.id, // Session UUID for persistence
         accessToken: authReq.session?.id || '', // Use session ID for database access
       },
+      // Add provider options with preferred model if set
+      providerOptions: authReq.user.preferredModel ? {
+        model: authReq.user.preferredModel,
+      } : undefined,
     };
 
     console.log(`[Execute] Session debug:
@@ -323,6 +327,7 @@ const executeHandler = async (req: any, res: any) => {
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
       - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
       - userProvidedSessionId (resuming): ${!!websiteSessionId}
+      - preferredModel: ${authReq.user.preferredModel || 'default (not set)'}
     `);
 
     // Always send GitHub config if available - AI worker will determine if it needs to clone
@@ -350,6 +355,7 @@ const executeHandler = async (req: any, res: any) => {
     console.log(`[Execute] Repository: ${executePayload.github?.repoUrl || 'N/A'}`);
     console.log(`[Execute] Branch: ${executePayload.github?.branch || 'N/A'}`);
     console.log(`[Execute] Auto Commit: ${executePayload.autoCommit ?? 'N/A'}`);
+    console.log(`[Execute] Preferred Model: ${authReq.user.preferredModel || 'default (not set)'}`);
     console.log(`[Execute] Full Payload (sanitized): ${JSON.stringify(sanitizedPayload, null, 2)}`);
     console.log(`[Execute] ==================================================================`);
 
