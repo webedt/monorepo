@@ -273,6 +273,9 @@ export default function Layout() {
               {/* Logo - Desktop Only */}
               <div className="hidden md:flex flex-col justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[200px] truncate" title={tagline}>
+                  {tagline}
+                </div>
                 <button
                   onClick={() => setShowVersionDetails(!showVersionDetails)}
                   className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60 text-left"
@@ -283,9 +286,6 @@ export default function Layout() {
                     <span>v{VERSION}</span>
                   )}
                 </button>
-                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[200px] truncate" title={tagline}>
-                  {tagline}
-                </div>
               </div>
             </div>
 
@@ -294,6 +294,9 @@ export default function Layout() {
               {/* Logo - Mobile Only (Centered) */}
               <div className="md:hidden flex flex-col items-center justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[150px] truncate" title={tagline}>
+                  {tagline}
+                </div>
                 <button
                   onClick={() => setShowVersionDetails(!showVersionDetails)}
                   className="text-[9px] text-base-content/40 leading-tight cursor-pointer hover:text-base-content/60"
@@ -304,9 +307,6 @@ export default function Layout() {
                     <span>v{VERSION}</span>
                   )}
                 </button>
-                <div className="text-[10px] text-base-content/30 leading-tight italic max-w-[150px] truncate" title={tagline}>
-                  {tagline}
-                </div>
               </div>
 
               {/* Navigation Items - Desktop Only */}
