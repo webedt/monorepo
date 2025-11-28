@@ -253,6 +253,18 @@ export default function Chat() {
   const [prError, setPrError] = useState<string | null>(null);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
 
+  // Message queue and interruption state
+  const [messageQueue, setMessageQueue] = useState<Array<{
+    input: string;
+    images: ImageAttachment[];
+  }>>([]);
+  const [pendingMessage, setPendingMessage] = useState<{
+    input: string;
+    images: ImageAttachment[];
+  } | null>(null);
+  const [showInterruptDialog, setShowInterruptDialog] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Get repo store actions
   const repoStore = useRepoStore();
 
@@ -973,7 +985,17 @@ export default function Chat() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if ((!input.trim() && images.length === 0) || isExecuting) return;
+    if (!input.trim() && images.length === 0) return;
+
+    // If a job is currently executing, show interrupt/queue dialog
+    if (isExecuting) {
+      setPendingMessage({
+        input: input.trim(),
+        images: [...images],
+      });
+      setShowInterruptDialog(true);
+      return;
+    }
 
     // Set executing state immediately to prevent duplicate submissions
     setIsExecuting(true);
@@ -1115,6 +1137,146 @@ export default function Chat() {
     setStreamBody(requestParams);
     setStreamUrl(`${API_BASE_URL}/api/execute`);
   };
+
+  // Handle interrupting current job
+  const handleInterrupt = async () => {
+    if (!currentSessionId) return;
+
+    try {
+      // Send abort signal to server
+      await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/abort`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      // Cancel the ongoing stream
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      setIsExecuting(false);
+      setStreamUrl(null);
+      setShowInterruptDialog(false);
+
+      // Add system message about interruption
+      messageIdCounter.current += 1;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + messageIdCounter.current,
+          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+          type: 'system',
+          content: '⚠️ Job interrupted by user',
+          timestamp: new Date(),
+        },
+      ]);
+
+      // Process queued message if exists
+      if (messageQueue.length > 0) {
+        const nextMessage = messageQueue[0];
+        setMessageQueue(messageQueue.slice(1));
+
+        // Submit the queued message
+        setTimeout(() => {
+          setInput(nextMessage.input);
+          setImages(nextMessage.images);
+          handleSubmit(new Event('submit') as any);
+        }, 500);
+      } else if (pendingMessage) {
+        // Submit the pending message
+        const pending = pendingMessage;
+        setPendingMessage(null);
+        setTimeout(() => {
+          setInput(pending.input);
+          setImages(pending.images);
+          handleSubmit(new Event('submit') as any);
+        }, 500);
+      }
+    } catch (error) {
+      console.error('Failed to interrupt job:', error);
+      alert('Failed to interrupt the current job. Please try again.');
+    }
+  };
+
+  // Handle queueing a message
+  const handleQueue = () => {
+    if (pendingMessage) {
+      setMessageQueue([...messageQueue, pendingMessage]);
+      setPendingMessage(null);
+      setShowInterruptDialog(false);
+
+      // Show confirmation
+      messageIdCounter.current += 1;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + messageIdCounter.current,
+          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+          type: 'system',
+          content: `📋 Message queued (${messageQueue.length + 1} in queue)`,
+          timestamp: new Date(),
+        },
+      ]);
+    }
+  };
+
+  // Process the next message in the queue
+  useEffect(() => {
+    if (!isExecuting && messageQueue.length > 0) {
+      const nextMessage = messageQueue[0];
+      setMessageQueue((prev) => prev.slice(1));
+
+      // Create a synthetic form event
+      setTimeout(() => {
+        // Build request parameters directly instead of relying on state
+        const requestParams: any = {
+          userRequest: nextMessage.input,
+        };
+
+        if (currentSessionId) {
+          requestParams.websiteSessionId = currentSessionId;
+        }
+
+        // Add user message
+        messageIdCounter.current += 1;
+        const userMessage: Message = {
+          id: Date.now() + messageIdCounter.current,
+          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+          type: 'user',
+          content: nextMessage.input || (nextMessage.images.length > 0 ? `[${nextMessage.images.length} image${nextMessage.images.length > 1 ? 's' : ''} attached]` : ''),
+          images: nextMessage.images.length > 0 ? nextMessage.images : undefined,
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, userMessage]);
+
+        // Handle images in request if present
+        if (nextMessage.images.length > 0) {
+          const contentBlocks: any[] = [];
+          if (nextMessage.input) {
+            contentBlocks.push({ type: 'text', text: nextMessage.input });
+          }
+          nextMessage.images.forEach((image) => {
+            contentBlocks.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: image.mediaType,
+                data: image.data,
+              },
+            });
+          });
+          requestParams.userRequest = contentBlocks;
+        }
+
+        // Set executing state and start stream
+        setIsExecuting(true);
+        setStreamMethod('POST');
+        setStreamBody(requestParams);
+        setStreamUrl(`${API_BASE_URL}/api/execute`);
+      }, 500);
+    }
+  }, [isExecuting, messageQueue.length, currentSessionId, sessionId]);
 
   // Create title actions (Edit and Delete buttons) for the title line
   const titleActions = session && messages.length > 0 && (
@@ -1394,6 +1556,20 @@ export default function Chat() {
                 </div>
               )}
 
+              {/* Queue status indicator */}
+              {messageQueue.length > 0 && (
+                <div className="flex justify-center">
+                  <div className="alert alert-info inline-flex items-center gap-2 py-2 px-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-4 h-4">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span className="text-xs">
+                      {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
           </div>
@@ -1463,6 +1639,59 @@ export default function Chat() {
           fileName={viewingImage.fileName}
           onClose={() => setViewingImage(null)}
         />
+      )}
+
+      {/* Interrupt/Queue Dialog */}
+      {showInterruptDialog && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg mb-4">
+              Job in Progress
+            </h3>
+            <p className="text-sm text-base-content/70 mb-6">
+              An AI job is currently running. What would you like to do with your new message?
+            </p>
+            <div className="space-y-4">
+              <div className="alert alert-info">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <div className="text-sm">
+                  <p><strong>Interrupt:</strong> Stop the current job and start your new request immediately</p>
+                  <p><strong>Queue:</strong> Wait for the current job to finish, then run your message</p>
+                </div>
+              </div>
+              {messageQueue.length > 0 && (
+                <div className="text-xs text-base-content/60">
+                  {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} already in queue
+                </div>
+              )}
+            </div>
+            <div className="modal-action">
+              <button
+                onClick={() => {
+                  setShowInterruptDialog(false);
+                  setPendingMessage(null);
+                }}
+                className="btn btn-ghost"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleQueue}
+                className="btn btn-primary"
+              >
+                📋 Queue Message
+              </button>
+              <button
+                onClick={handleInterrupt}
+                className="btn btn-warning"
+              >
+                ⚠️ Interrupt & Run Now
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       </div>
     </SessionLayout>

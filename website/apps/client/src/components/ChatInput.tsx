@@ -536,8 +536,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           onPaste={handlePaste}
           placeholder="Describe what you want to code... (paste images, use voice input, or attach files)"
           rows={centered ? 6 : 4}
-          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-36 p-4 pb-16 ${centered ? 'text-lg' : 'text-base'}`}
-          disabled={isExecuting || !user?.claudeAuth}
+          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-36 p-4 pb-16 ${centered ? 'text-lg' : 'text-base'} ${isExecuting ? 'border-warning' : ''}`}
+          disabled={!user?.claudeAuth}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               // Shift+Enter → always insert new line (default behavior)
@@ -854,12 +854,19 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           {/* Submit button */}
           <button
             type="submit"
-            disabled={isExecuting || (!input.trim() && images.length === 0) || !user?.claudeAuth}
-            className="btn btn-primary btn-circle"
-            title="Send message (Enter at end, Cmd/Ctrl+Enter, or click)"
+            disabled={(!input.trim() && images.length === 0) || !user?.claudeAuth}
+            className={`btn btn-circle ${isExecuting ? 'btn-warning' : 'btn-primary'}`}
+            title={isExecuting ? "Queue or interrupt current job" : "Send message (Enter at end, Cmd/Ctrl+Enter, or click)"}
           >
             {isExecuting ? (
-              <span className="loading loading-spinner loading-sm"></span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="w-5 h-5"
+              >
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" />
+              </svg>
             ) : (
               <svg
                 xmlns="http://www.w3.org/2000/svg"
