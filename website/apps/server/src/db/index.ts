@@ -82,7 +82,8 @@ if (usePostgres) {
       auto_commit BOOLEAN NOT NULL DEFAULT FALSE,
       locked BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      completed_at TIMESTAMP
+      completed_at TIMESTAMP,
+      deleted_at TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -181,6 +182,13 @@ if (usePostgres) {
           WHERE table_name = 'chat_sessions' AND column_name = 'auto_commit'
         ) THEN
           ALTER TABLE chat_sessions ADD COLUMN auto_commit BOOLEAN NOT NULL DEFAULT FALSE;
+        END IF;
+        -- Add deleted_at column if not exists (soft delete support)
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'chat_sessions' AND column_name = 'deleted_at'
+        ) THEN
+          ALTER TABLE chat_sessions ADD COLUMN deleted_at TIMESTAMP;
         END IF;
         -- Migrate chat_sessions.id from INTEGER to TEXT (UUID)
         -- This migration is needed when upgrading from old schema with SERIAL id to new UUID-based id
@@ -292,6 +300,7 @@ if (usePostgres) {
       locked INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       completed_at INTEGER,
+      deleted_at INTEGER,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
@@ -381,6 +390,12 @@ if (usePostgres) {
     if (!hasIsAdminColumn) {
       sqlite.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;');
       console.log('SQLite migration: Added is_admin column to users');
+    }
+
+    const hasDeletedAtColumn = chatSessionsInfo.some((col) => col.name === 'deleted_at');
+    if (!hasDeletedAtColumn) {
+      sqlite.exec('ALTER TABLE chat_sessions ADD COLUMN deleted_at INTEGER;');
+      console.log('SQLite migration: Added deleted_at column to chat_sessions');
     }
 
     // Make etdofresh@gmail.com admin if they exist
