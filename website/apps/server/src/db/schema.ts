@@ -17,6 +17,7 @@ export const users = pgTable('users', {
   }>(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
   voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),
+  isAdmin: boolean('is_admin').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

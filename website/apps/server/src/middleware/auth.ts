@@ -48,3 +48,19 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 
   next();
 }
+
+export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+  const authReq = req as AuthRequest;
+
+  if (!authReq.user || !authReq.session) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+
+  if (!authReq.user.isAdmin) {
+    res.status(403).json({ success: false, error: 'Forbidden: Admin access required' });
+    return;
+  }
+
+  next();
+}

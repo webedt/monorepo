@@ -8,6 +8,7 @@ export interface User {
   claudeAuth: ClaudeAuth | null;
   imageResizeMaxDimension: number;
   voiceCommandKeywords: string[];
+  isAdmin: boolean;
   createdAt: Date;
 }
 

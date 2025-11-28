@@ -41,6 +41,9 @@ router.post('/register', async (req, res) => {
     // Generate user ID
     const userId = generateIdFromEntropySize(10); // 10 bytes = 120 bits of entropy
 
+    // Check if this email should be admin
+    const isAdmin = normalizedEmail === 'etdofresh@gmail.com';
+
     // Create user
     const [newUser] = await db
       .insert(users)
@@ -48,6 +51,7 @@ router.post('/register', async (req, res) => {
         id: userId,
         email: normalizedEmail,
         passwordHash,
+        isAdmin,
       })
       .returning();
 
@@ -70,6 +74,8 @@ router.post('/register', async (req, res) => {
             claudeAuth: newUser.claudeAuth,
             imageResizeMaxDimension: newUser.imageResizeMaxDimension,
             voiceCommandKeywords: newUser.voiceCommandKeywords || [],
+            isAdmin: newUser.isAdmin,
+            createdAt: newUser.createdAt,
           },
         },
       });
@@ -138,6 +144,8 @@ router.post('/login', async (req, res) => {
             claudeAuth: user.claudeAuth,
             imageResizeMaxDimension: user.imageResizeMaxDimension,
             voiceCommandKeywords: user.voiceCommandKeywords || [],
+            isAdmin: user.isAdmin,
+            createdAt: user.createdAt,
           },
         },
       });
@@ -203,6 +211,8 @@ router.get('/session', async (req, res) => {
           claudeAuth: freshUser.claudeAuth,
           imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
           voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
+          isAdmin: freshUser.isAdmin,
+          createdAt: freshUser.createdAt,
         },
         session: authReq.session,
       },

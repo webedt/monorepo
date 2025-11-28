@@ -205,6 +205,38 @@ export const sessionsApi = {
     }),
 };
 
+// Admin API
+export const adminApi = {
+  // User management
+  listUsers: () => fetchApi('/api/admin/users'),
+
+  getUser: (id: string) => fetchApi(`/api/admin/users/${id}`),
+
+  createUser: (data: { email: string; displayName?: string; password: string; isAdmin?: boolean }) =>
+    fetchApi('/api/admin/users', {
+      method: 'POST',
+      body: data,
+    }),
+
+  updateUser: (id: string, data: { email?: string; displayName?: string; isAdmin?: boolean; password?: string }) =>
+    fetchApi(`/api/admin/users/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }),
+
+  deleteUser: (id: string) =>
+    fetchApi(`/api/admin/users/${id}`, {
+      method: 'DELETE',
+    }),
+
+  impersonateUser: (id: string) =>
+    fetchApi(`/api/admin/users/${id}/impersonate`, {
+      method: 'POST',
+    }),
+
+  getStats: () => fetchApi('/api/admin/stats'),
+};
+
 // Storage Worker API
 export const storageWorkerApi = {
   listSessions: async () => {

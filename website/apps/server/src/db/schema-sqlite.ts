@@ -3,6 +3,7 @@ import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
+  displayName: text('display_name'),
   passwordHash: text('password_hash').notNull(),
   githubId: text('github_id').unique(),
   githubAccessToken: text('github_access_token'),
@@ -15,6 +16,8 @@ export const users = sqliteTable('users', {
     rateLimitTier: string;
   }>(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
+  voiceCommandKeywords: text('voice_command_keywords', { mode: 'json' }).$type<string[]>().default([]),
+  isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
