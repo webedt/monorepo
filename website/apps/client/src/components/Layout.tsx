@@ -278,8 +278,7 @@ export default function Layout() {
               <div className="hidden md:flex flex-col justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
                 <div
-                  className="text-[10px] text-base-content/30 leading-tight italic max-w-[200px] cursor-pointer hover:text-base-content/40 transition-colors truncate"
-                  title={tagline}
+                  className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
                   onClick={nextTagline}
                 >
                   {tagline}
@@ -303,8 +302,7 @@ export default function Layout() {
               <div className="md:hidden flex flex-col items-center justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
                 <div
-                  className="text-[10px] text-base-content/30 leading-tight italic max-w-[150px] cursor-pointer hover:text-base-content/40 transition-colors truncate"
-                  title={tagline}
+                  className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
                   onClick={nextTagline}
                 >
                   {tagline}
