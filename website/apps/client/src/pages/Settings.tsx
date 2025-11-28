@@ -13,6 +13,7 @@ export default function Settings() {
   const [claudeError, setClaudeError] = useState('');
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [defaultLandingPage, setDefaultLandingPage] = useState<'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
 
   // Voice command keywords state
   const [voiceKeywords, setVoiceKeywords] = useState<string[]>(user?.voiceCommandKeywords || []);
@@ -72,6 +73,10 @@ export default function Settings() {
   useEffect(() => {
     setVoiceKeywords(user?.voiceCommandKeywords || []);
   }, [user?.voiceCommandKeywords]);
+
+  useEffect(() => {
+    setDefaultLandingPage(user?.defaultLandingPage || 'store');
+  }, [user?.defaultLandingPage]);
 
   // Close keyword dropdown when clicking outside
   useEffect(() => {
@@ -151,6 +156,17 @@ export default function Settings() {
     },
     onError: (error) => {
       alert(`Failed to update voice command keywords: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const updateDefaultLandingPage = useMutation({
+    mutationFn: userApi.updateDefaultLandingPage,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Default landing page updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update default landing page: ${error instanceof Error ? error.message : 'Unknown error'}`);
     },
   });
 
@@ -573,6 +589,52 @@ export default function Settings() {
                   className="btn btn-primary min-w-[140px]"
                 >
                   {updateVoiceKeywords.isPending ? 'Saving...' : 'Save Keywords'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Default Landing Page */}
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title mb-2">Default Landing Page</h2>
+
+            <div className="space-y-6">
+              <p className="text-sm text-base-content/70 leading-relaxed">
+                Choose which page to show when you first log in or click the app logo. This becomes your home page.
+              </p>
+
+              <div className="divider my-4"></div>
+
+              <div className="form-control w-full">
+                <div className="mb-3">
+                  <span className="font-medium text-base text-base-content">Landing Page</span>
+                </div>
+                <select
+                  value={defaultLandingPage}
+                  onChange={(e) => setDefaultLandingPage(e.target.value as 'store' | 'library' | 'community' | 'sessions')}
+                  className="select select-bordered w-full max-w-md"
+                >
+                  <option value="store">Store - Browse available items and tools</option>
+                  <option value="library">Library - Your purchased items</option>
+                  <option value="community">Community - Shared community items</option>
+                  <option value="sessions">Sessions - Your coding sessions</option>
+                </select>
+                <div className="mt-2">
+                  <span className="text-sm text-base-content/60">
+                    You can always navigate between pages using the menu
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-start pt-2">
+                <button
+                  onClick={() => updateDefaultLandingPage.mutate(defaultLandingPage)}
+                  disabled={updateDefaultLandingPage.isPending || defaultLandingPage === user?.defaultLandingPage}
+                  className="btn btn-primary min-w-[140px]"
+                >
+                  {updateDefaultLandingPage.isPending ? 'Saving...' : 'Save Setting'}
                 </button>
               </div>
             </div>
