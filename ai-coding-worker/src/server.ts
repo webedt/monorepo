@@ -25,6 +25,8 @@ app.use(express.json({ limit: '10mb' }));
 
 // Worker state
 let workerStatus: 'idle' | 'busy' = 'idle';
+let activeExecution: Promise<void> | null = null;
+let shutdownRequested = false;
 
 // Create orchestrator instance
 const orchestrator = new Orchestrator(TMP_DIR, DB_BASE_URL);
@@ -222,6 +224,20 @@ app.post('/execute', async (req: Request, res: Response) => {
     }
   }
 
+  // Check if shutdown was requested - reject new work
+  if (shutdownRequested) {
+    workerStatus = 'idle';
+    console.log(`[Container ${containerId}] Rejecting request - shutdown in progress`);
+    const error: APIError = {
+      error: 'shutting_down',
+      message: 'Worker is shutting down, please retry with another worker',
+      retryAfter: 1,
+      containerId
+    };
+    res.status(503).json(error);
+    return;
+  }
+
   console.log(`[Container ${containerId}] Starting execution`);
   console.log(`[Container ${containerId}] Provider: ${request.codingAssistantProvider}`);
 
@@ -257,25 +273,84 @@ app.post('/execute', async (req: Request, res: Response) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.setHeader('X-Container-ID', containerId);
 
-  try {
-    // Execute the orchestrated workflow
-    await orchestrator.execute(request, req, res);
+  // Track the execution promise for graceful shutdown
+  // Note: Worker will NEVER become idle again after execute starts - it will exit
+  const executionPromise = (async () => {
+    let exitCode = 0;
+    try {
+      // Execute the orchestrated workflow
+      await orchestrator.execute(request, req, res);
+      console.log(`[Container ${containerId}] Execution completed successfully`);
+    } catch (error) {
+      console.error(`[Container ${containerId}] Execution failed:`, error);
+      exitCode = 1;
+    }
 
-    console.log(`[Container ${containerId}] Execution completed successfully`);
+    // Exit process after completion (ephemeral container model)
+    // Worker never becomes idle again - it always exits after execute
+    await gracefulExit(exitCode);
+  })();
 
-    // Exit process after successful completion (ephemeral container model)
-    // Wait 10 seconds to ensure all SSE events are consumed by the backend
-    console.log(`[Container ${containerId}] Exiting process in 10 seconds...`);
-    setTimeout(() => process.exit(0), 10000);
-  } catch (error) {
-    console.error(`[Container ${containerId}] Execution failed:`, error);
+  activeExecution = executionPromise;
+});
 
-    // Exit process after error (ephemeral container model)
-    // Wait 10 seconds to ensure all SSE events are consumed by the backend
-    console.log(`[Container ${containerId}] Exiting process in 10 seconds...`);
-    setTimeout(() => process.exit(1), 10000);
+/**
+ * Shutdown endpoint - allows client to signal worker can exit immediately
+ * Client calls this after receiving all SSE events to speed up worker recycling
+ */
+app.post('/shutdown', (req: Request, res: Response) => {
+  console.log(`[Container ${containerId}] Shutdown requested by client`);
+  res.setHeader('X-Container-ID', containerId);
+
+  if (workerStatus === 'idle') {
+    res.json({ status: 'ok', message: 'Worker was idle, shutting down' });
+    process.exit(0);
+  } else {
+    // Worker is busy - mark for immediate shutdown after current work completes
+    shutdownRequested = true;
+    res.json({ status: 'ok', message: 'Worker will shutdown after current execution completes' });
   }
 });
+
+/**
+ * Gracefully exit the process after ensuring all I/O is flushed
+ * If shutdownRequested is true (client signaled ready), exit faster
+ */
+async function gracefulExit(code: number): Promise<void> {
+  console.log(`[Container ${containerId}] Preparing graceful exit (code: ${code})...`);
+
+  // Give a moment for any final writes to complete
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Flush stdout/stderr
+  await new Promise<void>((resolve) => {
+    if (process.stdout.write('')) {
+      resolve();
+    } else {
+      process.stdout.once('drain', resolve);
+    }
+  });
+
+  await new Promise<void>((resolve) => {
+    if (process.stderr.write('')) {
+      resolve();
+    } else {
+      process.stderr.once('drain', resolve);
+    }
+  });
+
+  // If client requested shutdown, they've confirmed receipt - exit quickly
+  if (shutdownRequested) {
+    console.log(`[Container ${containerId}] Client confirmed receipt, exiting immediately`);
+    process.exit(code);
+  }
+
+  // Otherwise wait for network buffers to flush (client might still be reading)
+  console.log(`[Container ${containerId}] Waiting 10 seconds for client to receive all data...`);
+  await new Promise(resolve => setTimeout(resolve, 10000));
+
+  process.exit(code);
+}
 
 /**
  * Catch-all for undefined routes
@@ -291,7 +366,8 @@ app.use((req: Request, res: Response) => {
       'GET  /sessions',
       'GET  /sessions/:sessionId',
       'GET  /sessions/:sessionId/stream',
-      'POST /execute'
+      'POST /execute',
+      'POST /shutdown'
     ],
     containerId
   });
@@ -317,6 +393,7 @@ app.listen(PORT, () => {
   console.log('  GET    /sessions                  - List all sessions (from MinIO)');
   console.log('  DELETE /sessions/:id              - Delete a session');
   console.log('  POST   /execute                   - Execute coding assistant request');
+  console.log('  POST   /shutdown                  - Signal worker to shutdown (client confirms receipt)');
   console.log('');
   console.log('Supported providers:');
   console.log('  - claude-code');
@@ -331,13 +408,37 @@ app.listen(PORT, () => {
   console.log('='.repeat(60));
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log(`[Container ${containerId}] SIGTERM received, shutting down gracefully...`);
+// Graceful shutdown handler
+async function handleShutdownSignal(signal: string): Promise<void> {
+  console.log(`[Container ${containerId}] ${signal} received, initiating graceful shutdown...`);
+
+  // Mark shutdown as requested to reject new work
+  shutdownRequested = true;
+
+  if (activeExecution) {
+    console.log(`[Container ${containerId}] Waiting for active execution to complete...`);
+
+    // Give the execution time to complete (max 60 seconds)
+    const timeout = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        console.log(`[Container ${containerId}] Shutdown timeout reached, forcing exit...`);
+        resolve();
+      }, 60000);
+    });
+
+    await Promise.race([activeExecution, timeout]);
+    console.log(`[Container ${containerId}] Active execution finished or timed out`);
+  } else {
+    console.log(`[Container ${containerId}] No active execution, exiting immediately`);
+  }
+
   process.exit(0);
+}
+
+process.on('SIGTERM', () => {
+  handleShutdownSignal('SIGTERM');
 });
 
 process.on('SIGINT', () => {
-  console.log(`[Container ${containerId}] SIGINT received, shutting down gracefully...`);
-  process.exit(0);
+  handleShutdownSignal('SIGINT');
 });
