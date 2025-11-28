@@ -181,6 +181,8 @@ export const userApi = {
 export const sessionsApi = {
   list: () => fetchApi('/api/sessions'),
 
+  listDeleted: () => fetchApi('/api/sessions/deleted'),
+
   get: (id: string) => fetchApi(`/api/sessions/${id}`),
 
   getMessages: (id: string) => fetchApi(`/api/sessions/${id}/messages`),
@@ -206,6 +208,23 @@ export const sessionsApi = {
 
   deleteBulk: (ids: string[]) =>
     fetchApi('/api/sessions/bulk-delete', {
+      method: 'POST',
+      body: { ids },
+    }),
+
+  restore: (id: string) =>
+    fetchApi(`/api/sessions/${id}/restore`, {
+      method: 'POST',
+    }),
+
+  restoreBulk: (ids: string[]) =>
+    fetchApi('/api/sessions/bulk-restore', {
+      method: 'POST',
+      body: { ids },
+    }),
+
+  deletePermanentBulk: (ids: string[]) =>
+    fetchApi('/api/sessions/bulk-delete-permanent', {
       method: 'POST',
       body: { ids },
     }),

@@ -39,6 +39,7 @@ export interface ChatSession {
   locked: boolean;
   createdAt: Date;
   completedAt: Date | null;
+  deletedAt: Date | null;
 }
 
 export type SessionStatus = 'pending' | 'running' | 'completed' | 'error';
@@ -58,6 +59,7 @@ export interface Message {
   content: string;
   images?: ImageAttachment[] | null;
   timestamp: Date;
+  model?: string;
 }
 
 export type MessageType = 'user' | 'assistant' | 'system' | 'error';

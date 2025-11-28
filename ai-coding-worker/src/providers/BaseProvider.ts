@@ -10,6 +10,7 @@ export interface ProviderOptions {
 export interface ProviderStreamEvent {
   type: string;
   data: any;
+  model?: string;
 }
 
 /**
