@@ -81,7 +81,7 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
           key={iframeKey}
           src={previewUrl}
           title="Repository Preview"
-          className="w-full h-full border-0"
+          className="w-full h-full border-2 border-red-300/50"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         />
