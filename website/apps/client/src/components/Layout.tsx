@@ -461,36 +461,27 @@ export default function Layout() {
         </div>
       </nav>
 
-      {/* Second Bar - Status Indicator (shown when connected or in editor mode) */}
-      {(isEditorMode || isConnected) && (
+      {/* Second Bar - Status Indicator (always shown in editor mode) */}
+      {isEditorMode && (
         <div className="bg-base-100 border-b border-base-300">
-          <div className="px-4 h-12 flex items-center justify-center gap-4">
-            {isConnected ? (
-              /* Show connection details when connected */
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-success animate-pulse"></div>
-                  <span className="text-xs font-medium text-base-content/50">Connected</span>
+          <div className="px-4 py-2">
+            <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-xs">
+              {isConnected ? (
+                /* Show repository/branch info as pill when connected */
+                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full">
+                  <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
+                  <span className="text-base-content/70">
+                    {selectedRepo}/{baseBranch}
+                  </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-base-content/70">Repository:</span>
-                  <span className="text-sm text-base-content">{selectedRepo}</span>
+              ) : (
+                /* Show offline status when not connected */
+                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full">
+                  <div className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0"></div>
+                  <span className="text-base-content/50">Offline</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
-                  <span className="text-sm text-base-content">{baseBranch}</span>
-                </div>
-              </div>
-            ) : (
-              /* Show offline status when not connected */
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-gray-400"></div>
-                  <span className="text-xs font-medium text-base-content/50">Offline</span>
-                </div>
-                <span className="text-xs text-base-content/40">- Select a tool below to connect</span>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
