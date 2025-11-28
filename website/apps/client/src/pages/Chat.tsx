@@ -299,7 +299,11 @@ export default function Chat() {
   const [prError, setPrError] = useState<string | null>(null);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
 
-  // Message queue state
+  // Scroll button visibility states
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [showScrollToPresent, setShowScrollToPresent] = useState(false);
+
+  // Message queue and interruption state
   const [messageQueue, setMessageQueue] = useState<Array<{
     input: string;
     images: ImageAttachment[];
@@ -550,6 +554,14 @@ export default function Chat() {
     }
   };
 
+  const handleScrollToTop = () => {
+    messagesContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleScrollToPresent = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   const handleAutoPR = async () => {
     if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
       setPrError('Missing repository information');
@@ -736,6 +748,44 @@ export default function Chat() {
       }
     }
   }, [selectedRepo, hasLoadedFromStorage, isLocked]);
+
+  // Handle scroll position detection for scroll buttons
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const scrollPosition = scrollTop;
+      const maxScroll = scrollHeight - clientHeight;
+      const distanceFromBottom = maxScroll - scrollPosition;
+
+      // At bottom or closer to bottom -> show "scroll to top"
+      // At top or closer to top -> show "scroll to bottom"
+      const closerToBottom = scrollPosition >= distanceFromBottom;
+
+      if (closerToBottom) {
+        // At/near bottom - show scroll to top
+        setShowScrollToTop(true);
+        setShowScrollToPresent(false);
+      } else if (!closerToBottom) {
+        // At/near top - show scroll to bottom/present
+        setShowScrollToTop(false);
+        setShowScrollToPresent(true);
+      } else {
+        // Hide both (shouldn't reach here)
+        setShowScrollToTop(false);
+        setShowScrollToPresent(false);
+      }
+    };
+
+    // Initial check
+    handleScroll();
+
+    // Add scroll listener
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [messages.length]); // Re-attach when messages change
 
   // Smart auto-scroll: only scroll to bottom when new messages arrive and user is near bottom
   useEffect(() => {
@@ -1581,7 +1631,7 @@ export default function Chat() {
       ) : (
         /* Messages area with bottom input panel */
         <>
-          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4">
+          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
             <div className="max-w-4xl mx-auto space-y-4">
               {messages.map((message) => (
                 message.type === 'system' ? (
@@ -1641,6 +1691,55 @@ export default function Chat() {
 
               <div ref={messagesEndRef} />
             </div>
+
+            {/* Floating scroll buttons */}
+            {showScrollToTop && (
+              <button
+                onClick={handleScrollToTop}
+                className="fixed bottom-24 right-8 btn btn-circle btn-primary shadow-lg z-10 hover:scale-110 transition-transform"
+                title="Scroll to top"
+                aria-label="Scroll to top"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 10l7-7m0 0l7 7m-7-7v18"
+                  />
+                </svg>
+              </button>
+            )}
+
+            {showScrollToPresent && (
+              <button
+                onClick={handleScrollToPresent}
+                className="fixed bottom-24 right-8 btn btn-circle btn-accent shadow-lg z-10 hover:scale-110 transition-transform"
+                title="Scroll to present"
+                aria-label="Scroll to present (latest messages)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                  />
+                </svg>
+              </button>
+            )}
           </div>
 
           {/* Input panel at bottom when messages exist */}
