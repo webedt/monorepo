@@ -31,6 +31,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const hasExplicitlyClosedRef = useRef(false);
   const isConnectingRef = useRef(false);
+  const retryAttemptRef = useRef(0);
+  const maxRetryAttempts = 10; // Maximum retry attempts for 429 errors
 
   const connect = useCallback(() => {
     // Prevent duplicate connections
@@ -73,16 +75,81 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         signal: controller.signal,
       });
 
+      console.log(`[SSE] Response status: ${response.status}, ok: ${response.ok}`);
+
       if (!response.ok) {
-        let errorMessage = `HTTP error! status: ${response.status}`;
+        console.log(`[SSE] Response not OK, status: ${response.status}`);
+
+        // First, read the response body (can only be read once)
+        let errorData: any = null;
         try {
-          const errorData = await response.json();
-          if (errorData.error) {
-            errorMessage = errorData.error;
-          }
+          errorData = await response.json();
+          console.log('[SSE] Response error data:', JSON.stringify(errorData));
         } catch (e) {
-          // ignore json parse error and use default message
+          console.error('[SSE] Failed to parse error response as JSON:', e);
         }
+
+        // Handle 429 (worker busy) with automatic retry
+        if (response.status === 429) {
+          console.log('[SSE] Detected 429 status, handling retry logic...');
+
+          const retryAfter = errorData?.retryAfter || 5; // Default to 5 seconds
+
+          retryAttemptRef.current += 1;
+          console.log(`[SSE] Retry attempt ${retryAttemptRef.current}/${maxRetryAttempts}`);
+
+          if (retryAttemptRef.current > maxRetryAttempts) {
+            console.error(`[SSE] Max retry attempts (${maxRetryAttempts}) exceeded`);
+            isConnectingRef.current = false;
+            abortControllerRef.current = null;
+            throw new Error(`Worker busy after ${maxRetryAttempts} retry attempts. Please try again later.`);
+          }
+
+          console.log(`[SSE] Scheduling retry in ${retryAfter} seconds...`);
+
+          // Notify user we're retrying
+          try {
+            onMessage?.({
+              eventType: 'system',
+              data: {
+                type: 'message',
+                message: `⏳ Worker is busy, retrying in ${retryAfter} seconds (attempt ${retryAttemptRef.current}/${maxRetryAttempts})...`
+              }
+            });
+          } catch (msgErr) {
+            console.error('[SSE] Failed to send retry notification message:', msgErr);
+          }
+
+          isConnectingRef.current = false;
+          abortControllerRef.current = null;
+
+          // Retry after the specified delay
+          setTimeout(() => {
+            console.log('[SSE] Executing delayed retry now...');
+            connectWithFetch();
+          }, retryAfter * 1000);
+
+          console.log('[SSE] 429 handler complete, returning without error');
+          return; // CRITICAL: Return here to avoid throwing error
+        }
+
+        // For other errors, construct error message and throw
+        console.log(`[SSE] Non-429 error (status ${response.status}), preparing to throw error`);
+        let errorMessage = `HTTP error! status: ${response.status}`;
+
+        if (errorData) {
+          if (typeof errorData.error === 'string') {
+            errorMessage = errorData.error;
+          } else if (typeof errorData.message === 'string') {
+            errorMessage = errorData.message;
+          } else if (errorData.error) {
+            errorMessage = JSON.stringify(errorData);
+          }
+        }
+
+        isConnectingRef.current = false;
+        abortControllerRef.current = null;
+        console.error('[SSE] Throwing error with message:', errorMessage);
         throw new Error(errorMessage);
       }
 
@@ -94,6 +161,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       setIsConnected(true);
       setError(null);
       reconnectAttemptRef.current = 0;
+      retryAttemptRef.current = 0; // Reset retry counter on successful connection
       onConnected?.();
 
       const reader = response.body.getReader();
@@ -142,12 +210,19 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       abortControllerRef.current = null;
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
+        console.log('[SSE] Request aborted by user');
         return; // User cancelled
       }
+
+      console.error('[SSE] Caught error in connectWithFetch:', err);
+      console.error('[SSE] Error type:', typeof err);
+      console.error('[SSE] Error instance check:', err instanceof Error);
 
       isConnectingRef.current = false;
       setIsConnected(false);
       const error = err instanceof Error ? err : new Error('Stream error');
+      console.error('[SSE] Final error object:', error);
+      console.error('[SSE] Final error message:', error.message);
       setError(error);
       onError?.(error);
       abortControllerRef.current = null;
