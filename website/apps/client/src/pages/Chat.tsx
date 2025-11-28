@@ -326,6 +326,21 @@ export default function Chat() {
 
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
+  // Sync isExecuting with session status when returning to a running session
+  useEffect(() => {
+    if (session?.status === 'running' || session?.status === 'pending') {
+      if (!isExecuting) {
+        console.log('[Chat] Syncing isExecuting with session status:', session.status);
+        setIsExecuting(true);
+      }
+    } else if (session?.status === 'completed' || session?.status === 'error') {
+      if (isExecuting) {
+        console.log('[Chat] Session completed, setting isExecuting to false');
+        setIsExecuting(false);
+      }
+    }
+  }, [session?.status]);
+
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
     queryKey: ['currentSession', currentSessionId],
