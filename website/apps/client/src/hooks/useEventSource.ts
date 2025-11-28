@@ -31,6 +31,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const hasExplicitlyClosedRef = useRef(false);
   const isConnectingRef = useRef(false);
+  const retryAttemptRef = useRef(0);
+  const maxRetryAttempts = 10; // Maximum retry attempts for 429 errors
 
   const connect = useCallback(() => {
     // Prevent duplicate connections
@@ -74,6 +76,42 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       });
 
       if (!response.ok) {
+        // Handle 429 (worker busy) with automatic retry
+        if (response.status === 429) {
+          try {
+            const errorData = await response.json();
+            const retryAfter = errorData.retryAfter || 5; // Default to 5 seconds
+
+            retryAttemptRef.current += 1;
+
+            if (retryAttemptRef.current > maxRetryAttempts) {
+              throw new Error(`Worker busy after ${maxRetryAttempts} retry attempts. Please try again later.`);
+            }
+
+            console.log(`[SSE] Worker busy (429), retry ${retryAttemptRef.current}/${maxRetryAttempts} in ${retryAfter} seconds...`);
+
+            // Notify user we're retrying (optional - could be used for UI feedback)
+            onMessage?.({
+              eventType: 'system',
+              data: {
+                type: 'message',
+                message: `⏳ Worker is busy, retrying in ${retryAfter} seconds (attempt ${retryAttemptRef.current}/${maxRetryAttempts})...`
+              }
+            });
+
+            isConnectingRef.current = false;
+            abortControllerRef.current = null;
+
+            // Retry after the specified delay
+            setTimeout(() => {
+              connectWithFetch();
+            }, retryAfter * 1000);
+            return;
+          } catch (e) {
+            // If we can't parse the retry response or hit max retries, fall through to error handling
+          }
+        }
+
         let errorMessage = `HTTP error! status: ${response.status}`;
         try {
           const errorData = await response.json();
@@ -94,6 +132,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       setIsConnected(true);
       setError(null);
       reconnectAttemptRef.current = 0;
+      retryAttemptRef.current = 0; // Reset retry counter on successful connection
       onConnected?.();
 
       const reader = response.body.getReader();
