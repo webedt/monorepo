@@ -308,6 +308,7 @@ export default function Chat() {
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
+  const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
   const [latestTokenUsage, setLatestTokenUsage] = useState<any>(null);
 
   // Scroll button visibility states
@@ -596,6 +597,21 @@ export default function Chat() {
     setPrLoading('auto');
     setPrError(null);
     setPrSuccess(null);
+    setAutoPrProgress('Starting Auto PR...');
+
+    // Add initial progress message to chat
+    const startMessageId = Date.now();
+    messageIdCounter.current += 1;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: startMessageId,
+        chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+        type: 'system',
+        content: '🔄 **Auto PR in progress...**\n\nStarting Auto PR process...',
+        timestamp: new Date(),
+      },
+    ]);
 
     try {
       const response = await githubApi.autoPR(
@@ -605,41 +621,78 @@ export default function Chat() {
         {
           base: session.baseBranch,
           title: session.userRequest || `Merge ${session.branch} into ${session.baseBranch}`,
+          sessionId: sessionId && sessionId !== 'new' ? sessionId : undefined,
         }
       );
+
+      const results = response.data;
+
+      // Build progress summary
+      let progressSteps = '✅ **Auto PR completed successfully!**\n\n';
+      progressSteps += `**Steps completed:**\n`;
+      progressSteps += `1. ${results.pr ? `✓ Found/created PR #${results.pr.number}` : '✓ Checked PR status'}\n`;
+      progressSteps += `2. ✓ ${results.mergeBase?.message || 'Updated branch with base'}\n`;
+      progressSteps += `3. ✓ Waited for PR to become mergeable\n`;
+      progressSteps += `4. ✓ Merged PR #${results.pr?.number} into ${session.baseBranch}\n`;
+      if (sessionId && sessionId !== 'new') {
+        progressSteps += `5. ✓ Session moved to trash\n`;
+      }
+      progressSteps += `\n[View PR #${results.pr?.number}](${results.pr?.htmlUrl})`;
+
       setPrSuccess(`Auto PR completed! PR #${response.data.pr?.number} merged successfully.`);
+      setAutoPrProgress(null);
 
-      // Add message to chat history
-      const autoPrMessageContent = `🚀 Auto PR completed!\n\nPR #${response.data.pr?.number} created and merged into ${session.baseBranch}\n\n${response.data.pr?.htmlUrl}`;
-      messageIdCounter.current += 1;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + messageIdCounter.current,
-          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-          type: 'system',
-          content: autoPrMessageContent,
-          timestamp: new Date(),
-        },
-      ]);
+      // Update the progress message in chat with final results
+      setMessages((prev) =>
+        prev.map(msg =>
+          msg.id === startMessageId
+            ? { ...msg, content: progressSteps }
+            : msg
+        )
+      );
 
-      // Persist message to database
+      // Persist final message to database
       if (sessionId && sessionId !== 'new') {
         try {
-          await sessionsApi.createMessage(sessionId, 'system', autoPrMessageContent);
+          await sessionsApi.createMessage(sessionId, 'system', progressSteps);
         } catch (err) {
           console.error('Failed to persist Auto PR message to database:', err);
         }
       }
 
       refetchPr();
+
+      // If session was soft-deleted, redirect to sessions list after a short delay
+      if (sessionId && sessionId !== 'new') {
+        setTimeout(() => {
+          navigate('/');
+        }, 2000);
+      }
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to complete Auto PR';
+
+      // Update progress message with error
+      let errorDetails = `❌ **Auto PR failed**\n\n`;
       if (errorMsg.includes('conflict')) {
+        errorDetails += 'Merge conflict detected. Please resolve conflicts manually.';
         setPrError('Merge conflict detected. Please resolve conflicts manually.');
+      } else if (errorMsg.includes('Timeout')) {
+        errorDetails += 'Timeout waiting for PR to become mergeable. The PR may have been created but requires manual review.';
+        setPrError(errorMsg);
       } else {
+        errorDetails += `Error: ${errorMsg}`;
         setPrError(errorMsg);
       }
+
+      setMessages((prev) =>
+        prev.map(msg =>
+          msg.id === startMessageId
+            ? { ...msg, content: errorDetails }
+            : msg
+        )
+      );
+
+      setAutoPrProgress(null);
       refetchPr();
     } finally {
       setPrLoading(null);
@@ -1641,6 +1694,13 @@ export default function Chat() {
             )}
 
             {/* PR Status Messages */}
+            {autoPrProgress && (
+              <div className="alert alert-info">
+                <span className="loading loading-spinner loading-sm"></span>
+                <span className="text-sm font-semibold">{autoPrProgress}</span>
+              </div>
+            )}
+
             {prSuccess && (
               <div className="alert alert-success">
                 <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
