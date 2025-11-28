@@ -1,7 +1,7 @@
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA } from '@/version';
@@ -93,13 +93,16 @@ export default function Layout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showVersionDetails, setShowVersionDetails] = useState(false);
-  const [taglineTruncated, setTaglineTruncated] = useState(false);
+  const [taglineIndex, setTaglineIndex] = useState(() => Math.floor(Math.random() * TAGLINES.length));
   const userMenuRef = useRef<HTMLDivElement>(null);
 
-  // Select a random tagline on mount (changes on each page visit/refresh)
-  const tagline = useMemo(() => {
-    return TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
-  }, []);
+  // Get current tagline based on index
+  const tagline = TAGLINES[taglineIndex];
+
+  // Function to cycle to next tagline
+  const nextTagline = () => {
+    setTaglineIndex((prevIndex) => (prevIndex + 1) % TAGLINES.length);
+  };
 
   // Check if connected to a repository
   const isConnected = !!selectedRepo && isLocked;
@@ -275,9 +278,8 @@ export default function Layout() {
               <div className="hidden md:flex flex-col justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
                 <div
-                  className={`text-[10px] text-base-content/30 leading-tight italic max-w-[200px] cursor-pointer hover:text-base-content/40 transition-colors ${taglineTruncated ? 'truncate' : ''}`}
-                  title={tagline}
-                  onClick={() => setTaglineTruncated(!taglineTruncated)}
+                  className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
+                  onClick={nextTagline}
                 >
                   {tagline}
                 </div>
@@ -300,9 +302,8 @@ export default function Layout() {
               <div className="md:hidden flex flex-col items-center justify-center py-2">
                 <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
                 <div
-                  className={`text-[10px] text-base-content/30 leading-tight italic max-w-[150px] cursor-pointer hover:text-base-content/40 transition-colors ${taglineTruncated ? 'truncate' : ''}`}
-                  title={tagline}
-                  onClick={() => setTaglineTruncated(!taglineTruncated)}
+                  className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
+                  onClick={nextTagline}
                 >
                   {tagline}
                 </div>
