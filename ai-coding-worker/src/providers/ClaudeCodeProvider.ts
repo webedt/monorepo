@@ -85,7 +85,8 @@ export class ClaudeCodeProvider extends BaseProvider {
 
         onEvent({
           type: 'assistant_message',
-          data: message
+          data: message,
+          model: queryOptions.model
         });
       }
 

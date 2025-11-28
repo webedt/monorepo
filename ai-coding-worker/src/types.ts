@@ -112,6 +112,7 @@ export interface SessionNameEvent extends SSEEvent {
 export interface AssistantMessageEvent extends SSEEvent {
   type: 'assistant_message';
   content: any;
+  model?: string;
 }
 
 export interface CompletedEvent extends SSEEvent {

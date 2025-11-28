@@ -229,7 +229,7 @@ export function ChatMessage({ message, userName, onImageClick, onRetry, showRetr
           {message.type === 'user'
             ? userName || 'User'
             : message.type === 'assistant'
-            ? 'Claude'
+            ? message.model ? `Claude (${message.model})` : 'Claude'
             : 'Error'}{' '}
           • {new Date(message.timestamp).toLocaleTimeString()}
         </p>
