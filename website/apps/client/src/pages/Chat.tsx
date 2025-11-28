@@ -1706,14 +1706,44 @@ export default function Chat() {
 
               {/* Queue status indicator */}
               {messageQueue.length > 0 && (
-                <div className="flex justify-center">
-                  <div className="alert alert-info inline-flex items-center gap-2 py-2 px-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-4 h-4">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <span className="text-xs">
-                      {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
-                    </span>
+                <div className="flex justify-center my-4">
+                  <div className="bg-info/10 border border-info/30 rounded-lg inline-flex flex-col items-stretch gap-3 py-4 px-5 max-w-3xl w-full mx-4">
+                    <div className="flex items-center gap-2 pb-2 border-b border-info/20">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-info shrink-0 w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                      </svg>
+                      <span className="text-sm font-semibold text-info">
+                        {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {messageQueue.map((queuedMsg, index) => (
+                        <div key={index} className="flex items-center gap-3 bg-base-200/50 hover:bg-base-200 rounded-lg px-4 py-3 group transition-colors">
+                          <span className="text-sm font-mono font-semibold text-info min-w-[2rem]">
+                            {index + 1}.
+                          </span>
+                          <span className="text-sm flex-1 line-clamp-2 break-words" title={queuedMsg.input}>
+                            {queuedMsg.input || `[${queuedMsg.images.length} image${queuedMsg.images.length > 1 ? 's' : ''}]`}
+                          </span>
+                          {queuedMsg.images.length > 0 && queuedMsg.input && (
+                            <span className="text-sm font-medium opacity-70 shrink-0">
+                              +{queuedMsg.images.length} 🖼️
+                            </span>
+                          )}
+                          <button
+                            onClick={() => {
+                              setMessageQueue((prev) => prev.filter((_, i) => i !== index));
+                            }}
+                            className="btn btn-ghost btn-sm btn-circle shrink-0 hover:btn-error transition-all"
+                            title="Remove from queue"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
