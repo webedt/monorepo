@@ -101,6 +101,7 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   let content: string | null = null;
   let messageType: 'assistant' | 'system' = 'assistant';
   let eventLabel = '';
+  let model: string | undefined = undefined;
 
   // Skip if data is undefined or null
   if (!data) {
@@ -131,6 +132,13 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
     messageType = 'system';
   } else if (data.type === 'assistant_message' && data.data) {
     const msgData = data.data;
+
+    // Extract model information if present (check both locations)
+    if (data.model) {
+      model = data.model;
+    } else if (msgData.type === 'assistant' && msgData.message?.model) {
+      model = msgData.message.model;
+    }
 
     // Handle assistant message with Claude response
     if (msgData.type === 'assistant' && msgData.message?.content) {
@@ -188,6 +196,7 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
               type: messageType,
               content: content,
               timestamp: new Date(event.timestamp),
+              model,
             };
           }
         }
@@ -253,6 +262,7 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
     type: messageType,
     content: finalContent,
     timestamp: new Date(event.timestamp),
+    model,
   };
 }
 

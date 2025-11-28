@@ -58,6 +58,7 @@ export interface Message {
   content: string;
   images?: ImageAttachment[] | null;
   timestamp: Date;
+  model?: string;
 }
 
 export type MessageType = 'user' | 'assistant' | 'system' | 'error';
