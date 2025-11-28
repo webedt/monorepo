@@ -132,7 +132,7 @@ export const githubApi = {
       body: { base },
     }),
 
-  autoPR: (owner: string, repo: string, branch: string, data: { base: string; title?: string; body?: string }) =>
+  autoPR: (owner: string, repo: string, branch: string, data: { base: string; title?: string; body?: string; sessionId?: string }) =>
     fetchApi(`/api/github/repos/${owner}/${repo}/branches/${branch}/auto-pr`, {
       method: 'POST',
       body: data,

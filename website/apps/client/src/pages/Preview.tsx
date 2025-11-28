@@ -236,10 +236,18 @@ export default function Preview() {
           base: session.baseBranch,
           title: prContent.data.title,
           body: prContent.data.body,
+          sessionId: sessionId && sessionId !== 'new' ? sessionId : undefined,
         }
       );
       setPrSuccess(`Auto PR completed! PR #${response.data.pr?.number} merged successfully.`);
       refetchPr();
+
+      // If session was soft-deleted, redirect to sessions list after a short delay
+      if (sessionId && sessionId !== 'new') {
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 2000);
+      }
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to complete Auto PR';
       if (errorMsg.includes('conflict')) {
