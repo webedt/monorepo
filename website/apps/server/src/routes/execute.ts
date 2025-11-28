@@ -355,7 +355,7 @@ const executeHandler = async (req: any, res: any) => {
 
     // Forward to ai-coding-worker with increased timeout and retry logic
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000); // 2 minutes timeout
+    const timeout = setTimeout(() => controller.abort(), 600000); // 10 minutes timeout for long-running Claude Code sessions
 
     let response: Response | null = null;
     let lastError: Error | null = null;
@@ -471,15 +471,22 @@ const executeHandler = async (req: any, res: any) => {
     const decoder = new TextDecoder();
     let buffer = '';
     let eventCounter = 0;
+    const streamStartTime = Date.now();
 
     console.log(`[Execute] ========== STARTING SSE STREAM FROM AI WORKER ==========`);
+    console.log(`[Execute] Stream start time: ${new Date(streamStartTime).toISOString()}`);
 
     try {
       while (true) {
         const { done, value } = await reader.read();
 
         if (done) {
-          console.log(`[Execute] SSE stream ended (done=true)`);
+          const streamDuration = Date.now() - streamStartTime;
+          console.log(`[Execute] ========== SSE STREAM ENDED ==========`);
+          console.log(`[Execute] Total events received: ${eventCounter}`);
+          console.log(`[Execute] Stream duration: ${streamDuration}ms (${(streamDuration / 1000).toFixed(2)}s)`);
+          console.log(`[Execute] Stream completed normally (done=true)`);
+          console.log(`[Execute] ============================================`);
           break;
         }
 
@@ -510,6 +517,11 @@ const executeHandler = async (req: any, res: any) => {
               console.log(`[Execute] Event Type: ${currentEvent || eventData.type || 'unknown'}`);
               console.log(`[Execute] Session ID in event: ${eventData.sessionId || 'N/A'}`);
               console.log(`[Execute] Event Data (truncated): ${truncateContent(eventData, 1000)}`);
+
+              // Heartbeat logging every 10 events
+              if (eventCounter % 10 === 0) {
+                console.log(`[Execute] ========== STREAM HEARTBEAT: ${eventCounter} events received and forwarded ==========`);
+              }
 
               // Log specific important fields if present
               if (eventData.type === 'assistant_message' && eventData.data?.message?.content) {
