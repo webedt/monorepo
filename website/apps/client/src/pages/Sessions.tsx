@@ -12,22 +12,16 @@ export default function Sessions() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
 
-  // Session editing and deletion state
+  // Session editing state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
 
   // Trash modal state
   const [showTrashModal, setShowTrashModal] = useState(false);
   const [selectedDeletedIds, setSelectedDeletedIds] = useState<string[]>([]);
-
-  // Refs for delete buttons to auto-focus
-  const deleteButtonRef = useRef<HTMLButtonElement>(null);
-  const bulkDeleteButtonRef = useRef<HTMLButtonElement>(null);
 
   // Chat input state
   const [input, setInput] = useState('');
@@ -107,7 +101,6 @@ export default function Sessions() {
     mutationFn: (id: string) => sessionsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setDeletingId(null);
       setSelectedIds([]);
     },
   });
@@ -116,7 +109,6 @@ export default function Sessions() {
     mutationFn: (ids: string[]) => sessionsApi.deleteBulk(ids),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setIsDeletingBulk(false);
       setSelectedIds([]);
     },
   });
@@ -211,15 +203,7 @@ export default function Sessions() {
   };
 
   const handleDelete = (id: string) => {
-    setDeletingId(id);
-  };
-
-  const confirmDelete = (id: string) => {
     deleteMutation.mutate(id);
-  };
-
-  const cancelDelete = () => {
-    setDeletingId(null);
   };
 
   // Bulk selection handlers
@@ -238,48 +222,8 @@ export default function Sessions() {
   };
 
   const handleBulkDelete = () => {
-    setIsDeletingBulk(true);
-  };
-
-  const confirmBulkDelete = () => {
     deleteBulkMutation.mutate(selectedIds);
   };
-
-  const cancelBulkDelete = () => {
-    setIsDeletingBulk(false);
-  };
-
-  // Auto-focus delete button when single delete modal opens
-  useEffect(() => {
-    if (deletingId && deleteButtonRef.current) {
-      deleteButtonRef.current.focus();
-    }
-  }, [deletingId]);
-
-  // Auto-focus delete button when bulk delete modal opens
-  useEffect(() => {
-    if (isDeletingBulk && bulkDeleteButtonRef.current) {
-      bulkDeleteButtonRef.current.focus();
-    }
-  }, [isDeletingBulk]);
-
-  // Handle Enter key in delete modal
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (deletingId && e.key === 'Enter' && !deleteMutation.isPending) {
-        e.preventDefault();
-        confirmDelete(deletingId);
-      } else if (isDeletingBulk && e.key === 'Enter' && !deleteBulkMutation.isPending) {
-        e.preventDefault();
-        confirmBulkDelete();
-      }
-    };
-
-    if (deletingId || isDeletingBulk) {
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [deletingId, isDeletingBulk, deleteMutation.isPending, deleteBulkMutation.isPending]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -543,69 +487,6 @@ export default function Sessions() {
             </ul>
           </div>
         </>
-      )}
-
-      {/* Delete confirmation modal */}
-      {deletingId && (
-        <div className="modal modal-open">
-          <div className="modal-box">
-            <h3 className="font-bold text-lg mb-4">
-              Delete Session
-            </h3>
-            <p className="text-sm text-base-content/70 mb-6">
-              Are you sure you want to delete this session? You can restore it from the trash later.
-            </p>
-            <div className="modal-action">
-              <button
-                onClick={cancelDelete}
-                className="btn btn-ghost"
-                disabled={deleteMutation.isPending}
-              >
-                Cancel
-              </button>
-              <button
-                ref={deleteButtonRef}
-                onClick={() => confirmDelete(deletingId)}
-                className="btn btn-error"
-                disabled={deleteMutation.isPending}
-              >
-                {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk delete confirmation modal */}
-      {isDeletingBulk && (
-        <div className="modal modal-open">
-          <div className="modal-box">
-            <h3 className="font-bold text-lg mb-4">
-              Delete {selectedIds.length} Session{selectedIds.length !== 1 ? 's' : ''}
-            </h3>
-            <p className="text-sm text-base-content/70 mb-6">
-              Are you sure you want to delete {selectedIds.length} session{selectedIds.length !== 1 ? 's' : ''}?
-              You can restore them from the trash later.
-            </p>
-            <div className="modal-action">
-              <button
-                onClick={cancelBulkDelete}
-                className="btn btn-ghost"
-                disabled={deleteBulkMutation.isPending}
-              >
-                Cancel
-              </button>
-              <button
-                ref={bulkDeleteButtonRef}
-                onClick={confirmBulkDelete}
-                className="btn btn-error"
-                disabled={deleteBulkMutation.isPending}
-              >
-                {deleteBulkMutation.isPending ? 'Deleting...' : `Delete ${selectedIds.length} session${selectedIds.length !== 1 ? 's' : ''}`}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Trash modal */}
