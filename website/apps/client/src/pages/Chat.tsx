@@ -1040,8 +1040,7 @@ export default function Chat() {
               }
 
               if (toolMessages.length > 0) {
-                content = toolMessages.join('\n');
-                messageType = 'system';
+                const toolContent = toolMessages.join('\n');
                 // Create and add the tool message immediately
                 messageIdCounter.current += 1;
                 setMessages((prev) => [
@@ -1049,8 +1048,8 @@ export default function Chat() {
                   {
                     id: Date.now() + messageIdCounter.current,
                     chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-                    type: messageType,
-                    content: content,
+                    type: 'system',
+                    content: toolContent,
                     timestamp: new Date(),
                     model: data.model,
                   },
