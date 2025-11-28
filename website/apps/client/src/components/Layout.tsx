@@ -93,6 +93,7 @@ export default function Layout() {
 
   // Detect if we're in editor mode (on /sessions or /session/*)
   const isEditorMode = location.pathname === '/sessions' ||
+                       location.pathname === '/trash' ||
                        location.pathname.startsWith('/session/') ||
                        location.pathname === '/new-session' ||
                        location.pathname.startsWith('/quick-setup/');
