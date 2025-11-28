@@ -354,6 +354,7 @@ export default function Chat() {
       sessionsApi.update(id, title),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['session-details', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-for-layout', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setEditingTitle(false);
       setEditTitle('');
