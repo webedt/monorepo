@@ -936,6 +936,7 @@ export default function Chat() {
       let content: string | null = null;
       let messageType: 'assistant' | 'system' = 'assistant';
       let eventLabel = '';
+      let model: string | undefined = undefined;
 
       // Skip if data is undefined or null
       if (!data) {
@@ -986,6 +987,13 @@ export default function Chat() {
         }
       } else if (data.type === 'assistant_message' && data.data) {
         const msgData = data.data;
+
+        // Extract model information if present (check both locations)
+        if (data.model) {
+          model = data.model;
+        } else if (msgData.type === 'assistant' && msgData.message?.model) {
+          model = msgData.message.model;
+        }
 
         // Handle assistant message with Claude response
         if (msgData.type === 'assistant' && msgData.message?.content) {
@@ -1051,7 +1059,7 @@ export default function Chat() {
                     type: 'system',
                     content: toolContent,
                     timestamp: new Date(),
-                    model: data.model,
+                    model,
                   },
                 ]);
                 // Don't return here - continue to process text blocks if any
@@ -1129,6 +1137,7 @@ export default function Chat() {
           type: messageType,
           content: finalContent,
           timestamp: new Date(),
+          model,
         },
       ]);
     },
