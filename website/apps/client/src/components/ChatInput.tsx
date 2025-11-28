@@ -28,6 +28,7 @@ interface ChatInputProps {
   user: User | null;
   centered?: boolean;
   hideRepoSelection?: boolean;
+  onInterrupt?: () => void;
 }
 
 export interface ChatInputRef {
@@ -51,6 +52,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   user,
   centered = false,
   hideRepoSelection = false,
+  onInterrupt,
 }, ref) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -851,23 +853,48 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             </svg>
           </button>
 
-          {/* Submit button */}
+          {/* Submit/Stop/Queue button */}
           <button
-            type="submit"
-            disabled={(!input.trim() && images.length === 0) || !user?.claudeAuth}
-            className={`btn btn-circle ${isExecuting ? 'btn-warning' : 'btn-primary'}`}
-            title={isExecuting ? "Queue or interrupt current job" : "Send message (Enter at end, Cmd/Ctrl+Enter, or click)"}
+            type={isExecuting && !input.trim() && images.length === 0 ? 'button' : 'submit'}
+            onClick={isExecuting && !input.trim() && images.length === 0 ? onInterrupt : undefined}
+            disabled={!user?.claudeAuth}
+            className={`btn btn-circle ${
+              isExecuting && !input.trim() && images.length === 0
+                ? 'btn-error'
+                : isExecuting
+                ? 'btn-warning'
+                : 'btn-primary'
+            }`}
+            title={
+              isExecuting && !input.trim() && images.length === 0
+                ? 'Stop current job'
+                : isExecuting
+                ? 'Queue this message'
+                : 'Send message (Enter at end, Cmd/Ctrl+Enter, or click)'
+            }
           >
-            {isExecuting ? (
+            {isExecuting && !input.trim() && images.length === 0 ? (
+              // Stop icon when executing and input is blank
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
                 fill="currentColor"
                 className="w-5 h-5"
               >
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" />
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            ) : isExecuting ? (
+              // Queue icon when executing and input has text
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="w-5 h-5"
+              >
+                <path d="M5.625 3.75a2.625 2.625 0 100 5.25h12.75a2.625 2.625 0 000-5.25H5.625zM3.75 11.25a.75.75 0 000 1.5h16.5a.75.75 0 000-1.5H3.75zM3 15.75a.75.75 0 01.75-.75h16.5a.75.75 0 010 1.5H3.75a.75.75 0 01-.75-.75zM3.75 18.75a.75.75 0 000 1.5h16.5a.75.75 0 000-1.5H3.75z" />
               </svg>
             ) : (
+              // Send icon when not executing
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
