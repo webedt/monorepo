@@ -125,7 +125,7 @@ Rules for TITLE:
 - 3-6 words, human-readable, descriptive
 - Capitalize properly
 - No special characters except spaces
-- Max 60 characters
+- Keep concise, max 80 characters (shorter is better)
 
 Rules for BRANCH:
 - Lowercase only, use hyphens as separators
@@ -149,10 +149,11 @@ Return ONLY the two lines in the exact format above:`;
     let title = titleMatch ? titleMatch[1].trim() : 'New Session';
     let branchName = branchMatch ? branchMatch[1].trim() : 'auto-request';
 
-    // Clean up title (ensure max 60 chars, remove quotes if present)
-    title = title
-      .replace(/^["']|["']$/g, '')
-      .substring(0, 60);
+    // Clean up title (ensure max 80 chars with ellipsis if truncated, remove quotes if present)
+    title = title.replace(/^["']|["']$/g, '');
+    if (title.length > 80) {
+      title = title.substring(0, 77) + '...';
+    }
 
     // Ensure branch name is valid
     branchName = branchName

@@ -7,6 +7,7 @@ import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA } from '@/version';
 import type { GitHubRepository } from '@webedt/shared';
+import { truncateSessionName } from '@/lib/utils';
 
 // Helper to detect mobile devices
 const isMobileDevice = () => {
@@ -532,7 +533,10 @@ export default function SessionLayout({
                 >
                   <span className="text-lg">📁</span>
                   <h2 className={`text-sm font-medium text-base-content ${titleExpanded ? '' : 'truncate'}`}>
-                    {sessionData?.data?.userRequest || 'Session'}
+                    {titleExpanded
+                      ? (sessionData?.data?.userRequest || 'Session')
+                      : truncateSessionName(sessionData?.data?.userRequest || 'Session', 80)
+                    }
                   </h2>
                 </button>
 
