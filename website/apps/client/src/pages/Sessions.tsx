@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { sessionsApi, githubApi } from '@/lib/api';
@@ -20,6 +20,10 @@ export default function Sessions() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+
+  // Refs for delete buttons to auto-focus
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const bulkDeleteButtonRef = useRef<HTMLButtonElement>(null);
 
   // Chat input state
   const [input, setInput] = useState('');
@@ -214,6 +218,20 @@ export default function Sessions() {
   const cancelBulkDelete = () => {
     setIsDeletingBulk(false);
   };
+
+  // Auto-focus delete button when single delete modal opens
+  useEffect(() => {
+    if (deletingId && deleteButtonRef.current) {
+      deleteButtonRef.current.focus();
+    }
+  }, [deletingId]);
+
+  // Auto-focus delete button when bulk delete modal opens
+  useEffect(() => {
+    if (isDeletingBulk && bulkDeleteButtonRef.current) {
+      bulkDeleteButtonRef.current.focus();
+    }
+  }, [isDeletingBulk]);
 
   // Handle Enter key in delete modal
   useEffect(() => {
@@ -491,6 +509,7 @@ export default function Sessions() {
                 Cancel
               </button>
               <button
+                ref={deleteButtonRef}
                 onClick={() => confirmDelete(deletingId)}
                 className="btn btn-error"
                 disabled={deleteMutation.isPending}
@@ -522,6 +541,7 @@ export default function Sessions() {
                 Cancel
               </button>
               <button
+                ref={bulkDeleteButtonRef}
                 onClick={confirmBulkDelete}
                 className="btn btn-error"
                 disabled={deleteBulkMutation.isPending}
