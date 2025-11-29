@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type express from 'express';
 import { Octokit } from '@octokit/rest';
 import { db } from '../db/index';
-import { users, chatSessions } from '../db/index';
+import { users, chatSessions, events } from '../db/index';
 import { eq, and, isNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
@@ -619,6 +619,30 @@ router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req
   }
 });
 
+// Helper function to save auto PR log to database
+async function saveAutoPrLog(
+  sessionId: string | undefined,
+  step: string,
+  data: Record<string, any>
+): Promise<void> {
+  if (!sessionId) return;
+
+  try {
+    await db.insert(events).values({
+      chatSessionId: sessionId,
+      eventType: 'auto_pr_progress',
+      eventData: {
+        step,
+        ...data,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    // Log error but don't fail the auto PR process
+    console.error(`[GitHub] Failed to save auto PR log for session ${sessionId}:`, error);
+  }
+}
+
 // Auto PR: Create PR, merge base branch, wait for mergeable, merge PR, and soft-delete session
 // Note: Using wildcard (*) for branch because branch names can contain slashes (e.g., "user/feature-branch")
 router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, res) => {
@@ -648,6 +672,16 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       mergePr?: { merged: boolean; sha: string };
     } = { step: 'started', progress: 'Starting Auto PR process...' };
 
+    // Log the start of auto PR process
+    await saveAutoPrLog(sessionId, 'started', {
+      owner,
+      repo,
+      branch,
+      base,
+      title,
+      userId: authReq.user!.id,
+    });
+
     // Step 1: Check if PR already exists
     let prNumber: number | null = null;
     let prUrl: string | null = null;
@@ -668,6 +702,12 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       prUrl = existingPulls[0].html_url;
       console.log(`[GitHub] Using existing PR #${prNumber} for ${owner}/${repo}`);
       results.progress = `Found existing PR #${prNumber}`;
+
+      await saveAutoPrLog(sessionId, 'pr_found', {
+        prNumber,
+        prUrl,
+        message: `Found existing PR #${prNumber}`,
+      });
     } else {
       // Create new PR
       results.step = 'creating_pr';
@@ -686,10 +726,22 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
         prUrl = pr.html_url;
         console.log(`[GitHub] Created PR #${prNumber} for ${owner}/${repo}`);
         results.progress = `Created PR #${prNumber}`;
+
+        await saveAutoPrLog(sessionId, 'pr_created', {
+          prNumber,
+          prUrl,
+          title: pr.title,
+          message: `Created PR #${prNumber}`,
+        });
       } catch (createError: unknown) {
         const createErr = createError as { status?: number; message?: string };
         // If no commits between branches, cannot create PR
         if (createErr.status === 422) {
+          await saveAutoPrLog(sessionId, 'no_commits', {
+            error: 'No commits between branches - nothing to merge',
+            status: 422,
+          });
+
           res.status(422).json({
             success: false,
             error: 'No commits between branches - nothing to merge'
@@ -719,6 +771,11 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       results.mergeBase = { sha: mergeResult.sha, message: `Merged ${base} into ${branch}` };
       results.progress = `Successfully merged ${base} into ${branch}`;
       console.log(`[GitHub] Merged ${base} into ${branch}`);
+
+      await saveAutoPrLog(sessionId, 'base_merged', {
+        sha: mergeResult.sha,
+        message: `Merged ${base} into ${branch}`,
+      });
     } catch (mergeError: unknown) {
       const mergeErr = mergeError as { status?: number; message?: string };
       // 204 = already up to date, 409 = conflict
@@ -726,7 +783,15 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
         results.step = 'base_merged';
         results.mergeBase = { sha: null, message: 'Branch already up to date' };
         results.progress = `Branch ${branch} is already up to date with ${base}`;
+
+        await saveAutoPrLog(sessionId, 'base_already_up_to_date', {
+          message: `Branch ${branch} is already up to date with ${base}`,
+        });
       } else if (mergeErr.status === 409) {
+        await saveAutoPrLog(sessionId, 'merge_conflict', {
+          error: 'Merge conflict when updating branch - manual resolution required',
+        });
+
         // Return partial success - PR created but needs manual conflict resolution
         res.status(409).json({
           success: false,
@@ -759,8 +824,19 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       if (mergeable === true) {
         results.progress = 'PR is ready to merge!';
         console.log(`[GitHub] PR #${prNumber} is mergeable after ${pollAttempts + 1} attempts`);
+
+        await saveAutoPrLog(sessionId, 'pr_mergeable', {
+          prNumber,
+          pollAttempts: pollAttempts + 1,
+          message: `PR #${prNumber} is ready to merge`,
+        });
         break;
       } else if (mergeable === false) {
+        await saveAutoPrLog(sessionId, 'pr_not_mergeable', {
+          prNumber,
+          error: 'PR has merge conflicts or branch protection rules prevent merging',
+        });
+
         // PR is explicitly not mergeable
         res.status(409).json({
           success: false,
@@ -777,6 +853,12 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
     }
 
     if (mergeable !== true) {
+      await saveAutoPrLog(sessionId, 'timeout', {
+        prNumber,
+        maxPollAttempts,
+        error: 'Timeout waiting for PR to become mergeable',
+      });
+
       res.status(408).json({
         success: false,
         error: 'Timeout waiting for PR to become mergeable - please try merging manually',
@@ -800,9 +882,22 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       results.mergePr = { merged: prMergeResult.merged, sha: prMergeResult.sha };
       results.progress = `Successfully merged PR #${prNumber} into ${base}`;
       console.log(`[GitHub] Merged PR #${prNumber} for ${owner}/${repo}`);
+
+      await saveAutoPrLog(sessionId, 'pr_merged', {
+        prNumber,
+        merged: prMergeResult.merged,
+        sha: prMergeResult.sha,
+        message: `Successfully merged PR #${prNumber} into ${base}`,
+      });
     } catch (prMergeError: unknown) {
       const prMergeErr = prMergeError as { status?: number; message?: string };
       if (prMergeErr.status === 405) {
+        await saveAutoPrLog(sessionId, 'pr_merge_failed', {
+          prNumber,
+          error: 'PR is not mergeable - check branch protection rules',
+          status: 405,
+        });
+
         res.status(405).json({
           success: false,
           error: 'PR is not mergeable - check branch protection rules',
@@ -811,6 +906,12 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
         return;
       }
       if (prMergeErr.status === 409) {
+        await saveAutoPrLog(sessionId, 'pr_merge_conflict', {
+          prNumber,
+          error: 'Merge conflict when merging PR',
+          status: 409,
+        });
+
         res.status(409).json({
           success: false,
           error: 'Merge conflict when merging PR',
@@ -873,8 +974,16 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
 
           console.log(`[GitHub] Soft-deleted session ${sessionId} after Auto PR`);
           results.progress = 'Session moved to trash';
+
+          await saveAutoPrLog(sessionId, 'session_deleted', {
+            message: 'Session moved to trash after successful merge',
+          });
         } else {
           console.log(`[GitHub] Session ${sessionId} not found or access denied - skipping deletion`);
+
+          await saveAutoPrLog(sessionId, 'session_deletion_skipped', {
+            reason: 'Session not found or access denied',
+          });
         }
       } catch (deleteError) {
         // Log error but don't fail the entire operation - PR was already merged successfully
@@ -885,6 +994,12 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
 
     results.step = 'completed';
     results.progress = 'Auto PR completed successfully!';
+
+    await saveAutoPrLog(sessionId, 'completed', {
+      prNumber,
+      prUrl,
+      message: 'Auto PR completed successfully!',
+    });
 
     res.json({
       success: true,
@@ -909,6 +1024,13 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
     } else if (err.message) {
       errorMessage = err.message;
     }
+
+    // Log error to database
+    const { sessionId } = req.body;
+    await saveAutoPrLog(sessionId, 'error', {
+      error: errorMessage,
+      status: err.status || 500,
+    });
 
     res.status(err.status || 500).json({ success: false, error: errorMessage });
   }
