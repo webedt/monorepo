@@ -290,24 +290,28 @@ function ImagesContent() {
           <div className="text-xs font-semibold text-base-content/50 uppercase tracking-wider px-2 mb-2">
             Recent {editorMode === 'image' ? 'Images' : editorMode === 'spritesheet' ? 'Sheets' : 'Animations'}
           </div>
-          <div className="grid grid-cols-4 gap-1.5 px-1">
+          <div className="space-y-0.5">
             {getRecentItems().map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleRecentClick(item)}
-                className={`aspect-square rounded border flex items-center justify-center text-lg transition-all hover:scale-105 ${
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-colors text-left ${
                   selectedFile?.name === item.name
-                    ? 'border-primary bg-primary/10'
-                    : 'border-base-300 bg-base-200 hover:border-primary/50'
+                    ? 'bg-primary/10 text-primary'
+                    : 'hover:bg-base-200 text-base-content'
                 }`}
-                title={`${item.name}\n${item.lastModified}`}
-                style={{
-                  backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)',
-                  backgroundSize: '6px 6px',
-                  backgroundPosition: '0 0, 0 3px, 3px -3px, -3px 0px'
-                }}
               >
-                {item.thumbnail}
+                <div
+                  className="w-6 h-6 rounded border border-base-300 flex items-center justify-center text-sm flex-shrink-0"
+                  style={{
+                    backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)',
+                    backgroundSize: '4px 4px',
+                    backgroundPosition: '0 0, 0 2px, 2px -2px, -2px 0px'
+                  }}
+                >
+                  {item.thumbnail}
+                </div>
+                <span className="text-xs truncate">{item.name}</span>
               </button>
             ))}
           </div>
