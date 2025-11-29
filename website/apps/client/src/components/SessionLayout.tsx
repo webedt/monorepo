@@ -247,7 +247,7 @@ export default function SessionLayout({
 
               {/* Logo - Desktop Only */}
               <div className="hidden md:flex flex-col justify-center py-2">
-                <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <Link to="/store" className="font-semibold text-lg leading-tight">WebEDT</Link>
                 <div className="text-[9px] text-base-content/50 leading-tight italic">
                   {randomTagline}
                 </div>
@@ -268,7 +268,7 @@ export default function SessionLayout({
             <div className="flex-1 flex items-center justify-center">
               {/* Logo - Mobile Only (Centered) */}
               <div className="md:hidden flex flex-col items-center justify-center py-2">
-                <Link to="/" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <Link to="/store" className="font-semibold text-lg leading-tight">WebEDT</Link>
                 <div className="text-[9px] text-base-content/50 leading-tight italic">
                   {randomTagline}
                 </div>
@@ -447,7 +447,7 @@ export default function SessionLayout({
             <div className="flex items-center gap-3">
               {/* Mode Toggle - Switch to Hub - Desktop Only (inverse of hamburger) */}
               <Link
-                to="/"
+                to="/store"
                 className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -477,7 +477,7 @@ export default function SessionLayout({
 
                     {/* Store link */}
                     <Link
-                      to="/"
+                      to="/store"
                       onClick={() => setUserMenuOpen(false)}
                       className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
                     >

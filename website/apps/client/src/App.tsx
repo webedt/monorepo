@@ -123,6 +123,14 @@ function App() {
               }
             />
             <Route
+              path="/store"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/library"
               element={
                 <ProtectedRoute>
