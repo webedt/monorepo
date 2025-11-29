@@ -204,6 +204,20 @@ if (usePostgres) {
         ) THEN
           ALTER TABLE chat_sessions ADD COLUMN deleted_at TIMESTAMP;
         END IF;
+        -- Add codex_auth column for OpenAI Codex provider support
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'codex_auth'
+        ) THEN
+          ALTER TABLE users ADD COLUMN codex_auth JSONB;
+        END IF;
+        -- Add preferred_provider column for multi-provider support
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'preferred_provider'
+        ) THEN
+          ALTER TABLE users ADD COLUMN preferred_provider TEXT NOT NULL DEFAULT 'claude';
+        END IF;
         -- Migrate chat_sessions.id from INTEGER to TEXT (UUID)
         -- This migration is needed when upgrading from old schema with SERIAL id to new UUID-based id
         DO $migration$
@@ -424,6 +438,18 @@ if (usePostgres) {
     if (!hasDeletedAtColumn) {
       sqlite.exec('ALTER TABLE chat_sessions ADD COLUMN deleted_at INTEGER;');
       console.log('SQLite migration: Added deleted_at column to chat_sessions');
+    }
+
+    const hasCodexAuthColumn = usersInfo.some((col) => col.name === 'codex_auth');
+    if (!hasCodexAuthColumn) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN codex_auth TEXT;');
+      console.log('SQLite migration: Added codex_auth column to users');
+    }
+
+    const hasPreferredProviderColumn = usersInfo.some((col) => col.name === 'preferred_provider');
+    if (!hasPreferredProviderColumn) {
+      sqlite.exec("ALTER TABLE users ADD COLUMN preferred_provider TEXT NOT NULL DEFAULT 'claude';");
+      console.log('SQLite migration: Added preferred_provider column to users');
     }
 
     // Make etdofresh@gmail.com admin if they exist
