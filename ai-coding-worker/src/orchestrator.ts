@@ -392,6 +392,44 @@ export class Orchestrator {
               // Create and checkout the new branch
               await gitHelper.createBranch(branchName);
 
+              // Push empty branch to remote immediately to trigger GitHub Actions early
+              // This allows the site to start building while Claude Code is working
+              try {
+                sendEvent({
+                  type: 'message',
+                  message: `Pushing branch ${branchName} to trigger build...`,
+                  timestamp: new Date().toISOString()
+                });
+
+                await gitHelper.push();
+
+                sendEvent({
+                  type: 'message',
+                  message: `Branch ${branchName} pushed - build starting`,
+                  timestamp: new Date().toISOString()
+                });
+
+                logger.info('Early branch push completed', {
+                  component: 'Orchestrator',
+                  websiteSessionId,
+                  branchName
+                });
+              } catch (pushError) {
+                // Non-critical - the final push after commits will still happen
+                logger.warn('Early branch push failed (non-critical)', {
+                  component: 'Orchestrator',
+                  websiteSessionId,
+                  branchName,
+                  error: pushError instanceof Error ? pushError.message : String(pushError)
+                });
+
+                sendEvent({
+                  type: 'debug',
+                  message: `Early push failed (will retry after commits): ${pushError instanceof Error ? pushError.message : String(pushError)}`,
+                  timestamp: new Date().toISOString()
+                });
+              }
+
               // Generate sessionPath now that we have the branch name
               const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
 
@@ -462,6 +500,37 @@ export class Orchestrator {
               try {
                 const gitHelper = new GitHelper(workspacePath);
                 await gitHelper.createBranch(branchName);
+
+                // Push empty branch to remote immediately to trigger GitHub Actions early
+                try {
+                  sendEvent({
+                    type: 'message',
+                    message: `Pushing branch ${branchName} to trigger build...`,
+                    timestamp: new Date().toISOString()
+                  });
+
+                  await gitHelper.push();
+
+                  sendEvent({
+                    type: 'message',
+                    message: `Branch ${branchName} pushed - build starting`,
+                    timestamp: new Date().toISOString()
+                  });
+
+                  logger.info('Early branch push completed (fallback)', {
+                    component: 'Orchestrator',
+                    websiteSessionId,
+                    branchName
+                  });
+                } catch (pushError) {
+                  // Non-critical - the final push after commits will still happen
+                  logger.warn('Early branch push failed (non-critical, fallback)', {
+                    component: 'Orchestrator',
+                    websiteSessionId,
+                    branchName,
+                    error: pushError instanceof Error ? pushError.message : String(pushError)
+                  });
+                }
 
                 const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
                 metadata.branch = branchName;
