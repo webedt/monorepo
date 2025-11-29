@@ -198,6 +198,9 @@ export default function Code() {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
 
+  // Track pending click for single/double click distinction
+  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Fetch existing session if sessionId is provided
   const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
     queryKey: ['session', sessionId],
@@ -374,8 +377,8 @@ export default function Code() {
     }
   };
 
-  // Handle single-click on file - opens as preview tab
-  const handleFileClick = (path: string, name: string) => {
+  // Open file as preview tab (single-click behavior)
+  const openAsPreview = (path: string, name: string) => {
     // If the file is already open, just switch to it
     const existingTab = tabs.find(tab => tab.path === path);
     if (existingTab) {
@@ -393,8 +396,8 @@ export default function Code() {
     loadFileContent(path);
   };
 
-  // Handle double-click on file - opens as permanent tab
-  const handleFileDoubleClick = (path: string, name: string) => {
+  // Open file as permanent tab (double-click behavior)
+  const openAsPermanent = (path: string, name: string) => {
     // Check if already open as a tab
     const existingTab = tabs.find(tab => tab.path === path);
 
@@ -417,6 +420,32 @@ export default function Code() {
 
     setActiveTabPath(path);
     loadFileContent(path);
+  };
+
+  // Handle click on file - uses timeout to distinguish single vs double click
+  const handleFileClick = (path: string, name: string) => {
+    // Clear any pending single-click action
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = null;
+    }
+
+    // Delay single-click action to allow double-click to cancel it
+    clickTimeoutRef.current = setTimeout(() => {
+      openAsPreview(path, name);
+      clickTimeoutRef.current = null;
+    }, 200); // 200ms delay to detect double-click
+  };
+
+  // Handle double-click on file - cancels pending single-click and opens permanently
+  const handleFileDoubleClick = (path: string, name: string) => {
+    // Cancel the pending single-click action
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = null;
+    }
+
+    openAsPermanent(path, name);
   };
 
   // Handle tab click - switch to that tab
