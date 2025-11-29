@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 're
 import { Link } from 'react-router-dom';
 import type { GitHubRepository, User } from '@webedt/shared';
 import { githubApi } from '@/lib/api';
-import { useVoiceRecordingStore } from '@/lib/store';
+import { useVoiceRecordingStore, useWorkerStore } from '@/lib/store';
 
 export interface ImageAttachment {
   id: string;
@@ -64,6 +64,15 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   // Global voice recording state (persists across navigation)
   const voiceStore = useVoiceRecordingStore();
   const isRecording = voiceStore.isRecording;
+
+  // Global worker state - use this as an additional check for execution status
+  // This provides redundancy: if parent's isExecuting prop is wrong, we can detect it
+  const workerStore = useWorkerStore();
+  const isGloballyExecuting = !!workerStore.executingSessionId;
+
+  // Combine local prop with global state for maximum reliability
+  // If EITHER source says we're executing, treat as executing
+  const effectiveIsExecuting = isExecuting || isGloballyExecuting;
 
   // Keep voiceKeywordsRef in sync with user's voice command keywords
   useEffect(() => {
@@ -538,7 +547,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           onPaste={handlePaste}
           placeholder="Describe what you want to code... (paste images, use voice input, or attach files)"
           rows={centered ? 6 : 4}
-          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-36 p-4 pb-16 ${centered ? 'text-lg' : 'text-base'} ${isExecuting ? 'border-warning' : ''}`}
+          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-36 p-4 pb-16 ${centered ? 'text-lg' : 'text-base'} ${effectiveIsExecuting ? 'border-warning' : ''}`}
           disabled={!user?.claudeAuth}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -582,7 +591,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               ) : repositories.length > 0 ? (
                 /* Actual controls or labels */
                 <>
-                  {isExecuting || isLocked ? (
+                  {effectiveIsExecuting || isLocked ? (
                     /* Show as text labels when executing or locked */
                     <>
                       <span className="badge badge-ghost text-xs">
@@ -606,7 +615,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                           type="button"
                           onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
                           className="btn btn-sm btn-outline normal-case h-7 min-h-0 px-3"
-                          disabled={isExecuting || isLocked}
+                          disabled={effectiveIsExecuting || isLocked}
                         >
                           {selectedRepo
                             ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName ||
@@ -687,7 +696,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                                   setIsBranchDropdownOpen(!isBranchDropdownOpen);
                                 }
                               }}
-                              disabled={isExecuting || isLocked || isLoadingBranches}
+                              disabled={effectiveIsExecuting || isLocked || isLoadingBranches}
                               className="btn btn-sm btn-outline normal-case h-7 min-h-0 px-3"
                               title="Select base branch"
                             >
@@ -802,7 +811,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           <button
             type="button"
             onClick={toggleRecording}
-            disabled={!isRecording && (isExecuting || !user?.claudeAuth)}
+            disabled={!isRecording && (effectiveIsExecuting || !user?.claudeAuth)}
             className={`flex items-center justify-center w-10 h-10 rounded-full shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 ${
               isRecording
                 ? 'bg-red-500 hover:bg-red-600 text-white focus:ring-red-400 animate-pulse'
@@ -839,7 +848,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isExecuting || !user?.claudeAuth}
+            disabled={effectiveIsExecuting || !user?.claudeAuth}
             className="btn btn-circle btn-ghost"
             title="Attach image"
           >
@@ -855,25 +864,25 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
           {/* Submit/Stop/Queue button */}
           <button
-            type={isExecuting && !input.trim() && images.length === 0 ? 'button' : 'submit'}
-            onClick={isExecuting && !input.trim() && images.length === 0 ? onInterrupt : undefined}
+            type={effectiveIsExecuting && !input.trim() && images.length === 0 ? 'button' : 'submit'}
+            onClick={effectiveIsExecuting && !input.trim() && images.length === 0 ? onInterrupt : undefined}
             disabled={!user?.claudeAuth}
             className={`btn btn-circle ${
-              isExecuting && !input.trim() && images.length === 0
+              effectiveIsExecuting && !input.trim() && images.length === 0
                 ? 'btn-error'
-                : isExecuting
+                : effectiveIsExecuting
                 ? 'btn-warning'
                 : 'btn-primary'
             }`}
             title={
-              isExecuting && !input.trim() && images.length === 0
+              effectiveIsExecuting && !input.trim() && images.length === 0
                 ? 'Stop current job'
-                : isExecuting
+                : effectiveIsExecuting
                 ? 'Queue this message'
                 : 'Send message (Enter at end, Cmd/Ctrl+Enter, or click)'
             }
           >
-            {isExecuting && !input.trim() && images.length === 0 ? (
+            {effectiveIsExecuting && !input.trim() && images.length === 0 ? (
               // Stop icon when executing and input is blank
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -883,7 +892,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               >
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
-            ) : isExecuting ? (
+            ) : effectiveIsExecuting ? (
               // Queue icon when executing and input has text
               <svg
                 xmlns="http://www.w3.org/2000/svg"
