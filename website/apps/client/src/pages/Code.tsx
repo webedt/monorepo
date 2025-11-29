@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi } from '@/lib/api';
@@ -165,7 +164,6 @@ const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
 };
 
 export default function Code() {
-  const { sessionId } = useParams<{ sessionId?: string }>();
   const queryClient = useQueryClient();
 
   // Code session state
