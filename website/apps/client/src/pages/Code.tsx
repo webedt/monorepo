@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
-import { githubApi } from '@/lib/api';
+import { githubApi, sessionsApi } from '@/lib/api';
 
 type FileNode = {
   name: string;
@@ -164,12 +165,14 @@ const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
 };
 
 export default function Code() {
+  const { sessionId } = useParams<{ sessionId?: string }>();
   const queryClient = useQueryClient();
 
   // Code session state
   const [codeSession, setCodeSession] = useState<CodeSession | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [isFromExistingSession, setIsFromExistingSession] = useState(false);
 
   // File explorer state
   const [selectedFile, setSelectedFile] = useState<{ path: string; name: string } | null>(null);
@@ -177,10 +180,35 @@ export default function Code() {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
 
-  // Fetch user's GitHub repos
+  // Fetch existing session if sessionId is provided
+  const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => sessionsApi.get(sessionId!),
+    enabled: !!sessionId,
+  });
+
+  // Set code session from existing session data
+  useEffect(() => {
+    if (existingSessionData?.data) {
+      const session = existingSessionData.data;
+      // Only set if we have the required fields
+      if (session.repositoryOwner && session.repositoryName && session.branch) {
+        setCodeSession({
+          owner: session.repositoryOwner,
+          repo: session.repositoryName,
+          branch: session.branch,
+          baseBranch: session.baseBranch || 'main',
+        });
+        setIsFromExistingSession(true);
+      }
+    }
+  }, [existingSessionData]);
+
+  // Fetch user's GitHub repos (only when no existing session)
   const { data: reposData, isLoading: isLoadingRepos, error: reposError } = useQuery({
     queryKey: ['github-repos'],
     queryFn: githubApi.getRepos,
+    enabled: !sessionId, // Only fetch repos if not viewing an existing session
   });
 
   const repos: GitHubRepo[] = reposData?.data || [];
@@ -236,6 +264,7 @@ export default function Code() {
         branch: branchName,
         baseBranch,
       });
+      setIsFromExistingSession(false);
 
       // Expand root folders by default
       setExpandedFolders(new Set());
@@ -562,6 +591,38 @@ export default function Code() {
 
   // Code Session View with header
   const CodeSessionView = () => {
+    // Show loading state when fetching existing session
+    if (sessionId && isLoadingExistingSession) {
+      return (
+        <div className="flex items-center justify-center h-[calc(100vh-112px)]">
+          <div className="text-center">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
+            <p className="mt-2 text-base-content/70">Loading session...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // If we have a sessionId but the session doesn't have branch info, show error
+    if (sessionId && existingSessionData?.data && !codeSession) {
+      const session = existingSessionData.data;
+      if (!session.repositoryOwner || !session.repositoryName || !session.branch) {
+        return (
+          <div className="max-w-2xl mx-auto px-4 py-8">
+            <div className="alert alert-warning">
+              <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <h3 className="font-bold">Branch not available</h3>
+                <p className="text-sm">This session doesn't have a branch created yet. The branch is created when the AI worker starts processing.</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+    }
+
     if (!codeSession) {
       return <RepoSelector />;
     }
@@ -572,23 +633,26 @@ export default function Code() {
         <div className="bg-base-100 border-b border-base-300 px-4 py-3 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => {
-                  setCodeSession(null);
-                  setSelectedFile(null);
-                  setFileContent(null);
-                  setExpandedFolders(new Set());
-                }}
-                className="btn btn-ghost btn-sm btn-circle"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
+              {/* Only show back button if not from an existing session URL */}
+              {!isFromExistingSession && (
+                <button
+                  onClick={() => {
+                    setCodeSession(null);
+                    setSelectedFile(null);
+                    setFileContent(null);
+                    setExpandedFolders(new Set());
+                  }}
+                  className="btn btn-ghost btn-sm btn-circle"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fillRule="evenodd"
+                      d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+              )}
               <div>
                 <h2 className="text-sm font-semibold text-base-content">
                   {codeSession.owner}/{codeSession.repo}
