@@ -1,8 +1,16 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
+
+// File operation state for modals
+interface FileOperationState {
+  type: 'rename' | 'delete' | null;
+  itemType: 'file' | 'folder' | null;
+  path: string;
+  name: string;
+}
 
 interface PreSelectedSettings {
   repositoryUrl?: string;
@@ -201,6 +209,17 @@ export default function Code() {
   // Track pending click for single/double click distinction
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // File operation state for rename/delete modals
+  const [fileOperation, setFileOperation] = useState<FileOperationState>({
+    type: null,
+    itemType: null,
+    path: '',
+    name: '',
+  });
+  const [newName, setNewName] = useState('');
+  const [isOperating, setIsOperating] = useState(false);
+  const [operationError, setOperationError] = useState<string | null>(null);
+
   // Fetch existing session if sessionId is provided
   const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
     queryKey: ['session', sessionId],
@@ -357,7 +376,7 @@ export default function Code() {
   };
 
   // Load file content when a file is selected
-  const loadFileContent = async (path: string) => {
+  const loadFileContent = useCallback(async (path: string) => {
     if (!codeSession) return;
 
     setIsLoadingFile(true);
@@ -375,7 +394,7 @@ export default function Code() {
     } finally {
       setIsLoadingFile(false);
     }
-  };
+  }, [codeSession]);
 
   // Open file as preview tab (single-click behavior)
   const openAsPreview = (path: string, name: string) => {
@@ -500,6 +519,145 @@ export default function Code() {
     });
   };
 
+  // Open rename modal for file or folder
+  const openRenameModal = useCallback((itemType: 'file' | 'folder', path: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFileOperation({ type: 'rename', itemType, path, name });
+    setNewName(name);
+    setOperationError(null);
+  }, []);
+
+  // Open delete confirmation modal for file or folder
+  const openDeleteModal = useCallback((itemType: 'file' | 'folder', path: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFileOperation({ type: 'delete', itemType, path, name });
+    setOperationError(null);
+  }, []);
+
+  // Close the modal
+  const closeModal = useCallback(() => {
+    setFileOperation({ type: null, itemType: null, path: '', name: '' });
+    setNewName('');
+    setOperationError(null);
+  }, []);
+
+  // Handle rename operation
+  const handleRename = useCallback(async () => {
+    if (!codeSession || !newName.trim() || newName === fileOperation.name) {
+      closeModal();
+      return;
+    }
+
+    setIsOperating(true);
+    setOperationError(null);
+
+    try {
+      // Calculate the new path by replacing the name in the path
+      const pathParts = fileOperation.path.split('/');
+      pathParts[pathParts.length - 1] = newName.trim();
+      const newPath = pathParts.join('/');
+
+      if (fileOperation.itemType === 'file') {
+        await githubApi.renameFile(codeSession.owner, codeSession.repo, fileOperation.path, {
+          newPath,
+          branch: codeSession.branch,
+        });
+      } else {
+        await githubApi.renameFolder(codeSession.owner, codeSession.repo, fileOperation.path, {
+          newFolderPath: newPath,
+          branch: codeSession.branch,
+        });
+      }
+
+      // Refresh the file tree
+      queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+
+      // If the renamed item was open in a tab, update the tab
+      if (fileOperation.itemType === 'file' && activeTabPath === fileOperation.path) {
+        setActiveTabPath(newPath);
+        setTabs(prevTabs =>
+          prevTabs.map(tab =>
+            tab.path === fileOperation.path
+              ? { ...tab, path: newPath, name: newName.trim() }
+              : tab
+          )
+        );
+      }
+
+      closeModal();
+    } catch (error: any) {
+      console.error('Rename error:', error);
+      setOperationError(error.message || 'Failed to rename');
+    } finally {
+      setIsOperating(false);
+    }
+  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient]);
+
+  // Handle delete operation
+  const handleDelete = useCallback(async () => {
+    if (!codeSession) {
+      closeModal();
+      return;
+    }
+
+    setIsOperating(true);
+    setOperationError(null);
+
+    try {
+      if (fileOperation.itemType === 'file') {
+        await githubApi.deleteFile(codeSession.owner, codeSession.repo, fileOperation.path, {
+          branch: codeSession.branch,
+        });
+      } else {
+        await githubApi.deleteFolder(codeSession.owner, codeSession.repo, fileOperation.path, {
+          branch: codeSession.branch,
+        });
+      }
+
+      // Refresh the file tree
+      queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+
+      // If the deleted item was open in a tab, close it
+      if (fileOperation.itemType === 'file') {
+        setTabs(prevTabs => {
+          const newTabs = prevTabs.filter(tab => tab.path !== fileOperation.path);
+          if (activeTabPath === fileOperation.path) {
+            if (newTabs.length > 0) {
+              setActiveTabPath(newTabs[0].path);
+              loadFileContent(newTabs[0].path);
+            } else {
+              setActiveTabPath(null);
+              setFileContent(null);
+            }
+          }
+          return newTabs;
+        });
+      } else {
+        // For folders, close all tabs that are inside the folder
+        setTabs(prevTabs => {
+          const newTabs = prevTabs.filter(tab => !tab.path.startsWith(fileOperation.path + '/'));
+          if (activeTabPath && activeTabPath.startsWith(fileOperation.path + '/')) {
+            if (newTabs.length > 0) {
+              setActiveTabPath(newTabs[0].path);
+              loadFileContent(newTabs[0].path);
+            } else {
+              setActiveTabPath(null);
+              setFileContent(null);
+            }
+          }
+          return newTabs;
+        });
+      }
+
+      closeModal();
+    } catch (error: any) {
+      console.error('Delete error:', error);
+      setOperationError(error.message || 'Failed to delete');
+    } finally {
+      setIsOperating(false);
+    }
+  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent]);
+
   // Render file tree recursively
   const renderFileTree = (nodes: TreeNode[], level = 0): JSX.Element[] => {
     return nodes.map((node) => {
@@ -512,13 +670,48 @@ export default function Code() {
             key={node.path}
             onClick={() => handleFileClick(node.path, node.name)}
             onDoubleClick={() => handleFileDoubleClick(node.path, node.name)}
-            className={`flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
+            className={`group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
               isActive ? 'bg-base-300' : ''
             }`}
             style={{ paddingLeft }}
           >
             <span className="text-xs">{node.icon}</span>
-            <span className="text-sm truncate">{node.name}</span>
+            <span className="text-sm truncate flex-1">{node.name}</span>
+            {/* Action buttons - visible on hover */}
+            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={(e) => openRenameModal('file', node.path, node.name, e)}
+                className="p-1 hover:bg-base-200 rounded"
+                title="Rename file"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                </svg>
+              </button>
+              <button
+                onClick={(e) => openDeleteModal('file', node.path, node.name, e)}
+                className="p-1 hover:bg-base-200 rounded text-error"
+                title="Delete file"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
         );
       }
@@ -528,7 +721,7 @@ export default function Code() {
         <div key={node.path}>
           <div
             onClick={() => toggleFolder(node.path)}
-            className="flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300"
+            className="group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300"
             style={{ paddingLeft }}
           >
             <svg
@@ -542,7 +735,42 @@ export default function Code() {
                 clipRule="evenodd"
               />
             </svg>
-            <span className="text-sm font-medium">{node.name}</span>
+            <span className="text-sm font-medium flex-1">{node.name}</span>
+            {/* Action buttons - visible on hover */}
+            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={(e) => openRenameModal('folder', node.path, node.name, e)}
+                className="p-1 hover:bg-base-200 rounded"
+                title="Rename folder"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                </svg>
+              </button>
+              <button
+                onClick={(e) => openDeleteModal('folder', node.path, node.name, e)}
+                className="p-1 hover:bg-base-200 rounded text-error"
+                title="Delete folder"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
           {isExpanded && node.children.length > 0 && renderFileTree(node.children, level + 1)}
         </div>
@@ -908,6 +1136,113 @@ export default function Code() {
   return (
     <SessionLayout>
       <CodeSessionView />
+
+      {/* Rename Modal */}
+      {fileOperation.type === 'rename' && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg">
+              Rename {fileOperation.itemType === 'folder' ? 'Folder' : 'File'}
+            </h3>
+            <div className="py-4">
+              <label className="label">
+                <span className="label-text">New name</span>
+              </label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="input input-bordered w-full"
+                placeholder="Enter new name"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRename();
+                  if (e.key === 'Escape') closeModal();
+                }}
+              />
+              {operationError && (
+                <div className="mt-2 text-error text-sm">{operationError}</div>
+              )}
+            </div>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost"
+                onClick={closeModal}
+                disabled={isOperating}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleRename}
+                disabled={isOperating || !newName.trim() || newName === fileOperation.name}
+              >
+                {isOperating ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm"></span>
+                    Renaming...
+                  </>
+                ) : (
+                  'Rename'
+                )}
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={closeModal}></div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {fileOperation.type === 'delete' && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg text-error">
+              Delete {fileOperation.itemType === 'folder' ? 'Folder' : 'File'}
+            </h3>
+            <div className="py-4">
+              <p>
+                Are you sure you want to delete{' '}
+                <span className="font-semibold">{fileOperation.name}</span>?
+              </p>
+              {fileOperation.itemType === 'folder' && (
+                <p className="mt-2 text-warning text-sm">
+                  This will delete all files inside the folder.
+                </p>
+              )}
+              <p className="mt-2 text-base-content/70 text-sm">
+                This action cannot be undone.
+              </p>
+              {operationError && (
+                <div className="mt-2 text-error text-sm">{operationError}</div>
+              )}
+            </div>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost"
+                onClick={closeModal}
+                disabled={isOperating}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-error"
+                onClick={handleDelete}
+                disabled={isOperating}
+              >
+                {isOperating ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm"></span>
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete'
+                )}
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={closeModal}></div>
+        </div>
+      )}
     </SessionLayout>
   );
 }

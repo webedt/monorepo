@@ -1227,6 +1227,392 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
   }
 });
 
+// Delete a file
+// Note: Using wildcard (*) for the file path
+router.delete('/repos/:owner/:repo/contents/*', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const path = req.params[0]; // The file path
+    const { branch, sha, message } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!branch) {
+      res.status(400).json({ success: false, error: 'Branch is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // If sha is not provided, fetch it first
+    let fileSha = sha;
+    if (!fileSha) {
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner,
+          repo,
+          path,
+          ref: branch,
+        });
+        if (!Array.isArray(data) && data.type === 'file') {
+          fileSha = data.sha;
+        }
+      } catch (error: unknown) {
+        const err = error as { status?: number };
+        if (err.status === 404) {
+          res.status(404).json({ success: false, error: 'File not found' });
+          return;
+        }
+        throw error;
+      }
+    }
+
+    // Delete the file
+    await octokit.repos.deleteFile({
+      owner,
+      repo,
+      path,
+      message: message || `Delete ${path}`,
+      sha: fileSha!,
+      branch,
+    });
+
+    console.log(`[GitHub] Deleted file ${path} in ${owner}/${repo}/${branch}`);
+
+    res.json({
+      success: true,
+      data: { message: 'File deleted successfully' },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub delete file error:', error);
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'File or repository not found' });
+      return;
+    }
+    if (err.status === 409) {
+      res.status(409).json({ success: false, error: 'Conflict - file may have been modified' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to delete file' });
+  }
+});
+
+// Rename/move a file (create new file with contents, delete old file)
+// Note: Using wildcard (*) for the file path
+router.post('/repos/:owner/:repo/rename/*', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const oldPath = req.params[0]; // The original file path
+    const { newPath, branch, message } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!branch) {
+      res.status(400).json({ success: false, error: 'Branch is required' });
+      return;
+    }
+
+    if (!newPath) {
+      res.status(400).json({ success: false, error: 'New path is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Get the current file content
+    let fileContent: string;
+    let fileSha: string;
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner,
+        repo,
+        path: oldPath,
+        ref: branch,
+      });
+      if (Array.isArray(data) || data.type !== 'file') {
+        res.status(400).json({ success: false, error: 'Cannot rename a directory directly' });
+        return;
+      }
+      fileContent = data.content || '';
+      fileSha = data.sha;
+    } catch (error: unknown) {
+      const err = error as { status?: number };
+      if (err.status === 404) {
+        res.status(404).json({ success: false, error: 'File not found' });
+        return;
+      }
+      throw error;
+    }
+
+    // Create the new file with the same content
+    await octokit.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path: newPath,
+      message: message || `Rename ${oldPath} to ${newPath}`,
+      content: fileContent, // Already base64 encoded from getContent
+      branch,
+    });
+
+    // Delete the old file
+    await octokit.repos.deleteFile({
+      owner,
+      repo,
+      path: oldPath,
+      message: message || `Rename ${oldPath} to ${newPath} (delete old)`,
+      sha: fileSha,
+      branch,
+    });
+
+    console.log(`[GitHub] Renamed file ${oldPath} to ${newPath} in ${owner}/${repo}/${branch}`);
+
+    res.json({
+      success: true,
+      data: {
+        message: 'File renamed successfully',
+        oldPath,
+        newPath,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub rename file error:', error);
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'File or repository not found' });
+      return;
+    }
+    if (err.status === 422) {
+      res.status(422).json({ success: false, error: 'A file already exists at the new path' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to rename file' });
+  }
+});
+
+// Delete a folder (delete all files recursively)
+// Note: Using wildcard (*) for the folder path
+router.delete('/repos/:owner/:repo/folder/*', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const folderPath = req.params[0]; // The folder path
+    const { branch, message } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!branch) {
+      res.status(400).json({ success: false, error: 'Branch is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Get the tree for this branch to find all files in the folder
+    const { data: branchData } = await octokit.repos.getBranch({
+      owner,
+      repo,
+      branch,
+    });
+    const treeSha = branchData.commit.commit.tree.sha;
+
+    const { data: tree } = await octokit.git.getTree({
+      owner,
+      repo,
+      tree_sha: treeSha,
+      recursive: 'true',
+    });
+
+    // Find all files in the folder
+    const filesToDelete = tree.tree.filter(item =>
+      item.type === 'blob' && item.path?.startsWith(folderPath + '/')
+    );
+
+    if (filesToDelete.length === 0) {
+      res.status(404).json({ success: false, error: 'Folder is empty or not found' });
+      return;
+    }
+
+    // Delete files one by one (GitHub doesn't support batch delete)
+    // We need to delete in reverse order to handle nested structures
+    const sortedFiles = filesToDelete.sort((a, b) =>
+      (b.path?.length || 0) - (a.path?.length || 0)
+    );
+
+    for (const file of sortedFiles) {
+      if (!file.path || !file.sha) continue;
+
+      try {
+        await octokit.repos.deleteFile({
+          owner,
+          repo,
+          path: file.path,
+          message: message || `Delete ${file.path} (part of folder deletion)`,
+          sha: file.sha,
+          branch,
+        });
+      } catch (deleteError: unknown) {
+        const delErr = deleteError as { status?: number };
+        // Continue if file already deleted
+        if (delErr.status !== 404) {
+          throw deleteError;
+        }
+      }
+    }
+
+    console.log(`[GitHub] Deleted folder ${folderPath} (${filesToDelete.length} files) in ${owner}/${repo}/${branch}`);
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Folder deleted successfully',
+        filesDeleted: filesToDelete.length,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub delete folder error:', error);
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'Folder or repository not found' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to delete folder' });
+  }
+});
+
+// Rename a folder (rename all files in it)
+// Note: Using wildcard (*) for the folder path
+router.post('/repos/:owner/:repo/rename-folder/*', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const oldFolderPath = req.params[0]; // The original folder path
+    const { newFolderPath, branch, message } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!branch) {
+      res.status(400).json({ success: false, error: 'Branch is required' });
+      return;
+    }
+
+    if (!newFolderPath) {
+      res.status(400).json({ success: false, error: 'New folder path is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Get the tree for this branch to find all files in the folder
+    const { data: branchData } = await octokit.repos.getBranch({
+      owner,
+      repo,
+      branch,
+    });
+    const treeSha = branchData.commit.commit.tree.sha;
+
+    const { data: tree } = await octokit.git.getTree({
+      owner,
+      repo,
+      tree_sha: treeSha,
+      recursive: 'true',
+    });
+
+    // Find all files in the folder
+    const filesToRename = tree.tree.filter(item =>
+      item.type === 'blob' && item.path?.startsWith(oldFolderPath + '/')
+    );
+
+    if (filesToRename.length === 0) {
+      res.status(404).json({ success: false, error: 'Folder is empty or not found' });
+      return;
+    }
+
+    // Process files: create new, then delete old
+    for (const file of filesToRename) {
+      if (!file.path || !file.sha) continue;
+
+      const newPath = file.path.replace(oldFolderPath, newFolderPath);
+
+      // Get file content
+      const { data: fileData } = await octokit.repos.getContent({
+        owner,
+        repo,
+        path: file.path,
+        ref: branch,
+      });
+
+      if (Array.isArray(fileData) || fileData.type !== 'file') continue;
+
+      // Create file at new location
+      await octokit.repos.createOrUpdateFileContents({
+        owner,
+        repo,
+        path: newPath,
+        message: message || `Rename folder: move ${file.path} to ${newPath}`,
+        content: fileData.content || '',
+        branch,
+      });
+
+      // Delete old file
+      await octokit.repos.deleteFile({
+        owner,
+        repo,
+        path: file.path,
+        message: message || `Rename folder: delete old ${file.path}`,
+        sha: file.sha,
+        branch,
+      });
+    }
+
+    console.log(`[GitHub] Renamed folder ${oldFolderPath} to ${newFolderPath} (${filesToRename.length} files) in ${owner}/${repo}/${branch}`);
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Folder renamed successfully',
+        filesRenamed: filesToRename.length,
+        oldPath: oldFolderPath,
+        newPath: newFolderPath,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub rename folder error:', error);
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'Folder or repository not found' });
+      return;
+    }
+    if (err.status === 422) {
+      res.status(422).json({ success: false, error: 'A folder already exists at the new path' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to rename folder' });
+  }
+});
+
 // Disconnect GitHub
 router.post('/disconnect', requireAuth, async (req, res) => {
   try {
