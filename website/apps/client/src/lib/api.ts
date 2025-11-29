@@ -94,6 +94,21 @@ export const githubApi = {
   getBranches: (owner: string, repo: string) =>
     fetchApi(`/api/github/repos/${owner}/${repo}/branches`),
 
+  // Create a new branch
+  createBranch: (owner: string, repo: string, data: { branchName: string; baseBranch: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/branches`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  // Get repository file tree
+  getTree: (owner: string, repo: string, branch: string, recursive = true) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/tree/${branch}?recursive=${recursive}`),
+
+  // Get file contents
+  getFileContent: (owner: string, repo: string, path: string, ref: string) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/contents/${path}?ref=${ref}`),
+
   disconnect: () =>
     fetchApi('/api/github/disconnect', {
       method: 'POST',

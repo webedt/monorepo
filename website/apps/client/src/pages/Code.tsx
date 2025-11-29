@@ -1,244 +1,521 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
-import { storageWorkerApi } from '@/lib/api';
+import { githubApi, sessionsApi } from '@/lib/api';
 
 type FileNode = {
   name: string;
+  path: string;
   type: 'file';
   icon: string;
 };
 
 type FolderNode = {
   name: string;
+  path: string;
   type: 'folder';
   children: TreeNode[];
 };
 
 type TreeNode = FileNode | FolderNode;
 
-interface SessionMetadata {
-  sessionId: string;
-  createdAt: string;
-  lastModified: string;
+interface GitHubRepo {
+  id: number;
+  name: string;
+  fullName: string;
+  private: boolean;
+  description: string | null;
+  htmlUrl: string;
+  cloneUrl: string;
+  defaultBranch: string;
+}
+
+interface GitHubTreeItem {
+  path: string;
+  type: 'blob' | 'tree';
+  sha: string;
   size?: number;
 }
 
+interface CodeSession {
+  owner: string;
+  repo: string;
+  branch: string;
+  baseBranch: string;
+}
+
+// Helper to get file icon based on extension
+const getFileIcon = (filename: string): string => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const iconMap: Record<string, string> = {
+    js: '🟨',
+    jsx: '⚛️',
+    ts: '🔷',
+    tsx: '⚛️',
+    css: '🎨',
+    scss: '🎨',
+    sass: '🎨',
+    less: '🎨',
+    html: '🌐',
+    htm: '🌐',
+    json: '📦',
+    md: '📝',
+    mdx: '📝',
+    py: '🐍',
+    rb: '💎',
+    go: '🔵',
+    rs: '🦀',
+    java: '☕',
+    kt: '🟣',
+    swift: '🍎',
+    c: '🔵',
+    cpp: '🔵',
+    h: '🔵',
+    hpp: '🔵',
+    cs: '🟣',
+    php: '🐘',
+    vue: '💚',
+    svelte: '🔶',
+    yaml: '📋',
+    yml: '📋',
+    toml: '📋',
+    xml: '📋',
+    svg: '🖼️',
+    png: '🖼️',
+    jpg: '🖼️',
+    jpeg: '🖼️',
+    gif: '🖼️',
+    webp: '🖼️',
+    ico: '🖼️',
+    sh: '💻',
+    bash: '💻',
+    zsh: '💻',
+    fish: '💻',
+    sql: '🗃️',
+    graphql: '💠',
+    gql: '💠',
+    dockerfile: '🐳',
+    gitignore: '📁',
+    env: '🔐',
+    lock: '🔒',
+  };
+  return iconMap[ext || ''] || '📄';
+};
+
+// Transform GitHub tree to our TreeNode format
+const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
+  const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Sort items: directories first, then alphabetically
+  const sortedItems = [...items].sort((a, b) => {
+    if (a.type === 'tree' && b.type !== 'tree') return -1;
+    if (a.type !== 'tree' && b.type === 'tree') return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  for (const item of sortedItems) {
+    const pathParts = item.path.split('/');
+    let currentLevel = root;
+
+    for (let i = 0; i < pathParts.length; i++) {
+      const part = pathParts[i];
+      const currentPath = pathParts.slice(0, i + 1).join('/');
+      const isLastPart = i === pathParts.length - 1;
+
+      if (isLastPart) {
+        if (item.type === 'blob') {
+          // It's a file
+          currentLevel.children.push({
+            name: part,
+            path: currentPath,
+            type: 'file',
+            icon: getFileIcon(part),
+          });
+        } else {
+          // It's a directory (tree) - only add if not already exists
+          const existing = currentLevel.children.find(
+            c => c.type === 'folder' && c.name === part
+          );
+          if (!existing) {
+            currentLevel.children.push({
+              name: part,
+              path: currentPath,
+              type: 'folder',
+              children: [],
+            });
+          }
+        }
+      } else {
+        // Navigate to or create intermediate folder
+        let folder = currentLevel.children.find(
+          c => c.type === 'folder' && c.name === part
+        ) as FolderNode | undefined;
+
+        if (!folder) {
+          folder = { name: part, path: currentPath, type: 'folder', children: [] };
+          currentLevel.children.push(folder);
+        }
+        currentLevel = folder;
+      }
+    }
+  }
+
+  return root.children;
+};
+
 export default function Code() {
   const { sessionId } = useParams<{ sessionId?: string }>();
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(sessionId || null);
-  const [selectedFile, setSelectedFile] = useState('Button.jsx');
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['src', 'components']));
+  const queryClient = useQueryClient();
 
-  // Fetch all sessions
-  const { data: sessionsData, isLoading: isLoadingSessions, error: sessionsError } = useQuery({
-    queryKey: ['storage-sessions'],
-    queryFn: storageWorkerApi.listSessions,
+  // Code session state
+  const [codeSession, setCodeSession] = useState<CodeSession | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
+  const [isFromExistingSession, setIsFromExistingSession] = useState(false);
+
+  // File explorer state
+  const [selectedFile, setSelectedFile] = useState<{ path: string; name: string } | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
+
+  // Fetch existing session if sessionId is provided
+  const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => sessionsApi.get(sessionId!),
+    enabled: !!sessionId,
   });
 
-  // Fetch specific session if sessionId is provided
-  const { data: sessionData, isLoading: isLoadingSession } = useQuery({
-    queryKey: ['storage-session', selectedSessionId],
-    queryFn: () => storageWorkerApi.getSession(selectedSessionId!),
-    enabled: !!selectedSessionId,
-  });
-
-  const sessions: SessionMetadata[] = sessionsData?.sessions || [];
-
-  // Update selected session when URL param changes
+  // Set code session from existing session data
   useEffect(() => {
-    if (sessionId) {
-      setSelectedSessionId(sessionId);
+    if (existingSessionData?.data) {
+      const session = existingSessionData.data;
+      // Only set if we have the required fields
+      if (session.repositoryOwner && session.repositoryName && session.branch) {
+        setCodeSession({
+          owner: session.repositoryOwner,
+          repo: session.repositoryName,
+          branch: session.branch,
+          baseBranch: session.baseBranch || 'main',
+        });
+        setIsFromExistingSession(true);
+      }
     }
-  }, [sessionId]);
+  }, [existingSessionData]);
 
-  const toggleFolder = (folder: string) => {
+  // Fetch user's GitHub repos (only when no existing session)
+  const { data: reposData, isLoading: isLoadingRepos, error: reposError } = useQuery({
+    queryKey: ['github-repos'],
+    queryFn: githubApi.getRepos,
+    enabled: !sessionId, // Only fetch repos if not viewing an existing session
+  });
+
+  const repos: GitHubRepo[] = reposData?.data || [];
+
+  // Fetch file tree when code session is active
+  const { data: treeData, isLoading: isLoadingTree } = useQuery({
+    queryKey: ['github-tree', codeSession?.owner, codeSession?.repo, codeSession?.branch],
+    queryFn: () => githubApi.getTree(codeSession!.owner, codeSession!.repo, codeSession!.branch),
+    enabled: !!codeSession,
+  });
+
+  // Transform the GitHub tree into our TreeNode format
+  const fileTree = useMemo(() => {
+    if (!treeData?.data?.tree) return [];
+    return transformGitHubTree(treeData.data.tree);
+  }, [treeData]);
+
+  // Create branch mutation
+  const createBranchMutation = useMutation({
+    mutationFn: async ({ owner, repo, branchName, baseBranch }: {
+      owner: string;
+      repo: string;
+      branchName: string;
+      baseBranch: string;
+    }) => {
+      return githubApi.createBranch(owner, repo, { branchName, baseBranch });
+    },
+  });
+
+  // Initialize Code session when repo is selected
+  const initializeCodeSession = async (repo: GitHubRepo) => {
+    setIsInitializing(true);
+    setInitError(null);
+
+    const [owner, repoName] = repo.fullName.split('/');
+    const baseBranch = repo.defaultBranch;
+
+    // Generate random ID for branch
+    const randomId = Math.random().toString(36).substring(2, 10);
+    const branchName = `webedt/started-from-code-session-${randomId}`;
+
+    try {
+      await createBranchMutation.mutateAsync({
+        owner,
+        repo: repoName,
+        branchName,
+        baseBranch,
+      });
+
+      setCodeSession({
+        owner,
+        repo: repoName,
+        branch: branchName,
+        baseBranch,
+      });
+      setIsFromExistingSession(false);
+
+      // Expand root folders by default
+      setExpandedFolders(new Set());
+    } catch (error: any) {
+      console.error('Failed to create branch:', error);
+      setInitError(error.message || 'Failed to create branch');
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  // Load file content when a file is selected
+  const loadFileContent = async (path: string) => {
+    if (!codeSession) return;
+
+    setIsLoadingFile(true);
+    try {
+      const response = await githubApi.getFileContent(
+        codeSession.owner,
+        codeSession.repo,
+        path,
+        codeSession.branch
+      );
+      setFileContent(response.data.content || '');
+    } catch (error: any) {
+      console.error('Failed to load file:', error);
+      setFileContent(`// Error loading file: ${error.message}`);
+    } finally {
+      setIsLoadingFile(false);
+    }
+  };
+
+  // Handle file selection
+  const handleFileSelect = (path: string, name: string) => {
+    setSelectedFile({ path, name });
+    loadFileContent(path);
+  };
+
+  const toggleFolder = (path: string) => {
     setExpandedFolders(prev => {
       const next = new Set(prev);
-      if (next.has(folder)) {
-        next.delete(folder);
+      if (next.has(path)) {
+        next.delete(path);
       } else {
-        next.add(folder);
+        next.add(path);
       }
       return next;
     });
   };
 
-  const fileTree: FolderNode = {
-    name: 'src',
-    type: 'folder',
-    children: [
-      {
-        name: 'components',
-        type: 'folder',
-        children: [
-          { name: 'Button.jsx', type: 'file', icon: '🔵' },
-          { name: 'Card.jsx', type: 'file', icon: '🔵' }
-        ]
-      },
-      {
-        name: 'styles',
-        type: 'folder',
-        children: []
-      },
-      { name: 'App.js', type: 'file', icon: 'JS' },
-      { name: 'index.css', type: 'file', icon: 'CSS' },
-      { name: 'package.json', type: 'file', icon: '📦' },
-      { name: 'README.md', type: 'file', icon: '📄' }
-    ]
-  };
+  // Render file tree recursively
+  const renderFileTree = (nodes: TreeNode[], level = 0): JSX.Element[] => {
+    return nodes.map((node) => {
+      const paddingLeft = level * 16 + 8;
 
-  const exampleCode = `import React from 'react';
+      if (node.type === 'file') {
+        return (
+          <div
+            key={node.path}
+            onClick={() => handleFileSelect(node.path, node.name)}
+            className={`flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
+              selectedFile?.path === node.path ? 'bg-base-300' : ''
+            }`}
+            style={{ paddingLeft }}
+          >
+            <span className="text-xs">{node.icon}</span>
+            <span className="text-sm truncate">{node.name}</span>
+          </div>
+        );
+      }
 
-// A simple button component
-const Button = ({ children, onClick, type = 'button' }) => {
-  const baseStyles = 'px-4 py-2 rounded font-semibold';
-  const typeStyles = 'bg-primary text-white hover:bg-primary/90';
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      className={\`\${baseStyles} \${typeStyles}\`}
-    >
-      {children}
-    </button>
-  );
-};
-
-export default Button;`;
-
-  const renderFileTree = (node: TreeNode, level = 0): JSX.Element | JSX.Element[] => {
-    const paddingLeft = level * 16 + 8;
-
-    if (node.type === 'file') {
+      const isExpanded = expandedFolders.has(node.path);
       return (
-        <div
-          key={node.name}
-          onClick={() => setSelectedFile(node.name)}
-          className={`flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
-            selectedFile === node.name ? 'bg-base-300' : ''
-          }`}
-          style={{ paddingLeft }}
-        >
-          <span className="text-xs">{node.icon}</span>
-          <span className="text-sm">{node.name}</span>
+        <div key={node.path}>
+          <div
+            onClick={() => toggleFolder(node.path)}
+            className="flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300"
+            style={{ paddingLeft }}
+          >
+            <svg
+              className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <span className="text-sm font-medium">{node.name}</span>
+          </div>
+          {isExpanded && node.children.length > 0 && renderFileTree(node.children, level + 1)}
         </div>
       );
-    }
-
-    const isExpanded = expandedFolders.has(node.name);
-    return (
-      <div key={node.name}>
-        <div
-          onClick={() => toggleFolder(node.name)}
-          className="flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300"
-          style={{ paddingLeft }}
-        >
-          <svg
-            className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-            fill="currentColor"
-            viewBox="0 0 20 20"
-          >
-            <path
-              fillRule="evenodd"
-              d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-              clipRule="evenodd"
-            />
-          </svg>
-          <span className="text-sm font-medium">{node.name}</span>
-        </div>
-        {isExpanded && node.children?.map(child => renderFileTree(child, level + 1))}
-      </div>
-    );
+    });
   };
 
+  // Code Editor component with real file content
   const CodeEditor = () => (
     <div className="flex h-full">
       {/* File Explorer Sidebar */}
-      <div className="w-64 bg-base-100 border-r border-base-300 overflow-y-auto">
+      <div className="w-64 bg-base-100 border-r border-base-300 overflow-y-auto flex-shrink-0">
         <div className="flex items-center justify-between px-3 py-2 border-b border-base-300">
           <span className="text-sm font-semibold uppercase tracking-wide">Explorer</span>
           <div className="flex gap-1">
-            <button className="p-1 hover:bg-base-200 rounded">
+            <button
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['github-tree'] })}
+              className="p-1 hover:bg-base-200 rounded"
+              title="Refresh"
+            >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
-                <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
-              </svg>
-            </button>
-            <button className="p-1 hover:bg-base-200 rounded">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
               </svg>
             </button>
           </div>
         </div>
+
+        {/* Branch info */}
+        {codeSession && (
+          <div className="px-3 py-2 border-b border-base-300 bg-base-200">
+            <div className="text-xs text-base-content/70">Branch</div>
+            <div className="text-sm font-medium text-primary truncate" title={codeSession.branch}>
+              {codeSession.branch}
+            </div>
+          </div>
+        )}
+
         <div className="py-2">
-          {renderFileTree(fileTree)}
+          {isLoadingTree ? (
+            <div className="flex items-center justify-center py-8">
+              <span className="loading loading-spinner loading-sm"></span>
+            </div>
+          ) : fileTree.length > 0 ? (
+            renderFileTree(fileTree)
+          ) : (
+            <div className="px-3 py-4 text-sm text-base-content/70 text-center">
+              No files found
+            </div>
+          )}
         </div>
       </div>
 
       {/* Code Editor Area */}
-      <div className="flex-1 flex flex-col bg-base-200">
+      <div className="flex-1 flex flex-col bg-base-200 min-w-0">
         {/* Tab Bar */}
         <div className="flex items-center bg-base-100 border-b border-base-300">
-          <div className="flex items-center gap-2 px-4 py-2 bg-base-200 border-r border-base-300">
-            <span className="text-xs">🔵</span>
-            <span className="text-sm">{selectedFile}</span>
-            <button className="ml-2 hover:bg-base-300 rounded px-1">
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-            </button>
-          </div>
+          {selectedFile ? (
+            <div className="flex items-center gap-2 px-4 py-2 bg-base-200 border-r border-base-300">
+              <span className="text-xs">{getFileIcon(selectedFile.name)}</span>
+              <span className="text-sm">{selectedFile.name}</span>
+              <button
+                onClick={() => {
+                  setSelectedFile(null);
+                  setFileContent(null);
+                }}
+                className="ml-2 hover:bg-base-300 rounded px-1"
+              >
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <div className="px-4 py-2 text-sm text-base-content/50">
+              Select a file to view
+            </div>
+          )}
         </div>
 
         {/* Code Content */}
         <div className="flex-1 overflow-auto">
-          <div className="p-4 font-mono text-sm">
-            {exampleCode.split('\n').map((line, i) => (
-              <div key={i} className="flex">
-                <span className="text-base-content/40 select-none w-12 text-right pr-4">
-                  {i + 1}
-                </span>
-                <span className="text-base-content">
-                  {line.length === 0 ? '\u00A0' : line}
-                </span>
+          {isLoadingFile ? (
+            <div className="flex items-center justify-center h-full">
+              <span className="loading loading-spinner loading-md"></span>
+            </div>
+          ) : fileContent !== null ? (
+            <div className="p-4 font-mono text-sm">
+              {fileContent.split('\n').map((line, i) => (
+                <div key={i} className="flex">
+                  <span className="text-base-content/40 select-none w-12 text-right pr-4 flex-shrink-0">
+                    {i + 1}
+                  </span>
+                  <span className="text-base-content whitespace-pre">
+                    {line.length === 0 ? '\u00A0' : line}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full text-base-content/50">
+              <div className="text-center">
+                <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                </svg>
+                <p>Select a file from the explorer to view its contents</p>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 
-  // Sessions List View
-  const SessionsList = () => (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  // Repository Selector View
+  const RepoSelector = () => (
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-base-content mb-2">Code Sessions</h1>
-        <p className="text-sm text-base-content/70">
-          Select a session to view its code workspace
+        <h1 className="text-3xl font-bold text-base-content mb-2">Start Code Session</h1>
+        <p className="text-base-content/70">
+          Select a repository to start editing. A new branch will be created for your changes:
+          <code className="ml-2 px-2 py-1 bg-base-200 rounded text-sm">
+            webedt/started-from-code-session-{'{id}'}
+          </code>
         </p>
       </div>
 
-      {isLoadingSessions && (
-        <div className="text-center py-12">
-          <span className="loading loading-spinner loading-lg text-primary"></span>
-          <p className="mt-2 text-base-content/70">Loading sessions...</p>
+      {initError && (
+        <div className="alert alert-error mb-6">
+          <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{initError}</span>
+          <button onClick={() => setInitError(null)} className="btn btn-sm btn-ghost">Dismiss</button>
         </div>
       )}
 
-      {sessionsError && (
+      {isLoadingRepos && (
+        <div className="text-center py-12">
+          <span className="loading loading-spinner loading-lg text-primary"></span>
+          <p className="mt-2 text-base-content/70">Loading repositories...</p>
+        </div>
+      )}
+
+      {reposError && (
         <div className="alert alert-error">
           <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <span>{sessionsError instanceof Error ? sessionsError.message : 'Failed to load sessions'}</span>
+          <span>
+            {reposError instanceof Error ? reposError.message : 'Failed to load repositories'}
+            {String(reposError).includes('GitHub not connected') && (
+              <span className="ml-2">
+                Please <a href="/settings" className="link link-primary">connect your GitHub account</a> first.
+              </span>
+            )}
+          </span>
         </div>
       )}
 
-      {!isLoadingSessions && !sessionsError && sessions.length === 0 && (
+      {!isLoadingRepos && !reposError && repos.length === 0 && (
         <div className="text-center py-12">
           <svg
             className="mx-auto h-12 w-12 text-base-content/40"
@@ -250,71 +527,72 @@ export default Button;`;
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
             />
           </svg>
-          <h3 className="mt-2 text-sm font-medium text-base-content">No sessions</h3>
+          <h3 className="mt-2 text-sm font-medium text-base-content">No repositories</h3>
           <p className="mt-1 text-sm text-base-content/70">
-            No code sessions found in storage.
+            No repositories found. Make sure your GitHub account is connected.
           </p>
         </div>
       )}
 
-      {!isLoadingSessions && !sessionsError && sessions.length > 0 && (
-        <div className="bg-base-100 shadow overflow-hidden sm:rounded-md">
-          <ul className="divide-y divide-base-300">
-            {sessions.map((session) => (
-              <li key={session.sessionId}>
-                <div
-                  onClick={() => setSelectedSessionId(session.sessionId)}
-                  className="px-4 py-4 sm:px-6 hover:bg-base-200 cursor-pointer"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-primary truncate">
-                        {session.sessionId}
-                      </p>
-                      <div className="mt-1 flex items-center gap-4 text-sm text-base-content/70">
-                        <span>
-                          Created: {new Date(session.createdAt).toLocaleString()}
-                        </span>
-                        {session.size && (
-                          <span>
-                            Size: {(session.size / 1024 / 1024).toFixed(2)} MB
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="ml-4 flex-shrink-0">
-                      <svg
-                        className="w-5 h-5 text-base-content/40"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </div>
+      {!isLoadingRepos && !reposError && repos.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {repos.map((repo) => (
+            <div
+              key={repo.id}
+              onClick={() => !isInitializing && initializeCodeSession(repo)}
+              className={`p-4 bg-base-100 border border-base-300 rounded-lg hover:border-primary hover:shadow-md cursor-pointer transition-all ${
+                isInitializing ? 'opacity-50 cursor-wait' : ''
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-primary truncate">{repo.fullName}</span>
+                    {repo.private && (
+                      <span className="badge badge-xs badge-outline">Private</span>
+                    )}
+                  </div>
+                  {repo.description && (
+                    <p className="mt-1 text-sm text-base-content/70 line-clamp-2">
+                      {repo.description}
+                    </p>
+                  )}
+                  <div className="mt-2 text-xs text-base-content/50">
+                    Default branch: {repo.defaultBranch}
                   </div>
                 </div>
-              </li>
-            ))}
-          </ul>
+                <div className="ml-4 flex-shrink-0">
+                  {isInitializing ? (
+                    <span className="loading loading-spinner loading-sm"></span>
+                  ) : (
+                    <svg
+                      className="w-5 h-5 text-base-content/40"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 
-  // Session Detail View (with mock code editor for now)
-  const SessionDetailView = () => {
-    if (!selectedSessionId) {
-      return <SessionsList />;
-    }
-
-    if (isLoadingSession) {
+  // Code Session View with header
+  const CodeSessionView = () => {
+    // Show loading state when fetching existing session
+    if (sessionId && isLoadingExistingSession) {
       return (
         <div className="flex items-center justify-center h-[calc(100vh-112px)]">
           <div className="text-center">
@@ -325,38 +603,86 @@ export default Button;`;
       );
     }
 
+    // If we have a sessionId but the session doesn't have branch info, show error
+    if (sessionId && existingSessionData?.data && !codeSession) {
+      const session = existingSessionData.data;
+      if (!session.repositoryOwner || !session.repositoryName || !session.branch) {
+        return (
+          <div className="max-w-2xl mx-auto px-4 py-8">
+            <div className="alert alert-warning">
+              <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <h3 className="font-bold">Branch not available</h3>
+                <p className="text-sm">This session doesn't have a branch created yet. The branch is created when the AI worker starts processing.</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+    }
+
+    if (!codeSession) {
+      return <RepoSelector />;
+    }
+
     return (
       <div className="h-[calc(100vh-112px)] flex flex-col">
         {/* Session Header */}
-        <div className="bg-base-100 border-b border-base-300 px-4 py-3">
+        <div className="bg-base-100 border-b border-base-300 px-4 py-3 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setSelectedSessionId(null)}
-                className="btn btn-ghost btn-sm btn-circle"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
+              {/* Only show back button if not from an existing session URL */}
+              {!isFromExistingSession && (
+                <button
+                  onClick={() => {
+                    setCodeSession(null);
+                    setSelectedFile(null);
+                    setFileContent(null);
+                    setExpandedFolders(new Set());
+                  }}
+                  className="btn btn-ghost btn-sm btn-circle"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fillRule="evenodd"
+                      d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+              )}
               <div>
-                <h2 className="text-sm font-semibold text-base-content">{selectedSessionId}</h2>
-                {sessionData && (
-                  <p className="text-xs text-base-content/70">
-                    Last modified: {new Date(sessionData.lastModified).toLocaleString()}
-                  </p>
-                )}
+                <h2 className="text-sm font-semibold text-base-content">
+                  {codeSession.owner}/{codeSession.repo}
+                </h2>
+                <p className="text-xs text-base-content/70">
+                  Branch: <span className="text-primary">{codeSession.branch}</span>
+                  <span className="mx-2">•</span>
+                  Base: {codeSession.baseBranch}
+                </p>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={`https://github.com/${codeSession.owner}/${codeSession.repo}/tree/${codeSession.branch}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-sm btn-ghost gap-2"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                </svg>
+                View on GitHub
+              </a>
             </div>
           </div>
         </div>
 
         {/* Code Editor */}
-        <div className="flex-1">
+        <div className="flex-1 min-h-0">
           <CodeEditor />
         </div>
       </div>
@@ -366,7 +692,7 @@ export default Button;`;
   // Always use SessionLayout to show status bar
   return (
     <SessionLayout>
-      {selectedSessionId ? <SessionDetailView /> : <SessionsList />}
+      <CodeSessionView />
     </SessionLayout>
   );
 }
