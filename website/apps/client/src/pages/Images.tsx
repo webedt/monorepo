@@ -284,6 +284,16 @@ function ImagesContent() {
         </div>
       )}
 
+      {/* New Button */}
+      <div className="p-3 border-b border-base-300">
+        <button className="btn btn-sm btn-primary w-full gap-2">
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+          New {editorMode === 'image' ? 'Image' : editorMode === 'spritesheet' ? 'Sprite Sheet' : 'Animation'}
+        </button>
+      </div>
+
       {/* Recent Items */}
       <div className="flex-1 overflow-y-auto">
         <div className="p-2">
