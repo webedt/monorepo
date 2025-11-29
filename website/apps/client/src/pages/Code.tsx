@@ -198,9 +198,6 @@ export default function Code() {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
 
-  // Get the active tab
-  const activeTab = tabs.find(tab => tab.path === activeTabPath) || null;
-
   // Fetch existing session if sessionId is provided
   const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
     queryKey: ['session', sessionId],
