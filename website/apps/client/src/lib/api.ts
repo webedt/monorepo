@@ -152,6 +152,34 @@ export const githubApi = {
       method: 'POST',
       body: data,
     }),
+
+  // Delete a file
+  deleteFile: (owner: string, repo: string, path: string, data: { branch: string; sha?: string; message?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/contents/${path}`, {
+      method: 'DELETE',
+      body: data,
+    }),
+
+  // Rename a file
+  renameFile: (owner: string, repo: string, oldPath: string, data: { newPath: string; branch: string; message?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/rename/${oldPath}`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  // Delete a folder
+  deleteFolder: (owner: string, repo: string, folderPath: string, data: { branch: string; message?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/folder/${folderPath}`, {
+      method: 'DELETE',
+      body: data,
+    }),
+
+  // Rename a folder
+  renameFolder: (owner: string, repo: string, oldFolderPath: string, data: { newFolderPath: string; branch: string; message?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/rename-folder/${oldFolderPath}`, {
+      method: 'POST',
+      body: data,
+    }),
 };
 
 // User API
