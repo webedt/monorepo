@@ -45,9 +45,29 @@ export class ClaudeCodeProvider extends BaseProvider {
         ? userRequest
         : this.createStructuredMessageStream(userRequest);
 
+      // Create AbortController for SDK - either use provided signal or create new one
+      const abortController = new AbortController();
+
+      // If an external abort signal is provided, forward abort to our controller
+      if (options.abortSignal) {
+        options.abortSignal.addEventListener('abort', () => {
+          console.log('[ClaudeCodeProvider] External abort signal received, aborting SDK query');
+          abortController.abort();
+        });
+
+        // Check if already aborted
+        if (options.abortSignal.aborted) {
+          console.log('[ClaudeCodeProvider] Abort signal already aborted, skipping execution');
+          throw new Error('Execution aborted before start');
+        }
+      }
+
       const queryStream = query({
         prompt,
-        options: queryOptions
+        options: {
+          ...queryOptions,
+          abortController
+        }
       });
 
       let lastMessage: any = null;
@@ -98,6 +118,29 @@ export class ClaudeCodeProvider extends BaseProvider {
 
       console.log('[ClaudeCodeProvider] Execution completed successfully');
     } catch (error) {
+      // Check if this was an abort
+      const isAbort = options.abortSignal?.aborted ||
+        (error instanceof Error && (
+          error.name === 'AbortError' ||
+          error.message.includes('aborted') ||
+          error.message.includes('abort')
+        ));
+
+      if (isAbort) {
+        console.log('[ClaudeCodeProvider] Execution was aborted');
+        // Send abort event to stream
+        onEvent({
+          type: 'assistant_message',
+          data: {
+            type: 'system',
+            subtype: 'abort',
+            message: 'Execution was aborted by user'
+          }
+        });
+        // Re-throw with clear abort message
+        throw new Error('Execution aborted by user');
+      }
+
       console.error('[ClaudeCodeProvider] Execution error:', error);
       console.error('[ClaudeCodeProvider] Error details:', {
         message: error instanceof Error ? error.message : String(error),

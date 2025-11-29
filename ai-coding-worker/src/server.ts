@@ -27,6 +27,8 @@ app.use(express.json({ limit: '10mb' }));
 let workerStatus: 'idle' | 'busy' = 'idle';
 let activeExecution: Promise<void> | null = null;
 let shutdownRequested = false;
+let activeAbortController: AbortController | null = null;
+let activeSessionId: string | null = null;
 
 // Create orchestrator instance
 const orchestrator = new Orchestrator(TMP_DIR, DB_BASE_URL);
@@ -238,6 +240,10 @@ app.post('/execute', async (req: Request, res: Response) => {
     return;
   }
 
+  // Create abort controller for this execution
+  activeAbortController = new AbortController();
+  activeSessionId = request.websiteSessionId || null;
+
   console.log(`[Container ${containerId}] Starting execution`);
   console.log(`[Container ${containerId}] Provider: ${request.codingAssistantProvider}`);
 
@@ -275,15 +281,25 @@ app.post('/execute', async (req: Request, res: Response) => {
 
   // Track the execution promise for graceful shutdown
   // Note: Worker will NEVER become idle again after execute starts - it will exit
+  const abortSignal = activeAbortController.signal;
   const executionPromise = (async () => {
     let exitCode = 0;
     try {
-      // Execute the orchestrated workflow
-      await orchestrator.execute(request, req, res);
+      // Execute the orchestrated workflow with abort signal
+      await orchestrator.execute(request, req, res, abortSignal);
       console.log(`[Container ${containerId}] Execution completed successfully`);
     } catch (error) {
-      console.error(`[Container ${containerId}] Execution failed:`, error);
+      // Check if this was an abort
+      if (abortSignal.aborted) {
+        console.log(`[Container ${containerId}] Execution was aborted`);
+      } else {
+        console.error(`[Container ${containerId}] Execution failed:`, error);
+      }
       exitCode = 1;
+    } finally {
+      // Clean up abort controller
+      activeAbortController = null;
+      activeSessionId = null;
     }
 
     // Exit process after completion (ephemeral container model)
@@ -292,6 +308,49 @@ app.post('/execute', async (req: Request, res: Response) => {
   })();
 
   activeExecution = executionPromise;
+});
+
+/**
+ * Abort endpoint - allows client to abort the currently running execution
+ * This will signal the Claude Agent SDK to stop processing
+ */
+app.post('/abort', (req: Request, res: Response) => {
+  const { sessionId } = req.body;
+  console.log(`[Container ${containerId}] Abort requested for session: ${sessionId || 'any'}`);
+  res.setHeader('X-Container-ID', containerId);
+
+  if (workerStatus === 'idle') {
+    res.json({ status: 'ok', message: 'Worker was idle, nothing to abort' });
+    return;
+  }
+
+  // Verify session ID matches if provided
+  if (sessionId && activeSessionId && sessionId !== activeSessionId) {
+    res.status(400).json({
+      status: 'error',
+      message: `Session mismatch: worker is processing ${activeSessionId}, not ${sessionId}`,
+      containerId
+    });
+    return;
+  }
+
+  // Abort the active execution
+  if (activeAbortController) {
+    console.log(`[Container ${containerId}] Aborting execution for session: ${activeSessionId}`);
+    activeAbortController.abort();
+    res.json({
+      status: 'ok',
+      message: 'Abort signal sent',
+      sessionId: activeSessionId,
+      containerId
+    });
+  } else {
+    res.json({
+      status: 'ok',
+      message: 'No active abort controller, but worker is busy',
+      containerId
+    });
+  }
 });
 
 /**
@@ -367,6 +426,7 @@ app.use((req: Request, res: Response) => {
       'GET  /sessions/:sessionId',
       'GET  /sessions/:sessionId/stream',
       'POST /execute',
+      'POST /abort',
       'POST /shutdown'
     ],
     containerId
@@ -393,6 +453,7 @@ app.listen(PORT, () => {
   console.log('  GET    /sessions                  - List all sessions (from MinIO)');
   console.log('  DELETE /sessions/:id              - Delete a session');
   console.log('  POST   /execute                   - Execute coding assistant request');
+  console.log('  POST   /abort                     - Abort current execution');
   console.log('  POST   /shutdown                  - Signal worker to shutdown (client confirms receipt)');
   console.log('');
   console.log('Supported providers:');

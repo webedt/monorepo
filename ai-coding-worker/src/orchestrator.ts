@@ -62,7 +62,7 @@ export class Orchestrator {
   /**
    * Execute a complete workflow request
    */
-  async execute(request: ExecuteRequest, req: Request, res: Response): Promise<void> {
+  async execute(request: ExecuteRequest, req: Request, res: Response, abortSignal?: AbortSignal): Promise<void> {
     const startTime = Date.now();
     let chunkIndex = 0;
     let providerSessionId: string | undefined;
@@ -536,7 +536,8 @@ export class Orchestrator {
           authentication: request.codingAssistantAuthentication,
           workspace: workspacePath,
           resumeSessionId: providerSessionId, // Use provider's internal session ID
-          providerOptions: request.providerOptions
+          providerOptions: request.providerOptions,
+          abortSignal // Pass abort signal to provider
         },
         (event) => {
           // Extract provider session ID from init message

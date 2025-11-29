@@ -7,6 +7,7 @@ import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { getPreviewUrl } from '../utils/previewUrlHelper';
+import { activeWorkerSessions } from './execute';
 
 const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
 
@@ -484,26 +485,52 @@ router.post('/:id/abort', requireAuth, async (req, res) => {
       return;
     }
 
+    // Try to signal the AI worker to abort
+    let workerAborted = false;
+    const workerInfo = activeWorkerSessions.get(sessionId);
+
+    if (workerInfo) {
+      console.log(`[Sessions] Found active worker for session ${sessionId}: ${workerInfo.containerId}`);
+
+      try {
+        const abortResponse = await fetch(`${workerInfo.workerUrl}/abort`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+
+        if (abortResponse.ok) {
+          const abortResult = await abortResponse.json();
+          console.log(`[Sessions] Worker abort response:`, abortResult);
+          workerAborted = true;
+        } else {
+          console.log(`[Sessions] Worker abort failed with status: ${abortResponse.status}`);
+        }
+      } catch (workerError) {
+        console.error(`[Sessions] Failed to signal worker abort:`, workerError);
+        // Continue - we'll still update the database
+      }
+
+      // Clean up the session mapping
+      activeWorkerSessions.delete(sessionId);
+    } else {
+      console.log(`[Sessions] No active worker found for session ${sessionId} - may have already completed`);
+    }
+
     // Update session status to interrupted
     await db
       .update(chatSessions)
       .set({ status: 'error', completedAt: new Date() })
       .where(eq(chatSessions.id, sessionId));
 
-    console.log(`[Sessions] Session ${sessionId} aborted by user`);
-
-    // TODO: In a production system, you would also need to signal the AI worker
-    // to stop processing. This could be done via:
-    // 1. A shared Redis pub/sub channel
-    // 2. Direct HTTP call to the worker if session-to-worker mapping exists
-    // 3. WebSocket connection between server and worker
-    // For now, we just update the database status
+    console.log(`[Sessions] Session ${sessionId} aborted by user (worker signaled: ${workerAborted})`);
 
     res.json({
       success: true,
       data: {
-        message: 'Session aborted',
-        sessionId: sessionId
+        message: workerAborted ? 'Session aborted and worker signaled' : 'Session aborted (worker may have already completed)',
+        sessionId: sessionId,
+        workerAborted
       }
     });
   } catch (error) {
