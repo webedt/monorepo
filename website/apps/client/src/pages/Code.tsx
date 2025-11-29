@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
+import type { GitHubPullRequest } from '@webedt/shared';
 
 // File operation state for modals
 interface FileOperationState {
@@ -187,6 +188,7 @@ const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
 export default function Code() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   // Get pre-selected settings from navigation state (from QuickSessionSetup)
@@ -198,6 +200,12 @@ export default function Code() {
   const [isInitializing, setIsInitializing] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [isFromExistingSession, setIsFromExistingSession] = useState(false);
+
+  // PR-related state
+  const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
+  const [prError, setPrError] = useState<string | null>(null);
+  const [prSuccess, setPrSuccess] = useState<string | null>(null);
+  const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
 
   // File explorer state
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -286,6 +294,28 @@ export default function Code() {
     if (!treeData?.data?.tree) return [];
     return transformGitHubTree(treeData.data.tree);
   }, [treeData]);
+
+  // Query to check for existing PR (for code sessions)
+  const { data: prData, refetch: refetchPr } = useQuery({
+    queryKey: ['pr', codeSession?.owner, codeSession?.repo, codeSession?.branch],
+    queryFn: async () => {
+      if (!codeSession?.owner || !codeSession?.repo || !codeSession?.branch) {
+        return null;
+      }
+      const response = await githubApi.getPulls(
+        codeSession.owner,
+        codeSession.repo,
+        codeSession.branch,
+        codeSession.baseBranch || undefined
+      );
+      return response.data as GitHubPullRequest[];
+    },
+    enabled: !!codeSession?.owner && !!codeSession?.repo && !!codeSession?.branch,
+    refetchOnWindowFocus: false,
+  });
+
+  const existingPr = prData?.find((pr: GitHubPullRequest) => pr.state === 'open');
+  const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged === true);
 
   // Create branch mutation
   const createBranchMutation = useMutation({
@@ -657,6 +687,93 @@ export default function Code() {
       setIsOperating(false);
     }
   }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent]);
+
+  // PR Handler Functions
+  const handleCreatePR = async () => {
+    if (!codeSession?.owner || !codeSession?.repo || !codeSession?.branch || !codeSession?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('create');
+    setPrError(null);
+    setPrSuccess(null);
+
+    try {
+      const response = await githubApi.createPull(
+        codeSession.owner,
+        codeSession.repo,
+        {
+          title: `Code changes from ${codeSession.branch}`,
+          head: codeSession.branch,
+          base: codeSession.baseBranch,
+        }
+      );
+      setPrSuccess(`PR #${response.data.number} created successfully!`);
+      refetchPr();
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to create PR';
+      setPrError(errorMsg);
+    } finally {
+      setPrLoading(null);
+    }
+  };
+
+  const handleViewPR = () => {
+    if (existingPr?.htmlUrl) {
+      window.open(existingPr.htmlUrl, '_blank');
+    }
+  };
+
+  const handleAutoPR = async () => {
+    if (!codeSession?.owner || !codeSession?.repo || !codeSession?.branch || !codeSession?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('auto');
+    setPrError(null);
+    setPrSuccess(null);
+    setAutoPrProgress('Starting Auto PR...');
+
+    try {
+      const response = await githubApi.autoPR(
+        codeSession.owner,
+        codeSession.repo,
+        codeSession.branch,
+        {
+          base: codeSession.baseBranch,
+          title: `Code changes from ${codeSession.branch}`,
+          // Note: No sessionId for code sessions since they don't have database records
+        }
+      );
+
+      const results = response.data;
+      setPrSuccess(`Auto PR completed! PR #${results.pr?.number} merged successfully.`);
+      setAutoPrProgress(null);
+      refetchPr();
+
+      // After successful auto PR, redirect to sessions list
+      setTimeout(() => {
+        navigate('/sessions');
+      }, 2000);
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to complete Auto PR';
+
+      if (errorMsg.includes('conflict')) {
+        setPrError('Merge conflict detected. Please resolve conflicts manually.');
+      } else if (errorMsg.includes('Timeout')) {
+        setPrError(errorMsg);
+      } else {
+        setPrError(errorMsg);
+      }
+
+      setAutoPrProgress(null);
+      refetchPr();
+    } finally {
+      setPrLoading(null);
+    }
+  };
 
   // Render file tree recursively
   const renderFileTree = (nodes: TreeNode[], level = 0): JSX.Element[] => {
@@ -1124,6 +1241,34 @@ export default function Code() {
           </div>
         </div>
 
+        {/* PR Status Alerts */}
+        {(autoPrProgress || prSuccess || prError) && (
+          <div className="px-4 py-2 border-b border-base-300 bg-base-100 space-y-2">
+            {autoPrProgress && (
+              <div className="alert alert-info py-2">
+                <span className="loading loading-spinner loading-sm"></span>
+                <span className="text-sm font-semibold">{autoPrProgress}</span>
+              </div>
+            )}
+
+            {prSuccess && (
+              <div className="alert alert-success py-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="text-sm">{prSuccess}</span>
+                <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+              </div>
+            )}
+
+            {prError && (
+              <div className="alert alert-error py-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="text-sm">{prError}</span>
+                <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Code Editor */}
         <div className="flex-1 min-h-0">
           <CodeEditor />
@@ -1132,9 +1277,77 @@ export default function Code() {
     );
   };
 
+  // Create PR actions for the branch line (similar to Chat.tsx)
+  const prActions = codeSession && codeSession.branch && codeSession.baseBranch && (
+    <>
+      {/* View PR button - show only if PR is open */}
+      {existingPr && (
+        <button
+          onClick={handleViewPR}
+          className="btn btn-xs btn-info"
+          title={`View open PR #${existingPr.number}`}
+        >
+          View PR #{existingPr.number}
+        </button>
+      )}
+
+      {/* PR Merged button - show when PR was already merged */}
+      {!existingPr && mergedPr && (
+        <button
+          onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
+          className="btn btn-xs btn-success"
+          title={`PR #${mergedPr.number} was merged`}
+        >
+          PR #{mergedPr.number} Merged
+        </button>
+      )}
+
+      {/* Create PR button - show if no open PR exists and not merged */}
+      {!existingPr && !mergedPr && (
+        <button
+          onClick={handleCreatePR}
+          className="btn btn-xs btn-primary"
+          disabled={prLoading !== null}
+          title="Create a pull request"
+        >
+          {prLoading === 'create' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Create PR'
+          )}
+        </button>
+      )}
+
+      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged */}
+      {!mergedPr && (
+        <button
+          onClick={handleAutoPR}
+          className="btn btn-xs btn-accent"
+          disabled={prLoading !== null}
+          title="Create PR, merge base branch, and merge PR in one click"
+        >
+          {prLoading === 'auto' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Auto PR'
+          )}
+        </button>
+      )}
+    </>
+  );
+
+  // Construct the repository URL for SessionLayout
+  const selectedRepoUrl = codeSession ? `https://github.com/${codeSession.owner}/${codeSession.repo}.git` : undefined;
+
   // Always use SessionLayout to show status bar
   return (
-    <SessionLayout>
+    <SessionLayout
+      selectedRepo={selectedRepoUrl}
+      baseBranch={codeSession?.baseBranch}
+      branch={codeSession?.branch}
+      isLocked={!!codeSession}
+      prActions={prActions}
+    >
       <CodeSessionView />
 
       {/* Rename Modal */}
