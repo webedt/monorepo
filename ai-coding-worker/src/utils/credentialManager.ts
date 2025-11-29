@@ -121,6 +121,13 @@ export class CredentialManager {
 
   /**
    * Write Codex SDK credentials
+   * Supports multiple authentication formats:
+   * - JSON with apiKey field (OpenAI API key)
+   * - JSON with accessToken/refreshToken (ChatGPT subscription OAuth)
+   * - Plain string (treated as API key)
+   *
+   * Also sets OPENAI_API_KEY environment variable for SDK
+   *
    * @param authentication - Codex authentication token or JSON structure
    */
   static writeCodexCredentials(authentication: string): void {
@@ -128,15 +135,50 @@ export class CredentialManager {
 
     // Parse authentication if it's JSON, otherwise treat as plain auth token
     let credentials: any;
+    let apiKey: string | undefined;
+
     try {
-      credentials = JSON.parse(authentication);
-      // If it's valid JSON, write it as-is (could be OAuth structure or other format)
+      const parsed = JSON.parse(authentication);
+
+      // Check for API key format
+      if (parsed.apiKey) {
+        apiKey = parsed.apiKey;
+        credentials = {
+          apiKey: parsed.apiKey,
+          createdAt: new Date().toISOString()
+        };
+        console.log('[CredentialManager] Using OpenAI API key authentication for Codex');
+      }
+      // Check for ChatGPT subscription OAuth format
+      else if (parsed.accessToken) {
+        credentials = {
+          accessToken: parsed.accessToken,
+          refreshToken: parsed.refreshToken,
+          expiresAt: parsed.expiresAt,
+          createdAt: new Date().toISOString()
+        };
+        console.log('[CredentialManager] Using ChatGPT OAuth authentication for Codex');
+      }
+      // Unknown format, write as-is
+      else {
+        credentials = parsed;
+        console.log('[CredentialManager] Using unknown format for Codex credentials');
+      }
     } catch {
-      // Not JSON, treat as plain auth token
+      // Not JSON, treat as plain API key
+      apiKey = authentication;
       credentials = {
-        authToken: authentication,
+        apiKey: authentication,
         createdAt: new Date().toISOString()
       };
+      console.log('[CredentialManager] Using plain API key string for Codex');
+    }
+
+    // Set OPENAI_API_KEY environment variable if we have an API key
+    // The Codex SDK reads from this env var
+    if (apiKey) {
+      process.env.OPENAI_API_KEY = apiKey;
+      console.log('[CredentialManager] Set OPENAI_API_KEY environment variable');
     }
 
     this.writeCredentialFile(credentialPath, credentials);

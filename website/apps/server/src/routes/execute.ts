@@ -5,7 +5,8 @@ import { eq, and, or } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { ensureValidToken } from '../lib/claudeAuth';
-import type { ClaudeAuth } from '@webedt/shared';
+import { ensureValidCodexToken, isValidCodexAuth } from '../lib/codexAuth';
+import type { ClaudeAuth, CodexAuth, AIProvider, ProviderAuth } from '@webedt/shared';
 import { parseRepoUrl, generateSessionPath } from '../utils/sessionPathHelper';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -27,6 +28,7 @@ const sanitizeForLogging = (data: any): any => {
       sessionKey: sanitized.codingAssistantAuthentication.sessionKey ? '[REDACTED]' : undefined,
       accessToken: sanitized.codingAssistantAuthentication.accessToken ? '[REDACTED]' : undefined,
       refreshToken: sanitized.codingAssistantAuthentication.refreshToken ? '[REDACTED]' : undefined,
+      apiKey: sanitized.codingAssistantAuthentication.apiKey ? '[REDACTED]' : undefined,
       expiresAt: sanitized.codingAssistantAuthentication.expiresAt,
     };
   }
@@ -91,12 +93,32 @@ const executeHandler = async (req: any, res: any) => {
       return;
     }
 
-    if (!authReq.user?.claudeAuth) {
-      res.status(400).json({
-        success: false,
-        error: 'Claude authentication not configured. Please add your Claude credentials.',
-      });
-      return;
+    // Determine which provider to use
+    // Priority: request param > user preference > default (claude)
+    const requestedProvider = params.provider as AIProvider | undefined;
+    const userPreferredProvider = (authReq.user?.preferredProvider as AIProvider) || 'claude';
+    const selectedProvider: AIProvider = requestedProvider || userPreferredProvider;
+
+    console.log(`[Execute] Provider selection: requested=${requestedProvider}, userPref=${userPreferredProvider}, selected=${selectedProvider}`);
+
+    // Validate authentication based on selected provider
+    if (selectedProvider === 'codex') {
+      if (!isValidCodexAuth(authReq.user?.codexAuth)) {
+        res.status(400).json({
+          success: false,
+          error: 'OpenAI Codex authentication not configured. Please add your OpenAI credentials in Settings.',
+        });
+        return;
+      }
+    } else {
+      // Default: Claude
+      if (!authReq.user?.claudeAuth) {
+        res.status(400).json({
+          success: false,
+          error: 'Claude authentication not configured. Please add your Claude credentials.',
+        });
+        return;
+      }
     }
 
     // Check if we're continuing an existing session or creating a new one
@@ -240,31 +262,67 @@ const executeHandler = async (req: any, res: any) => {
         .where(eq(chatSessions.id, chatSession.id));
     }
 
-    // Ensure Claude token is valid, refresh if needed
-    let claudeAuth: ClaudeAuth = authReq.user.claudeAuth;
+    // Ensure provider token is valid, refresh if needed
+    let providerAuth: ProviderAuth;
+    let providerName: string;
     let tokenWasRefreshed = false;
 
-    try {
-      const refreshedAuth = await ensureValidToken(claudeAuth);
-      if (refreshedAuth !== claudeAuth) {
-        claudeAuth = refreshedAuth;
-        tokenWasRefreshed = true;
+    if (selectedProvider === 'codex') {
+      // Codex authentication
+      let codexAuth: CodexAuth = authReq.user.codexAuth!;
+      providerName = 'Codex';
 
-        // Save refreshed token to database
-        await db
-          .update(users)
-          .set({ claudeAuth: refreshedAuth })
-          .where(eq(users.id, authReq.user.id));
+      try {
+        const refreshedAuth = await ensureValidCodexToken(codexAuth);
+        if (refreshedAuth !== codexAuth) {
+          codexAuth = refreshedAuth;
+          tokenWasRefreshed = true;
 
-        console.log(`[Execute] Refreshed and saved Claude token for user ${authReq.user.id}`);
+          // Save refreshed token to database
+          await db
+            .update(users)
+            .set({ codexAuth: refreshedAuth })
+            .where(eq(users.id, authReq.user.id));
+
+          console.log(`[Execute] Refreshed and saved Codex token for user ${authReq.user.id}`);
+        }
+        providerAuth = codexAuth;
+      } catch (error) {
+        console.error('[Execute] Failed to refresh Codex token:', error);
+        res.status(401).json({
+          success: false,
+          error: 'Failed to refresh OpenAI authentication. Please re-authenticate.',
+        });
+        return;
       }
-    } catch (error) {
-      console.error('[Execute] Failed to refresh Claude token:', error);
-      res.status(401).json({
-        success: false,
-        error: 'Failed to refresh Claude authentication. Please re-authenticate with Claude.',
-      });
-      return;
+    } else {
+      // Claude authentication (default)
+      let claudeAuth: ClaudeAuth = authReq.user.claudeAuth!;
+      providerName = 'ClaudeAgentSDK';
+
+      try {
+        const refreshedAuth = await ensureValidToken(claudeAuth);
+        if (refreshedAuth !== claudeAuth) {
+          claudeAuth = refreshedAuth;
+          tokenWasRefreshed = true;
+
+          // Save refreshed token to database
+          await db
+            .update(users)
+            .set({ claudeAuth: refreshedAuth })
+            .where(eq(users.id, authReq.user.id));
+
+          console.log(`[Execute] Refreshed and saved Claude token for user ${authReq.user.id}`);
+        }
+        providerAuth = claudeAuth;
+      } catch (error) {
+        console.error('[Execute] Failed to refresh Claude token:', error);
+        res.status(401).json({
+          success: false,
+          error: 'Failed to refresh Claude authentication. Please re-authenticate with Claude.',
+        });
+        return;
+      }
     }
 
     // Setup SSE manually
@@ -308,8 +366,8 @@ const executeHandler = async (req: any, res: any) => {
 
     const executePayload: any = {
       userRequest: parsedUserRequest,
-      codingAssistantProvider: 'ClaudeAgentSDK',
-      codingAssistantAuthentication: claudeAuth,
+      codingAssistantProvider: providerName,
+      codingAssistantAuthentication: providerAuth,
       // Always send websiteSessionId so AI worker knows where to store session data
       websiteSessionId: chatSession.id,
       // Always use the autoCommit setting from the session (persisted in DB)
@@ -331,6 +389,8 @@ const executeHandler = async (req: any, res: any) => {
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
       - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
       - userProvidedSessionId (resuming): ${!!websiteSessionId}
+      - selectedProvider: ${selectedProvider}
+      - providerName: ${providerName}
       - preferredModel: ${authReq.user.preferredModel || 'default (not set)'}
     `);
 
@@ -355,6 +415,7 @@ const executeHandler = async (req: any, res: any) => {
     console.log(`[Execute] Destination: ${aiWorkerUrl}/execute`);
     console.log(`[Execute] Website Session ID (UUID): ${chatSession.id}`);
     console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'Not yet created'}`);
+    console.log(`[Execute] AI Provider: ${providerName} (${selectedProvider})`);
     console.log(`[Execute] User Request: ${truncateContent(executePayload.userRequest)}`);
     console.log(`[Execute] Repository: ${executePayload.github?.repoUrl || 'N/A'}`);
     console.log(`[Execute] Branch: ${executePayload.github?.branch || 'N/A'}`);

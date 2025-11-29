@@ -27,7 +27,8 @@ export class ProviderFactory {
       case 'codex':
       case 'cursor':
       case 'codexsdk':
-        return new CodexProvider(authentication, workspace);
+      case 'openai':
+        return new CodexProvider(authentication, workspace, options?.model, isResuming);
 
       // Future providers:
       // case 'copilot':
@@ -47,7 +48,7 @@ export class ProviderFactory {
    * Get list of supported providers
    */
   static getSupportedProviders(): string[] {
-    return ['claude-code', 'claude', 'claudeagentsdk', 'codex', 'cursor', 'codexsdk'];
+    return ['claude-code', 'claude', 'claudeagentsdk', 'codex', 'cursor', 'codexsdk', 'openai'];
   }
 
   /**
