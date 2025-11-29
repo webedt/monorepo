@@ -1,4 +1,4 @@
-import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Link, Outlet, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi } from '@/lib/api';
 import { useState, useRef, useEffect } from 'react';
@@ -20,6 +20,7 @@ export default function Layout() {
   const { selectedRepo, baseBranch, isLocked } = useRepoStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showVersionDetails, setShowVersionDetails] = useState(false);
@@ -92,11 +93,14 @@ export default function Layout() {
     : '??';
 
   // Detect if we're in editor mode (on /sessions or /session/*)
+  // Settings page respects the 'from' URL parameter to show the correct navbar
+  const settingsOrigin = searchParams.get('from');
   const isEditorMode = location.pathname === '/sessions' ||
                        location.pathname === '/trash' ||
                        location.pathname.startsWith('/session/') ||
                        location.pathname === '/new-session' ||
-                       location.pathname.startsWith('/quick-setup/');
+                       location.pathname.startsWith('/quick-setup/') ||
+                       (location.pathname === '/settings' && settingsOrigin === 'editor');
 
   // Store mode navigation items
   const storeNavItems: NavItem[] = [
@@ -399,7 +403,7 @@ export default function Layout() {
 
                     {/* Settings link */}
                     <Link
-                      to="/settings"
+                      to={`/settings?from=${isEditorMode ? 'editor' : 'hub'}`}
                       onClick={() => setUserMenuOpen(false)}
                       className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
                     >
