@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuthStore, useRepoStore } from '@/lib/store';
 import { authApi, sessionsApi, githubApi } from '@/lib/api';
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
@@ -57,10 +57,14 @@ export default function SessionLayout({
   const [branchExpanded, setBranchExpanded] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
 
-  // Select a random tagline that stays consistent during the session
-  const randomTagline = useMemo(() => {
-    return TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
-  }, []); // Empty deps array means this only runs once on mount
+  // Tagline state - starts with random tagline, can be clicked to change
+  const [taglineIndex, setTaglineIndex] = useState(() => Math.floor(Math.random() * TAGLINES.length));
+  const tagline = TAGLINES[taglineIndex];
+
+  // Function to pick a random tagline
+  const nextTagline = () => {
+    setTaglineIndex(() => Math.floor(Math.random() * TAGLINES.length));
+  };
 
   // Fetch session data when sessionId exists and no props provided
   // Use sessionProp if available to avoid stale data during updates
@@ -248,8 +252,11 @@ export default function SessionLayout({
               {/* Logo - Desktop Only */}
               <div className="hidden md:flex flex-col justify-center py-2">
                 <Link to="/store" className="font-semibold text-lg leading-tight">WebEDT</Link>
-                <div className="text-[9px] text-base-content/50 leading-tight italic">
-                  {randomTagline}
+                <div
+                  className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
+                  onClick={nextTagline}
+                >
+                  {tagline}
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -284,8 +291,11 @@ export default function SessionLayout({
               {/* Logo - Mobile Only (Centered) */}
               <div className="md:hidden flex flex-col items-center justify-center py-2">
                 <Link to="/store" className="font-semibold text-lg leading-tight">WebEDT</Link>
-                <div className="text-[9px] text-base-content/50 leading-tight italic">
-                  {randomTagline}
+                <div
+                  className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
+                  onClick={nextTagline}
+                >
+                  {tagline}
                 </div>
                 <div className="flex items-center gap-1">
                   <button
