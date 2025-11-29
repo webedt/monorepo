@@ -229,31 +229,6 @@ function ImagesContent() {
         </div>
       </div>
 
-      {/* Browse Button */}
-      <div className="p-3 border-b border-base-300">
-        <button
-          onClick={() => setShowExplorer(!showExplorer)}
-          className={`btn btn-sm w-full gap-2 ${showExplorer ? 'btn-primary' : 'btn-outline'}`}
-        >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
-          </svg>
-          Browse
-          <svg className={`w-3 h-3 ml-auto transition-transform ${showExplorer ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-          </svg>
-        </button>
-      </div>
-
-      {/* File Explorer (collapsible) */}
-      {showExplorer && (
-        <div className="border-b border-base-300 max-h-64 overflow-y-auto">
-          <div className="py-2">
-            {renderFileTree(mockFileTree)}
-          </div>
-        </div>
-      )}
-
       {/* Editor Mode Tabs */}
       <div className="p-2 border-b border-base-300">
         <div className="flex flex-col gap-1">
@@ -298,6 +273,31 @@ function ImagesContent() {
           </button>
         </div>
       </div>
+
+      {/* Browse Button */}
+      <div className="p-3 border-b border-base-300">
+        <button
+          onClick={() => setShowExplorer(!showExplorer)}
+          className={`btn btn-sm w-full gap-2 ${showExplorer ? 'btn-primary' : 'btn-outline'}`}
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+          </svg>
+          Browse
+          <svg className={`w-3 h-3 ml-auto transition-transform ${showExplorer ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      {/* File Explorer (collapsible) */}
+      {showExplorer && (
+        <div className="border-b border-base-300 max-h-64 overflow-y-auto">
+          <div className="py-2">
+            {renderFileTree(mockFileTree)}
+          </div>
+        </div>
+      )}
 
       {/* Recent Items */}
       <div className="flex-1 overflow-y-auto">
