@@ -214,10 +214,13 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req, res) => {
 });
 
 // Delete a branch
-router.delete('/repos/:owner/:repo/branches/:branch', requireAuth, async (req, res) => {
+// Note: Using wildcard (*) for branch because branch names can contain slashes (e.g., "user/feature-branch")
+router.delete('/repos/:owner/:repo/branches/*', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo, branch } = req.params;
+    const { owner, repo } = req.params;
+    // Express stores the wildcard match in params[0]
+    const branch = req.params[0];
 
     if (!authReq.user?.githubAccessToken) {
       res.status(400).json({ success: false, error: 'GitHub not connected' });
@@ -554,10 +557,13 @@ router.post('/repos/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (
 });
 
 // Merge base branch into feature branch (update branch)
-router.post('/repos/:owner/:repo/branches/:branch/merge-base', requireAuth, async (req, res) => {
+// Note: Using wildcard (*) for branch because branch names can contain slashes (e.g., "user/feature-branch")
+router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo, branch } = req.params;
+    const { owner, repo } = req.params;
+    // Express stores the wildcard match in params[0]
+    const branch = req.params[0];
     const { base } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
@@ -614,10 +620,13 @@ router.post('/repos/:owner/:repo/branches/:branch/merge-base', requireAuth, asyn
 });
 
 // Auto PR: Create PR, merge base branch, wait for mergeable, merge PR, and soft-delete session
-router.post('/repos/:owner/:repo/branches/:branch/auto-pr', requireAuth, async (req, res) => {
+// Note: Using wildcard (*) for branch because branch names can contain slashes (e.g., "user/feature-branch")
+router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
-    const { owner, repo, branch } = req.params;
+    const { owner, repo } = req.params;
+    // Express stores the wildcard match in params[0]
+    const branch = req.params[0];
     const { base, title, body, sessionId } = req.body;
 
     if (!authReq.user?.githubAccessToken) {
