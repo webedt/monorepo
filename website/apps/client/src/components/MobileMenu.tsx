@@ -129,7 +129,7 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
             {/* Mode Toggle - Switch between Hub and Editor */}
             <div className="px-2">
               <Link
-                to={isEditorMode ? '/' : '/sessions'}
+                to={isEditorMode ? '/store' : '/sessions'}
                 className="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
               >
                 {isEditorMode ? (
