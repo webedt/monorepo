@@ -64,8 +64,10 @@ export class ClaudeCodeProvider extends BaseProvider {
 
       const queryStream = query({
         prompt,
-        abortController,
-        options: queryOptions
+        options: {
+          ...queryOptions,
+          abortController
+        }
       });
 
       let lastMessage: any = null;
