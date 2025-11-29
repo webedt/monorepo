@@ -477,7 +477,7 @@ export default function SessionLayout({
             <div className="flex items-center gap-3">
               {/* Mode Toggle - Switch to Hub - Desktop Only (inverse of hamburger) */}
               <Link
-                to="./store"
+                to="/store"
                 className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
