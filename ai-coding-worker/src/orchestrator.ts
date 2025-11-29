@@ -12,6 +12,7 @@ import { LLMHelper } from './utils/llmHelper';
 import { GitHelper } from './utils/gitHelper';
 import { CredentialManager } from './utils/credentialManager';
 import { parseRepoUrl, generateSessionPath, sessionPathToDir } from './utils/sessionPathHelper';
+import { enrichEventWithRelativePaths } from './utils/filePathHelper';
 
 /**
  * Main orchestrator for executing coding assistant requests
@@ -631,8 +632,10 @@ export class Orchestrator {
           }
 
           // Forward provider events to SSE stream
+          // Enrich events with relative paths for better display on frontend
+          const enrichedEvent = enrichEventWithRelativePaths(event, workspacePath!);
           sendEvent({
-            ...event,
+            ...enrichedEvent,
             timestamp: new Date().toISOString()
           });
         }
