@@ -1,8 +1,13 @@
-import { useState, useMemo, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
+
+interface PreSelectedSettings {
+  repositoryUrl?: string;
+  baseBranch?: string;
+}
 
 type FileNode = {
   name: string;
@@ -166,7 +171,12 @@ const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
 
 export default function Code() {
   const { sessionId } = useParams<{ sessionId?: string }>();
+  const location = useLocation();
   const queryClient = useQueryClient();
+
+  // Get pre-selected settings from navigation state (from QuickSessionSetup)
+  const preSelectedSettings = (location.state as { preSelectedSettings?: PreSelectedSettings } | null)?.preSelectedSettings;
+  const hasInitializedFromPreSelected = useRef(false);
 
   // Code session state
   const [codeSession, setCodeSession] = useState<CodeSession | null>(null);
@@ -213,6 +223,27 @@ export default function Code() {
 
   const repos: GitHubRepo[] = reposData?.data || [];
 
+  // Auto-initialize from pre-selected settings (from QuickSessionSetup)
+  useEffect(() => {
+    // Only run once when we have pre-selected settings and repos are loaded
+    if (
+      preSelectedSettings?.repositoryUrl &&
+      repos.length > 0 &&
+      !hasInitializedFromPreSelected.current &&
+      !codeSession &&
+      !sessionId
+    ) {
+      hasInitializedFromPreSelected.current = true;
+
+      // Find the matching repo
+      const matchingRepo = repos.find(r => r.cloneUrl === preSelectedSettings.repositoryUrl);
+      if (matchingRepo) {
+        // Initialize with the pre-selected repo and branch
+        initializeCodeSessionFromQuickSetup(matchingRepo, preSelectedSettings.baseBranch);
+      }
+    }
+  }, [preSelectedSettings, repos, codeSession, sessionId]);
+
   // Fetch file tree when code session is active
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
     queryKey: ['github-tree', codeSession?.owner, codeSession?.repo, codeSession?.branch],
@@ -238,7 +269,45 @@ export default function Code() {
     },
   });
 
-  // Initialize Code session when repo is selected
+  // Initialize Code session from QuickSessionSetup (with pre-selected repo and branch)
+  const initializeCodeSessionFromQuickSetup = async (repo: GitHubRepo, selectedBranch?: string) => {
+    setIsInitializing(true);
+    setInitError(null);
+
+    const [owner, repoName] = repo.fullName.split('/');
+    const baseBranch = selectedBranch || repo.defaultBranch;
+
+    // Generate random ID for branch
+    const randomId = Math.random().toString(36).substring(2, 10);
+    const branchName = `webedt/started-from-code-${randomId}`;
+
+    try {
+      await createBranchMutation.mutateAsync({
+        owner,
+        repo: repoName,
+        branchName,
+        baseBranch,
+      });
+
+      setCodeSession({
+        owner,
+        repo: repoName,
+        branch: branchName,
+        baseBranch,
+      });
+      setIsFromExistingSession(false);
+
+      // Expand root folders by default
+      setExpandedFolders(new Set());
+    } catch (error: any) {
+      console.error('Failed to create branch:', error);
+      setInitError(error.message || 'Failed to create branch');
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  // Initialize Code session when repo is selected (from RepoSelector)
   const initializeCodeSession = async (repo: GitHubRepo) => {
     setIsInitializing(true);
     setInitError(null);
@@ -248,7 +317,7 @@ export default function Code() {
 
     // Generate random ID for branch
     const randomId = Math.random().toString(36).substring(2, 10);
-    const branchName = `webedt/started-from-code-session-${randomId}`;
+    const branchName = `webedt/started-from-code-${randomId}`;
 
     try {
       await createBranchMutation.mutateAsync({
@@ -470,14 +539,28 @@ export default function Code() {
   );
 
   // Repository Selector View
-  const RepoSelector = () => (
+  const RepoSelector = () => {
+    // If we're auto-initializing from quick-setup, show a dedicated loading state
+    if (preSelectedSettings?.repositoryUrl && (isLoadingRepos || isInitializing)) {
+      return (
+        <div className="flex items-center justify-center h-[calc(100vh-200px)]">
+          <div className="text-center">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
+            <p className="mt-4 text-lg text-base-content">Setting up your workspace...</p>
+            <p className="mt-2 text-sm text-base-content/70">Creating a new branch for your changes</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-base-content mb-2">Start Code Session</h1>
         <p className="text-base-content/70">
           Select a repository to start editing. A new branch will be created for your changes:
           <code className="ml-2 px-2 py-1 bg-base-200 rounded text-sm">
-            webedt/started-from-code-session-{'{id}'}
+            webedt/started-from-code-{'{id}'}
           </code>
         </p>
       </div>
@@ -587,7 +670,8 @@ export default function Code() {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   // Code Session View with header
   const CodeSessionView = () => {
