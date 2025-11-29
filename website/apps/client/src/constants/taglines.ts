@@ -52,7 +52,7 @@ export const TAGLINES = [
   "It's over 9000-edits!",
   "You had one edit.",
   "Ermahgerd… nice edit.",
-  "The floor is lava… jump to edit.",
+  "The edit is lava.",
   "We live in a society… so we edit.",
   "Do you even edit?",
   "Big if true… bigger if edit.",
