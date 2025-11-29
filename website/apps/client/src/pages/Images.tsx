@@ -214,21 +214,6 @@ function ImagesContent() {
   // Left Sidebar
   const LeftSidebar = () => (
     <div className="w-64 bg-base-100 border-r border-base-300 flex flex-col flex-shrink-0">
-      {/* Project Info */}
-      <div className="p-4 border-b border-base-300">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
-            <svg className="w-6 h-6 text-primary" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-            </svg>
-          </div>
-          <div>
-            <div className="font-semibold text-base-content">Project Alpha</div>
-            <div className="text-xs text-base-content/60">Images & Animations</div>
-          </div>
-        </div>
-      </div>
-
       {/* Editor Mode Tabs */}
       <div className="p-2 border-b border-base-300">
         <div className="flex flex-col gap-1">
