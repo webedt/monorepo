@@ -41,22 +41,22 @@ function DefaultRoute() {
 
   // Map landing page values to routes
   const landingPageRoutes: Record<string, string> = {
-    store: '/',
+    store: '/store',
     library: '/library',
     community: '/community',
     sessions: '/sessions',
   };
 
-  // If user has a default landing page set and it's not 'store', redirect
-  if (user?.defaultLandingPage && user.defaultLandingPage !== 'store') {
+  // If user has a default landing page set, redirect to it
+  if (user?.defaultLandingPage) {
     const redirectPath = landingPageRoutes[user.defaultLandingPage];
     if (redirectPath) {
       return <Navigate to={redirectPath} replace />;
     }
   }
 
-  // Otherwise show the Dashboard (Store)
-  return <Dashboard />;
+  // Default to store if no landing page is set
+  return <Navigate to="/store" replace />;
 }
 
 function App() {
@@ -119,6 +119,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <DefaultRoute />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/landing"
+              element={
+                <ProtectedRoute>
+                  <DefaultRoute />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/store"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
                 </ProtectedRoute>
               }
             />
