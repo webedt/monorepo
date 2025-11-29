@@ -203,7 +203,7 @@ export const TAGLINES = [
   "This edit is fine art in motion.",
   "Every time a bell rings, an edit gets merged.",
   "I am edit girl, in an edit world!",
-  "Straight outta edits!",
+  "Straight outta Edit!",
   "See you, space edit.",
   "Yippee-ki-yay, mother-editor.",
   "Thank you, Mario… but your edit is in another castle.",
