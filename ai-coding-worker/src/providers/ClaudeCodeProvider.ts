@@ -83,10 +83,16 @@ export class ClaudeCodeProvider extends BaseProvider {
           });
         }
 
+        // Extract model from SDK response - prefer actual model used over requested model
+        // The SDK returns the model in message.message.model for assistant messages
+        const actualModel = (message.type === 'assistant' && message.message?.model)
+          ? message.message.model
+          : queryOptions.model;
+
         onEvent({
           type: 'assistant_message',
           data: message,
-          model: queryOptions.model
+          model: actualModel
         });
       }
 
