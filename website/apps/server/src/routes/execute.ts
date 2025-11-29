@@ -11,6 +11,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+// Track which AI worker is handling each session for abort routing
+// Map of sessionId -> { workerUrl, containerId }
+export const activeWorkerSessions = new Map<string, { workerUrl: string; containerId: string }>();
+
 // Helper function to sanitize sensitive data for logging
 const sanitizeForLogging = (data: any): any => {
   if (!data || typeof data !== 'object') return data;
@@ -386,6 +390,14 @@ const executeHandler = async (req: any, res: any) => {
           const workerContainerId = response.headers.get('X-Container-ID') || 'unknown';
           console.log(`[Execute] Successfully connected to AI worker on attempt ${attempt}`);
           console.log(`[Execute] Worker Container ID: ${workerContainerId}`);
+
+          // Track this session -> worker mapping for abort routing
+          activeWorkerSessions.set(chatSession.id, {
+            workerUrl: aiWorkerUrl,
+            containerId: workerContainerId
+          });
+          console.log(`[Execute] Registered session ${chatSession.id} with worker ${workerContainerId}`);
+
           clearTimeout(timeout);
           break; // Success!
 
@@ -673,6 +685,10 @@ const executeHandler = async (req: any, res: any) => {
       console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'N/A'}`);
       console.log(`[Execute] ==================================================`);
 
+      // Clean up session -> worker mapping
+      activeWorkerSessions.delete(chatSession.id);
+      console.log(`[Execute] Removed session ${chatSession.id} from active worker tracking`);
+
       // Signal ai-coding-worker that we've received all data - allows faster shutdown
       try {
         console.log(`[Execute] Signaling AI worker to shutdown (received all data)...`);
@@ -710,6 +726,9 @@ const executeHandler = async (req: any, res: any) => {
       console.error('[Execute] Error stack:', streamError instanceof Error ? streamError.stack : 'No stack trace');
       console.error('[Execute] Total events received before error:', eventCounter);
       console.error('[Execute] ===========================================');
+
+      // Clean up session -> worker mapping on error
+      activeWorkerSessions.delete(chatSession.id);
 
       // Try to update session status, but don't fail if it doesn't work
       try {

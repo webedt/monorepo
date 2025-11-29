@@ -5,6 +5,7 @@ export interface ProviderOptions {
   workspace: string;
   resumeSessionId?: string;
   providerOptions?: Record<string, any>;
+  abortSignal?: AbortSignal;
 }
 
 export interface ProviderStreamEvent {
