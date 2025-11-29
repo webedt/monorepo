@@ -188,13 +188,6 @@ router.post('/create-code-session', requireAuth, async (req, res) => {
       })
       .returning();
 
-    // Add initial system message
-    await db.insert(messages).values({
-      chatSessionId: sessionId,
-      type: 'system',
-      content: `📂 Started code editing session on branch \`${branch}\``,
-    });
-
     console.log(`[Sessions] Created code session ${sessionId} for ${sessionPath}`);
 
     res.json({
@@ -259,6 +252,57 @@ router.get('/:id', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Get session error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch session' });
+  }
+});
+
+// Create an event for a session (for streaming-style logs)
+router.post('/:id/events', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+    const { eventType, eventData } = req.body;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    if (!eventType || eventData === undefined) {
+      res.status(400).json({ success: false, error: 'eventType and eventData are required' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Create event
+    const [newEvent] = await db
+      .insert(events)
+      .values({
+        chatSessionId: sessionId,
+        eventType,
+        eventData,
+      })
+      .returning();
+
+    res.json({ success: true, data: newEvent });
+  } catch (error) {
+    console.error('Create event error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create event' });
   }
 });
 

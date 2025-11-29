@@ -364,6 +364,16 @@ export default function Code() {
 
       const dbSessionId = sessionResponse.data.sessionId;
 
+      // Log the session start as an event (visible in Chat)
+      try {
+        await sessionsApi.createEvent(dbSessionId, 'code_operation', {
+          type: 'message',
+          message: `📂 Started code editing session on branch \`${branchName}\` (base: \`${baseBranch}\`)`,
+        });
+      } catch (e) {
+        console.error('Failed to log session start event:', e);
+      }
+
       setCodeSession({
         owner,
         repo: repoName,
@@ -418,6 +428,16 @@ export default function Code() {
       });
 
       const dbSessionId = sessionResponse.data.sessionId;
+
+      // Log the session start as an event (visible in Chat)
+      try {
+        await sessionsApi.createEvent(dbSessionId, 'code_operation', {
+          type: 'message',
+          message: `📂 Started code editing session on branch \`${branchName}\` (base: \`${baseBranch}\`)`,
+        });
+      } catch (e) {
+        console.error('Failed to log session start event:', e);
+      }
 
       setCodeSession({
         owner,
@@ -585,13 +605,18 @@ export default function Code() {
     });
   };
 
-  // Helper to log file operations to the database session
-  const logFileOperation = useCallback(async (message: string) => {
+  // Helper to log file operations as events (streaming-style logs visible in Chat)
+  const logCodeEvent = useCallback(async (message: string) => {
     if (!codeSession?.sessionId) return;
     try {
-      await sessionsApi.createMessage(codeSession.sessionId, 'system', message);
+      // Use 'code_operation' event type with the message format that Chat.tsx understands
+      // This matches the data.type === 'message' case in convertEventToMessage
+      await sessionsApi.createEvent(codeSession.sessionId, 'code_operation', {
+        type: 'message',
+        message: message,
+      });
     } catch (error) {
-      console.error('Failed to log file operation:', error);
+      console.error('Failed to log code event:', error);
     }
   }, [codeSession?.sessionId]);
 
@@ -648,9 +673,9 @@ export default function Code() {
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
 
-      // Log the rename operation
+      // Log the rename operation as an event (visible in Chat)
       const itemType = fileOperation.itemType === 'file' ? '📄' : '📁';
-      await logFileOperation(`${itemType} Renamed: \`${fileOperation.path}\` → \`${newPath}\``);
+      await logCodeEvent(`${itemType} Renamed: \`${fileOperation.path}\` → \`${newPath}\``);
 
       // If the renamed item was open in a tab, update the tab
       if (fileOperation.itemType === 'file' && activeTabPath === fileOperation.path) {
@@ -671,7 +696,7 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient, logFileOperation]);
+  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient, logCodeEvent]);
 
   // Handle delete operation
   const handleDelete = useCallback(async () => {
@@ -697,9 +722,9 @@ export default function Code() {
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
 
-      // Log the delete operation
+      // Log the delete operation as an event (visible in Chat)
       const deleteIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
-      await logFileOperation(`🗑️ Deleted ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\``);
+      await logCodeEvent(`🗑️ Deleted ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\``);
 
       // If the deleted item was open in a tab, close it
       if (fileOperation.itemType === 'file') {
@@ -740,7 +765,7 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logFileOperation]);
+  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logCodeEvent]);
 
   // PR Handler Functions
   const handleCreatePR = async () => {
@@ -765,8 +790,8 @@ export default function Code() {
       );
       setPrSuccess(`PR #${response.data.number} created successfully!`);
 
-      // Log PR creation
-      await logFileOperation(`🔀 Created Pull Request #${response.data.number}: [${response.data.htmlUrl}](${response.data.htmlUrl})`);
+      // Log PR creation as an event (visible in Chat)
+      await logCodeEvent(`🔀 Created Pull Request #${response.data.number}: ${response.data.htmlUrl}`);
 
       refetchPr();
     } catch (err: any) {
@@ -810,8 +835,8 @@ export default function Code() {
       setPrSuccess(`Auto PR completed! PR #${results.pr?.number} merged successfully.`);
       setAutoPrProgress(null);
 
-      // Log the auto PR completion
-      await logFileOperation(`✅ Auto PR completed! PR #${results.pr?.number} merged into \`${codeSession.baseBranch}\``);
+      // Log the auto PR completion as an event (visible in Chat)
+      await logCodeEvent(`✅ Auto PR completed! PR #${results.pr?.number} merged into \`${codeSession.baseBranch}\``);
 
       refetchPr();
 

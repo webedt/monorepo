@@ -267,6 +267,13 @@ export const sessionsApi = {
       body: { type, content },
     }),
 
+  // Create an event (for streaming-style logs that show up in Chat)
+  createEvent: (id: string, eventType: string, eventData: any) =>
+    fetchApi(`/api/sessions/${id}/events`, {
+      method: 'POST',
+      body: { eventType, eventData },
+    }),
+
   update: (id: string, userRequest: string) =>
     fetchApi(`/api/sessions/${id}`, {
       method: 'PATCH',
