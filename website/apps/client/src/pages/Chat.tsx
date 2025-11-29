@@ -153,17 +153,15 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
             const toolInput = toolBlock.input || {};
 
             if (toolName === 'Read') {
-              const filePath = toolInput.file_path || 'unknown file';
-              const fileName = filePath.split('/').pop() || filePath;
-              toolMessages.push(`📖 Reading: ${fileName}`);
+              // Prefer relative_path (added by backend) over file_path
+              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+              toolMessages.push(`📖 Reading: ${displayPath}`);
             } else if (toolName === 'Write') {
-              const filePath = toolInput.file_path || 'unknown file';
-              const fileName = filePath.split('/').pop() || filePath;
-              toolMessages.push(`📝 Writing: ${fileName}`);
+              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+              toolMessages.push(`📝 Writing: ${displayPath}`);
             } else if (toolName === 'Edit') {
-              const filePath = toolInput.file_path || 'unknown file';
-              const fileName = filePath.split('/').pop() || filePath;
-              toolMessages.push(`✏️ Editing: ${fileName}`);
+              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+              toolMessages.push(`✏️ Editing: ${displayPath}`);
             } else if (toolName === 'Grep') {
               const pattern = toolInput.pattern || '';
               toolMessages.push(`🔍 Searching for: "${pattern}"`);
@@ -1060,17 +1058,15 @@ export default function Chat() {
                 const toolInput = toolBlock.input || {};
 
                 if (toolName === 'Read') {
-                  const filePath = toolInput.file_path || 'unknown file';
-                  const fileName = filePath.split('/').pop() || filePath;
-                  toolMessages.push(`📖 Reading: ${fileName}`);
+                  // Prefer relative_path (added by backend) over file_path
+                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                  toolMessages.push(`📖 Reading: ${displayPath}`);
                 } else if (toolName === 'Write') {
-                  const filePath = toolInput.file_path || 'unknown file';
-                  const fileName = filePath.split('/').pop() || filePath;
-                  toolMessages.push(`📝 Writing: ${fileName}`);
+                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                  toolMessages.push(`📝 Writing: ${displayPath}`);
                 } else if (toolName === 'Edit') {
-                  const filePath = toolInput.file_path || 'unknown file';
-                  const fileName = filePath.split('/').pop() || filePath;
-                  toolMessages.push(`✏️ Editing: ${fileName}`);
+                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                  toolMessages.push(`✏️ Editing: ${displayPath}`);
                 } else if (toolName === 'Grep') {
                   const pattern = toolInput.pattern || '';
                   toolMessages.push(`🔍 Searching for: "${pattern}"`);
