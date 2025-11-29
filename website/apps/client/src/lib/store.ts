@@ -110,13 +110,13 @@ export const useWorkerStore = create<WorkerState>()(
           sessionStorage.removeItem(name);
         },
       },
-      // Only persist these fields
+      // Only persist these fields (cast needed because we intentionally omit actions and hasActiveStream)
       partialize: (state) => ({
         executingSessionId: state.executingSessionId,
         executionStartedAt: state.executionStartedAt,
         lastHeartbeat: state.lastHeartbeat,
         // Don't persist hasActiveStream - it should be false on page load
-      }),
+      }) as WorkerState,
     }
   )
 );
