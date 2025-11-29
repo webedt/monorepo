@@ -300,6 +300,20 @@ export const sessionsApi = {
       method: 'POST',
       body: { ids },
     }),
+
+  // Create a code-only session (for file editing without AI execution)
+  createCodeSession: (data: {
+    title?: string;
+    repositoryUrl?: string;
+    repositoryOwner: string;
+    repositoryName: string;
+    baseBranch: string;
+    branch: string;
+  }) =>
+    fetchApi('/api/sessions/create-code-session', {
+      method: 'POST',
+      body: data,
+    }),
 };
 
 // Admin API

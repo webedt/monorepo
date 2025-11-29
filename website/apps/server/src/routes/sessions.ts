@@ -151,6 +151,65 @@ router.get('/deleted', requireAuth, async (req, res) => {
   }
 });
 
+// Create a code-only session (no AI execution, just for tracking file operations)
+router.post('/create-code-session', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { title, repositoryUrl, repositoryOwner, repositoryName, baseBranch, branch } = req.body;
+
+    if (!repositoryOwner || !repositoryName || !branch) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required fields: repositoryOwner, repositoryName, branch'
+      });
+      return;
+    }
+
+    // Generate UUID for the session
+    const sessionId = crypto.randomUUID();
+    const sessionPath = `${repositoryOwner}/${repositoryName}/${branch}`;
+
+    // Create the session
+    const [chatSession] = await db
+      .insert(chatSessions)
+      .values({
+        id: sessionId,
+        userId: authReq.user!.id,
+        userRequest: title || 'Code editing session',
+        status: 'completed', // Not running AI execution
+        repositoryUrl: repositoryUrl || `https://github.com/${repositoryOwner}/${repositoryName}.git`,
+        repositoryOwner,
+        repositoryName,
+        baseBranch: baseBranch || 'main',
+        branch,
+        sessionPath,
+        autoCommit: false,
+        locked: true, // Prevent repo/branch changes
+      })
+      .returning();
+
+    // Add initial system message
+    await db.insert(messages).values({
+      chatSessionId: sessionId,
+      type: 'system',
+      content: `📂 Started code editing session on branch \`${branch}\``,
+    });
+
+    console.log(`[Sessions] Created code session ${sessionId} for ${sessionPath}`);
+
+    res.json({
+      success: true,
+      data: {
+        sessionId: chatSession.id,
+        sessionPath: chatSession.sessionPath,
+      },
+    });
+  } catch (error) {
+    console.error('Create code session error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create code session' });
+  }
+});
+
 // Get specific chat session
 router.get('/:id', requireAuth, async (req, res) => {
   try {

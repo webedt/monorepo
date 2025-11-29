@@ -64,6 +64,7 @@ interface CodeSession {
   repo: string;
   branch: string;
   baseBranch: string;
+  sessionId?: string; // Database session ID for tracking
 }
 
 // Helper to get file icon based on extension
@@ -246,6 +247,7 @@ export default function Code() {
           repo: session.repositoryName,
           branch: session.branch,
           baseBranch: session.baseBranch || 'main',
+          sessionId: session.id, // Include the session ID for message logging
         });
         setIsFromExistingSession(true);
       }
@@ -342,6 +344,7 @@ export default function Code() {
     const branchName = `webedt/started-from-code-${randomId}`;
 
     try {
+      // Create the GitHub branch
       await createBranchMutation.mutateAsync({
         owner,
         repo: repoName,
@@ -349,13 +352,29 @@ export default function Code() {
         baseBranch,
       });
 
+      // Create the database session for tracking
+      const sessionResponse = await sessionsApi.createCodeSession({
+        title: `Code: ${owner}/${repoName}`,
+        repositoryUrl: repo.cloneUrl,
+        repositoryOwner: owner,
+        repositoryName: repoName,
+        baseBranch,
+        branch: branchName,
+      });
+
+      const dbSessionId = sessionResponse.data.sessionId;
+
       setCodeSession({
         owner,
         repo: repoName,
         branch: branchName,
         baseBranch,
+        sessionId: dbSessionId,
       });
       setIsFromExistingSession(false);
+
+      // Navigate to the session URL
+      navigate(`/session/${dbSessionId}/code`, { replace: true });
 
       // Expand root folders by default
       setExpandedFolders(new Set());
@@ -380,6 +399,7 @@ export default function Code() {
     const branchName = `webedt/started-from-code-${randomId}`;
 
     try {
+      // Create the GitHub branch
       await createBranchMutation.mutateAsync({
         owner,
         repo: repoName,
@@ -387,13 +407,29 @@ export default function Code() {
         baseBranch,
       });
 
+      // Create the database session for tracking
+      const sessionResponse = await sessionsApi.createCodeSession({
+        title: `Code: ${owner}/${repoName}`,
+        repositoryUrl: repo.cloneUrl,
+        repositoryOwner: owner,
+        repositoryName: repoName,
+        baseBranch,
+        branch: branchName,
+      });
+
+      const dbSessionId = sessionResponse.data.sessionId;
+
       setCodeSession({
         owner,
         repo: repoName,
         branch: branchName,
         baseBranch,
+        sessionId: dbSessionId,
       });
       setIsFromExistingSession(false);
+
+      // Navigate to the session URL
+      navigate(`/session/${dbSessionId}/code`, { replace: true });
 
       // Expand root folders by default
       setExpandedFolders(new Set());
@@ -549,6 +585,16 @@ export default function Code() {
     });
   };
 
+  // Helper to log file operations to the database session
+  const logFileOperation = useCallback(async (message: string) => {
+    if (!codeSession?.sessionId) return;
+    try {
+      await sessionsApi.createMessage(codeSession.sessionId, 'system', message);
+    } catch (error) {
+      console.error('Failed to log file operation:', error);
+    }
+  }, [codeSession?.sessionId]);
+
   // Open rename modal for file or folder
   const openRenameModal = useCallback((itemType: 'file' | 'folder', path: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -602,6 +648,10 @@ export default function Code() {
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
 
+      // Log the rename operation
+      const itemType = fileOperation.itemType === 'file' ? '📄' : '📁';
+      await logFileOperation(`${itemType} Renamed: \`${fileOperation.path}\` → \`${newPath}\``);
+
       // If the renamed item was open in a tab, update the tab
       if (fileOperation.itemType === 'file' && activeTabPath === fileOperation.path) {
         setActiveTabPath(newPath);
@@ -621,7 +671,7 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient]);
+  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient, logFileOperation]);
 
   // Handle delete operation
   const handleDelete = useCallback(async () => {
@@ -646,6 +696,10 @@ export default function Code() {
 
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+
+      // Log the delete operation
+      const deleteIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
+      await logFileOperation(`🗑️ Deleted ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\``);
 
       // If the deleted item was open in a tab, close it
       if (fileOperation.itemType === 'file') {
@@ -686,7 +740,7 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent]);
+  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logFileOperation]);
 
   // PR Handler Functions
   const handleCreatePR = async () => {
@@ -710,6 +764,10 @@ export default function Code() {
         }
       );
       setPrSuccess(`PR #${response.data.number} created successfully!`);
+
+      // Log PR creation
+      await logFileOperation(`🔀 Created Pull Request #${response.data.number}: [${response.data.htmlUrl}](${response.data.htmlUrl})`);
+
       refetchPr();
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to create PR';
@@ -744,13 +802,17 @@ export default function Code() {
         {
           base: codeSession.baseBranch,
           title: `Code changes from ${codeSession.branch}`,
-          // Note: No sessionId for code sessions since they don't have database records
+          sessionId: codeSession.sessionId, // Now we have a session ID
         }
       );
 
       const results = response.data;
       setPrSuccess(`Auto PR completed! PR #${results.pr?.number} merged successfully.`);
       setAutoPrProgress(null);
+
+      // Log the auto PR completion
+      await logFileOperation(`✅ Auto PR completed! PR #${results.pr?.number} merged into \`${codeSession.baseBranch}\``);
+
       refetchPr();
 
       // After successful auto PR, redirect to sessions list
@@ -1339,6 +1401,10 @@ export default function Code() {
   // Construct the repository URL for SessionLayout
   const selectedRepoUrl = codeSession ? `https://github.com/${codeSession.owner}/${codeSession.repo}.git` : undefined;
 
+  // Create a session-like object for SessionLayout if we have a codeSession
+  // This enables proper title display in the top bar
+  const sessionForLayout = codeSession && existingSessionData?.data ? existingSessionData.data : undefined;
+
   // Always use SessionLayout to show status bar
   return (
     <SessionLayout
@@ -1347,6 +1413,7 @@ export default function Code() {
       branch={codeSession?.branch}
       isLocked={!!codeSession}
       prActions={prActions}
+      session={sessionForLayout}
     >
       <CodeSessionView />
 
