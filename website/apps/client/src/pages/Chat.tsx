@@ -1744,6 +1744,33 @@ export default function Chat() {
               </div>
             )}
 
+            {/* Deleted session banner */}
+            {session?.deletedAt && (
+              <div className="alert alert-warning">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                <div className="flex-1">
+                  <span className="text-sm font-medium">This session is in the trash</span>
+                  <span className="text-sm ml-2 opacity-70">
+                    (Deleted {new Date(session.deletedAt).toLocaleDateString()})
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    sessionsApi.restoreBulk([session.id]).then(() => {
+                      queryClient.invalidateQueries({ queryKey: ['session-details', sessionId] });
+                      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+                      queryClient.invalidateQueries({ queryKey: ['sessions', 'deleted'] });
+                    });
+                  }}
+                  className="btn btn-success btn-sm"
+                >
+                  Restore
+                </button>
+              </div>
+            )}
+
             {!user?.githubAccessToken && (
               <div className="alert alert-warning">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
@@ -1982,27 +2009,33 @@ export default function Chat() {
 
           {/* Input panel at bottom when messages exist */}
           <div className="bg-base-100 border-t border-base-300 p-6 flex-shrink-0">
-            <ChatInput
-              key="bottom-input"
-              ref={chatInputRef}
-              input={input}
-              setInput={setInput}
-              images={images}
-              setImages={setImages}
-              onSubmit={handleSubmit}
-              isExecuting={isExecuting}
-              selectedRepo={selectedRepo}
-              setSelectedRepo={setSelectedRepo}
-              baseBranch={baseBranch}
-              setBaseBranch={setBaseBranch}
-              repositories={repositories}
-              isLoadingRepos={isLoadingRepos}
-              isLocked={isLocked}
-              user={user}
-              centered={false}
-              hideRepoSelection={true}
-              onInterrupt={handleInterrupt}
-            />
+            {session?.deletedAt ? (
+              <div className="text-center text-base-content/50 py-2">
+                <span className="text-sm">This session is in the trash. Restore it to continue chatting.</span>
+              </div>
+            ) : (
+              <ChatInput
+                key="bottom-input"
+                ref={chatInputRef}
+                input={input}
+                setInput={setInput}
+                images={images}
+                setImages={setImages}
+                onSubmit={handleSubmit}
+                isExecuting={isExecuting}
+                selectedRepo={selectedRepo}
+                setSelectedRepo={setSelectedRepo}
+                baseBranch={baseBranch}
+                setBaseBranch={setBaseBranch}
+                repositories={repositories}
+                isLoadingRepos={isLoadingRepos}
+                isLocked={isLocked}
+                user={user}
+                centered={false}
+                hideRepoSelection={true}
+                onInterrupt={handleInterrupt}
+              />
+            )}
           </div>
         </>
       )}
