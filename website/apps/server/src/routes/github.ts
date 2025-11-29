@@ -821,7 +821,32 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       throw prMergeError;
     }
 
-    // Step 5: Soft-delete the session (if sessionId provided)
+    // Step 5: Delete the feature branch (PR was merged, branch is no longer needed)
+    results.step = 'deleting_branch';
+    results.progress = `Deleting branch ${branch}...`;
+
+    try {
+      await octokit.git.deleteRef({
+        owner,
+        repo,
+        ref: `heads/${branch}`,
+      });
+      console.log(`[GitHub] Deleted branch ${owner}/${repo}/${branch} after Auto PR merge`);
+      results.progress = `Deleted branch ${branch}`;
+    } catch (branchDeleteError: unknown) {
+      const branchDeleteErr = branchDeleteError as { status?: number };
+      // 422 or 404 means branch doesn't exist (already deleted) - that's fine
+      if (branchDeleteErr.status === 422 || branchDeleteErr.status === 404) {
+        console.log(`[GitHub] Branch ${owner}/${repo}/${branch} already deleted`);
+        results.progress = `Branch ${branch} already deleted`;
+      } else {
+        // Log error but don't fail - PR was already merged successfully
+        console.error(`[GitHub] Failed to delete branch ${owner}/${repo}/${branch}:`, branchDeleteError);
+        results.progress = `Branch deletion skipped (non-critical error)`;
+      }
+    }
+
+    // Step 6: Soft-delete the session (if sessionId provided)
     if (sessionId) {
       results.step = 'deleting_session';
       results.progress = 'Cleaning up session...';
@@ -840,7 +865,7 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
           .limit(1);
 
         if (session && session.userId === authReq.user!.id) {
-          // Soft delete the session
+          // Soft delete the session (branch already deleted above)
           await db
             .update(chatSessions)
             .set({ deletedAt: new Date() })
