@@ -3,14 +3,123 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi } from '@/lib/api';
 import SessionLayout from '@/components/SessionLayout';
 import type { GitHubPullRequest } from '@webedt/shared';
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+
+const AUTO_REFRESH_INTERVAL = 5; // seconds
+const MAX_AUTO_REFRESH_ATTEMPTS = 60; // stop after 60 attempts (5 minutes)
 
 function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   const [iframeKey, setIframeKey] = useState(0);
+  const [hasError, setHasError] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [autoRefreshAttempts, setAutoRefreshAttempts] = useState(0);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setIframeKey(prev => prev + 1);
-  };
+  }, []);
+
+  // Start auto-refresh countdown when there's an error
+  const startAutoRefresh = useCallback(() => {
+    if (autoRefreshAttempts >= MAX_AUTO_REFRESH_ATTEMPTS) {
+      // Stop auto-refresh after max attempts
+      setHasError(false);
+      setCountdown(0);
+      return;
+    }
+
+    setCountdown(AUTO_REFRESH_INTERVAL);
+
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          // Time to refresh
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+          }
+          setAutoRefreshAttempts(a => a + 1);
+          handleRefresh();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [autoRefreshAttempts, handleRefresh]);
+
+  // Stop auto-refresh
+  const stopAutoRefresh = useCallback(() => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setHasError(false);
+    setCountdown(0);
+    setAutoRefreshAttempts(0);
+  }, []);
+
+  // Listen for messages from the iframe (if same-origin or if we can inject a script)
+  // For cross-origin, we detect errors via fetch probe
+  useEffect(() => {
+    if (!previewUrl) return;
+
+    // Check status when URL changes or iframe refreshes
+    const checkStatus = async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        // Try to fetch the preview URL to check if it's available
+        const response = await fetch(previewUrl, {
+          method: 'GET',
+          mode: 'cors',
+          credentials: 'omit',
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        // Check for error status codes
+        if (response.status === 404 || response.status === 502 || response.status === 503 || response.status === 504) {
+          setHasError(true);
+        } else if (response.ok) {
+          stopAutoRefresh();
+        }
+      } catch (error: any) {
+        // CORS errors mean the server responded (which is good for our case)
+        // Network errors mean server is down
+        if (error.name === 'AbortError' || error.message?.includes('network') || error.message?.includes('Failed to fetch')) {
+          setHasError(true);
+        } else {
+          // CORS error - server is responding, assume it's working
+          stopAutoRefresh();
+        }
+      }
+    };
+
+    // Small delay before checking to let the iframe attempt to load
+    const checkTimeout = setTimeout(checkStatus, 1000);
+
+    return () => {
+      clearTimeout(checkTimeout);
+    };
+  }, [previewUrl, iframeKey, stopAutoRefresh]);
+
+  // Start countdown when error is detected
+  useEffect(() => {
+    if (hasError && countdown === 0 && !countdownRef.current) {
+      startAutoRefresh();
+    }
+  }, [hasError, countdown, startAutoRefresh]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+      }
+    };
+  }, []);
 
   if (!previewUrl) {
     return (
@@ -53,15 +162,30 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
         >
           {previewUrl}
         </a>
-        <button
-          onClick={handleRefresh}
-          className="btn btn-ghost btn-xs gap-1 flex-shrink-0"
-          title="Refresh preview"
-        >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Countdown indicator */}
+          {countdown > 0 && (
+            <span
+              className="text-xs text-warning font-mono min-w-[1.5rem] text-center cursor-pointer hover:text-error"
+              title="Click to stop auto-refresh"
+              onClick={stopAutoRefresh}
+            >
+              {countdown}s
+            </span>
+          )}
+          <button
+            onClick={() => {
+              stopAutoRefresh();
+              handleRefresh();
+            }}
+            className={`btn btn-ghost btn-xs gap-1 ${countdown > 0 ? 'animate-pulse' : ''}`}
+            title={countdown > 0 ? `Auto-refreshing in ${countdown}s (click to refresh now)` : 'Refresh preview'}
+          >
+            <svg className={`w-3 h-3 ${countdown > 0 ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         <a
           href={previewUrl}
           target="_blank"
@@ -84,6 +208,10 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
           className="w-full h-full border-2 border-red-300/50"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          onError={() => {
+            // Network-level error (e.g., DNS failure)
+            setHasError(true);
+          }}
         />
       </div>
     </div>
