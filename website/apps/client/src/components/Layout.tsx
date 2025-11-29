@@ -30,9 +30,9 @@ export default function Layout() {
   // Get current tagline based on index
   const tagline = TAGLINES[taglineIndex];
 
-  // Function to cycle to next tagline
+  // Function to pick a random tagline
   const nextTagline = () => {
-    setTaglineIndex((prevIndex) => (prevIndex + 1) % TAGLINES.length);
+    setTaglineIndex(() => Math.floor(Math.random() * TAGLINES.length));
   };
 
   // Check if connected to a repository
