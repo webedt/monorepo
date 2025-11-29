@@ -35,7 +35,7 @@ export const TAGLINES = [
   "It's-a me… edit!",
   "You're finally awake… time to edit.",
   "Took an arrow to the knee… still did edit.",
-  "Why so serious? Do edit.",
+  "Why edit so serious?",
   "You had me at edit.",
   "Expecto… edit-toh.",
   "I'll be back… with edits.",
