@@ -13,6 +13,7 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   const [hasError, setHasError] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [autoRefreshAttempts, setAutoRefreshAttempts] = useState(0);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false); // Disabled by default
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleRefresh = useCallback(() => {
@@ -105,12 +106,12 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
     };
   }, [previewUrl, iframeKey, stopAutoRefresh]);
 
-  // Start countdown when error is detected
+  // Start countdown when error is detected and auto-refresh is enabled
   useEffect(() => {
-    if (hasError && countdown === 0 && !countdownRef.current) {
+    if (hasError && countdown === 0 && !countdownRef.current && autoRefreshEnabled) {
       startAutoRefresh();
     }
-  }, [hasError, countdown, startAutoRefresh]);
+  }, [hasError, countdown, startAutoRefresh, autoRefreshEnabled]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -163,6 +164,21 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
           {previewUrl}
         </a>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Auto-refresh toggle */}
+          <label className="flex items-center gap-1 cursor-pointer" title={autoRefreshEnabled ? "Auto-refresh enabled (click to disable)" : "Auto-refresh disabled (click to enable)"}>
+            <input
+              type="checkbox"
+              className="toggle toggle-xs toggle-primary"
+              checked={autoRefreshEnabled}
+              onChange={(e) => {
+                setAutoRefreshEnabled(e.target.checked);
+                if (!e.target.checked) {
+                  stopAutoRefresh();
+                }
+              }}
+            />
+            <span className="text-xs text-base-content/60">Auto</span>
+          </label>
           {/* Countdown indicator */}
           {countdown > 0 && (
             <span
