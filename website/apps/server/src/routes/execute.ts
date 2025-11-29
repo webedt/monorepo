@@ -51,6 +51,7 @@ const truncateContent = (content: any, maxLength: number = 500): string => {
 // Execute AI coding task with SSE - supports both GET and POST
 const executeHandler = async (req: any, res: any) => {
   const authReq = req as AuthRequest;
+  const user = authReq.user!; // Non-null after requireAuth middleware
   let chatSession: any;
 
   try {
@@ -96,14 +97,14 @@ const executeHandler = async (req: any, res: any) => {
     // Determine which provider to use
     // Priority: request param > user preference > default (claude)
     const requestedProvider = params.provider as AIProvider | undefined;
-    const userPreferredProvider = (authReq.user?.preferredProvider as AIProvider) || 'claude';
+    const userPreferredProvider = (user.preferredProvider as AIProvider) || 'claude';
     const selectedProvider: AIProvider = requestedProvider || userPreferredProvider;
 
     console.log(`[Execute] Provider selection: requested=${requestedProvider}, userPref=${userPreferredProvider}, selected=${selectedProvider}`);
 
     // Validate authentication based on selected provider
     if (selectedProvider === 'codex') {
-      if (!isValidCodexAuth(authReq.user?.codexAuth)) {
+      if (!isValidCodexAuth(user.codexAuth)) {
         res.status(400).json({
           success: false,
           error: 'OpenAI Codex authentication not configured. Please add your OpenAI credentials in Settings.',
@@ -112,7 +113,7 @@ const executeHandler = async (req: any, res: any) => {
       }
     } else {
       // Default: Claude
-      if (!authReq.user?.claudeAuth) {
+      if (!user.claudeAuth) {
         res.status(400).json({
           success: false,
           error: 'Claude authentication not configured. Please add your Claude credentials.',
@@ -133,7 +134,7 @@ const executeHandler = async (req: any, res: any) => {
               eq(chatSessions.id, websiteSessionId as string),
               eq(chatSessions.sessionPath, websiteSessionId as string)
             ),
-            eq(chatSessions.userId, authReq.user.id)
+            eq(chatSessions.userId, user.id)
           )
         )
         .limit(1);
@@ -179,7 +180,7 @@ const executeHandler = async (req: any, res: any) => {
         .insert(chatSessions)
         .values({
           id: sessionUuid,
-          userId: authReq.user.id,
+          userId: user.id,
           userRequest: (userRequest as string) || 'New session',
           status: 'pending',
           repositoryUrl: (repoUrl as string) || null,
@@ -269,7 +270,7 @@ const executeHandler = async (req: any, res: any) => {
 
     if (selectedProvider === 'codex') {
       // Codex authentication
-      let codexAuth: CodexAuth = authReq.user.codexAuth!;
+      let codexAuth: CodexAuth = user.codexAuth!;
       providerName = 'Codex';
 
       try {
@@ -282,9 +283,9 @@ const executeHandler = async (req: any, res: any) => {
           await db
             .update(users)
             .set({ codexAuth: refreshedAuth })
-            .where(eq(users.id, authReq.user.id));
+            .where(eq(users.id, user.id));
 
-          console.log(`[Execute] Refreshed and saved Codex token for user ${authReq.user.id}`);
+          console.log(`[Execute] Refreshed and saved Codex token for user ${user.id}`);
         }
         providerAuth = codexAuth;
       } catch (error) {
@@ -297,7 +298,7 @@ const executeHandler = async (req: any, res: any) => {
       }
     } else {
       // Claude authentication (default)
-      let claudeAuth: ClaudeAuth = authReq.user.claudeAuth!;
+      let claudeAuth: ClaudeAuth = user.claudeAuth!;
       providerName = 'ClaudeAgentSDK';
 
       try {
@@ -310,9 +311,9 @@ const executeHandler = async (req: any, res: any) => {
           await db
             .update(users)
             .set({ claudeAuth: refreshedAuth })
-            .where(eq(users.id, authReq.user.id));
+            .where(eq(users.id, user.id));
 
-          console.log(`[Execute] Refreshed and saved Claude token for user ${authReq.user.id}`);
+          console.log(`[Execute] Refreshed and saved Claude token for user ${user.id}`);
         }
         providerAuth = claudeAuth;
       } catch (error) {
@@ -379,8 +380,8 @@ const executeHandler = async (req: any, res: any) => {
         accessToken: authReq.session?.id || '', // Use session ID for database access
       },
       // Add provider options with preferred model if set
-      providerOptions: authReq.user.preferredModel ? {
-        model: authReq.user.preferredModel,
+      providerOptions: user.preferredModel ? {
+        model: user.preferredModel,
       } : undefined,
     };
 
@@ -391,7 +392,7 @@ const executeHandler = async (req: any, res: any) => {
       - userProvidedSessionId (resuming): ${!!websiteSessionId}
       - selectedProvider: ${selectedProvider}
       - providerName: ${providerName}
-      - preferredModel: ${authReq.user.preferredModel || 'default (not set)'}
+      - preferredModel: ${user.preferredModel || 'default (not set)'}
     `);
 
     // Always send GitHub config if available - AI worker will determine if it needs to clone
@@ -399,11 +400,11 @@ const executeHandler = async (req: any, res: any) => {
     const effectiveRepoUrl = repoUrl || chatSession.repositoryUrl;
     const effectiveBranch = repoUrl ? branch : (chatSession.baseBranch || 'main');
 
-    if (effectiveRepoUrl && authReq.user.githubAccessToken) {
+    if (effectiveRepoUrl && user.githubAccessToken) {
       executePayload.github = {
         repoUrl: effectiveRepoUrl as string,
         branch: effectiveBranch as string,
-        accessToken: authReq.user.githubAccessToken,
+        accessToken: user.githubAccessToken,
       };
     }
 
@@ -420,7 +421,7 @@ const executeHandler = async (req: any, res: any) => {
     console.log(`[Execute] Repository: ${executePayload.github?.repoUrl || 'N/A'}`);
     console.log(`[Execute] Branch: ${executePayload.github?.branch || 'N/A'}`);
     console.log(`[Execute] Auto Commit: ${executePayload.autoCommit ?? 'N/A'}`);
-    console.log(`[Execute] Preferred Model: ${authReq.user.preferredModel || 'default (not set)'}`);
+    console.log(`[Execute] Preferred Model: ${user.preferredModel || 'default (not set)'}`);
     console.log(`[Execute] Full Payload (sanitized): ${JSON.stringify(sanitizedPayload, null, 2)}`);
     console.log(`[Execute] ==================================================================`);
 
