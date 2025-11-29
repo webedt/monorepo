@@ -213,6 +213,197 @@ router.get('/repos/:owner/:repo/branches', requireAuth, async (req, res) => {
   }
 });
 
+// Create a new branch
+router.post('/repos/:owner/:repo/branches', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const { branchName, baseBranch } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!branchName) {
+      res.status(400).json({ success: false, error: 'Branch name is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Get the SHA of the base branch
+    const base = baseBranch || 'main';
+    const { data: baseBranchData } = await octokit.repos.getBranch({
+      owner,
+      repo,
+      branch: base,
+    });
+
+    // Create the new branch
+    await octokit.git.createRef({
+      owner,
+      repo,
+      ref: `refs/heads/${branchName}`,
+      sha: baseBranchData.commit.sha,
+    });
+
+    console.log(`[GitHub] Created branch ${branchName} from ${base} in ${owner}/${repo}`);
+
+    res.json({
+      success: true,
+      data: {
+        branchName,
+        baseBranch: base,
+        sha: baseBranchData.commit.sha,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub create branch error:', error);
+
+    if (err.status === 422) {
+      res.status(422).json({ success: false, error: 'Branch already exists' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to create branch' });
+  }
+});
+
+// Get repository file tree
+// Note: Using wildcard (*) for branch because branch names can contain slashes
+router.get('/repos/:owner/:repo/tree/*', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const branch = req.params[0]; // The branch name (can contain slashes)
+    const { recursive } = req.query;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Get the tree SHA from the branch
+    const { data: branchData } = await octokit.repos.getBranch({
+      owner,
+      repo,
+      branch,
+    });
+    const treeSha = branchData.commit.commit.tree.sha;
+
+    // Get the tree
+    const { data: tree } = await octokit.git.getTree({
+      owner,
+      repo,
+      tree_sha: treeSha,
+      recursive: recursive === 'true' ? 'true' : undefined,
+    });
+
+    console.log(`[GitHub] Fetched tree for ${owner}/${repo}/${branch} (${tree.tree.length} items)`);
+
+    res.json({
+      success: true,
+      data: {
+        sha: tree.sha,
+        tree: tree.tree.map((item) => ({
+          path: item.path,
+          type: item.type, // 'blob' for files, 'tree' for directories
+          sha: item.sha,
+          size: item.size,
+        })),
+        truncated: tree.truncated,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub get tree error:', error);
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'Branch or repository not found' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to fetch file tree' });
+  }
+});
+
+// Get file contents
+// Note: Using wildcard (*) for the file path
+router.get('/repos/:owner/:repo/contents/*', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const path = req.params[0]; // The file path
+    const { ref } = req.query; // Branch/commit ref
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    const { data } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path,
+      ref: ref as string,
+    });
+
+    // Handle file content (not directory)
+    if (!Array.isArray(data) && data.type === 'file') {
+      // Decode base64 content
+      const content = data.encoding === 'base64' && data.content
+        ? Buffer.from(data.content, 'base64').toString('utf-8')
+        : data.content;
+
+      res.json({
+        success: true,
+        data: {
+          name: data.name,
+          path: data.path,
+          sha: data.sha,
+          size: data.size,
+          type: data.type,
+          content,
+          encoding: 'utf-8',
+        },
+      });
+    } else if (Array.isArray(data)) {
+      // Directory listing
+      res.json({
+        success: true,
+        data: {
+          type: 'dir',
+          items: data.map((item) => ({
+            name: item.name,
+            path: item.path,
+            sha: item.sha,
+            size: item.size,
+            type: item.type,
+          })),
+        },
+      });
+    } else {
+      res.json({ success: true, data });
+    }
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub get contents error:', error);
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'File or path not found' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to fetch file contents' });
+  }
+});
+
 // Delete a branch
 // Note: Using wildcard (*) for branch because branch names can contain slashes (e.g., "user/feature-branch")
 router.delete('/repos/:owner/:repo/branches/*', requireAuth, async (req, res) => {
