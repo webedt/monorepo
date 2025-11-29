@@ -1,189 +1,402 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import SessionLayout from '@/components/SessionLayout';
 
-type EditorType = 'sprite' | 'spritesheet' | 'animation';
+type EditorMode = 'image' | 'spritesheet' | 'animation';
+type ViewMode = 'preview' | 'edit';
+
+interface RecentItem {
+  id: string;
+  name: string;
+  thumbnail: string;
+  lastModified: string;
+}
+
+interface FileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'folder';
+  children?: FileNode[];
+  icon?: string;
+}
+
+// Mock file tree data
+const mockFileTree: FileNode[] = [
+  {
+    name: 'sprites',
+    path: 'sprites',
+    type: 'folder',
+    children: [
+      { name: 'character_idle.png', path: 'sprites/character_idle.png', type: 'file', icon: '🖼️' },
+      { name: 'character_walk.png', path: 'sprites/character_walk.png', type: 'file', icon: '🖼️' },
+      { name: 'character_jump.png', path: 'sprites/character_jump.png', type: 'file', icon: '🖼️' },
+      { name: 'enemy_type_A.png', path: 'sprites/enemy_type_A.png', type: 'file', icon: '🖼️' },
+      { name: 'enemy_type_B.png', path: 'sprites/enemy_type_B.png', type: 'file', icon: '🖼️' },
+    ],
+  },
+  {
+    name: 'spritesheets',
+    path: 'spritesheets',
+    type: 'folder',
+    children: [
+      { name: 'player_run.png', path: 'spritesheets/player_run.png', type: 'file', icon: '🎞️' },
+      { name: 'player_attack.png', path: 'spritesheets/player_attack.png', type: 'file', icon: '🎞️' },
+      { name: 'explosion_fx.png', path: 'spritesheets/explosion_fx.png', type: 'file', icon: '🎞️' },
+    ],
+  },
+  {
+    name: 'backgrounds',
+    path: 'backgrounds',
+    type: 'folder',
+    children: [
+      { name: 'forest_layer1.png', path: 'backgrounds/forest_layer1.png', type: 'file', icon: '🖼️' },
+      { name: 'forest_layer2.png', path: 'backgrounds/forest_layer2.png', type: 'file', icon: '🖼️' },
+      { name: 'sky_gradient.png', path: 'backgrounds/sky_gradient.png', type: 'file', icon: '🖼️' },
+    ],
+  },
+  {
+    name: 'ui',
+    path: 'ui',
+    type: 'folder',
+    children: [
+      { name: 'button_normal.png', path: 'ui/button_normal.png', type: 'file', icon: '🖼️' },
+      { name: 'button_hover.png', path: 'ui/button_hover.png', type: 'file', icon: '🖼️' },
+      { name: 'health_bar.png', path: 'ui/health_bar.png', type: 'file', icon: '🖼️' },
+    ],
+  },
+];
+
+// Mock recent items
+const mockRecentImages: RecentItem[] = [
+  { id: '1', name: 'character_idle.png', thumbnail: '👤', lastModified: '2 hours ago' },
+  { id: '2', name: 'enemy_type_A.png', thumbnail: '👹', lastModified: '4 hours ago' },
+  { id: '3', name: 'button_normal.png', thumbnail: '🔲', lastModified: 'Yesterday' },
+  { id: '4', name: 'forest_layer1.png', thumbnail: '🌲', lastModified: 'Yesterday' },
+  { id: '5', name: 'sky_gradient.png', thumbnail: '🌅', lastModified: '2 days ago' },
+  { id: '6', name: 'health_bar.png', thumbnail: '💚', lastModified: '2 days ago' },
+  { id: '7', name: 'coin_gold.png', thumbnail: '🪙', lastModified: '3 days ago' },
+  { id: '8', name: 'gem_blue.png', thumbnail: '💎', lastModified: '3 days ago' },
+];
+
+const mockRecentSpritesheets: RecentItem[] = [
+  { id: '1', name: 'player_run.png', thumbnail: '🏃', lastModified: '1 hour ago' },
+  { id: '2', name: 'player_attack.png', thumbnail: '⚔️', lastModified: '3 hours ago' },
+  { id: '3', name: 'explosion_fx.png', thumbnail: '💥', lastModified: 'Yesterday' },
+  { id: '4', name: 'coin_spin.png', thumbnail: '🪙', lastModified: 'Yesterday' },
+  { id: '5', name: 'fire_effect.png', thumbnail: '🔥', lastModified: '2 days ago' },
+  { id: '6', name: 'water_splash.png', thumbnail: '💦', lastModified: '2 days ago' },
+  { id: '7', name: 'dust_cloud.png', thumbnail: '💨', lastModified: '3 days ago' },
+  { id: '8', name: 'magic_sparkle.png', thumbnail: '✨', lastModified: '4 days ago' },
+];
+
+const mockRecentAnimations: RecentItem[] = [
+  { id: '1', name: 'Player_Idle', thumbnail: '🧍', lastModified: '30 mins ago' },
+  { id: '2', name: 'Player_Run', thumbnail: '🏃', lastModified: '1 hour ago' },
+  { id: '3', name: 'Player_Jump', thumbnail: '🦘', lastModified: '2 hours ago' },
+  { id: '4', name: 'Enemy_Attack', thumbnail: '👊', lastModified: 'Yesterday' },
+  { id: '5', name: 'Explosion_VFX', thumbnail: '💥', lastModified: 'Yesterday' },
+  { id: '6', name: 'Coin_Collect', thumbnail: '🪙', lastModified: '2 days ago' },
+  { id: '7', name: 'Door_Open', thumbnail: '🚪', lastModified: '3 days ago' },
+  { id: '8', name: 'Flag_Wave', thumbnail: '🚩', lastModified: '4 days ago' },
+];
 
 function ImagesContent() {
-  const [selectedEditor, setSelectedEditor] = useState<EditorType>('sprite');
-  const [selectedAsset, setSelectedAsset] = useState<string>('character_idle.png');
+  const [editorMode, setEditorMode] = useState<EditorMode>('image');
+  const [viewMode, setViewMode] = useState<ViewMode>('preview');
+  const [showExplorer, setShowExplorer] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['sprites']));
+  const [selectedFile, setSelectedFile] = useState<{ path: string; name: string } | null>(null);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
-  const mockImages = [
-    'character_idle.png',
-    'character_walk.png',
-    'enemy_type_A.png',
-    'background_layer1.png',
-    'explosion.png',
-  ];
+  // Get recent items based on current mode
+  const getRecentItems = () => {
+    switch (editorMode) {
+      case 'image':
+        return mockRecentImages;
+      case 'spritesheet':
+        return mockRecentSpritesheets;
+      case 'animation':
+        return mockRecentAnimations;
+    }
+  };
 
-  const mockAnimations = [
-    'Player_Idle',
-    'Player_Run',
-    'Player_Jump',
-  ];
+  const toggleFolder = (path: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
 
-  const mockSprites = [
-    'idle_0',
-    'idle_1',
-    'idle_2',
-    'idle_3',
-  ];
+  const handleFileClick = (node: FileNode) => {
+    if (node.type === 'folder') {
+      toggleFolder(node.path);
+    } else {
+      setSelectedFile({ path: node.path, name: node.name });
+      setViewMode('preview');
+    }
+  };
 
-  return (
-    <div className="h-full flex bg-base-300">
-      {/* Left Sidebar */}
-      <div className="w-64 bg-base-100 border-r border-base-300 flex flex-col">
-        {/* Project Info */}
-        <div className="p-4 border-b border-base-300">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
-              <svg className="w-6 h-6 text-primary" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-3.5l-3-4 4-5 3 4 2-2.5 4 5H10z"/>
+  const handleRecentClick = (item: RecentItem) => {
+    setSelectedFile({ path: item.id, name: item.name });
+    setViewMode('preview');
+  };
+
+  const handleAiSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aiPrompt.trim() || isGenerating) return;
+
+    setIsGenerating(true);
+    // Simulate AI generation
+    setTimeout(() => {
+      setIsGenerating(false);
+      setAiPrompt('');
+    }, 2000);
+  };
+
+  // Render file tree recursively
+  const renderFileTree = (nodes: FileNode[], level = 0): JSX.Element[] => {
+    return nodes.map((node) => {
+      const paddingLeft = level * 12 + 8;
+      const isExpanded = expandedFolders.has(node.path);
+      const isSelected = selectedFile?.path === node.path;
+
+      if (node.type === 'folder') {
+        return (
+          <div key={node.path}>
+            <div
+              onClick={() => handleFileClick(node)}
+              className="flex items-center gap-1.5 py-1 px-2 cursor-pointer hover:bg-base-200 transition-colors"
+              style={{ paddingLeft }}
+            >
+              <svg
+                className={`w-3 h-3 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                  clipRule="evenodd"
+                />
               </svg>
+              <svg className="w-4 h-4 text-yellow-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+              </svg>
+              <span className="text-xs font-medium truncate">{node.name}</span>
             </div>
-            <div>
-              <div className="font-semibold text-base-content">Project Alpha</div>
-              <div className="text-xs text-base-content/60">Images & Animations</div>
-            </div>
+            {isExpanded && node.children && renderFileTree(node.children, level + 1)}
           </div>
-        </div>
+        );
+      }
 
-        {/* Browse Button */}
-        <div className="p-4 border-b border-base-300">
-          <button className="btn btn-sm btn-outline w-full gap-2">
+      return (
+        <div
+          key={node.path}
+          onClick={() => handleFileClick(node)}
+          className={`flex items-center gap-1.5 py-1 px-2 cursor-pointer transition-colors ${
+            isSelected ? 'bg-primary/20 text-primary' : 'hover:bg-base-200'
+          }`}
+          style={{ paddingLeft: paddingLeft + 16 }}
+        >
+          <span className="text-xs flex-shrink-0">{node.icon || '📄'}</span>
+          <span className="text-xs truncate">{node.name}</span>
+        </div>
+      );
+    });
+  };
+
+  // Left Sidebar
+  const LeftSidebar = () => (
+    <div className="w-64 bg-base-100 border-r border-base-300 flex flex-col flex-shrink-0">
+      {/* Editor Mode Tabs */}
+      <div className="p-2 border-b border-base-300">
+        <div className="flex flex-col gap-1">
+          <button
+            onClick={() => setEditorMode('image')}
+            className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm ${
+              editorMode === 'image'
+                ? 'bg-primary/10 text-primary'
+                : 'text-base-content/70 hover:bg-base-200'
+            }`}
+          >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+              <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
             </svg>
-            Browse
+            ImageEDT
           </button>
-        </div>
-
-        {/* Editor Navigation */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-2">
-            <button
-              onClick={() => setSelectedEditor('sprite')}
-              className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-3 transition-colors ${
-                selectedEditor === 'sprite'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-base-content/70 hover:bg-base-200'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M18 4V3c0-.55-.45-1-1-1H5c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1h12c.55 0 1-.45 1-1V6h1v4H9v11c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-9h8V4h-3z"/>
-              </svg>
-              Sprite Editor
-            </button>
-
-            <button
-              onClick={() => setSelectedEditor('spritesheet')}
-              className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-3 transition-colors ${
-                selectedEditor === 'spritesheet'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-base-content/70 hover:bg-base-200'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z"/>
-              </svg>
-              Sprite Sheet Editor
-            </button>
-
-            <button
-              onClick={() => setSelectedEditor('animation')}
-              className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-3 transition-colors ${
-                selectedEditor === 'animation'
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-base-content/70 hover:bg-base-200'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
-              </svg>
-              Animation Editor
-            </button>
-          </div>
-
-          {/* Assets Section */}
-          {selectedEditor !== 'animation' && (
-            <div className="p-2 mt-4">
-              <div className="text-xs font-semibold text-base-content/50 uppercase tracking-wider px-3 mb-2">
-                Images
-              </div>
-              <div className="space-y-1">
-                {mockImages.map((image) => (
-                  <button
-                    key={image}
-                    onClick={() => setSelectedAsset(image)}
-                    className={`w-full text-left px-3 py-1.5 rounded text-sm flex items-center gap-2 transition-colors ${
-                      selectedAsset === image
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-base-content/70 hover:bg-base-200'
-                    }`}
-                  >
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                    </svg>
-                    {image}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {selectedEditor === 'animation' && (
-            <div className="p-2 mt-4">
-              <div className="text-xs font-semibold text-base-content/50 uppercase tracking-wider px-3 mb-2">
-                Animations
-              </div>
-              <div className="space-y-1">
-                {mockAnimations.map((animation) => (
-                  <button
-                    key={animation}
-                    className="w-full text-left px-3 py-1.5 rounded text-sm text-base-content/70 hover:bg-base-200 transition-colors"
-                  >
-                    {animation}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {selectedEditor === 'spritesheet' && selectedAsset && (
-            <div className="p-2 mt-4">
-              <div className="text-xs font-semibold text-base-content/50 uppercase tracking-wider px-3 mb-2">
-                Sprite List ({mockSprites.length})
-              </div>
-              <div className="space-y-1">
-                {mockSprites.map((sprite) => (
-                  <button
-                    key={sprite}
-                    className="w-full text-left px-3 py-1.5 rounded text-sm text-base-content/70 hover:bg-base-200 transition-colors"
-                  >
-                    {sprite}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <button
+            onClick={() => setEditorMode('spritesheet')}
+            className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm ${
+              editorMode === 'spritesheet'
+                ? 'bg-primary/10 text-primary'
+                : 'text-base-content/70 hover:bg-base-200'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z"/>
+            </svg>
+            SpriteSheetEDT
+          </button>
+          <button
+            onClick={() => setEditorMode('animation')}
+            className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm ${
+              editorMode === 'animation'
+                ? 'bg-primary/10 text-primary'
+                : 'text-base-content/70 hover:bg-base-200'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+            </svg>
+            AnimationEDT
+          </button>
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col">
-        {selectedEditor === 'sprite' && <SpriteEditor />}
-        {selectedEditor === 'spritesheet' && <SpritesheetEditor />}
-        {selectedEditor === 'animation' && <AnimationEditor />}
+      {/* Browse Button */}
+      <div className="p-3 border-b border-base-300">
+        <button
+          onClick={() => setShowExplorer(!showExplorer)}
+          className={`btn btn-sm w-full gap-2 ${showExplorer ? 'btn-primary' : 'btn-outline'}`}
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+          </svg>
+          Browse
+          <svg className={`w-3 h-3 ml-auto transition-transform ${showExplorer ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      {/* File Explorer (collapsible) */}
+      {showExplorer && (
+        <div className="border-b border-base-300 max-h-64 overflow-y-auto">
+          <div className="py-2">
+            {renderFileTree(mockFileTree)}
+          </div>
+        </div>
+      )}
+
+      {/* New Button */}
+      <div className="p-3 border-b border-base-300">
+        <button className="btn btn-sm btn-primary w-full gap-2">
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+          New {editorMode === 'image' ? 'Image' : editorMode === 'spritesheet' ? 'Sprite Sheet' : 'Animation'}
+        </button>
+      </div>
+
+      {/* Recent Items */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="p-2">
+          <div className="text-xs font-semibold text-base-content/50 uppercase tracking-wider px-2 mb-2">
+            Recent {editorMode === 'image' ? 'Images' : editorMode === 'spritesheet' ? 'Sheets' : 'Animations'}
+          </div>
+          <div className="space-y-0.5">
+            {getRecentItems().map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleRecentClick(item)}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-colors text-left ${
+                  selectedFile?.name === item.name
+                    ? 'bg-primary/10 text-primary'
+                    : 'hover:bg-base-200 text-base-content'
+                }`}
+              >
+                <div
+                  className="w-6 h-6 rounded border border-base-300 flex items-center justify-center text-sm flex-shrink-0"
+                  style={{
+                    backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)',
+                    backgroundSize: '4px 4px',
+                    backgroundPosition: '0 0, 0 2px, 2px -2px, -2px 0px'
+                  }}
+                >
+                  {item.thumbnail}
+                </div>
+                <span className="text-xs truncate">{item.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
-}
 
-function SpriteEditor() {
-  return (
-    <>
+  // Preview Content (when file is selected but not editing)
+  const PreviewContent = () => (
+    <div className="flex-1 flex flex-col">
+      {/* Preview Header */}
+      <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🖼️</span>
+          <span className="font-medium text-sm">{selectedFile?.name}</span>
+          <span className="text-xs text-base-content/50">256 x 256 px</span>
+        </div>
+        <button
+          onClick={() => setViewMode('edit')}
+          className="btn btn-primary btn-sm gap-2"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+          </svg>
+          Edit
+        </button>
+      </div>
+
+      {/* Preview Content */}
+      <div className="flex-1 flex items-center justify-center bg-base-200 p-8">
+        <div className="bg-white rounded-lg shadow-lg p-8">
+          <div
+            className="w-64 h-64 flex items-center justify-center rounded relative"
+            style={{
+              backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
+              backgroundSize: '16px 16px',
+              backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
+            }}
+          >
+            <span className="text-8xl">🖼️</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Empty State Content
+  const EmptyContent = () => (
+    <div className="flex-1 flex items-center justify-center bg-base-200">
+      <div className="text-center text-base-content/50">
+        <svg className="w-20 h-20 mx-auto mb-4 opacity-30" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+        </svg>
+        <p className="text-lg font-medium mb-2">No image selected</p>
+        <p className="text-sm">Select an image from the sidebar or browse files</p>
+      </div>
+    </div>
+  );
+
+  // Editor Content (full editing mode)
+  const EditorContent = () => (
+    <div className="flex-1 flex flex-col">
       {/* Toolbar */}
-      <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-2">
-        <div className="text-sm font-semibold text-base-content/70">Sprite Editor</div>
+      <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+        <button
+          onClick={() => setViewMode('preview')}
+          className="btn btn-ghost btn-sm btn-circle"
+          title="Back to preview"
+        >
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+        </button>
+        <div className="text-sm font-semibold text-base-content/70">{selectedFile?.name}</div>
         <div className="flex-1 flex gap-1 ml-4">
           {/* Drawing Tools */}
           <button className="btn btn-xs btn-square btn-ghost" title="Select">
@@ -194,6 +407,11 @@ function SpriteEditor() {
           <button className="btn btn-xs btn-square btn-primary" title="Pencil">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+            </svg>
+          </button>
+          <button className="btn btn-xs btn-square btn-ghost" title="Brush">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/>
             </svg>
           </button>
           <button className="btn btn-xs btn-square btn-ghost" title="Fill">
@@ -217,6 +435,22 @@ function SpriteEditor() {
               <circle cx="12" cy="12" r="9" strokeWidth="2"/>
             </svg>
           </button>
+          <button className="btn btn-xs btn-square btn-ghost" title="Line">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <line x1="4" y1="20" x2="20" y2="4" strokeWidth="2"/>
+            </svg>
+          </button>
+          <div className="divider divider-horizontal mx-1"></div>
+          <button className="btn btn-xs btn-square btn-ghost" title="Undo">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/>
+            </svg>
+          </button>
+          <button className="btn btn-xs btn-square btn-ghost" title="Redo">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/>
+            </svg>
+          </button>
         </div>
         <button className="btn btn-sm btn-primary gap-2">
           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -233,404 +467,337 @@ function SpriteEditor() {
       </div>
 
       {/* Canvas Area */}
-      <div className="flex-1 flex items-center justify-center bg-base-200 p-4">
+      <div className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0">
         <div className="relative">
-          {/* Pixel Grid Canvas Mock */}
           <div className="bg-white rounded shadow-lg p-4">
-            {/* Mock character sprite using CSS */}
-            <div className="relative" style={{ width: '256px', height: '256px' }}>
-              {/* Checkerboard pattern background */}
+            <div className="relative" style={{ width: '384px', height: '384px' }}>
               <div className="absolute inset-0" style={{
                 backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
                 backgroundSize: '16px 16px',
                 backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
               }}></div>
-
-              {/* Mock pixel art character */}
               <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-6xl">👤</div>
+                <div className="text-9xl">👤</div>
               </div>
-
-              {/* Grid overlay */}
               <div className="absolute inset-0 pointer-events-none" style={{
-                backgroundImage: 'linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)',
-                backgroundSize: '32px 32px'
+                backgroundImage: 'linear-gradient(rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px)',
+                backgroundSize: '24px 24px'
               }}></div>
             </div>
           </div>
-
-          {/* Zoom indicator */}
-          <div className="absolute bottom-2 right-2 bg-base-100 px-2 py-1 rounded text-xs text-base-content/70">
-            800%
+          <div className="absolute bottom-2 right-2 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
+            <button className="btn btn-xs btn-ghost btn-circle">-</button>
+            <span>100%</span>
+            <button className="btn btn-xs btn-ghost btn-circle">+</button>
           </div>
         </div>
       </div>
 
-      {/* Right Sidebar */}
-      <div className="w-64 bg-base-100 border-l border-base-300 overflow-y-auto">
-        <div className="p-4 space-y-4">
-          {/* Color Palette */}
-          <div>
-            <div className="font-semibold text-base-content mb-2">Colors</div>
-            <div className="grid grid-cols-8 gap-1">
-              {['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF',
-                '#880000', '#008800', '#000088', '#888800', '#880088', '#008888', '#888888', '#444444'].map((color) => (
-                <button
-                  key={color}
-                  className="w-6 h-6 rounded border border-base-300 hover:scale-110 transition-transform"
-                  style={{ backgroundColor: color }}
-                  title={color}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Layers */}
-          <div className="pt-4 border-t border-base-300">
-            <div className="font-semibold text-base-content mb-2 flex items-center justify-between">
-              Layers
-              <button className="btn btn-xs btn-ghost">
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                </svg>
+      {/* AI Prompt Input */}
+      <div className="bg-base-100 border-t border-base-300 p-4 flex-shrink-0">
+        <form onSubmit={handleAiSubmit} className="max-w-4xl mx-auto">
+          <div className="relative">
+            <textarea
+              ref={promptInputRef}
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="Describe changes... (e.g., 'Add glowing effect', 'Change to blue')"
+              rows={2}
+              className="textarea textarea-bordered w-full pr-24 resize-none text-sm"
+              disabled={isGenerating}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleAiSubmit(e);
+                }
+              }}
+            />
+            <div className="absolute bottom-3 right-3 flex items-center gap-2">
+              <div className="text-xs text-base-content/50 hidden sm:block">
+                Gemini 2.5
+              </div>
+              <button
+                type="submit"
+                disabled={!aiPrompt.trim() || isGenerating}
+                className={`btn btn-circle btn-sm ${isGenerating ? 'btn-warning' : 'btn-primary'}`}
+              >
+                {isGenerating ? (
+                  <span className="loading loading-spinner loading-xs"></span>
+                ) : (
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                  </svg>
+                )}
               </button>
             </div>
-            <div className="space-y-1">
-              {['Main', 'Shadow', 'Outline'].map((layer, i) => (
-                <div
-                  key={layer}
-                  className={`flex items-center gap-2 p-2 rounded ${i === 0 ? 'bg-primary/10' : 'bg-base-200'}`}
-                >
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+
+  // Right Sidebar - Context aware based on mode and view
+  const RightSidebar = () => {
+    // No file selected - show tips
+    if (!selectedFile) {
+      return (
+        <div className="w-64 bg-base-100 border-l border-base-300 p-4 flex-shrink-0">
+          <div className="text-sm font-semibold mb-4">Quick Start</div>
+          <div className="space-y-3 text-sm text-base-content/70">
+            <div className="flex items-start gap-2">
+              <span className="text-primary">1.</span>
+              <span>Select a recent image or browse files</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-primary">2.</span>
+              <span>Click "Edit" to open the editor</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-primary">3.</span>
+              <span>Use AI prompts to generate or modify</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Preview mode - show file info
+    if (viewMode === 'preview') {
+      return (
+        <div className="w-64 bg-base-100 border-l border-base-300 overflow-y-auto flex-shrink-0">
+          <div className="p-4 space-y-4">
+            {/* File Info */}
+            <div>
+              <div className="font-semibold text-base-content mb-3">File Info</div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-base-content/60">Name</span>
+                  <span className="truncate ml-2">{selectedFile.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-base-content/60">Size</span>
+                  <span>256 x 256</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-base-content/60">Format</span>
+                  <span>PNG</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-base-content/60">File size</span>
+                  <span>24.5 KB</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="pt-4 border-t border-base-300">
+              <div className="font-semibold text-base-content mb-3">Actions</div>
+              <div className="space-y-2">
+                <button onClick={() => setViewMode('edit')} className="btn btn-sm btn-primary w-full gap-2">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                   </svg>
-                  <span className="text-sm flex-1">{layer}</span>
-                </div>
-              ))}
+                  Edit Image
+                </button>
+                <button className="btn btn-sm btn-outline w-full gap-2">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                  </svg>
+                  Duplicate
+                </button>
+                <button className="btn btn-sm btn-outline w-full gap-2">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
+                  </svg>
+                  Export
+                </button>
+                <button className="btn btn-sm btn-ghost btn-error w-full gap-2">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                  </svg>
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </>
-  );
-}
+      );
+    }
 
-function SpritesheetEditor() {
-  return (
-    <>
-      {/* Toolbar */}
-      <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-4">
-        <div className="text-sm font-semibold text-base-content/70">Sprite Sheet Editor</div>
-        <div className="flex gap-2">
-          <button className="btn btn-sm btn-ghost btn-square" title="Zoom In">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-              <path d="M12 10h-2v2H9v-2H7V9h2V7h1v2h2v1z"/>
-            </svg>
-          </button>
-          <button className="btn btn-sm btn-ghost btn-square" title="Zoom Out">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-              <path d="M7 9h5v1H7z"/>
-            </svg>
-          </button>
-          <div className="text-sm text-base-content/50 px-2 flex items-center">100%</div>
-        </div>
-        <div className="flex-1"></div>
-        <button className="btn btn-sm btn-primary gap-2">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
-          </svg>
-          Export Sprites
-        </button>
-      </div>
+    // Edit mode - show tools based on editor mode
+    return (
+      <div className="w-64 bg-base-100 border-l border-base-300 overflow-y-auto flex-shrink-0">
+        <div className="p-4 space-y-4">
+          {/* Mode-specific content */}
+          {editorMode === 'image' && (
+            <>
+              {/* Color Palette */}
+              <div>
+                <div className="font-semibold text-base-content mb-3 flex items-center justify-between">
+                  Colors
+                  <button className="btn btn-xs btn-ghost">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-8 h-8 rounded border-2 border-base-content bg-black"></div>
+                  <div className="w-8 h-8 rounded border border-base-300 bg-white"></div>
+                  <button className="btn btn-xs btn-ghost ml-auto">Swap</button>
+                </div>
+                <div className="grid grid-cols-8 gap-1">
+                  {['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF',
+                    '#880000', '#008800', '#000088', '#888800', '#880088', '#008888', '#888888', '#444444'].map((color) => (
+                    <button
+                      key={color}
+                      className="w-5 h-5 rounded border border-base-300 hover:scale-110 transition-transform"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
 
-      {/* Canvas Area */}
-      <div className="flex-1 flex items-center justify-center bg-base-200 p-8 overflow-auto">
-        <div className="relative">
-          {/* Mock sprite sheet with character animations */}
-          <div className="bg-white rounded shadow-lg p-4">
-            <div className="grid grid-cols-4 gap-2">
-              {/* Mock 4 frames of idle animation */}
-              {[1, 2, 3, 4].map((frame) => (
-                <div
-                  key={frame}
-                  className="w-32 h-32 border-2 border-primary/60 rounded flex items-center justify-center relative group hover:bg-primary/5 transition-colors"
-                  style={{
-                    backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)',
-                    backgroundSize: '8px 8px',
-                    backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px'
-                  }}
-                >
-                  <div className="text-4xl">{frame % 2 === 0 ? '🧍' : '🚶'}</div>
-                  <div className="absolute top-1 right-1 bg-primary text-primary-content text-xs px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                    {frame}
+              {/* Brush */}
+              <div className="pt-4 border-t border-base-300">
+                <div className="font-semibold text-base-content mb-3">Brush</div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-base-content/70 mb-1 block">Size: 4px</label>
+                    <input type="range" min="1" max="32" defaultValue="4" className="range range-xs range-primary" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-base-content/70 mb-1 block">Opacity: 100%</label>
+                    <input type="range" min="0" max="100" defaultValue="100" className="range range-xs range-primary" />
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Slice count indicator */}
-          <div className="absolute top-2 right-2 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content">
-            <span className="font-semibold">4</span> sprites detected
-          </div>
-        </div>
-      </div>
-
-      {/* Right Sidebar */}
-      <div className="w-64 bg-base-100 border-l border-base-300 overflow-y-auto">
-        <div className="p-4 space-y-4">
-          {/* Slicing Tools */}
-          <div>
-            <div className="font-semibold text-base-content mb-3">Slicing Tools</div>
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <button className="btn btn-sm btn-primary flex-1">Automatic</button>
-                <button className="btn btn-sm btn-outline flex-1">Manual</button>
               </div>
-            </div>
-          </div>
 
-          {/* Grid Settings */}
-          <div className="pt-4 border-t border-base-300">
-            <div className="font-semibold text-base-content mb-3">Grid Settings</div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-base-content/70 mb-1 block">By Cell Size</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    placeholder="32"
-                    defaultValue="32"
-                    className="input input-sm input-bordered flex-1"
-                  />
-                  <input
-                    type="number"
-                    placeholder="32"
-                    defaultValue="32"
-                    className="input input-sm input-bordered flex-1"
-                  />
+              {/* Layers */}
+              <div className="pt-4 border-t border-base-300">
+                <div className="font-semibold text-base-content mb-3 flex items-center justify-between">
+                  Layers
+                  <button className="btn btn-xs btn-ghost">+</button>
+                </div>
+                <div className="space-y-1">
+                  {['Layer 2', 'Layer 1', 'Background'].map((layer, i) => (
+                    <div key={layer} className={`flex items-center gap-2 p-1.5 rounded text-xs ${i === 0 ? 'bg-primary/10' : 'bg-base-200'}`}>
+                      <button className="btn btn-xs btn-ghost btn-circle p-0 min-h-0 h-4 w-4">👁</button>
+                      <span className="flex-1 truncate">{layer}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
+            </>
+          )}
+
+          {editorMode === 'spritesheet' && (
+            <>
+              {/* Slicing */}
               <div>
-                <label className="text-xs text-base-content/70 mb-1 block">By Cell Count</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    placeholder="4"
-                    defaultValue="4"
-                    className="input input-sm input-bordered flex-1"
-                  />
-                  <input
-                    type="number"
-                    placeholder="1"
-                    defaultValue="1"
-                    className="input input-sm input-bordered flex-1"
-                  />
+                <div className="font-semibold text-base-content mb-3">Slicing</div>
+                <div className="flex gap-2 mb-3">
+                  <button className="btn btn-sm btn-primary flex-1">Auto</button>
+                  <button className="btn btn-sm btn-outline flex-1">Grid</button>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Export Options */}
-          <div className="pt-4 border-t border-base-300">
-            <div className="font-semibold text-base-content mb-3">Export Options</div>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="checkbox checkbox-sm" defaultChecked />
-                <span className="text-sm">Trim transparency</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="checkbox checkbox-sm" defaultChecked />
-                <span className="text-sm">Generate JSON</span>
-              </label>
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function AnimationEditor() {
-  return (
-    <>
-      {/* Toolbar */}
-      <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-4">
-        <div className="text-sm font-semibold text-base-content/70">Animation Editor</div>
-        <div className="flex-1"></div>
-        <button className="btn btn-sm btn-outline gap-2">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
-          </svg>
-          Share
-        </button>
-        <button className="btn btn-sm btn-primary gap-2">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
-          </svg>
-          Export
-        </button>
-      </div>
-
-      {/* Canvas Area */}
-      <div className="flex-1 flex flex-col">
-        <div className="flex-1 flex items-center justify-center bg-base-200 p-8">
-          {/* Animation Preview with mock character */}
-          <div className="relative">
-            <div className="w-96 h-64 bg-white rounded-lg shadow-lg flex items-center justify-center relative overflow-hidden">
-              {/* Checkerboard background */}
-              <div className="absolute inset-0" style={{
-                backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)',
-                backgroundSize: '16px 16px',
-                backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
-              }}></div>
-
-              {/* Mock animated character */}
-              <div className="relative z-10 text-8xl">
-                🏃
-              </div>
-            </div>
-
-            {/* FPS counter */}
-            <div className="absolute top-2 right-2 bg-base-100 px-2 py-1 rounded text-xs text-base-content/70">
-              10 FPS
-            </div>
-          </div>
-        </div>
-
-        {/* Control Panel */}
-        <div className="bg-base-100 border-t border-base-300 p-4">
-          {/* Playback Controls */}
-          <div className="mb-4 flex items-center justify-center gap-3">
-            <button className="btn btn-sm btn-primary btn-circle" title="Play/Pause">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z"/>
-              </svg>
-            </button>
-            <button className="btn btn-sm btn-outline btn-circle" title="Restart">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-              </svg>
-            </button>
-            <button className="btn btn-sm btn-outline btn-circle" title="Mute/Unmute">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-              </svg>
-            </button>
-          </div>
-
-          {/* Frames */}
-          <div>
-            <div className="text-xs text-base-content/70 mb-2 flex items-center justify-between">
-              <span>Frames</span>
-              <span className="text-base-content/50">Frame 2 / 4</span>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              {[
-                { emoji: '🧍', label: 'Idle' },
-                { emoji: '🏃', label: 'Run 1' },
-                { emoji: '🚶', label: 'Run 2' },
-                { emoji: '🏃', label: 'Run 3' }
-              ].map((frame, index) => (
-                <div
-                  key={index}
-                  className={`w-24 h-24 flex-shrink-0 border-2 rounded ${
-                    index === 1
-                      ? 'border-primary bg-primary/10'
-                      : 'border-base-300 bg-base-200'
-                  } flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors relative`}
-                  style={{
-                    backgroundImage: 'linear-gradient(45deg, #f9fafb 25%, transparent 25%), linear-gradient(-45deg, #f9fafb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f9fafb 75%), linear-gradient(-45deg, transparent 75%, #f9fafb 75%)',
-                    backgroundSize: '8px 8px',
-                    backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px'
-                  }}
-                >
-                  <div className="text-3xl">{frame.emoji}</div>
-                  <div className="text-[10px] text-base-content/50 mt-1">{frame.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Right Sidebar */}
-      <div className="w-64 bg-base-100 border-l border-base-300 overflow-y-auto">
-        <div className="p-4 space-y-4">
-          {/* Animation Properties */}
-          <div>
-            <div className="font-semibold text-base-content mb-3">Animation Properties</div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-base-content/70 mb-1 block">Animation Name</label>
-                <input
-                  type="text"
-                  placeholder="Player_Run"
-                  defaultValue="Player_Run"
-                  className="input input-sm input-bordered w-full"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-base-content/70 mb-1 block">Frame Duration (ms)</label>
-                <input
-                  type="number"
-                  placeholder="100"
-                  defaultValue="100"
-                  className="input input-sm input-bordered w-full"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-base-content/70 mb-1 block">Easing</label>
-                <select className="select select-sm select-bordered w-full">
-                  <option>Linear</option>
-                  <option>Ease In</option>
-                  <option>Ease Out</option>
-                  <option>Ease In Out</option>
-                </select>
-              </div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-base-content/70">Loop</label>
-                <input type="checkbox" className="toggle toggle-sm toggle-primary" defaultChecked />
-              </div>
-            </div>
-          </div>
-
-          {/* Layers */}
-          <div className="pt-4 border-t border-base-300">
-            <div className="font-semibold text-base-content mb-3">Layers</div>
-            <div className="space-y-2">
-              {['Player Body', 'Weapon', 'Background'].map((layer) => (
-                <div
-                  key={layer}
-                  className="flex items-center justify-between p-2 rounded bg-base-200 hover:bg-base-300 transition-colors"
-                >
-                  <span className="text-sm">{layer}</span>
-                  <div className="flex gap-1">
-                    <button className="btn btn-xs btn-ghost btn-circle">
-                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                      </svg>
-                    </button>
-                    <button className="btn btn-xs btn-ghost btn-circle">
-                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                      </svg>
-                    </button>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-xs text-base-content/70 mb-1 block">Cell Size</label>
+                    <div className="flex gap-2">
+                      <input type="number" defaultValue="32" className="input input-xs input-bordered w-full" />
+                      <input type="number" defaultValue="32" className="input input-xs input-bordered w-full" />
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
+
+              {/* Sprites */}
+              <div className="pt-4 border-t border-base-300">
+                <div className="font-semibold text-base-content mb-3">Sprites (4)</div>
+                <div className="grid grid-cols-4 gap-1">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="aspect-square bg-base-200 rounded border border-base-300 flex items-center justify-center text-xs">
+                      {i}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {editorMode === 'animation' && (
+            <>
+              {/* Playback */}
+              <div>
+                <div className="font-semibold text-base-content mb-3">Playback</div>
+                <div className="flex justify-center gap-2 mb-3">
+                  <button className="btn btn-sm btn-circle btn-ghost">⏮</button>
+                  <button className="btn btn-sm btn-circle btn-primary">▶</button>
+                  <button className="btn btn-sm btn-circle btn-ghost">⏭</button>
+                </div>
+                <div>
+                  <label className="text-xs text-base-content/70 mb-1 block">FPS: 12</label>
+                  <input type="range" min="1" max="60" defaultValue="12" className="range range-xs range-primary" />
+                </div>
+              </div>
+
+              {/* Frames */}
+              <div className="pt-4 border-t border-base-300">
+                <div className="font-semibold text-base-content mb-3 flex items-center justify-between">
+                  Frames (4)
+                  <button className="btn btn-xs btn-ghost">+</button>
+                </div>
+                <div className="flex gap-1 overflow-x-auto pb-2">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className={`w-12 h-12 flex-shrink-0 rounded border-2 flex items-center justify-center ${i === 2 ? 'border-primary' : 'border-base-300'}`}>
+                      🧍
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Properties */}
+              <div className="pt-4 border-t border-base-300">
+                <div className="font-semibold text-base-content mb-3">Properties</div>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <label className="text-xs text-base-content/70 mb-1 block">Name</label>
+                    <input type="text" defaultValue="idle" className="input input-xs input-bordered w-full" />
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" className="checkbox checkbox-xs" defaultChecked />
+                    <span className="text-xs">Loop</span>
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
-    </>
+    );
+  };
+
+  // Main content based on state
+  const MainContent = () => {
+    if (!selectedFile) {
+      return <EmptyContent />;
+    }
+    if (viewMode === 'preview') {
+      return <PreviewContent />;
+    }
+    return <EditorContent />;
+  };
+
+  return (
+    <div className="h-full flex bg-base-300">
+      <LeftSidebar />
+      <MainContent />
+      <RightSidebar />
+    </div>
   );
 }
 
 export default function Images() {
-  // Always use SessionLayout to show status bar
   return (
     <SessionLayout>
       <ImagesContent />

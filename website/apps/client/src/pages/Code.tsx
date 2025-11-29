@@ -25,6 +25,13 @@ type FolderNode = {
 
 type TreeNode = FileNode | FolderNode;
 
+// Tab type for the editor
+interface EditorTab {
+  path: string;
+  name: string;
+  isPreview: boolean; // Preview tabs are shown in italics and replaced by next preview
+}
+
 interface GitHubRepo {
   id: number;
   name: string;
@@ -185,10 +192,14 @@ export default function Code() {
   const [isFromExistingSession, setIsFromExistingSession] = useState(false);
 
   // File explorer state
-  const [selectedFile, setSelectedFile] = useState<{ path: string; name: string } | null>(null);
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+
+  // Track pending click for single/double click distinction
+  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch existing session if sessionId is provided
   const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
@@ -366,10 +377,115 @@ export default function Code() {
     }
   };
 
-  // Handle file selection
-  const handleFileSelect = (path: string, name: string) => {
-    setSelectedFile({ path, name });
+  // Open file as preview tab (single-click behavior)
+  const openAsPreview = (path: string, name: string) => {
+    // If the file is already open, just switch to it
+    const existingTab = tabs.find(tab => tab.path === path);
+    if (existingTab) {
+      setActiveTabPath(path);
+      loadFileContent(path);
+      return;
+    }
+
+    // Replace existing preview tab with new preview, or add new preview tab
+    setTabs(prevTabs => {
+      const nonPreviewTabs = prevTabs.filter(tab => !tab.isPreview);
+      return [...nonPreviewTabs, { path, name, isPreview: true }];
+    });
+    setActiveTabPath(path);
     loadFileContent(path);
+  };
+
+  // Open file as permanent tab (double-click behavior)
+  const openAsPermanent = (path: string, name: string) => {
+    // Check if already open as a tab
+    const existingTab = tabs.find(tab => tab.path === path);
+
+    if (existingTab) {
+      // If it's a preview tab, convert it to permanent
+      if (existingTab.isPreview) {
+        setTabs(prevTabs =>
+          prevTabs.map(tab =>
+            tab.path === path ? { ...tab, isPreview: false } : tab
+          )
+        );
+      }
+    } else {
+      // Close any preview tab and add this as a permanent tab
+      setTabs(prevTabs => {
+        const nonPreviewTabs = prevTabs.filter(tab => !tab.isPreview);
+        return [...nonPreviewTabs, { path, name, isPreview: false }];
+      });
+    }
+
+    setActiveTabPath(path);
+    loadFileContent(path);
+  };
+
+  // Handle click on file - uses timeout to distinguish single vs double click
+  const handleFileClick = (path: string, name: string) => {
+    // Clear any pending single-click action
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = null;
+    }
+
+    // Delay single-click action to allow double-click to cancel it
+    clickTimeoutRef.current = setTimeout(() => {
+      openAsPreview(path, name);
+      clickTimeoutRef.current = null;
+    }, 200); // 200ms delay to detect double-click
+  };
+
+  // Handle double-click on file - cancels pending single-click and opens permanently
+  const handleFileDoubleClick = (path: string, name: string) => {
+    // Cancel the pending single-click action
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = null;
+    }
+
+    openAsPermanent(path, name);
+  };
+
+  // Handle tab click - switch to that tab
+  const handleTabClick = (path: string) => {
+    setActiveTabPath(path);
+    loadFileContent(path);
+  };
+
+  // Handle tab close
+  const handleTabClose = (path: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent tab click from firing
+
+    setTabs(prevTabs => {
+      const newTabs = prevTabs.filter(tab => tab.path !== path);
+
+      // If we're closing the active tab, switch to another tab
+      if (activeTabPath === path) {
+        if (newTabs.length > 0) {
+          // Find the closest tab to switch to
+          const closedIndex = prevTabs.findIndex(tab => tab.path === path);
+          const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
+          setActiveTabPath(newTabs[newActiveIndex].path);
+          loadFileContent(newTabs[newActiveIndex].path);
+        } else {
+          setActiveTabPath(null);
+          setFileContent(null);
+        }
+      }
+
+      return newTabs;
+    });
+  };
+
+  // Convert preview tab to permanent (e.g., when user starts editing)
+  const pinTab = (path: string) => {
+    setTabs(prevTabs =>
+      prevTabs.map(tab =>
+        tab.path === path ? { ...tab, isPreview: false } : tab
+      )
+    );
   };
 
   const toggleFolder = (path: string) => {
@@ -390,12 +506,14 @@ export default function Code() {
       const paddingLeft = level * 16 + 8;
 
       if (node.type === 'file') {
+        const isActive = activeTabPath === node.path;
         return (
           <div
             key={node.path}
-            onClick={() => handleFileSelect(node.path, node.name)}
+            onClick={() => handleFileClick(node.path, node.name)}
+            onDoubleClick={() => handleFileDoubleClick(node.path, node.name)}
             className={`flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
-              selectedFile?.path === node.path ? 'bg-base-300' : ''
+              isActive ? 'bg-base-300' : ''
             }`}
             style={{ paddingLeft }}
           >
@@ -480,23 +598,35 @@ export default function Code() {
       {/* Code Editor Area */}
       <div className="flex-1 flex flex-col bg-base-200 min-w-0">
         {/* Tab Bar */}
-        <div className="flex items-center bg-base-100 border-b border-base-300">
-          {selectedFile ? (
-            <div className="flex items-center gap-2 px-4 py-2 bg-base-200 border-r border-base-300">
-              <span className="text-xs">{getFileIcon(selectedFile.name)}</span>
-              <span className="text-sm">{selectedFile.name}</span>
-              <button
-                onClick={() => {
-                  setSelectedFile(null);
-                  setFileContent(null);
-                }}
-                className="ml-2 hover:bg-base-300 rounded px-1"
-              >
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </button>
-            </div>
+        <div className="flex items-center bg-base-100 border-b border-base-300 overflow-x-auto">
+          {tabs.length > 0 ? (
+            tabs.map((tab) => {
+              const isActive = tab.path === activeTabPath;
+              return (
+                <div
+                  key={tab.path}
+                  onClick={() => handleTabClick(tab.path)}
+                  onDoubleClick={() => pinTab(tab.path)}
+                  className={`flex items-center gap-2 px-4 py-2 border-r border-base-300 cursor-pointer hover:bg-base-200 flex-shrink-0 ${
+                    isActive ? 'bg-base-200' : 'bg-base-100'
+                  }`}
+                  title={tab.isPreview ? `${tab.path} (Preview - double-click to keep open)` : tab.path}
+                >
+                  <span className="text-xs">{getFileIcon(tab.name)}</span>
+                  <span className={`text-sm ${tab.isPreview ? 'italic text-base-content/70' : ''}`}>
+                    {tab.name}
+                  </span>
+                  <button
+                    onClick={(e) => handleTabClose(tab.path, e)}
+                    className="ml-1 hover:bg-base-300 rounded p-0.5 opacity-60 hover:opacity-100"
+                  >
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })
           ) : (
             <div className="px-4 py-2 text-sm text-base-content/50">
               Select a file to view
@@ -722,7 +852,8 @@ export default function Code() {
                 <button
                   onClick={() => {
                     setCodeSession(null);
-                    setSelectedFile(null);
+                    setTabs([]);
+                    setActiveTabPath(null);
                     setFileContent(null);
                     setExpandedFolders(new Set());
                   }}

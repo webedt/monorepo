@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
 import type { GitHubPullRequest } from '@webedt/shared';
 import { useEventSource } from '@/hooks/useEventSource';
-import { useAuthStore, useRepoStore } from '@/lib/store';
+import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
 import { ChatMessage } from '@/components/ChatMessage';
@@ -153,17 +153,15 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
             const toolInput = toolBlock.input || {};
 
             if (toolName === 'Read') {
-              const filePath = toolInput.file_path || 'unknown file';
-              const fileName = filePath.split('/').pop() || filePath;
-              toolMessages.push(`📖 Reading: ${fileName}`);
+              // Prefer relative_path (added by backend) over file_path
+              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+              toolMessages.push(`📖 Reading: ${displayPath}`);
             } else if (toolName === 'Write') {
-              const filePath = toolInput.file_path || 'unknown file';
-              const fileName = filePath.split('/').pop() || filePath;
-              toolMessages.push(`📝 Writing: ${fileName}`);
+              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+              toolMessages.push(`📝 Writing: ${displayPath}`);
             } else if (toolName === 'Edit') {
-              const filePath = toolInput.file_path || 'unknown file';
-              const fileName = filePath.split('/').pop() || filePath;
-              toolMessages.push(`✏️ Editing: ${fileName}`);
+              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+              toolMessages.push(`✏️ Editing: ${displayPath}`);
             } else if (toolName === 'Grep') {
               const pattern = toolInput.pattern || '';
               toolMessages.push(`🔍 Searching for: "${pattern}"`);
@@ -323,6 +321,9 @@ export default function Chat() {
   // Get repo store actions
   const repoStore = useRepoStore();
 
+  // Get worker store for robust execution tracking
+  const workerStore = useWorkerStore();
+
   // Sync local state with global store
   useEffect(() => {
     repoStore.setSelectedRepo(selectedRepo);
@@ -335,6 +336,44 @@ export default function Chat() {
   useEffect(() => {
     repoStore.setIsLocked(isLocked);
   }, [isLocked]);
+
+  // ============================================================================
+  // WORKER STATE SYNCHRONIZATION
+  // ============================================================================
+  // Keep local isExecuting in sync with global worker store
+  // The global store is the source of truth - it persists across navigation
+  // ============================================================================
+
+  // On mount, check if worker store says we're executing for this session
+  useEffect(() => {
+    const effectiveSessionId = currentSessionId || (sessionId !== 'new' ? sessionId : null);
+    if (effectiveSessionId) {
+      const isWorkerExecuting = workerStore.isExecuting(effectiveSessionId);
+      if (isWorkerExecuting && !isExecuting) {
+        console.log('[Chat] Restoring isExecuting from worker store for session:', effectiveSessionId);
+        setIsExecuting(true);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId, sessionId]);
+
+  // When local isExecuting changes, sync to global store
+  useEffect(() => {
+    const effectiveSessionId = currentSessionId || (sessionId !== 'new' ? sessionId : null);
+
+    if (isExecuting && effectiveSessionId) {
+      // Make sure global store knows we're executing
+      if (!workerStore.isExecuting(effectiveSessionId)) {
+        workerStore.startExecution(effectiveSessionId);
+      }
+    } else if (!isExecuting) {
+      // If we stopped executing, clear global store (only if it matches our session)
+      if (effectiveSessionId && workerStore.executingSessionId === effectiveSessionId) {
+        workerStore.stopExecution();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExecuting, currentSessionId, sessionId]);
 
   // Load draft message when session changes
   useEffect(() => {
@@ -867,7 +906,9 @@ export default function Chat() {
       setInput('');
       setImages([]);
       setSelectedRepo('');
-      setIsExecuting(false);
+      // NOTE: We intentionally do NOT reset isExecuting here
+      // The global worker store tracks execution state across navigation
+      // and will restore it when the user returns to the executing session
       setStreamUrl(null);
       setEditingTitle(false);
       setEditTitle('');
@@ -877,6 +918,14 @@ export default function Chat() {
       messageIdCounter.current = 0;
       autoGeneratedTitleRef.current = null;
       hasUserEditedTitleRef.current = false;
+
+      // Reset local isExecuting only if there's no active worker in global store
+      // This prevents losing track of executing workers during navigation
+      if (!workerStore.executingSessionId) {
+        setIsExecuting(false);
+      } else {
+        console.log('[Chat] Navigating away but worker still executing:', workerStore.executingSessionId);
+      }
     }
   }, [sessionId]);
 
@@ -1060,17 +1109,15 @@ export default function Chat() {
                 const toolInput = toolBlock.input || {};
 
                 if (toolName === 'Read') {
-                  const filePath = toolInput.file_path || 'unknown file';
-                  const fileName = filePath.split('/').pop() || filePath;
-                  toolMessages.push(`📖 Reading: ${fileName}`);
+                  // Prefer relative_path (added by backend) over file_path
+                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                  toolMessages.push(`📖 Reading: ${displayPath}`);
                 } else if (toolName === 'Write') {
-                  const filePath = toolInput.file_path || 'unknown file';
-                  const fileName = filePath.split('/').pop() || filePath;
-                  toolMessages.push(`📝 Writing: ${fileName}`);
+                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                  toolMessages.push(`📝 Writing: ${displayPath}`);
                 } else if (toolName === 'Edit') {
-                  const filePath = toolInput.file_path || 'unknown file';
-                  const fileName = filePath.split('/').pop() || filePath;
-                  toolMessages.push(`✏️ Editing: ${fileName}`);
+                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                  toolMessages.push(`✏️ Editing: ${displayPath}`);
                 } else if (toolName === 'Grep') {
                   const pattern = toolInput.pattern || '';
                   toolMessages.push(`🔍 Searching for: "${pattern}"`);
@@ -1186,13 +1233,22 @@ export default function Chat() {
           model,
         },
       ]);
+      // Record heartbeat for every message received (keeps worker state fresh)
+      workerStore.recordHeartbeat();
     },
     onConnected: () => {
       setIsExecuting(true);
+      // Mark stream as active in global store
+      workerStore.setActiveStream(true);
+      console.log('[Chat] SSE stream connected, worker store updated');
     },
     onCompleted: (data) => {
       setIsExecuting(false);
       setStreamUrl(null);
+      // Clear global worker state
+      workerStore.stopExecution();
+      console.log('[Chat] SSE stream completed, worker store cleared');
+
       // Capture session ID from completion event
       if (data?.websiteSessionId) {
         console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
@@ -1240,6 +1296,10 @@ export default function Chat() {
       ]);
       setIsExecuting(false);
       setStreamUrl(null);
+      // Clear global worker state on error
+      workerStore.stopExecution();
+      console.log('[Chat] SSE stream error, worker store cleared');
+
       // Refocus input after error (with delay to ensure DOM updates)
       setTimeout(() => {
         chatInputRef.current?.focus();
@@ -1282,6 +1342,11 @@ export default function Chat() {
 
     // Set executing state immediately to prevent duplicate submissions
     setIsExecuting(true);
+
+    // Start execution in global worker store (for the session we're about to use)
+    const targetSessionId = currentSessionId || 'pending-new-session';
+    workerStore.startExecution(targetSessionId);
+    console.log('[Chat] Started execution tracking for session:', targetSessionId);
 
     // Save last request for retry functionality
     setLastRequest({
@@ -1445,6 +1510,10 @@ export default function Chat() {
       setIsExecuting(false);
       setStreamUrl(null);
 
+      // Clear global worker state on interrupt
+      workerStore.stopExecution();
+      console.log('[Chat] Job interrupted, worker store cleared');
+
       // Add system message about interruption
       messageIdCounter.current += 1;
       setMessages((prev) => [
@@ -1515,6 +1584,13 @@ export default function Chat() {
 
         // Set executing state and start stream
         setIsExecuting(true);
+
+        // Start worker tracking for queued message
+        if (currentSessionId) {
+          workerStore.startExecution(currentSessionId);
+          console.log('[Chat] Started worker tracking for queued message, session:', currentSessionId);
+        }
+
         setStreamMethod('POST');
         setStreamBody(requestParams);
         setStreamUrl(`${API_BASE_URL}/api/execute`);
