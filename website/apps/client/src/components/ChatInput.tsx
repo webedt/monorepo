@@ -617,7 +617,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                           </svg>
                         </button>
                         {isRepoDropdownOpen && (
-                          <div className="absolute bottom-full left-0 mb-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
+                          <div className="absolute top-full left-0 mt-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
                             {/* Search input */}
                             <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
                               <input
@@ -706,7 +706,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                               )}
                             </button>
                             {isBranchDropdownOpen && (
-                              <div className="absolute bottom-full left-0 mb-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
+                              <div className="absolute top-full left-0 mt-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
                                 {/* Search input */}
                                 <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
                                   <input
