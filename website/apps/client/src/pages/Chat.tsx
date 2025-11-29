@@ -1677,8 +1677,8 @@ export default function Chat() {
         </button>
       )}
 
-      {/* Auto PR button - hide when PR already merged */}
-      {!existingPr && !mergedPr && (
+      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged */}
+      {!mergedPr && (
         <button
           onClick={handleAutoPR}
           className="btn btn-xs btn-accent"
