@@ -28,7 +28,7 @@ export const TAGLINES = [
   "All your edit are belong to us.",
   "Ha-dou-ked-it",
   "Kamehame… edit!",
-  "Winter is coming… do the edit.",
+  "Winter edits are coming!",
   "Edit or do not… there is no try.",
   "I am once again asking for your edit.",
   "By the power of Grayskull… edit!",
