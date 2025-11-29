@@ -63,6 +63,88 @@ router.delete('/claude-auth', requireAuth, async (req, res) => {
   }
 });
 
+// Update Codex authentication (OpenAI)
+router.post('/codex-auth', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    let codexAuth = req.body.codexAuth || req.body;
+
+    // Validate Codex auth structure - must have either apiKey or accessToken
+    if (!codexAuth || (!codexAuth.apiKey && !codexAuth.accessToken)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid Codex auth. Must include either apiKey or accessToken.',
+      });
+      return;
+    }
+
+    // Update user with Codex auth
+    await db
+      .update(users)
+      .set({ codexAuth })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Codex authentication updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update Codex auth error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update Codex authentication' });
+  }
+});
+
+// Remove Codex authentication
+router.delete('/codex-auth', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    await db
+      .update(users)
+      .set({ codexAuth: null })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Codex authentication removed' },
+    });
+  } catch (error) {
+    console.error('Remove Codex auth error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove Codex authentication' });
+  }
+});
+
+// Update preferred AI provider
+router.post('/preferred-provider', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { provider } = req.body;
+
+    // Validate provider is one of the valid options
+    const validProviders = ['claude', 'codex'];
+    if (!validProviders.includes(provider)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid provider. Must be one of: claude, codex',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ preferredProvider: provider })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Preferred provider updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update preferred provider error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update preferred provider' });
+  }
+});
+
 // Update image resize max dimension
 router.post('/image-resize-setting', requireAuth, async (req, res) => {
   try {

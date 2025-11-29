@@ -5,7 +5,8 @@ import { eq, and, or } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { ensureValidToken } from '../lib/claudeAuth';
-import type { ClaudeAuth } from '@webedt/shared';
+import { ensureValidCodexToken, isValidCodexAuth } from '../lib/codexAuth';
+import type { ClaudeAuth, CodexAuth, AIProvider, ProviderAuth } from '@webedt/shared';
 import { parseRepoUrl, generateSessionPath } from '../utils/sessionPathHelper';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -27,6 +28,7 @@ const sanitizeForLogging = (data: any): any => {
       sessionKey: sanitized.codingAssistantAuthentication.sessionKey ? '[REDACTED]' : undefined,
       accessToken: sanitized.codingAssistantAuthentication.accessToken ? '[REDACTED]' : undefined,
       refreshToken: sanitized.codingAssistantAuthentication.refreshToken ? '[REDACTED]' : undefined,
+      apiKey: sanitized.codingAssistantAuthentication.apiKey ? '[REDACTED]' : undefined,
       expiresAt: sanitized.codingAssistantAuthentication.expiresAt,
     };
   }
@@ -49,6 +51,7 @@ const truncateContent = (content: any, maxLength: number = 500): string => {
 // Execute AI coding task with SSE - supports both GET and POST
 const executeHandler = async (req: any, res: any) => {
   const authReq = req as AuthRequest;
+  const user = authReq.user!; // Non-null after requireAuth middleware
   let chatSession: any;
 
   try {
@@ -91,12 +94,32 @@ const executeHandler = async (req: any, res: any) => {
       return;
     }
 
-    if (!authReq.user?.claudeAuth) {
-      res.status(400).json({
-        success: false,
-        error: 'Claude authentication not configured. Please add your Claude credentials.',
-      });
-      return;
+    // Determine which provider to use
+    // Priority: request param > user preference > default (claude)
+    const requestedProvider = params.provider as AIProvider | undefined;
+    const userPreferredProvider = (user.preferredProvider as AIProvider) || 'claude';
+    const selectedProvider: AIProvider = requestedProvider || userPreferredProvider;
+
+    console.log(`[Execute] Provider selection: requested=${requestedProvider}, userPref=${userPreferredProvider}, selected=${selectedProvider}`);
+
+    // Validate authentication based on selected provider
+    if (selectedProvider === 'codex') {
+      if (!isValidCodexAuth(user.codexAuth)) {
+        res.status(400).json({
+          success: false,
+          error: 'OpenAI Codex authentication not configured. Please add your OpenAI credentials in Settings.',
+        });
+        return;
+      }
+    } else {
+      // Default: Claude
+      if (!user.claudeAuth) {
+        res.status(400).json({
+          success: false,
+          error: 'Claude authentication not configured. Please add your Claude credentials.',
+        });
+        return;
+      }
     }
 
     // Check if we're continuing an existing session or creating a new one
@@ -111,7 +134,7 @@ const executeHandler = async (req: any, res: any) => {
               eq(chatSessions.id, websiteSessionId as string),
               eq(chatSessions.sessionPath, websiteSessionId as string)
             ),
-            eq(chatSessions.userId, authReq.user.id)
+            eq(chatSessions.userId, user.id)
           )
         )
         .limit(1);
@@ -157,7 +180,7 @@ const executeHandler = async (req: any, res: any) => {
         .insert(chatSessions)
         .values({
           id: sessionUuid,
-          userId: authReq.user.id,
+          userId: user.id,
           userRequest: (userRequest as string) || 'New session',
           status: 'pending',
           repositoryUrl: (repoUrl as string) || null,
@@ -240,31 +263,67 @@ const executeHandler = async (req: any, res: any) => {
         .where(eq(chatSessions.id, chatSession.id));
     }
 
-    // Ensure Claude token is valid, refresh if needed
-    let claudeAuth: ClaudeAuth = authReq.user.claudeAuth;
+    // Ensure provider token is valid, refresh if needed
+    let providerAuth: ProviderAuth;
+    let providerName: string;
     let tokenWasRefreshed = false;
 
-    try {
-      const refreshedAuth = await ensureValidToken(claudeAuth);
-      if (refreshedAuth !== claudeAuth) {
-        claudeAuth = refreshedAuth;
-        tokenWasRefreshed = true;
+    if (selectedProvider === 'codex') {
+      // Codex authentication
+      let codexAuth: CodexAuth = user.codexAuth!;
+      providerName = 'Codex';
 
-        // Save refreshed token to database
-        await db
-          .update(users)
-          .set({ claudeAuth: refreshedAuth })
-          .where(eq(users.id, authReq.user.id));
+      try {
+        const refreshedAuth = await ensureValidCodexToken(codexAuth);
+        if (refreshedAuth !== codexAuth) {
+          codexAuth = refreshedAuth;
+          tokenWasRefreshed = true;
 
-        console.log(`[Execute] Refreshed and saved Claude token for user ${authReq.user.id}`);
+          // Save refreshed token to database
+          await db
+            .update(users)
+            .set({ codexAuth: refreshedAuth })
+            .where(eq(users.id, user.id));
+
+          console.log(`[Execute] Refreshed and saved Codex token for user ${user.id}`);
+        }
+        providerAuth = codexAuth;
+      } catch (error) {
+        console.error('[Execute] Failed to refresh Codex token:', error);
+        res.status(401).json({
+          success: false,
+          error: 'Failed to refresh OpenAI authentication. Please re-authenticate.',
+        });
+        return;
       }
-    } catch (error) {
-      console.error('[Execute] Failed to refresh Claude token:', error);
-      res.status(401).json({
-        success: false,
-        error: 'Failed to refresh Claude authentication. Please re-authenticate with Claude.',
-      });
-      return;
+    } else {
+      // Claude authentication (default)
+      let claudeAuth: ClaudeAuth = user.claudeAuth!;
+      providerName = 'ClaudeAgentSDK';
+
+      try {
+        const refreshedAuth = await ensureValidToken(claudeAuth);
+        if (refreshedAuth !== claudeAuth) {
+          claudeAuth = refreshedAuth;
+          tokenWasRefreshed = true;
+
+          // Save refreshed token to database
+          await db
+            .update(users)
+            .set({ claudeAuth: refreshedAuth })
+            .where(eq(users.id, user.id));
+
+          console.log(`[Execute] Refreshed and saved Claude token for user ${user.id}`);
+        }
+        providerAuth = claudeAuth;
+      } catch (error) {
+        console.error('[Execute] Failed to refresh Claude token:', error);
+        res.status(401).json({
+          success: false,
+          error: 'Failed to refresh Claude authentication. Please re-authenticate with Claude.',
+        });
+        return;
+      }
     }
 
     // Setup SSE manually
@@ -308,8 +367,8 @@ const executeHandler = async (req: any, res: any) => {
 
     const executePayload: any = {
       userRequest: parsedUserRequest,
-      codingAssistantProvider: 'ClaudeAgentSDK',
-      codingAssistantAuthentication: claudeAuth,
+      codingAssistantProvider: providerName,
+      codingAssistantAuthentication: providerAuth,
       // Always send websiteSessionId so AI worker knows where to store session data
       websiteSessionId: chatSession.id,
       // Always use the autoCommit setting from the session (persisted in DB)
@@ -321,8 +380,8 @@ const executeHandler = async (req: any, res: any) => {
         accessToken: authReq.session?.id || '', // Use session ID for database access
       },
       // Add provider options with preferred model if set
-      providerOptions: authReq.user.preferredModel ? {
-        model: authReq.user.preferredModel,
+      providerOptions: user.preferredModel ? {
+        model: user.preferredModel,
       } : undefined,
     };
 
@@ -331,7 +390,9 @@ const executeHandler = async (req: any, res: any) => {
       - chatSession.sessionPath: ${chatSession.sessionPath || 'N/A'}
       - websiteSessionId being sent to AI worker: ${executePayload.websiteSessionId}
       - userProvidedSessionId (resuming): ${!!websiteSessionId}
-      - preferredModel: ${authReq.user.preferredModel || 'default (not set)'}
+      - selectedProvider: ${selectedProvider}
+      - providerName: ${providerName}
+      - preferredModel: ${user.preferredModel || 'default (not set)'}
     `);
 
     // Always send GitHub config if available - AI worker will determine if it needs to clone
@@ -339,11 +400,11 @@ const executeHandler = async (req: any, res: any) => {
     const effectiveRepoUrl = repoUrl || chatSession.repositoryUrl;
     const effectiveBranch = repoUrl ? branch : (chatSession.baseBranch || 'main');
 
-    if (effectiveRepoUrl && authReq.user.githubAccessToken) {
+    if (effectiveRepoUrl && user.githubAccessToken) {
       executePayload.github = {
         repoUrl: effectiveRepoUrl as string,
         branch: effectiveBranch as string,
-        accessToken: authReq.user.githubAccessToken,
+        accessToken: user.githubAccessToken,
       };
     }
 
@@ -355,11 +416,12 @@ const executeHandler = async (req: any, res: any) => {
     console.log(`[Execute] Destination: ${aiWorkerUrl}/execute`);
     console.log(`[Execute] Website Session ID (UUID): ${chatSession.id}`);
     console.log(`[Execute] Session Path: ${chatSession.sessionPath || 'Not yet created'}`);
+    console.log(`[Execute] AI Provider: ${providerName} (${selectedProvider})`);
     console.log(`[Execute] User Request: ${truncateContent(executePayload.userRequest)}`);
     console.log(`[Execute] Repository: ${executePayload.github?.repoUrl || 'N/A'}`);
     console.log(`[Execute] Branch: ${executePayload.github?.branch || 'N/A'}`);
     console.log(`[Execute] Auto Commit: ${executePayload.autoCommit ?? 'N/A'}`);
-    console.log(`[Execute] Preferred Model: ${authReq.user.preferredModel || 'default (not set)'}`);
+    console.log(`[Execute] Preferred Model: ${user.preferredModel || 'default (not set)'}`);
     console.log(`[Execute] Full Payload (sanitized): ${JSON.stringify(sanitizedPayload, null, 2)}`);
     console.log(`[Execute] ==================================================================`);
 

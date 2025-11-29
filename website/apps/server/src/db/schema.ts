@@ -15,6 +15,13 @@ export const users = pgTable('users', {
     subscriptionType: string;
     rateLimitTier: string;
   }>(),
+  codexAuth: json('codex_auth').$type<{
+    apiKey?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+  }>(),
+  preferredProvider: text('preferred_provider').default('claude').notNull(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
   voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),
   defaultLandingPage: text('default_landing_page').default('store').notNull(),

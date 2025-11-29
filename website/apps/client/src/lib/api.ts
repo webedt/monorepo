@@ -167,6 +167,23 @@ export const userApi = {
       method: 'DELETE',
     }),
 
+  updateCodexAuth: (codexAuth: any) =>
+    fetchApi('/api/user/codex-auth', {
+      method: 'POST',
+      body: { codexAuth },
+    }),
+
+  removeCodexAuth: () =>
+    fetchApi('/api/user/codex-auth', {
+      method: 'DELETE',
+    }),
+
+  updatePreferredProvider: (provider: 'claude' | 'codex') =>
+    fetchApi('/api/user/preferred-provider', {
+      method: 'POST',
+      body: { provider },
+    }),
+
   updateImageResizeSetting: (maxDimension: number) =>
     fetchApi('/api/user/image-resize-setting', {
       method: 'POST',
@@ -332,6 +349,7 @@ export const storageWorkerApi = {
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;
+  provider?: 'claude' | 'codex';
   github?: {
     repoUrl: string;
     branch: string;
@@ -344,6 +362,9 @@ export function createExecuteEventSource(data: {
   // Add non-github params directly
   if (data.userRequest !== undefined) {
     params.append('userRequest', String(data.userRequest));
+  }
+  if (data.provider !== undefined) {
+    params.append('provider', data.provider);
   }
   if (data.autoCommit !== undefined) {
     params.append('autoCommit', String(data.autoCommit));
@@ -360,6 +381,7 @@ export function createExecuteEventSource(data: {
   const fullUrl = `${API_BASE_URL}/api/execute?${params}`;
   console.log('[API] Creating EventSource with URL:', fullUrl);
   console.log('[API] API_BASE_URL:', API_BASE_URL);
+  console.log('[API] Selected provider:', data.provider || 'default');
 
   return new EventSource(fullUrl, {
     withCredentials: true,

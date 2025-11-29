@@ -19,6 +19,8 @@ export const lucia = new Lucia(adapter, {
       githubId: attributes.github_id,
       githubAccessToken: attributes.github_access_token,
       claudeAuth: attributes.claude_auth ? JSON.parse(attributes.claude_auth as string) : null,
+      codexAuth: attributes.codex_auth ? JSON.parse(attributes.codex_auth as string) : null,
+      preferredProvider: attributes.preferred_provider || 'claude',
       preferredModel: attributes.preferred_model,
       isAdmin: attributes.is_admin,
     };
@@ -33,6 +35,8 @@ declare module 'lucia' {
       github_id: string | null;
       github_access_token: string | null;
       claude_auth: string | null;
+      codex_auth: string | null;
+      preferred_provider: string;
       preferred_model: string | null;
       is_admin: boolean;
     };

@@ -11,6 +11,9 @@ export default function Settings() {
   const setUser = useAuthStore((state) => state.setUser);
   const [claudeAuthJson, setClaudeAuthJson] = useState('');
   const [claudeError, setClaudeError] = useState('');
+  const [codexAuthJson, setCodexAuthJson] = useState('');
+  const [codexError, setCodexError] = useState('');
+  const [preferredProvider, setPreferredProvider] = useState<'claude' | 'codex'>(user?.preferredProvider || 'claude');
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [defaultLandingPage, setDefaultLandingPage] = useState<'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
@@ -83,6 +86,10 @@ export default function Settings() {
     setPreferredModel(user?.preferredModel || '');
   }, [user?.preferredModel]);
 
+  useEffect(() => {
+    setPreferredProvider(user?.preferredProvider || 'claude');
+  }, [user?.preferredProvider]);
+
   // Close keyword dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -128,6 +135,40 @@ export default function Settings() {
     },
     onError: (error) => {
       alert(`Failed to remove Claude authentication: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const saveCodexAuth = useMutation({
+    mutationFn: userApi.updateCodexAuth,
+    onSuccess: async () => {
+      await refreshUserSession();
+      setCodexAuthJson('');
+      alert('Codex authentication saved successfully');
+    },
+    onError: (error) => {
+      setCodexError(error instanceof Error ? error.message : 'Failed to save Codex auth');
+    },
+  });
+
+  const removeCodexAuth = useMutation({
+    mutationFn: userApi.removeCodexAuth,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Codex authentication removed successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to remove Codex authentication: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const updatePreferredProviderMutation = useMutation({
+    mutationFn: userApi.updatePreferredProvider,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Preferred AI provider updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update preferred provider: ${error instanceof Error ? error.message : 'Unknown error'}`);
     },
   });
 
@@ -216,6 +257,23 @@ export default function Settings() {
       saveClaudeAuth.mutate(parsed);
     } catch (error) {
       setClaudeError('Invalid JSON format');
+    }
+  };
+
+  const handleCodexAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCodexError('');
+
+    try {
+      const parsed = JSON.parse(codexAuthJson);
+      // Validate it has either apiKey or accessToken
+      if (!parsed.apiKey && !parsed.accessToken) {
+        setCodexError('Must include either apiKey or accessToken');
+        return;
+      }
+      saveCodexAuth.mutate(parsed);
+    } catch (error) {
+      setCodexError('Invalid JSON format');
     }
   };
 
@@ -427,6 +485,146 @@ export default function Settings() {
                 </form>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Codex Authentication (OpenAI) */}
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title">
+              OpenAI Codex Authentication
+            </h2>
+
+            {user?.codexAuth ? (
+              <div className="space-y-4">
+                <div className="alert alert-success">
+                  <svg
+                    className="h-5 w-5"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <span className="text-sm">
+                    Codex credentials configured
+                  </span>
+                  <button
+                    onClick={() => removeCodexAuth.mutate()}
+                    disabled={removeCodexAuth.isPending}
+                    className="btn btn-sm btn-error"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-base-content/70">
+                    Auth Type: {user.codexAuth.apiKey ? 'API Key' : 'OAuth Token'}
+                  </p>
+                  {user.codexAuth.expiresAt && (
+                    <div className="text-xs">
+                      <span className="text-base-content/70">Access Token: </span>
+                      <span className={getExpirationStatus(user.codexAuth.expiresAt).color}>
+                        {getExpirationStatus(user.codexAuth.expiresAt).text}
+                      </span>
+                      <span className="text-base-content/70">
+                        {' '}
+                        (expires {formatTokenExpiration(user.codexAuth.expiresAt)})
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-base-content/70">
+                  Paste your OpenAI Codex credentials JSON. You can use either an API key or OAuth tokens from a ChatGPT subscription.
+                </p>
+
+                <form onSubmit={handleCodexAuthSubmit} className="space-y-4">
+                  <div>
+                    <label className="label">
+                      <span className="label-text">Codex Auth JSON</span>
+                    </label>
+                    <textarea
+                      value={codexAuthJson}
+                      onChange={(e) => setCodexAuthJson(e.target.value)}
+                      placeholder='{"apiKey":"sk-..."} or {"accessToken":"...","refreshToken":"...","expiresAt":123456789}'
+                      rows={4}
+                      className="textarea textarea-bordered w-full font-mono text-xs"
+                    />
+                    {codexError && (
+                      <label className="label">
+                        <span className="label-text-alt text-error">{codexError}</span>
+                      </label>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                  >
+                    Save Codex Credentials
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Preferred AI Provider */}
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title mb-2">Preferred AI Provider</h2>
+
+            <div className="space-y-6">
+              <p className="text-sm text-base-content/70 leading-relaxed">
+                Choose your preferred AI provider for coding sessions. Claude (Anthropic) and Codex (OpenAI) are currently supported.
+              </p>
+
+              <div className="divider my-4"></div>
+
+              <div className="form-control w-full">
+                <div className="mb-3">
+                  <span className="font-medium text-base text-base-content">AI Provider</span>
+                </div>
+                <select
+                  value={preferredProvider}
+                  onChange={(e) => setPreferredProvider(e.target.value as 'claude' | 'codex')}
+                  className="select select-bordered w-full max-w-md"
+                >
+                  <option value="claude">Claude (Anthropic) - Default</option>
+                  <option value="codex">Codex (OpenAI)</option>
+                </select>
+                <div className="mt-2">
+                  <span className="text-sm text-base-content/60">
+                    {preferredProvider === 'claude' && !user?.claudeAuth && (
+                      <span className="text-warning">⚠️ Claude credentials not configured</span>
+                    )}
+                    {preferredProvider === 'codex' && !user?.codexAuth && (
+                      <span className="text-warning">⚠️ Codex credentials not configured</span>
+                    )}
+                    {((preferredProvider === 'claude' && user?.claudeAuth) ||
+                      (preferredProvider === 'codex' && user?.codexAuth)) && (
+                      <span className="text-success">✓ Credentials configured</span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-start pt-2">
+                <button
+                  onClick={() => updatePreferredProviderMutation.mutate(preferredProvider)}
+                  disabled={updatePreferredProviderMutation.isPending || preferredProvider === user?.preferredProvider}
+                  className="btn btn-primary min-w-[140px]"
+                >
+                  {updatePreferredProviderMutation.isPending ? 'Saving...' : 'Save Setting'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

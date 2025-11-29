@@ -6,6 +6,8 @@ export interface User {
   githubId: string | null;
   githubAccessToken: string | null;
   claudeAuth: ClaudeAuth | null;
+  codexAuth: CodexAuth | null;           // OpenAI Codex credentials
+  preferredProvider: AIProvider;          // User's preferred AI provider
   imageResizeMaxDimension: number;
   voiceCommandKeywords: string[];
   defaultLandingPage: 'store' | 'library' | 'community' | 'sessions';
@@ -22,6 +24,20 @@ export interface ClaudeAuth {
   subscriptionType: string;
   rateLimitTier: string;
 }
+
+// OpenAI/Codex authentication
+export interface CodexAuth {
+  apiKey?: string;           // For API key auth (OPENAI_API_KEY)
+  accessToken?: string;      // For ChatGPT subscription OAuth
+  refreshToken?: string;
+  expiresAt?: number;
+}
+
+// Union type for provider authentication
+export type ProviderAuth = ClaudeAuth | CodexAuth;
+
+// Provider types
+export type AIProvider = 'claude' | 'codex';
 
 // Session types
 export interface ChatSession {
@@ -116,7 +132,7 @@ export interface AutoPRResult {
 export interface ExecuteRequest {
   userRequest: string;
   codingAssistantProvider: 'ClaudeAgentSDK' | 'Codex';
-  codingAssistantAuthentication: ClaudeAuth;
+  codingAssistantAuthentication: ProviderAuth;  // Claude or Codex auth
   websiteSessionId?: string;
   github?: {
     repoUrl: string;
