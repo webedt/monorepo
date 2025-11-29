@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { sessionsApi } from '@/lib/api';
 import type { ChatSession } from '@webedt/shared';
 import { truncateSessionName } from '@/lib/utils';
@@ -264,14 +264,14 @@ export default function Trash() {
                             }}
                             onClick={(e) => e.stopPropagation()}
                           />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-base-content truncate" title={session.userRequest}>
+                          <Link to={`/session/${session.id}`} className="flex-1 min-w-0 cursor-pointer group">
+                            <p className="text-sm font-medium text-primary truncate group-hover:underline" title={session.userRequest}>
                               {truncateSessionName(session.userRequest, 80)}
                             </p>
                             <p className="mt-1 text-sm text-base-content/70">
                               {session.repositoryUrl || 'No repository'}
                             </p>
-                          </div>
+                          </Link>
                         </div>
                         <div className="ml-4 flex-shrink-0 flex items-center space-x-4">
                           <div className="text-right">
