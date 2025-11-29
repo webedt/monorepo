@@ -21,3 +21,4 @@ Run the SQL commands from the migration files directly in your database client (
 ## Current Migrations
 
 - `0001_add_deleted_at.sql` - Adds soft delete support with `deleted_at` column to `chat_sessions` table
+- `0002_add_codex_provider_support.sql` - Adds multi-provider support with `codex_auth` and `preferred_provider` columns to `users` table
