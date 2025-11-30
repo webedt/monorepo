@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { useAuthStore, useRepoStore } from '@/lib/store';
+import { useAuthStore, useRepoStore, useSessionLastPageStore, type SessionPageName } from '@/lib/store';
 import { authApi, sessionsApi, githubApi } from '@/lib/api';
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -9,6 +9,17 @@ import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/vers
 import type { GitHubRepository } from '@webedt/shared';
 import { truncateSessionName } from '@/lib/utils';
 import { TAGLINES } from '@/constants/taglines';
+
+// Helper to extract page name from pathname
+function extractPageFromPath(pathname: string): SessionPageName | null {
+  if (pathname.includes('/code')) return 'code';
+  if (pathname.includes('/images')) return 'images';
+  if (pathname.includes('/sound')) return 'sound';
+  if (pathname.includes('/scene-editor')) return 'scene-editor';
+  if (pathname.includes('/preview')) return 'preview';
+  if (pathname.includes('/chat') || pathname.match(/\/session\/[^/]+$/)) return 'chat';
+  return null;
+}
 
 // Helper to detect mobile devices
 const isMobileDevice = () => {
@@ -156,6 +167,17 @@ export default function SessionLayout({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [userMenuOpen]);
+
+  // Track the last visited page for this session
+  const { setLastPage } = useSessionLastPageStore();
+  useEffect(() => {
+    if (sessionId && sessionId !== 'new') {
+      const currentPage = extractPageFromPath(location.pathname);
+      if (currentPage) {
+        setLastPage(sessionId, currentPage);
+      }
+    }
+  }, [sessionId, location.pathname, setLastPage]);
 
   if (!isAuthenticated) {
     return <>{children}</>;
