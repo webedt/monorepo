@@ -233,7 +233,7 @@ export const TAGLINES = [
   "Nothing edit happens after 2 a.m",
   "Kids, this is the story of how I met your edit.",
   "New edits are always better.",
-  "The BrEdit Code.".
+  "The BrEdit Code.",
   "The Edit is a vampire. Sent to drain.",
   "Despite all my edits, I am still just a rat in a cage.",
   "Every new edit comes from some other new edit's end.",

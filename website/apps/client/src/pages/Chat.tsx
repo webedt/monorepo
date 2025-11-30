@@ -761,13 +761,13 @@ export default function Chat() {
     }
   };
 
-  // Merge user messages with converted events
+  // Merge database messages with converted events
   useEffect(() => {
     if (!sessionId) return;
 
-    // Get user messages from the messages table (type: 'user')
-    const userMessages: Message[] = messagesData?.data?.messages?.filter(
-      (m: Message) => m.type === 'user'
+    // Get messages from the messages table (user messages and system messages from code operations)
+    const dbMessages: Message[] = messagesData?.data?.messages?.filter(
+      (m: Message) => m.type === 'user' || m.type === 'system'
     ) || [];
 
     // Convert raw events to displayable messages
@@ -777,7 +777,7 @@ export default function Chat() {
       .filter((msg): msg is Message => msg !== null);
 
     // Merge and sort by timestamp
-    const allMessages = [...userMessages, ...eventMessages].sort(
+    const allMessages = [...dbMessages, ...eventMessages].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 

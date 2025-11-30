@@ -152,6 +152,7 @@ router.get('/deleted', requireAuth, async (req, res) => {
 });
 
 // Create a code-only session (no AI execution, just for tracking file operations)
+// Creates a chat session exactly like starting a regular chat, so all actions appear as chat messages
 router.post('/create-code-session', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -169,14 +170,15 @@ router.post('/create-code-session', requireAuth, async (req, res) => {
     const sessionId = crypto.randomUUID();
     const sessionPath = `${repositoryOwner}/${repositoryName}/${branch}`;
 
-    // Create the session
+    // Create the session with 'completed' status - code sessions don't have active AI processing
+    // This avoids showing the "Processing" spinner in the Chat view
     const [chatSession] = await db
       .insert(chatSessions)
       .values({
         id: sessionId,
         userId: authReq.user!.id,
         userRequest: title || 'Code editing session',
-        status: 'completed', // Not running AI execution
+        status: 'completed', // No AI processing, just manual code editing
         repositoryUrl: repositoryUrl || `https://github.com/${repositoryOwner}/${repositoryName}.git`,
         repositoryOwner,
         repositoryName,
@@ -187,6 +189,15 @@ router.post('/create-code-session', requireAuth, async (req, res) => {
         locked: true, // Prevent repo/branch changes
       })
       .returning();
+
+    // Create an initial user message to mark the session start (like chat sessions have)
+    await db
+      .insert(messages)
+      .values({
+        chatSessionId: sessionId,
+        type: 'user',
+        content: `Started code editing session on repository ${repositoryOwner}/${repositoryName}`,
+      });
 
     console.log(`[Sessions] Created code session ${sessionId} for ${sessionPath}`);
 
