@@ -295,10 +295,18 @@ interface EditorTab {
   isPreview: boolean;
 }
 
+// Pending change type matching the one in Code.tsx
+interface PendingChange {
+  content: string;
+  originalContent: string;
+  sha?: string;
+}
+
 interface EditorSessionData {
   tabs: EditorTab[];
   activeTabPath: string | null;
   expandedFolders: string[]; // Stored as array for JSON serialization
+  pendingChanges: Record<string, PendingChange>; // Map stored as object for JSON
 }
 
 interface EditorSessionStateStore {
@@ -310,7 +318,8 @@ interface EditorSessionStateStore {
     sessionId: string,
     tabs: EditorTab[],
     activeTabPath: string | null,
-    expandedFolders: Set<string>
+    expandedFolders: Set<string>,
+    pendingChanges: Map<string, PendingChange>
   ) => void;
 
   // Get the editor state for a session
@@ -360,15 +369,23 @@ export const useEditorSessionStore = create<EditorSessionStateStore>((set, get) 
     sessionId: string,
     tabs: EditorTab[],
     activeTabPath: string | null,
-    expandedFolders: Set<string>
+    expandedFolders: Set<string>,
+    pendingChanges: Map<string, PendingChange>
   ) => {
     set((state) => {
+      // Convert Map to plain object for JSON serialization
+      const pendingChangesObj: Record<string, PendingChange> = {};
+      pendingChanges.forEach((value, key) => {
+        pendingChangesObj[key] = value;
+      });
+
       const newSessions = {
         ...state.sessions,
         [sessionId]: {
           tabs,
           activeTabPath,
           expandedFolders: Array.from(expandedFolders),
+          pendingChanges: pendingChangesObj,
         },
       };
       saveEditorState(newSessions);

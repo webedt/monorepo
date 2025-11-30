@@ -548,7 +548,7 @@ export default function Code() {
     }
   }, [codeSession, pendingChanges]);
 
-  // Restore editor state (tabs, active tab, expanded folders) from localStorage
+  // Restore editor state (tabs, active tab, expanded folders, pending changes) from localStorage
   useEffect(() => {
     if (sessionId && !hasRestoredState.current) {
       const savedState = getEditorState(sessionId);
@@ -557,6 +557,15 @@ export default function Code() {
         setTabs(savedState.tabs);
         setActiveTabPath(savedState.activeTabPath);
         setExpandedFolders(new Set(savedState.expandedFolders));
+
+        // Restore pending changes (convert object back to Map)
+        if (savedState.pendingChanges) {
+          const restoredChanges = new Map<string, PendingChange>();
+          Object.entries(savedState.pendingChanges).forEach(([key, value]) => {
+            restoredChanges.set(key, value);
+          });
+          setPendingChanges(restoredChanges);
+        }
       }
     }
   }, [sessionId, getEditorState]);
@@ -564,18 +573,24 @@ export default function Code() {
   // Load active tab content when code session becomes available (after state restoration)
   useEffect(() => {
     if (codeSession && activeTabPath && hasRestoredState.current) {
-      loadFileContent(activeTabPath);
+      // Check if we have pending changes for this file - use those instead of fetching
+      const existingChange = pendingChanges.get(activeTabPath);
+      if (existingChange) {
+        setFileContent(existingChange.content);
+      } else {
+        loadFileContent(activeTabPath);
+      }
     }
     // Only run when codeSession becomes available, not on every activeTabPath change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [codeSession]);
 
-  // Save editor state whenever tabs, activeTabPath, or expandedFolders change
+  // Save editor state whenever tabs, activeTabPath, expandedFolders, or pendingChanges change
   useEffect(() => {
-    if (sessionId && (tabs.length > 0 || activeTabPath || expandedFolders.size > 0)) {
-      saveEditorState(sessionId, tabs, activeTabPath, expandedFolders);
+    if (sessionId && (tabs.length > 0 || activeTabPath || expandedFolders.size > 0 || pendingChanges.size > 0)) {
+      saveEditorState(sessionId, tabs, activeTabPath, expandedFolders, pendingChanges);
     }
-  }, [sessionId, tabs, activeTabPath, expandedFolders, saveEditorState]);
+  }, [sessionId, tabs, activeTabPath, expandedFolders, pendingChanges, saveEditorState]);
 
   // Open file as preview tab (single-click behavior)
   const openAsPreview = (path: string, name: string) => {
