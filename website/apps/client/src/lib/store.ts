@@ -277,3 +277,133 @@ export const useSessionLastPageStore = create<SessionLastPageState>((set, get) =
     return state.lastPages[sessionId] || 'chat';
   },
 }));
+
+// ============================================================================
+// EDITOR SESSION STATE PERSISTENCE
+// ============================================================================
+// This store tracks the editor state (open tabs, active tab, expanded folders)
+// for each session, allowing users to return to the same editor state when
+// they navigate back to the code editor.
+// ============================================================================
+
+const EDITOR_STATE_STORAGE_KEY = 'editorSessionState';
+
+// Tab type matching the one in Code.tsx
+interface EditorTab {
+  path: string;
+  name: string;
+  isPreview: boolean;
+}
+
+// Pending change type matching the one in Code.tsx
+interface PendingChange {
+  content: string;
+  originalContent: string;
+  sha?: string;
+}
+
+interface EditorSessionData {
+  tabs: EditorTab[];
+  activeTabPath: string | null;
+  expandedFolders: string[]; // Stored as array for JSON serialization
+  pendingChanges: Record<string, PendingChange>; // Map stored as object for JSON
+}
+
+interface EditorSessionStateStore {
+  // Map of sessionId -> editor state
+  sessions: Record<string, EditorSessionData>;
+
+  // Save the complete editor state for a session
+  saveEditorState: (
+    sessionId: string,
+    tabs: EditorTab[],
+    activeTabPath: string | null,
+    expandedFolders: Set<string>,
+    pendingChanges: Map<string, PendingChange>
+  ) => void;
+
+  // Get the editor state for a session
+  getEditorState: (sessionId: string) => EditorSessionData | null;
+
+  // Clear editor state for a session (e.g., when session is deleted)
+  clearEditorState: (sessionId: string) => void;
+}
+
+// Load initial state from localStorage
+function loadEditorState(): Record<string, EditorSessionData> {
+  try {
+    const stored = localStorage.getItem(EDITOR_STATE_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn('[EditorSessionState] Failed to load from localStorage:', e);
+  }
+  return {};
+}
+
+// Save state to localStorage
+function saveEditorState(sessions: Record<string, EditorSessionData>) {
+  try {
+    // Limit storage to prevent localStorage from growing too large
+    // Keep only the most recent 50 sessions
+    const sessionIds = Object.keys(sessions);
+    if (sessionIds.length > 50) {
+      const sessionsToKeep = sessionIds.slice(-50);
+      const trimmedSessions: Record<string, EditorSessionData> = {};
+      sessionsToKeep.forEach(id => {
+        trimmedSessions[id] = sessions[id];
+      });
+      sessions = trimmedSessions;
+    }
+    localStorage.setItem(EDITOR_STATE_STORAGE_KEY, JSON.stringify(sessions));
+  } catch (e) {
+    console.warn('[EditorSessionState] Failed to save to localStorage:', e);
+  }
+}
+
+export const useEditorSessionStore = create<EditorSessionStateStore>((set, get) => ({
+  sessions: loadEditorState(),
+
+  saveEditorState: (
+    sessionId: string,
+    tabs: EditorTab[],
+    activeTabPath: string | null,
+    expandedFolders: Set<string>,
+    pendingChanges: Map<string, PendingChange>
+  ) => {
+    set((state) => {
+      // Convert Map to plain object for JSON serialization
+      const pendingChangesObj: Record<string, PendingChange> = {};
+      pendingChanges.forEach((value, key) => {
+        pendingChangesObj[key] = value;
+      });
+
+      const newSessions = {
+        ...state.sessions,
+        [sessionId]: {
+          tabs,
+          activeTabPath,
+          expandedFolders: Array.from(expandedFolders),
+          pendingChanges: pendingChangesObj,
+        },
+      };
+      saveEditorState(newSessions);
+      return { sessions: newSessions };
+    });
+  },
+
+  getEditorState: (sessionId: string): EditorSessionData | null => {
+    const state = get();
+    return state.sessions[sessionId] || null;
+  },
+
+  clearEditorState: (sessionId: string) => {
+    set((state) => {
+      const newSessions = { ...state.sessions };
+      delete newSessions[sessionId];
+      saveEditorState(newSessions);
+      return { sessions: newSessions };
+    });
+  },
+}));
