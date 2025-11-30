@@ -751,9 +751,31 @@ export default function Code() {
     };
   }, [debouncedSave]);
 
+  // Track cursor position for restoration after re-render
+  const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
+
+  // Restore cursor position after content update
+  useEffect(() => {
+    if (cursorPositionRef.current && textareaRef.current) {
+      const { start, end } = cursorPositionRef.current;
+      textareaRef.current.setSelectionRange(start, end);
+      cursorPositionRef.current = null;
+    }
+  }, [fileContent]);
+
   // Handle content change in editor
-  const handleContentChange = useCallback((newContent: string) => {
+  const handleContentChange = useCallback((newContent: string, cursorStart?: number, cursorEnd?: number) => {
     if (!activeTabPath) return;
+
+    // Save cursor position before state update
+    if (cursorStart !== undefined && cursorEnd !== undefined) {
+      cursorPositionRef.current = { start: cursorStart, end: cursorEnd };
+    } else if (textareaRef.current) {
+      cursorPositionRef.current = {
+        start: textareaRef.current.selectionStart,
+        end: textareaRef.current.selectionEnd
+      };
+    }
 
     // Update file content immediately for responsive editing
     setFileContent(newContent);
@@ -770,7 +792,7 @@ export default function Code() {
       return next;
     });
 
-    // Add to edit history for undo
+    // Add to edit history for undo (debounced to avoid too many history entries)
     setEditHistory(prev => {
       const next = new Map(prev);
       const history = next.get(activeTabPath) || [];
@@ -1498,25 +1520,39 @@ export default function Code() {
             </div>
           ) : fileContent !== null ? (
             <div className="h-full flex">
-              {/* Line Numbers */}
-              <div className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 select-none overflow-hidden flex-shrink-0">
-                {fileContent.split('\n').map((_, i) => (
-                  <div key={i} className="text-right px-3 leading-6">
-                    {i + 1}
-                  </div>
-                ))}
-              </div>
+              {/* Line Numbers - using a single pre element for better performance */}
+              <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
+                {Array.from({ length: fileContent.split('\n').length }, (_, i) => i + 1).join('\n')}
+              </pre>
 
               {/* Text Editor */}
               <textarea
                 ref={textareaRef}
                 value={fileContent}
-                onChange={(e) => handleContentChange(e.target.value)}
-                className="flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto"
+                onChange={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  handleContentChange(target.value, target.selectionStart, target.selectionEnd);
+                }}
+                onKeyDown={(e) => {
+                  // Handle Tab key for indentation
+                  if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const target = e.target as HTMLTextAreaElement;
+                    const start = target.selectionStart;
+                    const end = target.selectionEnd;
+                    const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
+                    handleContentChange(newValue, start + 2, start + 2);
+                  }
+                }}
+                className="flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none"
                 spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
                 style={{
                   tabSize: 2,
                   MozTabSize: 2,
+                  caretColor: 'auto',
                 }}
               />
             </div>
