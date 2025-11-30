@@ -230,7 +230,6 @@ function ImagesContent() {
   const [imageSession, setImageSession] = useState<ImageSession | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
-  const [isFromExistingSession, setIsFromExistingSession] = useState(false);
 
   // Editor state
   const [editorMode, setEditorMode] = useState<EditorMode>('image');
