@@ -959,13 +959,6 @@ export default function Code() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [commitChanges, handleUndo, handleRedo]);
 
-  // Check if current file has unsaved changes
-  const hasUnsavedChanges = useMemo(() => {
-    if (!activeTabPath) return false;
-    const change = pendingChanges.get(activeTabPath);
-    return change ? change.content !== change.originalContent : false;
-  }, [activeTabPath, pendingChanges]);
-
   // Count total modified files
   const modifiedFilesCount = useMemo(() => {
     let count = 0;
