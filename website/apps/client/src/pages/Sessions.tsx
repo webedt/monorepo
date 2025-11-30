@@ -2,15 +2,27 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { sessionsApi, githubApi } from '@/lib/api';
-import { useAuthStore } from '@/lib/store';
+import { useAuthStore, useSessionLastPageStore } from '@/lib/store';
 import ChatInput, { type ImageAttachment } from '@/components/ChatInput';
 import type { ChatSession, GitHubRepository } from '@webedt/shared';
 import { truncateSessionName } from '@/lib/utils';
+
+// Helper to get the session URL with last visited page
+function getSessionUrl(sessionId: string, getLastPage: (id: string) => string): string {
+  const lastPage = getLastPage(sessionId);
+  // For 'chat', we can use just the session id (defaults to chat)
+  // For other pages, append the page name
+  if (lastPage === 'chat') {
+    return `/session/${sessionId}`;
+  }
+  return `/session/${sessionId}/${lastPage}`;
+}
 
 export default function Sessions() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const { getLastPage } = useSessionLastPageStore();
 
   // Session editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -389,7 +401,7 @@ export default function Sessions() {
                           </button>
                         </div>
                       ) : (
-                        <Link to={`/session/${session.id}`}>
+                        <Link to={getSessionUrl(session.id, getLastPage)}>
                           <p className="text-sm font-medium text-primary truncate" title={session.userRequest}>
                             {truncateSessionName(session.userRequest, 80)}
                           </p>

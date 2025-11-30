@@ -214,3 +214,66 @@ export const useRepoStore = create<RepoConnectionState>((set) => ({
   setIsLocked: (locked) => set({ isLocked: locked }),
   clearRepoConnection: () => set({ selectedRepo: '', baseBranch: '', isLocked: false }),
 }));
+
+// ============================================================================
+// SESSION LAST VISITED PAGE TRACKING
+// ============================================================================
+// This store tracks the last visited page for each session, allowing users
+// to return to the same page (chat, code, images, etc.) when they click on
+// a session from the sessions list.
+// ============================================================================
+
+const SESSION_PAGES_STORAGE_KEY = 'sessionLastPages';
+
+// Valid page names that can be tracked
+export type SessionPageName = 'chat' | 'code' | 'images' | 'sound' | 'scene-editor' | 'preview';
+
+interface SessionLastPageState {
+  // Map of sessionId -> last visited page
+  lastPages: Record<string, SessionPageName>;
+
+  // Set the last visited page for a session
+  setLastPage: (sessionId: string, page: SessionPageName) => void;
+
+  // Get the last visited page for a session (defaults to 'chat')
+  getLastPage: (sessionId: string) => SessionPageName;
+}
+
+// Load initial state from localStorage
+function loadLastPages(): Record<string, SessionPageName> {
+  try {
+    const stored = localStorage.getItem(SESSION_PAGES_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn('[SessionLastPage] Failed to load from localStorage:', e);
+  }
+  return {};
+}
+
+// Save state to localStorage
+function saveLastPages(pages: Record<string, SessionPageName>) {
+  try {
+    localStorage.setItem(SESSION_PAGES_STORAGE_KEY, JSON.stringify(pages));
+  } catch (e) {
+    console.warn('[SessionLastPage] Failed to save to localStorage:', e);
+  }
+}
+
+export const useSessionLastPageStore = create<SessionLastPageState>((set, get) => ({
+  lastPages: loadLastPages(),
+
+  setLastPage: (sessionId: string, page: SessionPageName) => {
+    set((state) => {
+      const newPages = { ...state.lastPages, [sessionId]: page };
+      saveLastPages(newPages);
+      return { lastPages: newPages };
+    });
+  },
+
+  getLastPage: (sessionId: string): SessionPageName => {
+    const state = get();
+    return state.lastPages[sessionId] || 'chat';
+  },
+}));
