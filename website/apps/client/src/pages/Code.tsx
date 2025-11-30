@@ -5,6 +5,40 @@ import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
 import type { GitHubPullRequest } from '@webedt/shared';
 
+// Debounce utility
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): { (...args: Parameters<T>): void; cancel: () => void } {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const debounced = (...args: Parameters<T>) => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => {
+      func(...args);
+      timeoutId = null;
+    }, wait);
+  };
+
+  debounced.cancel = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
+
+  return debounced;
+}
+
+// Track pending changes per file
+interface PendingChange {
+  content: string;
+  originalContent: string;
+  sha?: string;
+}
+
 // File operation state for modals
 interface FileOperationState {
   type: 'rename' | 'delete' | null;
@@ -217,6 +251,15 @@ export default function Code() {
 
   // Track pending click for single/double click distinction
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Editor state - tracking changes and save status
+  const [pendingChanges, setPendingChanges] = useState<Map<string, PendingChange>>(new Map());
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
+  const [lastSaveError, setLastSaveError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [editHistory, setEditHistory] = useState<Map<string, string[]>>(new Map());
+  const [historyIndex, setHistoryIndex] = useState<Map<string, number>>(new Map());
 
   // File operation state for rename/delete modals
   const [fileOperation, setFileOperation] = useState<FileOperationState>({
@@ -451,6 +494,13 @@ export default function Code() {
   const loadFileContent = useCallback(async (path: string) => {
     if (!codeSession) return;
 
+    // Check if we have pending changes for this file - use those instead of fetching
+    const existingChange = pendingChanges.get(path);
+    if (existingChange) {
+      setFileContent(existingChange.content);
+      return;
+    }
+
     setIsLoadingFile(true);
     try {
       const response = await githubApi.getFileContent(
@@ -459,14 +509,39 @@ export default function Code() {
         path,
         codeSession.branch
       );
-      setFileContent(response.data.content || '');
+      const content = response.data.content || '';
+      const sha = response.data.sha;
+      setFileContent(content);
+
+      // Initialize edit history for this file
+      setEditHistory(prev => {
+        const next = new Map(prev);
+        if (!next.has(path)) {
+          next.set(path, [content]);
+        }
+        return next;
+      });
+      setHistoryIndex(prev => {
+        const next = new Map(prev);
+        if (!next.has(path)) {
+          next.set(path, 0);
+        }
+        return next;
+      });
+
+      // Store the original content and sha for later comparison
+      setPendingChanges(prev => {
+        const next = new Map(prev);
+        next.set(path, { content, originalContent: content, sha });
+        return next;
+      });
     } catch (error: any) {
       console.error('Failed to load file:', error);
       setFileContent(`// Error loading file: ${error.message}`);
     } finally {
       setIsLoadingFile(false);
     }
-  }, [codeSession]);
+  }, [codeSession, pendingChanges]);
 
   // Open file as preview tab (single-click behavior)
   const openAsPreview = (path: string, name: string) => {
@@ -602,6 +677,360 @@ export default function Code() {
       console.error('Failed to log code message:', error);
     }
   }, [codeSession?.sessionId]);
+
+  // Refs to hold latest values for use in debounced callback
+  const pendingChangesRef = useRef(pendingChanges);
+  const codeSessionRef = useRef(codeSession);
+  const editHistoryRef = useRef(editHistory);
+  const historyIndexRef = useRef(historyIndex);
+
+  // Keep refs updated
+  useEffect(() => {
+    pendingChangesRef.current = pendingChanges;
+  }, [pendingChanges]);
+
+  useEffect(() => {
+    codeSessionRef.current = codeSession;
+  }, [codeSession]);
+
+  useEffect(() => {
+    editHistoryRef.current = editHistory;
+  }, [editHistory]);
+
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
+
+  // Save a single file to GitHub
+  const saveFile = useCallback(async (path: string, content: string, sha?: string) => {
+    const session = codeSessionRef.current;
+    if (!session) return null;
+
+    try {
+      const response = await githubApi.updateFile(
+        session.owner,
+        session.repo,
+        path,
+        {
+          content,
+          branch: session.branch,
+          sha,
+          message: `Update ${path}`,
+        }
+      );
+      return response.data.sha; // Return new SHA for future updates
+    } catch (error: any) {
+      console.error(`Failed to save file ${path}:`, error);
+      throw error;
+    }
+  }, []);
+
+  // Auto-save function (debounced) - saves file to GitHub
+  const performAutoSave = useCallback(async (path: string, content: string) => {
+    const session = codeSessionRef.current;
+    if (!session) return;
+
+    const changes = pendingChangesRef.current;
+    const change = changes.get(path);
+    if (!change) return; // No change record found
+
+    // Check if content actually changed from original
+    if (content === change.originalContent) return; // No actual changes
+
+    setSaveStatus('saving');
+    setLastSaveError(null);
+
+    try {
+      const newSha = await saveFile(path, content, change.sha);
+
+      // Update the pending change with new SHA
+      setPendingChanges(prev => {
+        const next = new Map(prev);
+        const existing = next.get(path);
+        if (existing) {
+          next.set(path, { ...existing, sha: newSha || existing.sha });
+        }
+        return next;
+      });
+
+      // Add to edit history for undo - only save snapshots on successful saves
+      const currentHistory = editHistoryRef.current.get(path) || [];
+      const currentIndex = historyIndexRef.current.get(path) ?? -1;
+
+      // Only add if content is different from the last saved snapshot
+      const lastSnapshot = currentHistory[currentIndex];
+      if (lastSnapshot !== content) {
+        setEditHistory(prev => {
+          const next = new Map(prev);
+          const history = next.get(path) || [];
+          // Truncate any forward history if we've undone, then add new snapshot
+          const newHistory = [...history.slice(0, currentIndex + 1), content];
+          // Keep max 50 save snapshots
+          if (newHistory.length > 50) {
+            newHistory.shift();
+          }
+          next.set(path, newHistory);
+          return next;
+        });
+
+        setHistoryIndex(prev => {
+          const next = new Map(prev);
+          const history = editHistoryRef.current.get(path) || [];
+          next.set(path, Math.min(currentIndex + 1, history.length));
+          return next;
+        });
+      }
+
+      // Log the save to chat history
+      await logCodeMessage(`📝 Saved: \`${path}\``, 'system');
+
+      setSaveStatus('saved');
+
+      // Reset to idle after a moment
+      setTimeout(() => {
+        setSaveStatus(prev => prev === 'saved' ? 'idle' : prev);
+      }, 2000);
+    } catch (error: any) {
+      setSaveStatus('error');
+      setLastSaveError(error.message || 'Failed to save');
+    }
+  }, [saveFile, logCodeMessage]);
+
+  // Keep a ref to the latest performAutoSave so debounced function always calls current version
+  const performAutoSaveRef = useRef(performAutoSave);
+  useEffect(() => {
+    performAutoSaveRef.current = performAutoSave;
+  }, [performAutoSave]);
+
+  // Create debounced auto-save - stable reference that won't be recreated
+  const debouncedSave = useMemo(
+    () => debounce((path: string, content: string) => {
+      performAutoSaveRef.current(path, content);
+    }, 1500),
+    [] // Empty deps - created once, always calls latest performAutoSave via ref
+  );
+
+  // Cleanup debounced function on unmount
+  useEffect(() => {
+    return () => {
+      debouncedSave.cancel();
+    };
+  }, [debouncedSave]);
+
+  // Track cursor position for restoration after re-render
+  const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
+
+  // Restore cursor position after content update
+  useEffect(() => {
+    if (cursorPositionRef.current && textareaRef.current) {
+      const { start, end } = cursorPositionRef.current;
+      textareaRef.current.setSelectionRange(start, end);
+      cursorPositionRef.current = null;
+    }
+  }, [fileContent]);
+
+  // Handle content change in editor
+  const handleContentChange = useCallback((newContent: string, cursorStart?: number, cursorEnd?: number) => {
+    if (!activeTabPath) return;
+
+    // Save cursor position before state update
+    if (cursorStart !== undefined && cursorEnd !== undefined) {
+      cursorPositionRef.current = { start: cursorStart, end: cursorEnd };
+    } else if (textareaRef.current) {
+      cursorPositionRef.current = {
+        start: textareaRef.current.selectionStart,
+        end: textareaRef.current.selectionEnd
+      };
+    }
+
+    // Update file content immediately for responsive editing
+    setFileContent(newContent);
+
+    // Update pending changes
+    setPendingChanges(prev => {
+      const next = new Map(prev);
+      const existing = next.get(activeTabPath);
+      if (existing) {
+        next.set(activeTabPath, { ...existing, content: newContent });
+      } else {
+        next.set(activeTabPath, { content: newContent, originalContent: newContent });
+      }
+      return next;
+    });
+
+    // Pin the tab when editing starts
+    const tab = tabs.find(t => t.path === activeTabPath);
+    if (tab?.isPreview) {
+      pinTab(activeTabPath);
+    }
+
+    // Trigger debounced auto-save
+    debouncedSave(activeTabPath, newContent);
+  }, [activeTabPath, debouncedSave, tabs, pinTab]);
+
+  // Undo function
+  const handleUndo = useCallback(() => {
+    if (!activeTabPath) return;
+
+    const history = editHistory.get(activeTabPath);
+    const currentIndex = historyIndex.get(activeTabPath) || 0;
+
+    if (!history || currentIndex <= 0) return;
+
+    const newIndex = currentIndex - 1;
+    const previousContent = history[newIndex];
+
+    setHistoryIndex(prev => {
+      const next = new Map(prev);
+      next.set(activeTabPath, newIndex);
+      return next;
+    });
+
+    setFileContent(previousContent);
+
+    // Update pending changes
+    setPendingChanges(prev => {
+      const next = new Map(prev);
+      const existing = next.get(activeTabPath);
+      if (existing) {
+        next.set(activeTabPath, { ...existing, content: previousContent });
+      }
+      return next;
+    });
+
+    // Trigger auto-save for the undone content
+    debouncedSave(activeTabPath, previousContent);
+  }, [activeTabPath, editHistory, historyIndex, debouncedSave]);
+
+  // Redo function
+  const handleRedo = useCallback(() => {
+    if (!activeTabPath) return;
+
+    const history = editHistory.get(activeTabPath);
+    const currentIndex = historyIndex.get(activeTabPath) || 0;
+
+    if (!history || currentIndex >= history.length - 1) return;
+
+    const newIndex = currentIndex + 1;
+    const nextContent = history[newIndex];
+
+    setHistoryIndex(prev => {
+      const next = new Map(prev);
+      next.set(activeTabPath, newIndex);
+      return next;
+    });
+
+    setFileContent(nextContent);
+
+    // Update pending changes
+    setPendingChanges(prev => {
+      const next = new Map(prev);
+      const existing = next.get(activeTabPath);
+      if (existing) {
+        next.set(activeTabPath, { ...existing, content: nextContent });
+      }
+      return next;
+    });
+
+    // Trigger auto-save for the redone content
+    debouncedSave(activeTabPath, nextContent);
+  }, [activeTabPath, editHistory, historyIndex, debouncedSave]);
+
+  // Commit all pending changes (creates a commit message in the log)
+  const commitChanges = useCallback(async () => {
+    if (!codeSession) return;
+
+    // Get list of modified files
+    const modifiedFiles: string[] = [];
+    pendingChanges.forEach((change, path) => {
+      if (change.content !== change.originalContent) {
+        modifiedFiles.push(path);
+      }
+    });
+
+    if (modifiedFiles.length === 0) {
+      // No changes to commit
+      return;
+    }
+
+    setCommitStatus('committing');
+
+    try {
+      // First ensure all pending saves are complete
+      debouncedSave.cancel();
+
+      // Save any unsaved files first
+      for (const path of modifiedFiles) {
+        const change = pendingChanges.get(path);
+        if (change) {
+          await saveFile(path, change.content, change.sha);
+        }
+      }
+
+      // Log the commit
+      const fileList = modifiedFiles.map(f => `\`${f}\``).join(', ');
+      await logCodeMessage(`💾 Committed changes to ${modifiedFiles.length} file(s): ${fileList}`, 'system');
+
+      // Update pending changes to mark as committed (new original = current)
+      setPendingChanges(prev => {
+        const next = new Map(prev);
+        modifiedFiles.forEach(path => {
+          const change = next.get(path);
+          if (change) {
+            next.set(path, { ...change, originalContent: change.content });
+          }
+        });
+        return next;
+      });
+
+      setCommitStatus('committed');
+
+      setTimeout(() => {
+        setCommitStatus(prev => prev === 'committed' ? 'idle' : prev);
+      }, 2000);
+    } catch (error: any) {
+      console.error('Failed to commit changes:', error);
+      setCommitStatus('error');
+      setLastSaveError(error.message || 'Failed to commit');
+    }
+  }, [codeSession, pendingChanges, debouncedSave, saveFile, logCodeMessage]);
+
+  // Keyboard shortcuts handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + S to commit changes
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        commitChanges();
+      }
+
+      // Ctrl/Cmd + Z for undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      }
+
+      // Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y for redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [commitChanges, handleUndo, handleRedo]);
+
+  // Count total modified files
+  const modifiedFilesCount = useMemo(() => {
+    let count = 0;
+    pendingChanges.forEach((change) => {
+      if (change.content !== change.originalContent) {
+        count++;
+      }
+    });
+    return count;
+  }, [pendingChanges]);
 
   // Open rename modal for file or folder
   const openRenameModal = useCallback((itemType: 'file' | 'folder', path: string, name: string, e: React.MouseEvent) => {
@@ -967,8 +1396,14 @@ export default function Code() {
     });
   };
 
-  // Code Editor component with real file content
-  const CodeEditor = () => (
+  // Line count for the editor (memoized to avoid recalculating on every render)
+  const lineCount = useMemo(() => {
+    if (!fileContent) return 0;
+    return fileContent.split('\n').length;
+  }, [fileContent]);
+
+  // Code Editor JSX (not a component - just JSX to avoid remounting)
+  const codeEditorContent = (
     <div className="flex h-full">
       {/* File Explorer Sidebar */}
       <div className="w-64 bg-base-100 border-r border-base-300 overflow-y-auto flex-shrink-0">
@@ -1014,61 +1449,158 @@ export default function Code() {
 
       {/* Code Editor Area */}
       <div className="flex-1 flex flex-col bg-base-200 min-w-0">
-        {/* Tab Bar */}
-        <div className="flex items-center bg-base-100 border-b border-base-300 overflow-x-auto">
-          {tabs.length > 0 ? (
-            tabs.map((tab) => {
-              const isActive = tab.path === activeTabPath;
-              return (
-                <div
-                  key={tab.path}
-                  onClick={() => handleTabClick(tab.path)}
-                  onDoubleClick={() => pinTab(tab.path)}
-                  className={`flex items-center gap-2 px-4 py-2 border-r border-base-300 cursor-pointer hover:bg-base-200 flex-shrink-0 ${
-                    isActive ? 'bg-base-200' : 'bg-base-100'
-                  }`}
-                  title={tab.isPreview ? `${tab.path} (Preview - double-click to keep open)` : tab.path}
-                >
-                  <span className="text-xs">{getFileIcon(tab.name)}</span>
-                  <span className={`text-sm ${tab.isPreview ? 'italic text-base-content/70' : ''}`}>
-                    {tab.name}
-                  </span>
-                  <button
-                    onClick={(e) => handleTabClose(tab.path, e)}
-                    className="ml-1 hover:bg-base-300 rounded p-0.5 opacity-60 hover:opacity-100"
+        {/* Tab Bar with Status */}
+        <div className="flex items-center bg-base-100 border-b border-base-300">
+          <div className="flex-1 flex items-center overflow-x-auto">
+            {tabs.length > 0 ? (
+              tabs.map((tab) => {
+                const isActive = tab.path === activeTabPath;
+                const tabChange = pendingChanges.get(tab.path);
+                const isModified = tabChange ? tabChange.content !== tabChange.originalContent : false;
+                return (
+                  <div
+                    key={tab.path}
+                    onClick={() => handleTabClick(tab.path)}
+                    onDoubleClick={() => pinTab(tab.path)}
+                    className={`flex items-center gap-2 px-4 py-2 border-r border-base-300 cursor-pointer hover:bg-base-200 flex-shrink-0 ${
+                      isActive ? 'bg-base-200' : 'bg-base-100'
+                    }`}
+                    title={tab.isPreview ? `${tab.path} (Preview - double-click to keep open)` : tab.path}
                   >
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                </div>
-              );
-            })
-          ) : (
-            <div className="px-4 py-2 text-sm text-base-content/50">
-              Select a file to view
+                    <span className="text-xs">{getFileIcon(tab.name)}</span>
+                    <span className={`text-sm ${tab.isPreview ? 'italic text-base-content/70' : ''}`}>
+                      {tab.name}
+                    </span>
+                    {isModified && (
+                      <span className="w-2 h-2 rounded-full bg-warning" title="Modified" />
+                    )}
+                    <button
+                      onClick={(e) => handleTabClose(tab.path, e)}
+                      className="ml-1 hover:bg-base-300 rounded p-0.5 opacity-60 hover:opacity-100"
+                    >
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="px-4 py-2 text-sm text-base-content/50">
+                Select a file to edit
+              </div>
+            )}
+          </div>
+
+          {/* Save/Commit Status and Actions */}
+          <div className="flex items-center gap-2 px-3 border-l border-base-300">
+            {/* Save Status */}
+            <div className="flex items-center gap-1.5 text-xs">
+              {saveStatus === 'saving' && (
+                <>
+                  <span className="loading loading-spinner loading-xs"></span>
+                  <span className="text-base-content/70">Saving...</span>
+                </>
+              )}
+              {saveStatus === 'saved' && (
+                <>
+                  <svg className="w-3.5 h-3.5 text-success" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-success">Saved</span>
+                </>
+              )}
+              {saveStatus === 'error' && (
+                <>
+                  <svg className="w-3.5 h-3.5 text-error" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-error" title={lastSaveError || 'Save failed'}>Error</span>
+                </>
+              )}
             </div>
-          )}
+
+            {/* Modified files count */}
+            {modifiedFilesCount > 0 && (
+              <div className="badge badge-warning badge-sm" title={`${modifiedFilesCount} file(s) with uncommitted changes`}>
+                {modifiedFilesCount} modified
+              </div>
+            )}
+
+            {/* Commit Button */}
+            <button
+              onClick={commitChanges}
+              disabled={modifiedFilesCount === 0 || commitStatus === 'committing'}
+              className="btn btn-xs btn-primary gap-1"
+              title="Commit changes (Ctrl/Cmd+S)"
+            >
+              {commitStatus === 'committing' ? (
+                <>
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Committing...
+                </>
+              ) : commitStatus === 'committed' ? (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Committed!
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                  Commit
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
-        {/* Code Content */}
-        <div className="flex-1 overflow-auto">
+        {/* Code Editor */}
+        <div className="flex-1 overflow-hidden relative">
           {isLoadingFile ? (
             <div className="flex items-center justify-center h-full">
               <span className="loading loading-spinner loading-md"></span>
             </div>
           ) : fileContent !== null ? (
-            <div className="p-4 font-mono text-sm">
-              {fileContent.split('\n').map((line, i) => (
-                <div key={i} className="flex">
-                  <span className="text-base-content/40 select-none w-12 text-right pr-4 flex-shrink-0">
-                    {i + 1}
-                  </span>
-                  <span className="text-base-content whitespace-pre">
-                    {line.length === 0 ? '\u00A0' : line}
-                  </span>
-                </div>
-              ))}
+            <div className="h-full flex">
+              {/* Line Numbers - using a single pre element for better performance */}
+              <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
+                {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
+              </pre>
+
+              {/* Text Editor */}
+              <textarea
+                ref={textareaRef}
+                value={fileContent}
+                onChange={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  handleContentChange(target.value, target.selectionStart, target.selectionEnd);
+                }}
+                onKeyDown={(e) => {
+                  // Handle Tab key for indentation
+                  if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const target = e.target as HTMLTextAreaElement;
+                    const start = target.selectionStart;
+                    const end = target.selectionEnd;
+                    const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
+                    handleContentChange(newValue, start + 2, start + 2);
+                  }
+                }}
+                className="flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none"
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                style={{
+                  tabSize: 2,
+                  MozTabSize: 2,
+                  caretColor: 'auto',
+                }}
+              />
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-base-content/50">
@@ -1076,7 +1608,10 @@ export default function Code() {
                 <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
                 </svg>
-                <p>Select a file from the explorer to view its contents</p>
+                <p>Select a file from the explorer to edit</p>
+                <p className="text-xs mt-2 text-base-content/40">
+                  Changes auto-save • Ctrl/Cmd+S to commit • Ctrl/Cmd+Z to undo
+                </p>
               </div>
             </div>
           )}
@@ -1220,8 +1755,8 @@ export default function Code() {
     );
   };
 
-  // Code Session View with header
-  const CodeSessionView = () => {
+  // Determine what content to show based on state
+  const getMainContent = () => {
     // Show loading state when fetching existing session
     if (sessionId && isLoadingExistingSession) {
       return (
@@ -1258,96 +1793,11 @@ export default function Code() {
       return <RepoSelector />;
     }
 
-    return (
-      <div className="h-[calc(100vh-112px)] flex flex-col">
-        {/* Session Header */}
-        <div className="bg-base-100 border-b border-base-300 px-4 py-3 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {/* Only show back button if not from an existing session URL */}
-              {!isFromExistingSession && (
-                <button
-                  onClick={() => {
-                    setCodeSession(null);
-                    setTabs([]);
-                    setActiveTabPath(null);
-                    setFileContent(null);
-                    setExpandedFolders(new Set());
-                  }}
-                  className="btn btn-ghost btn-sm btn-circle"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </button>
-              )}
-              <div>
-                <h2 className="text-sm font-semibold text-base-content">
-                  {codeSession.owner}/{codeSession.repo}
-                </h2>
-                <p className="text-xs text-base-content/70">
-                  Branch: <span className="text-primary">{codeSession.branch}</span>
-                  <span className="mx-2">•</span>
-                  Base: {codeSession.baseBranch}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <a
-                href={`https://github.com/${codeSession.owner}/${codeSession.repo}/tree/${codeSession.branch}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-sm btn-ghost gap-2"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
-                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
-                </svg>
-                View on GitHub
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* PR Status Alerts */}
-        {(autoPrProgress || prSuccess || prError) && (
-          <div className="px-4 py-2 border-b border-base-300 bg-base-100 space-y-2">
-            {autoPrProgress && (
-              <div className="alert alert-info py-2">
-                <span className="loading loading-spinner loading-sm"></span>
-                <span className="text-sm font-semibold">{autoPrProgress}</span>
-              </div>
-            )}
-
-            {prSuccess && (
-              <div className="alert alert-success py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <span className="text-sm">{prSuccess}</span>
-                <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
-              </div>
-            )}
-
-            {prError && (
-              <div className="alert alert-error py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <span className="text-sm">{prError}</span>
-                <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Code Editor */}
-        <div className="flex-1 min-h-0">
-          <CodeEditor />
-        </div>
-      </div>
-    );
+    // Return the code session view
+    return null;
   };
+
+  const mainContent = getMainContent();
 
   // Create PR actions for the branch line (similar to Chat.tsx)
   const prActions = codeSession && codeSession.branch && codeSession.baseBranch && (
@@ -1425,7 +1875,97 @@ export default function Code() {
       prActions={prActions}
       session={sessionForLayout}
     >
-      <CodeSessionView />
+      {/* Show loading/error/repo selector OR the code editor */}
+      {mainContent || (
+        <div className="h-[calc(100vh-112px)] flex flex-col">
+          {/* Session Header */}
+          <div className="bg-base-100 border-b border-base-300 px-4 py-3 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {/* Only show back button if not from an existing session URL */}
+                {!isFromExistingSession && (
+                  <button
+                    onClick={() => {
+                      setCodeSession(null);
+                      setTabs([]);
+                      setActiveTabPath(null);
+                      setFileContent(null);
+                      setExpandedFolders(new Set());
+                      setPendingChanges(new Map());
+                    }}
+                    className="btn btn-ghost btn-sm btn-circle"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                      <path
+                        fillRule="evenodd"
+                        d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                )}
+                <div>
+                  <h2 className="text-sm font-semibold text-base-content">
+                    {codeSession?.owner}/{codeSession?.repo}
+                  </h2>
+                  <p className="text-xs text-base-content/70">
+                    Branch: <span className="text-primary">{codeSession?.branch}</span>
+                    <span className="mx-2">•</span>
+                    Base: {codeSession?.baseBranch}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`https://github.com/${codeSession?.owner}/${codeSession?.repo}/tree/${codeSession?.branch}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-sm btn-ghost gap-2"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                    <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                  </svg>
+                  View on GitHub
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* PR Status Alerts */}
+          {(autoPrProgress || prSuccess || prError) && (
+            <div className="px-4 py-2 border-b border-base-300 bg-base-100 space-y-2">
+              {autoPrProgress && (
+                <div className="alert alert-info py-2">
+                  <span className="loading loading-spinner loading-sm"></span>
+                  <span className="text-sm font-semibold">{autoPrProgress}</span>
+                </div>
+              )}
+
+              {prSuccess && (
+                <div className="alert alert-success py-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <span className="text-sm">{prSuccess}</span>
+                  <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+                </div>
+              )}
+
+              {prError && (
+                <div className="alert alert-error py-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <span className="text-sm">{prError}</span>
+                  <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Code Editor */}
+          <div className="flex-1 min-h-0">
+            {codeEditorContent}
+          </div>
+        </div>
+      )}
 
       {/* Rename Modal */}
       {fileOperation.type === 'rename' && (

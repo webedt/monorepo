@@ -1402,6 +1402,99 @@ router.post('/repos/:owner/:repo/rename/*', requireAuth, async (req, res) => {
   }
 });
 
+// Update/Create a file
+// Note: Using wildcard (*) for the file path
+router.put('/repos/:owner/:repo/contents/*', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const path = req.params[0]; // The file path
+    const { content, branch, sha, message } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!branch) {
+      res.status(400).json({ success: false, error: 'Branch is required' });
+      return;
+    }
+
+    if (content === undefined) {
+      res.status(400).json({ success: false, error: 'Content is required' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    // Convert content to base64
+    const contentBase64 = Buffer.from(content, 'utf-8').toString('base64');
+
+    // If sha is not provided, try to get the current file's sha (for updates)
+    let fileSha = sha;
+    if (!fileSha) {
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner,
+          repo,
+          path,
+          ref: branch,
+        });
+        if (!Array.isArray(data) && data.type === 'file') {
+          fileSha = data.sha;
+        }
+      } catch (error: unknown) {
+        const err = error as { status?: number };
+        // 404 is fine - it means we're creating a new file
+        if (err.status !== 404) {
+          throw error;
+        }
+      }
+    }
+
+    // Create or update the file
+    const result = await octokit.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path,
+      message: message || `Update ${path}`,
+      content: contentBase64,
+      branch,
+      sha: fileSha, // Will be undefined for new files
+    });
+
+    console.log(`[GitHub] Updated file ${path} in ${owner}/${repo}/${branch}`);
+
+    res.json({
+      success: true,
+      data: {
+        message: fileSha ? 'File updated successfully' : 'File created successfully',
+        sha: result.data.content?.sha,
+        path,
+      },
+    });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    console.error('GitHub update file error:', error);
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      return;
+    }
+    if (err.status === 409) {
+      res.status(409).json({ success: false, error: 'Conflict - file may have been modified. Please refresh and try again.' });
+      return;
+    }
+    if (err.status === 422) {
+      res.status(422).json({ success: false, error: 'Invalid file content or path' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: 'Failed to update file' });
+  }
+});
+
 // Delete a folder (delete all files recursively)
 // Note: Using wildcard (*) for the folder path
 router.delete('/repos/:owner/:repo/folder/*', requireAuth, async (req, res) => {
