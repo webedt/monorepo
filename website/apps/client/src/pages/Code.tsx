@@ -364,15 +364,8 @@ export default function Code() {
 
       const dbSessionId = sessionResponse.data.sessionId;
 
-      // Log the session start as an event (visible in Chat)
-      try {
-        await sessionsApi.createEvent(dbSessionId, 'code_operation', {
-          type: 'message',
-          message: `📂 Started code editing session on branch \`${branchName}\` (base: \`${baseBranch}\`)`,
-        });
-      } catch (e) {
-        console.error('Failed to log session start event:', e);
-      }
+      // Note: Server already creates an initial user message when creating the code session
+      // No need to log a duplicate session start event here
 
       setCodeSession({
         owner,
@@ -429,15 +422,8 @@ export default function Code() {
 
       const dbSessionId = sessionResponse.data.sessionId;
 
-      // Log the session start as an event (visible in Chat)
-      try {
-        await sessionsApi.createEvent(dbSessionId, 'code_operation', {
-          type: 'message',
-          message: `📂 Started code editing session on branch \`${branchName}\` (base: \`${baseBranch}\`)`,
-        });
-      } catch (e) {
-        console.error('Failed to log session start event:', e);
-      }
+      // Note: Server already creates an initial user message when creating the code session
+      // No need to log a duplicate session start event here
 
       setCodeSession({
         owner,
@@ -605,18 +591,15 @@ export default function Code() {
     });
   };
 
-  // Helper to log file operations as events (streaming-style logs visible in Chat)
-  const logCodeEvent = useCallback(async (message: string) => {
+  // Helper to log file operations as chat messages (saved to database like chat messages)
+  // This creates proper messages that appear in the Chat view exactly like AI responses
+  const logCodeMessage = useCallback(async (message: string, type: 'user' | 'assistant' | 'system' = 'system') => {
     if (!codeSession?.sessionId) return;
     try {
-      // Use 'code_operation' event type with the message format that Chat.tsx understands
-      // This matches the data.type === 'message' case in convertEventToMessage
-      await sessionsApi.createEvent(codeSession.sessionId, 'code_operation', {
-        type: 'message',
-        message: message,
-      });
+      // Save as a proper chat message (like AI chat responses)
+      await sessionsApi.createMessage(codeSession.sessionId, type, message);
     } catch (error) {
-      console.error('Failed to log code event:', error);
+      console.error('Failed to log code message:', error);
     }
   }, [codeSession?.sessionId]);
 
@@ -673,9 +656,10 @@ export default function Code() {
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
 
-      // Log the rename operation as an event (visible in Chat)
-      const itemType = fileOperation.itemType === 'file' ? '📄' : '📁';
-      await logCodeEvent(`${itemType} Renamed: \`${fileOperation.path}\` → \`${newPath}\``);
+      // Log the rename operation as a chat message (persisted to database)
+      const itemTypeIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
+      const renameMessage = `${itemTypeIcon} Renamed: \`${fileOperation.path}\` → \`${newPath}\``;
+      await logCodeMessage(renameMessage, 'system');
 
       // If the renamed item was open in a tab, update the tab
       if (fileOperation.itemType === 'file' && activeTabPath === fileOperation.path) {
@@ -696,7 +680,7 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient, logCodeEvent]);
+  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient, logCodeMessage]);
 
   // Handle delete operation
   const handleDelete = useCallback(async () => {
@@ -722,9 +706,10 @@ export default function Code() {
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
 
-      // Log the delete operation as an event (visible in Chat)
+      // Log the delete operation as a chat message (persisted to database)
       const deleteIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
-      await logCodeEvent(`🗑️ Deleted ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\``);
+      const deleteMessage = `🗑️ Deleted ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\``;
+      await logCodeMessage(deleteMessage, 'system');
 
       // If the deleted item was open in a tab, close it
       if (fileOperation.itemType === 'file') {
@@ -765,7 +750,7 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logCodeEvent]);
+  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logCodeMessage]);
 
   // PR Handler Functions
   const handleCreatePR = async () => {
@@ -790,8 +775,8 @@ export default function Code() {
       );
       setPrSuccess(`PR #${response.data.number} created successfully!`);
 
-      // Log PR creation as an event (visible in Chat)
-      await logCodeEvent(`🔀 Created Pull Request #${response.data.number}: ${response.data.htmlUrl}`);
+      // Log PR creation as a chat message (persisted to database)
+      await logCodeMessage(`🔀 Created Pull Request #${response.data.number}: ${response.data.htmlUrl}`, 'system');
 
       refetchPr();
     } catch (err: any) {
@@ -835,8 +820,8 @@ export default function Code() {
       setPrSuccess(`Auto PR completed! PR #${results.pr?.number} merged successfully.`);
       setAutoPrProgress(null);
 
-      // Log the auto PR completion as an event (visible in Chat)
-      await logCodeEvent(`✅ Auto PR completed! PR #${results.pr?.number} merged into \`${codeSession.baseBranch}\``);
+      // Log the auto PR completion as a chat message (persisted to database)
+      await logCodeMessage(`✅ Auto PR completed! PR #${results.pr?.number} merged into \`${codeSession.baseBranch}\``, 'system');
 
       refetchPr();
 
