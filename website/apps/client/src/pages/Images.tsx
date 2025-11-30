@@ -1,15 +1,14 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
+import { githubApi, sessionsApi } from '@/lib/api';
 
 type EditorMode = 'image' | 'spritesheet' | 'animation';
 type ViewMode = 'preview' | 'edit';
 
-interface RecentItem {
-  id: string;
-  name: string;
-  thumbnail: string;
-  lastModified: string;
-}
+// File types for filtering
+type ImageFileType = 'image' | 'spritesheet' | 'animation';
 
 interface FileNode {
   name: string;
@@ -17,109 +16,284 @@ interface FileNode {
   type: 'file' | 'folder';
   children?: FileNode[];
   icon?: string;
+  fileType?: ImageFileType; // For files: what kind of image asset
 }
 
-// Mock file tree data
-const mockFileTree: FileNode[] = [
-  {
-    name: 'sprites',
-    path: 'sprites',
-    type: 'folder',
-    children: [
-      { name: 'character_idle.png', path: 'sprites/character_idle.png', type: 'file', icon: '🖼️' },
-      { name: 'character_walk.png', path: 'sprites/character_walk.png', type: 'file', icon: '🖼️' },
-      { name: 'character_jump.png', path: 'sprites/character_jump.png', type: 'file', icon: '🖼️' },
-      { name: 'enemy_type_A.png', path: 'sprites/enemy_type_A.png', type: 'file', icon: '🖼️' },
-      { name: 'enemy_type_B.png', path: 'sprites/enemy_type_B.png', type: 'file', icon: '🖼️' },
-    ],
-  },
-  {
-    name: 'spritesheets',
-    path: 'spritesheets',
-    type: 'folder',
-    children: [
-      { name: 'player_run.png', path: 'spritesheets/player_run.png', type: 'file', icon: '🎞️' },
-      { name: 'player_attack.png', path: 'spritesheets/player_attack.png', type: 'file', icon: '🎞️' },
-      { name: 'explosion_fx.png', path: 'spritesheets/explosion_fx.png', type: 'file', icon: '🎞️' },
-    ],
-  },
-  {
-    name: 'backgrounds',
-    path: 'backgrounds',
-    type: 'folder',
-    children: [
-      { name: 'forest_layer1.png', path: 'backgrounds/forest_layer1.png', type: 'file', icon: '🖼️' },
-      { name: 'forest_layer2.png', path: 'backgrounds/forest_layer2.png', type: 'file', icon: '🖼️' },
-      { name: 'sky_gradient.png', path: 'backgrounds/sky_gradient.png', type: 'file', icon: '🖼️' },
-    ],
-  },
-  {
-    name: 'ui',
-    path: 'ui',
-    type: 'folder',
-    children: [
-      { name: 'button_normal.png', path: 'ui/button_normal.png', type: 'file', icon: '🖼️' },
-      { name: 'button_hover.png', path: 'ui/button_hover.png', type: 'file', icon: '🖼️' },
-      { name: 'health_bar.png', path: 'ui/health_bar.png', type: 'file', icon: '🖼️' },
-    ],
-  },
-];
+interface GitHubTreeItem {
+  path: string;
+  type: 'blob' | 'tree';
+  sha: string;
+  size?: number;
+}
 
-// Mock recent items
-const mockRecentImages: RecentItem[] = [
-  { id: '1', name: 'character_idle.png', thumbnail: '👤', lastModified: '2 hours ago' },
-  { id: '2', name: 'enemy_type_A.png', thumbnail: '👹', lastModified: '4 hours ago' },
-  { id: '3', name: 'button_normal.png', thumbnail: '🔲', lastModified: 'Yesterday' },
-  { id: '4', name: 'forest_layer1.png', thumbnail: '🌲', lastModified: 'Yesterday' },
-  { id: '5', name: 'sky_gradient.png', thumbnail: '🌅', lastModified: '2 days ago' },
-  { id: '6', name: 'health_bar.png', thumbnail: '💚', lastModified: '2 days ago' },
-  { id: '7', name: 'coin_gold.png', thumbnail: '🪙', lastModified: '3 days ago' },
-  { id: '8', name: 'gem_blue.png', thumbnail: '💎', lastModified: '3 days ago' },
-];
+// File extensions for different asset types
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'];
+const SPRITESHEET_PATTERNS = ['.spritesheet.json', '.atlas.json', '-atlas.json', '_atlas.json'];
+const ANIMATION_PATTERNS = ['.animation.json', '.anim.json', '-anim.json', '_anim.json'];
 
-const mockRecentSpritesheets: RecentItem[] = [
-  { id: '1', name: 'player_run.png', thumbnail: '🏃', lastModified: '1 hour ago' },
-  { id: '2', name: 'player_attack.png', thumbnail: '⚔️', lastModified: '3 hours ago' },
-  { id: '3', name: 'explosion_fx.png', thumbnail: '💥', lastModified: 'Yesterday' },
-  { id: '4', name: 'coin_spin.png', thumbnail: '🪙', lastModified: 'Yesterday' },
-  { id: '5', name: 'fire_effect.png', thumbnail: '🔥', lastModified: '2 days ago' },
-  { id: '6', name: 'water_splash.png', thumbnail: '💦', lastModified: '2 days ago' },
-  { id: '7', name: 'dust_cloud.png', thumbnail: '💨', lastModified: '3 days ago' },
-  { id: '8', name: 'magic_sparkle.png', thumbnail: '✨', lastModified: '4 days ago' },
-];
+// Helper to determine file type
+const getImageFileType = (filename: string): ImageFileType | null => {
+  const lowerName = filename.toLowerCase();
 
-const mockRecentAnimations: RecentItem[] = [
-  { id: '1', name: 'Player_Idle', thumbnail: '🧍', lastModified: '30 mins ago' },
-  { id: '2', name: 'Player_Run', thumbnail: '🏃', lastModified: '1 hour ago' },
-  { id: '3', name: 'Player_Jump', thumbnail: '🦘', lastModified: '2 hours ago' },
-  { id: '4', name: 'Enemy_Attack', thumbnail: '👊', lastModified: 'Yesterday' },
-  { id: '5', name: 'Explosion_VFX', thumbnail: '💥', lastModified: 'Yesterday' },
-  { id: '6', name: 'Coin_Collect', thumbnail: '🪙', lastModified: '2 days ago' },
-  { id: '7', name: 'Door_Open', thumbnail: '🚪', lastModified: '3 days ago' },
-  { id: '8', name: 'Flag_Wave', thumbnail: '🚩', lastModified: '4 days ago' },
-];
+  // Check for spritesheet patterns first (more specific)
+  if (SPRITESHEET_PATTERNS.some(pattern => lowerName.endsWith(pattern))) {
+    return 'spritesheet';
+  }
+
+  // Check for animation patterns
+  if (ANIMATION_PATTERNS.some(pattern => lowerName.endsWith(pattern))) {
+    return 'animation';
+  }
+
+  // Check for image extensions
+  const ext = lowerName.split('.').pop();
+  if (ext && IMAGE_EXTENSIONS.includes(ext)) {
+    return 'image';
+  }
+
+  return null;
+};
+
+// Helper to get file icon based on type
+const getFileIcon = (filename: string, fileType?: ImageFileType): string => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+
+  if (fileType === 'spritesheet') return '🎞️';
+  if (fileType === 'animation') return '🎬';
+
+  // Image icons based on extension
+  const iconMap: Record<string, string> = {
+    png: '🖼️',
+    jpg: '🖼️',
+    jpeg: '🖼️',
+    gif: '🎭',
+    webp: '🖼️',
+    svg: '📐',
+    ico: '🔲',
+    bmp: '🖼️',
+  };
+
+  return iconMap[ext || ''] || '🖼️';
+};
+
+// Transform GitHub tree to our filtered TreeNode format
+const transformGitHubTreeForImages = (
+  items: GitHubTreeItem[],
+  filterMode: EditorMode | 'all'
+): FileNode[] => {
+  const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Sort items: directories first, then alphabetically
+  const sortedItems = [...items].sort((a, b) => {
+    if (a.type === 'tree' && b.type !== 'tree') return -1;
+    if (a.type !== 'tree' && b.type === 'tree') return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  // Track which folders have image-related content
+  const foldersWithContent = new Set<string>();
+
+  // First pass: identify all files and their types
+  const fileTypes = new Map<string, ImageFileType>();
+  for (const item of sortedItems) {
+    if (item.type === 'blob') {
+      const fileType = getImageFileType(item.path.split('/').pop() || '');
+      if (fileType) {
+        fileTypes.set(item.path, fileType);
+
+        // Mark parent folders as having content
+        const pathParts = item.path.split('/');
+        for (let i = 1; i < pathParts.length; i++) {
+          foldersWithContent.add(pathParts.slice(0, i).join('/'));
+        }
+      }
+    }
+  }
+
+  // Build the tree structure
+  for (const item of sortedItems) {
+    const pathParts = item.path.split('/');
+    let currentLevel = root;
+
+    for (let i = 0; i < pathParts.length; i++) {
+      const part = pathParts[i];
+      const currentPath = pathParts.slice(0, i + 1).join('/');
+      const isLastPart = i === pathParts.length - 1;
+
+      if (isLastPart) {
+        if (item.type === 'blob') {
+          const fileType = fileTypes.get(item.path);
+
+          // Filter by mode
+          if (!fileType) continue;
+          if (filterMode !== 'all') {
+            if (filterMode === 'image' && fileType !== 'image') continue;
+            if (filterMode === 'spritesheet' && fileType !== 'spritesheet') continue;
+            if (filterMode === 'animation' && fileType !== 'animation') continue;
+          }
+
+          currentLevel.children!.push({
+            name: part,
+            path: currentPath,
+            type: 'file',
+            icon: getFileIcon(part, fileType),
+            fileType,
+          });
+        } else {
+          // Directory - only add if it has relevant content
+          if (foldersWithContent.has(currentPath)) {
+            const existing = currentLevel.children!.find(
+              c => c.type === 'folder' && c.name === part
+            );
+            if (!existing) {
+              currentLevel.children!.push({
+                name: part,
+                path: currentPath,
+                type: 'folder',
+                children: [],
+              });
+            }
+          }
+        }
+      } else {
+        // Navigate to or create intermediate folder
+        let folder = currentLevel.children!.find(
+          c => c.type === 'folder' && c.name === part
+        ) as FileNode | undefined;
+
+        if (!folder && foldersWithContent.has(currentPath)) {
+          folder = { name: part, path: currentPath, type: 'folder', children: [] };
+          currentLevel.children!.push(folder);
+        }
+
+        if (folder) {
+          currentLevel = folder;
+        } else {
+          break; // Skip this path if folder doesn't exist
+        }
+      }
+    }
+  }
+
+  // Remove empty folders recursively
+  const removeEmptyFolders = (node: FileNode): boolean => {
+    if (node.type === 'file') return true;
+
+    if (node.children) {
+      node.children = node.children.filter(child => removeEmptyFolders(child));
+      return node.children.length > 0;
+    }
+
+    return false;
+  };
+
+  root.children = root.children?.filter(child => removeEmptyFolders(child)) || [];
+
+  return root.children || [];
+};
 
 function ImagesContent() {
+  const { sessionId } = useParams<{ sessionId?: string }>();
+  const queryClient = useQueryClient();
+
   const [editorMode, setEditorMode] = useState<EditorMode>('image');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
-  const [showExplorer, setShowExplorer] = useState(false);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['sprites']));
-  const [selectedFile, setSelectedFile] = useState<{ path: string; name: string } | null>(null);
+  const [showExplorer, setShowExplorer] = useState(true);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [selectedFile, setSelectedFile] = useState<{ path: string; name: string; fileType?: ImageFileType } | null>(null);
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isLoadingImage, setIsLoadingImage] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Get recent items based on current mode
-  const getRecentItems = () => {
-    switch (editorMode) {
-      case 'image':
-        return mockRecentImages;
-      case 'spritesheet':
-        return mockRecentSpritesheets;
-      case 'animation':
-        return mockRecentAnimations;
+  // Fetch session data to get repo info
+  const { data: sessionData, isLoading: isLoadingSession } = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => sessionsApi.get(sessionId!),
+    enabled: !!sessionId,
+  });
+
+  const session = sessionData?.data;
+  const hasRepoInfo = session?.repositoryOwner && session?.repositoryName && session?.branch;
+
+  // Fetch file tree from GitHub
+  const { data: treeData, isLoading: isLoadingTree } = useQuery({
+    queryKey: ['github-tree', session?.repositoryOwner, session?.repositoryName, session?.branch],
+    queryFn: () => githubApi.getTree(
+      session!.repositoryOwner!,
+      session!.repositoryName!,
+      session!.branch!
+    ),
+    enabled: hasRepoInfo,
+  });
+
+  // Transform and filter the file tree based on editor mode
+  const fileTree = useMemo(() => {
+    if (!treeData?.data?.tree) return [];
+    return transformGitHubTreeForImages(treeData.data.tree, editorMode);
+  }, [treeData, editorMode]);
+
+  // Count files by type for display
+  const fileCounts = useMemo(() => {
+    if (!treeData?.data?.tree) return { image: 0, spritesheet: 0, animation: 0 };
+
+    const counts = { image: 0, spritesheet: 0, animation: 0 };
+    for (const item of treeData.data.tree) {
+      if (item.type === 'blob') {
+        const fileType = getImageFileType(item.path.split('/').pop() || '');
+        if (fileType) {
+          counts[fileType]++;
+        }
+      }
     }
-  };
+    return counts;
+  }, [treeData]);
+
+  // Load image when a file is selected
+  const loadImage = useCallback(async (path: string) => {
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch) return;
+
+    setIsLoadingImage(true);
+    setImageUrl(null);
+
+    try {
+      const response = await githubApi.getFileContent(
+        session.repositoryOwner,
+        session.repositoryName,
+        path,
+        session.branch
+      );
+
+      // GitHub API returns base64 encoded content for binary files
+      if (response.data.content && response.data.encoding === 'base64') {
+        // Determine MIME type from extension
+        const ext = path.split('.').pop()?.toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          png: 'image/png',
+          jpg: 'image/jpeg',
+          jpeg: 'image/jpeg',
+          gif: 'image/gif',
+          webp: 'image/webp',
+          svg: 'image/svg+xml',
+          ico: 'image/x-icon',
+          bmp: 'image/bmp',
+        };
+        const mimeType = mimeTypes[ext || ''] || 'image/png';
+
+        // Create data URL
+        const dataUrl = `data:${mimeType};base64,${response.data.content}`;
+        setImageUrl(dataUrl);
+      } else if (response.data.download_url) {
+        // Use download URL if available
+        setImageUrl(response.data.download_url);
+      }
+    } catch (error) {
+      console.error('Failed to load image:', error);
+    } finally {
+      setIsLoadingImage(false);
+    }
+  }, [session]);
 
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => {
@@ -137,14 +311,16 @@ function ImagesContent() {
     if (node.type === 'folder') {
       toggleFolder(node.path);
     } else {
-      setSelectedFile({ path: node.path, name: node.name });
+      setSelectedFile({ path: node.path, name: node.name, fileType: node.fileType });
       setViewMode('preview');
-    }
-  };
 
-  const handleRecentClick = (item: RecentItem) => {
-    setSelectedFile({ path: item.id, name: item.name });
-    setViewMode('preview');
+      // Load the image if it's an image file
+      if (node.fileType === 'image') {
+        loadImage(node.path);
+      } else {
+        setImageUrl(null);
+      }
+    }
   };
 
   const handleAiSubmit = async (e: React.FormEvent) => {
@@ -162,50 +338,61 @@ function ImagesContent() {
   // Render file tree recursively
   const renderFileTree = (nodes: FileNode[], level = 0): JSX.Element[] => {
     return nodes.map((node) => {
-      const paddingLeft = level * 12 + 8;
-      const isExpanded = expandedFolders.has(node.path);
-      const isSelected = selectedFile?.path === node.path;
+      const paddingLeft = level * 16 + 8;
 
-      if (node.type === 'folder') {
+      if (node.type === 'file') {
+        const isSelected = selectedFile?.path === node.path;
         return (
-          <div key={node.path}>
-            <div
-              onClick={() => handleFileClick(node)}
-              className="flex items-center gap-1.5 py-1 px-2 cursor-pointer hover:bg-base-200 transition-colors"
-              style={{ paddingLeft }}
-            >
-              <svg
-                className={`w-3 h-3 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <svg className="w-4 h-4 text-yellow-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
-              </svg>
-              <span className="text-xs font-medium truncate">{node.name}</span>
-            </div>
-            {isExpanded && node.children && renderFileTree(node.children, level + 1)}
+          <div
+            key={node.path}
+            onClick={() => handleFileClick(node)}
+            className={`group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
+              isSelected ? 'bg-base-300 text-primary' : ''
+            }`}
+            style={{ paddingLeft }}
+            title={node.path}
+          >
+            <span className="text-sm flex-shrink-0">{node.icon}</span>
+            <span className="text-sm truncate flex-1">{node.name}</span>
+            {node.fileType && (
+              <span className="text-xs text-base-content/40 group-hover:text-base-content/60">
+                {node.fileType === 'spritesheet' ? 'sheet' : node.fileType === 'animation' ? 'anim' : ''}
+              </span>
+            )}
           </div>
         );
       }
 
+      const isExpanded = expandedFolders.has(node.path);
       return (
-        <div
-          key={node.path}
-          onClick={() => handleFileClick(node)}
-          className={`flex items-center gap-1.5 py-1 px-2 cursor-pointer transition-colors ${
-            isSelected ? 'bg-primary/20 text-primary' : 'hover:bg-base-200'
-          }`}
-          style={{ paddingLeft: paddingLeft + 16 }}
-        >
-          <span className="text-xs flex-shrink-0">{node.icon || '📄'}</span>
-          <span className="text-xs truncate">{node.name}</span>
+        <div key={node.path}>
+          <div
+            onClick={() => toggleFolder(node.path)}
+            className="group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300"
+            style={{ paddingLeft }}
+          >
+            <svg
+              className={`w-3 h-3 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <svg className="w-4 h-4 text-yellow-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+            </svg>
+            <span className="text-sm font-medium truncate flex-1">{node.name}</span>
+            {node.children && node.children.length > 0 && (
+              <span className="text-xs text-base-content/40">
+                {node.children.filter(c => c.type === 'file').length}
+              </span>
+            )}
+          </div>
+          {isExpanded && node.children && node.children.length > 0 && renderFileTree(node.children, level + 1)}
         </div>
       );
     });
@@ -214,7 +401,33 @@ function ImagesContent() {
   // Left Sidebar
   const LeftSidebar = () => (
     <div className="w-64 bg-base-100 border-r border-base-300 flex flex-col flex-shrink-0">
-      {/* Editor Mode Tabs */}
+      {/* Header with Explorer title and refresh */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-base-300">
+        <span className="text-sm font-semibold uppercase tracking-wide">Image Explorer</span>
+        <div className="flex gap-1">
+          <button
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['github-tree'] })}
+            className="p-1 hover:bg-base-200 rounded"
+            title="Refresh"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Branch info */}
+      {session && (
+        <div className="px-3 py-2 border-b border-base-300 bg-base-200">
+          <div className="text-xs text-base-content/70">Branch</div>
+          <div className="text-sm font-medium text-primary truncate" title={session.branch || ''}>
+            {session.branch || 'No branch'}
+          </div>
+        </div>
+      )}
+
+      {/* Editor Mode Tabs with counts */}
       <div className="p-2 border-b border-base-300">
         <div className="flex flex-col gap-1">
           <button
@@ -228,7 +441,8 @@ function ImagesContent() {
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
             </svg>
-            ImageEDT
+            <span className="flex-1">Images</span>
+            <span className="badge badge-sm badge-ghost">{fileCounts.image}</span>
           </button>
           <button
             onClick={() => setEditorMode('spritesheet')}
@@ -241,7 +455,8 @@ function ImagesContent() {
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z"/>
             </svg>
-            SpriteSheetEDT
+            <span className="flex-1">Sprite Sheets</span>
+            <span className="badge badge-sm badge-ghost">{fileCounts.spritesheet}</span>
           </button>
           <button
             onClick={() => setEditorMode('animation')}
@@ -254,78 +469,73 @@ function ImagesContent() {
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
             </svg>
-            AnimationEDT
+            <span className="flex-1">Animations</span>
+            <span className="badge badge-sm badge-ghost">{fileCounts.animation}</span>
           </button>
         </div>
       </div>
 
-      {/* Browse Button */}
-      <div className="p-3 border-b border-base-300">
+      {/* File Explorer Toggle */}
+      <div className="px-3 py-2 border-b border-base-300">
         <button
           onClick={() => setShowExplorer(!showExplorer)}
-          className={`btn btn-sm w-full gap-2 ${showExplorer ? 'btn-primary' : 'btn-outline'}`}
+          className="w-full flex items-center gap-2 text-sm text-base-content/70 hover:text-base-content transition-colors"
         >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+          <svg className={`w-3 h-3 transition-transform ${showExplorer ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
           </svg>
-          Browse
-          <svg className={`w-3 h-3 ml-auto transition-transform ${showExplorer ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-          </svg>
+          <span className="font-medium">Files</span>
+          <span className="text-xs text-base-content/40 ml-auto">
+            {fileTree.length > 0 ? `${fileTree.reduce((acc, node) => acc + (node.type === 'folder' ? (node.children?.length || 0) : 1), 0)} items` : ''}
+          </span>
         </button>
       </div>
 
       {/* File Explorer (collapsible) */}
       {showExplorer && (
-        <div className="border-b border-base-300 max-h-64 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <div className="py-2">
-            {renderFileTree(mockFileTree)}
+            {isLoadingSession || isLoadingTree ? (
+              <div className="flex items-center justify-center py-8">
+                <span className="loading loading-spinner loading-sm"></span>
+              </div>
+            ) : !hasRepoInfo ? (
+              <div className="px-3 py-4 text-sm text-base-content/70 text-center">
+                <svg className="w-8 h-8 mx-auto mb-2 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                </svg>
+                <p>No repository connected</p>
+                <p className="text-xs mt-1">Start a session from Chat to browse files</p>
+              </div>
+            ) : fileTree.length > 0 ? (
+              renderFileTree(fileTree)
+            ) : (
+              <div className="px-3 py-4 text-sm text-base-content/70 text-center">
+                <svg className="w-8 h-8 mx-auto mb-2 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                </svg>
+                <p>No {editorMode === 'image' ? 'images' : editorMode === 'spritesheet' ? 'sprite sheets' : 'animations'} found</p>
+                <p className="text-xs mt-1">
+                  {editorMode === 'image'
+                    ? 'Looking for: .png, .jpg, .gif, .webp, .svg'
+                    : editorMode === 'spritesheet'
+                    ? 'Looking for: .spritesheet.json, .atlas.json'
+                    : 'Looking for: .animation.json, .anim.json'}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* New Button */}
-      <div className="p-3 border-b border-base-300">
+      {/* New Button - at bottom */}
+      <div className="p-3 border-t border-base-300 mt-auto">
         <button className="btn btn-sm btn-primary w-full gap-2">
           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
             <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
           </svg>
           New {editorMode === 'image' ? 'Image' : editorMode === 'spritesheet' ? 'Sprite Sheet' : 'Animation'}
         </button>
-      </div>
-
-      {/* Recent Items */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-2">
-          <div className="text-xs font-semibold text-base-content/50 uppercase tracking-wider px-2 mb-2">
-            Recent {editorMode === 'image' ? 'Images' : editorMode === 'spritesheet' ? 'Sheets' : 'Animations'}
-          </div>
-          <div className="space-y-0.5">
-            {getRecentItems().map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleRecentClick(item)}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-colors text-left ${
-                  selectedFile?.name === item.name
-                    ? 'bg-primary/10 text-primary'
-                    : 'hover:bg-base-200 text-base-content'
-                }`}
-              >
-                <div
-                  className="w-6 h-6 rounded border border-base-300 flex items-center justify-center text-sm flex-shrink-0"
-                  style={{
-                    backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)',
-                    backgroundSize: '4px 4px',
-                    backgroundPosition: '0 0, 0 2px, 2px -2px, -2px 0px'
-                  }}
-                >
-                  {item.thumbnail}
-                </div>
-                <span className="text-xs truncate">{item.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -336,9 +546,9 @@ function ImagesContent() {
       {/* Preview Header */}
       <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-lg">🖼️</span>
+          <span className="text-lg">{selectedFile?.fileType === 'spritesheet' ? '🎞️' : selectedFile?.fileType === 'animation' ? '🎬' : '🖼️'}</span>
           <span className="font-medium text-sm">{selectedFile?.name}</span>
-          <span className="text-xs text-base-content/50">256 x 256 px</span>
+          <span className="text-xs text-base-content/50">{selectedFile?.path}</span>
         </div>
         <button
           onClick={() => setViewMode('edit')}
@@ -352,17 +562,39 @@ function ImagesContent() {
       </div>
 
       {/* Preview Content */}
-      <div className="flex-1 flex items-center justify-center bg-base-200 p-8">
-        <div className="bg-white rounded-lg shadow-lg p-8">
+      <div className="flex-1 flex items-center justify-center bg-base-200 p-8 overflow-auto">
+        <div className="bg-white rounded-lg shadow-lg p-4 max-w-full max-h-full">
           <div
-            className="w-64 h-64 flex items-center justify-center rounded relative"
+            className="flex items-center justify-center rounded relative min-w-[256px] min-h-[256px]"
             style={{
               backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
               backgroundSize: '16px 16px',
               backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
             }}
           >
-            <span className="text-8xl">🖼️</span>
+            {isLoadingImage ? (
+              <div className="flex flex-col items-center gap-2">
+                <span className="loading loading-spinner loading-lg"></span>
+                <span className="text-sm text-base-content/50">Loading image...</span>
+              </div>
+            ) : imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={selectedFile?.name}
+                className="max-w-full max-h-[60vh] object-contain"
+                style={{ imageRendering: 'pixelated' }}
+              />
+            ) : selectedFile?.fileType === 'spritesheet' || selectedFile?.fileType === 'animation' ? (
+              <div className="flex flex-col items-center gap-2 p-8">
+                <span className="text-6xl">{selectedFile?.fileType === 'spritesheet' ? '🎞️' : '🎬'}</span>
+                <span className="text-sm text-base-content/70">
+                  {selectedFile?.fileType === 'spritesheet' ? 'Sprite Sheet Definition' : 'Animation Definition'}
+                </span>
+                <span className="text-xs text-base-content/50">{selectedFile?.name}</span>
+              </div>
+            ) : (
+              <span className="text-8xl">🖼️</span>
+            )}
           </div>
         </div>
       </div>
@@ -563,6 +795,7 @@ function ImagesContent() {
 
     // Preview mode - show file info
     if (viewMode === 'preview') {
+      const ext = selectedFile.name.split('.').pop()?.toUpperCase() || '';
       return (
         <div className="w-64 bg-base-100 border-l border-base-300 overflow-y-auto flex-shrink-0">
           <div className="p-4 space-y-4">
@@ -572,19 +805,21 @@ function ImagesContent() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-base-content/60">Name</span>
-                  <span className="truncate ml-2">{selectedFile.name}</span>
+                  <span className="truncate ml-2 max-w-[140px]" title={selectedFile.name}>{selectedFile.name}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-base-content/60">Size</span>
-                  <span>256 x 256</span>
+                  <span className="text-base-content/60">Path</span>
+                  <span className="truncate ml-2 max-w-[140px] text-xs" title={selectedFile.path}>{selectedFile.path}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-base-content/60">Type</span>
+                  <span className="badge badge-sm">
+                    {selectedFile.fileType === 'spritesheet' ? 'Sprite Sheet' : selectedFile.fileType === 'animation' ? 'Animation' : 'Image'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-base-content/60">Format</span>
-                  <span>PNG</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-base-content/60">File size</span>
-                  <span>24.5 KB</span>
+                  <span>{ext}</span>
                 </div>
               </div>
             </div>
