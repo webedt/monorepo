@@ -3,6 +3,7 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
+import { useEditorSessionStore } from '@/lib/store';
 import type { GitHubPullRequest } from '@webedt/shared';
 
 // Debounce utility
@@ -225,6 +226,10 @@ export default function Code() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Editor session state persistence
+  const { saveEditorState, getEditorState } = useEditorSessionStore();
+  const hasRestoredState = useRef(false);
 
   // Get pre-selected settings from navigation state (from QuickSessionSetup)
   const preSelectedSettings = (location.state as { preSelectedSettings?: PreSelectedSettings } | null)?.preSelectedSettings;
@@ -542,6 +547,35 @@ export default function Code() {
       setIsLoadingFile(false);
     }
   }, [codeSession, pendingChanges]);
+
+  // Restore editor state (tabs, active tab, expanded folders) from localStorage
+  useEffect(() => {
+    if (sessionId && !hasRestoredState.current) {
+      const savedState = getEditorState(sessionId);
+      if (savedState) {
+        hasRestoredState.current = true;
+        setTabs(savedState.tabs);
+        setActiveTabPath(savedState.activeTabPath);
+        setExpandedFolders(new Set(savedState.expandedFolders));
+      }
+    }
+  }, [sessionId, getEditorState]);
+
+  // Load active tab content when code session becomes available (after state restoration)
+  useEffect(() => {
+    if (codeSession && activeTabPath && hasRestoredState.current) {
+      loadFileContent(activeTabPath);
+    }
+    // Only run when codeSession becomes available, not on every activeTabPath change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeSession]);
+
+  // Save editor state whenever tabs, activeTabPath, or expandedFolders change
+  useEffect(() => {
+    if (sessionId && (tabs.length > 0 || activeTabPath || expandedFolders.size > 0)) {
+      saveEditorState(sessionId, tabs, activeTabPath, expandedFolders);
+    }
+  }, [sessionId, tabs, activeTabPath, expandedFolders, saveEditorState]);
 
   // Open file as preview tab (single-click behavior)
   const openAsPreview = (path: string, name: string) => {
