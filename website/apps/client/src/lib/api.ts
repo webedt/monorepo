@@ -180,6 +180,13 @@ export const githubApi = {
       method: 'POST',
       body: data,
     }),
+
+  // Update/Create a file
+  updateFile: (owner: string, repo: string, path: string, data: { content: string; branch: string; sha?: string; message?: string }) =>
+    fetchApi(`/api/github/repos/${owner}/${repo}/contents/${path}`, {
+      method: 'PUT',
+      body: data,
+    }),
 };
 
 // User API
