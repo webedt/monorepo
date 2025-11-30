@@ -724,6 +724,9 @@ export default function Code() {
         return next;
       });
 
+      // Log the save to chat history
+      await logCodeMessage(`📝 Saved: \`${path}\``, 'system');
+
       setSaveStatus('saved');
 
       // Reset to idle after a moment
@@ -734,7 +737,7 @@ export default function Code() {
       setSaveStatus('error');
       setLastSaveError(error.message || 'Failed to save');
     }
-  }, [codeSession, pendingChanges, saveFile]);
+  }, [codeSession, pendingChanges, saveFile, logCodeMessage]);
 
   // Create debounced auto-save
   const debouncedSave = useMemo(
