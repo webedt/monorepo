@@ -170,15 +170,15 @@ router.post('/create-code-session', requireAuth, async (req, res) => {
     const sessionId = crypto.randomUUID();
     const sessionPath = `${repositoryOwner}/${repositoryName}/${branch}`;
 
-    // Create the session with 'running' status - same as a regular chat session that's active
-    // This makes code sessions appear in the sessions list just like chat sessions
+    // Create the session with 'completed' status - code sessions don't have active AI processing
+    // This avoids showing the "Processing" spinner in the Chat view
     const [chatSession] = await db
       .insert(chatSessions)
       .values({
         id: sessionId,
         userId: authReq.user!.id,
         userRequest: title || 'Code editing session',
-        status: 'running', // Active session, like a chat session in progress
+        status: 'completed', // No AI processing, just manual code editing
         repositoryUrl: repositoryUrl || `https://github.com/${repositoryOwner}/${repositoryName}.git`,
         repositoryOwner,
         repositoryName,
