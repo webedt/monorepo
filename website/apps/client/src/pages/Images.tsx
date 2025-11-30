@@ -3,6 +3,12 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
+import {
+  useNewImagePreferencesStore,
+  RESOLUTION_PRESETS,
+  type AspectRatioTab,
+  type ImageExtension,
+} from '@/lib/store';
 
 type EditorMode = 'image' | 'spritesheet' | 'animation';
 type ViewMode = 'preview' | 'edit';
@@ -101,6 +107,7 @@ const getFileIcon = (filename: string, fileType?: ImageFileType): string => {
 };
 
 // Transform GitHub tree to our filtered TreeNode format
+// Now includes ALL directories, not just those with images
 const transformGitHubTreeForImages = (
   items: GitHubTreeItem[],
   filterMode: EditorMode | 'all'
@@ -114,9 +121,6 @@ const transformGitHubTreeForImages = (
     return a.path.localeCompare(b.path);
   });
 
-  // Track which folders have image-related content
-  const foldersWithContent = new Set<string>();
-
   // First pass: identify all files and their types
   const fileTypes = new Map<string, ImageFileType>();
   for (const item of sortedItems) {
@@ -124,17 +128,19 @@ const transformGitHubTreeForImages = (
       const fileType = getImageFileType(item.path.split('/').pop() || '');
       if (fileType) {
         fileTypes.set(item.path, fileType);
-
-        // Mark parent folders as having content
-        const pathParts = item.path.split('/');
-        for (let i = 1; i < pathParts.length; i++) {
-          foldersWithContent.add(pathParts.slice(0, i).join('/'));
-        }
       }
     }
   }
 
-  // Build the tree structure
+  // Collect all directory paths
+  const allDirectories = new Set<string>();
+  for (const item of sortedItems) {
+    if (item.type === 'tree') {
+      allDirectories.add(item.path);
+    }
+  }
+
+  // Build the tree structure - include ALL directories
   for (const item of sortedItems) {
     const pathParts = item.path.split('/');
     let currentLevel = root;
@@ -148,7 +154,7 @@ const transformGitHubTreeForImages = (
         if (item.type === 'blob') {
           const fileType = fileTypes.get(item.path);
 
-          // Filter by mode
+          // Filter by mode - only include matching image files
           if (!fileType) continue;
           if (filterMode !== 'all') {
             if (filterMode === 'image' && fileType !== 'image') continue;
@@ -164,19 +170,17 @@ const transformGitHubTreeForImages = (
             fileType,
           });
         } else {
-          // Directory - only add if it has relevant content
-          if (foldersWithContent.has(currentPath)) {
-            const existing = currentLevel.children!.find(
-              c => c.type === 'folder' && c.name === part
-            );
-            if (!existing) {
-              currentLevel.children!.push({
-                name: part,
-                path: currentPath,
-                type: 'folder',
-                children: [],
-              });
-            }
+          // Directory - always add all directories
+          const existing = currentLevel.children!.find(
+            c => c.type === 'folder' && c.name === part
+          );
+          if (!existing) {
+            currentLevel.children!.push({
+              name: part,
+              path: currentPath,
+              type: 'folder',
+              children: [],
+            });
           }
         }
       } else {
@@ -185,33 +189,15 @@ const transformGitHubTreeForImages = (
           c => c.type === 'folder' && c.name === part
         ) as FileNode | undefined;
 
-        if (!folder && foldersWithContent.has(currentPath)) {
+        if (!folder) {
           folder = { name: part, path: currentPath, type: 'folder', children: [] };
           currentLevel.children!.push(folder);
         }
 
-        if (folder) {
-          currentLevel = folder;
-        } else {
-          break; // Skip this path if folder doesn't exist
-        }
+        currentLevel = folder;
       }
     }
   }
-
-  // Remove empty folders recursively
-  const removeEmptyFolders = (node: FileNode): boolean => {
-    if (node.type === 'file') return true;
-
-    if (node.children) {
-      node.children = node.children.filter(child => removeEmptyFolders(child));
-      return node.children.length > 0;
-    }
-
-    return false;
-  };
-
-  root.children = root.children?.filter(child => removeEmptyFolders(child)) || [];
 
   return root.children || [];
 };
@@ -237,11 +223,21 @@ function ImagesContent() {
   const [showExplorer, setShowExplorer] = useState(true);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [selectedFile, setSelectedFile] = useState<{ path: string; name: string; fileType?: ImageFileType } | null>(null);
+  const [selectedDirectory, setSelectedDirectory] = useState<{ path: string; name: string } | null>(null);
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isLoadingImage, setIsLoadingImage] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // New Image Modal state
+  const [showNewImageModal, setShowNewImageModal] = useState(false);
+  const [newImageFilename, setNewImageFilename] = useState('image.png');
+  const [showResolutionPicker, setShowResolutionPicker] = useState(false);
+  const resolutionPickerRef = useRef<HTMLDivElement>(null);
+
+  // Get preferences from store
+  const imagePrefs = useNewImagePreferencesStore();
 
   // Fetch existing session if sessionId is provided
   const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
@@ -452,8 +448,14 @@ function ImagesContent() {
   const handleFileClick = (node: FileNode) => {
     if (node.type === 'folder') {
       toggleFolder(node.path);
+      // Select the directory for preview
+      setSelectedDirectory({ path: node.path, name: node.name });
+      setSelectedFile(null);
+      setImageUrl(null);
+      setViewMode('preview');
     } else {
       setSelectedFile({ path: node.path, name: node.name, fileType: node.fileType });
+      setSelectedDirectory(null);
       setViewMode('preview');
 
       // Load the image if it's an image file
@@ -464,6 +466,96 @@ function ImagesContent() {
       }
     }
   };
+
+  // Helper to count files in a directory
+  const countFilesInDirectory = useCallback((dirPath: string): { images: number; spritesheets: number; animations: number; folders: number } => {
+    const counts = { images: 0, spritesheets: 0, animations: 0, folders: 0 };
+    if (!treeData?.data?.tree) return counts;
+
+    for (const item of treeData.data.tree) {
+      // Check if item is directly inside this directory
+      if (item.path.startsWith(dirPath + '/')) {
+        const relativePath = item.path.slice(dirPath.length + 1);
+        // Only count direct children (no more slashes in relative path)
+        if (!relativePath.includes('/')) {
+          if (item.type === 'tree') {
+            counts.folders++;
+          } else if (item.type === 'blob') {
+            const fileType = getImageFileType(item.path.split('/').pop() || '');
+            if (fileType === 'image') counts.images++;
+            else if (fileType === 'spritesheet') counts.spritesheets++;
+            else if (fileType === 'animation') counts.animations++;
+          }
+        }
+      }
+    }
+    return counts;
+  }, [treeData]);
+
+  // Generate unique filename for new image
+  const generateNewImageFilename = useCallback((basePath: string, extension: string): string => {
+    if (!treeData?.data?.tree) return `image.${extension}`;
+
+    const existingFiles = new Set<string>();
+    const prefix = basePath ? `${basePath}/` : '';
+
+    for (const item of treeData.data.tree) {
+      if (item.type === 'blob' && item.path.startsWith(prefix)) {
+        const relativePath = item.path.slice(prefix.length);
+        if (!relativePath.includes('/')) {
+          existingFiles.add(relativePath.toLowerCase());
+        }
+      }
+    }
+
+    // Try image.ext first
+    if (!existingFiles.has(`image.${extension}`)) {
+      return `image.${extension}`;
+    }
+
+    // Try image-1.ext, image-2.ext, etc.
+    let counter = 1;
+    while (existingFiles.has(`image-${counter}.${extension}`)) {
+      counter++;
+    }
+    return `image-${counter}.${extension}`;
+  }, [treeData]);
+
+  // Open new image modal
+  const openNewImageModal = useCallback((targetPath?: string) => {
+    const basePath = targetPath || selectedDirectory?.path || '';
+    const filename = generateNewImageFilename(basePath, imagePrefs.extension);
+    setNewImageFilename(filename);
+    setShowNewImageModal(true);
+  }, [selectedDirectory, imagePrefs.extension, generateNewImageFilename]);
+
+  // Handle creating new image
+  const handleCreateNewImage = useCallback(() => {
+    // For now, just close the modal - actual creation will be implemented later
+    console.log('Creating new image:', {
+      filename: newImageFilename,
+      path: selectedDirectory?.path || '',
+      width: imagePrefs.width,
+      height: imagePrefs.height,
+      extension: imagePrefs.extension,
+    });
+    setShowNewImageModal(false);
+    // TODO: Implement actual image creation and save to GitHub
+  }, [newImageFilename, selectedDirectory, imagePrefs]);
+
+  // Close resolution picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (resolutionPickerRef.current && !resolutionPickerRef.current.contains(event.target as Node)) {
+        setShowResolutionPicker(false);
+      }
+    };
+
+    if (showResolutionPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showResolutionPicker]);
 
   const handleAiSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -506,11 +598,16 @@ function ImagesContent() {
       }
 
       const isExpanded = expandedFolders.has(node.path);
+      const isSelectedDir = selectedDirectory?.path === node.path;
+      const fileCount = node.children?.filter(c => c.type === 'file').length || 0;
+      const folderCount = node.children?.filter(c => c.type === 'folder').length || 0;
       return (
         <div key={node.path}>
           <div
-            onClick={() => toggleFolder(node.path)}
-            className="group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300"
+            onClick={() => handleFileClick(node)}
+            className={`group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
+              isSelectedDir ? 'bg-base-300 text-primary' : ''
+            }`}
             style={{ paddingLeft }}
           >
             <svg
@@ -524,13 +621,15 @@ function ImagesContent() {
                 clipRule="evenodd"
               />
             </svg>
-            <svg className="w-4 h-4 text-yellow-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-4 h-4 flex-shrink-0 ${isSelectedDir ? 'text-primary' : 'text-yellow-500'}`} fill="currentColor" viewBox="0 0 24 24">
               <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
             </svg>
             <span className="text-sm font-medium truncate flex-1">{node.name}</span>
-            {node.children && node.children.length > 0 && (
+            {(fileCount > 0 || folderCount > 0) && (
               <span className="text-xs text-base-content/40">
-                {node.children.filter(c => c.type === 'file').length}
+                {fileCount > 0 && `${fileCount}`}
+                {fileCount > 0 && folderCount > 0 && '/'}
+                {folderCount > 0 && <span className="text-base-content/30">{folderCount}</span>}
               </span>
             )}
           </div>
@@ -664,7 +763,10 @@ function ImagesContent() {
 
       {/* New Button - at bottom */}
       <div className="p-3 border-t border-base-300 mt-auto">
-        <button className="btn btn-sm btn-primary w-full gap-2">
+        <button
+          onClick={() => openNewImageModal()}
+          className="btn btn-sm btn-primary w-full gap-2"
+        >
           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
             <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
           </svg>
@@ -743,10 +845,103 @@ function ImagesContent() {
           <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
         </svg>
         <p className="text-lg font-medium mb-2">No image selected</p>
-        <p className="text-sm">Select an image from the sidebar or browse files</p>
+        <p className="text-sm">Select an image or directory from the sidebar</p>
+        <button
+          onClick={() => openNewImageModal()}
+          className="btn btn-primary btn-sm mt-4 gap-2"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+          Create New Image
+        </button>
       </div>
     </div>
   );
+
+  // Directory Preview Content (when directory is selected)
+  const DirectoryPreviewContent = () => {
+    if (!selectedDirectory) return null;
+
+    const dirCounts = countFilesInDirectory(selectedDirectory.path);
+    const totalItems = dirCounts.images + dirCounts.spritesheets + dirCounts.animations + dirCounts.folders;
+
+    return (
+      <div className="flex-1 flex flex-col">
+        {/* Directory Header */}
+        <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+            </svg>
+            <span className="font-medium text-sm">{selectedDirectory.name}</span>
+            <span className="text-xs text-base-content/50">/{selectedDirectory.path}</span>
+          </div>
+          <button
+            onClick={() => openNewImageModal(selectedDirectory.path)}
+            className="btn btn-primary btn-sm gap-2"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+            </svg>
+            New Image
+          </button>
+        </div>
+
+        {/* Directory Content */}
+        <div className="flex-1 flex items-center justify-center bg-base-200 p-8">
+          <div className="bg-base-100 rounded-lg shadow-lg p-8 max-w-md w-full">
+            {/* Large folder icon */}
+            <div className="text-center mb-6">
+              <svg className="w-24 h-24 mx-auto text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+              </svg>
+              <h2 className="text-xl font-semibold mt-4">{selectedDirectory.name}</h2>
+              <p className="text-sm text-base-content/60 mt-1">{selectedDirectory.path}</p>
+            </div>
+
+            {/* Directory stats */}
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="bg-base-200 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-primary">{dirCounts.images}</div>
+                <div className="text-xs text-base-content/60">Images</div>
+              </div>
+              <div className="bg-base-200 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-secondary">{dirCounts.folders}</div>
+                <div className="text-xs text-base-content/60">Folders</div>
+              </div>
+              <div className="bg-base-200 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-accent">{dirCounts.spritesheets}</div>
+                <div className="text-xs text-base-content/60">Sprite Sheets</div>
+              </div>
+              <div className="bg-base-200 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-info">{dirCounts.animations}</div>
+                <div className="text-xs text-base-content/60">Animations</div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="space-y-2">
+              <button
+                onClick={() => openNewImageModal(selectedDirectory.path)}
+                className="btn btn-primary w-full gap-2"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                </svg>
+                Create New Image Here
+              </button>
+              {totalItems === 0 && (
+                <p className="text-center text-sm text-base-content/50 mt-4">
+                  This folder is empty. Create your first image!
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // Editor Content (full editing mode)
   const EditorContent = () => (
@@ -904,6 +1099,57 @@ function ImagesContent() {
 
   // Right Sidebar - Context aware based on mode and view
   const RightSidebar = () => {
+    // Directory selected - show directory info
+    if (selectedDirectory && !selectedFile) {
+      const dirCounts = countFilesInDirectory(selectedDirectory.path);
+      return (
+        <div className="w-64 bg-base-100 border-l border-base-300 p-4 flex-shrink-0">
+          <div className="text-sm font-semibold mb-4">Directory Info</div>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-base-content/60">Name</span>
+              <span className="font-medium">{selectedDirectory.name}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-base-content/60">Path</span>
+              <span className="text-xs truncate max-w-[120px]" title={selectedDirectory.path}>
+                /{selectedDirectory.path}
+              </span>
+            </div>
+            <div className="divider my-2"></div>
+            <div className="flex justify-between">
+              <span className="text-base-content/60">Images</span>
+              <span className="badge badge-sm">{dirCounts.images}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-base-content/60">Folders</span>
+              <span className="badge badge-sm">{dirCounts.folders}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-base-content/60">Spritesheets</span>
+              <span className="badge badge-sm">{dirCounts.spritesheets}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-base-content/60">Animations</span>
+              <span className="badge badge-sm">{dirCounts.animations}</span>
+            </div>
+          </div>
+          <div className="divider my-4"></div>
+          <div className="space-y-2">
+            <button
+              onClick={() => openNewImageModal(selectedDirectory.path)}
+              className="btn btn-primary btn-sm w-full gap-2"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+              </svg>
+              New Image
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     // No file selected - show tips
     if (!selectedFile) {
       return (
@@ -912,7 +1158,7 @@ function ImagesContent() {
           <div className="space-y-3 text-sm text-base-content/70">
             <div className="flex items-start gap-2">
               <span className="text-primary">1.</span>
-              <span>Select a recent image or browse files</span>
+              <span>Select a folder or image from the sidebar</span>
             </div>
             <div className="flex items-start gap-2">
               <span className="text-primary">2.</span>
@@ -923,6 +1169,16 @@ function ImagesContent() {
               <span>Use AI prompts to generate or modify</span>
             </div>
           </div>
+          <div className="divider my-4"></div>
+          <button
+            onClick={() => openNewImageModal()}
+            className="btn btn-primary btn-sm w-full gap-2"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+            </svg>
+            New Image
+          </button>
         </div>
       );
     }
@@ -1148,9 +1404,15 @@ function ImagesContent() {
 
   // Main content based on state
   const MainContent = () => {
+    // Show directory preview if a directory is selected
+    if (selectedDirectory && !selectedFile) {
+      return <DirectoryPreviewContent />;
+    }
+    // Show empty state if nothing is selected
     if (!selectedFile) {
       return <EmptyContent />;
     }
+    // Show preview or editor based on mode
     if (viewMode === 'preview') {
       return <PreviewContent />;
     }
@@ -1326,7 +1588,252 @@ function ImagesContent() {
     return <RepoSelector />;
   };
 
-  return getMainView();
+  // New Image Modal Component
+  const NewImageModal = () => {
+    if (!showNewImageModal) return null;
+
+    const aspectTabs: AspectRatioTab[] = ['1:1', '4:3', '16:9', '3:2', 'custom'];
+    const extensions: ImageExtension[] = ['png', 'jpg', 'gif', 'webp', 'svg', 'ico', 'bmp'];
+
+    const handlePresetClick = (width: number, height: number) => {
+      imagePrefs.setDimensions(width, height);
+    };
+
+    const updateFilenameExtension = (newExt: string) => {
+      const baseName = newImageFilename.replace(/\.[^/.]+$/, '');
+      setNewImageFilename(`${baseName}.${newExt}`);
+      imagePrefs.setExtension(newExt as ImageExtension);
+    };
+
+    const currentPresets = RESOLUTION_PRESETS[imagePrefs.aspectRatioTab] || [];
+
+    return (
+      <div className="modal modal-open">
+        <div className="modal-box max-w-xl">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-lg">Create New Image</h3>
+            <button
+              onClick={() => setShowNewImageModal(false)}
+              className="btn btn-sm btn-circle btn-ghost"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+
+          {/* File Name */}
+          <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text font-medium">File Name</span>
+              {selectedDirectory && (
+                <span className="label-text-alt text-base-content/50">
+                  in /{selectedDirectory.path}
+                </span>
+              )}
+            </label>
+            <input
+              type="text"
+              value={newImageFilename}
+              onChange={(e) => setNewImageFilename(e.target.value)}
+              className="input input-bordered w-full"
+              placeholder="image.png"
+            />
+          </div>
+
+          {/* File Type */}
+          <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text font-medium">File Type</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {extensions.map((ext) => (
+                <button
+                  key={ext}
+                  onClick={() => updateFilenameExtension(ext)}
+                  className={`btn btn-sm ${
+                    imagePrefs.extension === ext ? 'btn-primary' : 'btn-outline'
+                  }`}
+                >
+                  .{ext}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Aspect Ratio Tabs */}
+          <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text font-medium">Aspect Ratio</span>
+            </label>
+            <div className="tabs tabs-boxed bg-base-200">
+              {aspectTabs.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => imagePrefs.setAspectRatioTab(tab)}
+                  className={`tab ${imagePrefs.aspectRatioTab === tab ? 'tab-active' : ''}`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Dimensions */}
+          <div className="form-control mb-4">
+            <label className="label">
+              <span className="label-text font-medium">Dimensions</span>
+              <span className="label-text-alt text-base-content/50">
+                {imagePrefs.width} x {imagePrefs.height} px
+              </span>
+            </label>
+            <div className="flex gap-2 items-center">
+              <input
+                type="number"
+                value={imagePrefs.width}
+                onChange={(e) => imagePrefs.setWidth(parseInt(e.target.value) || 1)}
+                className="input input-bordered w-full"
+                min="1"
+                max="16384"
+              />
+              <span className="text-base-content/50">x</span>
+              <input
+                type="number"
+                value={imagePrefs.height}
+                onChange={(e) => imagePrefs.setHeight(parseInt(e.target.value) || 1)}
+                className="input input-bordered w-full"
+                min="1"
+                max="16384"
+              />
+              {/* Resolution Presets Bubble */}
+              <div className="relative" ref={resolutionPickerRef}>
+                <button
+                  onClick={() => setShowResolutionPicker(!showResolutionPicker)}
+                  className="btn btn-square btn-outline"
+                  title="Common Resolutions"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                {showResolutionPicker && (
+                  <div className="absolute right-0 top-full mt-2 z-50 bg-base-100 border border-base-300 rounded-lg shadow-xl p-3 min-w-[200px]">
+                    <div className="text-xs font-semibold text-base-content/50 mb-2 uppercase tracking-wide">
+                      {imagePrefs.aspectRatioTab} Presets
+                    </div>
+                    {currentPresets.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-1">
+                        {currentPresets.map((preset) => (
+                          <button
+                            key={`${preset.width}x${preset.height}`}
+                            onClick={() => {
+                              handlePresetClick(preset.width, preset.height);
+                              setShowResolutionPicker(false);
+                            }}
+                            className={`btn btn-xs ${
+                              imagePrefs.width === preset.width && imagePrefs.height === preset.height
+                                ? 'btn-primary'
+                                : 'btn-ghost'
+                            }`}
+                          >
+                            {preset.width}x{preset.height}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-base-content/50 text-center py-2">
+                        Enter custom dimensions
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Resolution Presets (for current aspect ratio) */}
+          {currentPresets.length > 0 && (
+            <div className="mb-4">
+              <div className="flex flex-wrap gap-1">
+                {currentPresets.slice(0, 6).map((preset) => (
+                  <button
+                    key={`quick-${preset.width}x${preset.height}`}
+                    onClick={() => handlePresetClick(preset.width, preset.height)}
+                    className={`badge badge-lg cursor-pointer hover:badge-primary transition-colors ${
+                      imagePrefs.width === preset.width && imagePrefs.height === preset.height
+                        ? 'badge-primary'
+                        : 'badge-outline'
+                    }`}
+                  >
+                    {preset.width}x{preset.height}
+                  </button>
+                ))}
+                {currentPresets.length > 6 && (
+                  <button
+                    onClick={() => setShowResolutionPicker(true)}
+                    className="badge badge-lg badge-ghost cursor-pointer"
+                  >
+                    +{currentPresets.length - 6} more
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Preview */}
+          <div className="bg-base-200 rounded-lg p-4 mb-4">
+            <div className="flex items-center justify-center">
+              <div
+                className="bg-base-100 border border-base-300 rounded flex items-center justify-center text-base-content/30"
+                style={{
+                  width: Math.min(imagePrefs.width / 4, 200),
+                  height: Math.min(imagePrefs.height / 4, 200),
+                  aspectRatio: `${imagePrefs.width} / ${imagePrefs.height}`,
+                  maxWidth: '200px',
+                  maxHeight: '150px',
+                }}
+              >
+                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                </svg>
+              </div>
+            </div>
+            <div className="text-center text-xs text-base-content/50 mt-2">
+              Preview ({imagePrefs.width} x {imagePrefs.height})
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="modal-action">
+            <button
+              onClick={() => setShowNewImageModal(false)}
+              className="btn btn-ghost"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateNewImage}
+              className="btn btn-primary gap-2"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+              </svg>
+              Create Image
+            </button>
+          </div>
+        </div>
+        <div className="modal-backdrop" onClick={() => setShowNewImageModal(false)}></div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      {getMainView()}
+      <NewImageModal />
+    </>
+  );
 }
 
 export default function Images() {
