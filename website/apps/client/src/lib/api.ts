@@ -267,6 +267,13 @@ export const sessionsApi = {
       body: { type, content },
     }),
 
+  // Create an event (for streaming-style logs that show up in Chat)
+  createEvent: (id: string, eventType: string, eventData: any) =>
+    fetchApi(`/api/sessions/${id}/events`, {
+      method: 'POST',
+      body: { eventType, eventData },
+    }),
+
   update: (id: string, userRequest: string) =>
     fetchApi(`/api/sessions/${id}`, {
       method: 'PATCH',
@@ -299,6 +306,20 @@ export const sessionsApi = {
     fetchApi('/api/sessions/bulk-delete-permanent', {
       method: 'POST',
       body: { ids },
+    }),
+
+  // Create a code-only session (for file editing without AI execution)
+  createCodeSession: (data: {
+    title?: string;
+    repositoryUrl?: string;
+    repositoryOwner: string;
+    repositoryName: string;
+    baseBranch: string;
+    branch: string;
+  }) =>
+    fetchApi('/api/sessions/create-code-session', {
+      method: 'POST',
+      body: data,
     }),
 };
 

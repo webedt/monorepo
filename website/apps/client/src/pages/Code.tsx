@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
+import type { GitHubPullRequest } from '@webedt/shared';
 
 // File operation state for modals
 interface FileOperationState {
@@ -63,6 +64,7 @@ interface CodeSession {
   repo: string;
   branch: string;
   baseBranch: string;
+  sessionId?: string; // Database session ID for tracking
 }
 
 // Helper to get file icon based on extension
@@ -187,6 +189,7 @@ const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
 export default function Code() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   // Get pre-selected settings from navigation state (from QuickSessionSetup)
@@ -198,6 +201,12 @@ export default function Code() {
   const [isInitializing, setIsInitializing] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [isFromExistingSession, setIsFromExistingSession] = useState(false);
+
+  // PR-related state
+  const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
+  const [prError, setPrError] = useState<string | null>(null);
+  const [prSuccess, setPrSuccess] = useState<string | null>(null);
+  const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
 
   // File explorer state
   const [tabs, setTabs] = useState<EditorTab[]>([]);
@@ -238,6 +247,7 @@ export default function Code() {
           repo: session.repositoryName,
           branch: session.branch,
           baseBranch: session.baseBranch || 'main',
+          sessionId: session.id, // Include the session ID for message logging
         });
         setIsFromExistingSession(true);
       }
@@ -287,6 +297,28 @@ export default function Code() {
     return transformGitHubTree(treeData.data.tree);
   }, [treeData]);
 
+  // Query to check for existing PR (for code sessions)
+  const { data: prData, refetch: refetchPr } = useQuery({
+    queryKey: ['pr', codeSession?.owner, codeSession?.repo, codeSession?.branch],
+    queryFn: async () => {
+      if (!codeSession?.owner || !codeSession?.repo || !codeSession?.branch) {
+        return null;
+      }
+      const response = await githubApi.getPulls(
+        codeSession.owner,
+        codeSession.repo,
+        codeSession.branch,
+        codeSession.baseBranch || undefined
+      );
+      return response.data as GitHubPullRequest[];
+    },
+    enabled: !!codeSession?.owner && !!codeSession?.repo && !!codeSession?.branch,
+    refetchOnWindowFocus: false,
+  });
+
+  const existingPr = prData?.find((pr: GitHubPullRequest) => pr.state === 'open');
+  const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged === true);
+
   // Create branch mutation
   const createBranchMutation = useMutation({
     mutationFn: async ({ owner, repo, branchName, baseBranch }: {
@@ -312,6 +344,7 @@ export default function Code() {
     const branchName = `webedt/started-from-code-${randomId}`;
 
     try {
+      // Create the GitHub branch
       await createBranchMutation.mutateAsync({
         owner,
         repo: repoName,
@@ -319,13 +352,39 @@ export default function Code() {
         baseBranch,
       });
 
+      // Create the database session for tracking
+      const sessionResponse = await sessionsApi.createCodeSession({
+        title: `Code: ${owner}/${repoName}`,
+        repositoryUrl: repo.cloneUrl,
+        repositoryOwner: owner,
+        repositoryName: repoName,
+        baseBranch,
+        branch: branchName,
+      });
+
+      const dbSessionId = sessionResponse.data.sessionId;
+
+      // Log the session start as an event (visible in Chat)
+      try {
+        await sessionsApi.createEvent(dbSessionId, 'code_operation', {
+          type: 'message',
+          message: `📂 Started code editing session on branch \`${branchName}\` (base: \`${baseBranch}\`)`,
+        });
+      } catch (e) {
+        console.error('Failed to log session start event:', e);
+      }
+
       setCodeSession({
         owner,
         repo: repoName,
         branch: branchName,
         baseBranch,
+        sessionId: dbSessionId,
       });
       setIsFromExistingSession(false);
+
+      // Navigate to the session URL
+      navigate(`/session/${dbSessionId}/code`, { replace: true });
 
       // Expand root folders by default
       setExpandedFolders(new Set());
@@ -350,6 +409,7 @@ export default function Code() {
     const branchName = `webedt/started-from-code-${randomId}`;
 
     try {
+      // Create the GitHub branch
       await createBranchMutation.mutateAsync({
         owner,
         repo: repoName,
@@ -357,13 +417,39 @@ export default function Code() {
         baseBranch,
       });
 
+      // Create the database session for tracking
+      const sessionResponse = await sessionsApi.createCodeSession({
+        title: `Code: ${owner}/${repoName}`,
+        repositoryUrl: repo.cloneUrl,
+        repositoryOwner: owner,
+        repositoryName: repoName,
+        baseBranch,
+        branch: branchName,
+      });
+
+      const dbSessionId = sessionResponse.data.sessionId;
+
+      // Log the session start as an event (visible in Chat)
+      try {
+        await sessionsApi.createEvent(dbSessionId, 'code_operation', {
+          type: 'message',
+          message: `📂 Started code editing session on branch \`${branchName}\` (base: \`${baseBranch}\`)`,
+        });
+      } catch (e) {
+        console.error('Failed to log session start event:', e);
+      }
+
       setCodeSession({
         owner,
         repo: repoName,
         branch: branchName,
         baseBranch,
+        sessionId: dbSessionId,
       });
       setIsFromExistingSession(false);
+
+      // Navigate to the session URL
+      navigate(`/session/${dbSessionId}/code`, { replace: true });
 
       // Expand root folders by default
       setExpandedFolders(new Set());
@@ -519,6 +605,21 @@ export default function Code() {
     });
   };
 
+  // Helper to log file operations as events (streaming-style logs visible in Chat)
+  const logCodeEvent = useCallback(async (message: string) => {
+    if (!codeSession?.sessionId) return;
+    try {
+      // Use 'code_operation' event type with the message format that Chat.tsx understands
+      // This matches the data.type === 'message' case in convertEventToMessage
+      await sessionsApi.createEvent(codeSession.sessionId, 'code_operation', {
+        type: 'message',
+        message: message,
+      });
+    } catch (error) {
+      console.error('Failed to log code event:', error);
+    }
+  }, [codeSession?.sessionId]);
+
   // Open rename modal for file or folder
   const openRenameModal = useCallback((itemType: 'file' | 'folder', path: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -572,6 +673,10 @@ export default function Code() {
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
 
+      // Log the rename operation as an event (visible in Chat)
+      const itemType = fileOperation.itemType === 'file' ? '📄' : '📁';
+      await logCodeEvent(`${itemType} Renamed: \`${fileOperation.path}\` → \`${newPath}\``);
+
       // If the renamed item was open in a tab, update the tab
       if (fileOperation.itemType === 'file' && activeTabPath === fileOperation.path) {
         setActiveTabPath(newPath);
@@ -591,7 +696,7 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient]);
+  }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient, logCodeEvent]);
 
   // Handle delete operation
   const handleDelete = useCallback(async () => {
@@ -616,6 +721,10 @@ export default function Code() {
 
       // Refresh the file tree
       queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+
+      // Log the delete operation as an event (visible in Chat)
+      const deleteIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
+      await logCodeEvent(`🗑️ Deleted ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\``);
 
       // If the deleted item was open in a tab, close it
       if (fileOperation.itemType === 'file') {
@@ -656,7 +765,102 @@ export default function Code() {
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent]);
+  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logCodeEvent]);
+
+  // PR Handler Functions
+  const handleCreatePR = async () => {
+    if (!codeSession?.owner || !codeSession?.repo || !codeSession?.branch || !codeSession?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('create');
+    setPrError(null);
+    setPrSuccess(null);
+
+    try {
+      const response = await githubApi.createPull(
+        codeSession.owner,
+        codeSession.repo,
+        {
+          title: `Code changes from ${codeSession.branch}`,
+          head: codeSession.branch,
+          base: codeSession.baseBranch,
+        }
+      );
+      setPrSuccess(`PR #${response.data.number} created successfully!`);
+
+      // Log PR creation as an event (visible in Chat)
+      await logCodeEvent(`🔀 Created Pull Request #${response.data.number}: ${response.data.htmlUrl}`);
+
+      refetchPr();
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to create PR';
+      setPrError(errorMsg);
+    } finally {
+      setPrLoading(null);
+    }
+  };
+
+  const handleViewPR = () => {
+    if (existingPr?.htmlUrl) {
+      window.open(existingPr.htmlUrl, '_blank');
+    }
+  };
+
+  const handleAutoPR = async () => {
+    if (!codeSession?.owner || !codeSession?.repo || !codeSession?.branch || !codeSession?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('auto');
+    setPrError(null);
+    setPrSuccess(null);
+    setAutoPrProgress('Starting Auto PR...');
+
+    try {
+      const response = await githubApi.autoPR(
+        codeSession.owner,
+        codeSession.repo,
+        codeSession.branch,
+        {
+          base: codeSession.baseBranch,
+          title: `Code changes from ${codeSession.branch}`,
+          sessionId: codeSession.sessionId, // Now we have a session ID
+        }
+      );
+
+      const results = response.data;
+      setPrSuccess(`Auto PR completed! PR #${results.pr?.number} merged successfully.`);
+      setAutoPrProgress(null);
+
+      // Log the auto PR completion as an event (visible in Chat)
+      await logCodeEvent(`✅ Auto PR completed! PR #${results.pr?.number} merged into \`${codeSession.baseBranch}\``);
+
+      refetchPr();
+
+      // After successful auto PR, redirect to sessions list
+      setTimeout(() => {
+        navigate('/sessions');
+      }, 2000);
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to complete Auto PR';
+
+      if (errorMsg.includes('conflict')) {
+        setPrError('Merge conflict detected. Please resolve conflicts manually.');
+      } else if (errorMsg.includes('Timeout')) {
+        setPrError(errorMsg);
+      } else {
+        setPrError(errorMsg);
+      }
+
+      setAutoPrProgress(null);
+      refetchPr();
+    } finally {
+      setPrLoading(null);
+    }
+  };
 
   // Render file tree recursively
   const renderFileTree = (nodes: TreeNode[], level = 0): JSX.Element[] => {
@@ -1124,6 +1328,34 @@ export default function Code() {
           </div>
         </div>
 
+        {/* PR Status Alerts */}
+        {(autoPrProgress || prSuccess || prError) && (
+          <div className="px-4 py-2 border-b border-base-300 bg-base-100 space-y-2">
+            {autoPrProgress && (
+              <div className="alert alert-info py-2">
+                <span className="loading loading-spinner loading-sm"></span>
+                <span className="text-sm font-semibold">{autoPrProgress}</span>
+              </div>
+            )}
+
+            {prSuccess && (
+              <div className="alert alert-success py-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="text-sm">{prSuccess}</span>
+                <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+              </div>
+            )}
+
+            {prError && (
+              <div className="alert alert-error py-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="text-sm">{prError}</span>
+                <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Code Editor */}
         <div className="flex-1 min-h-0">
           <CodeEditor />
@@ -1132,9 +1364,82 @@ export default function Code() {
     );
   };
 
+  // Create PR actions for the branch line (similar to Chat.tsx)
+  const prActions = codeSession && codeSession.branch && codeSession.baseBranch && (
+    <>
+      {/* View PR button - show only if PR is open */}
+      {existingPr && (
+        <button
+          onClick={handleViewPR}
+          className="btn btn-xs btn-info"
+          title={`View open PR #${existingPr.number}`}
+        >
+          View PR #{existingPr.number}
+        </button>
+      )}
+
+      {/* PR Merged button - show when PR was already merged */}
+      {!existingPr && mergedPr && (
+        <button
+          onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
+          className="btn btn-xs btn-success"
+          title={`PR #${mergedPr.number} was merged`}
+        >
+          PR #{mergedPr.number} Merged
+        </button>
+      )}
+
+      {/* Create PR button - show if no open PR exists and not merged */}
+      {!existingPr && !mergedPr && (
+        <button
+          onClick={handleCreatePR}
+          className="btn btn-xs btn-primary"
+          disabled={prLoading !== null}
+          title="Create a pull request"
+        >
+          {prLoading === 'create' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Create PR'
+          )}
+        </button>
+      )}
+
+      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged */}
+      {!mergedPr && (
+        <button
+          onClick={handleAutoPR}
+          className="btn btn-xs btn-accent"
+          disabled={prLoading !== null}
+          title="Create PR, merge base branch, and merge PR in one click"
+        >
+          {prLoading === 'auto' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Auto PR'
+          )}
+        </button>
+      )}
+    </>
+  );
+
+  // Construct the repository URL for SessionLayout
+  const selectedRepoUrl = codeSession ? `https://github.com/${codeSession.owner}/${codeSession.repo}.git` : undefined;
+
+  // Create a session-like object for SessionLayout if we have a codeSession
+  // This enables proper title display in the top bar
+  const sessionForLayout = codeSession && existingSessionData?.data ? existingSessionData.data : undefined;
+
   // Always use SessionLayout to show status bar
   return (
-    <SessionLayout>
+    <SessionLayout
+      selectedRepo={selectedRepoUrl}
+      baseBranch={codeSession?.baseBranch}
+      branch={codeSession?.branch}
+      isLocked={!!codeSession}
+      prActions={prActions}
+      session={sessionForLayout}
+    >
       <CodeSessionView />
 
       {/* Rename Modal */}

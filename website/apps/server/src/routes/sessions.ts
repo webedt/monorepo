@@ -151,6 +151,58 @@ router.get('/deleted', requireAuth, async (req, res) => {
   }
 });
 
+// Create a code-only session (no AI execution, just for tracking file operations)
+router.post('/create-code-session', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { title, repositoryUrl, repositoryOwner, repositoryName, baseBranch, branch } = req.body;
+
+    if (!repositoryOwner || !repositoryName || !branch) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required fields: repositoryOwner, repositoryName, branch'
+      });
+      return;
+    }
+
+    // Generate UUID for the session
+    const sessionId = crypto.randomUUID();
+    const sessionPath = `${repositoryOwner}/${repositoryName}/${branch}`;
+
+    // Create the session
+    const [chatSession] = await db
+      .insert(chatSessions)
+      .values({
+        id: sessionId,
+        userId: authReq.user!.id,
+        userRequest: title || 'Code editing session',
+        status: 'completed', // Not running AI execution
+        repositoryUrl: repositoryUrl || `https://github.com/${repositoryOwner}/${repositoryName}.git`,
+        repositoryOwner,
+        repositoryName,
+        baseBranch: baseBranch || 'main',
+        branch,
+        sessionPath,
+        autoCommit: false,
+        locked: true, // Prevent repo/branch changes
+      })
+      .returning();
+
+    console.log(`[Sessions] Created code session ${sessionId} for ${sessionPath}`);
+
+    res.json({
+      success: true,
+      data: {
+        sessionId: chatSession.id,
+        sessionPath: chatSession.sessionPath,
+      },
+    });
+  } catch (error) {
+    console.error('Create code session error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create code session' });
+  }
+});
+
 // Get specific chat session
 router.get('/:id', requireAuth, async (req, res) => {
   try {
@@ -200,6 +252,57 @@ router.get('/:id', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Get session error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch session' });
+  }
+});
+
+// Create an event for a session (for streaming-style logs)
+router.post('/:id/events', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+    const { eventType, eventData } = req.body;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    if (!eventType || eventData === undefined) {
+      res.status(400).json({ success: false, error: 'eventType and eventData are required' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Create event
+    const [newEvent] = await db
+      .insert(events)
+      .values({
+        chatSessionId: sessionId,
+        eventType,
+        eventData,
+      })
+      .returning();
+
+    res.json({ success: true, data: newEvent });
+  } catch (error) {
+    console.error('Create event error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create event' });
   }
 });
 
