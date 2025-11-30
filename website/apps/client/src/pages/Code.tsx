@@ -1356,8 +1356,14 @@ export default function Code() {
     });
   };
 
-  // Code Editor component with real file content
-  const CodeEditor = () => (
+  // Line count for the editor (memoized to avoid recalculating on every render)
+  const lineCount = useMemo(() => {
+    if (!fileContent) return 0;
+    return fileContent.split('\n').length;
+  }, [fileContent]);
+
+  // Code Editor JSX (not a component - just JSX to avoid remounting)
+  const codeEditorContent = (
     <div className="flex h-full">
       {/* File Explorer Sidebar */}
       <div className="w-64 bg-base-100 border-r border-base-300 overflow-y-auto flex-shrink-0">
@@ -1522,7 +1528,7 @@ export default function Code() {
             <div className="h-full flex">
               {/* Line Numbers - using a single pre element for better performance */}
               <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
-                {Array.from({ length: fileContent.split('\n').length }, (_, i) => i + 1).join('\n')}
+                {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
               </pre>
 
               {/* Text Editor */}
@@ -1709,8 +1715,8 @@ export default function Code() {
     );
   };
 
-  // Code Session View with header
-  const CodeSessionView = () => {
+  // Determine what content to show based on state
+  const getMainContent = () => {
     // Show loading state when fetching existing session
     if (sessionId && isLoadingExistingSession) {
       return (
@@ -1747,96 +1753,11 @@ export default function Code() {
       return <RepoSelector />;
     }
 
-    return (
-      <div className="h-[calc(100vh-112px)] flex flex-col">
-        {/* Session Header */}
-        <div className="bg-base-100 border-b border-base-300 px-4 py-3 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {/* Only show back button if not from an existing session URL */}
-              {!isFromExistingSession && (
-                <button
-                  onClick={() => {
-                    setCodeSession(null);
-                    setTabs([]);
-                    setActiveTabPath(null);
-                    setFileContent(null);
-                    setExpandedFolders(new Set());
-                  }}
-                  className="btn btn-ghost btn-sm btn-circle"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </button>
-              )}
-              <div>
-                <h2 className="text-sm font-semibold text-base-content">
-                  {codeSession.owner}/{codeSession.repo}
-                </h2>
-                <p className="text-xs text-base-content/70">
-                  Branch: <span className="text-primary">{codeSession.branch}</span>
-                  <span className="mx-2">•</span>
-                  Base: {codeSession.baseBranch}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <a
-                href={`https://github.com/${codeSession.owner}/${codeSession.repo}/tree/${codeSession.branch}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-sm btn-ghost gap-2"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
-                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
-                </svg>
-                View on GitHub
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* PR Status Alerts */}
-        {(autoPrProgress || prSuccess || prError) && (
-          <div className="px-4 py-2 border-b border-base-300 bg-base-100 space-y-2">
-            {autoPrProgress && (
-              <div className="alert alert-info py-2">
-                <span className="loading loading-spinner loading-sm"></span>
-                <span className="text-sm font-semibold">{autoPrProgress}</span>
-              </div>
-            )}
-
-            {prSuccess && (
-              <div className="alert alert-success py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <span className="text-sm">{prSuccess}</span>
-                <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
-              </div>
-            )}
-
-            {prError && (
-              <div className="alert alert-error py-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <span className="text-sm">{prError}</span>
-                <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Code Editor */}
-        <div className="flex-1 min-h-0">
-          <CodeEditor />
-        </div>
-      </div>
-    );
+    // Return the code session view
+    return null;
   };
+
+  const mainContent = getMainContent();
 
   // Create PR actions for the branch line (similar to Chat.tsx)
   const prActions = codeSession && codeSession.branch && codeSession.baseBranch && (
@@ -1914,7 +1835,97 @@ export default function Code() {
       prActions={prActions}
       session={sessionForLayout}
     >
-      <CodeSessionView />
+      {/* Show loading/error/repo selector OR the code editor */}
+      {mainContent || (
+        <div className="h-[calc(100vh-112px)] flex flex-col">
+          {/* Session Header */}
+          <div className="bg-base-100 border-b border-base-300 px-4 py-3 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {/* Only show back button if not from an existing session URL */}
+                {!isFromExistingSession && (
+                  <button
+                    onClick={() => {
+                      setCodeSession(null);
+                      setTabs([]);
+                      setActiveTabPath(null);
+                      setFileContent(null);
+                      setExpandedFolders(new Set());
+                      setPendingChanges(new Map());
+                    }}
+                    className="btn btn-ghost btn-sm btn-circle"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                      <path
+                        fillRule="evenodd"
+                        d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                )}
+                <div>
+                  <h2 className="text-sm font-semibold text-base-content">
+                    {codeSession?.owner}/{codeSession?.repo}
+                  </h2>
+                  <p className="text-xs text-base-content/70">
+                    Branch: <span className="text-primary">{codeSession?.branch}</span>
+                    <span className="mx-2">•</span>
+                    Base: {codeSession?.baseBranch}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`https://github.com/${codeSession?.owner}/${codeSession?.repo}/tree/${codeSession?.branch}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-sm btn-ghost gap-2"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                    <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                  </svg>
+                  View on GitHub
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* PR Status Alerts */}
+          {(autoPrProgress || prSuccess || prError) && (
+            <div className="px-4 py-2 border-b border-base-300 bg-base-100 space-y-2">
+              {autoPrProgress && (
+                <div className="alert alert-info py-2">
+                  <span className="loading loading-spinner loading-sm"></span>
+                  <span className="text-sm font-semibold">{autoPrProgress}</span>
+                </div>
+              )}
+
+              {prSuccess && (
+                <div className="alert alert-success py-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <span className="text-sm">{prSuccess}</span>
+                  <button onClick={() => setPrSuccess(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+                </div>
+              )}
+
+              {prError && (
+                <div className="alert alert-error py-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <span className="text-sm">{prError}</span>
+                  <button onClick={() => setPrError(null)} className="btn btn-ghost btn-xs">Dismiss</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Code Editor */}
+          <div className="flex-1 min-h-0">
+            {codeEditorContent}
+          </div>
+        </div>
+      )}
 
       {/* Rename Modal */}
       {fileOperation.type === 'rename' && (
