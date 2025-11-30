@@ -263,7 +263,6 @@ function ImagesContent() {
           baseBranch: session.baseBranch || 'main',
           sessionId: session.id,
         });
-        setIsFromExistingSession(true);
       }
     }
   }, [existingSessionData]);
@@ -346,7 +345,6 @@ function ImagesContent() {
         baseBranch,
         sessionId: dbSessionId,
       });
-      setIsFromExistingSession(false);
 
       // Navigate to the session URL
       navigate(`/session/${dbSessionId}/images`, { replace: true });
