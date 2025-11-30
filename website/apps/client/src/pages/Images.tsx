@@ -1,6 +1,6 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi } from '@/lib/api';
 
@@ -24,6 +24,30 @@ interface GitHubTreeItem {
   type: 'blob' | 'tree';
   sha: string;
   size?: number;
+}
+
+interface GitHubRepo {
+  id: number;
+  name: string;
+  fullName: string;
+  private: boolean;
+  description: string | null;
+  htmlUrl: string;
+  cloneUrl: string;
+  defaultBranch: string;
+}
+
+interface ImageSession {
+  owner: string;
+  repo: string;
+  branch: string;
+  baseBranch: string;
+  sessionId?: string;
+}
+
+interface PreSelectedSettings {
+  repositoryUrl?: string;
+  baseBranch?: string;
 }
 
 // File extensions for different asset types
@@ -194,8 +218,21 @@ const transformGitHubTreeForImages = (
 
 function ImagesContent() {
   const { sessionId } = useParams<{ sessionId?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  // Get pre-selected settings from navigation state (from QuickSessionSetup)
+  const preSelectedSettings = (location.state as { preSelectedSettings?: PreSelectedSettings } | null)?.preSelectedSettings;
+  const hasInitializedFromPreSelected = useRef(false);
+
+  // Image session state (similar to Code's codeSession)
+  const [imageSession, setImageSession] = useState<ImageSession | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
+  const [isFromExistingSession, setIsFromExistingSession] = useState(false);
+
+  // Editor state
   const [editorMode, setEditorMode] = useState<EditorMode>('image');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [showExplorer, setShowExplorer] = useState(true);
@@ -207,25 +244,133 @@ function ImagesContent() {
   const [isLoadingImage, setIsLoadingImage] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Fetch session data to get repo info
-  const { data: sessionData, isLoading: isLoadingSession } = useQuery({
+  // Fetch existing session if sessionId is provided
+  const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
     queryKey: ['session', sessionId],
     queryFn: () => sessionsApi.get(sessionId!),
     enabled: !!sessionId,
   });
 
-  const session = sessionData?.data;
-  const hasRepoInfo = session?.repositoryOwner && session?.repositoryName && session?.branch;
+  // Set image session from existing session data
+  useEffect(() => {
+    if (existingSessionData?.data) {
+      const session = existingSessionData.data;
+      // Only set if we have the required fields
+      if (session.repositoryOwner && session.repositoryName && session.branch) {
+        setImageSession({
+          owner: session.repositoryOwner,
+          repo: session.repositoryName,
+          branch: session.branch,
+          baseBranch: session.baseBranch || 'main',
+          sessionId: session.id,
+        });
+        setIsFromExistingSession(true);
+      }
+    }
+  }, [existingSessionData]);
 
-  // Fetch file tree from GitHub
+  // Fetch user's GitHub repos (only when no existing session)
+  const { data: reposData, isLoading: isLoadingRepos, error: reposError } = useQuery({
+    queryKey: ['github-repos'],
+    queryFn: githubApi.getRepos,
+    enabled: !sessionId && !imageSession, // Only fetch repos if not viewing an existing session
+  });
+
+  const repos: GitHubRepo[] = reposData?.data || [];
+
+  // Create branch mutation
+  const createBranchMutation = useMutation({
+    mutationFn: async ({ owner, repo, branchName, baseBranch }: {
+      owner: string;
+      repo: string;
+      branchName: string;
+      baseBranch: string;
+    }) => {
+      return githubApi.createBranch(owner, repo, { branchName, baseBranch });
+    },
+  });
+
+  // Auto-initialize from pre-selected settings (from QuickSessionSetup)
+  useEffect(() => {
+    if (
+      preSelectedSettings?.repositoryUrl &&
+      repos.length > 0 &&
+      !hasInitializedFromPreSelected.current &&
+      !imageSession &&
+      !sessionId
+    ) {
+      hasInitializedFromPreSelected.current = true;
+      const matchingRepo = repos.find(r => r.cloneUrl === preSelectedSettings.repositoryUrl);
+      if (matchingRepo) {
+        initializeImageSession(matchingRepo, preSelectedSettings.baseBranch);
+      }
+    }
+  }, [preSelectedSettings, repos, imageSession, sessionId]);
+
+  // Initialize Image session when repo is selected
+  const initializeImageSession = async (repo: GitHubRepo, selectedBranch?: string) => {
+    setIsInitializing(true);
+    setInitError(null);
+
+    const [owner, repoName] = repo.fullName.split('/');
+    const baseBranch = selectedBranch || repo.defaultBranch;
+
+    // Generate random ID for branch
+    const randomId = Math.random().toString(36).substring(2, 10);
+    const branchName = `webedt/started-from-images-${randomId}`;
+
+    try {
+      // Create the GitHub branch
+      await createBranchMutation.mutateAsync({
+        owner,
+        repo: repoName,
+        branchName,
+        baseBranch,
+      });
+
+      // Create the database session for tracking
+      const sessionResponse = await sessionsApi.createCodeSession({
+        title: `Images: ${owner}/${repoName}`,
+        repositoryUrl: repo.cloneUrl,
+        repositoryOwner: owner,
+        repositoryName: repoName,
+        baseBranch,
+        branch: branchName,
+      });
+
+      const dbSessionId = sessionResponse.data.sessionId;
+
+      setImageSession({
+        owner,
+        repo: repoName,
+        branch: branchName,
+        baseBranch,
+        sessionId: dbSessionId,
+      });
+      setIsFromExistingSession(false);
+
+      // Navigate to the session URL
+      navigate(`/session/${dbSessionId}/images`, { replace: true });
+
+      // Expand root folders by default
+      setExpandedFolders(new Set());
+    } catch (error: any) {
+      console.error('Failed to create branch:', error);
+      setInitError(error.message || 'Failed to create branch');
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  // Fetch file tree from GitHub when imageSession is active
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['github-tree', session?.repositoryOwner, session?.repositoryName, session?.branch],
+    queryKey: ['github-tree', imageSession?.owner, imageSession?.repo, imageSession?.branch],
     queryFn: () => githubApi.getTree(
-      session!.repositoryOwner!,
-      session!.repositoryName!,
-      session!.branch!
+      imageSession!.owner,
+      imageSession!.repo,
+      imageSession!.branch
     ),
-    enabled: hasRepoInfo,
+    enabled: !!imageSession,
   });
 
   // Transform and filter the file tree based on editor mode
@@ -252,17 +397,17 @@ function ImagesContent() {
 
   // Load image when a file is selected
   const loadImage = useCallback(async (path: string) => {
-    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch) return;
+    if (!imageSession) return;
 
     setIsLoadingImage(true);
     setImageUrl(null);
 
     try {
       const response = await githubApi.getFileContent(
-        session.repositoryOwner,
-        session.repositoryName,
+        imageSession.owner,
+        imageSession.repo,
         path,
-        session.branch
+        imageSession.branch
       );
 
       // GitHub API returns base64 encoded content for binary files
@@ -293,7 +438,7 @@ function ImagesContent() {
     } finally {
       setIsLoadingImage(false);
     }
-  }, [session]);
+  }, [imageSession]);
 
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => {
@@ -418,11 +563,11 @@ function ImagesContent() {
       </div>
 
       {/* Branch info */}
-      {session && (
+      {imageSession && (
         <div className="px-3 py-2 border-b border-base-300 bg-base-200">
           <div className="text-xs text-base-content/70">Branch</div>
-          <div className="text-sm font-medium text-primary truncate" title={session.branch || ''}>
-            {session.branch || 'No branch'}
+          <div className="text-sm font-medium text-primary truncate" title={imageSession.branch || ''}>
+            {imageSession.branch || 'No branch'}
           </div>
         </div>
       )}
@@ -495,17 +640,9 @@ function ImagesContent() {
       {showExplorer && (
         <div className="flex-1 overflow-y-auto">
           <div className="py-2">
-            {isLoadingSession || isLoadingTree ? (
+            {isLoadingTree ? (
               <div className="flex items-center justify-center py-8">
                 <span className="loading loading-spinner loading-sm"></span>
-              </div>
-            ) : !hasRepoInfo ? (
-              <div className="px-3 py-4 text-sm text-base-content/70 text-center">
-                <svg className="w-8 h-8 mx-auto mb-2 opacity-50" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
-                </svg>
-                <p>No repository connected</p>
-                <p className="text-xs mt-1">Start a session from Chat to browse files</p>
               </div>
             ) : fileTree.length > 0 ? (
               renderFileTree(fileTree)
@@ -1023,13 +1160,176 @@ function ImagesContent() {
     return <EditorContent />;
   };
 
-  return (
-    <div className="h-full flex bg-base-300">
-      <LeftSidebar />
-      <MainContent />
-      <RightSidebar />
-    </div>
-  );
+  // Repository Selector View
+  const RepoSelector = () => {
+    // If we're auto-initializing from quick-setup, show a dedicated loading state
+    if (preSelectedSettings?.repositoryUrl && (isLoadingRepos || isInitializing)) {
+      return (
+        <div className="flex items-center justify-center h-[calc(100vh-200px)]">
+          <div className="text-center">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
+            <p className="mt-4 text-lg text-base-content">Setting up your image workspace...</p>
+            <p className="mt-2 text-sm text-base-content/70">Creating a new branch for your changes</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-base-content mb-2">Start Image Session</h1>
+          <p className="text-base-content/70">
+            Select a repository to browse and edit images. A new branch will be created for your changes:
+            <code className="ml-2 px-2 py-1 bg-base-200 rounded text-sm">
+              webedt/started-from-images-{'{id}'}
+            </code>
+          </p>
+        </div>
+
+        {initError && (
+          <div className="alert alert-error mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{initError}</span>
+            <button onClick={() => setInitError(null)} className="btn btn-sm btn-ghost">Dismiss</button>
+          </div>
+        )}
+
+        {isLoadingRepos && (
+          <div className="text-center py-12">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
+            <p className="mt-2 text-base-content/70">Loading repositories...</p>
+          </div>
+        )}
+
+        {reposError && (
+          <div className="alert alert-error">
+            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>
+              {reposError instanceof Error ? reposError.message : 'Failed to load repositories'}
+              {String(reposError).includes('GitHub not connected') && (
+                <span className="ml-2">
+                  Please <a href="/settings" className="link link-primary">connect your GitHub account</a> first.
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+
+        {!isLoadingRepos && !reposError && repos.length === 0 && (
+          <div className="text-center py-12">
+            <svg
+              className="mx-auto h-12 w-12 text-base-content/40"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              />
+            </svg>
+            <h3 className="mt-2 text-sm font-medium text-base-content">No repositories</h3>
+            <p className="mt-1 text-sm text-base-content/70">
+              No repositories found. Make sure your GitHub account is connected.
+            </p>
+          </div>
+        )}
+
+        {!isLoadingRepos && !reposError && repos.length > 0 && (
+          <div className="grid gap-4 md:grid-cols-2">
+            {repos.map((repo) => (
+              <div
+                key={repo.id}
+                onClick={() => !isInitializing && initializeImageSession(repo)}
+                className={`p-4 bg-base-100 border border-base-300 rounded-lg hover:border-primary hover:shadow-md cursor-pointer transition-all ${
+                  isInitializing ? 'opacity-50 cursor-wait' : ''
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-primary truncate">{repo.fullName}</span>
+                      {repo.private && (
+                        <span className="badge badge-xs badge-outline">Private</span>
+                      )}
+                    </div>
+                    {repo.description && (
+                      <p className="mt-1 text-sm text-base-content/70 line-clamp-2">
+                        {repo.description}
+                      </p>
+                    )}
+                    <div className="mt-2 text-xs text-base-content/50">
+                      Default branch: {repo.defaultBranch}
+                    </div>
+                  </div>
+                  <div className="ml-4 flex-shrink-0">
+                    {isInitializing ? (
+                      <span className="loading loading-spinner loading-sm"></span>
+                    ) : (
+                      <svg
+                        className="w-5 h-5 text-base-content/40"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Determine what content to show based on state
+  const getMainView = () => {
+    // Show loading state when fetching existing session
+    if (sessionId && isLoadingExistingSession) {
+      return (
+        <div className="flex items-center justify-center h-[calc(100vh-112px)]">
+          <div className="text-center">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
+            <p className="mt-2 text-base-content/70">Loading session...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // If no session ID and no active image session, show repo selector
+    if (!sessionId && !imageSession) {
+      return <RepoSelector />;
+    }
+
+    // If we have an image session, show the editor
+    if (imageSession) {
+      return (
+        <div className="h-full flex bg-base-300">
+          <LeftSidebar />
+          <MainContent />
+          <RightSidebar />
+        </div>
+      );
+    }
+
+    // Fallback - show repo selector
+    return <RepoSelector />;
+  };
+
+  return getMainView();
 }
 
 export default function Images() {
