@@ -681,6 +681,8 @@ export default function Code() {
   // Refs to hold latest values for use in debounced callback
   const pendingChangesRef = useRef(pendingChanges);
   const codeSessionRef = useRef(codeSession);
+  const editHistoryRef = useRef(editHistory);
+  const historyIndexRef = useRef(historyIndex);
 
   // Keep refs updated
   useEffect(() => {
@@ -690,6 +692,14 @@ export default function Code() {
   useEffect(() => {
     codeSessionRef.current = codeSession;
   }, [codeSession]);
+
+  useEffect(() => {
+    editHistoryRef.current = editHistory;
+  }, [editHistory]);
+
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
 
   // Save a single file to GitHub
   const saveFile = useCallback(async (path: string, content: string, sha?: string) => {
@@ -742,6 +752,34 @@ export default function Code() {
         }
         return next;
       });
+
+      // Add to edit history for undo - only save snapshots on successful saves
+      const currentHistory = editHistoryRef.current.get(path) || [];
+      const currentIndex = historyIndexRef.current.get(path) ?? -1;
+
+      // Only add if content is different from the last saved snapshot
+      const lastSnapshot = currentHistory[currentIndex];
+      if (lastSnapshot !== content) {
+        setEditHistory(prev => {
+          const next = new Map(prev);
+          const history = next.get(path) || [];
+          // Truncate any forward history if we've undone, then add new snapshot
+          const newHistory = [...history.slice(0, currentIndex + 1), content];
+          // Keep max 50 save snapshots
+          if (newHistory.length > 50) {
+            newHistory.shift();
+          }
+          next.set(path, newHistory);
+          return next;
+        });
+
+        setHistoryIndex(prev => {
+          const next = new Map(prev);
+          const history = editHistoryRef.current.get(path) || [];
+          next.set(path, Math.min(currentIndex + 1, history.length));
+          return next;
+        });
+      }
 
       // Log the save to chat history
       await logCodeMessage(`📝 Saved: \`${path}\``, 'system');
@@ -820,32 +858,6 @@ export default function Code() {
       return next;
     });
 
-    // Add to edit history for undo (debounced to avoid too many history entries)
-    setEditHistory(prev => {
-      const next = new Map(prev);
-      const history = next.get(activeTabPath) || [];
-      const currentIndex = historyIndex.get(activeTabPath) || 0;
-
-      // Truncate any forward history if we've undone
-      const newHistory = [...history.slice(0, currentIndex + 1), newContent];
-
-      // Keep max 100 history entries
-      if (newHistory.length > 100) {
-        newHistory.shift();
-      }
-
-      next.set(activeTabPath, newHistory);
-      return next;
-    });
-
-    setHistoryIndex(prev => {
-      const next = new Map(prev);
-      const history = editHistory.get(activeTabPath) || [];
-      const currentIndex = historyIndex.get(activeTabPath) || 0;
-      next.set(activeTabPath, Math.min(currentIndex + 1, history.length));
-      return next;
-    });
-
     // Pin the tab when editing starts
     const tab = tabs.find(t => t.path === activeTabPath);
     if (tab?.isPreview) {
@@ -854,7 +866,7 @@ export default function Code() {
 
     // Trigger debounced auto-save
     debouncedSave(activeTabPath, newContent);
-  }, [activeTabPath, debouncedSave, editHistory, historyIndex, tabs, pinTab]);
+  }, [activeTabPath, debouncedSave, tabs, pinTab]);
 
   // Undo function
   const handleUndo = useCallback(() => {
