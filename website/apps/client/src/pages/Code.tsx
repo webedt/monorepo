@@ -678,18 +678,32 @@ export default function Code() {
     }
   }, [codeSession?.sessionId]);
 
+  // Refs to hold latest values for use in debounced callback
+  const pendingChangesRef = useRef(pendingChanges);
+  const codeSessionRef = useRef(codeSession);
+
+  // Keep refs updated
+  useEffect(() => {
+    pendingChangesRef.current = pendingChanges;
+  }, [pendingChanges]);
+
+  useEffect(() => {
+    codeSessionRef.current = codeSession;
+  }, [codeSession]);
+
   // Save a single file to GitHub
   const saveFile = useCallback(async (path: string, content: string, sha?: string) => {
-    if (!codeSession) return null;
+    const session = codeSessionRef.current;
+    if (!session) return null;
 
     try {
       const response = await githubApi.updateFile(
-        codeSession.owner,
-        codeSession.repo,
+        session.owner,
+        session.repo,
         path,
         {
           content,
-          branch: codeSession.branch,
+          branch: session.branch,
           sha,
           message: `Update ${path}`,
         }
@@ -699,14 +713,19 @@ export default function Code() {
       console.error(`Failed to save file ${path}:`, error);
       throw error;
     }
-  }, [codeSession]);
+  }, []);
 
   // Auto-save function (debounced) - saves file to GitHub
   const performAutoSave = useCallback(async (path: string, content: string) => {
-    if (!codeSession) return;
+    const session = codeSessionRef.current;
+    if (!session) return;
 
-    const change = pendingChanges.get(path);
-    if (!change || change.content === change.originalContent) return; // No actual changes
+    const changes = pendingChangesRef.current;
+    const change = changes.get(path);
+    if (!change) return; // No change record found
+
+    // Check if content actually changed from original
+    if (content === change.originalContent) return; // No actual changes
 
     setSaveStatus('saving');
     setLastSaveError(null);
@@ -714,7 +733,7 @@ export default function Code() {
     try {
       const newSha = await saveFile(path, content, change.sha);
 
-      // Update the pending change with new SHA and mark as saved
+      // Update the pending change with new SHA
       setPendingChanges(prev => {
         const next = new Map(prev);
         const existing = next.get(path);
@@ -737,14 +756,20 @@ export default function Code() {
       setSaveStatus('error');
       setLastSaveError(error.message || 'Failed to save');
     }
-  }, [codeSession, pendingChanges, saveFile, logCodeMessage]);
+  }, [saveFile, logCodeMessage]);
 
-  // Create debounced auto-save
+  // Keep a ref to the latest performAutoSave so debounced function always calls current version
+  const performAutoSaveRef = useRef(performAutoSave);
+  useEffect(() => {
+    performAutoSaveRef.current = performAutoSave;
+  }, [performAutoSave]);
+
+  // Create debounced auto-save - stable reference that won't be recreated
   const debouncedSave = useMemo(
     () => debounce((path: string, content: string) => {
-      performAutoSave(path, content);
-    }, 1500), // 1.5 second debounce
-    [performAutoSave]
+      performAutoSaveRef.current(path, content);
+    }, 1500),
+    [] // Empty deps - created once, always calls latest performAutoSave via ref
   );
 
   // Cleanup debounced function on unmount
