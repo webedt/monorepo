@@ -234,6 +234,7 @@ function ImagesContent() {
   const [showNewImageModal, setShowNewImageModal] = useState(false);
   const [newImageFilename, setNewImageFilename] = useState('image.png');
   const [showResolutionPicker, setShowResolutionPicker] = useState(false);
+  const [isCreatingImage, setIsCreatingImage] = useState(false);
   const resolutionPickerRef = useRef<HTMLDivElement>(null);
 
   // Get preferences from store
@@ -530,18 +531,94 @@ function ImagesContent() {
   }, [selectedDirectory, imagePrefs.extension, generateNewImageFilename]);
 
   // Handle creating new image
-  const handleCreateNewImage = useCallback(() => {
-    // For now, just close the modal - actual creation will be implemented later
-    console.log('Creating new image:', {
-      filename: newImageFilename,
-      path: selectedDirectory?.path || '',
-      width: imagePrefs.width,
-      height: imagePrefs.height,
-      extension: imagePrefs.extension,
-    });
-    setShowNewImageModal(false);
-    // TODO: Implement actual image creation and save to GitHub
-  }, [newImageFilename, selectedDirectory, imagePrefs]);
+  const handleCreateNewImage = useCallback(async () => {
+    if (!imageSession || !newImageFilename || isCreatingImage) return;
+
+    setIsCreatingImage(true);
+
+    const basePath = selectedDirectory?.path || '';
+    const fullPath = basePath ? `${basePath}/${newImageFilename}` : newImageFilename;
+
+    // Create a blank canvas with the specified dimensions
+    const canvas = document.createElement('canvas');
+    canvas.width = imagePrefs.width;
+    canvas.height = imagePrefs.height;
+    const ctx = canvas.getContext('2d');
+
+    if (ctx) {
+      // Fill with transparent (for PNG) or white (for other formats)
+      const ext = newImageFilename.split('.').pop()?.toLowerCase();
+      if (ext === 'png' || ext === 'gif' || ext === 'webp') {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    // Convert to base64
+    const mimeTypes: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      bmp: 'image/bmp',
+    };
+    const ext = newImageFilename.split('.').pop()?.toLowerCase() || 'png';
+    const mimeType = mimeTypes[ext] || 'image/png';
+
+    // Get base64 data (remove the data:image/xxx;base64, prefix)
+    const dataUrl = canvas.toDataURL(mimeType);
+    const base64Content = dataUrl.split(',')[1];
+
+    try {
+      // Create file in GitHub
+      await githubApi.updateFile(
+        imageSession.owner,
+        imageSession.repo,
+        fullPath,
+        {
+          content: base64Content,
+          branch: imageSession.branch,
+          message: `Create new image: ${newImageFilename}`,
+        }
+      );
+
+      // Close modal
+      setShowNewImageModal(false);
+
+      // Refresh the file tree
+      await queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+
+      // Select the new file
+      setSelectedFile({
+        path: fullPath,
+        name: newImageFilename,
+        fileType: 'image',
+      });
+      setSelectedDirectory(null);
+
+      // Expand parent folders to show the new file
+      if (basePath) {
+        const pathParts = basePath.split('/');
+        const newExpanded = new Set(expandedFolders);
+        for (let i = 1; i <= pathParts.length; i++) {
+          newExpanded.add(pathParts.slice(0, i).join('/'));
+        }
+        setExpandedFolders(newExpanded);
+      }
+
+      // Load the new image for preview
+      loadImage(fullPath);
+
+    } catch (error) {
+      console.error('Failed to create image:', error);
+      // Could add error toast here
+    } finally {
+      setIsCreatingImage(false);
+    }
+  }, [imageSession, newImageFilename, selectedDirectory, imagePrefs, queryClient, expandedFolders, loadImage, isCreatingImage]);
 
   // Close resolution picker when clicking outside
   useEffect(() => {
@@ -1667,12 +1744,12 @@ function ImagesContent() {
             <label className="label">
               <span className="label-text font-medium">Aspect Ratio</span>
             </label>
-            <div className="tabs tabs-boxed bg-base-200">
+            <div className="flex flex-wrap gap-2">
               {aspectTabs.map((tab) => (
                 <button
                   key={tab}
                   onClick={() => imagePrefs.setAspectRatioTab(tab)}
-                  className={`tab ${imagePrefs.aspectRatioTab === tab ? 'tab-active' : ''}`}
+                  className={`btn btn-sm ${imagePrefs.aspectRatioTab === tab ? 'btn-primary' : 'btn-outline'}`}
                 >
                   {tab}
                 </button>
@@ -1809,21 +1886,32 @@ function ImagesContent() {
             <button
               onClick={() => setShowNewImageModal(false)}
               className="btn btn-ghost"
+              disabled={isCreatingImage}
             >
               Cancel
             </button>
             <button
               onClick={handleCreateNewImage}
               className="btn btn-primary gap-2"
+              disabled={isCreatingImage || !newImageFilename.trim()}
             >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-              </svg>
-              Create Image
+              {isCreatingImage ? (
+                <>
+                  <span className="loading loading-spinner loading-sm"></span>
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                  </svg>
+                  Create Image
+                </>
+              )}
             </button>
           </div>
         </div>
-        <div className="modal-backdrop" onClick={() => setShowNewImageModal(false)}></div>
+        <div className="modal-backdrop" onClick={() => !isCreatingImage && setShowNewImageModal(false)}></div>
       </div>
     );
   };
