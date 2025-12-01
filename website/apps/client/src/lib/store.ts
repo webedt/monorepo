@@ -545,3 +545,55 @@ export const useNewImagePreferencesStore = create<NewImagePreferencesState>((set
     },
   };
 });
+
+// ============================================================================
+// SESSIONS SIDEBAR STATE
+// ============================================================================
+// This store manages the state of the expandable sessions sidebar, persisting
+// the collapsed/expanded state to localStorage so it survives page refreshes.
+// ============================================================================
+
+const SIDEBAR_STATE_STORAGE_KEY = 'sessionsSidebarState';
+
+interface SessionsSidebarState {
+  isExpanded: boolean;
+  setIsExpanded: (expanded: boolean) => void;
+  toggle: () => void;
+}
+
+// Load initial state from localStorage
+function loadSidebarState(): boolean {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_STATE_STORAGE_KEY);
+    if (stored !== null) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn('[SessionsSidebar] Failed to load from localStorage:', e);
+  }
+  return true; // Default to expanded
+}
+
+// Save state to localStorage
+function saveSidebarState(isExpanded: boolean) {
+  try {
+    localStorage.setItem(SIDEBAR_STATE_STORAGE_KEY, JSON.stringify(isExpanded));
+  } catch (e) {
+    console.warn('[SessionsSidebar] Failed to save to localStorage:', e);
+  }
+}
+
+export const useSessionsSidebarStore = create<SessionsSidebarState>((set, get) => ({
+  isExpanded: loadSidebarState(),
+
+  setIsExpanded: (isExpanded: boolean) => {
+    set({ isExpanded });
+    saveSidebarState(isExpanded);
+  },
+
+  toggle: () => {
+    const newState = !get().isExpanded;
+    set({ isExpanded: newState });
+    saveSidebarState(newState);
+  },
+}));

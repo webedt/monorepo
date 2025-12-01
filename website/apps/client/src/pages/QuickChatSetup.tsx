@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { githubApi } from '@/lib/api';
@@ -22,6 +22,12 @@ export default function QuickChatSetup() {
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
+
+  // Keyboard navigation state
+  const [repoHighlightedIndex, setRepoHighlightedIndex] = useState(-1);
+  const [branchHighlightedIndex, setBranchHighlightedIndex] = useState(-1);
+  const repoListRef = useRef<HTMLDivElement>(null);
+  const branchListRef = useRef<HTMLDivElement>(null);
 
   const hasGithubAuth = !!user?.githubAccessToken;
 
@@ -116,11 +122,13 @@ export default function QuickChatSetup() {
       if (isRepoDropdownOpen && !target.closest('.repo-dropdown')) {
         setIsRepoDropdownOpen(false);
         setRepoSearchQuery('');
+        setRepoHighlightedIndex(-1);
       }
 
       if (isBranchDropdownOpen && !target.closest('.branch-dropdown')) {
         setIsBranchDropdownOpen(false);
         setBranchSearchQuery('');
+        setBranchHighlightedIndex(-1);
       }
     };
 
@@ -131,6 +139,120 @@ export default function QuickChatSetup() {
       };
     }
   }, [isRepoDropdownOpen, isBranchDropdownOpen]);
+
+  // Reset highlighted index when search query or dropdown state changes
+  useEffect(() => {
+    setRepoHighlightedIndex(-1);
+  }, [repoSearchQuery, isRepoDropdownOpen]);
+
+  useEffect(() => {
+    setBranchHighlightedIndex(-1);
+  }, [branchSearchQuery, isBranchDropdownOpen]);
+
+  // Scroll highlighted item into view for repos
+  useEffect(() => {
+    if (repoHighlightedIndex >= 0 && repoListRef.current) {
+      const items = repoListRef.current.querySelectorAll('[data-repo-item]');
+      const item = items[repoHighlightedIndex] as HTMLElement;
+      if (item) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [repoHighlightedIndex]);
+
+  // Scroll highlighted item into view for branches
+  useEffect(() => {
+    if (branchHighlightedIndex >= 0 && branchListRef.current) {
+      const items = branchListRef.current.querySelectorAll('[data-branch-item]');
+      const item = items[branchHighlightedIndex] as HTMLElement;
+      if (item) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [branchHighlightedIndex]);
+
+  // Handle keyboard navigation for repo dropdown
+  const handleRepoKeyDown = (e: React.KeyboardEvent) => {
+    // Total items: "No repository" option + filtered repositories
+    const totalItems = 1 + filteredRepositories.length;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      setRepoHighlightedIndex((prev) => {
+        const next = prev < totalItems - 1 ? prev + 1 : 0; // wrap to beginning
+        return next;
+      });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      setRepoHighlightedIndex((prev) => {
+        const next = prev > 0 ? prev - 1 : totalItems - 1; // wrap to end
+        return next;
+      });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      // If nothing highlighted, select first item
+      const indexToSelect = repoHighlightedIndex >= 0 ? repoHighlightedIndex : 0;
+      if (indexToSelect === 0) {
+        // "No repository" option
+        setSelectedRepo('');
+      } else {
+        const repo = filteredRepositories[indexToSelect - 1];
+        if (repo) {
+          setSelectedRepo(repo.cloneUrl);
+        }
+      }
+      setIsRepoDropdownOpen(false);
+      setRepoSearchQuery('');
+      setRepoHighlightedIndex(-1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsRepoDropdownOpen(false);
+      setRepoSearchQuery('');
+      setRepoHighlightedIndex(-1);
+    }
+  };
+
+  // Handle keyboard navigation for branch dropdown
+  const handleBranchKeyDown = (e: React.KeyboardEvent) => {
+    const totalItems = filteredBranches.length;
+    if (totalItems === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      setBranchHighlightedIndex((prev) => {
+        const next = prev < totalItems - 1 ? prev + 1 : 0; // wrap to beginning
+        return next;
+      });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      setBranchHighlightedIndex((prev) => {
+        const next = prev > 0 ? prev - 1 : totalItems - 1; // wrap to end
+        return next;
+      });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      // If nothing highlighted, select first item
+      const indexToSelect = branchHighlightedIndex >= 0 ? branchHighlightedIndex : 0;
+      const branchName = filteredBranches[indexToSelect];
+      if (branchName) {
+        setBranch(branchName);
+      }
+      setIsBranchDropdownOpen(false);
+      setBranchSearchQuery('');
+      setBranchHighlightedIndex(-1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsBranchDropdownOpen(false);
+      setBranchSearchQuery('');
+      setBranchHighlightedIndex(-1);
+    }
+  };
 
   const handleStart = () => {
     // Navigate to chat page with pre-selected settings
@@ -198,19 +320,27 @@ export default function QuickChatSetup() {
                         placeholder="Search repositories..."
                         value={repoSearchQuery}
                         onChange={(e) => setRepoSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Escape' || e.key === 'Enter') {
+                            e.preventDefault();
+                            handleRepoKeyDown(e);
+                          }
+                        }}
                         className="input input-bordered input-sm w-full"
                         autoFocus
                       />
                     </div>
-                    <div className="overflow-y-auto max-h-64">
+                    <div className="overflow-y-auto max-h-64" ref={repoListRef}>
                       <button
                         type="button"
+                        data-repo-item
                         onClick={() => {
                           setSelectedRepo('');
                           setIsRepoDropdownOpen(false);
                           setRepoSearchQuery('');
+                          setRepoHighlightedIndex(-1);
                         }}
-                        className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${!selectedRepo ? 'bg-primary/10 font-semibold' : ''}`}
+                        className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${!selectedRepo ? 'bg-primary/10 font-semibold' : ''} ${repoHighlightedIndex === 0 ? 'bg-base-200' : ''}`}
                         title="Session won't be saved to a repository"
                       >
                         <div>
@@ -219,16 +349,18 @@ export default function QuickChatSetup() {
                         </div>
                       </button>
                       {filteredRepositories.length > 0 ? (
-                        filteredRepositories.map((repo) => (
+                        filteredRepositories.map((repo, index) => (
                           <button
                             key={repo.id}
                             type="button"
+                            data-repo-item
                             onClick={() => {
                               setSelectedRepo(repo.cloneUrl);
                               setIsRepoDropdownOpen(false);
                               setRepoSearchQuery('');
+                              setRepoHighlightedIndex(-1);
                             }}
-                            className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${selectedRepo === repo.cloneUrl ? 'bg-primary/10 font-semibold' : ''}`}
+                            className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${selectedRepo === repo.cloneUrl ? 'bg-primary/10 font-semibold' : ''} ${repoHighlightedIndex === index + 1 ? 'bg-base-200' : ''}`}
                           >
                             {repo.fullName}
                           </button>
@@ -281,22 +413,30 @@ export default function QuickChatSetup() {
                         placeholder="Search branches..."
                         value={branchSearchQuery}
                         onChange={(e) => setBranchSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Escape' || e.key === 'Enter') {
+                            e.preventDefault();
+                            handleBranchKeyDown(e);
+                          }
+                        }}
                         className="input input-bordered input-sm w-full"
                         autoFocus
                       />
                     </div>
-                    <div className="overflow-y-auto max-h-64">
+                    <div className="overflow-y-auto max-h-64" ref={branchListRef}>
                       {filteredBranches.length > 0 ? (
-                        filteredBranches.map((branchName) => (
+                        filteredBranches.map((branchName, index) => (
                           <button
                             key={branchName}
                             type="button"
+                            data-branch-item
                             onClick={() => {
                               setBranch(branchName);
                               setIsBranchDropdownOpen(false);
                               setBranchSearchQuery('');
+                              setBranchHighlightedIndex(-1);
                             }}
-                            className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${branch === branchName ? 'bg-primary/10 font-semibold' : ''}`}
+                            className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${branch === branchName ? 'bg-primary/10 font-semibold' : ''} ${branchHighlightedIndex === index ? 'bg-base-200' : ''}`}
                           >
                             {branchName}
                           </button>
