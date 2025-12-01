@@ -256,19 +256,28 @@ export default function NewSession() {
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setRepoHighlightedIndex((prev) =>
-        prev < totalItems - 1 ? prev + 1 : prev
-      );
+      e.stopPropagation();
+      setRepoHighlightedIndex((prev) => {
+        const next = prev < totalItems - 1 ? prev + 1 : 0; // wrap to beginning
+        return next;
+      });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setRepoHighlightedIndex((prev) => (prev > 0 ? prev - 1 : prev));
-    } else if (e.key === 'Enter' && repoHighlightedIndex >= 0) {
+      e.stopPropagation();
+      setRepoHighlightedIndex((prev) => {
+        const next = prev > 0 ? prev - 1 : totalItems - 1; // wrap to end
+        return next;
+      });
+    } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (repoHighlightedIndex === 0) {
+      e.stopPropagation();
+      // If nothing highlighted, select first item
+      const indexToSelect = repoHighlightedIndex >= 0 ? repoHighlightedIndex : 0;
+      if (indexToSelect === 0) {
         // "No repository" option
         setSelectedRepo('');
       } else {
-        const repo = filteredRepositories[repoHighlightedIndex - 1];
+        const repo = filteredRepositories[indexToSelect - 1];
         if (repo) {
           setSelectedRepo(repo.cloneUrl);
         }
@@ -287,18 +296,28 @@ export default function NewSession() {
   // Handle keyboard navigation for branch dropdown
   const handleBranchKeyDown = (e: React.KeyboardEvent) => {
     const totalItems = filteredBranches.length;
+    if (totalItems === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setBranchHighlightedIndex((prev) =>
-        prev < totalItems - 1 ? prev + 1 : prev
-      );
+      e.stopPropagation();
+      setBranchHighlightedIndex((prev) => {
+        const next = prev < totalItems - 1 ? prev + 1 : 0; // wrap to beginning
+        return next;
+      });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setBranchHighlightedIndex((prev) => (prev > 0 ? prev - 1 : prev));
-    } else if (e.key === 'Enter' && branchHighlightedIndex >= 0) {
+      e.stopPropagation();
+      setBranchHighlightedIndex((prev) => {
+        const next = prev > 0 ? prev - 1 : totalItems - 1; // wrap to end
+        return next;
+      });
+    } else if (e.key === 'Enter') {
       e.preventDefault();
-      const branch = filteredBranches[branchHighlightedIndex];
+      e.stopPropagation();
+      // If nothing highlighted, select first item
+      const indexToSelect = branchHighlightedIndex >= 0 ? branchHighlightedIndex : 0;
+      const branch = filteredBranches[indexToSelect];
       if (branch) {
         setBaseBranch(branch);
       }
