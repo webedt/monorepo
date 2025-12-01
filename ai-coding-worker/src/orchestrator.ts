@@ -263,6 +263,9 @@ export class Orchestrator {
       });
 
       // Step 4: Setup GitHub repository if provided
+      // Track the base branch for later use in session initialization
+      let baseBranchForSession: string | undefined;
+
       if (request.github) {
         // Check if repo already exists in session
         const repoAlreadyExists = metadata.github?.clonedPath &&
@@ -271,6 +274,7 @@ export class Orchestrator {
         if (repoAlreadyExists) {
           // Repo exists - use it from metadata
           workspacePath = path.join(sessionRoot, metadata.github!.clonedPath);
+          baseBranchForSession = metadata.github!.baseBranch;
           logger.info('Using existing cloned repo from session', {
             component: 'Orchestrator',
             websiteSessionId,
@@ -305,6 +309,7 @@ export class Orchestrator {
 
           // Update workspace path to cloned repo
           workspacePath = pullResult.targetPath;
+          baseBranchForSession = pullResult.branch;
 
           // Save updated metadata
           this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
@@ -325,247 +330,280 @@ export class Orchestrator {
             repoUrl: request.github.repoUrl,
             branch: pullResult.branch
           });
+        }
+      }
 
-          // Step 4.5: Generate session title and branch name (only for new sessions)
-          if (!isResuming) {
+      // Step 4.5: Generate session title and branch name (ONLY for truly new sessions)
+      // This should ONLY happen on the first message of a session, never on subsequent messages.
+      // We check multiple conditions to ensure this:
+      // 1. isResuming must be false (session didn't exist in storage)
+      // 2. metadata.branch must not be set (no branch was created yet)
+      // 3. metadata.sessionTitle must not be set (no title was generated yet)
+      // 4. request.github must be provided (we need a repo to create a branch)
+      const shouldInitializeSession =
+        !isResuming &&
+        !metadata.branch &&
+        !metadata.sessionTitle &&
+        request.github &&
+        baseBranchForSession;
+
+      if (shouldInitializeSession) {
+        logger.info('Initializing new session (first message)', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          isResuming,
+          hasBranch: !!metadata.branch,
+          hasTitle: !!metadata.sessionTitle,
+          hasGithub: !!request.github
+        });
+
+        try {
+          // Generate title and branch name using LLM
+          // LLMHelper reads credentials from ~/.claude/.credentials.json (written in Step 1.5)
+          sendEvent({
+            type: 'message',
+            message: 'Generating session title and branch name...',
+            timestamp: new Date().toISOString()
+          });
+
+          // LLMHelper uses Claude Agent SDK (same auth as main execution)
+          const llmHelper = new LLMHelper(workspacePath);
+
+          const userRequestText = this.serializeUserRequest(request.userRequest);
+          sendEvent({
+            type: 'debug',
+            message: `Calling generateSessionTitleAndBranch with request: "${userRequestText.substring(0, 100)}..."`,
+            timestamp: new Date().toISOString()
+          });
+
+          const result = await llmHelper.generateSessionTitleAndBranch(
+            userRequestText,
+            baseBranchForSession!
+          );
+
+          sendEvent({
+            type: 'debug',
+            message: `LLM returned: title="${result.title}", branchName="${result.branchName}"`,
+            timestamp: new Date().toISOString()
+          });
+
+          const title = result.title;
+          const descriptivePart = result.branchName;
+
+          logger.info('Generated session title and branch name with LLM', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            sessionTitle: title,
+            descriptivePart
+          });
+
+          // Extract last 8 characters of session ID for suffix
+          const sessionIdSuffix = websiteSessionId.slice(-8);
+
+          // Construct full branch name: webedt/{descriptive}-{sessionIdSuffix}
+          branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
+
+          logger.info('Prepared session title and branch name', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            sessionTitle: title,
+            branchName,
+            baseBranch: baseBranchForSession
+          });
+
+          sendEvent({
+            type: 'message',
+            message: `Creating branch: ${branchName}`,
+            timestamp: new Date().toISOString()
+          });
+
+          const gitHelper = new GitHelper(workspacePath);
+
+          // Create and checkout the new branch
+          await gitHelper.createBranch(branchName);
+
+          // Push empty branch to remote immediately to trigger GitHub Actions early
+          // This allows the site to start building while Claude Code is working
+          try {
+            sendEvent({
+              type: 'message',
+              message: `Pushing branch ${branchName} to trigger build...`,
+              timestamp: new Date().toISOString()
+            });
+
+            await gitHelper.push();
+
+            sendEvent({
+              type: 'message',
+              message: `Branch ${branchName} pushed - build starting`,
+              timestamp: new Date().toISOString()
+            });
+
+            logger.info('Early branch push completed', {
+              component: 'Orchestrator',
+              websiteSessionId,
+              branchName
+            });
+          } catch (pushError) {
+            // Non-critical - the final push after commits will still happen
+            logger.warn('Early branch push failed (non-critical)', {
+              component: 'Orchestrator',
+              websiteSessionId,
+              branchName,
+              error: pushError instanceof Error ? pushError.message : String(pushError)
+            });
+
+            sendEvent({
+              type: 'debug',
+              message: `Early push failed (will retry after commits): ${pushError instanceof Error ? pushError.message : String(pushError)}`,
+              timestamp: new Date().toISOString()
+            });
+          }
+
+          // Generate sessionPath now that we have the branch name
+          const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
+
+          // Update metadata with branch name, sessionPath, and title
+          metadata.branch = branchName;
+          metadata.sessionPath = sessionPath;
+          metadata.repositoryOwner = repositoryOwner;
+          metadata.repositoryName = repositoryName;
+          metadata.sessionTitle = title;
+          this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+          sendEvent({
+            type: 'branch_created',
+            branchName: branchName,
+            baseBranch: baseBranchForSession!,
+            sessionPath: sessionPath,
+            message: `Created and checked out branch: ${branchName}`,
+            timestamp: new Date().toISOString()
+          });
+
+          // Send session_name event with the generated title
+          sendEvent({
+            type: 'session_name',
+            sessionName: title,
+            branchName: branchName,
+            timestamp: new Date().toISOString()
+          });
+
+          logger.info('Branch created and session title generated', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            sessionPath,
+            sessionTitle: title,
+            branchName,
+            baseBranch: baseBranchForSession
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
+
+          logger.error('Failed to create branch and generate title', error, {
+            component: 'Orchestrator',
+            websiteSessionId
+          });
+
+          // Send detailed debug info about the failure
+          sendEvent({
+            type: 'debug',
+            message: `LLM naming failed: ${errorMessage}`,
+            error: errorMessage,
+            stack: errorStack,
+            timestamp: new Date().toISOString()
+          });
+
+          // Use fallback values
+          const title = 'New Session';
+          const descriptivePart = 'auto-request';
+          const sessionIdSuffix = websiteSessionId.slice(-8);
+          branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
+
+          sendEvent({
+            type: 'debug',
+            message: `Using fallback: title="${title}", branch="${branchName}"`,
+            timestamp: new Date().toISOString()
+          });
+
+          // Still create the branch with fallback name
+          try {
+            const gitHelper = new GitHelper(workspacePath);
+            await gitHelper.createBranch(branchName);
+
+            // Push empty branch to remote immediately to trigger GitHub Actions early
             try {
-              // Generate title and branch name using LLM
-              // LLMHelper reads credentials from ~/.claude/.credentials.json (written in Step 1.5)
               sendEvent({
                 type: 'message',
-                message: 'Generating session title and branch name...',
+                message: `Pushing branch ${branchName} to trigger build...`,
                 timestamp: new Date().toISOString()
               });
 
-              // LLMHelper uses Claude Agent SDK (same auth as main execution)
-              const llmHelper = new LLMHelper(workspacePath);
-
-              const userRequestText = this.serializeUserRequest(request.userRequest);
-              sendEvent({
-                type: 'debug',
-                message: `Calling generateSessionTitleAndBranch with request: "${userRequestText.substring(0, 100)}..."`,
-                timestamp: new Date().toISOString()
-              });
-
-              const result = await llmHelper.generateSessionTitleAndBranch(
-                userRequestText,
-                pullResult.branch
-              );
-
-              sendEvent({
-                type: 'debug',
-                message: `LLM returned: title="${result.title}", branchName="${result.branchName}"`,
-                timestamp: new Date().toISOString()
-              });
-
-              const title = result.title;
-              const descriptivePart = result.branchName;
-
-              logger.info('Generated session title and branch name with LLM', {
-                component: 'Orchestrator',
-                websiteSessionId,
-                sessionTitle: title,
-                descriptivePart
-              });
-
-              // Extract last 8 characters of session ID for suffix
-              const sessionIdSuffix = websiteSessionId.slice(-8);
-
-              // Construct full branch name: webedt/{descriptive}-{sessionIdSuffix}
-              branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
-
-              logger.info('Prepared session title and branch name', {
-                component: 'Orchestrator',
-                websiteSessionId,
-                sessionTitle: title,
-                branchName,
-                baseBranch: pullResult.branch
-              });
+              await gitHelper.push();
 
               sendEvent({
                 type: 'message',
-                message: `Creating branch: ${branchName}`,
+                message: `Branch ${branchName} pushed - build starting`,
                 timestamp: new Date().toISOString()
               });
 
-              const gitHelper = new GitHelper(workspacePath);
-
-              // Create and checkout the new branch
-              await gitHelper.createBranch(branchName);
-
-              // Push empty branch to remote immediately to trigger GitHub Actions early
-              // This allows the site to start building while Claude Code is working
-              try {
-                sendEvent({
-                  type: 'message',
-                  message: `Pushing branch ${branchName} to trigger build...`,
-                  timestamp: new Date().toISOString()
-                });
-
-                await gitHelper.push();
-
-                sendEvent({
-                  type: 'message',
-                  message: `Branch ${branchName} pushed - build starting`,
-                  timestamp: new Date().toISOString()
-                });
-
-                logger.info('Early branch push completed', {
-                  component: 'Orchestrator',
-                  websiteSessionId,
-                  branchName
-                });
-              } catch (pushError) {
-                // Non-critical - the final push after commits will still happen
-                logger.warn('Early branch push failed (non-critical)', {
-                  component: 'Orchestrator',
-                  websiteSessionId,
-                  branchName,
-                  error: pushError instanceof Error ? pushError.message : String(pushError)
-                });
-
-                sendEvent({
-                  type: 'debug',
-                  message: `Early push failed (will retry after commits): ${pushError instanceof Error ? pushError.message : String(pushError)}`,
-                  timestamp: new Date().toISOString()
-                });
-              }
-
-              // Generate sessionPath now that we have the branch name
-              const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
-
-              // Update metadata with branch name, sessionPath, and title
-              metadata.branch = branchName;
-              metadata.sessionPath = sessionPath;
-              metadata.repositoryOwner = repositoryOwner;
-              metadata.repositoryName = repositoryName;
-              metadata.sessionTitle = title;
-              this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
-
-              sendEvent({
-                type: 'branch_created',
-                branchName: branchName,
-                baseBranch: pullResult.branch,
-                sessionPath: sessionPath,
-                message: `Created and checked out branch: ${branchName}`,
-                timestamp: new Date().toISOString()
-              });
-
-              // Send session_name event with the generated title
-              sendEvent({
-                type: 'session_name',
-                sessionName: title,
-                branchName: branchName,
-                timestamp: new Date().toISOString()
-              });
-
-              logger.info('Branch created and session title generated', {
+              logger.info('Early branch push completed (fallback)', {
                 component: 'Orchestrator',
                 websiteSessionId,
-                sessionPath,
-                sessionTitle: title,
-                branchName,
-                baseBranch: pullResult.branch
+                branchName
               });
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : String(error);
-              const errorStack = error instanceof Error ? error.stack : undefined;
-
-              logger.error('Failed to create branch and generate title', error, {
+            } catch (pushError) {
+              // Non-critical - the final push after commits will still happen
+              logger.warn('Early branch push failed (non-critical, fallback)', {
                 component: 'Orchestrator',
-                websiteSessionId
+                websiteSessionId,
+                branchName,
+                error: pushError instanceof Error ? pushError.message : String(pushError)
               });
-
-              // Send detailed debug info about the failure
-              sendEvent({
-                type: 'debug',
-                message: `LLM naming failed: ${errorMessage}`,
-                error: errorMessage,
-                stack: errorStack,
-                timestamp: new Date().toISOString()
-              });
-
-              // Use fallback values
-              const title = 'New Session';
-              const descriptivePart = 'auto-request';
-              const sessionIdSuffix = websiteSessionId.slice(-8);
-              branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
-
-              sendEvent({
-                type: 'debug',
-                message: `Using fallback: title="${title}", branch="${branchName}"`,
-                timestamp: new Date().toISOString()
-              });
-
-              // Still create the branch with fallback name
-              try {
-                const gitHelper = new GitHelper(workspacePath);
-                await gitHelper.createBranch(branchName);
-
-                // Push empty branch to remote immediately to trigger GitHub Actions early
-                try {
-                  sendEvent({
-                    type: 'message',
-                    message: `Pushing branch ${branchName} to trigger build...`,
-                    timestamp: new Date().toISOString()
-                  });
-
-                  await gitHelper.push();
-
-                  sendEvent({
-                    type: 'message',
-                    message: `Branch ${branchName} pushed - build starting`,
-                    timestamp: new Date().toISOString()
-                  });
-
-                  logger.info('Early branch push completed (fallback)', {
-                    component: 'Orchestrator',
-                    websiteSessionId,
-                    branchName
-                  });
-                } catch (pushError) {
-                  // Non-critical - the final push after commits will still happen
-                  logger.warn('Early branch push failed (non-critical, fallback)', {
-                    component: 'Orchestrator',
-                    websiteSessionId,
-                    branchName,
-                    error: pushError instanceof Error ? pushError.message : String(pushError)
-                  });
-                }
-
-                const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
-                metadata.branch = branchName;
-                metadata.sessionPath = sessionPath;
-                metadata.repositoryOwner = repositoryOwner;
-                metadata.repositoryName = repositoryName;
-                metadata.sessionTitle = title;
-                this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
-
-                sendEvent({
-                  type: 'branch_created',
-                  branchName: branchName,
-                  baseBranch: pullResult.branch,
-                  sessionPath: sessionPath,
-                  message: `Created and checked out branch: ${branchName}`,
-                  timestamp: new Date().toISOString()
-                });
-
-                sendEvent({
-                  type: 'session_name',
-                  sessionName: title,
-                  branchName: branchName,
-                  timestamp: new Date().toISOString()
-                });
-              } catch (branchError) {
-                sendEvent({
-                  type: 'message',
-                  message: `Warning: Failed to create branch - ${branchError instanceof Error ? branchError.message : String(branchError)}`,
-                  timestamp: new Date().toISOString()
-                });
-              }
             }
+
+            const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
+            metadata.branch = branchName;
+            metadata.sessionPath = sessionPath;
+            metadata.repositoryOwner = repositoryOwner;
+            metadata.repositoryName = repositoryName;
+            metadata.sessionTitle = title;
+            this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+            sendEvent({
+              type: 'branch_created',
+              branchName: branchName,
+              baseBranch: baseBranchForSession!,
+              sessionPath: sessionPath,
+              message: `Created and checked out branch: ${branchName}`,
+              timestamp: new Date().toISOString()
+            });
+
+            sendEvent({
+              type: 'session_name',
+              sessionName: title,
+              branchName: branchName,
+              timestamp: new Date().toISOString()
+            });
+          } catch (branchError) {
+            sendEvent({
+              type: 'message',
+              message: `Warning: Failed to create branch - ${branchError instanceof Error ? branchError.message : String(branchError)}`,
+              timestamp: new Date().toISOString()
+            });
           }
         }
+      } else if (request.github) {
+        // Log why we're skipping session initialization
+        logger.info('Skipping session initialization (not first message or already initialized)', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          isResuming,
+          hasBranch: !!metadata.branch,
+          hasTitle: !!metadata.sessionTitle,
+          existingBranch: metadata.branch,
+          existingTitle: metadata.sessionTitle
+        });
       }
 
       // Update DB with session metadata
