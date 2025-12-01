@@ -613,6 +613,9 @@ function ImagesContent() {
       }
 
       // Load the new image for preview
+      // Set loading state immediately to avoid flash of placeholder
+      setIsLoadingImage(true);
+      setImageUrl(null);
       loadImage(fullPath);
 
     } catch (error) {
