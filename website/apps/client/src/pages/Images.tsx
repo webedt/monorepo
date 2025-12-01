@@ -461,6 +461,9 @@ function ImagesContent() {
 
       // Load the image if it's an image file
       if (node.fileType === 'image') {
+        // Set loading state immediately to avoid flash of placeholder
+        setIsLoadingImage(true);
+        setImageUrl(null);
         loadImage(node.path);
       } else {
         setImageUrl(null);
