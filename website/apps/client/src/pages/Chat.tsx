@@ -263,8 +263,16 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   };
 }
 
-export default function Chat() {
-  const { sessionId } = useParams();
+// Props for split view support
+interface ChatProps {
+  sessionId?: string;
+  /** When true, renders without SessionLayout wrapper (for split view) */
+  embedded?: boolean;
+}
+
+export default function Chat({ sessionId: sessionIdProp, embedded = false }: ChatProps = {}) {
+  const { sessionId: sessionIdParam } = useParams();
+  const sessionId = sessionIdProp ?? sessionIdParam;
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -1695,20 +1703,8 @@ export default function Chat() {
     </>
   );
 
-  return (
-    <SessionLayout
-      selectedRepo={selectedRepo}
-      baseBranch={baseBranch}
-      branch={session?.branch ?? undefined}
-      onRepoChange={setSelectedRepo}
-      onBaseBranchChange={setBaseBranch}
-      repositories={repositories}
-      isLoadingRepos={isLoadingRepos}
-      isLocked={isLocked}
-      titleActions={titleActions}
-      prActions={prActions}
-      session={session}
-    >
+  // The actual content to render
+  const content = (
       <div className="flex flex-col flex-1 overflow-hidden">
       {/* Alerts/Warnings Area - only show for existing sessions with messages */}
       {messages.length > 0 && (
@@ -2050,6 +2046,29 @@ export default function Chat() {
         />
       )}
       </div>
+  );
+
+  // When embedded in split view, render without SessionLayout wrapper
+  if (embedded) {
+    return content;
+  }
+
+  // Normal rendering with SessionLayout
+  return (
+    <SessionLayout
+      selectedRepo={selectedRepo}
+      baseBranch={baseBranch}
+      branch={session?.branch ?? undefined}
+      onRepoChange={setSelectedRepo}
+      onBaseBranchChange={setBaseBranch}
+      repositories={repositories}
+      isLoadingRepos={isLoadingRepos}
+      isLocked={isLocked}
+      titleActions={titleActions}
+      prActions={prActions}
+      session={session}
+    >
+      {content}
     </SessionLayout>
   );
 }

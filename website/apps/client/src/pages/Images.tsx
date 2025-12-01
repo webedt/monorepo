@@ -203,8 +203,14 @@ const transformGitHubTreeForImages = (
   return root.children || [];
 };
 
-function ImagesContent() {
-  const { sessionId } = useParams<{ sessionId?: string }>();
+// Props for split view support
+interface ImagesContentProps {
+  sessionId?: string;
+}
+
+export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  const sessionId = sessionIdProp ?? sessionIdParam;
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();

@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 const AUTO_REFRESH_INTERVAL = 5; // seconds
 const MAX_AUTO_REFRESH_ATTEMPTS = 60; // stop after 60 attempts (5 minutes)
 
+// Internal presentation component
 function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   const [iframeKey, setIframeKey] = useState(0);
   const [hasError, setHasError] = useState(false);
@@ -597,4 +598,42 @@ export default function Preview() {
       )}
     </SessionLayout>
   );
+}
+
+// Exported for split view - session-aware preview pane
+interface PreviewPaneProps {
+  sessionId?: string;
+}
+
+export function PreviewPane({ sessionId: sessionIdProp }: PreviewPaneProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  const sessionId = sessionIdProp ?? sessionIdParam;
+
+  // Load session details to get preview URL
+  const { data: sessionData, isLoading } = useQuery({
+    queryKey: ['session-details', sessionId],
+    queryFn: () => {
+      if (!sessionId || sessionId === 'new') {
+        throw new Error('Invalid session ID');
+      }
+      return sessionsApi.get(sessionId);
+    },
+    enabled: !!sessionId && sessionId !== 'new',
+  });
+
+  const session = sessionData?.data;
+  const previewUrl = (session as any)?.previewUrl || null;
+
+  if (isLoading) {
+    return (
+      <div className="h-full bg-base-300 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <span className="loading loading-spinner loading-lg text-primary"></span>
+          <p className="text-base-content/60">Loading preview...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <PreviewContent previewUrl={previewUrl} />;
 }

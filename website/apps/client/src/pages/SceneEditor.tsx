@@ -1,5 +1,17 @@
 import SessionLayout from '@/components/SessionLayout';
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
+
+// Props for split view support
+interface SceneEditorContentProps {
+  sessionId?: string;
+}
+
+export function SceneEditorContent({ sessionId: sessionIdProp }: SceneEditorContentProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  const _sessionId = sessionIdProp ?? sessionIdParam; // Available for future use
+  return <EditorPlaceholder />;
+}
 
 function EditorPlaceholder() {
   const [selectedObject, setSelectedObject] = useState('Cube');

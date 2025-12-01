@@ -1,9 +1,17 @@
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import SessionLayout from '@/components/SessionLayout';
 
 type ViewMode = 'waveform' | 'timeline';
 
-function SoundContent() {
+// Props for split view support
+interface SoundContentProps {
+  sessionId?: string;
+}
+
+export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  const _sessionId = sessionIdProp ?? sessionIdParam; // Available for future use
   const [viewMode, setViewMode] = useState<ViewMode>('timeline');
 
   return (

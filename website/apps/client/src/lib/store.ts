@@ -545,3 +545,122 @@ export const useNewImagePreferencesStore = create<NewImagePreferencesState>((set
     },
   };
 });
+
+// ============================================================================
+// SPLIT VIEW PREFERENCES
+// ============================================================================
+// This store persists split view preferences per session, including:
+// - Split ratio (how much space each pane takes)
+// - Orientation (horizontal or vertical)
+// - Last used split configuration
+// ============================================================================
+
+const SPLIT_VIEW_STORAGE_KEY = 'splitViewPreferences';
+
+export type SplitOrientation = 'horizontal' | 'vertical';
+
+interface SplitViewSessionPrefs {
+  ratio: number;
+  orientation: SplitOrientation;
+  lastConfig?: string; // e.g., 'code+preview'
+}
+
+interface SplitViewPreferencesState {
+  // Map of sessionId -> split preferences
+  sessions: Record<string, SplitViewSessionPrefs>;
+
+  // Get preferences for a session (with defaults)
+  getSplitPrefs: (sessionId: string) => SplitViewSessionPrefs;
+
+  // Set split ratio for a session
+  setSplitRatio: (sessionId: string, ratio: number) => void;
+
+  // Set orientation for a session
+  setOrientation: (sessionId: string, orientation: SplitOrientation) => void;
+
+  // Set last used split config for a session
+  setLastConfig: (sessionId: string, config: string) => void;
+}
+
+// Default preferences
+const DEFAULT_SPLIT_PREFS: SplitViewSessionPrefs = {
+  ratio: 0.5,
+  orientation: 'horizontal',
+};
+
+// Load initial state from localStorage
+function loadSplitViewPrefs(): Record<string, SplitViewSessionPrefs> {
+  try {
+    const stored = localStorage.getItem(SPLIT_VIEW_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn('[SplitViewPrefs] Failed to load from localStorage:', e);
+  }
+  return {};
+}
+
+// Save state to localStorage
+function saveSplitViewPrefs(sessions: Record<string, SplitViewSessionPrefs>) {
+  try {
+    // Limit to 100 sessions to prevent localStorage bloat
+    const sessionIds = Object.keys(sessions);
+    if (sessionIds.length > 100) {
+      const sessionsToKeep = sessionIds.slice(-100);
+      const trimmed: Record<string, SplitViewSessionPrefs> = {};
+      sessionsToKeep.forEach(id => {
+        trimmed[id] = sessions[id];
+      });
+      sessions = trimmed;
+    }
+    localStorage.setItem(SPLIT_VIEW_STORAGE_KEY, JSON.stringify(sessions));
+  } catch (e) {
+    console.warn('[SplitViewPrefs] Failed to save to localStorage:', e);
+  }
+}
+
+export const useSplitViewStore = create<SplitViewPreferencesState>((set, get) => ({
+  sessions: loadSplitViewPrefs(),
+
+  getSplitPrefs: (sessionId: string): SplitViewSessionPrefs => {
+    const state = get();
+    return state.sessions[sessionId] || DEFAULT_SPLIT_PREFS;
+  },
+
+  setSplitRatio: (sessionId: string, ratio: number) => {
+    set((state) => {
+      const currentPrefs = state.sessions[sessionId] || DEFAULT_SPLIT_PREFS;
+      const newSessions = {
+        ...state.sessions,
+        [sessionId]: { ...currentPrefs, ratio },
+      };
+      saveSplitViewPrefs(newSessions);
+      return { sessions: newSessions };
+    });
+  },
+
+  setOrientation: (sessionId: string, orientation: SplitOrientation) => {
+    set((state) => {
+      const currentPrefs = state.sessions[sessionId] || DEFAULT_SPLIT_PREFS;
+      const newSessions = {
+        ...state.sessions,
+        [sessionId]: { ...currentPrefs, orientation },
+      };
+      saveSplitViewPrefs(newSessions);
+      return { sessions: newSessions };
+    });
+  },
+
+  setLastConfig: (sessionId: string, config: string) => {
+    set((state) => {
+      const currentPrefs = state.sessions[sessionId] || DEFAULT_SPLIT_PREFS;
+      const newSessions = {
+        ...state.sessions,
+        [sessionId]: { ...currentPrefs, lastConfig: config },
+      };
+      saveSplitViewPrefs(newSessions);
+      return { sessions: newSessions };
+    });
+  },
+}));
