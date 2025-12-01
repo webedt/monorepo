@@ -304,4 +304,81 @@ router.get('/storage-worker/sessions/:sessionId/files/*', async (req: Request, r
   }
 });
 
+// Write/update a file in a session
+// Note: Using wildcard to capture multi-segment paths
+router.put('/storage-worker/sessions/:sessionId/files/*', async (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const filePath = req.params[0];
+
+  if (!filePath) {
+    res.status(400).json({ error: 'File path is required' });
+    return;
+  }
+
+  try {
+    // Get raw body - could be text or binary
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.from(chunk));
+    }
+    const body = Buffer.concat(chunks);
+
+    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionId}/files/${filePath}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': req.get('content-type') || 'application/octet-stream',
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('[StorageWorker] Write file failed:', error);
+      res.status(response.status).json({ error: 'Failed to write file' });
+      return;
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('[StorageWorker] Error writing file:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete a file from a session
+// Note: Using wildcard to capture multi-segment paths
+router.delete('/storage-worker/sessions/:sessionId/files/*', async (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const filePath = req.params[0];
+
+  if (!filePath) {
+    res.status(400).json({ error: 'File path is required' });
+    return;
+  }
+
+  try {
+    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionId}/files/${filePath}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        res.status(404).json({ error: 'File not found' });
+        return;
+      }
+      const error = await response.text();
+      console.error('[StorageWorker] Delete file failed:', error);
+      res.status(response.status).json({ error: 'Failed to delete file' });
+      return;
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('[StorageWorker] Error deleting file:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

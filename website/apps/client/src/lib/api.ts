@@ -441,6 +441,39 @@ export const storageWorkerApi = {
       return null;
     }
   },
+
+  // Write/update a file in a session
+  writeFile: async (sessionPath: string, filePath: string, content: string | Blob): Promise<boolean> => {
+    try {
+      const body = typeof content === 'string' ? content : content;
+      const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
+
+      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': contentType,
+        },
+        body,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  // Delete a file from a session
+  deleteFile: async (sessionPath: string, filePath: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  },
 };
 
 // Execute API (SSE)

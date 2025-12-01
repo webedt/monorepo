@@ -381,6 +381,165 @@ export class StorageService {
   }
 
   /**
+   * Write/update a file in a session tarball
+   * Downloads the tarball, extracts, modifies the file, re-tarballs, and uploads
+   */
+  async writeSessionFile(sessionPath: string, filePath: string, content: Buffer): Promise<void> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const tmpDir = path.join(os.tmpdir(), `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+    const tarPath = path.join(tmpDir, 'session.tar.gz');
+    const extractDir = path.join(tmpDir, 'extracted');
+
+    try {
+      // Create temp directory
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      // Download existing tarball
+      await this.minio.fGetObject(this.bucket, objectName, tarPath);
+
+      // Extract tarball
+      await tar.extract({
+        file: tarPath,
+        cwd: extractDir,
+      });
+
+      // Normalize file path and write the new content
+      const normalizedFilePath = filePath.replace(/^\.?\//, '');
+      const fullFilePath = path.join(extractDir, normalizedFilePath);
+
+      // Ensure parent directory exists
+      const parentDir = path.dirname(fullFilePath);
+      fs.mkdirSync(parentDir, { recursive: true });
+
+      // Write the file
+      fs.writeFileSync(fullFilePath, content);
+
+      // Remove old tarball
+      fs.unlinkSync(tarPath);
+
+      // Create new tarball
+      await tar.create(
+        {
+          gzip: true,
+          file: tarPath,
+          cwd: extractDir,
+        },
+        ['.']
+      );
+
+      // Upload new tarball
+      await this.minio.fPutObject(this.bucket, objectName, tarPath);
+
+      console.log(`File ${filePath} written to session ${sessionPath}`);
+    } catch (err: any) {
+      if (err.code === 'NotFound' || err.code === 'NoSuchKey') {
+        // Session doesn't exist - create new tarball with just this file
+        fs.mkdirSync(extractDir, { recursive: true });
+
+        const normalizedFilePath = filePath.replace(/^\.?\//, '');
+        const fullFilePath = path.join(extractDir, normalizedFilePath);
+
+        const parentDir = path.dirname(fullFilePath);
+        fs.mkdirSync(parentDir, { recursive: true });
+
+        fs.writeFileSync(fullFilePath, content);
+
+        await tar.create(
+          {
+            gzip: true,
+            file: tarPath,
+            cwd: extractDir,
+          },
+          ['.']
+        );
+
+        await this.minio.fPutObject(this.bucket, objectName, tarPath);
+
+        console.log(`Created new session ${sessionPath} with file ${filePath}`);
+      } else {
+        console.error(`Failed to write file ${filePath} to session ${sessionPath}:`, err);
+        throw err;
+      }
+    } finally {
+      // Cleanup temp directory
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
+   * Delete a file from a session tarball
+   */
+  async deleteSessionFile(sessionPath: string, filePath: string): Promise<boolean> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const tmpDir = path.join(os.tmpdir(), `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+    const tarPath = path.join(tmpDir, 'session.tar.gz');
+    const extractDir = path.join(tmpDir, 'extracted');
+
+    try {
+      // Create temp directory
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      // Download existing tarball
+      await this.minio.fGetObject(this.bucket, objectName, tarPath);
+
+      // Extract tarball
+      await tar.extract({
+        file: tarPath,
+        cwd: extractDir,
+      });
+
+      // Normalize file path and delete
+      const normalizedFilePath = filePath.replace(/^\.?\//, '');
+      const fullFilePath = path.join(extractDir, normalizedFilePath);
+
+      if (!fs.existsSync(fullFilePath)) {
+        return false; // File doesn't exist
+      }
+
+      // Delete the file
+      fs.unlinkSync(fullFilePath);
+
+      // Remove old tarball
+      fs.unlinkSync(tarPath);
+
+      // Create new tarball
+      await tar.create(
+        {
+          gzip: true,
+          file: tarPath,
+          cwd: extractDir,
+        },
+        ['.']
+      );
+
+      // Upload new tarball
+      await this.minio.fPutObject(this.bucket, objectName, tarPath);
+
+      console.log(`File ${filePath} deleted from session ${sessionPath}`);
+      return true;
+    } catch (err: any) {
+      if (err.code === 'NotFound' || err.code === 'NoSuchKey') {
+        return false; // Session doesn't exist
+      }
+      console.error(`Failed to delete file ${filePath} from session ${sessionPath}:`, err);
+      throw err;
+    } finally {
+      // Cleanup temp directory
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
    * Get MIME type based on file extension
    */
   private getMimeType(filePath: string): string {
