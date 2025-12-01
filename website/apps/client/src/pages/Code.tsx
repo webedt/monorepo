@@ -102,6 +102,31 @@ interface CodeSession {
   sessionId?: string; // Database session ID for tracking
 }
 
+// Helper to check if a file is an image based on extension
+const isImageFile = (filename: string): boolean => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'tiff', 'tif'];
+  return imageExtensions.includes(ext || '');
+};
+
+// Helper to get MIME type for image files
+const getImageMimeType = (filename: string): string => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    ico: 'image/x-icon',
+    bmp: 'image/bmp',
+    tiff: 'image/tiff',
+    tif: 'image/tiff',
+  };
+  return mimeTypes[ext || ''] || 'application/octet-stream';
+};
+
 // Helper to get file icon based on extension
 const getFileIcon = (filename: string): string => {
   const ext = filename.split('.').pop()?.toLowerCase();
@@ -326,6 +351,9 @@ export default function Code() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+
+  // Image preview state
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   // Track pending click for single/double click distinction
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -597,6 +625,47 @@ export default function Code() {
   const loadFileContent = useCallback(async (path: string) => {
     if (!codeSession) return;
 
+    // Clear previous image URL when loading a new file
+    setImageUrl(null);
+
+    // Check if this is an image file
+    if (isImageFile(path)) {
+      setIsLoadingFile(true);
+      setFileContent(null); // Clear text content for images
+      try {
+        // Build session path: owner/repo/branch
+        const sessionPath = `${codeSession.owner}/${codeSession.repo}/${codeSession.branch}`;
+
+        // Try to fetch image from storage-worker first
+        const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${path}`);
+
+        if (blob) {
+          // Create a URL for the image blob
+          const url = URL.createObjectURL(blob);
+          setImageUrl(url);
+        } else {
+          // Fall back to GitHub for base64 encoded image
+          console.log(`[Code] Image not in storage, falling back to GitHub: ${path}`);
+          const response = await githubApi.getFileContent(
+            codeSession.owner,
+            codeSession.repo,
+            path,
+            codeSession.branch
+          );
+          // GitHub returns base64 encoded content for binary files
+          const base64Content = response.data.content || '';
+          const mimeType = getImageMimeType(path);
+          setImageUrl(`data:${mimeType};base64,${base64Content}`);
+        }
+      } catch (error: any) {
+        console.error('Failed to load image:', error);
+        setFileContent(`// Error loading image: ${error.message}`);
+      } finally {
+        setIsLoadingFile(false);
+      }
+      return;
+    }
+
     // Check if we have pending changes for this file - use those instead of fetching
     const existingChange = pendingChanges.get(path);
     if (existingChange) {
@@ -680,6 +749,16 @@ export default function Code() {
       setIsLoadingFile(false);
     }
   }, [codeSession, pendingChanges]);
+
+  // Cleanup object URLs for images when component unmounts or image changes
+  useEffect(() => {
+    return () => {
+      // Revoke any blob URL to prevent memory leaks
+      if (imageUrl && imageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUrl);
+      }
+    };
+  }, [imageUrl]);
 
   // Restore editor state (tabs, active tab, expanded folders, pending changes) from localStorage
   useEffect(() => {
@@ -1745,6 +1824,21 @@ export default function Code() {
           {isLoadingFile ? (
             <div className="flex items-center justify-center h-full">
               <span className="loading loading-spinner loading-md"></span>
+            </div>
+          ) : imageUrl ? (
+            /* Image Preview */
+            <div className="h-full flex items-center justify-center bg-base-200 p-4 overflow-auto">
+              <div className="relative max-w-full max-h-full">
+                <img
+                  src={imageUrl}
+                  alt={activeTabPath || 'Image preview'}
+                  className="max-w-full max-h-[calc(100vh-200px)] object-contain rounded-lg shadow-lg"
+                  style={{ imageRendering: 'auto' }}
+                />
+                <div className="absolute bottom-0 left-0 right-0 bg-base-300/80 backdrop-blur-sm text-base-content text-xs p-2 rounded-b-lg text-center">
+                  {activeTabPath?.split('/').pop() || 'Image'} (read-only preview)
+                </div>
+              </div>
             </div>
           ) : fileContent !== null ? (
             <div className="h-full flex">
