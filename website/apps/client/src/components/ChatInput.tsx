@@ -29,6 +29,8 @@ interface ChatInputProps {
   centered?: boolean;
   hideRepoSelection?: boolean;
   onInterrupt?: () => void;
+  /** When true, ignores global execution state - useful for pages that create new sessions */
+  ignoreGlobalExecution?: boolean;
 }
 
 export interface ChatInputRef {
@@ -53,6 +55,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   centered = false,
   hideRepoSelection = false,
   onInterrupt,
+  ignoreGlobalExecution = false,
 }, ref) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -72,7 +75,9 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
   // Combine local prop with global state for maximum reliability
   // If EITHER source says we're executing, treat as executing
-  const effectiveIsExecuting = isExecuting || isGloballyExecuting;
+  // Exception: if ignoreGlobalExecution is true (e.g., Sessions page for creating new sessions),
+  // only use the parent's isExecuting prop
+  const effectiveIsExecuting = ignoreGlobalExecution ? isExecuting : (isExecuting || isGloballyExecuting);
 
   // Keep voiceKeywordsRef in sync with user's voice command keywords
   useEffect(() => {
