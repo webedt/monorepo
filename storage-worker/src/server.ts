@@ -341,6 +341,47 @@ app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files$/, async (req: Request, r
 });
 
 /**
+ * Check if a specific file exists in a session
+ * HEAD /api/storage-worker/sessions/.../files/...
+ * Returns 200 if file exists, 404 if not
+ */
+app.head(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
+  const sessionPath = req.params[0];
+  const filePath = req.params[1];
+  res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!filePath) {
+    res.status(400).end();
+    return;
+  }
+
+  try {
+    // First check if session exists
+    const sessionExists = await storageService.sessionExists(sessionPath);
+    if (!sessionExists) {
+      res.status(404).end();
+      return;
+    }
+
+    // Try to get the file (we need to actually check if it exists in the tarball)
+    const result = await storageService.getSessionFile(sessionPath, filePath);
+
+    if (!result) {
+      res.status(404).end();
+      return;
+    }
+
+    // File exists, return headers
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', result.content.length);
+    res.status(200).end();
+  } catch (error) {
+    console.error(`Error checking file ${filePath} in session ${sessionPath}:`, error);
+    res.status(500).end();
+  }
+});
+
+/**
  * Get a specific file from a session
  * GET /api/storage-worker/sessions/.../files/...
  * Note: Using regex to capture multi-segment session paths and file paths
