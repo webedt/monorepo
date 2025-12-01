@@ -4,6 +4,7 @@ import { authApi } from '@/lib/api';
 import { useState, useRef, useEffect } from 'react';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
+import SessionsSidebar from './SessionsSidebar';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/version';
 import { TAGLINES } from '@/constants/taglines';
 
@@ -469,10 +470,23 @@ export default function Layout() {
       )}
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1">
-        <Outlet />
-      </main>
+      {/* Main Content - with sidebar in editor mode */}
+      {isEditorMode ? (
+        <div className="flex-1 flex min-h-0">
+          {/* Sessions Sidebar - Desktop only, hidden on mobile */}
+          <div className="hidden md:flex">
+            <SessionsSidebar />
+          </div>
+          {/* Main content area */}
+          <main className="flex-1 min-w-0">
+            <Outlet />
+          </main>
+        </div>
+      ) : (
+        <main className="flex-1">
+          <Outlet />
+        </main>
+      )}
     </div>
   );
 }

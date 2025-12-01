@@ -235,6 +235,7 @@ export default function Sessions() {
           isLocked={false}
           user={user}
           centered={false}
+          ignoreGlobalExecution={true}
         />
       </div>
 
