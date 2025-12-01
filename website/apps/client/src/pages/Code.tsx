@@ -899,6 +899,7 @@ export default function Code() {
         } else {
           setActiveTabPath(null);
           setFileContent(null);
+          setImageUrl(null); // Clear image preview when closing last tab
         }
       }
 
