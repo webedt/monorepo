@@ -12,6 +12,7 @@ import {
 
 type EditorMode = 'image' | 'spritesheet' | 'animation';
 type ViewMode = 'preview' | 'edit';
+type DrawingTool = 'select' | 'pencil' | 'brush' | 'fill' | 'eraser' | 'rectangle' | 'circle' | 'line';
 
 // File types for filtering
 type ImageFileType = 'image' | 'spritesheet' | 'animation';
@@ -229,6 +230,25 @@ function ImagesContent() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isLoadingImage, setIsLoadingImage] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Canvas and drawing state
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawingLayerRef = useRef<HTMLCanvasElement>(null);
+  const [currentTool, setCurrentTool] = useState<DrawingTool>('pencil');
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [brushSize, setBrushSize] = useState(4);
+  const [brushOpacity, setBrushOpacity] = useState(100);
+  const [primaryColor, setPrimaryColor] = useState('#000000');
+  const [secondaryColor, setSecondaryColor] = useState('#FFFFFF');
+  const [canvasZoom, setCanvasZoom] = useState(100);
+  const [canvasHistory, setCanvasHistory] = useState<ImageData[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number } | null>(null);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const [selection, setSelection] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
+  const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [shapeStart, setShapeStart] = useState<{ x: number; y: number } | null>(null);
 
   // New Image Modal state
   const [showNewImageModal, setShowNewImageModal] = useState(false);
@@ -671,6 +691,339 @@ function ImagesContent() {
     }, 2000);
   };
 
+  // Initialize canvas when entering edit mode with an image
+  useEffect(() => {
+    if (viewMode === 'edit' && imageUrl && canvasRef.current && drawingLayerRef.current) {
+      const canvas = canvasRef.current;
+      const drawingCanvas = drawingLayerRef.current;
+      const ctx = canvas.getContext('2d');
+      const drawingCtx = drawingCanvas.getContext('2d');
+
+      if (!ctx || !drawingCtx) return;
+
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        // Set canvas dimensions to match image
+        canvas.width = img.width;
+        canvas.height = img.height;
+        drawingCanvas.width = img.width;
+        drawingCanvas.height = img.height;
+        setCanvasDimensions({ width: img.width, height: img.height });
+
+        // Draw image on base canvas
+        ctx.drawImage(img, 0, 0);
+
+        // Clear drawing layer
+        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+
+        // Initialize history with current state
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        setCanvasHistory([imageData]);
+        setHistoryIndex(0);
+
+        // Reset selection
+        setSelection(null);
+      };
+      img.src = imageUrl;
+    }
+  }, [viewMode, imageUrl]);
+
+  // Save canvas state to history
+  const saveToHistory = useCallback(() => {
+    const canvas = canvasRef.current;
+    const drawingCanvas = drawingLayerRef.current;
+    if (!canvas || !drawingCanvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const drawingCtx = drawingCanvas.getContext('2d');
+    if (!ctx || !drawingCtx) return;
+
+    // Merge drawing layer onto main canvas
+    ctx.drawImage(drawingCanvas, 0, 0);
+    // Clear drawing layer
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+
+    // Save combined state to history
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Remove any future history if we're not at the end
+    const newHistory = canvasHistory.slice(0, historyIndex + 1);
+    newHistory.push(imageData);
+
+    // Limit history size
+    if (newHistory.length > 50) {
+      newHistory.shift();
+    }
+
+    setCanvasHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  }, [canvasHistory, historyIndex]);
+
+  // Undo function
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const prevIndex = historyIndex - 1;
+      ctx.putImageData(canvasHistory[prevIndex], 0, 0);
+      setHistoryIndex(prevIndex);
+    }
+  }, [historyIndex, canvasHistory]);
+
+  // Redo function
+  const handleRedo = useCallback(() => {
+    if (historyIndex < canvasHistory.length - 1) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const nextIndex = historyIndex + 1;
+      ctx.putImageData(canvasHistory[nextIndex], 0, 0);
+      setHistoryIndex(nextIndex);
+    }
+  }, [historyIndex, canvasHistory]);
+
+  // Get mouse position relative to canvas
+  const getCanvasPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = e.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  }, []);
+
+  // Draw line between two points
+  const drawLine = useCallback((ctx: CanvasRenderingContext2D, from: { x: number; y: number }, to: { x: number; y: number }) => {
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  }, []);
+
+  // Flood fill algorithm
+  const floodFill = useCallback((startX: number, startY: number, fillColor: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    // Convert fill color to RGBA
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+    tempCtx.fillStyle = fillColor;
+    tempCtx.fillRect(0, 0, 1, 1);
+    const fillRgba = tempCtx.getImageData(0, 0, 1, 1).data;
+
+    const targetX = Math.floor(startX);
+    const targetY = Math.floor(startY);
+    const targetIndex = (targetY * canvas.width + targetX) * 4;
+    const targetColor = [data[targetIndex], data[targetIndex + 1], data[targetIndex + 2], data[targetIndex + 3]];
+
+    // Don't fill if clicking on the same color
+    if (targetColor[0] === fillRgba[0] && targetColor[1] === fillRgba[1] && targetColor[2] === fillRgba[2]) {
+      return;
+    }
+
+    const stack: [number, number][] = [[targetX, targetY]];
+    const visited = new Set<string>();
+
+    const matchesTarget = (index: number) => {
+      return Math.abs(data[index] - targetColor[0]) < 10 &&
+             Math.abs(data[index + 1] - targetColor[1]) < 10 &&
+             Math.abs(data[index + 2] - targetColor[2]) < 10 &&
+             Math.abs(data[index + 3] - targetColor[3]) < 10;
+    };
+
+    while (stack.length > 0) {
+      const [x, y] = stack.pop()!;
+      const key = `${x},${y}`;
+
+      if (visited.has(key)) continue;
+      if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) continue;
+
+      const index = (y * canvas.width + x) * 4;
+      if (!matchesTarget(index)) continue;
+
+      visited.add(key);
+
+      data[index] = fillRgba[0];
+      data[index + 1] = fillRgba[1];
+      data[index + 2] = fillRgba[2];
+      data[index + 3] = 255;
+
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    saveToHistory();
+  }, [saveToHistory]);
+
+  // Handle mouse down on canvas
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const pos = getCanvasPosition(e);
+    const drawingCanvas = drawingLayerRef.current;
+    if (!drawingCanvas) return;
+    const ctx = drawingCanvas.getContext('2d');
+    if (!ctx) return;
+
+    if (currentTool === 'select') {
+      setIsSelecting(true);
+      selectionStartRef.current = pos;
+      setSelection(null);
+      return;
+    }
+
+    if (currentTool === 'fill') {
+      floodFill(pos.x, pos.y, primaryColor);
+      return;
+    }
+
+    if (currentTool === 'rectangle' || currentTool === 'circle' || currentTool === 'line') {
+      setShapeStart(pos);
+      setIsDrawing(true);
+      return;
+    }
+
+    setIsDrawing(true);
+    lastPointRef.current = pos;
+
+    // Set up drawing context
+    ctx.strokeStyle = currentTool === 'eraser' ? 'rgba(255,255,255,1)' : primaryColor;
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.globalAlpha = currentTool === 'eraser' ? 1 : brushOpacity / 100;
+
+    if (currentTool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Draw initial point
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }, [currentTool, primaryColor, brushSize, brushOpacity, getCanvasPosition, floodFill]);
+
+  // Handle mouse move on canvas
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const pos = getCanvasPosition(e);
+
+    if (isSelecting && selectionStartRef.current) {
+      const start = selectionStartRef.current;
+      setSelection({
+        x: Math.min(start.x, pos.x),
+        y: Math.min(start.y, pos.y),
+        width: Math.abs(pos.x - start.x),
+        height: Math.abs(pos.y - start.y)
+      });
+      return;
+    }
+
+    if (!isDrawing) return;
+
+    const drawingCanvas = drawingLayerRef.current;
+    if (!drawingCanvas) return;
+    const ctx = drawingCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Handle shape tools
+    if (shapeStart && (currentTool === 'rectangle' || currentTool === 'circle' || currentTool === 'line')) {
+      // Clear and redraw the shape preview
+      ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      ctx.strokeStyle = primaryColor;
+      ctx.lineWidth = brushSize;
+      ctx.globalAlpha = brushOpacity / 100;
+
+      if (currentTool === 'rectangle') {
+        ctx.strokeRect(
+          shapeStart.x,
+          shapeStart.y,
+          pos.x - shapeStart.x,
+          pos.y - shapeStart.y
+        );
+      } else if (currentTool === 'circle') {
+        const radiusX = Math.abs(pos.x - shapeStart.x) / 2;
+        const radiusY = Math.abs(pos.y - shapeStart.y) / 2;
+        const centerX = shapeStart.x + (pos.x - shapeStart.x) / 2;
+        const centerY = shapeStart.y + (pos.y - shapeStart.y) / 2;
+        ctx.beginPath();
+        ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (currentTool === 'line') {
+        ctx.beginPath();
+        ctx.moveTo(shapeStart.x, shapeStart.y);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+      }
+      return;
+    }
+
+    // Handle freehand drawing
+    if (lastPointRef.current) {
+      drawLine(ctx, lastPointRef.current, pos);
+    }
+    lastPointRef.current = pos;
+  }, [isDrawing, isSelecting, currentTool, primaryColor, brushSize, brushOpacity, getCanvasPosition, drawLine, shapeStart]);
+
+  // Handle mouse up on canvas
+  const handleCanvasMouseUp = useCallback(() => {
+    if (isSelecting) {
+      setIsSelecting(false);
+      selectionStartRef.current = null;
+      return;
+    }
+
+    if (isDrawing) {
+      setIsDrawing(false);
+      lastPointRef.current = null;
+      setShapeStart(null);
+
+      // Reset composite operation
+      const drawingCanvas = drawingLayerRef.current;
+      if (drawingCanvas) {
+        const ctx = drawingCanvas.getContext('2d');
+        if (ctx) {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      saveToHistory();
+    }
+  }, [isDrawing, isSelecting, saveToHistory]);
+
+  // Handle mouse leave on canvas
+  const handleCanvasMouseLeave = useCallback(() => {
+    if (isDrawing) {
+      handleCanvasMouseUp();
+    }
+    if (isSelecting) {
+      setIsSelecting(false);
+      selectionStartRef.current = null;
+    }
+  }, [isDrawing, isSelecting, handleCanvasMouseUp]);
+
+  // Swap primary and secondary colors
+  const swapColors = useCallback(() => {
+    const temp = primaryColor;
+    setPrimaryColor(secondaryColor);
+    setSecondaryColor(temp);
+  }, [primaryColor, secondaryColor]);
+
   // Render file tree recursively
   const renderFileTree = (nodes: FileNode[], level = 0): JSX.Element[] => {
     return nodes.map((node) => {
@@ -1046,158 +1399,280 @@ function ImagesContent() {
   };
 
   // Editor Content (full editing mode)
-  const EditorContent = () => (
-    <div className="flex-1 flex flex-col">
-      {/* Toolbar */}
-      <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-2 flex-shrink-0">
-        <button
-          onClick={() => setViewMode('preview')}
-          className="btn btn-ghost btn-sm btn-circle"
-          title="Back to preview"
-        >
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-        </button>
-        <div className="text-sm font-semibold text-base-content/70">{selectedFile?.name}</div>
-        <div className="flex-1 flex gap-1 ml-4">
-          {/* Drawing Tools */}
-          <button className="btn btn-xs btn-square btn-ghost" title="Select">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M3 3h2v2H3V3zm4 0h2v2H7V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm0 4h2v2h-2V7zM3 7h2v2H3V7zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm4 0h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm0-4h2v2h-2v-2zm0-4h2v2h-2v-2z"/>
-            </svg>
-          </button>
-          <button className="btn btn-xs btn-square btn-primary" title="Pencil">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-            </svg>
-          </button>
-          <button className="btn btn-xs btn-square btn-ghost" title="Brush">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/>
-            </svg>
-          </button>
-          <button className="btn btn-xs btn-square btn-ghost" title="Fill">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M16.56 8.94L7.62 0 6.21 1.41l2.38 2.38-5.15 5.15c-.59.59-.59 1.54 0 2.12l5.5 5.5c.29.29.68.44 1.06.44s.77-.15 1.06-.44l5.5-5.5c.59-.58.59-1.53 0-2.12zM5.21 10L10 5.21 14.79 10H5.21zM19 11.5s-2 2.17-2 3.5c0 1.1.9 2 2 2s2-.9 2-2c0-1.33-2-3.5-2-3.5z"/>
-            </svg>
-          </button>
-          <button className="btn btn-xs btn-square btn-ghost" title="Eraser">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-6.36-6.36-3.54 3.53c-.78.79-.78 2.05 0 2.83z"/>
-            </svg>
-          </button>
-          <div className="divider divider-horizontal mx-1"></div>
-          <button className="btn btn-xs btn-square btn-ghost" title="Rectangle">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="3" y="3" width="18" height="18" strokeWidth="2"/>
-            </svg>
-          </button>
-          <button className="btn btn-xs btn-square btn-ghost" title="Circle">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="9" strokeWidth="2"/>
-            </svg>
-          </button>
-          <button className="btn btn-xs btn-square btn-ghost" title="Line">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <line x1="4" y1="20" x2="20" y2="4" strokeWidth="2"/>
-            </svg>
-          </button>
-          <div className="divider divider-horizontal mx-1"></div>
-          <button className="btn btn-xs btn-square btn-ghost" title="Undo">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/>
-            </svg>
-          </button>
-          <button className="btn btn-xs btn-square btn-ghost" title="Redo">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/>
-            </svg>
-          </button>
-        </div>
-        <button className="btn btn-sm btn-primary gap-2">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
-          </svg>
-          Save
-        </button>
-        <button className="btn btn-sm btn-outline gap-2">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
-          </svg>
-          Export
-        </button>
-      </div>
+  const EditorContent = () => {
+    // Calculate display dimensions based on zoom
+    const displayWidth = canvasDimensions ? (canvasDimensions.width * canvasZoom / 100) : 384;
+    const displayHeight = canvasDimensions ? (canvasDimensions.height * canvasZoom / 100) : 384;
 
-      {/* Canvas Area */}
-      <div className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0">
-        <div className="relative">
-          <div className="bg-white rounded shadow-lg p-4">
-            <div className="relative" style={{ width: '384px', height: '384px' }}>
-              <div className="absolute inset-0" style={{
-                backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
-                backgroundSize: '16px 16px',
-                backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
-              }}></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-9xl">👤</div>
-              </div>
-              <div className="absolute inset-0 pointer-events-none" style={{
-                backgroundImage: 'linear-gradient(rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px)',
-                backgroundSize: '24px 24px'
-              }}></div>
+    // Tool button helper
+    const ToolButton = ({ tool, title, children }: { tool: DrawingTool; title: string; children: React.ReactNode }) => (
+      <button
+        onClick={() => setCurrentTool(tool)}
+        className={`btn btn-xs btn-square ${currentTool === tool ? 'btn-primary' : 'btn-ghost'}`}
+        title={title}
+      >
+        {children}
+      </button>
+    );
+
+    return (
+      <div className="flex-1 flex flex-col">
+        {/* Toolbar */}
+        <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setViewMode('preview')}
+            className="btn btn-ghost btn-sm btn-circle"
+            title="Back to preview"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+          </button>
+          <div className="text-sm font-semibold text-base-content/70">{selectedFile?.name}</div>
+          {canvasDimensions && (
+            <div className="text-xs text-base-content/50">
+              {canvasDimensions.width} x {canvasDimensions.height}
             </div>
+          )}
+          <div className="flex-1 flex gap-1 ml-4">
+            {/* Drawing Tools */}
+            <ToolButton tool="select" title="Select (S)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M3 3h2v2H3V3zm4 0h2v2H7V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm0 4h2v2h-2V7zM3 7h2v2H3V7zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm4 0h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm0-4h2v2h-2v-2zm0-4h2v2h-2v-2z"/>
+              </svg>
+            </ToolButton>
+            <ToolButton tool="pencil" title="Pencil (P)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+              </svg>
+            </ToolButton>
+            <ToolButton tool="brush" title="Brush (B)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/>
+              </svg>
+            </ToolButton>
+            <ToolButton tool="fill" title="Fill (G)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M16.56 8.94L7.62 0 6.21 1.41l2.38 2.38-5.15 5.15c-.59.59-.59 1.54 0 2.12l5.5 5.5c.29.29.68.44 1.06.44s.77-.15 1.06-.44l5.5-5.5c.59-.58.59-1.53 0-2.12zM5.21 10L10 5.21 14.79 10H5.21zM19 11.5s-2 2.17-2 3.5c0 1.1.9 2 2 2s2-.9 2-2c0-1.33-2-3.5-2-3.5z"/>
+              </svg>
+            </ToolButton>
+            <ToolButton tool="eraser" title="Eraser (E)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-6.36-6.36-3.54 3.53c-.78.79-.78 2.05 0 2.83z"/>
+              </svg>
+            </ToolButton>
+            <div className="divider divider-horizontal mx-1"></div>
+            <ToolButton tool="rectangle" title="Rectangle (R)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="3" y="3" width="18" height="18" strokeWidth="2"/>
+              </svg>
+            </ToolButton>
+            <ToolButton tool="circle" title="Circle (C)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="9" strokeWidth="2"/>
+              </svg>
+            </ToolButton>
+            <ToolButton tool="line" title="Line (L)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <line x1="4" y1="20" x2="20" y2="4" strokeWidth="2"/>
+              </svg>
+            </ToolButton>
+            <div className="divider divider-horizontal mx-1"></div>
+            <button
+              onClick={handleUndo}
+              disabled={historyIndex <= 0}
+              className="btn btn-xs btn-square btn-ghost"
+              title="Undo (Ctrl+Z)"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/>
+              </svg>
+            </button>
+            <button
+              onClick={handleRedo}
+              disabled={historyIndex >= canvasHistory.length - 1}
+              className="btn btn-xs btn-square btn-ghost"
+              title="Redo (Ctrl+Y)"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/>
+              </svg>
+            </button>
           </div>
-          <div className="absolute bottom-2 right-2 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
-            <button className="btn btn-xs btn-ghost btn-circle">-</button>
-            <span>100%</span>
-            <button className="btn btn-xs btn-ghost btn-circle">+</button>
-          </div>
+          <button className="btn btn-sm btn-primary gap-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+            </svg>
+            Save
+          </button>
+          <button className="btn btn-sm btn-outline gap-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
+            </svg>
+            Export
+          </button>
         </div>
-      </div>
 
-      {/* AI Prompt Input */}
-      <div className="bg-base-100 border-t border-base-300 p-4 flex-shrink-0">
-        <form onSubmit={handleAiSubmit} className="max-w-4xl mx-auto">
+        {/* Canvas Area */}
+        <div className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0 overflow-auto">
           <div className="relative">
-            <textarea
-              ref={promptInputRef}
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="Describe changes... (e.g., 'Add glowing effect', 'Change to blue')"
-              rows={2}
-              className="textarea textarea-bordered w-full pr-24 resize-none text-sm"
-              disabled={isGenerating}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleAiSubmit(e);
-                }
-              }}
-            />
-            <div className="absolute bottom-3 right-3 flex items-center gap-2">
-              <div className="text-xs text-base-content/50 hidden sm:block">
-                Gemini 2.5
-              </div>
-              <button
-                type="submit"
-                disabled={!aiPrompt.trim() || isGenerating}
-                className={`btn btn-circle btn-sm ${isGenerating ? 'btn-warning' : 'btn-primary'}`}
+            <div className="bg-white rounded shadow-lg p-4">
+              {/* Checkered background container */}
+              <div
+                className="relative"
+                style={{
+                  width: displayWidth,
+                  height: displayHeight,
+                  backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
+                  backgroundSize: '16px 16px',
+                  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
+                }}
               >
-                {isGenerating ? (
-                  <span className="loading loading-spinner loading-xs"></span>
-                ) : (
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                  </svg>
+                {/* Loading state */}
+                {isLoadingImage && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-base-200/50 z-20">
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="loading loading-spinner loading-lg"></span>
+                      <span className="text-sm text-base-content/70">Loading image...</span>
+                    </div>
+                  </div>
                 )}
+
+                {/* Base canvas (image layer) */}
+                <canvas
+                  ref={canvasRef}
+                  className="absolute inset-0"
+                  style={{
+                    width: displayWidth,
+                    height: displayHeight,
+                    imageRendering: 'pixelated'
+                  }}
+                />
+
+                {/* Drawing layer canvas */}
+                <canvas
+                  ref={drawingLayerRef}
+                  className="absolute inset-0"
+                  style={{
+                    width: displayWidth,
+                    height: displayHeight,
+                    imageRendering: 'pixelated',
+                    cursor: currentTool === 'select' ? 'crosshair' :
+                            currentTool === 'fill' ? 'cell' :
+                            'crosshair'
+                  }}
+                  onMouseDown={handleCanvasMouseDown}
+                  onMouseMove={handleCanvasMouseMove}
+                  onMouseUp={handleCanvasMouseUp}
+                  onMouseLeave={handleCanvasMouseLeave}
+                />
+
+                {/* Selection overlay */}
+                {selection && (
+                  <div
+                    className="absolute pointer-events-none border-2 border-dashed border-primary bg-primary/10"
+                    style={{
+                      left: selection.x * canvasZoom / 100,
+                      top: selection.y * canvasZoom / 100,
+                      width: selection.width * canvasZoom / 100,
+                      height: selection.height * canvasZoom / 100,
+                      animation: 'marching-ants 0.5s linear infinite'
+                    }}
+                  >
+                    {/* Selection handles */}
+                    <div className="absolute -left-1 -top-1 w-2 h-2 bg-primary border border-white"></div>
+                    <div className="absolute -right-1 -top-1 w-2 h-2 bg-primary border border-white"></div>
+                    <div className="absolute -left-1 -bottom-1 w-2 h-2 bg-primary border border-white"></div>
+                    <div className="absolute -right-1 -bottom-1 w-2 h-2 bg-primary border border-white"></div>
+                  </div>
+                )}
+
+                {/* Empty state when no image */}
+                {!imageUrl && !isLoadingImage && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center text-base-content/50">
+                      <svg className="w-16 h-16 mx-auto mb-2 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                      </svg>
+                      <p className="text-sm">No image loaded</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Zoom controls */}
+            <div className="absolute bottom-2 right-2 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
+              <button
+                onClick={() => setCanvasZoom(Math.max(25, canvasZoom - 25))}
+                className="btn btn-xs btn-ghost btn-circle"
+                disabled={canvasZoom <= 25}
+              >
+                -
+              </button>
+              <span className="min-w-[40px] text-center">{canvasZoom}%</span>
+              <button
+                onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 25))}
+                className="btn btn-xs btn-ghost btn-circle"
+                disabled={canvasZoom >= 400}
+              >
+                +
               </button>
             </div>
+
+            {/* Current tool indicator */}
+            <div className="absolute top-2 left-2 bg-base-100 px-2 py-1 rounded shadow text-xs text-base-content/70 flex items-center gap-1">
+              <span className="capitalize">{currentTool}</span>
+              {currentTool !== 'select' && currentTool !== 'fill' && (
+                <span className="text-base-content/50">• {brushSize}px</span>
+              )}
+            </div>
           </div>
-        </form>
+        </div>
+
+        {/* AI Prompt Input */}
+        <div className="bg-base-100 border-t border-base-300 p-4 flex-shrink-0">
+          <form onSubmit={handleAiSubmit} className="max-w-4xl mx-auto">
+            <div className="relative">
+              <textarea
+                ref={promptInputRef}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="Describe changes... (e.g., 'Add glowing effect', 'Change to blue')"
+                rows={2}
+                className="textarea textarea-bordered w-full pr-24 resize-none text-sm"
+                disabled={isGenerating}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAiSubmit(e);
+                  }
+                }}
+              />
+              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                <div className="text-xs text-base-content/50 hidden sm:block">
+                  Gemini 2.5
+                </div>
+                <button
+                  type="submit"
+                  disabled={!aiPrompt.trim() || isGenerating}
+                  className={`btn btn-circle btn-sm ${isGenerating ? 'btn-warning' : 'btn-primary'}`}
+                >
+                  {isGenerating ? (
+                    <span className="loading loading-spinner loading-xs"></span>
+                  ) : (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Right Sidebar - Context aware based on mode and view
   const RightSidebar = () => {
@@ -1352,6 +1827,13 @@ function ImagesContent() {
     }
 
     // Edit mode - show tools based on editor mode
+    const colorPalette = [
+      '#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF',
+      '#880000', '#008800', '#000088', '#888800', '#880088', '#008888', '#888888', '#444444',
+      '#FF8800', '#88FF00', '#0088FF', '#FF0088', '#8800FF', '#00FF88', '#FFCC00', '#CC00FF',
+      '#FF4444', '#44FF44', '#4444FF', '#FFFF44', '#FF44FF', '#44FFFF', '#AAAAAA', '#666666'
+    ];
+
     return (
       <div className="w-64 bg-base-100 border-l border-base-300 overflow-y-auto flex-shrink-0">
         <div className="p-4 space-y-4">
@@ -1362,24 +1844,38 @@ function ImagesContent() {
               <div>
                 <div className="font-semibold text-base-content mb-3 flex items-center justify-between">
                   Colors
-                  <button className="btn btn-xs btn-ghost">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8z"/>
-                    </svg>
-                  </button>
+                  <input
+                    type="color"
+                    value={primaryColor}
+                    onChange={(e) => setPrimaryColor(e.target.value)}
+                    className="w-6 h-6 rounded cursor-pointer"
+                    title="Pick custom color"
+                  />
                 </div>
                 <div className="flex items-center gap-2 mb-3">
-                  <div className="w-8 h-8 rounded border-2 border-base-content bg-black"></div>
-                  <div className="w-8 h-8 rounded border border-base-300 bg-white"></div>
-                  <button className="btn btn-xs btn-ghost ml-auto">Swap</button>
+                  <div
+                    className="w-8 h-8 rounded border-2 border-base-content cursor-pointer hover:scale-105 transition-transform"
+                    style={{ backgroundColor: primaryColor }}
+                    title={`Primary: ${primaryColor}`}
+                  ></div>
+                  <div
+                    className="w-8 h-8 rounded border border-base-300 cursor-pointer hover:scale-105 transition-transform"
+                    style={{ backgroundColor: secondaryColor }}
+                    title={`Secondary: ${secondaryColor}`}
+                  ></div>
+                  <button onClick={swapColors} className="btn btn-xs btn-ghost ml-auto">Swap</button>
                 </div>
                 <div className="grid grid-cols-8 gap-1">
-                  {['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF',
-                    '#880000', '#008800', '#000088', '#888800', '#880088', '#008888', '#888888', '#444444'].map((color) => (
+                  {colorPalette.map((color) => (
                     <button
                       key={color}
-                      className="w-5 h-5 rounded border border-base-300 hover:scale-110 transition-transform"
+                      onClick={() => setPrimaryColor(color)}
+                      onContextMenu={(e) => { e.preventDefault(); setSecondaryColor(color); }}
+                      className={`w-5 h-5 rounded border hover:scale-110 transition-transform ${
+                        primaryColor === color ? 'border-2 border-base-content' : 'border-base-300'
+                      }`}
                       style={{ backgroundColor: color }}
+                      title={`${color} (right-click for secondary)`}
                     />
                   ))}
                 </div>
@@ -1390,29 +1886,85 @@ function ImagesContent() {
                 <div className="font-semibold text-base-content mb-3">Brush</div>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-base-content/70 mb-1 block">Size: 4px</label>
-                    <input type="range" min="1" max="32" defaultValue="4" className="range range-xs range-primary" />
+                    <label className="text-xs text-base-content/70 mb-1 block">Size: {brushSize}px</label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="64"
+                      value={brushSize}
+                      onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                      className="range range-xs range-primary"
+                    />
                   </div>
                   <div>
-                    <label className="text-xs text-base-content/70 mb-1 block">Opacity: 100%</label>
-                    <input type="range" min="0" max="100" defaultValue="100" className="range range-xs range-primary" />
+                    <label className="text-xs text-base-content/70 mb-1 block">Opacity: {brushOpacity}%</label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="100"
+                      value={brushOpacity}
+                      onChange={(e) => setBrushOpacity(parseInt(e.target.value))}
+                      className="range range-xs range-primary"
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Layers */}
+              {/* Current Tool Info */}
               <div className="pt-4 border-t border-base-300">
-                <div className="font-semibold text-base-content mb-3 flex items-center justify-between">
-                  Layers
-                  <button className="btn btn-xs btn-ghost">+</button>
+                <div className="font-semibold text-base-content mb-3">Current Tool</div>
+                <div className="bg-base-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="capitalize font-medium">{currentTool}</span>
+                  </div>
+                  <div className="text-xs text-base-content/60 mt-1">
+                    {currentTool === 'select' && 'Click and drag to select a region'}
+                    {currentTool === 'pencil' && 'Click and drag to draw lines'}
+                    {currentTool === 'brush' && 'Click and drag to paint with soft edges'}
+                    {currentTool === 'fill' && 'Click to fill an area with color'}
+                    {currentTool === 'eraser' && 'Click and drag to erase'}
+                    {currentTool === 'rectangle' && 'Click and drag to draw a rectangle'}
+                    {currentTool === 'circle' && 'Click and drag to draw an ellipse'}
+                    {currentTool === 'line' && 'Click and drag to draw a line'}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  {['Layer 2', 'Layer 1', 'Background'].map((layer, i) => (
-                    <div key={layer} className={`flex items-center gap-2 p-1.5 rounded text-xs ${i === 0 ? 'bg-primary/10' : 'bg-base-200'}`}>
-                      <button className="btn btn-xs btn-ghost btn-circle p-0 min-h-0 h-4 w-4">👁</button>
-                      <span className="flex-1 truncate">{layer}</span>
-                    </div>
-                  ))}
+              </div>
+
+              {/* Selection Info */}
+              {selection && (
+                <div className="pt-4 border-t border-base-300">
+                  <div className="font-semibold text-base-content mb-3 flex items-center justify-between">
+                    Selection
+                    <button onClick={() => setSelection(null)} className="btn btn-xs btn-ghost text-error">Clear</button>
+                  </div>
+                  <div className="text-xs text-base-content/70 space-y-1">
+                    <div>Position: {Math.round(selection.x)}, {Math.round(selection.y)}</div>
+                    <div>Size: {Math.round(selection.width)} x {Math.round(selection.height)}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* History Info */}
+              <div className="pt-4 border-t border-base-300">
+                <div className="font-semibold text-base-content mb-3">History</div>
+                <div className="text-xs text-base-content/70">
+                  <div>Step {historyIndex + 1} of {canvasHistory.length}</div>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={handleUndo}
+                      disabled={historyIndex <= 0}
+                      className="btn btn-xs btn-outline flex-1"
+                    >
+                      Undo
+                    </button>
+                    <button
+                      onClick={handleRedo}
+                      disabled={historyIndex >= canvasHistory.length - 1}
+                      className="btn btn-xs btn-outline flex-1"
+                    >
+                      Redo
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
