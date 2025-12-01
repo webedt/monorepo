@@ -28,7 +28,7 @@ export default function SessionsSidebar() {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [selectedRepo, setSelectedRepo] = useState('');
-  const [baseBranch, setBaseBranch] = useState('main');
+  const [baseBranch] = useState('main');
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
