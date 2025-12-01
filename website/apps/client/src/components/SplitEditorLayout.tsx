@@ -11,8 +11,8 @@ import SceneEditor from '@/pages/SceneEditor';
 import Preview from '@/pages/Preview';
 import Chat from '@/pages/Chat';
 
-// Map of page names to components - using embedded prop
-const PAGE_COMPONENTS: Record<string, React.ComponentType<{ embedded?: boolean }>> = {
+// Map of page names to components - using isEmbedded prop
+const PAGE_COMPONENTS: Record<string, React.ComponentType<{ isEmbedded?: boolean }>> = {
   code: Code,
   images: Images,
   sound: Sound,
@@ -55,7 +55,7 @@ interface SplitEditorLayoutProps {
 export default function SplitEditorLayout({ leftPage, rightPage }: SplitEditorLayoutProps) {
   const { sessionId } = useParams();
   const navigate = useNavigate();
-  const { getSplitPrefs, setSplitRatio, setOrientation } = useSplitViewStore();
+  const { getSplitPrefs, setSplitRatio } = useSplitViewStore();
 
   // Get preferences for this session
   const prefs = sessionId ? getSplitPrefs(sessionId) : { ratio: 0.5, orientation: 'horizontal' as const };
@@ -176,7 +176,7 @@ export default function SplitEditorLayout({ leftPage, rightPage }: SplitEditorLa
         {/* Panel content */}
         <div className="flex-1 overflow-hidden">
           <EmbeddedProvider isEmbedded>
-            <LeftComponent embedded />
+            <LeftComponent isEmbedded />
           </EmbeddedProvider>
         </div>
       </div>
@@ -222,7 +222,7 @@ export default function SplitEditorLayout({ leftPage, rightPage }: SplitEditorLa
         {/* Panel content */}
         <div className="flex-1 overflow-hidden">
           <EmbeddedProvider isEmbedded>
-            <RightComponent embedded />
+            <RightComponent isEmbedded />
           </EmbeddedProvider>
         </div>
       </div>

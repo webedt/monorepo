@@ -267,10 +267,10 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
 interface ChatProps {
   sessionId?: string;
   /** When true, renders without SessionLayout wrapper (for split view) */
-  embedded?: boolean;
+  isEmbedded?: boolean;
 }
 
-export default function Chat({ sessionId: sessionIdProp, embedded = false }: ChatProps = {}) {
+export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: ChatProps = {}) {
   const { sessionId: sessionIdParam } = useParams();
   const sessionId = sessionIdProp ?? sessionIdParam;
   const navigate = useNavigate();
@@ -324,7 +324,6 @@ export default function Chat({ sessionId: sessionIdProp, embedded = false }: Cha
     input: string;
     images: ImageAttachment[];
   }>>([]);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Get repo store actions
   const repoStore = useRepoStore();
@@ -2055,7 +2054,7 @@ export default function Chat({ sessionId: sessionIdProp, embedded = false }: Cha
   );
 
   // When embedded in split view, render without SessionLayout wrapper
-  if (embedded) {
+  if (isEmbedded) {
     return content;
   }
 

@@ -323,10 +323,10 @@ const transformStorageFiles = (files: { path: string; size: number; type: 'file'
 interface CodeProps {
   sessionId?: string;
   /** When true, renders without SessionLayout wrapper (for split view) */
-  embedded?: boolean;
+  isEmbedded?: boolean;
 }
 
-export default function Code({ sessionId: sessionIdProp, embedded = false }: CodeProps = {}) {
+export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: CodeProps = {}) {
   const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
   const sessionId = sessionIdProp ?? sessionIdParam;
   const location = useLocation();
@@ -2352,7 +2352,7 @@ export default function Code({ sessionId: sessionIdProp, embedded = false }: Cod
   );
 
   // When embedded in split view, render without SessionLayout wrapper
-  if (embedded) {
+  if (isEmbedded) {
     return content;
   }
 
