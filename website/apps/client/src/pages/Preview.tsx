@@ -72,7 +72,7 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
 
         // Try to fetch the preview URL to check if it's available
         // Use no-cors mode to avoid CORS errors in console - we only care if the server responds
-        const response = await fetch(previewUrl, {
+        await fetch(previewUrl, {
           method: 'HEAD',
           mode: 'no-cors',
           credentials: 'omit',
