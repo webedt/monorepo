@@ -1133,15 +1133,32 @@ function ImagesContent() {
       <div className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0">
         <div className="relative">
           <div className="bg-white rounded shadow-lg p-4">
-            <div className="relative" style={{ width: '384px', height: '384px' }}>
+            <div className="relative flex items-center justify-center" style={{ minWidth: '384px', minHeight: '384px' }}>
+              {/* Checkerboard background for transparency */}
               <div className="absolute inset-0" style={{
                 backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
                 backgroundSize: '16px 16px',
                 backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
               }}></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-9xl">👤</div>
+              {/* Image content */}
+              <div className="relative z-10 flex items-center justify-center">
+                {isLoadingImage ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="loading loading-spinner loading-lg"></span>
+                    <span className="text-sm text-base-content/50">Loading image...</span>
+                  </div>
+                ) : imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt={selectedFile?.name}
+                    className="max-w-full max-h-[60vh] object-contain"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                ) : (
+                  <span className="text-8xl">🖼️</span>
+                )}
               </div>
+              {/* Grid overlay */}
               <div className="absolute inset-0 pointer-events-none" style={{
                 backgroundImage: 'linear-gradient(rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px)',
                 backgroundSize: '24px 24px'
