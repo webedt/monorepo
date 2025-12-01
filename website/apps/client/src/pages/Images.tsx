@@ -852,30 +852,39 @@ function ImagesContent() {
     return () => clearTimeout(timeoutId);
   }, [viewMode, imageUrl]);
 
+  // Track if we're in the middle of saving to prevent restore from interfering
+  const isSavingRef = useRef(false);
+
   // Restore canvas from history after re-renders (since EditorContent is recreated each render)
   useEffect(() => {
     if (viewMode !== 'edit') return;
     if (canvasHistory.length === 0 || historyIndex < 0) return;
+    if (isSavingRef.current) return; // Don't restore while saving
 
-    const canvas = canvasRef.current;
-    const drawingCanvas = drawingLayerRef.current;
-    if (!canvas || !drawingCanvas) return;
+    // Small delay to ensure canvas is mounted after re-render
+    const timeoutId = setTimeout(() => {
+      const canvas = canvasRef.current;
+      const drawingCanvas = drawingLayerRef.current;
+      if (!canvas || !drawingCanvas) return;
 
-    // Only restore if canvas has correct dimensions
-    const currentImageData = canvasHistory[historyIndex];
-    if (canvas.width !== currentImageData.width || canvas.height !== currentImageData.height) {
-      // Set canvas dimensions first
-      canvas.width = currentImageData.width;
-      canvas.height = currentImageData.height;
-      drawingCanvas.width = currentImageData.width;
-      drawingCanvas.height = currentImageData.height;
-    }
+      const currentImageData = canvasHistory[historyIndex];
 
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.putImageData(currentImageData, 0, 0);
-      console.log('[Canvas] Restored from history after render');
-    }
+      // Set canvas dimensions if needed
+      if (canvas.width !== currentImageData.width || canvas.height !== currentImageData.height) {
+        canvas.width = currentImageData.width;
+        canvas.height = currentImageData.height;
+        drawingCanvas.width = currentImageData.width;
+        drawingCanvas.height = currentImageData.height;
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.putImageData(currentImageData, 0, 0);
+        console.log('[Canvas] Restored from history after render');
+      }
+    }, 10);
+
+    return () => clearTimeout(timeoutId);
   }, [viewMode, canvasHistory, historyIndex, canvasDimensions]);
 
   // Save canvas state to history
@@ -887,6 +896,9 @@ function ImagesContent() {
     const ctx = canvas.getContext('2d');
     const drawingCtx = drawingCanvas.getContext('2d');
     if (!ctx || !drawingCtx) return;
+
+    // Mark that we're saving to prevent restore from interfering
+    isSavingRef.current = true;
 
     // Merge drawing layer onto main canvas
     ctx.drawImage(drawingCanvas, 0, 0);
@@ -907,6 +919,11 @@ function ImagesContent() {
 
     setCanvasHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
+
+    // Allow restore again after state updates complete
+    requestAnimationFrame(() => {
+      isSavingRef.current = false;
+    });
   }, [canvasHistory, historyIndex]);
 
   // Undo function
@@ -939,13 +956,21 @@ function ImagesContent() {
 
   // Get mouse position relative to canvas
   const getCanvasPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = e.currentTarget;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    // Use canvasRef for dimensions since it's the source of truth
+    const baseCanvas = canvasRef.current;
+    const targetCanvas = e.currentTarget;
+    const rect = targetCanvas.getBoundingClientRect();
+
+    // Use base canvas dimensions for scaling (they should match, but be safe)
+    const canvasWidth = baseCanvas?.width || targetCanvas.width;
+    const canvasHeight = baseCanvas?.height || targetCanvas.height;
+
+    const scaleX = canvasWidth / rect.width;
+    const scaleY = canvasHeight / rect.height;
+
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      x: Math.round((e.clientX - rect.left) * scaleX),
+      y: Math.round((e.clientY - rect.top) * scaleY)
     };
   }, []);
 
