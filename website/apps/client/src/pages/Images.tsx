@@ -410,9 +410,20 @@ function ImagesContent() {
     return counts;
   }, [treeData]);
 
+  // Helper to convert blob to data URL
+  const blobToDataUrl = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   // Load image when a file is selected
   // Uses storage-worker to fetch files directly from the session tarball
   // Falls back to GitHub API if not in storage
+  // Always converts to data URL to avoid CORS issues with canvas
   const loadImage = useCallback(async (path: string) => {
     if (!imageSession) return;
 
@@ -431,8 +442,12 @@ function ImagesContent() {
       const checkResponse = await fetch(storageUrl, { method: 'HEAD', credentials: 'include' });
 
       if (checkResponse.ok) {
-        // File exists in storage, use it
-        setImageUrl(storageUrl);
+        // File exists in storage - fetch it and convert to data URL
+        // This avoids CORS issues when drawing to canvas
+        const imageResponse = await fetch(storageUrl, { credentials: 'include' });
+        const blob = await imageResponse.blob();
+        const dataUrl = await blobToDataUrl(blob);
+        setImageUrl(dataUrl);
       } else {
         // Fall back to GitHub API
         console.log(`[Images] File not in storage, falling back to GitHub: ${path}`);
@@ -463,8 +478,16 @@ function ImagesContent() {
           const dataUrl = `data:${mimeType};base64,${response.data.content}`;
           setImageUrl(dataUrl);
         } else if (response.data.download_url) {
-          // Use download URL if available
-          setImageUrl(response.data.download_url);
+          // Fetch the download URL and convert to data URL to avoid CORS issues
+          try {
+            const imageResponse = await fetch(response.data.download_url);
+            const blob = await imageResponse.blob();
+            const dataUrl = await blobToDataUrl(blob);
+            setImageUrl(dataUrl);
+          } catch {
+            // If fetching fails, use the URL directly (preview will work, but canvas may have issues)
+            setImageUrl(response.data.download_url);
+          }
         }
       }
     } catch (error) {
@@ -1578,7 +1601,53 @@ function ImagesContent() {
         </div>
 
         {/* Canvas Area */}
-        <div ref={canvasContainerRef} className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0 overflow-auto">
+        <div ref={canvasContainerRef} className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0 overflow-auto relative">
+          {/* Zoom controls - positioned at top-right of canvas area */}
+          <div className="absolute top-2 right-2 z-10 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
+            <button
+              onClick={() => {
+                // Calculate fit zoom
+                if (canvasContainerRef.current && canvasDimensions) {
+                  const containerRect = canvasContainerRef.current.getBoundingClientRect();
+                  const availableWidth = containerRect.width - 64;
+                  const availableHeight = containerRect.height - 64;
+                  const scaleX = availableWidth / canvasDimensions.width;
+                  const scaleY = availableHeight / canvasDimensions.height;
+                  const fitScale = Math.min(scaleX, scaleY, 1);
+                  const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
+                  setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
+                }
+              }}
+              className="btn btn-xs btn-ghost"
+              title="Fit to screen"
+            >
+              Fit
+            </button>
+            <button
+              onClick={() => setCanvasZoom(100)}
+              className="btn btn-xs btn-ghost"
+              title="Reset to 100%"
+            >
+              1:1
+            </button>
+            <div className="w-px h-4 bg-base-300"></div>
+            <button
+              onClick={() => setCanvasZoom(Math.max(25, canvasZoom - 25))}
+              className="btn btn-xs btn-ghost btn-circle"
+              disabled={canvasZoom <= 25}
+            >
+              -
+            </button>
+            <span className="min-w-[40px] text-center">{canvasZoom}%</span>
+            <button
+              onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 25))}
+              className="btn btn-xs btn-ghost btn-circle"
+              disabled={canvasZoom >= 400}
+            >
+              +
+            </button>
+          </div>
+
           <div className="relative">
             <div className="bg-white rounded shadow-lg p-4">
               {/* Checkered background container */}
@@ -1663,52 +1732,6 @@ function ImagesContent() {
                   </div>
                 )}
               </div>
-            </div>
-
-            {/* Zoom controls */}
-            <div className="absolute bottom-2 right-2 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
-              <button
-                onClick={() => {
-                  // Calculate fit zoom
-                  if (canvasContainerRef.current && canvasDimensions) {
-                    const containerRect = canvasContainerRef.current.getBoundingClientRect();
-                    const availableWidth = containerRect.width - 64;
-                    const availableHeight = containerRect.height - 64;
-                    const scaleX = availableWidth / canvasDimensions.width;
-                    const scaleY = availableHeight / canvasDimensions.height;
-                    const fitScale = Math.min(scaleX, scaleY, 1);
-                    const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
-                    setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
-                  }
-                }}
-                className="btn btn-xs btn-ghost"
-                title="Fit to screen"
-              >
-                Fit
-              </button>
-              <button
-                onClick={() => setCanvasZoom(100)}
-                className="btn btn-xs btn-ghost"
-                title="Reset to 100%"
-              >
-                1:1
-              </button>
-              <div className="w-px h-4 bg-base-300"></div>
-              <button
-                onClick={() => setCanvasZoom(Math.max(25, canvasZoom - 25))}
-                className="btn btn-xs btn-ghost btn-circle"
-                disabled={canvasZoom <= 25}
-              >
-                -
-              </button>
-              <span className="min-w-[40px] text-center">{canvasZoom}%</span>
-              <button
-                onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 25))}
-                className="btn btn-xs btn-ghost btn-circle"
-                disabled={canvasZoom >= 400}
-              >
-                +
-              </button>
             </div>
 
             {/* Current tool indicator */}
