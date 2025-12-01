@@ -234,6 +234,7 @@ function ImagesContent() {
   // Canvas and drawing state
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingLayerRef = useRef<HTMLCanvasElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [currentTool, setCurrentTool] = useState<DrawingTool>('pencil');
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(4);
@@ -702,7 +703,13 @@ function ImagesContent() {
       if (!ctx || !drawingCtx) return;
 
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+
+      // Only set crossOrigin for non-data URLs to avoid CORS issues
+      // Data URLs don't need CORS and setting it can cause issues
+      if (!imageUrl.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+
       img.onload = () => {
         // Set canvas dimensions to match image
         canvas.width = img.width;
@@ -724,7 +731,64 @@ function ImagesContent() {
 
         // Reset selection
         setSelection(null);
+
+        // Calculate auto-fit zoom level if image is larger than container
+        if (canvasContainerRef.current) {
+          const containerRect = canvasContainerRef.current.getBoundingClientRect();
+          // Account for padding (p-4 = 16px on each side) and some margin
+          const availableWidth = containerRect.width - 64;
+          const availableHeight = containerRect.height - 64;
+
+          // Calculate zoom needed to fit image in viewport
+          const scaleX = availableWidth / img.width;
+          const scaleY = availableHeight / img.height;
+          const fitScale = Math.min(scaleX, scaleY, 1); // Don't zoom in past 100%
+
+          // Convert to percentage and round to nearest 25%
+          const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
+          // Ensure minimum zoom of 25%
+          setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
+        }
       };
+
+      img.onerror = (e) => {
+        console.error('Failed to load image onto canvas:', e);
+        // Try loading without crossOrigin as fallback
+        if (img.crossOrigin) {
+          console.log('Retrying without crossOrigin...');
+          const retryImg = new Image();
+          retryImg.onload = () => {
+            canvas.width = retryImg.width;
+            canvas.height = retryImg.height;
+            drawingCanvas.width = retryImg.width;
+            drawingCanvas.height = retryImg.height;
+            setCanvasDimensions({ width: retryImg.width, height: retryImg.height });
+            ctx.drawImage(retryImg, 0, 0);
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            setCanvasHistory([imageData]);
+            setHistoryIndex(0);
+            setSelection(null);
+
+            // Auto-fit zoom on retry success
+            if (canvasContainerRef.current) {
+              const containerRect = canvasContainerRef.current.getBoundingClientRect();
+              const availableWidth = containerRect.width - 64;
+              const availableHeight = containerRect.height - 64;
+              const scaleX = availableWidth / retryImg.width;
+              const scaleY = availableHeight / retryImg.height;
+              const fitScale = Math.min(scaleX, scaleY, 1);
+              const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
+              setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
+            }
+          };
+          retryImg.onerror = () => {
+            console.error('Failed to load image even without crossOrigin');
+          };
+          retryImg.src = imageUrl;
+        }
+      };
+
       img.src = imageUrl;
     }
   }, [viewMode, imageUrl]);
@@ -1514,7 +1578,7 @@ function ImagesContent() {
         </div>
 
         {/* Canvas Area */}
-        <div className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0 overflow-auto">
+        <div ref={canvasContainerRef} className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0 overflow-auto">
           <div className="relative">
             <div className="bg-white rounded shadow-lg p-4">
               {/* Checkered background container */}
@@ -1603,6 +1667,33 @@ function ImagesContent() {
 
             {/* Zoom controls */}
             <div className="absolute bottom-2 right-2 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  // Calculate fit zoom
+                  if (canvasContainerRef.current && canvasDimensions) {
+                    const containerRect = canvasContainerRef.current.getBoundingClientRect();
+                    const availableWidth = containerRect.width - 64;
+                    const availableHeight = containerRect.height - 64;
+                    const scaleX = availableWidth / canvasDimensions.width;
+                    const scaleY = availableHeight / canvasDimensions.height;
+                    const fitScale = Math.min(scaleX, scaleY, 1);
+                    const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
+                    setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
+                  }
+                }}
+                className="btn btn-xs btn-ghost"
+                title="Fit to screen"
+              >
+                Fit
+              </button>
+              <button
+                onClick={() => setCanvasZoom(100)}
+                className="btn btn-xs btn-ghost"
+                title="Reset to 100%"
+              >
+                1:1
+              </button>
+              <div className="w-px h-4 bg-base-300"></div>
               <button
                 onClick={() => setCanvasZoom(Math.max(25, canvasZoom - 25))}
                 className="btn btn-xs btn-ghost btn-circle"
