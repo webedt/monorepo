@@ -2013,6 +2013,49 @@ function ImagesContent() {
               {canvasDimensions.width} x {canvasDimensions.height}
             </div>
           )}
+          <div className="flex-1 flex gap-1 ml-4">
+            {/* Drawing Tools */}
+            <button onClick={() => setCurrentTool('select')} className={`btn btn-xs btn-square ${currentTool === 'select' ? 'btn-primary' : 'btn-ghost'}`} title="Select (S)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h2v2H3V3zm4 0h2v2H7V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm0 4h2v2h-2V7zM3 7h2v2H3V7zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm4 0h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm0-4h2v2h-2v-2zm0-4h2v2h-2v-2z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('pencil')} className={`btn btn-xs btn-square ${currentTool === 'pencil' ? 'btn-primary' : 'btn-ghost'}`} title="Pencil (P)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('brush')} className={`btn btn-xs btn-square ${currentTool === 'brush' ? 'btn-primary' : 'btn-ghost'}`} title="Brush (B)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('fill')} className={`btn btn-xs btn-square ${currentTool === 'fill' ? 'btn-primary' : 'btn-ghost'}`} title="Fill (G)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M16.56 8.94L7.62 0 6.21 1.41l2.38 2.38-5.15 5.15c-.59.59-.59 1.54 0 2.12l5.5 5.5c.29.29.68.44 1.06.44s.77-.15 1.06-.44l5.5-5.5c.59-.58.59-1.53 0-2.12zM5.21 10L10 5.21 14.79 10H5.21zM19 11.5s-2 2.17-2 3.5c0 1.1.9 2 2 2s2-.9 2-2c0-1.33-2-3.5-2-3.5z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('eraser')} className={`btn btn-xs btn-square ${currentTool === 'eraser' ? 'btn-primary' : 'btn-ghost'}`} title="Eraser (E)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-6.36-6.36-3.54 3.53c-.78.79-.78 2.05 0 2.83z"/></svg>
+            </button>
+            <div className="divider divider-horizontal mx-1"></div>
+            <button onClick={() => setCurrentTool('rectangle')} className={`btn btn-xs btn-square ${currentTool === 'rectangle' ? 'btn-primary' : 'btn-ghost'}`} title="Rectangle (R)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" strokeWidth="2"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('circle')} className={`btn btn-xs btn-square ${currentTool === 'circle' ? 'btn-primary' : 'btn-ghost'}`} title="Circle (C)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" strokeWidth="2"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('line')} className={`btn btn-xs btn-square ${currentTool === 'line' ? 'btn-primary' : 'btn-ghost'}`} title="Line (L)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="4" y1="20" x2="20" y2="4" strokeWidth="2"/></svg>
+            </button>
+            <div className="divider divider-horizontal mx-1"></div>
+            <button onClick={handleUndo} disabled={historyIndex <= 0} className="btn btn-xs btn-square btn-ghost" title="Undo (Ctrl+Z)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+            </button>
+            <button onClick={handleRedo} disabled={historyIndex >= canvasHistory.length - 1} className="btn btn-xs btn-square btn-ghost" title="Redo (Ctrl+Y)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
+            </button>
+          </div>
+          <button className="btn btn-sm btn-primary gap-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+            Save
+          </button>
+          <button className="btn btn-sm btn-outline gap-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/></svg>
+            Export
+          </button>
         </div>
 
         {/* Canvas Area */}
@@ -2158,11 +2201,52 @@ function ImagesContent() {
             </div>
           </div>
         </div>
+
+        {/* AI Prompt Input */}
+        <div className="bg-base-100 border-t border-base-300 p-4 flex-shrink-0">
+          <form onSubmit={handleAiSubmit} className="max-w-4xl mx-auto">
+            <div className="relative">
+              <textarea
+                ref={promptInputRef}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="Describe changes... (e.g., 'Add glowing effect', 'Change to blue')"
+                rows={2}
+                className="textarea textarea-bordered w-full pr-24 resize-none text-sm"
+                disabled={isGenerating}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAiSubmit(e);
+                  }
+                }}
+              />
+              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                <div className="text-xs text-base-content/50 hidden sm:block">
+                  Gemini 2.5
+                </div>
+                <button
+                  type="submit"
+                  disabled={!aiPrompt.trim() || isGenerating}
+                  className={`btn btn-circle btn-sm ${isGenerating ? 'btn-warning' : 'btn-primary'}`}
+                >
+                  {isGenerating ? (
+                    <span className="loading loading-spinner loading-xs"></span>
+                  ) : (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       </div>
     );
   // Only recreate when these specific values change - NOT isDrawing or other transient state
   // Event handlers are accessed via refs so they don't need to be in dependencies
-  }, [canvasDimensions, canvasZoom, selectedFile?.name, currentTool, brushSize, selection, imageUrl, isLoadingImage]);
+  }, [canvasDimensions, canvasZoom, selectedFile?.name, currentTool, brushSize, selection, imageUrl, isLoadingImage, aiPrompt, isGenerating, handleAiSubmit, handleUndo, handleRedo, historyIndex, canvasHistory.length, setCurrentTool]);
 
   // Main content based on state
   const renderMainContent = () => {
