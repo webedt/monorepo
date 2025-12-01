@@ -444,9 +444,12 @@ function ImagesContent() {
       if (checkResponse.ok) {
         // File exists in storage - fetch it and convert to data URL
         // This avoids CORS issues when drawing to canvas
+        console.log('[loadImage] Fetching from storage:', storageUrl);
         const imageResponse = await fetch(storageUrl, { credentials: 'include' });
         const blob = await imageResponse.blob();
+        console.log('[loadImage] Got blob, size:', blob.size, 'type:', blob.type);
         const dataUrl = await blobToDataUrl(blob);
+        console.log('[loadImage] Converted to dataUrl, length:', dataUrl.length);
         setImageUrl(dataUrl);
       } else {
         // Fall back to GitHub API
@@ -717,9 +720,22 @@ function ImagesContent() {
 
   // Initialize canvas when entering edit mode with an image
   useEffect(() => {
-    if (viewMode === 'edit' && imageUrl && canvasRef.current && drawingLayerRef.current) {
+    if (viewMode !== 'edit' || !imageUrl) return;
+
+    console.log('[Canvas] Starting image load, imageUrl length:', imageUrl.length, 'starts with data:', imageUrl.startsWith('data:'));
+
+    // Use a small timeout to ensure canvas refs are mounted after view mode switch
+    const timeoutId = setTimeout(() => {
       const canvas = canvasRef.current;
       const drawingCanvas = drawingLayerRef.current;
+
+      if (!canvas || !drawingCanvas) {
+        console.warn('[Canvas] Canvas refs not ready yet');
+        return;
+      }
+
+      console.log('[Canvas] Canvas refs ready, creating Image object');
+
       const ctx = canvas.getContext('2d');
       const drawingCtx = drawingCanvas.getContext('2d');
 
@@ -734,6 +750,7 @@ function ImagesContent() {
       }
 
       img.onload = () => {
+        console.log('[Canvas] Image loaded successfully:', img.width, 'x', img.height);
         // Set canvas dimensions to match image
         canvas.width = img.width;
         canvas.height = img.height;
@@ -758,24 +775,24 @@ function ImagesContent() {
         // Calculate auto-fit zoom level if image is larger than container
         if (canvasContainerRef.current) {
           const containerRect = canvasContainerRef.current.getBoundingClientRect();
-          // Account for padding (p-4 = 16px on each side) and some margin
-          const availableWidth = containerRect.width - 64;
-          const availableHeight = containerRect.height - 64;
+          // Account for padding and the white card around the canvas
+          const availableWidth = containerRect.width - 80;
+          const availableHeight = containerRect.height - 80;
 
           // Calculate zoom needed to fit image in viewport
           const scaleX = availableWidth / img.width;
           const scaleY = availableHeight / img.height;
           const fitScale = Math.min(scaleX, scaleY, 1); // Don't zoom in past 100%
 
-          // Convert to percentage and round to nearest 25%
-          const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
-          // Ensure minimum zoom of 25%
-          setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
+          // Use exact percentage for better fit (round to 1 decimal place)
+          const fitZoom = Math.round(fitScale * 1000) / 10;
+          // Ensure minimum zoom of 10%
+          setCanvasZoom(Math.max(10, Math.min(fitZoom, 100)));
         }
       };
 
       img.onerror = (e) => {
-        console.error('Failed to load image onto canvas:', e);
+        console.error('[Canvas] Failed to load image onto canvas:', e, 'imageUrl:', imageUrl.substring(0, 100));
         // Try loading without crossOrigin as fallback
         if (img.crossOrigin) {
           console.log('Retrying without crossOrigin...');
@@ -796,13 +813,13 @@ function ImagesContent() {
             // Auto-fit zoom on retry success
             if (canvasContainerRef.current) {
               const containerRect = canvasContainerRef.current.getBoundingClientRect();
-              const availableWidth = containerRect.width - 64;
-              const availableHeight = containerRect.height - 64;
+              const availableWidth = containerRect.width - 80;
+              const availableHeight = containerRect.height - 80;
               const scaleX = availableWidth / retryImg.width;
               const scaleY = availableHeight / retryImg.height;
               const fitScale = Math.min(scaleX, scaleY, 1);
-              const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
-              setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
+              const fitZoom = Math.round(fitScale * 1000) / 10;
+              setCanvasZoom(Math.max(10, Math.min(fitZoom, 100)));
             }
           };
           retryImg.onerror = () => {
@@ -813,7 +830,9 @@ function ImagesContent() {
       };
 
       img.src = imageUrl;
-    }
+    }, 50); // Small delay to ensure canvas is mounted
+
+    return () => clearTimeout(timeoutId);
   }, [viewMode, imageUrl]);
 
   // Save canvas state to history
@@ -1609,13 +1628,13 @@ function ImagesContent() {
                 // Calculate fit zoom
                 if (canvasContainerRef.current && canvasDimensions) {
                   const containerRect = canvasContainerRef.current.getBoundingClientRect();
-                  const availableWidth = containerRect.width - 64;
-                  const availableHeight = containerRect.height - 64;
+                  const availableWidth = containerRect.width - 80;
+                  const availableHeight = containerRect.height - 80;
                   const scaleX = availableWidth / canvasDimensions.width;
                   const scaleY = availableHeight / canvasDimensions.height;
                   const fitScale = Math.min(scaleX, scaleY, 1);
-                  const fitZoom = Math.floor(fitScale * 100 / 25) * 25;
-                  setCanvasZoom(Math.max(25, Math.min(fitZoom, 100)));
+                  const fitZoom = Math.round(fitScale * 1000) / 10;
+                  setCanvasZoom(Math.max(10, Math.min(fitZoom, 100)));
                 }
               }}
               className="btn btn-xs btn-ghost"
@@ -1632,15 +1651,15 @@ function ImagesContent() {
             </button>
             <div className="w-px h-4 bg-base-300"></div>
             <button
-              onClick={() => setCanvasZoom(Math.max(25, canvasZoom - 25))}
+              onClick={() => setCanvasZoom(Math.max(10, canvasZoom - 10))}
               className="btn btn-xs btn-ghost btn-circle"
-              disabled={canvasZoom <= 25}
+              disabled={canvasZoom <= 10}
             >
               -
             </button>
-            <span className="min-w-[40px] text-center">{canvasZoom}%</span>
+            <span className="min-w-[48px] text-center">{Math.round(canvasZoom * 10) / 10}%</span>
             <button
-              onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 25))}
+              onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 10))}
               className="btn btn-xs btn-ghost btn-circle"
               disabled={canvasZoom >= 400}
             >
