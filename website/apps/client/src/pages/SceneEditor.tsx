@@ -10,7 +10,8 @@ interface SceneEditorContentProps {
 
 export function SceneEditorContent({ sessionId: sessionIdProp }: SceneEditorContentProps = {}) {
   const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
-  const _sessionId = sessionIdProp ?? sessionIdParam; // Available for future use
+  // sessionId available for future use
+  void (sessionIdProp ?? sessionIdParam);
   return <EditorPlaceholder />;
 }
 

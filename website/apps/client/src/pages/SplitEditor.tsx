@@ -1,7 +1,7 @@
 import { useParams, Navigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
-import SplitEditorLayout, { parseSplitRoute, type SplitViewPage } from '@/components/SplitEditorLayout';
+import SplitEditorLayout, { parseSplitRoute } from '@/components/SplitEditorLayout';
 import { sessionsApi, githubApi } from '@/lib/api';
 import { useAuthStore, useSplitViewStore } from '@/lib/store';
 import { useEffect } from 'react';
@@ -10,7 +10,7 @@ import type { GitHubRepository } from '@webedt/shared';
 export default function SplitEditor() {
   const { sessionId, splitPages } = useParams<{ sessionId?: string; splitPages: string }>();
   const { user } = useAuthStore();
-  const { setLastSplitPages } = useSplitViewStore();
+  const { setLastConfig } = useSplitViewStore();
 
   // Parse the split pages from the URL
   const parsedPages = splitPages ? parseSplitRoute(splitPages) : null;
@@ -32,12 +32,12 @@ export default function SplitEditor() {
   const session = sessionData?.data;
   const repositories = reposData?.data ?? [];
 
-  // Save the last split pages for this session
+  // Save the last split config for this session
   useEffect(() => {
-    if (sessionId && parsedPages) {
-      setLastSplitPages(sessionId, parsedPages[0], parsedPages[1]);
+    if (sessionId && parsedPages && splitPages) {
+      setLastConfig(sessionId, splitPages);
     }
-  }, [sessionId, parsedPages, setLastSplitPages]);
+  }, [sessionId, parsedPages, splitPages, setLastConfig]);
 
   // If invalid split route, redirect to the session's chat page
   if (!parsedPages) {

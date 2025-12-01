@@ -11,8 +11,8 @@ import SceneEditor from '@/pages/SceneEditor';
 import Preview from '@/pages/Preview';
 import Chat from '@/pages/Chat';
 
-// Map of page names to components
-const PAGE_COMPONENTS: Record<string, React.ComponentType<{ isEmbedded?: boolean }>> = {
+// Map of page names to components - using embedded prop
+const PAGE_COMPONENTS: Record<string, React.ComponentType<{ embedded?: boolean }>> = {
   code: Code,
   images: Images,
   sound: Sound,
@@ -55,7 +55,18 @@ interface SplitEditorLayoutProps {
 export default function SplitEditorLayout({ leftPage, rightPage }: SplitEditorLayoutProps) {
   const { sessionId } = useParams();
   const navigate = useNavigate();
-  const { splitPosition, splitOrientation, setSplitPosition } = useSplitViewStore();
+  const { getSplitPrefs, setSplitRatio, setOrientation } = useSplitViewStore();
+
+  // Get preferences for this session
+  const prefs = sessionId ? getSplitPrefs(sessionId) : { ratio: 0.5, orientation: 'horizontal' as const };
+  const splitPosition = prefs.ratio * 100; // Convert to percentage
+  const splitOrientation = prefs.orientation;
+
+  const setSplitPosition = (pos: number) => {
+    if (sessionId) {
+      setSplitRatio(sessionId, pos / 100); // Convert back to ratio
+    }
+  };
 
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -165,7 +176,7 @@ export default function SplitEditorLayout({ leftPage, rightPage }: SplitEditorLa
         {/* Panel content */}
         <div className="flex-1 overflow-hidden">
           <EmbeddedProvider isEmbedded>
-            <LeftComponent isEmbedded />
+            <LeftComponent embedded />
           </EmbeddedProvider>
         </div>
       </div>
@@ -211,7 +222,7 @@ export default function SplitEditorLayout({ leftPage, rightPage }: SplitEditorLa
         {/* Panel content */}
         <div className="flex-1 overflow-hidden">
           <EmbeddedProvider isEmbedded>
-            <RightComponent isEmbedded />
+            <RightComponent embedded />
           </EmbeddedProvider>
         </div>
       </div>

@@ -12,7 +12,8 @@ interface SoundContentProps {
 
 export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {}) {
   const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
-  const _sessionId = sessionIdProp ?? sessionIdParam; // Available for future use
+  // sessionId available for future use
+  void (sessionIdProp ?? sessionIdParam);
   const [viewMode, setViewMode] = useState<ViewMode>('timeline');
 
   return (
