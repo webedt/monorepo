@@ -71,28 +71,25 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
         // Try to fetch the preview URL to check if it's available
-        const response = await fetch(previewUrl, {
-          method: 'GET',
-          mode: 'cors',
+        // Use no-cors mode to avoid CORS errors in console - we only care if the server responds
+        await fetch(previewUrl, {
+          method: 'HEAD',
+          mode: 'no-cors',
           credentials: 'omit',
           signal: controller.signal,
         });
 
         clearTimeout(timeoutId);
 
-        // Check for error status codes
-        if (response.status === 404 || response.status === 502 || response.status === 503 || response.status === 504) {
-          setHasError(true);
-        } else if (response.ok) {
-          stopAutoRefresh();
-        }
+        // With no-cors mode, we get an opaque response (type: 'opaque')
+        // If we get here without error, the server responded - assume it's working
+        stopAutoRefresh();
       } catch (error: any) {
-        // CORS errors mean the server responded (which is good for our case)
-        // Network errors mean server is down
+        // Network errors mean server is down or unreachable
         if (error.name === 'AbortError' || error.message?.includes('network') || error.message?.includes('Failed to fetch')) {
           setHasError(true);
         } else {
-          // CORS error - server is responding, assume it's working
+          // Other errors - assume server is working
           stopAutoRefresh();
         }
       }

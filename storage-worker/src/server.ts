@@ -302,6 +302,221 @@ app.post('/api/storage-worker/sessions/bulk-delete', async (req: Request, res: R
 });
 
 /**
+ * List files in a session
+ * GET /api/storage-worker/sessions/.../files
+ * Note: Using regex to capture multi-segment session paths (e.g., owner/repo/branch)
+ */
+app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files$/, async (req: Request, res: Response) => {
+  const sessionPath = req.params[0];
+  res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  try {
+    // Check if session exists
+    const exists = await storageService.sessionExists(sessionPath);
+    if (!exists) {
+      res.status(404).json({
+        error: 'session_not_found',
+        message: `Session ${sessionPath} not found`,
+        containerId: CONTAINER_ID,
+      });
+      return;
+    }
+
+    const files = await storageService.listSessionFiles(sessionPath);
+
+    res.json({
+      sessionPath,
+      count: files.length,
+      files,
+      containerId: CONTAINER_ID,
+    });
+  } catch (error) {
+    console.error(`Error listing files in session ${sessionPath}:`, error);
+    res.status(500).json({
+      error: 'list_files_failed',
+      message: error instanceof Error ? error.message : 'Failed to list session files',
+      containerId: CONTAINER_ID,
+    });
+  }
+});
+
+/**
+ * Check if a specific file exists in a session
+ * HEAD /api/storage-worker/sessions/.../files/...
+ * Returns 200 if file exists, 404 if not
+ */
+app.head(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
+  const sessionPath = req.params[0];
+  const filePath = req.params[1];
+  res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!filePath) {
+    res.status(400).end();
+    return;
+  }
+
+  try {
+    // First check if session exists
+    const sessionExists = await storageService.sessionExists(sessionPath);
+    if (!sessionExists) {
+      res.status(404).end();
+      return;
+    }
+
+    // Try to get the file (we need to actually check if it exists in the tarball)
+    const result = await storageService.getSessionFile(sessionPath, filePath);
+
+    if (!result) {
+      res.status(404).end();
+      return;
+    }
+
+    // File exists, return headers
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', result.content.length);
+    res.status(200).end();
+  } catch (error) {
+    console.error(`Error checking file ${filePath} in session ${sessionPath}:`, error);
+    res.status(500).end();
+  }
+});
+
+/**
+ * Get a specific file from a session
+ * GET /api/storage-worker/sessions/.../files/...
+ * Note: Using regex to capture multi-segment session paths and file paths
+ * Returns raw file content with appropriate Content-Type
+ */
+app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
+  const sessionPath = req.params[0]; // e.g., owner/repo/branch
+  const filePath = req.params[1]; // The file path after /files/
+  res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!filePath) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'File path is required',
+      containerId: CONTAINER_ID,
+    });
+    return;
+  }
+
+  try {
+    const result = await storageService.getSessionFile(sessionPath, filePath);
+
+    if (!result) {
+      res.status(404).json({
+        error: 'file_not_found',
+        message: `File ${filePath} not found in session ${sessionPath}`,
+        containerId: CONTAINER_ID,
+      });
+      return;
+    }
+
+    // Set appropriate headers
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', result.content.length);
+    res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+
+    // Send raw content
+    res.send(result.content);
+  } catch (error) {
+    console.error(`Error getting file ${filePath} from session ${sessionPath}:`, error);
+    res.status(500).json({
+      error: 'get_file_failed',
+      message: error instanceof Error ? error.message : 'Failed to get file',
+      containerId: CONTAINER_ID,
+    });
+  }
+});
+
+/**
+ * Write/update a file in a session
+ * PUT /api/storage-worker/sessions/.../files/...
+ * Expects raw file content in the request body
+ */
+app.put(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, express.raw({ type: '*/*', limit: '50mb' }), async (req: Request, res: Response) => {
+  const sessionPath = req.params[0];
+  const filePath = req.params[1];
+  res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!filePath) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'File path is required',
+      containerId: CONTAINER_ID,
+    });
+    return;
+  }
+
+  try {
+    const content = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
+    await storageService.writeSessionFile(sessionPath, filePath, content);
+
+    res.json({
+      success: true,
+      sessionPath,
+      filePath,
+      size: content.length,
+      containerId: CONTAINER_ID,
+    });
+  } catch (error) {
+    console.error(`Error writing file ${filePath} to session ${sessionPath}:`, error);
+    res.status(500).json({
+      error: 'write_file_failed',
+      message: error instanceof Error ? error.message : 'Failed to write file',
+      containerId: CONTAINER_ID,
+    });
+  }
+});
+
+/**
+ * Delete a file from a session
+ * DELETE /api/storage-worker/sessions/.../files/...
+ */
+app.delete(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
+  const sessionPath = req.params[0];
+  const filePath = req.params[1];
+  res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!filePath) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'File path is required',
+      containerId: CONTAINER_ID,
+    });
+    return;
+  }
+
+  try {
+    const deleted = await storageService.deleteSessionFile(sessionPath, filePath);
+
+    if (!deleted) {
+      res.status(404).json({
+        error: 'file_not_found',
+        message: `File ${filePath} not found in session ${sessionPath}`,
+        containerId: CONTAINER_ID,
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      sessionPath,
+      filePath,
+      containerId: CONTAINER_ID,
+    });
+  } catch (error) {
+    console.error(`Error deleting file ${filePath} from session ${sessionPath}:`, error);
+    res.status(500).json({
+      error: 'delete_file_failed',
+      message: error instanceof Error ? error.message : 'Failed to delete file',
+      containerId: CONTAINER_ID,
+    });
+  }
+});
+
+/**
  * Catch-all for undefined routes
  */
 app.use((req: Request, res: Response) => {
@@ -318,6 +533,10 @@ app.use((req: Request, res: Response) => {
       'HEAD   /api/storage-worker/sessions/:sessionPath',
       'DELETE /api/storage-worker/sessions/:sessionPath',
       'POST   /api/storage-worker/sessions/bulk-delete',
+      'GET    /api/storage-worker/sessions/:sessionPath/files',
+      'GET    /api/storage-worker/sessions/:sessionPath/files/*',
+      'PUT    /api/storage-worker/sessions/:sessionPath/files/*',
+      'DELETE /api/storage-worker/sessions/:sessionPath/files/*',
     ],
     containerId: CONTAINER_ID,
   });
@@ -344,6 +563,10 @@ app.listen(PORT, () => {
   console.log('  HEAD   /api/storage-worker/sessions/:id                   - Check session exists');
   console.log('  DELETE /api/storage-worker/sessions/:id                   - Delete session');
   console.log('  POST   /api/storage-worker/sessions/bulk-delete           - Bulk delete sessions');
+  console.log('  GET    /api/storage-worker/sessions/:id/files             - List files in session');
+  console.log('  GET    /api/storage-worker/sessions/:id/files/*           - Get file from session');
+  console.log('  PUT    /api/storage-worker/sessions/:id/files/*           - Write file to session');
+  console.log('  DELETE /api/storage-worker/sessions/:id/files/*           - Delete file from session');
   console.log('='.repeat(60));
 });
 

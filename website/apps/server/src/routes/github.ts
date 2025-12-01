@@ -356,23 +356,48 @@ router.get('/repos/:owner/:repo/contents/*', requireAuth, async (req, res) => {
 
     // Handle file content (not directory)
     if (!Array.isArray(data) && data.type === 'file') {
-      // Decode base64 content
-      const content = data.encoding === 'base64' && data.content
-        ? Buffer.from(data.content, 'base64').toString('utf-8')
-        : data.content;
+      // Check if this is a binary file (image, etc.) based on extension
+      const ext = data.name.split('.').pop()?.toLowerCase() || '';
+      const binaryExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'svg', 'pdf', 'zip', 'tar', 'gz', 'woff', 'woff2', 'ttf', 'eot', 'mp3', 'mp4', 'wav', 'ogg', 'webm'];
+      const isBinary = binaryExtensions.includes(ext);
 
-      res.json({
-        success: true,
-        data: {
-          name: data.name,
-          path: data.path,
-          sha: data.sha,
-          size: data.size,
-          type: data.type,
-          content,
-          encoding: 'utf-8',
-        },
-      });
+      if (isBinary && data.encoding === 'base64' && data.content) {
+        // Keep base64 encoding for binary files
+        // Remove any whitespace/newlines that GitHub adds to the base64 content
+        const cleanContent = data.content.replace(/\s/g, '');
+
+        res.json({
+          success: true,
+          data: {
+            name: data.name,
+            path: data.path,
+            sha: data.sha,
+            size: data.size,
+            type: data.type,
+            content: cleanContent,
+            encoding: 'base64',
+            download_url: data.download_url,
+          },
+        });
+      } else {
+        // Decode base64 content to UTF-8 for text files
+        const content = data.encoding === 'base64' && data.content
+          ? Buffer.from(data.content, 'base64').toString('utf-8')
+          : data.content;
+
+        res.json({
+          success: true,
+          data: {
+            name: data.name,
+            path: data.path,
+            sha: data.sha,
+            size: data.size,
+            type: data.type,
+            content,
+            encoding: 'utf-8',
+          },
+        });
+      }
     } else if (Array.isArray(data)) {
       // Directory listing
       res.json({

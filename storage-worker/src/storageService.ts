@@ -1,7 +1,10 @@
 import { Client as MinioClient } from 'minio';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { Readable } from 'stream';
+import * as tar from 'tar';
+import { createGunzip } from 'zlib';
 
 export interface SessionMetadata {
   sessionPath: string; // Format: {owner}/{repo}/{branch}
@@ -266,5 +269,323 @@ export class StorageService {
       console.error(`Failed to delete sessions:`, error);
       throw error;
     }
+  }
+
+  /**
+   * List files in a session tarball
+   * Returns array of file paths and their metadata
+   */
+  async listSessionFiles(sessionPath: string): Promise<{ path: string; size: number; type: 'file' | 'directory' }[]> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const files: { path: string; size: number; type: 'file' | 'directory' }[] = [];
+
+    try {
+      const stream = await this.minio.getObject(this.bucket, objectName);
+
+      return new Promise((resolve, reject) => {
+        const gunzip = createGunzip();
+        const parser = new tar.Parser();
+
+        parser.on('entry', (entry) => {
+          files.push({
+            path: entry.path,
+            size: entry.size || 0,
+            type: entry.type === 'Directory' ? 'directory' : 'file',
+          });
+          entry.resume(); // Drain the entry
+        });
+
+        parser.on('end', () => {
+          resolve(files);
+        });
+
+        parser.on('error', (err) => {
+          reject(err);
+        });
+
+        stream.pipe(gunzip).pipe(parser);
+
+        gunzip.on('error', (err) => {
+          reject(err);
+        });
+      });
+    } catch (error) {
+      console.error(`Failed to list files in session ${sessionPath}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a specific file from a session tarball
+   * Returns the file content as a Buffer and its mime type
+   */
+  async getSessionFile(sessionPath: string, filePath: string): Promise<{ content: Buffer; mimeType: string } | null> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+
+    try {
+      const stream = await this.minio.getObject(this.bucket, objectName);
+
+      return new Promise((resolve, reject) => {
+        const gunzip = createGunzip();
+        const parser = new tar.Parser();
+        let found = false;
+        const chunks: Buffer[] = [];
+
+        // Normalize the file path (remove leading ./ or /)
+        const normalizedFilePath = filePath.replace(/^\.?\//, '');
+
+        parser.on('entry', (entry) => {
+          // Normalize entry path for comparison
+          const entryPath = entry.path.replace(/^\.?\//, '');
+
+          if (entryPath === normalizedFilePath && entry.type === 'File') {
+            found = true;
+            entry.on('data', (chunk: Buffer) => {
+              chunks.push(chunk);
+            });
+            entry.on('end', () => {
+              // Don't resolve here - wait for parser to finish
+            });
+          } else {
+            entry.resume(); // Skip this entry
+          }
+        });
+
+        parser.on('end', () => {
+          if (found && chunks.length > 0) {
+            const content = Buffer.concat(chunks);
+            const mimeType = this.getMimeType(filePath);
+            resolve({ content, mimeType });
+          } else {
+            resolve(null);
+          }
+        });
+
+        parser.on('error', (err) => {
+          reject(err);
+        });
+
+        stream.pipe(gunzip).pipe(parser);
+
+        gunzip.on('error', (err) => {
+          reject(err);
+        });
+      });
+    } catch (err: any) {
+      if (err.code === 'NotFound' || err.code === 'NoSuchKey') {
+        return null;
+      }
+      console.error(`Failed to get file ${filePath} from session ${sessionPath}:`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * Write/update a file in a session tarball
+   * Downloads the tarball, extracts, modifies the file, re-tarballs, and uploads
+   */
+  async writeSessionFile(sessionPath: string, filePath: string, content: Buffer): Promise<void> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const tmpDir = path.join(os.tmpdir(), `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+    const tarPath = path.join(tmpDir, 'session.tar.gz');
+    const extractDir = path.join(tmpDir, 'extracted');
+
+    try {
+      // Create temp directory
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      // Download existing tarball
+      await this.minio.fGetObject(this.bucket, objectName, tarPath);
+
+      // Extract tarball
+      await tar.extract({
+        file: tarPath,
+        cwd: extractDir,
+      });
+
+      // Normalize file path and write the new content
+      const normalizedFilePath = filePath.replace(/^\.?\//, '');
+      const fullFilePath = path.join(extractDir, normalizedFilePath);
+
+      // Ensure parent directory exists
+      const parentDir = path.dirname(fullFilePath);
+      fs.mkdirSync(parentDir, { recursive: true });
+
+      // Write the file
+      fs.writeFileSync(fullFilePath, content);
+
+      // Remove old tarball
+      fs.unlinkSync(tarPath);
+
+      // Create new tarball
+      await tar.create(
+        {
+          gzip: true,
+          file: tarPath,
+          cwd: extractDir,
+        },
+        ['.']
+      );
+
+      // Upload new tarball
+      await this.minio.fPutObject(this.bucket, objectName, tarPath);
+
+      console.log(`File ${filePath} written to session ${sessionPath}`);
+    } catch (err: any) {
+      if (err.code === 'NotFound' || err.code === 'NoSuchKey') {
+        // Session doesn't exist - create new tarball with just this file
+        fs.mkdirSync(extractDir, { recursive: true });
+
+        const normalizedFilePath = filePath.replace(/^\.?\//, '');
+        const fullFilePath = path.join(extractDir, normalizedFilePath);
+
+        const parentDir = path.dirname(fullFilePath);
+        fs.mkdirSync(parentDir, { recursive: true });
+
+        fs.writeFileSync(fullFilePath, content);
+
+        await tar.create(
+          {
+            gzip: true,
+            file: tarPath,
+            cwd: extractDir,
+          },
+          ['.']
+        );
+
+        await this.minio.fPutObject(this.bucket, objectName, tarPath);
+
+        console.log(`Created new session ${sessionPath} with file ${filePath}`);
+      } else {
+        console.error(`Failed to write file ${filePath} to session ${sessionPath}:`, err);
+        throw err;
+      }
+    } finally {
+      // Cleanup temp directory
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
+   * Delete a file from a session tarball
+   */
+  async deleteSessionFile(sessionPath: string, filePath: string): Promise<boolean> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const tmpDir = path.join(os.tmpdir(), `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+    const tarPath = path.join(tmpDir, 'session.tar.gz');
+    const extractDir = path.join(tmpDir, 'extracted');
+
+    try {
+      // Create temp directory
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      // Download existing tarball
+      await this.minio.fGetObject(this.bucket, objectName, tarPath);
+
+      // Extract tarball
+      await tar.extract({
+        file: tarPath,
+        cwd: extractDir,
+      });
+
+      // Normalize file path and delete
+      const normalizedFilePath = filePath.replace(/^\.?\//, '');
+      const fullFilePath = path.join(extractDir, normalizedFilePath);
+
+      if (!fs.existsSync(fullFilePath)) {
+        return false; // File doesn't exist
+      }
+
+      // Delete the file
+      fs.unlinkSync(fullFilePath);
+
+      // Remove old tarball
+      fs.unlinkSync(tarPath);
+
+      // Create new tarball
+      await tar.create(
+        {
+          gzip: true,
+          file: tarPath,
+          cwd: extractDir,
+        },
+        ['.']
+      );
+
+      // Upload new tarball
+      await this.minio.fPutObject(this.bucket, objectName, tarPath);
+
+      console.log(`File ${filePath} deleted from session ${sessionPath}`);
+      return true;
+    } catch (err: any) {
+      if (err.code === 'NotFound' || err.code === 'NoSuchKey') {
+        return false; // Session doesn't exist
+      }
+      console.error(`Failed to delete file ${filePath} from session ${sessionPath}:`, err);
+      throw err;
+    } finally {
+      // Cleanup temp directory
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
+   * Get MIME type based on file extension
+   */
+  private getMimeType(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      // Images
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+      '.bmp': 'image/bmp',
+      // Text/Code
+      '.html': 'text/html',
+      '.css': 'text/css',
+      '.js': 'application/javascript',
+      '.mjs': 'application/javascript',
+      '.ts': 'text/typescript',
+      '.tsx': 'text/typescript',
+      '.jsx': 'application/javascript',
+      '.json': 'application/json',
+      '.xml': 'application/xml',
+      '.txt': 'text/plain',
+      '.md': 'text/markdown',
+      // Fonts
+      '.woff': 'font/woff',
+      '.woff2': 'font/woff2',
+      '.ttf': 'font/ttf',
+      '.eot': 'application/vnd.ms-fontobject',
+      '.otf': 'font/otf',
+      // Audio/Video
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.ogg': 'audio/ogg',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      // Archives
+      '.zip': 'application/zip',
+      '.tar': 'application/x-tar',
+      '.gz': 'application/gzip',
+      // Other
+      '.pdf': 'application/pdf',
+      '.wasm': 'application/wasm',
+    };
+    return mimeTypes[ext] || 'application/octet-stream';
   }
 }

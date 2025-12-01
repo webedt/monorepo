@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
-import { githubApi, sessionsApi } from '@/lib/api';
+import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useEditorSessionStore } from '@/lib/store';
 import type { GitHubPullRequest } from '@webedt/shared';
 
@@ -221,6 +221,79 @@ const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
   return root.children;
 };
 
+// Transform storage-worker file list to our TreeNode format
+const transformStorageFiles = (files: { path: string; size: number; type: 'file' | 'directory' }[]): TreeNode[] => {
+  const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Filter out non-workspace files (like .session-metadata.json, .stream-events.jsonl)
+  // and extract paths from workspace/ prefix
+  const workspaceFiles = files
+    .filter(f => f.path.startsWith('workspace/') && !f.path.includes('.session-metadata') && !f.path.includes('.stream-events'))
+    .map(f => ({
+      ...f,
+      path: f.path.replace(/^workspace\//, ''), // Remove workspace/ prefix
+    }))
+    .filter(f => f.path && f.path !== ''); // Remove empty paths
+
+  // Sort items: directories first, then alphabetically
+  const sortedFiles = [...workspaceFiles].sort((a, b) => {
+    if (a.type === 'directory' && b.type !== 'directory') return -1;
+    if (a.type !== 'directory' && b.type === 'directory') return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  for (const item of sortedFiles) {
+    const pathParts = item.path.split('/').filter(p => p); // Filter empty parts
+    if (pathParts.length === 0) continue;
+
+    let currentLevel = root;
+
+    for (let i = 0; i < pathParts.length; i++) {
+      const part = pathParts[i];
+      const currentPath = pathParts.slice(0, i + 1).join('/');
+      const isLastPart = i === pathParts.length - 1;
+
+      if (isLastPart) {
+        if (item.type === 'file') {
+          // It's a file
+          currentLevel.children.push({
+            name: part,
+            path: currentPath,
+            type: 'file',
+            icon: getFileIcon(part),
+          });
+        } else {
+          // It's a directory - only add if not already exists
+          const existing = currentLevel.children.find(
+            c => c.type === 'folder' && c.name === part
+          );
+          if (!existing) {
+            currentLevel.children.push({
+              name: part,
+              path: currentPath,
+              type: 'folder',
+              children: [],
+            });
+          }
+        }
+      } else {
+        // Navigate to or create intermediate folder
+        let folder = currentLevel.children.find(
+          c => c.type === 'folder' && c.name === part
+        ) as FolderNode | undefined;
+
+        if (!folder) {
+          folder = { name: part, path: currentPath, type: 'folder', children: [] };
+          currentLevel.children.push(folder);
+        }
+        currentLevel = folder;
+      }
+    }
+  }
+
+  return root.children;
+};
+
 export default function Code() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const location = useLocation();
@@ -333,16 +406,40 @@ export default function Code() {
   }, [preSelectedSettings, repos, codeSession, sessionId]);
 
   // Fetch file tree when code session is active
+  // Try storage-worker first, fall back to GitHub if session not in storage
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['github-tree', codeSession?.owner, codeSession?.repo, codeSession?.branch],
-    queryFn: () => githubApi.getTree(codeSession!.owner, codeSession!.repo, codeSession!.branch),
+    queryKey: ['file-tree', codeSession?.owner, codeSession?.repo, codeSession?.branch],
+    queryFn: async () => {
+      const sessionPath = `${codeSession!.owner}/${codeSession!.repo}/${codeSession!.branch}`;
+
+      try {
+        // Try storage-worker first
+        const files = await storageWorkerApi.listFiles(sessionPath);
+        if (files && files.length > 0) {
+          console.log('[Code] Using storage-worker for file tree');
+          return { source: 'storage', files };
+        }
+      } catch (err) {
+        console.log('[Code] Storage-worker not available, falling back to GitHub');
+      }
+
+      // Fall back to GitHub
+      console.log('[Code] Using GitHub for file tree');
+      const response = await githubApi.getTree(codeSession!.owner, codeSession!.repo, codeSession!.branch);
+      return { source: 'github', data: response.data };
+    },
     enabled: !!codeSession,
   });
 
-  // Transform the GitHub tree into our TreeNode format
+  // Transform the tree into our TreeNode format
   const fileTree = useMemo(() => {
-    if (!treeData?.data?.tree) return [];
-    return transformGitHubTree(treeData.data.tree);
+    if (!treeData) return [];
+    if (treeData.source === 'storage' && treeData.files) {
+      return transformStorageFiles(treeData.files);
+    } else if (treeData.data?.tree) {
+      return transformGitHubTree(treeData.data.tree);
+    }
+    return [];
   }, [treeData]);
 
   // Query to check for existing PR (for code sessions)
@@ -496,6 +593,7 @@ export default function Code() {
   };
 
   // Load file content when a file is selected
+  // Uses storage-worker to fetch files from the session tarball
   const loadFileContent = useCallback(async (path: string) => {
     if (!codeSession) return;
 
@@ -508,38 +606,73 @@ export default function Code() {
 
     setIsLoadingFile(true);
     try {
-      const response = await githubApi.getFileContent(
-        codeSession.owner,
-        codeSession.repo,
-        path,
-        codeSession.branch
-      );
-      const content = response.data.content || '';
-      const sha = response.data.sha;
-      setFileContent(content);
+      // Build session path: owner/repo/branch
+      const sessionPath = `${codeSession.owner}/${codeSession.repo}/${codeSession.branch}`;
 
-      // Initialize edit history for this file
-      setEditHistory(prev => {
-        const next = new Map(prev);
-        if (!next.has(path)) {
-          next.set(path, [content]);
-        }
-        return next;
-      });
-      setHistoryIndex(prev => {
-        const next = new Map(prev);
-        if (!next.has(path)) {
-          next.set(path, 0);
-        }
-        return next;
-      });
+      // Fetch file content from storage-worker
+      // Files in storage are under workspace/ prefix
+      const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${path}`);
 
-      // Store the original content and sha for later comparison
-      setPendingChanges(prev => {
-        const next = new Map(prev);
-        next.set(path, { content, originalContent: content, sha });
-        return next;
-      });
+      if (content === null) {
+        // File not found in storage - might be a new session, fall back to GitHub
+        console.log(`[Code] File not in storage, falling back to GitHub: ${path}`);
+        const response = await githubApi.getFileContent(
+          codeSession.owner,
+          codeSession.repo,
+          path,
+          codeSession.branch
+        );
+        const githubContent = response.data.content || '';
+        setFileContent(githubContent);
+
+        // Initialize edit history for this file
+        setEditHistory(prev => {
+          const next = new Map(prev);
+          if (!next.has(path)) {
+            next.set(path, [githubContent]);
+          }
+          return next;
+        });
+        setHistoryIndex(prev => {
+          const next = new Map(prev);
+          if (!next.has(path)) {
+            next.set(path, 0);
+          }
+          return next;
+        });
+
+        // Store the original content for later comparison (no sha needed for storage-worker)
+        setPendingChanges(prev => {
+          const next = new Map(prev);
+          next.set(path, { content: githubContent, originalContent: githubContent });
+          return next;
+        });
+      } else {
+        setFileContent(content);
+
+        // Initialize edit history for this file
+        setEditHistory(prev => {
+          const next = new Map(prev);
+          if (!next.has(path)) {
+            next.set(path, [content]);
+          }
+          return next;
+        });
+        setHistoryIndex(prev => {
+          const next = new Map(prev);
+          if (!next.has(path)) {
+            next.set(path, 0);
+          }
+          return next;
+        });
+
+        // Store the original content for later comparison (no sha needed for storage-worker)
+        setPendingChanges(prev => {
+          const next = new Map(prev);
+          next.set(path, { content, originalContent: content });
+          return next;
+        });
+      }
     } catch (error: any) {
       console.error('Failed to load file:', error);
       setFileContent(`// Error loading file: ${error.message}`);

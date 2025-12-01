@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
-import { githubApi, sessionsApi } from '@/lib/api';
+import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import {
   useNewImagePreferencesStore,
   RESOLUTION_PRESETS,
@@ -390,6 +390,8 @@ function ImagesContent() {
   }, [treeData]);
 
   // Load image when a file is selected
+  // Uses storage-worker to fetch files directly from the session tarball
+  // Falls back to GitHub API if not in storage
   const loadImage = useCallback(async (path: string) => {
     if (!imageSession) return;
 
@@ -397,35 +399,52 @@ function ImagesContent() {
     setImageUrl(null);
 
     try {
-      const response = await githubApi.getFileContent(
-        imageSession.owner,
-        imageSession.repo,
-        path,
-        imageSession.branch
-      );
+      // Build the session path: owner/repo/branch
+      const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
 
-      // GitHub API returns base64 encoded content for binary files
-      if (response.data.content && response.data.encoding === 'base64') {
-        // Determine MIME type from extension
-        const ext = path.split('.').pop()?.toLowerCase();
-        const mimeTypes: Record<string, string> = {
-          png: 'image/png',
-          jpg: 'image/jpeg',
-          jpeg: 'image/jpeg',
-          gif: 'image/gif',
-          webp: 'image/webp',
-          svg: 'image/svg+xml',
-          ico: 'image/x-icon',
-          bmp: 'image/bmp',
-        };
-        const mimeType = mimeTypes[ext || ''] || 'image/png';
+      // Try to get from storage-worker first
+      // Files in storage are under workspace/ prefix
+      const storageUrl = storageWorkerApi.getFileUrl(sessionPath, `workspace/${path}`);
 
-        // Create data URL
-        const dataUrl = `data:${mimeType};base64,${response.data.content}`;
-        setImageUrl(dataUrl);
-      } else if (response.data.download_url) {
-        // Use download URL if available
-        setImageUrl(response.data.download_url);
+      // Check if the file exists in storage by making a HEAD request
+      const checkResponse = await fetch(storageUrl, { method: 'HEAD', credentials: 'include' });
+
+      if (checkResponse.ok) {
+        // File exists in storage, use it
+        setImageUrl(storageUrl);
+      } else {
+        // Fall back to GitHub API
+        console.log(`[Images] File not in storage, falling back to GitHub: ${path}`);
+        const response = await githubApi.getFileContent(
+          imageSession.owner,
+          imageSession.repo,
+          path,
+          imageSession.branch
+        );
+
+        // GitHub API returns base64 encoded content for binary files
+        if (response.data.content && response.data.encoding === 'base64') {
+          // Determine MIME type from extension
+          const ext = path.split('.').pop()?.toLowerCase();
+          const mimeTypes: Record<string, string> = {
+            png: 'image/png',
+            jpg: 'image/jpeg',
+            jpeg: 'image/jpeg',
+            gif: 'image/gif',
+            webp: 'image/webp',
+            svg: 'image/svg+xml',
+            ico: 'image/x-icon',
+            bmp: 'image/bmp',
+          };
+          const mimeType = mimeTypes[ext || ''] || 'image/png';
+
+          // Create data URL
+          const dataUrl = `data:${mimeType};base64,${response.data.content}`;
+          setImageUrl(dataUrl);
+        } else if (response.data.download_url) {
+          // Use download URL if available
+          setImageUrl(response.data.download_url);
+        }
       }
     } catch (error) {
       console.error('Failed to load image:', error);
@@ -461,6 +480,9 @@ function ImagesContent() {
 
       // Load the image if it's an image file
       if (node.fileType === 'image') {
+        // Set loading state immediately to avoid flash of placeholder
+        setIsLoadingImage(true);
+        setImageUrl(null);
         loadImage(node.path);
       } else {
         setImageUrl(null);
@@ -610,6 +632,9 @@ function ImagesContent() {
       }
 
       // Load the new image for preview
+      // Set loading state immediately to avoid flash of placeholder
+      setIsLoadingImage(true);
+      setImageUrl(null);
       loadImage(fullPath);
 
     } catch (error) {
