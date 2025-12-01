@@ -756,23 +756,19 @@ function ImagesContent() {
         canvas.height = img.height;
         drawingCanvas.width = img.width;
         drawingCanvas.height = img.height;
-        setCanvasDimensions({ width: img.width, height: img.height });
 
         // Draw image on base canvas
         ctx.drawImage(img, 0, 0);
+        console.log('[Canvas] Drew image to canvas');
 
         // Clear drawing layer
         drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 
         // Initialize history with current state
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        setCanvasHistory([imageData]);
-        setHistoryIndex(0);
-
-        // Reset selection
-        setSelection(null);
 
         // Calculate auto-fit zoom level if image is larger than container
+        let fitZoom = 100;
         if (canvasContainerRef.current) {
           const containerRect = canvasContainerRef.current.getBoundingClientRect();
           // Account for padding and the white card around the canvas
@@ -785,10 +781,31 @@ function ImagesContent() {
           const fitScale = Math.min(scaleX, scaleY, 1); // Don't zoom in past 100%
 
           // Use exact percentage for better fit (round to 1 decimal place)
-          const fitZoom = Math.round(fitScale * 1000) / 10;
+          fitZoom = Math.round(fitScale * 1000) / 10;
           // Ensure minimum zoom of 10%
-          setCanvasZoom(Math.max(10, Math.min(fitZoom, 100)));
+          fitZoom = Math.max(10, Math.min(fitZoom, 100));
         }
+
+        // Batch all state updates together to minimize re-renders
+        // Use a microtask to ensure canvas drawing completes first
+        queueMicrotask(() => {
+          setCanvasDimensions({ width: img.width, height: img.height });
+          setCanvasHistory([imageData]);
+          setHistoryIndex(0);
+          setSelection(null);
+          setCanvasZoom(fitZoom);
+
+          // Re-draw after state updates to ensure canvas isn't cleared by re-render
+          requestAnimationFrame(() => {
+            if (canvasRef.current) {
+              const ctx2 = canvasRef.current.getContext('2d');
+              if (ctx2 && canvasRef.current.width === img.width) {
+                ctx2.putImageData(imageData, 0, 0);
+                console.log('[Canvas] Re-drew image after state update');
+              }
+            }
+          });
+        });
       };
 
       img.onerror = (e) => {
@@ -834,6 +851,32 @@ function ImagesContent() {
 
     return () => clearTimeout(timeoutId);
   }, [viewMode, imageUrl]);
+
+  // Restore canvas from history after re-renders (since EditorContent is recreated each render)
+  useEffect(() => {
+    if (viewMode !== 'edit') return;
+    if (canvasHistory.length === 0 || historyIndex < 0) return;
+
+    const canvas = canvasRef.current;
+    const drawingCanvas = drawingLayerRef.current;
+    if (!canvas || !drawingCanvas) return;
+
+    // Only restore if canvas has correct dimensions
+    const currentImageData = canvasHistory[historyIndex];
+    if (canvas.width !== currentImageData.width || canvas.height !== currentImageData.height) {
+      // Set canvas dimensions first
+      canvas.width = currentImageData.width;
+      canvas.height = currentImageData.height;
+      drawingCanvas.width = currentImageData.width;
+      drawingCanvas.height = currentImageData.height;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.putImageData(currentImageData, 0, 0);
+      console.log('[Canvas] Restored from history after render');
+    }
+  }, [viewMode, canvasHistory, historyIndex, canvasDimensions]);
 
   // Save canvas state to history
   const saveToHistory = useCallback(() => {
