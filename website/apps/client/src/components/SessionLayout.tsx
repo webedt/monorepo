@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
+import SessionsSidebar from './SessionsSidebar';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/version';
 import type { GitHubRepository } from '@webedt/shared';
 import { truncateSessionName } from '@/lib/utils';
@@ -797,10 +798,17 @@ export default function SessionLayout({
       </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-h-0">
-        {children}
-      </main>
+      {/* Main Content - with sidebar */}
+      <div className="flex-1 flex min-h-0">
+        {/* Sessions Sidebar - Desktop only */}
+        <div className="hidden md:flex">
+          <SessionsSidebar />
+        </div>
+        {/* Main content area */}
+        <main className="flex-1 flex flex-col min-h-0 min-w-0">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

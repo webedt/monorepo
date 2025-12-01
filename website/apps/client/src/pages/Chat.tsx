@@ -492,14 +492,22 @@ export default function Chat({ sessionId: sessionIdProp, embedded = false }: Cha
       if (!isExecuting) {
         console.log('[Chat] Syncing isExecuting with session status:', session.status);
         setIsExecuting(true);
+        // Also sync the global worker store to keep stop/interrupt button working
+        if (currentSessionId) {
+          workerStore.startExecution(currentSessionId);
+          console.log('[Chat] Synced worker store for running session:', currentSessionId);
+        }
       }
     } else if (session?.status === 'completed' || session?.status === 'error') {
       if (isExecuting) {
         console.log('[Chat] Session completed, setting isExecuting to false');
         setIsExecuting(false);
+        // Also clear the global worker store
+        workerStore.stopExecution();
+        console.log('[Chat] Cleared worker store for completed/errored session');
       }
     }
-  }, [session?.status, isExecuting]);
+  }, [session?.status, isExecuting, currentSessionId]);
 
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
@@ -1004,7 +1012,7 @@ export default function Chat({ sessionId: sessionIdProp, embedded = false }: Cha
     }
   }, [sessionId]);
 
-  useEventSource(streamUrl, {
+  const { disconnect: disconnectStream } = useEventSource(streamUrl, {
     method: streamMethod,
     body: streamBody,
     onMessage: (event) => {
@@ -1511,9 +1519,7 @@ export default function Chat({ sessionId: sessionIdProp, embedded = false }: Cha
       });
 
       // Cancel the ongoing stream
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      disconnectStream();
 
       setIsExecuting(false);
       setStreamUrl(null);

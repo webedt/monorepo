@@ -241,6 +241,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   // Canvas and drawing state
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingLayerRef = useRef<HTMLCanvasElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [currentTool, setCurrentTool] = useState<DrawingTool>('pencil');
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(4);
@@ -416,9 +417,20 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     return counts;
   }, [treeData]);
 
+  // Helper to convert blob to data URL
+  const blobToDataUrl = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   // Load image when a file is selected
   // Uses storage-worker to fetch files directly from the session tarball
   // Falls back to GitHub API if not in storage
+  // Always converts to data URL to avoid CORS issues with canvas
   const loadImage = useCallback(async (path: string) => {
     if (!imageSession) return;
 
@@ -437,8 +449,15 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       const checkResponse = await fetch(storageUrl, { method: 'HEAD', credentials: 'include' });
 
       if (checkResponse.ok) {
-        // File exists in storage, use it
-        setImageUrl(storageUrl);
+        // File exists in storage - fetch it and convert to data URL
+        // This avoids CORS issues when drawing to canvas
+        console.log('[loadImage] Fetching from storage:', storageUrl);
+        const imageResponse = await fetch(storageUrl, { credentials: 'include' });
+        const blob = await imageResponse.blob();
+        console.log('[loadImage] Got blob, size:', blob.size, 'type:', blob.type);
+        const dataUrl = await blobToDataUrl(blob);
+        console.log('[loadImage] Converted to dataUrl, length:', dataUrl.length);
+        setImageUrl(dataUrl);
       } else {
         // Fall back to GitHub API
         console.log(`[Images] File not in storage, falling back to GitHub: ${path}`);
@@ -469,8 +488,16 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
           const dataUrl = `data:${mimeType};base64,${response.data.content}`;
           setImageUrl(dataUrl);
         } else if (response.data.download_url) {
-          // Use download URL if available
-          setImageUrl(response.data.download_url);
+          // Fetch the download URL and convert to data URL to avoid CORS issues
+          try {
+            const imageResponse = await fetch(response.data.download_url);
+            const blob = await imageResponse.blob();
+            const dataUrl = await blobToDataUrl(blob);
+            setImageUrl(dataUrl);
+          } catch {
+            // If fetching fails, use the URL directly (preview will work, but canvas may have issues)
+            setImageUrl(response.data.download_url);
+          }
         }
       }
     } catch (error) {
@@ -700,41 +727,178 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
   // Initialize canvas when entering edit mode with an image
   useEffect(() => {
-    if (viewMode === 'edit' && imageUrl && canvasRef.current && drawingLayerRef.current) {
+    if (viewMode !== 'edit' || !imageUrl) return;
+
+    console.log('[Canvas] Starting image load, imageUrl length:', imageUrl.length, 'starts with data:', imageUrl.startsWith('data:'));
+
+    // Use a small timeout to ensure canvas refs are mounted after view mode switch
+    const timeoutId = setTimeout(() => {
       const canvas = canvasRef.current;
       const drawingCanvas = drawingLayerRef.current;
+
+      if (!canvas || !drawingCanvas) {
+        console.warn('[Canvas] Canvas refs not ready yet');
+        return;
+      }
+
+      console.log('[Canvas] Canvas refs ready, creating Image object');
+
       const ctx = canvas.getContext('2d');
       const drawingCtx = drawingCanvas.getContext('2d');
 
       if (!ctx || !drawingCtx) return;
 
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+
+      // Only set crossOrigin for non-data URLs to avoid CORS issues
+      // Data URLs don't need CORS and setting it can cause issues
+      if (!imageUrl.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+
       img.onload = () => {
+        console.log('[Canvas] Image loaded successfully:', img.width, 'x', img.height);
         // Set canvas dimensions to match image
         canvas.width = img.width;
         canvas.height = img.height;
         drawingCanvas.width = img.width;
         drawingCanvas.height = img.height;
-        setCanvasDimensions({ width: img.width, height: img.height });
 
         // Draw image on base canvas
         ctx.drawImage(img, 0, 0);
+        console.log('[Canvas] Drew image to canvas');
 
         // Clear drawing layer
         drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 
         // Initialize history with current state
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        setCanvasHistory([imageData]);
-        setHistoryIndex(0);
 
-        // Reset selection
-        setSelection(null);
+        // Calculate auto-fit zoom level if image is larger than container
+        let fitZoom = 100;
+        if (canvasContainerRef.current) {
+          const containerRect = canvasContainerRef.current.getBoundingClientRect();
+          // Account for padding and the white card around the canvas
+          const availableWidth = containerRect.width - 80;
+          const availableHeight = containerRect.height - 80;
+
+          // Calculate zoom needed to fit image in viewport
+          const scaleX = availableWidth / img.width;
+          const scaleY = availableHeight / img.height;
+          const fitScale = Math.min(scaleX, scaleY, 1); // Don't zoom in past 100%
+
+          // Use exact percentage for better fit (round to 1 decimal place)
+          fitZoom = Math.round(fitScale * 1000) / 10;
+          // Ensure minimum zoom of 10%
+          fitZoom = Math.max(10, Math.min(fitZoom, 100));
+        }
+
+        // Batch all state updates together to minimize re-renders
+        // Use a microtask to ensure canvas drawing completes first
+        queueMicrotask(() => {
+          setCanvasDimensions({ width: img.width, height: img.height });
+          setCanvasHistory([imageData]);
+          setHistoryIndex(0);
+          setSelection(null);
+          setCanvasZoom(fitZoom);
+
+          // Re-draw after state updates to ensure canvas isn't cleared by re-render
+          requestAnimationFrame(() => {
+            if (canvasRef.current) {
+              const ctx2 = canvasRef.current.getContext('2d');
+              if (ctx2 && canvasRef.current.width === img.width) {
+                ctx2.putImageData(imageData, 0, 0);
+                console.log('[Canvas] Re-drew image after state update');
+              }
+            }
+          });
+        });
       };
+
+      img.onerror = (e) => {
+        console.error('[Canvas] Failed to load image onto canvas:', e, 'imageUrl:', imageUrl.substring(0, 100));
+        // Try loading without crossOrigin as fallback
+        if (img.crossOrigin) {
+          console.log('Retrying without crossOrigin...');
+          const retryImg = new Image();
+          retryImg.onload = () => {
+            canvas.width = retryImg.width;
+            canvas.height = retryImg.height;
+            drawingCanvas.width = retryImg.width;
+            drawingCanvas.height = retryImg.height;
+            setCanvasDimensions({ width: retryImg.width, height: retryImg.height });
+            ctx.drawImage(retryImg, 0, 0);
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            setCanvasHistory([imageData]);
+            setHistoryIndex(0);
+            setSelection(null);
+
+            // Auto-fit zoom on retry success
+            if (canvasContainerRef.current) {
+              const containerRect = canvasContainerRef.current.getBoundingClientRect();
+              const availableWidth = containerRect.width - 80;
+              const availableHeight = containerRect.height - 80;
+              const scaleX = availableWidth / retryImg.width;
+              const scaleY = availableHeight / retryImg.height;
+              const fitScale = Math.min(scaleX, scaleY, 1);
+              const fitZoom = Math.round(fitScale * 1000) / 10;
+              setCanvasZoom(Math.max(10, Math.min(fitZoom, 100)));
+            }
+          };
+          retryImg.onerror = () => {
+            console.error('Failed to load image even without crossOrigin');
+          };
+          retryImg.src = imageUrl;
+        }
+      };
+
       img.src = imageUrl;
-    }
+    }, 50); // Small delay to ensure canvas is mounted
+
+    return () => clearTimeout(timeoutId);
   }, [viewMode, imageUrl]);
+
+  // Track if we're in the middle of saving to prevent restore from interfering
+  const isSavingRef = useRef(false);
+
+  // Store event handlers in refs so canvas doesn't need to be recreated when handlers change
+  const handleCanvasMouseDownRef = useRef<(e: React.MouseEvent<HTMLCanvasElement>) => void>(() => {});
+  const handleCanvasMouseMoveRef = useRef<(e: React.MouseEvent<HTMLCanvasElement>) => void>(() => {});
+  const handleCanvasMouseUpRef = useRef<() => void>(() => {});
+  const handleCanvasMouseLeaveRef = useRef<() => void>(() => {});
+
+  // Restore canvas from history after re-renders (since EditorContent is recreated each render)
+  useEffect(() => {
+    if (viewMode !== 'edit') return;
+    if (canvasHistory.length === 0 || historyIndex < 0) return;
+    if (isSavingRef.current) return; // Don't restore while saving
+
+    // Small delay to ensure canvas is mounted after re-render
+    const timeoutId = setTimeout(() => {
+      const canvas = canvasRef.current;
+      const drawingCanvas = drawingLayerRef.current;
+      if (!canvas || !drawingCanvas) return;
+
+      const currentImageData = canvasHistory[historyIndex];
+
+      // Set canvas dimensions if needed
+      if (canvas.width !== currentImageData.width || canvas.height !== currentImageData.height) {
+        canvas.width = currentImageData.width;
+        canvas.height = currentImageData.height;
+        drawingCanvas.width = currentImageData.width;
+        drawingCanvas.height = currentImageData.height;
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.putImageData(currentImageData, 0, 0);
+        console.log('[Canvas] Restored from history after render');
+      }
+    }, 10);
+
+    return () => clearTimeout(timeoutId);
+  }, [viewMode, canvasHistory, historyIndex, canvasDimensions]);
 
   // Save canvas state to history
   const saveToHistory = useCallback(() => {
@@ -745,6 +909,9 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     const ctx = canvas.getContext('2d');
     const drawingCtx = drawingCanvas.getContext('2d');
     if (!ctx || !drawingCtx) return;
+
+    // Mark that we're saving to prevent restore from interfering
+    isSavingRef.current = true;
 
     // Merge drawing layer onto main canvas
     ctx.drawImage(drawingCanvas, 0, 0);
@@ -765,6 +932,11 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
     setCanvasHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
+
+    // Allow restore again after state updates complete
+    requestAnimationFrame(() => {
+      isSavingRef.current = false;
+    });
   }, [canvasHistory, historyIndex]);
 
   // Undo function
@@ -797,13 +969,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
   // Get mouse position relative to canvas
   const getCanvasPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = e.currentTarget;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    // Use canvasRef for dimensions since it's the source of truth
+    const baseCanvas = canvasRef.current;
+    const targetCanvas = e.currentTarget;
+    const rect = targetCanvas.getBoundingClientRect();
+
+    // Use base canvas dimensions for scaling (they should match, but be safe)
+    const canvasWidth = baseCanvas?.width || targetCanvas.width;
+    const canvasHeight = baseCanvas?.height || targetCanvas.height;
+
+    const scaleX = canvasWidth / rect.width;
+    const scaleY = canvasHeight / rect.height;
+
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      x: Math.round((e.clientX - rect.left) * scaleX),
+      y: Math.round((e.clientY - rect.top) * scaleY)
     };
   }, []);
 
@@ -881,7 +1061,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getCanvasPosition(e);
     const drawingCanvas = drawingLayerRef.current;
-    if (!drawingCanvas) return;
+    const baseCanvas = canvasRef.current;
+
+    console.log('[Draw] MouseDown at', pos, 'tool:', currentTool);
+    console.log('[Draw] Base canvas size:', baseCanvas?.width, 'x', baseCanvas?.height);
+    console.log('[Draw] Drawing canvas size:', drawingCanvas?.width, 'x', drawingCanvas?.height);
+
+    if (!drawingCanvas || !baseCanvas) return;
+
+    // Ensure drawing canvas has same dimensions as base canvas
+    if (drawingCanvas.width !== baseCanvas.width || drawingCanvas.height !== baseCanvas.height) {
+      console.log('[Draw] Fixing drawing canvas dimensions');
+      drawingCanvas.width = baseCanvas.width;
+      drawingCanvas.height = baseCanvas.height;
+    }
+
     const ctx = drawingCanvas.getContext('2d');
     if (!ctx) return;
 
@@ -922,8 +1116,12 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     // Draw initial point
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
+    ctx.fillStyle = primaryColor;
     ctx.fill();
   }, [currentTool, primaryColor, brushSize, brushOpacity, getCanvasPosition, floodFill]);
+
+  // Keep refs updated with latest handlers
+  handleCanvasMouseDownRef.current = handleCanvasMouseDown;
 
   // Handle mouse move on canvas
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -986,6 +1184,9 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     lastPointRef.current = pos;
   }, [isDrawing, isSelecting, currentTool, primaryColor, brushSize, brushOpacity, getCanvasPosition, drawLine, shapeStart]);
 
+  // Keep refs updated with latest handlers
+  handleCanvasMouseMoveRef.current = handleCanvasMouseMove;
+
   // Handle mouse up on canvas
   const handleCanvasMouseUp = useCallback(() => {
     if (isSelecting) {
@@ -1013,6 +1214,9 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     }
   }, [isDrawing, isSelecting, saveToHistory]);
 
+  // Keep refs updated with latest handlers
+  handleCanvasMouseUpRef.current = handleCanvasMouseUp;
+
   // Handle mouse leave on canvas
   const handleCanvasMouseLeave = useCallback(() => {
     if (isDrawing) {
@@ -1023,6 +1227,9 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       selectionStartRef.current = null;
     }
   }, [isDrawing, isSelecting, handleCanvasMouseUp]);
+
+  // Keep refs updated with latest handlers
+  handleCanvasMouseLeaveRef.current = handleCanvasMouseLeave;
 
   // Swap primary and secondary colors
   const swapColors = useCallback(() => {
@@ -1400,282 +1607,6 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
               )}
             </div>
           </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Editor Content (full editing mode)
-  const EditorContent = () => {
-    // Calculate display dimensions based on zoom
-    const displayWidth = canvasDimensions ? (canvasDimensions.width * canvasZoom / 100) : 384;
-    const displayHeight = canvasDimensions ? (canvasDimensions.height * canvasZoom / 100) : 384;
-
-    // Tool button helper
-    const ToolButton = ({ tool, title, children }: { tool: DrawingTool; title: string; children: React.ReactNode }) => (
-      <button
-        onClick={() => setCurrentTool(tool)}
-        className={`btn btn-xs btn-square ${currentTool === tool ? 'btn-primary' : 'btn-ghost'}`}
-        title={title}
-      >
-        {children}
-      </button>
-    );
-
-    return (
-      <div className="flex-1 flex flex-col">
-        {/* Toolbar */}
-        <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={() => setViewMode('preview')}
-            className="btn btn-ghost btn-sm btn-circle"
-            title="Back to preview"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-          </button>
-          <div className="text-sm font-semibold text-base-content/70">{selectedFile?.name}</div>
-          {canvasDimensions && (
-            <div className="text-xs text-base-content/50">
-              {canvasDimensions.width} x {canvasDimensions.height}
-            </div>
-          )}
-          <div className="flex-1 flex gap-1 ml-4">
-            {/* Drawing Tools */}
-            <ToolButton tool="select" title="Select (S)">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M3 3h2v2H3V3zm4 0h2v2H7V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm0 4h2v2h-2V7zM3 7h2v2H3V7zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm4 0h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm0-4h2v2h-2v-2zm0-4h2v2h-2v-2z"/>
-              </svg>
-            </ToolButton>
-            <ToolButton tool="pencil" title="Pencil (P)">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-              </svg>
-            </ToolButton>
-            <ToolButton tool="brush" title="Brush (B)">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/>
-              </svg>
-            </ToolButton>
-            <ToolButton tool="fill" title="Fill (G)">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M16.56 8.94L7.62 0 6.21 1.41l2.38 2.38-5.15 5.15c-.59.59-.59 1.54 0 2.12l5.5 5.5c.29.29.68.44 1.06.44s.77-.15 1.06-.44l5.5-5.5c.59-.58.59-1.53 0-2.12zM5.21 10L10 5.21 14.79 10H5.21zM19 11.5s-2 2.17-2 3.5c0 1.1.9 2 2 2s2-.9 2-2c0-1.33-2-3.5-2-3.5z"/>
-              </svg>
-            </ToolButton>
-            <ToolButton tool="eraser" title="Eraser (E)">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-6.36-6.36-3.54 3.53c-.78.79-.78 2.05 0 2.83z"/>
-              </svg>
-            </ToolButton>
-            <div className="divider divider-horizontal mx-1"></div>
-            <ToolButton tool="rectangle" title="Rectangle (R)">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <rect x="3" y="3" width="18" height="18" strokeWidth="2"/>
-              </svg>
-            </ToolButton>
-            <ToolButton tool="circle" title="Circle (C)">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="9" strokeWidth="2"/>
-              </svg>
-            </ToolButton>
-            <ToolButton tool="line" title="Line (L)">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <line x1="4" y1="20" x2="20" y2="4" strokeWidth="2"/>
-              </svg>
-            </ToolButton>
-            <div className="divider divider-horizontal mx-1"></div>
-            <button
-              onClick={handleUndo}
-              disabled={historyIndex <= 0}
-              className="btn btn-xs btn-square btn-ghost"
-              title="Undo (Ctrl+Z)"
-            >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/>
-              </svg>
-            </button>
-            <button
-              onClick={handleRedo}
-              disabled={historyIndex >= canvasHistory.length - 1}
-              className="btn btn-xs btn-square btn-ghost"
-              title="Redo (Ctrl+Y)"
-            >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/>
-              </svg>
-            </button>
-          </div>
-          <button className="btn btn-sm btn-primary gap-2">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
-            </svg>
-            Save
-          </button>
-          <button className="btn btn-sm btn-outline gap-2">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
-            </svg>
-            Export
-          </button>
-        </div>
-
-        {/* Canvas Area */}
-        <div className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0 overflow-auto">
-          <div className="relative">
-            <div className="bg-white rounded shadow-lg p-4">
-              {/* Checkered background container */}
-              <div
-                className="relative"
-                style={{
-                  width: displayWidth,
-                  height: displayHeight,
-                  backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
-                  backgroundSize: '16px 16px',
-                  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
-                }}
-              >
-                {/* Loading state */}
-                {isLoadingImage && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-base-200/50 z-20">
-                    <div className="flex flex-col items-center gap-2">
-                      <span className="loading loading-spinner loading-lg"></span>
-                      <span className="text-sm text-base-content/70">Loading image...</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Base canvas (image layer) */}
-                <canvas
-                  ref={canvasRef}
-                  className="absolute inset-0"
-                  style={{
-                    width: displayWidth,
-                    height: displayHeight,
-                    imageRendering: 'pixelated'
-                  }}
-                />
-
-                {/* Drawing layer canvas */}
-                <canvas
-                  ref={drawingLayerRef}
-                  className="absolute inset-0"
-                  style={{
-                    width: displayWidth,
-                    height: displayHeight,
-                    imageRendering: 'pixelated',
-                    cursor: currentTool === 'select' ? 'crosshair' :
-                            currentTool === 'fill' ? 'cell' :
-                            'crosshair'
-                  }}
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={handleCanvasMouseMove}
-                  onMouseUp={handleCanvasMouseUp}
-                  onMouseLeave={handleCanvasMouseLeave}
-                />
-
-                {/* Selection overlay */}
-                {selection && (
-                  <div
-                    className="absolute pointer-events-none border-2 border-dashed border-primary bg-primary/10"
-                    style={{
-                      left: selection.x * canvasZoom / 100,
-                      top: selection.y * canvasZoom / 100,
-                      width: selection.width * canvasZoom / 100,
-                      height: selection.height * canvasZoom / 100,
-                      animation: 'marching-ants 0.5s linear infinite'
-                    }}
-                  >
-                    {/* Selection handles */}
-                    <div className="absolute -left-1 -top-1 w-2 h-2 bg-primary border border-white"></div>
-                    <div className="absolute -right-1 -top-1 w-2 h-2 bg-primary border border-white"></div>
-                    <div className="absolute -left-1 -bottom-1 w-2 h-2 bg-primary border border-white"></div>
-                    <div className="absolute -right-1 -bottom-1 w-2 h-2 bg-primary border border-white"></div>
-                  </div>
-                )}
-
-                {/* Empty state when no image */}
-                {!imageUrl && !isLoadingImage && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center text-base-content/50">
-                      <svg className="w-16 h-16 mx-auto mb-2 opacity-50" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                      </svg>
-                      <p className="text-sm">No image loaded</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Zoom controls */}
-            <div className="absolute bottom-2 right-2 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
-              <button
-                onClick={() => setCanvasZoom(Math.max(25, canvasZoom - 25))}
-                className="btn btn-xs btn-ghost btn-circle"
-                disabled={canvasZoom <= 25}
-              >
-                -
-              </button>
-              <span className="min-w-[40px] text-center">{canvasZoom}%</span>
-              <button
-                onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 25))}
-                className="btn btn-xs btn-ghost btn-circle"
-                disabled={canvasZoom >= 400}
-              >
-                +
-              </button>
-            </div>
-
-            {/* Current tool indicator */}
-            <div className="absolute top-2 left-2 bg-base-100 px-2 py-1 rounded shadow text-xs text-base-content/70 flex items-center gap-1">
-              <span className="capitalize">{currentTool}</span>
-              {currentTool !== 'select' && currentTool !== 'fill' && (
-                <span className="text-base-content/50">• {brushSize}px</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* AI Prompt Input */}
-        <div className="bg-base-100 border-t border-base-300 p-4 flex-shrink-0">
-          <form onSubmit={handleAiSubmit} className="max-w-4xl mx-auto">
-            <div className="relative">
-              <textarea
-                ref={promptInputRef}
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="Describe changes... (e.g., 'Add glowing effect', 'Change to blue')"
-                rows={2}
-                className="textarea textarea-bordered w-full pr-24 resize-none text-sm"
-                disabled={isGenerating}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleAiSubmit(e);
-                  }
-                }}
-              />
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                <div className="text-xs text-base-content/50 hidden sm:block">
-                  Gemini 2.5
-                </div>
-                <button
-                  type="submit"
-                  disabled={!aiPrompt.trim() || isGenerating}
-                  className={`btn btn-circle btn-sm ${isGenerating ? 'btn-warning' : 'btn-primary'}`}
-                >
-                  {isGenerating ? (
-                    <span className="loading loading-spinner loading-xs"></span>
-                  ) : (
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
-          </form>
         </div>
       </div>
     );
@@ -2063,8 +1994,269 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     );
   };
 
+  // Memoized editor content to prevent canvas from being recreated on re-renders
+  // This is critical - without useMemo, every state change recreates the canvas elements
+  const editorContent = useMemo(() => {
+    // Calculate display dimensions based on zoom
+    const displayWidth = canvasDimensions ? (canvasDimensions.width * canvasZoom / 100) : 384;
+    const displayHeight = canvasDimensions ? (canvasDimensions.height * canvasZoom / 100) : 384;
+
+    return (
+      <div className="flex-1 flex flex-col">
+        {/* Toolbar */}
+        <div className="bg-base-100 border-b border-base-300 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setViewMode('preview')}
+            className="btn btn-ghost btn-sm btn-circle"
+            title="Back to preview"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+          </button>
+          <div className="text-sm font-semibold text-base-content/70">{selectedFile?.name}</div>
+          {canvasDimensions && (
+            <div className="text-xs text-base-content/50">
+              {canvasDimensions.width} x {canvasDimensions.height}
+            </div>
+          )}
+          <div className="flex-1 flex gap-1 ml-4">
+            {/* Drawing Tools */}
+            <button onClick={() => setCurrentTool('select')} className={`btn btn-xs btn-square ${currentTool === 'select' ? 'btn-primary' : 'btn-ghost'}`} title="Select (S)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h2v2H3V3zm4 0h2v2H7V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm0 4h2v2h-2V7zM3 7h2v2H3V7zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm4 0h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm0-4h2v2h-2v-2zm0-4h2v2h-2v-2z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('pencil')} className={`btn btn-xs btn-square ${currentTool === 'pencil' ? 'btn-primary' : 'btn-ghost'}`} title="Pencil (P)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('brush')} className={`btn btn-xs btn-square ${currentTool === 'brush' ? 'btn-primary' : 'btn-ghost'}`} title="Brush (B)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('fill')} className={`btn btn-xs btn-square ${currentTool === 'fill' ? 'btn-primary' : 'btn-ghost'}`} title="Fill (G)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M16.56 8.94L7.62 0 6.21 1.41l2.38 2.38-5.15 5.15c-.59.59-.59 1.54 0 2.12l5.5 5.5c.29.29.68.44 1.06.44s.77-.15 1.06-.44l5.5-5.5c.59-.58.59-1.53 0-2.12zM5.21 10L10 5.21 14.79 10H5.21zM19 11.5s-2 2.17-2 3.5c0 1.1.9 2 2 2s2-.9 2-2c0-1.33-2-3.5-2-3.5z"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('eraser')} className={`btn btn-xs btn-square ${currentTool === 'eraser' ? 'btn-primary' : 'btn-ghost'}`} title="Eraser (E)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-6.36-6.36-3.54 3.53c-.78.79-.78 2.05 0 2.83z"/></svg>
+            </button>
+            <div className="divider divider-horizontal mx-1"></div>
+            <button onClick={() => setCurrentTool('rectangle')} className={`btn btn-xs btn-square ${currentTool === 'rectangle' ? 'btn-primary' : 'btn-ghost'}`} title="Rectangle (R)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" strokeWidth="2"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('circle')} className={`btn btn-xs btn-square ${currentTool === 'circle' ? 'btn-primary' : 'btn-ghost'}`} title="Circle (C)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" strokeWidth="2"/></svg>
+            </button>
+            <button onClick={() => setCurrentTool('line')} className={`btn btn-xs btn-square ${currentTool === 'line' ? 'btn-primary' : 'btn-ghost'}`} title="Line (L)">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="4" y1="20" x2="20" y2="4" strokeWidth="2"/></svg>
+            </button>
+            <div className="divider divider-horizontal mx-1"></div>
+            <button onClick={handleUndo} disabled={historyIndex <= 0} className="btn btn-xs btn-square btn-ghost" title="Undo (Ctrl+Z)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+            </button>
+            <button onClick={handleRedo} disabled={historyIndex >= canvasHistory.length - 1} className="btn btn-xs btn-square btn-ghost" title="Redo (Ctrl+Y)">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
+            </button>
+          </div>
+          <button className="btn btn-sm btn-primary gap-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+            Save
+          </button>
+          <button className="btn btn-sm btn-outline gap-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/></svg>
+            Export
+          </button>
+        </div>
+
+        {/* Canvas Area */}
+        <div ref={canvasContainerRef} className="flex-1 flex items-center justify-center bg-base-200 p-4 min-h-0 overflow-auto relative">
+          {/* Zoom controls - positioned at top-right of canvas area */}
+          <div className="absolute top-2 right-2 z-10 bg-base-100 px-3 py-1 rounded-lg shadow text-sm text-base-content/70 flex items-center gap-2">
+            <button
+              onClick={() => {
+                // Calculate fit zoom
+                if (canvasContainerRef.current && canvasDimensions) {
+                  const containerRect = canvasContainerRef.current.getBoundingClientRect();
+                  const availableWidth = containerRect.width - 80;
+                  const availableHeight = containerRect.height - 80;
+                  const scaleX = availableWidth / canvasDimensions.width;
+                  const scaleY = availableHeight / canvasDimensions.height;
+                  const fitScale = Math.min(scaleX, scaleY, 1);
+                  const fitZoom = Math.round(fitScale * 1000) / 10;
+                  setCanvasZoom(Math.max(10, Math.min(fitZoom, 100)));
+                }
+              }}
+              className="btn btn-xs btn-ghost"
+              title="Fit to screen"
+            >
+              Fit
+            </button>
+            <button
+              onClick={() => setCanvasZoom(100)}
+              className="btn btn-xs btn-ghost"
+              title="Reset to 100%"
+            >
+              1:1
+            </button>
+            <div className="w-px h-4 bg-base-300"></div>
+            <button
+              onClick={() => setCanvasZoom(Math.max(10, canvasZoom - 10))}
+              className="btn btn-xs btn-ghost btn-circle"
+              disabled={canvasZoom <= 10}
+            >
+              -
+            </button>
+            <span className="min-w-[48px] text-center">{Math.round(canvasZoom * 10) / 10}%</span>
+            <button
+              onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 10))}
+              className="btn btn-xs btn-ghost btn-circle"
+              disabled={canvasZoom >= 400}
+            >
+              +
+            </button>
+          </div>
+
+          <div className="relative">
+            <div className="bg-white rounded shadow-lg p-4">
+              {/* Checkered background container */}
+              <div
+                className="relative"
+                style={{
+                  width: displayWidth,
+                  height: displayHeight,
+                  backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
+                  backgroundSize: '16px 16px',
+                  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
+                }}
+              >
+                {/* Loading state */}
+                {isLoadingImage && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-base-200/50 z-20">
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="loading loading-spinner loading-lg"></span>
+                      <span className="text-sm text-base-content/70">Loading image...</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Base canvas (image layer) */}
+                <canvas
+                  ref={canvasRef}
+                  className="absolute inset-0"
+                  style={{
+                    width: displayWidth,
+                    height: displayHeight,
+                    imageRendering: 'pixelated'
+                  }}
+                />
+
+                {/* Drawing layer canvas */}
+                <canvas
+                  ref={drawingLayerRef}
+                  className="absolute inset-0"
+                  style={{
+                    width: displayWidth,
+                    height: displayHeight,
+                    imageRendering: 'pixelated',
+                    cursor: currentTool === 'select' ? 'crosshair' :
+                            currentTool === 'fill' ? 'cell' :
+                            'crosshair'
+                  }}
+                  onMouseDown={(e) => handleCanvasMouseDownRef.current(e)}
+                  onMouseMove={(e) => handleCanvasMouseMoveRef.current(e)}
+                  onMouseUp={() => handleCanvasMouseUpRef.current()}
+                  onMouseLeave={() => handleCanvasMouseLeaveRef.current()}
+                />
+
+                {/* Selection overlay */}
+                {selection && (
+                  <div
+                    className="absolute pointer-events-none border-2 border-dashed border-primary bg-primary/10"
+                    style={{
+                      left: selection.x * canvasZoom / 100,
+                      top: selection.y * canvasZoom / 100,
+                      width: selection.width * canvasZoom / 100,
+                      height: selection.height * canvasZoom / 100,
+                      animation: 'marching-ants 0.5s linear infinite'
+                    }}
+                  >
+                    {/* Selection handles */}
+                    <div className="absolute -left-1 -top-1 w-2 h-2 bg-primary border border-white"></div>
+                    <div className="absolute -right-1 -top-1 w-2 h-2 bg-primary border border-white"></div>
+                    <div className="absolute -left-1 -bottom-1 w-2 h-2 bg-primary border border-white"></div>
+                    <div className="absolute -right-1 -bottom-1 w-2 h-2 bg-primary border border-white"></div>
+                  </div>
+                )}
+
+                {/* Empty state when no image */}
+                {!imageUrl && !isLoadingImage && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center text-base-content/50">
+                      <svg className="w-16 h-16 mx-auto mb-2 opacity-50" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                      </svg>
+                      <p className="text-sm">No image loaded</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Current tool indicator */}
+            <div className="absolute top-2 left-2 bg-base-100 px-2 py-1 rounded shadow text-xs text-base-content/70 flex items-center gap-1">
+              <span className="capitalize">{currentTool}</span>
+              {currentTool !== 'select' && currentTool !== 'fill' && (
+                <span className="text-base-content/50">• {brushSize}px</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* AI Prompt Input */}
+        <div className="bg-base-100 border-t border-base-300 p-4 flex-shrink-0">
+          <form onSubmit={handleAiSubmit} className="max-w-4xl mx-auto">
+            <div className="relative">
+              <textarea
+                ref={promptInputRef}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="Describe changes... (e.g., 'Add glowing effect', 'Change to blue')"
+                rows={2}
+                className="textarea textarea-bordered w-full pr-24 resize-none text-sm"
+                disabled={isGenerating}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAiSubmit(e);
+                  }
+                }}
+              />
+              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                <div className="text-xs text-base-content/50 hidden sm:block">
+                  Gemini 2.5
+                </div>
+                <button
+                  type="submit"
+                  disabled={!aiPrompt.trim() || isGenerating}
+                  className={`btn btn-circle btn-sm ${isGenerating ? 'btn-warning' : 'btn-primary'}`}
+                >
+                  {isGenerating ? (
+                    <span className="loading loading-spinner loading-xs"></span>
+                  ) : (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  // Only recreate when these specific values change - NOT isDrawing or other transient state
+  // Event handlers are accessed via refs so they don't need to be in dependencies
+  }, [canvasDimensions, canvasZoom, selectedFile?.name, currentTool, brushSize, selection, imageUrl, isLoadingImage, aiPrompt, isGenerating, handleAiSubmit, handleUndo, handleRedo, historyIndex, canvasHistory.length, setCurrentTool]);
+
   // Main content based on state
-  const MainContent = () => {
+  const renderMainContent = () => {
     // Show directory preview if a directory is selected
     if (selectedDirectory && !selectedFile) {
       return <DirectoryPreviewContent />;
@@ -2077,7 +2269,8 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     if (viewMode === 'preview') {
       return <PreviewContent />;
     }
-    return <EditorContent />;
+    // Use the memoized editor content
+    return editorContent;
   };
 
   // Repository Selector View
@@ -2239,7 +2432,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       return (
         <div className="h-full flex bg-base-300">
           <LeftSidebar />
-          <MainContent />
+          {renderMainContent()}
           <RightSidebar />
         </div>
       );
