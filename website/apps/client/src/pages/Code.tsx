@@ -434,7 +434,7 @@ export default function Code() {
   // Transform the tree into our TreeNode format
   const fileTree = useMemo(() => {
     if (!treeData) return [];
-    if (treeData.source === 'storage') {
+    if (treeData.source === 'storage' && treeData.files) {
       return transformStorageFiles(treeData.files);
     } else if (treeData.data?.tree) {
       return transformGitHubTree(treeData.data.tree);
