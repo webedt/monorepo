@@ -401,7 +401,12 @@ export default function NewSession() {
                         placeholder="Search repositories..."
                         value={repoSearchQuery}
                         onChange={(e) => setRepoSearchQuery(e.target.value)}
-                        onKeyDown={handleRepoKeyDown}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Escape' || e.key === 'Enter') {
+                            e.preventDefault();
+                            handleRepoKeyDown(e);
+                          }
+                        }}
                         className="input input-bordered input-sm w-full"
                         autoFocus
                       />
@@ -484,7 +489,12 @@ export default function NewSession() {
                         placeholder="Search branches..."
                         value={branchSearchQuery}
                         onChange={(e) => setBranchSearchQuery(e.target.value)}
-                        onKeyDown={handleBranchKeyDown}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Escape' || e.key === 'Enter') {
+                            e.preventDefault();
+                            handleBranchKeyDown(e);
+                          }
+                        }}
                         className="input input-bordered input-sm w-full"
                         autoFocus
                       />
