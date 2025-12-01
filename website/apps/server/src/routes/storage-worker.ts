@@ -211,4 +211,97 @@ router.post('/storage-worker/sessions/bulk-delete', async (req: Request, res: Re
   }
 });
 
+// List files in a session
+// Note: sessionId can be multi-segment (e.g., owner/repo/branch)
+router.get('/storage-worker/sessions/:sessionId/files', async (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+
+  try {
+    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionId}/files`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      const error = await response.text();
+      console.error('[StorageWorker] List files failed:', error);
+      res.status(response.status).json({ error: 'Failed to list files' });
+      return;
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('[StorageWorker] Error listing files:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get a specific file from a session
+// Note: Using wildcard to capture multi-segment paths
+router.get('/storage-worker/sessions/:sessionId/files/*', async (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const filePath = req.params[0]; // The file path after /files/
+
+  if (!filePath) {
+    res.status(400).json({ error: 'File path is required' });
+    return;
+  }
+
+  try {
+    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionId}/files/${filePath}`, {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        res.status(404).json({ error: 'File not found' });
+        return;
+      }
+      const error = await response.text();
+      console.error('[StorageWorker] Get file failed:', error);
+      res.status(response.status).json({ error: 'Failed to get file' });
+      return;
+    }
+
+    // Forward the response with appropriate headers
+    const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
+    const contentLength = response.headers.get('Content-Length');
+
+    res.setHeader('Content-Type', contentType);
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+
+    // Stream the response body
+    if (response.body) {
+      const reader = response.body.getReader();
+      const pump = async () => {
+        const { done, value } = await reader.read();
+        if (done) {
+          res.end();
+          return;
+        }
+        res.write(value);
+        await pump();
+      };
+      await pump();
+    } else {
+      res.end();
+    }
+  } catch (error) {
+    console.error('[StorageWorker] Error getting file:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+});
+
 export default router;

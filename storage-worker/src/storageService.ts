@@ -1,7 +1,10 @@
 import { Client as MinioClient } from 'minio';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { Readable } from 'stream';
+import * as tar from 'tar';
+import { createGunzip } from 'zlib';
 
 export interface SessionMetadata {
   sessionPath: string; // Format: {owner}/{repo}/{branch}
@@ -266,5 +269,164 @@ export class StorageService {
       console.error(`Failed to delete sessions:`, error);
       throw error;
     }
+  }
+
+  /**
+   * List files in a session tarball
+   * Returns array of file paths and their metadata
+   */
+  async listSessionFiles(sessionPath: string): Promise<{ path: string; size: number; type: 'file' | 'directory' }[]> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const files: { path: string; size: number; type: 'file' | 'directory' }[] = [];
+
+    try {
+      const stream = await this.minio.getObject(this.bucket, objectName);
+
+      return new Promise((resolve, reject) => {
+        const gunzip = createGunzip();
+        const parser = new tar.Parser();
+
+        parser.on('entry', (entry) => {
+          files.push({
+            path: entry.path,
+            size: entry.size || 0,
+            type: entry.type === 'Directory' ? 'directory' : 'file',
+          });
+          entry.resume(); // Drain the entry
+        });
+
+        parser.on('end', () => {
+          resolve(files);
+        });
+
+        parser.on('error', (err) => {
+          reject(err);
+        });
+
+        stream.pipe(gunzip).pipe(parser);
+
+        gunzip.on('error', (err) => {
+          reject(err);
+        });
+      });
+    } catch (error) {
+      console.error(`Failed to list files in session ${sessionPath}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a specific file from a session tarball
+   * Returns the file content as a Buffer and its mime type
+   */
+  async getSessionFile(sessionPath: string, filePath: string): Promise<{ content: Buffer; mimeType: string } | null> {
+    const objectName = `${sessionPath}/session.tar.gz`;
+
+    try {
+      const stream = await this.minio.getObject(this.bucket, objectName);
+
+      return new Promise((resolve, reject) => {
+        const gunzip = createGunzip();
+        const parser = new tar.Parser();
+        let found = false;
+        const chunks: Buffer[] = [];
+
+        // Normalize the file path (remove leading ./ or /)
+        const normalizedFilePath = filePath.replace(/^\.?\//, '');
+
+        parser.on('entry', (entry) => {
+          // Normalize entry path for comparison
+          const entryPath = entry.path.replace(/^\.?\//, '');
+
+          if (entryPath === normalizedFilePath && entry.type === 'File') {
+            found = true;
+            entry.on('data', (chunk: Buffer) => {
+              chunks.push(chunk);
+            });
+            entry.on('end', () => {
+              // Don't resolve here - wait for parser to finish
+            });
+          } else {
+            entry.resume(); // Skip this entry
+          }
+        });
+
+        parser.on('end', () => {
+          if (found && chunks.length > 0) {
+            const content = Buffer.concat(chunks);
+            const mimeType = this.getMimeType(filePath);
+            resolve({ content, mimeType });
+          } else {
+            resolve(null);
+          }
+        });
+
+        parser.on('error', (err) => {
+          reject(err);
+        });
+
+        stream.pipe(gunzip).pipe(parser);
+
+        gunzip.on('error', (err) => {
+          reject(err);
+        });
+      });
+    } catch (err: any) {
+      if (err.code === 'NotFound' || err.code === 'NoSuchKey') {
+        return null;
+      }
+      console.error(`Failed to get file ${filePath} from session ${sessionPath}:`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * Get MIME type based on file extension
+   */
+  private getMimeType(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      // Images
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+      '.bmp': 'image/bmp',
+      // Text/Code
+      '.html': 'text/html',
+      '.css': 'text/css',
+      '.js': 'application/javascript',
+      '.mjs': 'application/javascript',
+      '.ts': 'text/typescript',
+      '.tsx': 'text/typescript',
+      '.jsx': 'application/javascript',
+      '.json': 'application/json',
+      '.xml': 'application/xml',
+      '.txt': 'text/plain',
+      '.md': 'text/markdown',
+      // Fonts
+      '.woff': 'font/woff',
+      '.woff2': 'font/woff2',
+      '.ttf': 'font/ttf',
+      '.eot': 'application/vnd.ms-fontobject',
+      '.otf': 'font/otf',
+      // Audio/Video
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.ogg': 'audio/ogg',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      // Archives
+      '.zip': 'application/zip',
+      '.tar': 'application/x-tar',
+      '.gz': 'application/gzip',
+      // Other
+      '.pdf': 'application/pdf',
+      '.wasm': 'application/wasm',
+    };
+    return mimeTypes[ext] || 'application/octet-stream';
   }
 }

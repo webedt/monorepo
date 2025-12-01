@@ -400,6 +400,47 @@ export const storageWorkerApi = {
       return false;
     }
   },
+
+  // List all files in a session
+  listFiles: async (sessionPath: string): Promise<{ path: string; size: number; type: 'file' | 'directory' }[]> => {
+    const response = await fetchApi(`/api/storage-worker/sessions/${sessionPath}/files`);
+    return response.files || [];
+  },
+
+  // Get a file's raw URL (for images, etc.)
+  getFileUrl: (sessionPath: string, filePath: string): string => {
+    return `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+  },
+
+  // Get file content as blob
+  getFileBlob: async (sessionPath: string, filePath: string): Promise<Blob | null> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return await response.blob();
+    } catch {
+      return null;
+    }
+  },
+
+  // Get file content as text
+  getFileText: async (sessionPath: string, filePath: string): Promise<string | null> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return await response.text();
+    } catch {
+      return null;
+    }
+  },
 };
 
 // Execute API (SSE)
