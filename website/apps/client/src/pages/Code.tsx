@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useEditorSessionStore } from '@/lib/store';
+import { useEmbedded } from '@/contexts/EmbeddedContext';
 import type { GitHubPullRequest } from '@webedt/shared';
 
 // Debounce utility

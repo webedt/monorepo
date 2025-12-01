@@ -9,6 +9,7 @@ import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components
 import { ImageViewer } from '@/components/ImageViewer';
 import { ChatMessage } from '@/components/ChatMessage';
 import SessionLayout from '@/components/SessionLayout';
+import { useEmbedded } from '@/contexts/EmbeddedContext';
 import type { Message, GitHubRepository, ChatSession } from '@webedt/shared';
 
 // Helper to render text with clickable links

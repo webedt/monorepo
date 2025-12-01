@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { useAuthStore, useRepoStore, useSessionLastPageStore, type SessionPageName } from '@/lib/store';
+import { useAuthStore, useRepoStore, useSessionLastPageStore, useSplitViewStore, type SessionPageName, type SplitViewPageName } from '@/lib/store';
 import { authApi, sessionsApi, githubApi } from '@/lib/api';
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -9,6 +9,16 @@ import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/vers
 import type { GitHubRepository } from '@webedt/shared';
 import { truncateSessionName } from '@/lib/utils';
 import { TAGLINES } from '@/constants/taglines';
+
+// Split view page options
+const SPLIT_PAGES: { id: SplitViewPageName; label: string }[] = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'code', label: 'Code' },
+  { id: 'images', label: 'Images' },
+  { id: 'sound', label: 'Sounds' },
+  { id: 'scene-editor', label: 'Scenes' },
+  { id: 'preview', label: 'Preview' },
+];
 
 // Helper to extract page name from pathname
 function extractPageFromPath(pathname: string): SessionPageName | null {
@@ -63,10 +73,19 @@ export default function SessionLayout({
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showVersionDetails, setShowVersionDetails] = useState(false);
+  const [splitMenuOpen, setSplitMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const splitMenuRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [branchExpanded, setBranchExpanded] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
+
+  // Split view state
+  const { splitOrientation, toggleOrientation, getLastSplitPages } = useSplitViewStore();
+  const lastSplitPages = sessionId ? getLastSplitPages(sessionId) : null;
+
+  // Check if we're currently in split view
+  const isInSplitView = location.pathname.includes('/split/');
 
   // Tagline state - starts with random tagline, can be clicked to change
   const [taglineIndex, setTaglineIndex] = useState(() => Math.floor(Math.random() * TAGLINES.length));
@@ -167,6 +186,20 @@ export default function SessionLayout({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [userMenuOpen]);
+
+  // Close split menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (splitMenuRef.current && !splitMenuRef.current.contains(event.target as Node)) {
+        setSplitMenuOpen(false);
+      }
+    };
+
+    if (splitMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [splitMenuOpen]);
 
   // Track the last visited page for this session
   const { setLastPage } = useSessionLastPageStore();

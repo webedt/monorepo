@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi } from '@/lib/api';
 import SessionLayout from '@/components/SessionLayout';
+import { useEmbedded } from '@/contexts/EmbeddedContext';
 import type { GitHubPullRequest } from '@webedt/shared';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
@@ -232,10 +233,19 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   );
 }
 
-export default function Preview() {
+interface PreviewProps {
+  isEmbedded?: boolean;
+}
+
+export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewProps) {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Check if we're embedded via context (from split view) or prop
+  const { isEmbedded: isEmbeddedContext } = useEmbedded();
+  const isEmbedded = isEmbeddedProp || isEmbeddedContext;
+
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
@@ -524,12 +534,21 @@ export default function Preview() {
     </>
   );
 
+  // Wrap content conditionally - when embedded, skip SessionLayout wrapper
+  const Wrapper = isEmbedded ?
+    ({ children }: { children: React.ReactNode }) => <div className="h-full flex flex-col overflow-hidden bg-base-200">{children}</div> :
+    ({ children }: { children: React.ReactNode }) => (
+      <SessionLayout
+        titleActions={titleActions}
+        prActions={prActions}
+        session={session}
+      >
+        {children}
+      </SessionLayout>
+    );
+
   return (
-    <SessionLayout
-      titleActions={titleActions}
-      prActions={prActions}
-      session={session}
-    >
+    <Wrapper>
       {isLoading ? (
         <div className="h-full bg-base-300 flex items-center justify-center">
           <div className="text-center space-y-4">
@@ -596,7 +615,7 @@ export default function Preview() {
           <PreviewContent previewUrl={previewUrl} />
         </>
       )}
-    </SessionLayout>
+    </Wrapper>
   );
 }
 
