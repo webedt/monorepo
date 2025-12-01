@@ -407,3 +407,141 @@ export const useEditorSessionStore = create<EditorSessionStateStore>((set, get) 
     });
   },
 }));
+
+// ============================================================================
+// NEW IMAGE MODAL PREFERENCES
+// ============================================================================
+// This store persists user preferences for the "New Image" modal, including:
+// - Last used width/height
+// - Selected aspect ratio tab
+// - File extension type
+// ============================================================================
+
+const NEW_IMAGE_PREFS_STORAGE_KEY = 'newImagePreferences';
+
+export type AspectRatioTab = '1:1' | '4:3' | '16:9' | '3:2' | 'custom';
+export type ImageExtension = 'png' | 'jpg' | 'gif' | 'webp' | 'svg' | 'ico' | 'bmp';
+
+// Common resolution presets organized by aspect ratio
+export const RESOLUTION_PRESETS = {
+  '1:1': [
+    { width: 16, height: 16 },
+    { width: 32, height: 32 },
+    { width: 64, height: 64 },
+    { width: 128, height: 128 },
+    { width: 256, height: 256 },
+    { width: 512, height: 512 },
+    { width: 1024, height: 1024 },
+    { width: 2048, height: 2048 },
+    { width: 4096, height: 4096 },
+    { width: 8192, height: 8192 },
+  ],
+  '4:3': [
+    { width: 320, height: 240 },
+    { width: 640, height: 480 },
+    { width: 800, height: 600 },
+    { width: 1024, height: 768 },
+    { width: 1280, height: 960 },
+    { width: 1400, height: 1050 },
+    { width: 1600, height: 1200 },
+    { width: 2048, height: 1536 },
+  ],
+  '16:9': [
+    { width: 640, height: 360 },
+    { width: 854, height: 480 },
+    { width: 1280, height: 720 },
+    { width: 1920, height: 1080 },
+    { width: 2560, height: 1440 },
+    { width: 3840, height: 2160 },
+    { width: 7680, height: 4320 },
+  ],
+  '3:2': [
+    { width: 240, height: 160 },
+    { width: 480, height: 320 },
+    { width: 720, height: 480 },
+    { width: 1080, height: 720 },
+    { width: 1440, height: 960 },
+    { width: 2160, height: 1440 },
+    { width: 3000, height: 2000 },
+  ],
+  'custom': [], // Custom allows any size
+} as const;
+
+interface NewImagePreferences {
+  width: number;
+  height: number;
+  aspectRatioTab: AspectRatioTab;
+  extension: ImageExtension;
+}
+
+interface NewImagePreferencesState extends NewImagePreferences {
+  // Actions
+  setWidth: (width: number) => void;
+  setHeight: (height: number) => void;
+  setDimensions: (width: number, height: number) => void;
+  setAspectRatioTab: (tab: AspectRatioTab) => void;
+  setExtension: (ext: ImageExtension) => void;
+}
+
+// Load preferences from localStorage
+function loadNewImagePrefs(): NewImagePreferences {
+  const defaults: NewImagePreferences = {
+    width: 1024,
+    height: 1024,
+    aspectRatioTab: '1:1',
+    extension: 'png',
+  };
+
+  try {
+    const stored = localStorage.getItem(NEW_IMAGE_PREFS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return { ...defaults, ...parsed };
+    }
+  } catch (e) {
+    console.warn('[NewImagePrefs] Failed to load from localStorage:', e);
+  }
+  return defaults;
+}
+
+// Save preferences to localStorage
+function saveNewImagePrefs(prefs: NewImagePreferences) {
+  try {
+    localStorage.setItem(NEW_IMAGE_PREFS_STORAGE_KEY, JSON.stringify(prefs));
+  } catch (e) {
+    console.warn('[NewImagePrefs] Failed to save to localStorage:', e);
+  }
+}
+
+export const useNewImagePreferencesStore = create<NewImagePreferencesState>((set, get) => {
+  const initialPrefs = loadNewImagePrefs();
+
+  return {
+    ...initialPrefs,
+
+    setWidth: (width: number) => {
+      set({ width });
+      saveNewImagePrefs({ ...get(), width });
+    },
+
+    setHeight: (height: number) => {
+      set({ height });
+      saveNewImagePrefs({ ...get(), height });
+    },
+
+    setDimensions: (width: number, height: number) => {
+      set({ width, height });
+      saveNewImagePrefs({ ...get(), width, height });
+    },
+
+    setAspectRatioTab: (aspectRatioTab: AspectRatioTab) => {
+      set({ aspectRatioTab });
+      saveNewImagePrefs({ ...get(), aspectRatioTab });
+    },
+
+    setExtension: (extension: ImageExtension) => {
+      set({ extension });
+      saveNewImagePrefs({ ...get(), extension });
+    },
+  };
+});
