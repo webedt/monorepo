@@ -1048,7 +1048,21 @@ function ImagesContent() {
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getCanvasPosition(e);
     const drawingCanvas = drawingLayerRef.current;
-    if (!drawingCanvas) return;
+    const baseCanvas = canvasRef.current;
+
+    console.log('[Draw] MouseDown at', pos, 'tool:', currentTool);
+    console.log('[Draw] Base canvas size:', baseCanvas?.width, 'x', baseCanvas?.height);
+    console.log('[Draw] Drawing canvas size:', drawingCanvas?.width, 'x', drawingCanvas?.height);
+
+    if (!drawingCanvas || !baseCanvas) return;
+
+    // Ensure drawing canvas has same dimensions as base canvas
+    if (drawingCanvas.width !== baseCanvas.width || drawingCanvas.height !== baseCanvas.height) {
+      console.log('[Draw] Fixing drawing canvas dimensions');
+      drawingCanvas.width = baseCanvas.width;
+      drawingCanvas.height = baseCanvas.height;
+    }
+
     const ctx = drawingCanvas.getContext('2d');
     if (!ctx) return;
 
@@ -1089,6 +1103,7 @@ function ImagesContent() {
     // Draw initial point
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
+    ctx.fillStyle = primaryColor;
     ctx.fill();
   }, [currentTool, primaryColor, brushSize, brushOpacity, getCanvasPosition, floodFill]);
 
