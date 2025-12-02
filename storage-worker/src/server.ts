@@ -10,6 +10,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const CONTAINER_ID = os.hostname();
 
+// Build information (set at build time via Docker build args)
+const BUILD_COMMIT_SHA = process.env.BUILD_COMMIT_SHA || 'unknown';
+const BUILD_TIMESTAMP = process.env.BUILD_TIMESTAMP || 'unknown';
+const BUILD_IMAGE_TAG = process.env.BUILD_IMAGE_TAG || 'unknown';
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -45,6 +50,11 @@ app.get('/health', (req: Request, res: Response) => {
     status: 'ok',
     service: 'storage-worker',
     containerId: CONTAINER_ID,
+    build: {
+      commitSha: BUILD_COMMIT_SHA,
+      timestamp: BUILD_TIMESTAMP,
+      imageTag: BUILD_IMAGE_TAG,
+    },
     timestamp: new Date().toISOString(),
   });
 });

@@ -1,5 +1,10 @@
 FROM node:20-slim
 
+# Build arguments for version tracking
+ARG BUILD_COMMIT_SHA=unknown
+ARG BUILD_TIMESTAMP=unknown
+ARG BUILD_IMAGE_TAG=unknown
+
 # Install git (required for cloning repositories)
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
@@ -35,6 +40,9 @@ RUN git config --global user.email "worker@ai-coding-worker.local" && \
 ENV PORT=5000
 ENV WORKSPACE_DIR=/workspace
 ENV NODE_ENV=production
+ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
+ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
+ENV BUILD_IMAGE_TAG=$BUILD_IMAGE_TAG
 
 # Expose port
 EXPOSE 5000
