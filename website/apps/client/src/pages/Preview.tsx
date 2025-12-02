@@ -2,12 +2,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi } from '@/lib/api';
 import SessionLayout from '@/components/SessionLayout';
+import { useEmbedded } from '@/contexts/EmbeddedContext';
 import type { GitHubPullRequest } from '@webedt/shared';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const AUTO_REFRESH_INTERVAL = 5; // seconds
 const MAX_AUTO_REFRESH_ATTEMPTS = 60; // stop after 60 attempts (5 minutes)
 
+// Internal presentation component
 function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   const [iframeKey, setIframeKey] = useState(0);
   const [hasError, setHasError] = useState(false);
@@ -231,10 +233,19 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
   );
 }
 
-export default function Preview() {
+interface PreviewProps {
+  isEmbedded?: boolean;
+}
+
+export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewProps) {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Check if we're embedded via context (from split view) or prop
+  const { isEmbedded: isEmbeddedContext } = useEmbedded();
+  const isEmbedded = isEmbeddedProp || isEmbeddedContext;
+
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
@@ -523,12 +534,21 @@ export default function Preview() {
     </>
   );
 
+  // Wrap content conditionally - when embedded, skip SessionLayout wrapper
+  const Wrapper = isEmbedded ?
+    ({ children }: { children: React.ReactNode }) => <div className="h-full flex flex-col overflow-hidden bg-base-200">{children}</div> :
+    ({ children }: { children: React.ReactNode }) => (
+      <SessionLayout
+        titleActions={titleActions}
+        prActions={prActions}
+        session={session}
+      >
+        {children}
+      </SessionLayout>
+    );
+
   return (
-    <SessionLayout
-      titleActions={titleActions}
-      prActions={prActions}
-      session={session}
-    >
+    <Wrapper>
       {isLoading ? (
         <div className="h-full bg-base-300 flex items-center justify-center">
           <div className="text-center space-y-4">
@@ -595,6 +615,44 @@ export default function Preview() {
           <PreviewContent previewUrl={previewUrl} />
         </>
       )}
-    </SessionLayout>
+    </Wrapper>
   );
+}
+
+// Exported for split view - session-aware preview pane
+interface PreviewPaneProps {
+  sessionId?: string;
+}
+
+export function PreviewPane({ sessionId: sessionIdProp }: PreviewPaneProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  const sessionId = sessionIdProp ?? sessionIdParam;
+
+  // Load session details to get preview URL
+  const { data: sessionData, isLoading } = useQuery({
+    queryKey: ['session-details', sessionId],
+    queryFn: () => {
+      if (!sessionId || sessionId === 'new') {
+        throw new Error('Invalid session ID');
+      }
+      return sessionsApi.get(sessionId);
+    },
+    enabled: !!sessionId && sessionId !== 'new',
+  });
+
+  const session = sessionData?.data;
+  const previewUrl = (session as any)?.previewUrl || null;
+
+  if (isLoading) {
+    return (
+      <div className="h-full bg-base-300 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <span className="loading loading-spinner loading-lg text-primary"></span>
+          <p className="text-base-content/60">Loading preview...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <PreviewContent previewUrl={previewUrl} />;
 }

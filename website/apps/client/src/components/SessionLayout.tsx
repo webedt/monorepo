@@ -64,7 +64,9 @@ export default function SessionLayout({
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showVersionDetails, setShowVersionDetails] = useState(false);
+  const [splitMenuOpen, setSplitMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const splitMenuRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [branchExpanded, setBranchExpanded] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
@@ -169,6 +171,20 @@ export default function SessionLayout({
     }
   }, [userMenuOpen]);
 
+  // Close split menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (splitMenuRef.current && !splitMenuRef.current.contains(event.target as Node)) {
+        setSplitMenuOpen(false);
+      }
+    };
+
+    if (splitMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [splitMenuOpen]);
+
   // Track the last visited page for this session
   const { setLastPage } = useSessionLastPageStore();
   useEffect(() => {
@@ -240,7 +256,22 @@ export default function SessionLayout({
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>,
       disabled: location.pathname.includes('/preview'),
       onClick: handlePreviewClick
-    }
+    },
+    // Split view items - only shown when in a session
+    ...(sessionId && sessionId !== 'new' ? [
+      {
+        to: `/session/${sessionId}/code+preview`,
+        label: 'Split: Code + Preview',
+        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" /></svg>,
+        disabled: location.pathname.includes('/code+preview')
+      },
+      {
+        to: `/session/${sessionId}/images+preview`,
+        label: 'Split: Images + Preview',
+        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" /></svg>,
+        disabled: location.pathname.includes('/images+preview')
+      },
+    ] : [])
   ];
 
   return (
@@ -502,6 +533,57 @@ export default function SessionLayout({
                     </svg>
                     Preview
                   </Link>
+                )}
+
+                {/* Split View Dropdown - only show when in a session */}
+                {sessionId && sessionId !== 'new' && (
+                  <div className="relative group">
+                    <button
+                      className="flex items-center gap-1 px-2 py-2 text-sm font-medium rounded transition-colors text-base-content/70 hover:bg-base-200"
+                      title="Split View"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                      </svg>
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                    {/* Dropdown menu */}
+                    <div className="absolute left-0 top-full mt-1 w-48 bg-base-100 rounded-lg shadow-xl border border-base-300 py-1 z-50 hidden group-hover:block">
+                      <div className="px-3 py-1 text-xs text-base-content/50 font-medium">Split with...</div>
+                      <Link
+                        to={`/session/${sessionId}/code+preview`}
+                        className="block px-3 py-2 text-sm hover:bg-base-200 transition-colors"
+                      >
+                        Code + Preview
+                      </Link>
+                      <Link
+                        to={`/session/${sessionId}/images+preview`}
+                        className="block px-3 py-2 text-sm hover:bg-base-200 transition-colors"
+                      >
+                        Images + Preview
+                      </Link>
+                      <Link
+                        to={`/session/${sessionId}/chat+preview`}
+                        className="block px-3 py-2 text-sm hover:bg-base-200 transition-colors"
+                      >
+                        Chat + Preview
+                      </Link>
+                      <Link
+                        to={`/session/${sessionId}/code+chat`}
+                        className="block px-3 py-2 text-sm hover:bg-base-200 transition-colors"
+                      >
+                        Code + Chat
+                      </Link>
+                      <Link
+                        to={`/session/${sessionId}/images+code`}
+                        className="block px-3 py-2 text-sm hover:bg-base-200 transition-colors"
+                      >
+                        Images + Code
+                      </Link>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
