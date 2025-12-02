@@ -746,42 +746,25 @@ function ImagesContent() {
       };
       const mimeType = mimeTypes[ext] || 'image/png';
 
-      // Convert canvas to blob for storage and base64 for GitHub
+      // Convert canvas to data URL and extract base64 content
       const dataUrl = canvas.toDataURL(mimeType);
       const base64Content = dataUrl.split(',')[1];
 
-      // Convert data URL to blob for storage
-      const byteCharacters = atob(base64Content);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: mimeType });
+      // Save to GitHub only (storage is managed by the execution worker, not the client)
+      console.log('[Save] Saving to GitHub...', { path: selectedFile.path, branch: imageSession.branch });
 
-      // Save to both GitHub and storage in parallel
-      const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
-      const storagePath = `workspace/${selectedFile.path}`;
+      await githubApi.updateFile(
+        imageSession.owner,
+        imageSession.repo,
+        selectedFile.path,
+        {
+          content: base64Content,
+          branch: imageSession.branch,
+          message: `Update image: ${selectedFile.name}`,
+        }
+      );
 
-      console.log('[Save] Saving to GitHub and storage...', { sessionPath, storagePath, blobSize: blob.size, blobType: blob.type });
-
-      const [githubResult, storageResult] = await Promise.all([
-        // Save to GitHub
-        githubApi.updateFile(
-          imageSession.owner,
-          imageSession.repo,
-          selectedFile.path,
-          {
-            content: base64Content,
-            branch: imageSession.branch,
-            message: `Update image: ${selectedFile.name}`,
-          }
-        ),
-        // Save to storage for faster local access
-        storageWorkerApi.writeFile(sessionPath, storagePath, blob),
-      ]);
-
-      console.log('[Save] Results - GitHub:', !!githubResult, 'Storage:', storageResult);
+      console.log('[Save] GitHub save successful');
 
       // Update the imageUrl with the saved data URL so the canvas state is preserved
       // This prevents the image from disappearing after save
