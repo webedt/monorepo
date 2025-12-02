@@ -12,6 +12,11 @@ const DB_BASE_URL = process.env.DB_BASE_URL;
 // Container identification (Docker sets HOSTNAME to container ID)
 const containerId = process.env.HOSTNAME || 'unknown';
 
+// Build information (set at build time via Docker build args)
+const BUILD_COMMIT_SHA = process.env.BUILD_COMMIT_SHA || 'unknown';
+const BUILD_TIMESTAMP = process.env.BUILD_TIMESTAMP || 'unknown';
+const BUILD_IMAGE_TAG = process.env.BUILD_IMAGE_TAG || 'unknown';
+
 // Default coding assistant credentials from environment (optional fallback)
 const DEFAULT_CODING_ASSISTANT_PROVIDER = process.env.CODING_ASSISTANT_PROVIDER;
 const DEFAULT_CODING_ASSISTANT_AUTHENTICATION = process.env.CODING_ASSISTANT_AUTHENTICATION;
@@ -69,9 +74,15 @@ app.get('/health', (req: Request, res: Response) => {
   res.setHeader('X-Container-ID', containerId);
   res.json({
     status: 'ok',
+    service: 'ai-coding-worker',
     tmpDir: TMP_DIR,
     workerStatus,
     containerId,
+    build: {
+      commitSha: BUILD_COMMIT_SHA,
+      timestamp: BUILD_TIMESTAMP,
+      imageTag: BUILD_IMAGE_TAG,
+    },
     timestamp: new Date().toISOString(),
   });
 });

@@ -10,9 +10,27 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const CONTAINER_ID = os.hostname();
 
+// Build information (set at build time via Docker build args)
+const BUILD_COMMIT_SHA = process.env.BUILD_COMMIT_SHA || 'unknown';
+const BUILD_TIMESTAMP = process.env.BUILD_TIMESTAMP || 'unknown';
+const BUILD_IMAGE_TAG = process.env.BUILD_IMAGE_TAG || 'unknown';
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Path prefix normalization middleware
+// This handles cases where the /api/storage-worker prefix is stripped by a reverse proxy
+// or when clients connect directly without the prefix
+app.use((req, res, next) => {
+  // If the request path starts with /sessions and not /api/storage-worker/sessions,
+  // add the expected prefix for consistent routing
+  if (req.path.startsWith('/sessions') && !req.path.startsWith('/api/storage-worker/sessions')) {
+    req.url = '/api/storage-worker' + req.url;
+    console.log(`[PathNormalization] Normalized path to: ${req.url}`);
+  }
+  next();
+});
 
 // Create storage service
 const storageService = new StorageService();
@@ -32,6 +50,11 @@ app.get('/health', (req: Request, res: Response) => {
     status: 'ok',
     service: 'storage-worker',
     containerId: CONTAINER_ID,
+    build: {
+      commitSha: BUILD_COMMIT_SHA,
+      timestamp: BUILD_TIMESTAMP,
+      imageTag: BUILD_IMAGE_TAG,
+    },
     timestamp: new Date().toISOString(),
   });
 });
@@ -392,7 +415,13 @@ app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Requ
   const filePath = req.params[1]; // The file path after /files/
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
-  console.log(`[READ] session-id: ${sessionPath}, file: ${filePath}, container: ${CONTAINER_ID}`);
+  console.log(`[READ] Request details:`, {
+    originalUrl: req.originalUrl,
+    sessionPath,
+    filePath,
+    expectedMinioPath: `${sessionPath}/session.tar.gz`,
+    containerId: CONTAINER_ID,
+  });
 
   if (!filePath) {
     res.status(400).json({
@@ -404,12 +433,35 @@ app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Requ
   }
 
   try {
+    // First check if session exists
+    const sessionExists = await storageService.sessionExists(sessionPath);
+    console.log(`[READ] Session exists check: ${sessionPath} -> ${sessionExists}`);
+
+    if (!sessionExists) {
+      // List all sessions to help debug
+      const allSessions = await storageService.listSessions();
+      console.log(`[READ] Session not found. Available sessions:`, allSessions.map(s => s.sessionPath));
+      res.status(404).json({
+        error: 'session_not_found',
+        message: `Session ${sessionPath} not found`,
+        requestedSessionPath: sessionPath,
+        availableSessions: allSessions.map(s => s.sessionPath).slice(0, 10), // Show first 10
+        containerId: CONTAINER_ID,
+      });
+      return;
+    }
+
     const result = await storageService.getSessionFile(sessionPath, filePath);
 
     if (!result) {
+      // List files in the session to help debug
+      const files = await storageService.listSessionFiles(sessionPath);
+      console.log(`[READ] File not found in session. Available files:`, files.map(f => f.path).slice(0, 20));
       res.status(404).json({
         error: 'file_not_found',
         message: `File ${filePath} not found in session ${sessionPath}`,
+        requestedFilePath: filePath,
+        availableFiles: files.map(f => f.path).slice(0, 20), // Show first 20 files
         containerId: CONTAINER_ID,
       });
       return;

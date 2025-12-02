@@ -53,6 +53,14 @@ router.head(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Reque
 router.get(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
   const sessionPath = req.params[0];
   const filePath = req.params[1];
+  const targetUrl = `${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+
+  console.log('[StorageWorker] GET file request:', {
+    originalUrl: req.originalUrl,
+    sessionPath,
+    filePath,
+    targetUrl,
+  });
 
   if (!filePath) {
     res.status(400).json({ error: 'File path is required' });
@@ -60,12 +68,26 @@ router.get(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Reques
   }
 
   try {
-    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+    const response = await fetch(targetUrl, {
       method: 'GET',
+    });
+
+    console.log('[StorageWorker] GET file response:', {
+      status: response.status,
+      ok: response.ok,
+      targetUrl,
     });
 
     if (!response.ok) {
       if (response.status === 404) {
+        // Log more details about the 404
+        const errorBody = await response.text().catch(() => '');
+        console.log('[StorageWorker] GET file 404 details:', {
+          sessionPath,
+          filePath,
+          targetUrl,
+          errorBody: errorBody.substring(0, 500),
+        });
         res.status(404).json({ error: 'File not found' });
         return;
       }
