@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 're
 import { Link } from 'react-router-dom';
 import type { GitHubRepository, User } from '@webedt/shared';
 import { githubApi } from '@/lib/api';
-import { useVoiceRecordingStore, useWorkerStore } from '@/lib/store';
+import { useVoiceRecordingStore, useIsWorkerExecuting } from '@/lib/store';
 
 export interface ImageAttachment {
   id: string;
@@ -70,8 +70,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
   // Global worker state - use this as an additional check for execution status
   // This provides redundancy: if parent's isExecuting prop is wrong, we can detect it
-  const workerStore = useWorkerStore();
-  const isGloballyExecuting = !!workerStore.executingSessionId;
+  // Use the selector-based hook to ensure proper Zustand subscription and re-renders
+  const isGloballyExecuting = useIsWorkerExecuting();
 
   // Combine local prop with global state for maximum reliability
   // If EITHER source says we're executing, treat as executing
