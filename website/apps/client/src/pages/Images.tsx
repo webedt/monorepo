@@ -728,7 +728,7 @@ function ImagesContent() {
       };
       const mimeType = mimeTypes[ext] || 'image/png';
 
-      // Convert canvas to base64
+      // Convert canvas to base64 - keep the full data URL for local display
       const dataUrl = canvas.toDataURL(mimeType);
       const base64Content = dataUrl.split(',')[1];
 
@@ -744,8 +744,9 @@ function ImagesContent() {
         }
       );
 
-      // Refresh the file tree to get updated SHA
-      await queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+      // Update the imageUrl with the saved data URL so the canvas state is preserved
+      // This prevents the image from disappearing after save
+      setImageUrl(dataUrl);
 
       // Update history with the merged state
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -759,6 +760,9 @@ function ImagesContent() {
 
       // Clear selection
       setSelection(null);
+
+      // Refresh the file tree to get updated SHA (do this after updating local state)
+      await queryClient.invalidateQueries({ queryKey: ['github-tree'] });
 
       console.log('Image saved successfully');
     } catch (error) {
