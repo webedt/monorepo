@@ -1353,7 +1353,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       // Refresh the file tree
-      queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+      queryClient.invalidateQueries({ queryKey: ['file-tree'] });
 
       // Log the rename operation as a chat message (persisted to database)
       const itemTypeIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
@@ -1403,7 +1403,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       // Refresh the file tree
-      queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+      queryClient.invalidateQueries({ queryKey: ['file-tree'] });
 
       // Log the delete operation as a chat message (persisted to database)
       const deleteIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
@@ -1681,7 +1681,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           <span className="text-sm font-semibold uppercase tracking-wide">Explorer</span>
           <div className="flex gap-1">
             <button
-              onClick={() => queryClient.invalidateQueries({ queryKey: ['github-tree'] })}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['file-tree'] })}
               className="p-1 hover:bg-base-200 rounded"
               title="Refresh"
             >
