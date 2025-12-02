@@ -363,18 +363,8 @@ export const adminApi = {
 };
 
 // Storage Worker API
-// Note: Storage worker is not available on preview-only sites (github.etdofresh.com)
 export const storageWorkerApi = {
-  // Check if storage worker API is available
-  isAvailable: (): boolean => {
-    return !isPreviewOnlySite();
-  },
-
   listSessions: async () => {
-    if (isPreviewOnlySite()) {
-      console.log('[StorageWorker] Not available on preview site');
-      return { sessions: [], count: 0 };
-    }
     const response = await fetchApi('/api/storage-worker/sessions');
     // Map sessionPath to sessionId for compatibility with frontend
     if (response.sessions) {
@@ -389,9 +379,6 @@ export const storageWorkerApi = {
   },
 
   getSession: async (sessionId: string) => {
-    if (isPreviewOnlySite()) {
-      return null;
-    }
     const response = await fetchApi(`/api/storage-worker/sessions/${sessionId}`);
     // Map sessionPath to sessionId for compatibility
     return {
@@ -403,9 +390,6 @@ export const storageWorkerApi = {
   },
 
   sessionExists: async (sessionId: string): Promise<boolean> => {
-    if (isPreviewOnlySite()) {
-      return false;
-    }
     try {
       const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionId}`, {
         method: 'HEAD',
@@ -419,26 +403,17 @@ export const storageWorkerApi = {
 
   // List all files in a session
   listFiles: async (sessionPath: string): Promise<{ path: string; size: number; type: 'file' | 'directory' }[]> => {
-    if (isPreviewOnlySite()) {
-      return [];
-    }
     const response = await fetchApi(`/api/storage-worker/sessions/${sessionPath}/files`);
     return response.files || [];
   },
 
   // Get a file's raw URL (for images, etc.)
-  getFileUrl: (sessionPath: string, filePath: string): string | null => {
-    if (isPreviewOnlySite()) {
-      return null;
-    }
+  getFileUrl: (sessionPath: string, filePath: string): string => {
     return `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
   },
 
   // Get file content as blob
   getFileBlob: async (sessionPath: string, filePath: string): Promise<Blob | null> => {
-    if (isPreviewOnlySite()) {
-      return null;
-    }
     try {
       const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
         credentials: 'include',
@@ -454,11 +429,6 @@ export const storageWorkerApi = {
 
   // Get file content as text
   getFileText: async (sessionPath: string, filePath: string): Promise<string | null> => {
-    if (isPreviewOnlySite()) {
-      console.log(`[StorageWorker] Skipping - not available on preview site`);
-      return null;
-    }
-
     const url = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
 
     console.log(`[StorageWorker] getFileText request:`, {
@@ -497,11 +467,6 @@ export const storageWorkerApi = {
 
   // Write/update a file in a session
   writeFile: async (sessionPath: string, filePath: string, content: string | Blob): Promise<boolean> => {
-    if (isPreviewOnlySite()) {
-      console.log(`[StorageWorker] writeFile skipped - not available on preview site`);
-      return false;
-    }
-
     const body = typeof content === 'string' ? content : content;
     const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
     const contentSize = typeof content === 'string' ? content.length : content.size;
@@ -612,9 +577,6 @@ export const storageWorkerApi = {
 
   // Delete a file from a session
   deleteFile: async (sessionPath: string, filePath: string): Promise<boolean> => {
-    if (isPreviewOnlySite()) {
-      return false;
-    }
     try {
       const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
         method: 'DELETE',
