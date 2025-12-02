@@ -2333,6 +2333,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                 className="btn btn-error"
                 onClick={handleDelete}
                 disabled={isOperating}
+                autoFocus
               >
                 {isOperating ? (
                   <>
