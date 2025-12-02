@@ -64,22 +64,22 @@ jobs:
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          APPLICATION_ID: ${{ vars.DOKPLOY_STORAGE_WORKER_APP_ID }}
+          COMPOSE_ID: ${{ vars.DOKPLOY_STORAGE_WORKER_COMPOSE_ID }}
         run: |
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
           echo "🚀 Deploying storage-worker to Dokploy..."
 
-          # Trigger deployment using tRPC endpoint
+          # Trigger deployment using tRPC endpoint (compose.deploy for stack deployments)
           RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
-            "${DOKPLOY_URL}/api/trpc/application.deploy" \
+            "${DOKPLOY_URL}/api/trpc/compose.deploy" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \
             -H "x-api-key: ${DOKPLOY_API_KEY}" \
             -d "{
               \"json\": {
-                \"applicationId\": \"${APPLICATION_ID}\"
+                \"composeId\": \"${COMPOSE_ID}\"
               }
             }")
 
@@ -90,7 +90,7 @@ jobs:
 
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
             echo "✅ Deployment triggered successfully!"
-            echo "Application ID: ${APPLICATION_ID}"
+            echo "Compose ID: ${COMPOSE_ID}"
           else
             echo "❌ Deployment failed with status code: ${HTTP_CODE}"
             echo "Response: ${BODY}"
