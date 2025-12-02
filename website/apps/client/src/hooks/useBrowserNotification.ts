@@ -134,8 +134,6 @@ export function useBrowserNotification(): UseBrowserNotificationReturn {
     return showNotification(title, {
       body,
       tag: sessionId ? `session-${sessionId}` : 'session-completed',
-      // Prevent duplicate notifications for the same session
-      renotify: false,
     });
   }, [showNotification]);
 
