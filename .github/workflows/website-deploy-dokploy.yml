@@ -323,7 +323,6 @@ jobs:
             echo "  - Auto Deploy: disabled (GitHub Actions will trigger deployments)"
 
             # Create new application (with server ID for cloud provider)
-            # Note: autoDeploy is set to false to prevent double deployments (GitHub Actions handles deploys)
             CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
               "${DOKPLOY_URL}/api/trpc/application.create" \
               -H 'accept: application/json' \
@@ -334,8 +333,7 @@ jobs:
                   \"name\": \"${APP_NAME}\",
                   \"projectId\": \"${DOKPLOY_PROJECT_ID}\",
                   \"environmentId\": \"${DOKPLOY_ENVIRONMENT_ID}\",
-                  \"serverId\": \"${DOKPLOY_SERVER_ID}\",
-                  \"autoDeploy\": false
+                  \"serverId\": \"${DOKPLOY_SERVER_ID}\"
                 }
               }")
 
@@ -346,6 +344,27 @@ jobs:
               APP_ID=$(echo "$CREATE_BODY" | jq -r '.result.data.json.applicationId // .result.data.applicationId // .applicationId')
               echo "✅ Application created successfully: ${APP_ID}"
               echo "app_created=true" >> $GITHUB_OUTPUT
+
+              # Immediately disable autoDeploy to prevent race condition with GitHub webhook
+              echo "🔒 Disabling autoDeploy to prevent double deployments..."
+              AUTODEPLOY_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+                "${DOKPLOY_URL}/api/trpc/application.update" \
+                -H 'accept: application/json' \
+                -H 'Content-Type: application/json' \
+                -H "x-api-key: ${DOKPLOY_API_KEY}" \
+                -d "{
+                  \"json\": {
+                    \"applicationId\": \"${APP_ID}\",
+                    \"autoDeploy\": false
+                  }
+                }")
+
+              AUTODEPLOY_HTTP_CODE=$(echo "$AUTODEPLOY_RESPONSE" | tail -n1)
+              if [ "$AUTODEPLOY_HTTP_CODE" -ge 200 ] && [ "$AUTODEPLOY_HTTP_CODE" -lt 300 ]; then
+                echo "✅ autoDeploy disabled successfully"
+              else
+                echo "⚠️  Warning: Failed to disable autoDeploy (HTTP ${AUTODEPLOY_HTTP_CODE})"
+              fi
             else
               echo "❌ Failed to create application (HTTP ${CREATE_HTTP_CODE})"
               echo "Response: ${CREATE_BODY}"
