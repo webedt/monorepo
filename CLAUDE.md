@@ -106,6 +106,89 @@ New feature implementation
 - **Optimize** - Improve performance
 - **Document** - Add or update documentation
 
+## File Management Architecture
+
+**CRITICAL REQUIREMENT:** All file read and write operations MUST go through the **Storage Worker** service.
+
+### Storage Worker as Primary File Interface
+
+The Storage Worker (`/storage-worker`) is the **single source of truth** for all file operations within sessions:
+
+| Operation | Use Storage Worker | Use GitHub API |
+|-----------|-------------------|----------------|
+| Read file content | ✅ Yes | ❌ No |
+| Write/update file | ✅ Yes | ❌ No |
+| List files | ✅ Yes | ❌ No (fallback only) |
+| Delete file | ✅ Yes | ❌ No |
+| Create commits | ❌ No | ✅ Yes |
+| Create PRs | ❌ No | ✅ Yes |
+| Branch operations | ❌ No | ✅ Yes |
+| AI coding execution | N/A | Via ai-coding-worker |
+
+### Session Path Format
+
+Storage worker uses session paths in the format: `{owner}/{repo}/{branch}`
+
+Example: `webedt/monorepo/webedt/feature-branch`
+
+### Storage Worker API Endpoints
+
+```
+GET    /api/storage-worker/sessions/:sessionPath/files           - List all files
+GET    /api/storage-worker/sessions/:sessionPath/files/*         - Read file content
+PUT    /api/storage-worker/sessions/:sessionPath/files/*         - Write/update file
+DELETE /api/storage-worker/sessions/:sessionPath/files/*         - Delete file
+HEAD   /api/storage-worker/sessions/:sessionPath/files/*         - Check if file exists
+```
+
+### On-Demand Session Creation
+
+Sessions are created automatically when you write a file to a non-existent session. No explicit "create session" call is needed.
+
+### Frontend API Usage (Website)
+
+```typescript
+import { storageWorkerApi } from '@/lib/api';
+
+// Read file
+const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${filePath}`);
+const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${filePath}`);
+
+// Write file
+await storageWorkerApi.writeFile(sessionPath, `workspace/${filePath}`, content);
+
+// List files
+const files = await storageWorkerApi.listFiles(sessionPath);
+
+// Delete file
+await storageWorkerApi.deleteFile(sessionPath, `workspace/${filePath}`);
+```
+
+### GitHub API Usage (Limited to Git Operations)
+
+GitHub API should ONLY be used for:
+- Creating/deleting branches
+- Creating commits (from storage worker content)
+- Creating/managing pull requests
+- Repository metadata
+
+```typescript
+import { githubApi } from '@/lib/api';
+
+// Git operations only
+await githubApi.createBranch(...);
+await githubApi.updateFile(...);  // For committing changes
+await githubApi.createPR(...);
+```
+
+### Why Storage Worker First?
+
+1. **Performance** - Local/cached file access is faster than GitHub API
+2. **Consistency** - Single source of truth for session state
+3. **Offline capability** - Changes persist locally before syncing
+4. **Rate limiting** - Avoids GitHub API rate limits
+5. **Binary files** - Better handling of images and large files
+
 ## Common Architectural Patterns
 
 ### Ephemeral Worker Model
