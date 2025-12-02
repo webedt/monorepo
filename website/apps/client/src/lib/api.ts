@@ -447,6 +447,9 @@ export const storageWorkerApi = {
     try {
       const body = typeof content === 'string' ? content : content;
       const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
+      const contentSize = typeof content === 'string' ? content.length : content.size;
+
+      console.log(`[StorageWorker] Writing file: ${filePath} to session: ${sessionPath} (${contentSize} bytes)`);
 
       const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
         method: 'PUT',
@@ -456,8 +459,16 @@ export const storageWorkerApi = {
         },
         body,
       });
+
+      if (response.ok) {
+        console.log(`[StorageWorker] Successfully wrote file: ${filePath}`);
+      } else {
+        console.error(`[StorageWorker] Failed to write file: ${filePath}, status: ${response.status}`);
+      }
+
       return response.ok;
-    } catch {
+    } catch (error) {
+      console.error(`[StorageWorker] Error writing file: ${filePath}`, error);
       return false;
     }
   },
