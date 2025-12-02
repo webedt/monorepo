@@ -750,21 +750,50 @@ function ImagesContent() {
       const dataUrl = canvas.toDataURL(mimeType);
       const base64Content = dataUrl.split(',')[1];
 
-      // Save to GitHub only (storage is managed by the execution worker, not the client)
-      console.log('[Save] Saving to GitHub...', { path: selectedFile.path, branch: imageSession.branch });
+      // Convert base64 to Blob for storage-worker
+      const byteCharacters = atob(base64Content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
 
-      await githubApi.updateFile(
-        imageSession.owner,
-        imageSession.repo,
-        selectedFile.path,
-        {
-          content: base64Content,
-          branch: imageSession.branch,
-          message: `Update image: ${selectedFile.name}`,
-        }
-      );
+      // Build session path for storage-worker
+      const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
+      const storagePath = `workspace/${selectedFile.path}`;
 
-      console.log('[Save] GitHub save successful');
+      console.log('[Save] Saving to storage-worker and GitHub...', {
+        sessionPath,
+        storagePath,
+        blobSize: blob.size
+      });
+
+      // Save to both storage-worker (primary) and GitHub (for persistence)
+      // Storage-worker will create the session if it doesn't exist
+      const [storageResult, githubResult] = await Promise.all([
+        storageWorkerApi.writeFile(sessionPath, storagePath, blob)
+          .then(result => {
+            console.log('[Save] Storage-worker result:', result);
+            return result;
+          })
+          .catch(err => {
+            console.error('[Save] Storage-worker error:', err);
+            return false;
+          }),
+        githubApi.updateFile(
+          imageSession.owner,
+          imageSession.repo,
+          selectedFile.path,
+          {
+            content: base64Content,
+            branch: imageSession.branch,
+            message: `Update image: ${selectedFile.name}`,
+          }
+        ),
+      ]);
+
+      console.log('[Save] Results - Storage:', storageResult, 'GitHub:', !!githubResult);
 
       // Update the imageUrl with the saved data URL so the canvas state is preserved
       // This prevents the image from disappearing after save
@@ -782,9 +811,6 @@ function ImagesContent() {
 
       // Clear selection
       setSelection(null);
-
-      // Note: We don't invalidate queries here to avoid triggering a reload
-      // The file tree SHA will be stale but that's okay - it will refresh on next navigation
 
       console.log('Image saved successfully');
     } catch (error) {
