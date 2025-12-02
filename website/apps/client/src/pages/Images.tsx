@@ -263,6 +263,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   const [newImageFilename, setNewImageFilename] = useState('image.png');
   const [showResolutionPicker, setShowResolutionPicker] = useState(false);
   const [isCreatingImage, setIsCreatingImage] = useState(false);
+  const [isSavingImage, setIsSavingImage] = useState(false);
   const resolutionPickerRef = useRef<HTMLDivElement>(null);
 
   // Get preferences from store
@@ -468,6 +469,12 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
           imageSession.branch
         );
 
+        console.log('[Images] GitHub response:', {
+          hasContent: !!response.data.content,
+          encoding: response.data.encoding,
+          hasDownloadUrl: !!response.data.download_url
+        });
+
         // GitHub API returns base64 encoded content for binary files
         if (response.data.content && response.data.encoding === 'base64') {
           // Determine MIME type from extension
@@ -486,18 +493,24 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
           // Create data URL
           const dataUrl = `data:${mimeType};base64,${response.data.content}`;
+          console.log('[Images] Created data URL from base64, length:', dataUrl.length);
           setImageUrl(dataUrl);
         } else if (response.data.download_url) {
           // Fetch the download URL and convert to data URL to avoid CORS issues
+          console.log('[Images] Using download_url:', response.data.download_url);
           try {
             const imageResponse = await fetch(response.data.download_url);
             const blob = await imageResponse.blob();
             const dataUrl = await blobToDataUrl(blob);
+            console.log('[Images] Converted download to data URL, length:', dataUrl.length);
             setImageUrl(dataUrl);
-          } catch {
+          } catch (fetchError) {
             // If fetching fails, use the URL directly (preview will work, but canvas may have issues)
+            console.error('[Images] Failed to fetch download_url:', fetchError);
             setImageUrl(response.data.download_url);
           }
+        } else {
+          console.error('[Images] No content or download_url in GitHub response');
         }
       }
     } catch (error) {
@@ -528,16 +541,22 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       setImageUrl(null);
       setViewMode('preview');
     } else {
+      // Check if we're clicking on the same file that's already selected
+      const isSameFile = selectedFile?.path === node.path;
+
       setSelectedFile({ path: node.path, name: node.name, fileType: node.fileType });
       setSelectedDirectory(null);
       setViewMode('preview');
 
-      // Load the image if it's an image file
+      // Load the image if it's an image file AND it's not the same file we already have loaded
       if (node.fileType === 'image') {
-        // Set loading state immediately to avoid flash of placeholder
-        setIsLoadingImage(true);
-        setImageUrl(null);
-        loadImage(node.path);
+        if (!isSameFile) {
+          // Set loading state immediately to avoid flash of placeholder
+          setIsLoadingImage(true);
+          setImageUrl(null);
+          loadImage(node.path);
+        }
+        // If it's the same file, keep the existing imageUrl
       } else {
         setImageUrl(null);
       }
@@ -698,6 +717,116 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       setIsCreatingImage(false);
     }
   }, [imageSession, newImageFilename, selectedDirectory, imagePrefs, queryClient, expandedFolders, loadImage, isCreatingImage]);
+
+  // Handle saving the current image
+  const handleSaveImage = useCallback(async () => {
+    if (!imageSession || !selectedFile || !canvasRef.current || isSavingImage) return;
+
+    setIsSavingImage(true);
+
+    try {
+      const canvas = canvasRef.current;
+      const drawingCanvas = drawingLayerRef.current;
+      const ctx = canvas.getContext('2d');
+      const drawingCtx = drawingCanvas?.getContext('2d');
+
+      if (!ctx) {
+        console.error('Failed to get canvas context');
+        return;
+      }
+
+      // Merge drawing layer onto base canvas if it exists
+      if (drawingCanvas && drawingCtx) {
+        ctx.drawImage(drawingCanvas, 0, 0);
+        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      }
+
+      // Determine MIME type from file extension
+      const ext = selectedFile.name.split('.').pop()?.toLowerCase() || 'png';
+      const mimeTypes: Record<string, string> = {
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        bmp: 'image/bmp',
+      };
+      const mimeType = mimeTypes[ext] || 'image/png';
+
+      // Convert canvas to data URL and extract base64 content
+      const dataUrl = canvas.toDataURL(mimeType);
+      const base64Content = dataUrl.split(',')[1];
+
+      // Convert base64 to Blob for storage-worker
+      const byteCharacters = atob(base64Content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+
+      // Build session path for storage-worker
+      const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
+      const storagePath = `workspace/${selectedFile.path}`;
+
+      console.log('[Save] Saving to storage-worker and GitHub...', {
+        sessionPath,
+        storagePath,
+        blobSize: blob.size
+      });
+
+      // Save to both storage-worker (primary) and GitHub (for persistence)
+      // Storage-worker will create the session if it doesn't exist
+      const [storageResult, githubResult] = await Promise.all([
+        storageWorkerApi.writeFile(sessionPath, storagePath, blob)
+          .then(result => {
+            console.log('[Save] Storage-worker result:', result);
+            return result;
+          })
+          .catch(err => {
+            console.error('[Save] Storage-worker error:', err);
+            return false;
+          }),
+        githubApi.updateFile(
+          imageSession.owner,
+          imageSession.repo,
+          selectedFile.path,
+          {
+            content: base64Content,
+            branch: imageSession.branch,
+            message: `Update image: ${selectedFile.name}`,
+          }
+        ),
+      ]);
+
+      console.log('[Save] Results - Storage:', storageResult, 'GitHub:', !!githubResult);
+
+      // Update the imageUrl with the saved data URL so the canvas state is preserved
+      // This prevents the image from disappearing after save
+      setImageUrl(dataUrl);
+
+      // Update history with the merged state
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const newHistory = canvasHistory.slice(0, historyIndex + 1);
+      newHistory.push(imageData);
+      if (newHistory.length > 50) {
+        newHistory.shift();
+      }
+      setCanvasHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+
+      // Clear selection
+      setSelection(null);
+
+      console.log('Image saved successfully');
+    } catch (error) {
+      console.error('Failed to save image:', error);
+      // Could add error toast here
+    } finally {
+      setIsSavingImage(false);
+    }
+  }, [imageSession, selectedFile, isSavingImage, canvasHistory, historyIndex]);
 
   // Close resolution picker when clicking outside
   useEffect(() => {
@@ -2055,9 +2184,17 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
             </button>
           </div>
-          <button className="btn btn-sm btn-primary gap-2">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
-            Save
+          <button
+            onClick={handleSaveImage}
+            disabled={isSavingImage || !selectedFile || !imageSession}
+            className="btn btn-sm btn-primary gap-2"
+          >
+            {isSavingImage ? (
+              <span className="loading loading-spinner loading-xs"></span>
+            ) : (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+            )}
+            {isSavingImage ? 'Saving...' : 'Save'}
           </button>
           <button className="btn btn-sm btn-outline gap-2">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/></svg>
