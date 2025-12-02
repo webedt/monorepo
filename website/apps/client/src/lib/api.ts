@@ -429,15 +429,38 @@ export const storageWorkerApi = {
 
   // Get file content as text
   getFileText: async (sessionPath: string, filePath: string): Promise<string | null> => {
+    const url = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+
+    console.log(`[StorageWorker] getFileText request:`, {
+      sessionPath,
+      filePath,
+      url,
+      apiBaseUrl: API_BASE_URL,
+    });
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+      const response = await fetch(url, {
         credentials: 'include',
       });
+
+      console.log(`[StorageWorker] getFileText response:`, {
+        status: response.status,
+        ok: response.ok,
+        url,
+      });
+
       if (!response.ok) {
+        // Try to get error details
+        const errorText = await response.text().catch(() => '');
+        console.log(`[StorageWorker] getFileText error details:`, {
+          status: response.status,
+          errorText: errorText.substring(0, 500),
+        });
         return null;
       }
       return await response.text();
-    } catch {
+    } catch (error) {
+      console.error(`[StorageWorker] getFileText exception:`, error);
       return null;
     }
   },
