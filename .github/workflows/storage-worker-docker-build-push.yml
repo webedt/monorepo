@@ -51,6 +51,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           no-cache: true
+          build-args: |
+            BUILD_COMMIT_SHA=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
+            BUILD_IMAGE_TAG=${{ github.ref_name }}
 
       - name: Image digest
         run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
