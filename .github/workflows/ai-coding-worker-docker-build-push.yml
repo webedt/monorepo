@@ -12,7 +12,7 @@ env:
 
 jobs:
   build-and-push-ai-coding-worker:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -55,3 +55,56 @@ jobs:
 
       - name: Image digest
         run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
+
+      - name: Deploy to Dokploy
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          APPLICATION_ID: ${{ vars.DOKPLOY_AI_CODING_WORKER_APP_ID }}
+        run: |
+          # Strip trailing slash from DOKPLOY_URL if present
+          DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          echo "🚀 Deploying ai-coding-worker to Dokploy..."
+
+          # Trigger deployment using tRPC endpoint
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/application.deploy" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"applicationId\": \"${APPLICATION_ID}\"
+              }
+            }")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Code: ${HTTP_CODE}"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Deployment triggered successfully!"
+            echo "Application ID: ${APPLICATION_ID}"
+          else
+            echo "❌ Deployment failed with status code: ${HTTP_CODE}"
+            echo "Response: ${BODY}"
+            exit 1
+          fi
+
+      - name: Deployment Summary
+        if: always() && github.ref == 'refs/heads/main'
+        run: |
+          echo "## AI Coding Worker Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Build and deployment completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build or deployment failed" >> $GITHUB_STEP_SUMMARY
+          fi
