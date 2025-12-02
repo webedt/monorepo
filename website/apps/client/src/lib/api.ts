@@ -6,9 +6,18 @@ function getApiBaseUrl(): string {
     return envBaseUrl;
   }
 
+  const hostname = window.location.hostname;
+
+  // If we're on the preview/GitHub Pages site (github.etdofresh.com),
+  // API calls should go to the main app (webedt.etdofresh.com)
+  if (hostname === 'github.etdofresh.com') {
+    console.log('[API] On preview site, using main API server');
+    return 'https://webedt.etdofresh.com';
+  }
+
   // Detect from current pathname for path-based routing
-  // Example: https://github.etdofresh.com/webedt/website/branch/ -> /webedt/website/branch
-  // Monorepo: https://github.etdofresh.com/webedt/monorepo/website/branch/ -> /webedt/monorepo/website/branch
+  // Example: https://webedt.etdofresh.com/webedt/website/branch/ -> /webedt/website/branch
+  // Monorepo: https://webedt.etdofresh.com/webedt/monorepo/website/branch/ -> /webedt/monorepo/website/branch
   const pathname = window.location.pathname;
   const pathSegments = pathname.split('/').filter(Boolean);
 
