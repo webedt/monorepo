@@ -316,7 +316,6 @@ export default function Chat() {
     input: string;
     images: ImageAttachment[];
   }>>([]);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Get repo store actions
   const repoStore = useRepoStore();
