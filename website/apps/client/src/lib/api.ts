@@ -444,14 +444,22 @@ export const storageWorkerApi = {
 
   // Write/update a file in a session
   writeFile: async (sessionPath: string, filePath: string, content: string | Blob): Promise<boolean> => {
+    const body = typeof content === 'string' ? content : content;
+    const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
+    const contentSize = typeof content === 'string' ? content.length : content.size;
+    const url = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+
+    console.log(`[StorageWorker] Writing file:`, {
+      sessionPath,
+      filePath,
+      contentType,
+      contentSize,
+      url,
+      apiBaseUrl: API_BASE_URL,
+    });
+
     try {
-      const body = typeof content === 'string' ? content : content;
-      const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
-      const contentSize = typeof content === 'string' ? content.length : content.size;
-
-      console.log(`[StorageWorker] Writing file: ${filePath} to session: ${sessionPath} (${contentSize} bytes)`);
-
-      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+      const response = await fetch(url, {
         method: 'PUT',
         credentials: 'include',
         headers: {
@@ -461,14 +469,85 @@ export const storageWorkerApi = {
       });
 
       if (response.ok) {
-        console.log(`[StorageWorker] Successfully wrote file: ${filePath}`);
+        const data = await response.json().catch(() => ({}));
+        console.log(`[StorageWorker] Successfully wrote file:`, {
+          filePath,
+          status: response.status,
+          response: data,
+        });
+        return true;
       } else {
-        console.error(`[StorageWorker] Failed to write file: ${filePath}, status: ${response.status}`);
-      }
+        // Try to get error details from response
+        let errorBody: string | object = '';
+        try {
+          errorBody = await response.json();
+        } catch {
+          try {
+            errorBody = await response.text();
+          } catch {
+            errorBody = '(could not read response body)';
+          }
+        }
 
-      return response.ok;
+        console.error(`[StorageWorker] Failed to write file:`, {
+          filePath,
+          sessionPath,
+          url,
+          status: response.status,
+          statusText: response.statusText,
+          errorBody,
+          headers: Object.fromEntries(response.headers.entries()),
+        });
+
+        // If 404, run diagnostics to understand why
+        if (response.status === 404) {
+          console.log(`[StorageWorker] Running diagnostics for 404 error...`);
+
+          // Check if session exists
+          try {
+            const sessionCheckUrl = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}`;
+            const sessionCheck = await fetch(sessionCheckUrl, {
+              method: 'HEAD',
+              credentials: 'include',
+            });
+            console.log(`[StorageWorker] Session exists check:`, {
+              url: sessionCheckUrl,
+              exists: sessionCheck.ok,
+              status: sessionCheck.status,
+            });
+          } catch (e) {
+            console.log(`[StorageWorker] Session exists check failed:`, e);
+          }
+
+          // Check if we can list sessions at all (to verify API is reachable)
+          try {
+            const listUrl = `${API_BASE_URL}/api/storage-worker/sessions`;
+            const listCheck = await fetch(listUrl, {
+              method: 'GET',
+              credentials: 'include',
+            });
+            const listData = await listCheck.json().catch(() => null);
+            console.log(`[StorageWorker] List sessions check:`, {
+              url: listUrl,
+              ok: listCheck.ok,
+              status: listCheck.status,
+              sessionCount: listData?.count ?? 'unknown',
+            });
+          } catch (e) {
+            console.log(`[StorageWorker] List sessions check failed:`, e);
+          }
+        }
+
+        return false;
+      }
     } catch (error) {
-      console.error(`[StorageWorker] Error writing file: ${filePath}`, error);
+      console.error(`[StorageWorker] Network error writing file:`, {
+        filePath,
+        sessionPath,
+        url,
+        error: error instanceof Error ? error.message : error,
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
       return false;
     }
   },

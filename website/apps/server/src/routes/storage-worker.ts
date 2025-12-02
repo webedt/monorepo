@@ -113,8 +113,18 @@ router.get(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Reques
 router.put(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
   const sessionPath = req.params[0];
   const filePath = req.params[1];
+  const contentType = req.get('content-type') || 'application/octet-stream';
+  const targetUrl = `${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+
+  console.log('[StorageWorker] PUT file request:', {
+    sessionPath,
+    filePath,
+    contentType,
+    targetUrl,
+  });
 
   if (!filePath) {
+    console.log('[StorageWorker] PUT file failed: File path is required');
     res.status(400).json({ error: 'File path is required' });
     return;
   }
@@ -127,25 +137,43 @@ router.put(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Reques
     }
     const body = Buffer.concat(chunks);
 
-    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+    console.log('[StorageWorker] PUT file - body size:', body.length, 'bytes');
+
+    const response = await fetch(targetUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': req.get('content-type') || 'application/octet-stream',
+        'Content-Type': contentType,
       },
       body,
     });
 
+    console.log('[StorageWorker] PUT file - storage-worker response:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+    });
+
     if (!response.ok) {
       const error = await response.text();
-      console.error('[StorageWorker] Write file failed:', error);
+      console.error('[StorageWorker] Write file failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error,
+        targetUrl,
+      });
       res.status(response.status).json({ error: 'Failed to write file' });
       return;
     }
 
     const data = await response.json();
+    console.log('[StorageWorker] PUT file success:', data);
     res.json(data);
   } catch (error) {
-    console.error('[StorageWorker] Error writing file:', error);
+    console.error('[StorageWorker] Error writing file:', {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+      targetUrl,
+    });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
