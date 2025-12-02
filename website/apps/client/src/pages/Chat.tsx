@@ -333,7 +333,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const workerStore = useWorkerStore();
 
   // Browser notification for session completion
-  const { showSessionCompletedNotification } = useBrowserNotification();
+  const { permission: notificationPermission, requestPermission, showSessionCompletedNotification } = useBrowserNotification();
 
   // Sync local state with global store
   useEffect(() => {
@@ -1274,7 +1274,17 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         const repoName = session?.repositoryName
           ? `${session.repositoryOwner}/${session.repositoryName}`
           : selectedRepo || undefined;
-        showSessionCompletedNotification(data?.websiteSessionId, repoName);
+
+        // If permission not yet requested, request it now (on first session completion)
+        if (notificationPermission === 'default') {
+          requestPermission().then((perm) => {
+            if (perm === 'granted') {
+              showSessionCompletedNotification(data?.websiteSessionId, repoName);
+            }
+          });
+        } else {
+          showSessionCompletedNotification(data?.websiteSessionId, repoName);
+        }
       }
 
       // Capture session ID from completion event
