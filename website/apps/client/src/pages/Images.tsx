@@ -534,16 +534,22 @@ function ImagesContent() {
       setImageUrl(null);
       setViewMode('preview');
     } else {
+      // Check if we're clicking on the same file that's already selected
+      const isSameFile = selectedFile?.path === node.path;
+
       setSelectedFile({ path: node.path, name: node.name, fileType: node.fileType });
       setSelectedDirectory(null);
       setViewMode('preview');
 
-      // Load the image if it's an image file
+      // Load the image if it's an image file AND it's not the same file we already have loaded
       if (node.fileType === 'image') {
-        // Set loading state immediately to avoid flash of placeholder
-        setIsLoadingImage(true);
-        setImageUrl(null);
-        loadImage(node.path);
+        if (!isSameFile) {
+          // Set loading state immediately to avoid flash of placeholder
+          setIsLoadingImage(true);
+          setImageUrl(null);
+          loadImage(node.path);
+        }
+        // If it's the same file, keep the existing imageUrl
       } else {
         setImageUrl(null);
       }
