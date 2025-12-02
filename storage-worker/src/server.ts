@@ -14,6 +14,19 @@ const CONTAINER_ID = os.hostname();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Path prefix normalization middleware
+// This handles cases where the /api/storage-worker prefix is stripped by a reverse proxy
+// or when clients connect directly without the prefix
+app.use((req, res, next) => {
+  // If the request path starts with /sessions and not /api/storage-worker/sessions,
+  // add the expected prefix for consistent routing
+  if (req.path.startsWith('/sessions') && !req.path.startsWith('/api/storage-worker/sessions')) {
+    req.url = '/api/storage-worker' + req.url;
+    console.log(`[PathNormalization] Normalized path to: ${req.url}`);
+  }
+  next();
+});
+
 // Create storage service
 const storageService = new StorageService();
 
