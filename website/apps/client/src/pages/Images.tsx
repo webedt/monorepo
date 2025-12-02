@@ -462,6 +462,12 @@ function ImagesContent() {
           imageSession.branch
         );
 
+        console.log('[Images] GitHub response:', {
+          hasContent: !!response.data.content,
+          encoding: response.data.encoding,
+          hasDownloadUrl: !!response.data.download_url
+        });
+
         // GitHub API returns base64 encoded content for binary files
         if (response.data.content && response.data.encoding === 'base64') {
           // Determine MIME type from extension
@@ -480,18 +486,24 @@ function ImagesContent() {
 
           // Create data URL
           const dataUrl = `data:${mimeType};base64,${response.data.content}`;
+          console.log('[Images] Created data URL from base64, length:', dataUrl.length);
           setImageUrl(dataUrl);
         } else if (response.data.download_url) {
           // Fetch the download URL and convert to data URL to avoid CORS issues
+          console.log('[Images] Using download_url:', response.data.download_url);
           try {
             const imageResponse = await fetch(response.data.download_url);
             const blob = await imageResponse.blob();
             const dataUrl = await blobToDataUrl(blob);
+            console.log('[Images] Converted download to data URL, length:', dataUrl.length);
             setImageUrl(dataUrl);
-          } catch {
+          } catch (fetchError) {
             // If fetching fails, use the URL directly (preview will work, but canvas may have issues)
+            console.error('[Images] Failed to fetch download_url:', fetchError);
             setImageUrl(response.data.download_url);
           }
+        } else {
+          console.error('[Images] No content or download_url in GitHub response');
         }
       }
     } catch (error) {
@@ -745,7 +757,9 @@ function ImagesContent() {
       const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
       const storagePath = `workspace/${selectedFile.path}`;
 
-      const [githubResult] = await Promise.all([
+      console.log('[Save] Saving to GitHub and storage...', { sessionPath, storagePath, blobSize: blob.size, blobType: blob.type });
+
+      const [githubResult, storageResult] = await Promise.all([
         // Save to GitHub
         githubApi.updateFile(
           imageSession.owner,
@@ -761,7 +775,7 @@ function ImagesContent() {
         storageWorkerApi.writeFile(sessionPath, storagePath, blob),
       ]);
 
-      console.log('Image saved to GitHub and storage');
+      console.log('[Save] Results - GitHub:', !!githubResult, 'Storage:', storageResult);
 
       // Update the imageUrl with the saved data URL so the canvas state is preserved
       // This prevents the image from disappearing after save
