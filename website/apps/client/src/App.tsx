@@ -25,6 +25,7 @@ import SceneEditor from '@/pages/SceneEditor';
 import Preview from '@/pages/Preview';
 import ItemPage from '@/pages/ItemPage';
 import LibraryItemPage from '@/pages/LibraryItemPage';
+import SplitViewRouter from '@/components/SplitViewRouter';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -332,6 +333,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <Preview />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Split view routes - e.g., /session/:id/code+preview */}
+          <Route
+            path="/session/:sessionId/:pages"
+            element={
+              <ProtectedRoute>
+                <SplitViewRouter />
               </ProtectedRoute>
             }
           />

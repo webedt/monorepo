@@ -319,8 +319,16 @@ const transformStorageFiles = (files: { path: string; size: number; type: 'file'
   return root.children;
 };
 
-export default function Code() {
-  const { sessionId } = useParams<{ sessionId?: string }>();
+// Props for split view support
+interface CodeProps {
+  sessionId?: string;
+  /** When true, renders without SessionLayout wrapper (for split view) */
+  isEmbedded?: boolean;
+}
+
+export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: CodeProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  const sessionId = sessionIdProp ?? sessionIdParam;
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -2142,19 +2150,10 @@ export default function Code() {
   // This enables proper title display in the top bar
   const sessionForLayout = codeSession && existingSessionData?.data ? existingSessionData.data : undefined;
 
-  // Always use SessionLayout to show status bar
-  return (
-    <SessionLayout
-      selectedRepo={selectedRepoUrl}
-      baseBranch={codeSession?.baseBranch}
-      branch={codeSession?.branch}
-      isLocked={!!codeSession}
-      prActions={prActions}
-      session={sessionForLayout}
-    >
-      {/* Show loading/error/repo selector OR the code editor */}
-      {mainContent || (
-        <div className="h-[calc(100vh-112px)] flex flex-col">
+  // The actual content to render (either loading state or editor)
+  const content = mainContent || (
+    <>
+      <div className="h-[calc(100vh-112px)] flex flex-col">
           {/* Session Header */}
           <div className="bg-base-100 border-b border-base-300 px-4 py-3 flex-shrink-0">
             <div className="flex items-center justify-between">
@@ -2242,7 +2241,6 @@ export default function Code() {
             {codeEditorContent}
           </div>
         </div>
-      )}
 
       {/* Rename Modal */}
       {fileOperation.type === 'rename' && (
@@ -2350,6 +2348,25 @@ export default function Code() {
           <div className="modal-backdrop" onClick={closeModal}></div>
         </div>
       )}
+    </>
+  );
+
+  // When embedded in split view, render without SessionLayout wrapper
+  if (isEmbedded) {
+    return content;
+  }
+
+  // Normal rendering with SessionLayout
+  return (
+    <SessionLayout
+      selectedRepo={selectedRepoUrl}
+      baseBranch={codeSession?.baseBranch}
+      branch={codeSession?.branch}
+      isLocked={!!codeSession}
+      prActions={prActions}
+      session={sessionForLayout}
+    >
+      {content}
     </SessionLayout>
   );
 }
