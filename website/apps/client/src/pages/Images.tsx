@@ -728,21 +728,40 @@ function ImagesContent() {
       };
       const mimeType = mimeTypes[ext] || 'image/png';
 
-      // Convert canvas to base64 - keep the full data URL for local display
+      // Convert canvas to blob for storage and base64 for GitHub
       const dataUrl = canvas.toDataURL(mimeType);
       const base64Content = dataUrl.split(',')[1];
 
-      // Save to GitHub
-      await githubApi.updateFile(
-        imageSession.owner,
-        imageSession.repo,
-        selectedFile.path,
-        {
-          content: base64Content,
-          branch: imageSession.branch,
-          message: `Update image: ${selectedFile.name}`,
-        }
-      );
+      // Convert data URL to blob for storage
+      const byteCharacters = atob(base64Content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+
+      // Save to both GitHub and storage in parallel
+      const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
+      const storagePath = `workspace/${selectedFile.path}`;
+
+      const [githubResult] = await Promise.all([
+        // Save to GitHub
+        githubApi.updateFile(
+          imageSession.owner,
+          imageSession.repo,
+          selectedFile.path,
+          {
+            content: base64Content,
+            branch: imageSession.branch,
+            message: `Update image: ${selectedFile.name}`,
+          }
+        ),
+        // Save to storage for faster local access
+        storageWorkerApi.writeFile(sessionPath, storagePath, blob),
+      ]);
+
+      console.log('Image saved to GitHub and storage');
 
       // Update the imageUrl with the saved data URL so the canvas state is preserved
       // This prevents the image from disappearing after save
@@ -761,8 +780,8 @@ function ImagesContent() {
       // Clear selection
       setSelection(null);
 
-      // Refresh the file tree to get updated SHA (do this after updating local state)
-      await queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+      // Note: We don't invalidate queries here to avoid triggering a reload
+      // The file tree SHA will be stale but that's okay - it will refresh on next navigation
 
       console.log('Image saved successfully');
     } catch (error) {
@@ -771,7 +790,7 @@ function ImagesContent() {
     } finally {
       setIsSavingImage(false);
     }
-  }, [imageSession, selectedFile, isSavingImage, queryClient, canvasHistory, historyIndex]);
+  }, [imageSession, selectedFile, isSavingImage, canvasHistory, historyIndex]);
 
   // Close resolution picker when clicking outside
   useEffect(() => {
