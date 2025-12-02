@@ -24,9 +24,9 @@ interface SplitLayoutProps {
 function renderPane(pageName: SplitPageName, sessionId: string) {
   switch (pageName) {
     case 'chat':
-      return <Chat sessionId={sessionId} embedded />;
+      return <Chat sessionId={sessionId} isEmbedded />;
     case 'code':
-      return <Code sessionId={sessionId} embedded />;
+      return <Code sessionId={sessionId} isEmbedded />;
     case 'images':
       return <ImagesContent sessionId={sessionId} />;
     case 'sound':
