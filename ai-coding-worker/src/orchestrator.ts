@@ -14,6 +14,10 @@ import { CredentialManager } from './utils/credentialManager';
 import { parseRepoUrl, generateSessionPath, sessionPathToDir } from './utils/sessionPathHelper';
 import { enrichEventWithRelativePaths } from './utils/filePathHelper';
 
+// Website API URL for callbacks (worker -> website server)
+const WEBSITE_API_URL = process.env.WEBSITE_API_URL || 'http://localhost:3000';
+const WORKER_CALLBACK_SECRET = process.env.WORKER_CALLBACK_SECRET;
+
 /**
  * Main orchestrator for executing coding assistant requests
  * Uses storage-worker for session storage - downloads session at start, uploads at end
@@ -29,6 +33,72 @@ export class Orchestrator {
     this.githubClient = new GitHubClient();
     this.dbClient = new DBClient(dbBaseUrl);
     this.sessionStorage = new StorageClient();
+  }
+
+  /**
+   * Notify the website server of session completion status
+   * This ensures the session status is updated even if the SSE connection was lost
+   * (e.g., due to a server restart during job execution)
+   */
+  private async notifyWebsiteOfCompletion(
+    websiteSessionId: string,
+    status: 'completed' | 'error'
+  ): Promise<void> {
+    if (!WORKER_CALLBACK_SECRET) {
+      logger.warn('WORKER_CALLBACK_SECRET not configured, skipping completion callback', {
+        component: 'Orchestrator',
+        websiteSessionId
+      });
+      return;
+    }
+
+    try {
+      const callbackUrl = `${WEBSITE_API_URL}/api/sessions/${websiteSessionId}/worker-status`;
+
+      logger.info('Notifying website of session completion', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        status,
+        callbackUrl
+      });
+
+      const response = await fetch(callbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          completedAt: new Date().toISOString(),
+          workerSecret: WORKER_CALLBACK_SECRET
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        logger.info('Website notified of session completion', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          status,
+          response: result
+        });
+      } else {
+        const errorText = await response.text();
+        logger.warn('Failed to notify website of completion', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          status,
+          httpStatus: response.status,
+          error: errorText
+        });
+      }
+    } catch (err) {
+      // Non-critical - the orphan cleanup will eventually handle it
+      logger.warn('Error notifying website of completion (non-critical)', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        status,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
   }
 
   /**
@@ -870,6 +940,12 @@ export class Orchestrator {
         durationMs: duration
       });
 
+      // Step 8.5: Notify website server of completion (handles SSE connection loss)
+      // This is a safety net - if the website server restarted during execution,
+      // the SSE connection was lost and the status won't be updated. This callback
+      // ensures the session status is always updated.
+      await this.notifyWebsiteOfCompletion(websiteSessionId, 'completed');
+
       // Step 9: Cleanup local workspace
       try {
         fs.rmSync(sessionRoot, { recursive: true, force: true });
@@ -948,6 +1024,9 @@ export class Orchestrator {
           websiteSessionId
         }));
       }
+
+      // Notify website server of error (handles SSE connection loss)
+      await this.notifyWebsiteOfCompletion(websiteSessionId, 'error');
 
       logger.info('Closing SSE stream after error', {
         component: 'Orchestrator',
