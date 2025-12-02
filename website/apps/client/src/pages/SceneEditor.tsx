@@ -1,5 +1,19 @@
 import SessionLayout from '@/components/SessionLayout';
+import { useEmbedded } from '@/contexts/EmbeddedContext';
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
+
+// Props for split view support
+interface SceneEditorContentProps {
+  sessionId?: string;
+}
+
+export function SceneEditorContent({ sessionId: sessionIdProp }: SceneEditorContentProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  // sessionId available for future use
+  void (sessionIdProp ?? sessionIdParam);
+  return <EditorPlaceholder />;
+}
 
 function EditorPlaceholder() {
   const [selectedObject, setSelectedObject] = useState('Cube');
@@ -249,11 +263,27 @@ function EditorPlaceholder() {
   );
 }
 
-export default function SceneEditor() {
-  // Always use SessionLayout to show status bar
+interface SceneEditorProps {
+  isEmbedded?: boolean;
+}
+
+export default function SceneEditor({ isEmbedded: isEmbeddedProp = false }: SceneEditorProps) {
+  // Check if we're embedded via context (from split view) or prop
+  const { isEmbedded: isEmbeddedContext } = useEmbedded();
+  const isEmbedded = isEmbeddedProp || isEmbeddedContext;
+
+  // Wrap content conditionally - when embedded, skip SessionLayout wrapper
+  const Wrapper = isEmbedded ?
+    ({ children }: { children: React.ReactNode }) => <div className="h-full flex flex-col overflow-hidden bg-base-200">{children}</div> :
+    ({ children }: { children: React.ReactNode }) => (
+      <SessionLayout>
+        {children}
+      </SessionLayout>
+    );
+
   return (
-    <SessionLayout>
+    <Wrapper>
       <EditorPlaceholder />
-    </SessionLayout>
+    </Wrapper>
   );
 }

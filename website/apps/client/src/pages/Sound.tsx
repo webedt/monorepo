@@ -1,9 +1,19 @@
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import SessionLayout from '@/components/SessionLayout';
+import { useEmbedded } from '@/contexts/EmbeddedContext';
 
 type ViewMode = 'waveform' | 'timeline';
 
-function SoundContent() {
+// Props for split view support
+interface SoundContentProps {
+  sessionId?: string;
+}
+
+export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  // sessionId available for future use
+  void (sessionIdProp ?? sessionIdParam);
   const [viewMode, setViewMode] = useState<ViewMode>('timeline');
 
   return (
@@ -420,11 +430,27 @@ function generateWaveformPath(): string {
   return points.join(' ');
 }
 
-export default function Sound() {
-  // Always use SessionLayout to show status bar
+interface SoundProps {
+  isEmbedded?: boolean;
+}
+
+export default function Sound({ isEmbedded: isEmbeddedProp = false }: SoundProps) {
+  // Check if we're embedded via context (from split view) or prop
+  const { isEmbedded: isEmbeddedContext } = useEmbedded();
+  const isEmbedded = isEmbeddedProp || isEmbeddedContext;
+
+  // Wrap content conditionally - when embedded, skip SessionLayout wrapper
+  const Wrapper = isEmbedded ?
+    ({ children }: { children: React.ReactNode }) => <div className="h-full flex flex-col overflow-hidden bg-base-200">{children}</div> :
+    ({ children }: { children: React.ReactNode }) => (
+      <SessionLayout>
+        {children}
+      </SessionLayout>
+    );
+
   return (
-    <SessionLayout>
+    <Wrapper>
       <SoundContent />
-    </SessionLayout>
+    </Wrapper>
   );
 }

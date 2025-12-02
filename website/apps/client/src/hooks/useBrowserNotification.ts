@@ -1,0 +1,186 @@
+import { useCallback, useEffect, useState } from 'react';
+
+// ============================================================================
+// BROWSER NOTIFICATION HOOK
+// ============================================================================
+// This hook provides a simple API for showing browser notifications when
+// sessions complete. It handles permission requests and provides feedback
+// about the current permission state.
+// ============================================================================
+
+export type NotificationPermission = 'granted' | 'denied' | 'default';
+
+interface UseBrowserNotificationReturn {
+  // Current permission state
+  permission: NotificationPermission;
+  // Whether notifications are supported in this browser
+  isSupported: boolean;
+  // Request permission from the user
+  requestPermission: () => Promise<NotificationPermission>;
+  // Show a notification (only works if permission is granted)
+  showNotification: (title: string, options?: NotificationOptions) => Notification | null;
+  // Show a session completion notification
+  showSessionCompletedNotification: (sessionId?: string, repoName?: string) => Notification | null;
+}
+
+/**
+ * Hook for managing browser notifications
+ *
+ * Usage:
+ * ```tsx
+ * const { permission, requestPermission, showSessionCompletedNotification } = useBrowserNotification();
+ *
+ * // Request permission on user action
+ * <button onClick={requestPermission}>Enable Notifications</button>
+ *
+ * // Show notification when session completes
+ * onCompleted: () => {
+ *   showSessionCompletedNotification(sessionId, repoName);
+ * }
+ * ```
+ */
+export function useBrowserNotification(): UseBrowserNotificationReturn {
+  const isSupported = typeof window !== 'undefined' && 'Notification' in window;
+
+  const [permission, setPermission] = useState<NotificationPermission>(() => {
+    if (!isSupported) return 'denied';
+    return Notification.permission as NotificationPermission;
+  });
+
+  // Listen for permission changes (e.g., user changes in browser settings)
+  useEffect(() => {
+    if (!isSupported) return;
+
+    // Update state if permission changes externally
+    const checkPermission = () => {
+      setPermission(Notification.permission as NotificationPermission);
+    };
+
+    // Check periodically in case user changed settings
+    const interval = setInterval(checkPermission, 5000);
+    return () => clearInterval(interval);
+  }, [isSupported]);
+
+  const requestPermission = useCallback(async (): Promise<NotificationPermission> => {
+    if (!isSupported) {
+      console.warn('[Notification] Browser does not support notifications');
+      return 'denied';
+    }
+
+    try {
+      const result = await Notification.requestPermission();
+      setPermission(result as NotificationPermission);
+      return result as NotificationPermission;
+    } catch (error) {
+      console.error('[Notification] Failed to request permission:', error);
+      return 'denied';
+    }
+  }, [isSupported]);
+
+  const showNotification = useCallback((
+    title: string,
+    options?: NotificationOptions
+  ): Notification | null => {
+    if (!isSupported) {
+      console.warn('[Notification] Browser does not support notifications');
+      return null;
+    }
+
+    if (permission !== 'granted') {
+      console.warn('[Notification] Permission not granted, cannot show notification');
+      return null;
+    }
+
+    // Don't show notification if the page is already visible/focused
+    if (document.visibilityState === 'visible' && document.hasFocus()) {
+      console.log('[Notification] Page is visible and focused, skipping notification');
+      return null;
+    }
+
+    try {
+      const notification = new Notification(title, {
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        ...options,
+      });
+
+      // Auto-close after 5 seconds
+      setTimeout(() => {
+        notification.close();
+      }, 5000);
+
+      // Focus window when notification is clicked
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+
+      return notification;
+    } catch (error) {
+      console.error('[Notification] Failed to show notification:', error);
+      return null;
+    }
+  }, [isSupported, permission]);
+
+  const showSessionCompletedNotification = useCallback((
+    sessionId?: string,
+    repoName?: string
+  ): Notification | null => {
+    const title = 'Session Completed';
+    const body = repoName
+      ? `Your session for ${repoName} has finished processing.`
+      : 'Your session has finished processing.';
+
+    return showNotification(title, {
+      body,
+      tag: sessionId ? `session-${sessionId}` : 'session-completed',
+    });
+  }, [showNotification]);
+
+  return {
+    permission,
+    isSupported,
+    requestPermission,
+    showNotification,
+    showSessionCompletedNotification,
+  };
+}
+
+// ============================================================================
+// NOTIFICATION SETTINGS STORE
+// ============================================================================
+// Persists user preference for notifications to localStorage
+// ============================================================================
+
+const NOTIFICATION_PREFS_KEY = 'browserNotificationPrefs';
+
+interface NotificationPrefs {
+  enabled: boolean;
+  onSessionComplete: boolean;
+}
+
+const DEFAULT_PREFS: NotificationPrefs = {
+  enabled: true,
+  onSessionComplete: true,
+};
+
+export function getNotificationPrefs(): NotificationPrefs {
+  try {
+    const stored = localStorage.getItem(NOTIFICATION_PREFS_KEY);
+    if (stored) {
+      return { ...DEFAULT_PREFS, ...JSON.parse(stored) };
+    }
+  } catch (e) {
+    console.warn('[NotificationPrefs] Failed to load:', e);
+  }
+  return DEFAULT_PREFS;
+}
+
+export function setNotificationPrefs(prefs: Partial<NotificationPrefs>): void {
+  try {
+    const current = getNotificationPrefs();
+    localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify({ ...current, ...prefs }));
+  } catch (e) {
+    console.warn('[NotificationPrefs] Failed to save:', e);
+  }
+}

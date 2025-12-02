@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
 import type { GitHubPullRequest } from '@webedt/shared';
 import { useEventSource } from '@/hooks/useEventSource';
+import { useBrowserNotification, getNotificationPrefs } from '@/hooks/useBrowserNotification';
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
@@ -263,8 +264,16 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   };
 }
 
-export default function Chat() {
-  const { sessionId } = useParams();
+// Props for split view support
+interface ChatProps {
+  sessionId?: string;
+  /** When true, renders without SessionLayout wrapper (for split view) */
+  isEmbedded?: boolean;
+}
+
+export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: ChatProps = {}) {
+  const { sessionId: sessionIdParam } = useParams();
+  const sessionId = sessionIdProp ?? sessionIdParam;
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -322,6 +331,9 @@ export default function Chat() {
 
   // Get worker store for robust execution tracking
   const workerStore = useWorkerStore();
+
+  // Browser notification for session completion
+  const { permission: notificationPermission, requestPermission, showSessionCompletedNotification } = useBrowserNotification();
 
   // Sync local state with global store
   useEffect(() => {
@@ -1256,6 +1268,25 @@ export default function Chat() {
       workerStore.stopExecution();
       console.log('[Chat] SSE stream completed, worker store cleared');
 
+      // Show browser notification if enabled (only when tab is not focused)
+      const notificationPrefs = getNotificationPrefs();
+      if (notificationPrefs.enabled && notificationPrefs.onSessionComplete) {
+        const repoName = session?.repositoryName
+          ? `${session.repositoryOwner}/${session.repositoryName}`
+          : selectedRepo || undefined;
+
+        // If permission not yet requested, request it now (on first session completion)
+        if (notificationPermission === 'default') {
+          requestPermission().then((perm) => {
+            if (perm === 'granted') {
+              showSessionCompletedNotification(data?.websiteSessionId, repoName);
+            }
+          });
+        } else {
+          showSessionCompletedNotification(data?.websiteSessionId, repoName);
+        }
+      }
+
       // Capture session ID from completion event
       if (data?.websiteSessionId) {
         console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
@@ -1700,20 +1731,8 @@ export default function Chat() {
     </>
   );
 
-  return (
-    <SessionLayout
-      selectedRepo={selectedRepo}
-      baseBranch={baseBranch}
-      branch={session?.branch ?? undefined}
-      onRepoChange={setSelectedRepo}
-      onBaseBranchChange={setBaseBranch}
-      repositories={repositories}
-      isLoadingRepos={isLoadingRepos}
-      isLocked={isLocked}
-      titleActions={titleActions}
-      prActions={prActions}
-      session={session}
-    >
+  // The actual content to render
+  const content = (
       <div className="flex flex-col flex-1 overflow-hidden">
       {/* Alerts/Warnings Area - only show for existing sessions with messages */}
       {messages.length > 0 && (
@@ -2055,6 +2074,29 @@ export default function Chat() {
         />
       )}
       </div>
+  );
+
+  // When embedded in split view, render without SessionLayout wrapper
+  if (isEmbedded) {
+    return content;
+  }
+
+  // Normal rendering with SessionLayout
+  return (
+    <SessionLayout
+      selectedRepo={selectedRepo}
+      baseBranch={baseBranch}
+      branch={session?.branch ?? undefined}
+      onRepoChange={setSelectedRepo}
+      onBaseBranchChange={setBaseBranch}
+      repositories={repositories}
+      isLoadingRepos={isLoadingRepos}
+      isLocked={isLocked}
+      titleActions={titleActions}
+      prActions={prActions}
+      session={session}
+    >
+      {content}
     </SessionLayout>
   );
 }

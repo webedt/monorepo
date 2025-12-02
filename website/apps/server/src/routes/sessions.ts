@@ -977,4 +977,82 @@ router.post('/:id/restore', requireAuth, async (req, res) => {
   }
 });
 
+// Worker callback endpoint - allows ai-coding-worker to update session status
+// This is called by the worker after it completes (even if the SSE connection was lost)
+// Uses a shared secret for authentication since this is a server-to-server call
+router.post('/:id/worker-status', async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+    const { status, completedAt, workerSecret } = req.body;
+
+    // Validate worker secret (server-to-server auth)
+    const expectedSecret = process.env.WORKER_CALLBACK_SECRET;
+    if (!expectedSecret || workerSecret !== expectedSecret) {
+      console.warn(`[Sessions] Invalid worker secret for session ${sessionId}`);
+      res.status(401).json({ success: false, error: 'Invalid worker secret' });
+      return;
+    }
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    if (!status || !['completed', 'error'].includes(status)) {
+      res.status(400).json({ success: false, error: 'Invalid status. Must be "completed" or "error"' });
+      return;
+    }
+
+    // Verify session exists
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    // Only update if session is still in 'running' or 'pending' state
+    // This prevents overwriting a status that was already set by another mechanism
+    if (session.status !== 'running' && session.status !== 'pending') {
+      console.log(`[Sessions] Session ${sessionId} already has status '${session.status}', skipping worker update to '${status}'`);
+      res.json({
+        success: true,
+        data: {
+          message: 'Session status already finalized',
+          currentStatus: session.status,
+          requestedStatus: status
+        }
+      });
+      return;
+    }
+
+    // Update session status
+    await db
+      .update(chatSessions)
+      .set({
+        status,
+        completedAt: completedAt ? new Date(completedAt) : new Date()
+      })
+      .where(eq(chatSessions.id, sessionId));
+
+    console.log(`[Sessions] Worker callback updated session ${sessionId} status to '${status}'`);
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Session status updated',
+        sessionId,
+        status
+      }
+    });
+  } catch (error) {
+    console.error('Worker status callback error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update session status' });
+  }
+});
+
 export default router;

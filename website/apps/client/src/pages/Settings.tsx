@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { githubApi, userApi, authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
+import { useBrowserNotification, getNotificationPrefs, setNotificationPrefs } from '@/hooks/useBrowserNotification';
 
 // Pre-defined voice command keywords that cannot be deleted
 const DEFAULT_KEYWORDS = ['over', 'submit', 'enter', 'period'];
@@ -76,6 +77,10 @@ export default function Settings() {
   const [newKeyword, setNewKeyword] = useState('');
   const [isKeywordDropdownOpen, setIsKeywordDropdownOpen] = useState(false);
   const keywordDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Browser notification state
+  const { permission, isSupported, requestPermission } = useBrowserNotification();
+  const [notificationPrefs, setNotificationPrefsState] = useState(getNotificationPrefs);
 
   // Handle tab change
   const setActiveTab = (tab: SettingsTab) => {
@@ -846,6 +851,115 @@ export default function Settings() {
                       {updateImageResizeSetting.isPending ? 'Saving...' : 'Save Setting'}
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Browser Notifications */}
+            <div className="card bg-base-100 shadow">
+              <div className="card-body">
+                <h2 className="card-title mb-2">Browser Notifications</h2>
+
+                <div className="space-y-6">
+                  <p className="text-sm text-base-content/70 leading-relaxed">
+                    Get notified when your coding sessions complete. Notifications only appear when the browser tab is not focused.
+                  </p>
+
+                  <div className="divider my-4"></div>
+
+                  {/* Permission Status */}
+                  <div className="form-control w-full">
+                    <div className="mb-3">
+                      <span className="font-medium text-base text-base-content">Notification Permission</span>
+                    </div>
+                    {!isSupported ? (
+                      <div className="alert alert-warning">
+                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-sm">Your browser does not support notifications</span>
+                      </div>
+                    ) : permission === 'granted' ? (
+                      <div className="alert alert-success">
+                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-sm">Notifications are enabled</span>
+                      </div>
+                    ) : permission === 'denied' ? (
+                      <div className="alert alert-error">
+                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-sm">Notifications blocked. Please enable them in your browser settings.</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-4">
+                        <button
+                          onClick={requestPermission}
+                          className="btn btn-primary"
+                        >
+                          <svg className="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                          </svg>
+                          Enable Notifications
+                        </button>
+                        <span className="text-sm text-base-content/60">
+                          Click to allow browser notifications
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Notification Preferences (only show if permission granted) */}
+                  {isSupported && permission === 'granted' && (
+                    <>
+                      <div className="divider my-4"></div>
+
+                      <div className="form-control">
+                        <label className="label cursor-pointer justify-start gap-4">
+                          <input
+                            type="checkbox"
+                            checked={notificationPrefs.enabled}
+                            onChange={(e) => {
+                              const newPrefs = { ...notificationPrefs, enabled: e.target.checked };
+                              setNotificationPrefsState(newPrefs);
+                              setNotificationPrefs(newPrefs);
+                            }}
+                            className="checkbox checkbox-primary"
+                          />
+                          <div>
+                            <span className="label-text font-medium">Enable notifications</span>
+                            <p className="text-sm text-base-content/60">Master toggle for all browser notifications</p>
+                          </div>
+                        </label>
+                      </div>
+
+                      <div className="form-control">
+                        <label className="label cursor-pointer justify-start gap-4">
+                          <input
+                            type="checkbox"
+                            checked={notificationPrefs.onSessionComplete}
+                            onChange={(e) => {
+                              const newPrefs = { ...notificationPrefs, onSessionComplete: e.target.checked };
+                              setNotificationPrefsState(newPrefs);
+                              setNotificationPrefs(newPrefs);
+                            }}
+                            disabled={!notificationPrefs.enabled}
+                            className="checkbox checkbox-primary"
+                          />
+                          <div>
+                            <span className={`label-text font-medium ${!notificationPrefs.enabled ? 'opacity-50' : ''}`}>
+                              Session completion
+                            </span>
+                            <p className={`text-sm text-base-content/60 ${!notificationPrefs.enabled ? 'opacity-50' : ''}`}>
+                              Notify when a coding session finishes processing
+                            </p>
+                          </div>
+                        </label>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

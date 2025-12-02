@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
+import { useEmbedded } from '@/contexts/EmbeddedContext';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import {
   useNewImagePreferencesStore,
@@ -203,8 +204,14 @@ const transformGitHubTreeForImages = (
   return root.children || [];
 };
 
-function ImagesContent() {
-  const { sessionId } = useParams<{ sessionId?: string }>();
+// Props for split view support
+interface ImagesContentProps {
+  sessionId?: string;
+}
+
+export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps = {}) {
+  const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
+  const sessionId = sessionIdProp ?? sessionIdParam;
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -2831,10 +2838,27 @@ function ImagesContent() {
   );
 }
 
-export default function Images() {
+interface ImagesProps {
+  isEmbedded?: boolean;
+}
+
+export default function Images({ isEmbedded: isEmbeddedProp = false }: ImagesProps) {
+  // Check if we're embedded via context (from split view) or prop
+  const { isEmbedded: isEmbeddedContext } = useEmbedded();
+  const isEmbedded = isEmbeddedProp || isEmbeddedContext;
+
+  // Wrap content conditionally - when embedded, skip SessionLayout wrapper
+  const Wrapper = isEmbedded ?
+    ({ children }: { children: React.ReactNode }) => <div className="h-full flex flex-col overflow-hidden bg-base-200">{children}</div> :
+    ({ children }: { children: React.ReactNode }) => (
+      <SessionLayout>
+        {children}
+      </SessionLayout>
+    );
+
   return (
-    <SessionLayout>
+    <Wrapper>
       <ImagesContent />
-    </SessionLayout>
+    </Wrapper>
   );
 }
