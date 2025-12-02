@@ -2301,50 +2301,53 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       {fileOperation.type === 'delete' && (
         <div className="modal modal-open">
           <div className="modal-box">
-            <h3 className="font-bold text-lg text-error">
-              Delete {fileOperation.itemType === 'folder' ? 'Folder' : 'File'}
-            </h3>
-            <div className="py-4">
-              <p>
-                Are you sure you want to delete{' '}
-                <span className="font-semibold">{fileOperation.name}</span>?
-              </p>
-              {fileOperation.itemType === 'folder' && (
-                <p className="mt-2 text-warning text-sm">
-                  This will delete all files inside the folder.
+            <form onSubmit={(e) => { e.preventDefault(); handleDelete(); }}>
+              <h3 className="font-bold text-lg text-error">
+                Delete {fileOperation.itemType === 'folder' ? 'Folder' : 'File'}
+              </h3>
+              <div className="py-4">
+                <p>
+                  Are you sure you want to delete{' '}
+                  <span className="font-semibold">{fileOperation.name}</span>?
                 </p>
-              )}
-              <p className="mt-2 text-base-content/70 text-sm">
-                This action cannot be undone.
-              </p>
-              {operationError && (
-                <div className="mt-2 text-error text-sm">{operationError}</div>
-              )}
-            </div>
-            <div className="modal-action">
-              <button
-                className="btn btn-ghost"
-                onClick={closeModal}
-                disabled={isOperating}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-error"
-                onClick={handleDelete}
-                disabled={isOperating}
-                autoFocus
-              >
-                {isOperating ? (
-                  <>
-                    <span className="loading loading-spinner loading-sm"></span>
-                    Deleting...
-                  </>
-                ) : (
-                  'Delete'
+                {fileOperation.itemType === 'folder' && (
+                  <p className="mt-2 text-warning text-sm">
+                    This will delete all files inside the folder.
+                  </p>
                 )}
-              </button>
-            </div>
+                <p className="mt-2 text-base-content/70 text-sm">
+                  This action cannot be undone.
+                </p>
+                {operationError && (
+                  <div className="mt-2 text-error text-sm">{operationError}</div>
+                )}
+              </div>
+              <div className="modal-action">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={closeModal}
+                  disabled={isOperating}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-error"
+                  disabled={isOperating}
+                  autoFocus
+                >
+                  {isOperating ? (
+                    <>
+                      <span className="loading loading-spinner loading-sm"></span>
+                      Deleting...
+                    </>
+                  ) : (
+                    'Delete'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
           <div className="modal-backdrop" onClick={closeModal}></div>
         </div>
