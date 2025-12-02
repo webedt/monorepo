@@ -256,6 +256,7 @@ function ImagesContent() {
   const [newImageFilename, setNewImageFilename] = useState('image.png');
   const [showResolutionPicker, setShowResolutionPicker] = useState(false);
   const [isCreatingImage, setIsCreatingImage] = useState(false);
+  const [isSavingImage, setIsSavingImage] = useState(false);
   const resolutionPickerRef = useRef<HTMLDivElement>(null);
 
   // Get preferences from store
@@ -691,6 +692,82 @@ function ImagesContent() {
       setIsCreatingImage(false);
     }
   }, [imageSession, newImageFilename, selectedDirectory, imagePrefs, queryClient, expandedFolders, loadImage, isCreatingImage]);
+
+  // Handle saving the current image
+  const handleSaveImage = useCallback(async () => {
+    if (!imageSession || !selectedFile || !canvasRef.current || isSavingImage) return;
+
+    setIsSavingImage(true);
+
+    try {
+      const canvas = canvasRef.current;
+      const drawingCanvas = drawingLayerRef.current;
+      const ctx = canvas.getContext('2d');
+      const drawingCtx = drawingCanvas?.getContext('2d');
+
+      if (!ctx) {
+        console.error('Failed to get canvas context');
+        return;
+      }
+
+      // Merge drawing layer onto base canvas if it exists
+      if (drawingCanvas && drawingCtx) {
+        ctx.drawImage(drawingCanvas, 0, 0);
+        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      }
+
+      // Determine MIME type from file extension
+      const ext = selectedFile.name.split('.').pop()?.toLowerCase() || 'png';
+      const mimeTypes: Record<string, string> = {
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        bmp: 'image/bmp',
+      };
+      const mimeType = mimeTypes[ext] || 'image/png';
+
+      // Convert canvas to base64
+      const dataUrl = canvas.toDataURL(mimeType);
+      const base64Content = dataUrl.split(',')[1];
+
+      // Save to GitHub
+      await githubApi.updateFile(
+        imageSession.owner,
+        imageSession.repo,
+        selectedFile.path,
+        {
+          content: base64Content,
+          branch: imageSession.branch,
+          message: `Update image: ${selectedFile.name}`,
+        }
+      );
+
+      // Refresh the file tree to get updated SHA
+      await queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+
+      // Update history with the merged state
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const newHistory = canvasHistory.slice(0, historyIndex + 1);
+      newHistory.push(imageData);
+      if (newHistory.length > 50) {
+        newHistory.shift();
+      }
+      setCanvasHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+
+      // Clear selection
+      setSelection(null);
+
+      console.log('Image saved successfully');
+    } catch (error) {
+      console.error('Failed to save image:', error);
+      // Could add error toast here
+    } finally {
+      setIsSavingImage(false);
+    }
+  }, [imageSession, selectedFile, isSavingImage, queryClient, canvasHistory, historyIndex]);
 
   // Close resolution picker when clicking outside
   useEffect(() => {
@@ -2048,9 +2125,17 @@ function ImagesContent() {
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
             </button>
           </div>
-          <button className="btn btn-sm btn-primary gap-2">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
-            Save
+          <button
+            onClick={handleSaveImage}
+            disabled={isSavingImage || !selectedFile || !imageSession}
+            className="btn btn-sm btn-primary gap-2"
+          >
+            {isSavingImage ? (
+              <span className="loading loading-spinner loading-xs"></span>
+            ) : (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+            )}
+            {isSavingImage ? 'Saving...' : 'Save'}
           </button>
           <button className="btn btn-sm btn-outline gap-2">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/></svg>
