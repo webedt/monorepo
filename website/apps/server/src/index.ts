@@ -117,9 +117,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+// Configure CORS - include github.etdofresh.com for preview site access
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];
+// Always allow the preview site to make API calls
+if (!allowedOrigins.includes('https://github.etdofresh.com')) {
+  allowedOrigins.push('https://github.etdofresh.com');
+}
 app.use(
   cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+    origin: allowedOrigins,
     credentials: true,
   })
 );
