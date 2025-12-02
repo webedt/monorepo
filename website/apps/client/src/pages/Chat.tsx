@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
 import type { GitHubPullRequest } from '@webedt/shared';
 import { useEventSource } from '@/hooks/useEventSource';
+import { useBrowserNotification, getNotificationPrefs } from '@/hooks/useBrowserNotification';
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
@@ -330,6 +331,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Get worker store for robust execution tracking
   const workerStore = useWorkerStore();
+
+  // Browser notification for session completion
+  const { permission: notificationPermission, requestPermission, showSessionCompletedNotification } = useBrowserNotification();
 
   // Sync local state with global store
   useEffect(() => {
@@ -1263,6 +1267,25 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Clear global worker state
       workerStore.stopExecution();
       console.log('[Chat] SSE stream completed, worker store cleared');
+
+      // Show browser notification if enabled (only when tab is not focused)
+      const notificationPrefs = getNotificationPrefs();
+      if (notificationPrefs.enabled && notificationPrefs.onSessionComplete) {
+        const repoName = session?.repositoryName
+          ? `${session.repositoryOwner}/${session.repositoryName}`
+          : selectedRepo || undefined;
+
+        // If permission not yet requested, request it now (on first session completion)
+        if (notificationPermission === 'default') {
+          requestPermission().then((perm) => {
+            if (perm === 'granted') {
+              showSessionCompletedNotification(data?.websiteSessionId, repoName);
+            }
+          });
+        } else {
+          showSessionCompletedNotification(data?.websiteSessionId, repoName);
+        }
+      }
 
       // Capture session ID from completion event
       if (data?.websiteSessionId) {
