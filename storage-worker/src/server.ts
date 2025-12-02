@@ -392,6 +392,8 @@ app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Requ
   const filePath = req.params[1]; // The file path after /files/
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
+  console.log(`[READ] session-id: ${sessionPath}, file: ${filePath}, container: ${CONTAINER_ID}`);
+
   if (!filePath) {
     res.status(400).json({
       error: 'invalid_request',
@@ -439,6 +441,8 @@ app.put(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, express.raw({ ty
   const sessionPath = req.params[0];
   const filePath = req.params[1];
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  console.log(`[WRITE] session-id: ${sessionPath}, file: ${filePath}, container: ${CONTAINER_ID}`);
 
   if (!filePath) {
     res.status(400).json({
