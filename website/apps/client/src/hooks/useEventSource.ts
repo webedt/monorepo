@@ -79,8 +79,20 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
 
     isMountedRef.current = true;
 
-    // Prevent duplicate connections
-    if (!url || (eventSourceRef.current || abortControllerRef.current) || isConnectingRef.current) return;
+    // If there's an existing connection, disconnect it first to allow new connection
+    // This handles the case where a new request comes in while a previous connection is still active
+    if (abortControllerRef.current) {
+      console.log('[SSE] Disconnecting previous connection to allow new request');
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    // Prevent duplicate connections (only check isConnectingRef now since we cleared the others)
+    if (!url || isConnectingRef.current) return;
 
     try {
       isConnectingRef.current = true;
