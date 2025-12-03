@@ -298,5 +298,6 @@ export const TAGLINES = [
   "Oppan Gangnam Edits!",
   "What does the fox edit?",
   "Watch me edit, watch me nae nae",
-  "Baby edit, doo doo doo doo doo doo"
+  "Baby edit, doo doo doo doo doo doo",
+  "I am the edit, goo-goo g'joob",
 ];
