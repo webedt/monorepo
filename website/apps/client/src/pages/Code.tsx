@@ -33,31 +33,6 @@ function debounce<T extends (...args: any[]) => any>(
   return debounced;
 }
 
-// Session path separator used between components (double underscore to avoid conflicts)
-const SESSION_PATH_SEPARATOR = '__';
-
-/**
- * Sanitize a component for use in session path
- * Replaces slashes and other problematic characters with dashes
- */
-function sanitizeSessionComponent(component: string): string {
-  return component
-    .replace(/\//g, '-')  // Replace slashes with dashes
-    .replace(/__/g, '-')  // Replace double underscores (our separator) with dashes
-    .replace(/[^a-zA-Z0-9._-]/g, '-'); // Replace other special chars with dashes
-}
-
-/**
- * Generate a session path from owner, repo, and branch
- * Format: {owner}__{repo}__{branch} (no slashes)
- */
-function generateSessionPath(owner: string, repo: string, branch: string): string {
-  const safeOwner = sanitizeSessionComponent(owner);
-  const safeRepo = sanitizeSessionComponent(repo);
-  const safeBranch = sanitizeSessionComponent(branch);
-  return `${safeOwner}${SESSION_PATH_SEPARATOR}${safeRepo}${SESSION_PATH_SEPARATOR}${safeBranch}`;
-}
-
 // Track pending changes per file
 interface PendingChange {
   content: string;
@@ -382,17 +357,21 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Fetch file tree when code session is active
   // Uses storage-worker only (no GitHub fallback)
+  // NOTE: Storage-worker uses the database session ID as the storage key, not owner/repo/branch
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['file-tree', codeSession?.owner, codeSession?.repo, codeSession?.branch],
+    queryKey: ['file-tree', codeSession?.sessionId],
     queryFn: async () => {
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(codeSession!.owner, codeSession!.repo, codeSession!.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = codeSession!.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage lookup');
+      }
 
-      console.log('[Code] Fetching file tree from storage-worker:', sessionPath);
-      const files = await storageWorkerApi.listFiles(sessionPath);
+      console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
+      const files = await storageWorkerApi.listFiles(storageSessionId);
       return { source: 'storage', files: files || [] };
     },
-    enabled: !!codeSession,
+    enabled: !!codeSession?.sessionId,
   });
 
   // Transform the tree into our TreeNode format
@@ -557,13 +536,13 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Load file content when a file is selected
   // Uses storage-worker to fetch files from the session tarball
   const loadFileContent = useCallback(async (path: string) => {
-    if (!codeSession) return;
+    if (!codeSession || !codeSession.sessionId) return;
 
     // Clear previous image URL when loading a new file
     setImageUrl(null);
 
-    // Session path format: owner__repo__branch (no slashes, sanitized)
-    const sessionPath = generateSessionPath(codeSession.owner, codeSession.repo, codeSession.branch);
+    // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+    const storageSessionId = codeSession.sessionId;
 
     // Check if this is an image file
     if (isImageFile(path)) {
@@ -571,7 +550,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setFileContent(null); // Clear text content for images
       try {
         // Fetch image from storage-worker
-        const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${path}`);
+        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
 
         if (blob) {
           // Create a URL for the image blob
@@ -601,7 +580,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     try {
       // Fetch file content from storage-worker
       // Files in storage are under workspace/ prefix
-      const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${path}`);
+      const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
 
       if (content === null) {
         // File not found in storage
@@ -857,16 +836,16 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Save a single file to storage-worker
   const saveFile = useCallback(async (path: string, content: string, _sha?: string) => {
     const session = codeSessionRef.current;
-    if (!session) return null;
+    if (!session || !session.sessionId) return null;
 
     try {
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(session.owner, session.repo, session.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = session.sessionId;
       const storagePath = `workspace/${path}`;
 
-      console.log(`[Code] Saving file to storage-worker:`, { sessionPath, storagePath });
+      console.log(`[Code] Saving file to storage-worker:`, { storageSessionId, storagePath });
 
-      const success = await storageWorkerApi.writeFile(sessionPath, storagePath, content);
+      const success = await storageWorkerApi.writeFile(storageSessionId, storagePath, content);
       if (!success) {
         throw new Error('Failed to write file to storage');
       }
@@ -1223,15 +1202,18 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       pathParts[pathParts.length - 1] = newName.trim();
       const newPath = pathParts.join('/');
 
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(codeSession.owner, codeSession.repo, codeSession.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = codeSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
 
       if (fileOperation.itemType === 'file') {
         // Rename file in storage-worker: read content, write to new path, delete old
-        const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${fileOperation.path}`);
+        const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${fileOperation.path}`);
         if (content !== null) {
-          await storageWorkerApi.writeFile(sessionPath, `workspace/${newPath}`, content);
-          await storageWorkerApi.deleteFile(sessionPath, `workspace/${fileOperation.path}`);
+          await storageWorkerApi.writeFile(storageSessionId, `workspace/${newPath}`, content);
+          await storageWorkerApi.deleteFile(storageSessionId, `workspace/${fileOperation.path}`);
         } else {
           throw new Error('File not found in storage');
         }
@@ -1281,11 +1263,14 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     setOperationError(null);
 
     try {
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(codeSession.owner, codeSession.repo, codeSession.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = codeSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
 
       if (fileOperation.itemType === 'file') {
-        const success = await storageWorkerApi.deleteFile(sessionPath, `workspace/${fileOperation.path}`);
+        const success = await storageWorkerApi.deleteFile(storageSessionId, `workspace/${fileOperation.path}`);
         if (!success) {
           throw new Error('Failed to delete file from storage');
         }

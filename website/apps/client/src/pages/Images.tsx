@@ -15,31 +15,6 @@ type EditorMode = 'image' | 'spritesheet' | 'animation';
 type ViewMode = 'preview' | 'edit';
 type DrawingTool = 'select' | 'pencil' | 'brush' | 'fill' | 'eraser' | 'rectangle' | 'circle' | 'line';
 
-// Session path separator used between components (double underscore to avoid conflicts)
-const SESSION_PATH_SEPARATOR = '__';
-
-/**
- * Sanitize a component for use in session path
- * Replaces slashes and other problematic characters with dashes
- */
-function sanitizeSessionComponent(component: string): string {
-  return component
-    .replace(/\//g, '-')  // Replace slashes with dashes
-    .replace(/__/g, '-')  // Replace double underscores (our separator) with dashes
-    .replace(/[^a-zA-Z0-9._-]/g, '-'); // Replace other special chars with dashes
-}
-
-/**
- * Generate a session path from owner, repo, and branch
- * Format: {owner}__{repo}__{branch} (no slashes)
- */
-function generateSessionPath(owner: string, repo: string, branch: string): string {
-  const safeOwner = sanitizeSessionComponent(owner);
-  const safeRepo = sanitizeSessionComponent(repo);
-  const safeBranch = sanitizeSessionComponent(branch);
-  return `${safeOwner}${SESSION_PATH_SEPARATOR}${safeRepo}${SESSION_PATH_SEPARATOR}${safeBranch}`;
-}
-
 // File types for filtering
 type ImageFileType = 'image' | 'spritesheet' | 'animation';
 
@@ -413,17 +388,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
   // Fetch file tree from storage-worker when imageSession is active
   // Uses storage-worker only (no GitHub fallback)
+  // NOTE: Storage-worker uses the database session ID as the storage key, not owner/repo/branch
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['file-tree', imageSession?.owner, imageSession?.repo, imageSession?.branch],
+    queryKey: ['file-tree', imageSession?.sessionId],
     queryFn: async () => {
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(imageSession!.owner, imageSession!.repo, imageSession!.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession!.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage lookup');
+      }
 
-      console.log('[Images] Fetching file tree from storage-worker:', sessionPath);
-      const files = await storageWorkerApi.listFiles(sessionPath);
+      console.log('[Images] Fetching file tree from storage-worker:', storageSessionId);
+      const files = await storageWorkerApi.listFiles(storageSessionId);
       return { source: 'storage', files: files || [] };
     },
-    enabled: !!imageSession,
+    enabled: !!imageSession?.sessionId,
   });
 
   // Transform and filter the file tree based on editor mode
@@ -471,13 +450,16 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     setImageUrl(null);
 
     try {
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(imageSession.owner, imageSession.repo, imageSession.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage lookup');
+      }
 
       // Fetch image from storage-worker
       // Files in storage are under workspace/ prefix
-      console.log('[loadImage] Fetching from storage-worker:', sessionPath, `workspace/${path}`);
-      const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${path}`);
+      console.log('[loadImage] Fetching from storage-worker:', storageSessionId, `workspace/${path}`);
+      const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
 
       if (blob) {
         console.log('[loadImage] Got blob, size:', blob.size, 'type:', blob.type);
@@ -648,8 +630,11 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     const base64Content = dataUrl.split(',')[1];
 
     try {
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(imageSession.owner, imageSession.repo, imageSession.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
       const storagePath = `workspace/${fullPath}`;
 
       // Convert base64 to Blob for storage-worker
@@ -662,7 +647,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       const blob = new Blob([byteArray], { type: mimeType });
 
       // Create file in storage-worker
-      const success = await storageWorkerApi.writeFile(sessionPath, storagePath, blob);
+      const success = await storageWorkerApi.writeFile(storageSessionId, storagePath, blob);
       if (!success) {
         throw new Error('Failed to create image in storage');
       }
@@ -753,18 +738,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       const byteArray = new Uint8Array(byteNumbers);
       const blob = new Blob([byteArray], { type: mimeType });
 
-      // Session path format: owner__repo__branch (no slashes, sanitized)
-      const sessionPath = generateSessionPath(imageSession.owner, imageSession.repo, imageSession.branch);
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
       const storagePath = `workspace/${selectedFile.path}`;
 
       console.log('[Save] Saving to storage-worker...', {
-        sessionPath,
+        storageSessionId,
         storagePath,
         blobSize: blob.size
       });
 
       // Save to storage-worker only
-      const storageResult = await storageWorkerApi.writeFile(sessionPath, storagePath, blob);
+      const storageResult = await storageWorkerApi.writeFile(storageSessionId, storagePath, blob);
 
       if (!storageResult) {
         throw new Error('Failed to save image to storage');
