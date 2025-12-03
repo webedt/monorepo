@@ -10,20 +10,19 @@ console.log(`[StorageWorker] Using storage worker URL: ${STORAGE_WORKER_URL}`);
  * Proxy all storage-worker requests to the storage-worker service
  * This acts as a pass-through to avoid CORS issues and centralize service communication
  *
- * IMPORTANT: Route order matters! More specific routes (regex patterns for multi-segment paths)
- * must be registered BEFORE simpler parameterized routes to ensure proper matching.
- * Session paths are multi-segment (owner/repo/branch where branch can contain /).
+ * Session paths are now simple identifiers without slashes (e.g., owner__repo__branch)
+ * This simplifies routing - no more regex patterns needed for session paths.
+ * File paths can still contain slashes and are captured with wildcards.
  */
 
 // ============================================================================
-// FILE ROUTES (must come first - more specific patterns)
-// These use regex to capture multi-segment session paths
+// FILE ROUTES
 // ============================================================================
 
 // HEAD request to check if a file exists
-router.head(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
-  const filePath = req.params[1];
+router.head('/storage-worker/sessions/:sessionPath/files/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
 
   if (!filePath) {
     res.status(400).end();
@@ -50,9 +49,9 @@ router.head(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Reque
 });
 
 // Get a specific file from a session
-router.get(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
-  const filePath = req.params[1];
+router.get('/storage-worker/sessions/:sessionPath/files/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
   const targetUrl = `${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
 
   console.log('[StorageWorker] GET file request:', {
@@ -132,9 +131,9 @@ router.get(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Reques
 });
 
 // Write/update a file in a session
-router.put(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
-  const filePath = req.params[1];
+router.put('/storage-worker/sessions/:sessionPath/files/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
   const contentType = req.get('content-type') || 'application/octet-stream';
   const targetUrl = `${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
 
@@ -201,9 +200,9 @@ router.put(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Reques
 });
 
 // Delete a file from a session
-router.delete(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
-  const filePath = req.params[1];
+router.delete('/storage-worker/sessions/:sessionPath/files/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
 
   if (!filePath) {
     res.status(400).json({ error: 'File path is required' });
@@ -235,8 +234,8 @@ router.delete(/^\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Req
 });
 
 // List files in a session
-router.get(/^\/storage-worker\/sessions\/(.+)\/files$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
+router.get('/storage-worker/sessions/:sessionPath/files', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
 
   try {
     const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files`, {
@@ -320,9 +319,9 @@ router.post('/storage-worker/sessions/bulk-delete', async (req: Request, res: Re
   }
 });
 
-// Get session metadata (uses regex to capture multi-segment session path)
-router.get(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
+// Get session metadata
+router.get('/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
 
   try {
     const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}`, {
@@ -352,8 +351,8 @@ router.get(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)$/, async (req: Reque
 });
 
 // Check if session exists (HEAD request)
-router.head(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
+router.head('/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
 
   try {
     const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}`, {
@@ -368,8 +367,8 @@ router.head(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)$/, async (req: Requ
 });
 
 // Upload session
-router.post(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)\/upload$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
+router.post('/storage-worker/sessions/:sessionPath/upload', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
 
   try {
     const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/upload`, {
@@ -396,8 +395,8 @@ router.post(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)\/upload$/, async (r
 });
 
 // Download session
-router.get(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)\/download$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
+router.get('/storage-worker/sessions/:sessionPath/download', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
 
   try {
     const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/download`, {
@@ -443,8 +442,8 @@ router.get(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)\/download$/, async (
 });
 
 // Delete session
-router.delete(/^\/storage-worker\/sessions\/([^/]+\/[^/]+\/.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
+router.delete('/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
 
   try {
     const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}`, {
