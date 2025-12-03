@@ -233,6 +233,72 @@ const transformStorageFiles = (files: { path: string; size: number; type: 'file'
   return root.children;
 };
 
+// Transform GitHub tree to our TreeNode format
+const transformGitHubTree = (tree: { path: string; type: string; sha: string }[]): TreeNode[] => {
+  const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Filter to only files and trees (directories), exclude blobs that are too large
+  const items = tree.filter(item => item.type === 'blob' || item.type === 'tree');
+
+  // Sort items: directories first, then alphabetically
+  const sortedItems = [...items].sort((a, b) => {
+    if (a.type === 'tree' && b.type !== 'tree') return -1;
+    if (a.type !== 'tree' && b.type === 'tree') return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  for (const item of sortedItems) {
+    const pathParts = item.path.split('/').filter(p => p);
+    if (pathParts.length === 0) continue;
+
+    let currentLevel = root;
+
+    for (let i = 0; i < pathParts.length; i++) {
+      const part = pathParts[i];
+      const currentPath = pathParts.slice(0, i + 1).join('/');
+      const isLastPart = i === pathParts.length - 1;
+
+      if (isLastPart) {
+        if (item.type === 'blob') {
+          // It's a file
+          currentLevel.children.push({
+            name: part,
+            path: currentPath,
+            type: 'file',
+            icon: getFileIcon(part),
+          });
+        } else {
+          // It's a directory - only add if not already exists
+          const existing = currentLevel.children.find(
+            c => c.type === 'folder' && c.name === part
+          );
+          if (!existing) {
+            currentLevel.children.push({
+              name: part,
+              path: currentPath,
+              type: 'folder',
+              children: [],
+            });
+          }
+        }
+      } else {
+        // Navigate to or create intermediate folder
+        let folder = currentLevel.children.find(
+          c => c.type === 'folder' && c.name === part
+        ) as FolderNode | undefined;
+
+        if (!folder) {
+          folder = { name: part, path: currentPath, type: 'folder', children: [] };
+          currentLevel.children.push(folder);
+        }
+        currentLevel = folder;
+      }
+    }
+  }
+
+  return root.children;
+};
+
 // Props for split view support
 interface CodeProps {
   sessionId?: string;
@@ -356,32 +422,57 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   }, [preSelectedSettings, repos, codeSession, sessionId]);
 
   // Fetch file tree when code session is active
-  // Uses storage-worker only (no GitHub fallback)
+  // First tries storage-worker, falls back to GitHub if session not in storage yet
   // NOTE: Storage-worker uses the database session ID as the storage key, not owner/repo/branch
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['file-tree', codeSession?.sessionId],
+    queryKey: ['file-tree', codeSession?.sessionId, codeSession?.owner, codeSession?.repo, codeSession?.branch],
     queryFn: async () => {
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
       const storageSessionId = codeSession!.sessionId;
-      if (!storageSessionId) {
-        throw new Error('No session ID available for storage lookup');
+
+      // Try storage-worker first if we have a session ID
+      if (storageSessionId) {
+        try {
+          console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
+          const files = await storageWorkerApi.listFiles(storageSessionId);
+          if (files && files.length > 0) {
+            return { source: 'storage', files };
+          }
+          // Empty result - session might not be uploaded yet, fall through to GitHub
+          console.log('[Code] Storage-worker returned empty, falling back to GitHub');
+        } catch (error) {
+          // Storage-worker failed (likely 404 - session not uploaded yet), fall back to GitHub
+          console.log('[Code] Storage-worker failed, falling back to GitHub:', error);
+        }
       }
 
-      console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
-      const files = await storageWorkerApi.listFiles(storageSessionId);
-      return { source: 'storage', files: files || [] };
+      // Fall back to GitHub to get the file tree
+      if (codeSession!.owner && codeSession!.repo && codeSession!.branch) {
+        console.log('[Code] Fetching file tree from GitHub:', codeSession!.owner, codeSession!.repo, codeSession!.branch);
+        const response = await githubApi.getTree(codeSession!.owner, codeSession!.repo, codeSession!.branch);
+        return { source: 'github', tree: response.tree || [] };
+      }
+
+      return { source: 'empty', files: [], tree: [] };
     },
-    enabled: !!codeSession?.sessionId,
+    enabled: !!codeSession?.sessionId || (!!codeSession?.owner && !!codeSession?.repo && !!codeSession?.branch),
   });
 
   // Transform the tree into our TreeNode format
+  // Handles both storage-worker and GitHub sources
   const fileTree = useMemo(() => {
     if (!treeData) return [];
-    if (treeData.files) {
+    if (treeData.source === 'storage' && treeData.files) {
       return transformStorageFiles(treeData.files);
+    }
+    if (treeData.source === 'github' && treeData.tree) {
+      return transformGitHubTree(treeData.tree);
     }
     return [];
   }, [treeData]);
+
+  // Track which source we're using for file operations
+  const treeSource = treeData?.source || 'unknown';
 
   // Query to check for existing PR (for code sessions)
   const { data: prData, refetch: refetchPr } = useQuery({
@@ -534,9 +625,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   };
 
   // Load file content when a file is selected
-  // Uses storage-worker to fetch files from the session tarball
+  // First tries storage-worker, falls back to GitHub if not in storage
   const loadFileContent = useCallback(async (path: string) => {
-    if (!codeSession || !codeSession.sessionId) return;
+    if (!codeSession) return;
 
     // Clear previous image URL when loading a new file
     setImageUrl(null);
@@ -549,17 +640,41 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setIsLoadingFile(true);
       setFileContent(null); // Clear text content for images
       try {
-        // Fetch image from storage-worker
-        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
-
-        if (blob) {
-          // Create a URL for the image blob
-          const url = URL.createObjectURL(blob);
-          setImageUrl(url);
-        } else {
-          console.error(`[Code] Image not found in storage: ${path}`);
-          setFileContent(`// Error: Image not found in storage`);
+        // Try storage-worker first
+        if (storageSessionId) {
+          try {
+            const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              setImageUrl(url);
+              setIsLoadingFile(false);
+              return;
+            }
+          } catch {
+            // Fall through to GitHub
+          }
         }
+
+        // Fall back to GitHub
+        if (codeSession.owner && codeSession.repo && codeSession.branch) {
+          const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.branch);
+          if (response.content) {
+            // Decode base64 content and create blob
+            const binaryString = atob(response.content);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            setImageUrl(url);
+            setIsLoadingFile(false);
+            return;
+          }
+        }
+
+        console.error(`[Code] Image not found: ${path}`);
+        setFileContent(`// Error: Image not found`);
       } catch (error: any) {
         console.error('Failed to load image:', error);
         setFileContent(`// Error loading image: ${error.message}`);
@@ -578,9 +693,26 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     setIsLoadingFile(true);
     try {
-      // Fetch file content from storage-worker
-      // Files in storage are under workspace/ prefix
-      const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
+      let content: string | null = null;
+
+      // Try storage-worker first
+      if (storageSessionId) {
+        try {
+          content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
+        } catch {
+          // Fall through to GitHub
+          console.log('[Code] Storage-worker failed for file, trying GitHub');
+        }
+      }
+
+      // Fall back to GitHub if storage didn't have the file
+      if (content === null && codeSession.owner && codeSession.repo && codeSession.branch) {
+        console.log('[Code] Fetching file from GitHub:', path);
+        const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.branch);
+        if (response.content) {
+          content = atob(response.content);
+        }
+      }
 
       if (content === null) {
         // File not found in storage
