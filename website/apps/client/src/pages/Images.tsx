@@ -108,102 +108,6 @@ const getFileIcon = (filename: string, fileType?: ImageFileType): string => {
   return iconMap[ext || ''] || '🖼️';
 };
 
-// Transform GitHub tree to our filtered TreeNode format
-// Now includes ALL directories, not just those with images
-const transformGitHubTreeForImages = (
-  items: GitHubTreeItem[],
-  filterMode: EditorMode | 'all'
-): FileNode[] => {
-  const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
-
-  // Sort items: directories first, then alphabetically
-  const sortedItems = [...items].sort((a, b) => {
-    if (a.type === 'tree' && b.type !== 'tree') return -1;
-    if (a.type !== 'tree' && b.type === 'tree') return 1;
-    return a.path.localeCompare(b.path);
-  });
-
-  // First pass: identify all files and their types
-  const fileTypes = new Map<string, ImageFileType>();
-  for (const item of sortedItems) {
-    if (item.type === 'blob') {
-      const fileType = getImageFileType(item.path.split('/').pop() || '');
-      if (fileType) {
-        fileTypes.set(item.path, fileType);
-      }
-    }
-  }
-
-  // Collect all directory paths
-  const allDirectories = new Set<string>();
-  for (const item of sortedItems) {
-    if (item.type === 'tree') {
-      allDirectories.add(item.path);
-    }
-  }
-
-  // Build the tree structure - include ALL directories
-  for (const item of sortedItems) {
-    const pathParts = item.path.split('/');
-    let currentLevel = root;
-
-    for (let i = 0; i < pathParts.length; i++) {
-      const part = pathParts[i];
-      const currentPath = pathParts.slice(0, i + 1).join('/');
-      const isLastPart = i === pathParts.length - 1;
-
-      if (isLastPart) {
-        if (item.type === 'blob') {
-          const fileType = fileTypes.get(item.path);
-
-          // Filter by mode - only include matching image files
-          if (!fileType) continue;
-          if (filterMode !== 'all') {
-            if (filterMode === 'image' && fileType !== 'image') continue;
-            if (filterMode === 'spritesheet' && fileType !== 'spritesheet') continue;
-            if (filterMode === 'animation' && fileType !== 'animation') continue;
-          }
-
-          currentLevel.children!.push({
-            name: part,
-            path: currentPath,
-            type: 'file',
-            icon: getFileIcon(part, fileType),
-            fileType,
-          });
-        } else {
-          // Directory - always add all directories
-          const existing = currentLevel.children!.find(
-            c => c.type === 'folder' && c.name === part
-          );
-          if (!existing) {
-            currentLevel.children!.push({
-              name: part,
-              path: currentPath,
-              type: 'folder',
-              children: [],
-            });
-          }
-        }
-      } else {
-        // Navigate to or create intermediate folder
-        let folder = currentLevel.children!.find(
-          c => c.type === 'folder' && c.name === part
-        ) as FileNode | undefined;
-
-        if (!folder) {
-          folder = { name: part, path: currentPath, type: 'folder', children: [] };
-          currentLevel.children!.push(folder);
-        }
-
-        currentLevel = folder;
-      }
-    }
-  }
-
-  return root.children || [];
-};
-
 // Transform storage-worker files to our filtered TreeNode format for images
 // Storage files have path and type properties
 const transformStorageFilesForImages = (
@@ -618,17 +522,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   // Helper to count files in a directory
   const countFilesInDirectory = useCallback((dirPath: string): { images: number; spritesheets: number; animations: number; folders: number } => {
     const counts = { images: 0, spritesheets: 0, animations: 0, folders: 0 };
-    if (!treeData?.data?.tree) return counts;
+    if (!treeData?.files) return counts;
 
-    for (const item of treeData.data.tree) {
+    // Files in storage have workspace/ prefix, so we need to account for that
+    const workspacePrefix = 'workspace/';
+    const fullDirPath = workspacePrefix + dirPath;
+
+    for (const item of treeData.files) {
       // Check if item is directly inside this directory
-      if (item.path.startsWith(dirPath + '/')) {
-        const relativePath = item.path.slice(dirPath.length + 1);
+      if (item.path.startsWith(fullDirPath + '/')) {
+        const relativePath = item.path.slice(fullDirPath.length + 1);
         // Only count direct children (no more slashes in relative path)
         if (!relativePath.includes('/')) {
-          if (item.type === 'tree') {
+          if (item.type === 'directory') {
             counts.folders++;
-          } else if (item.type === 'blob') {
+          } else if (item.type === 'file') {
             const fileType = getImageFileType(item.path.split('/').pop() || '');
             if (fileType === 'image') counts.images++;
             else if (fileType === 'spritesheet') counts.spritesheets++;
@@ -642,13 +550,15 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
   // Generate unique filename for new image
   const generateNewImageFilename = useCallback((basePath: string, extension: string): string => {
-    if (!treeData?.data?.tree) return `image.${extension}`;
+    if (!treeData?.files) return `image.${extension}`;
 
     const existingFiles = new Set<string>();
-    const prefix = basePath ? `${basePath}/` : '';
+    // Files in storage have workspace/ prefix
+    const workspacePrefix = 'workspace/';
+    const prefix = basePath ? `${workspacePrefix}${basePath}/` : workspacePrefix;
 
-    for (const item of treeData.data.tree) {
-      if (item.type === 'blob' && item.path.startsWith(prefix)) {
+    for (const item of treeData.files) {
+      if (item.type === 'file' && item.path.startsWith(prefix)) {
         const relativePath = item.path.slice(prefix.length);
         if (!relativePath.includes('/')) {
           existingFiles.add(relativePath.toLowerCase());

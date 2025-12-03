@@ -109,24 +109,6 @@ const isImageFile = (filename: string): boolean => {
   return imageExtensions.includes(ext || '');
 };
 
-// Helper to get MIME type for image files
-const getImageMimeType = (filename: string): string => {
-  const ext = filename.split('.').pop()?.toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
-    webp: 'image/webp',
-    svg: 'image/svg+xml',
-    ico: 'image/x-icon',
-    bmp: 'image/bmp',
-    tiff: 'image/tiff',
-    tif: 'image/tiff',
-  };
-  return mimeTypes[ext || ''] || 'application/octet-stream';
-};
-
 // Helper to get file icon based on extension
 const getFileIcon = (filename: string): string => {
   const ext = filename.split('.').pop()?.toLowerCase();
@@ -183,67 +165,6 @@ const getFileIcon = (filename: string): string => {
     lock: '🔒',
   };
   return iconMap[ext || ''] || '📄';
-};
-
-// Transform GitHub tree to our TreeNode format
-const transformGitHubTree = (items: GitHubTreeItem[]): TreeNode[] => {
-  const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
-
-  // Sort items: directories first, then alphabetically
-  const sortedItems = [...items].sort((a, b) => {
-    if (a.type === 'tree' && b.type !== 'tree') return -1;
-    if (a.type !== 'tree' && b.type === 'tree') return 1;
-    return a.path.localeCompare(b.path);
-  });
-
-  for (const item of sortedItems) {
-    const pathParts = item.path.split('/');
-    let currentLevel = root;
-
-    for (let i = 0; i < pathParts.length; i++) {
-      const part = pathParts[i];
-      const currentPath = pathParts.slice(0, i + 1).join('/');
-      const isLastPart = i === pathParts.length - 1;
-
-      if (isLastPart) {
-        if (item.type === 'blob') {
-          // It's a file
-          currentLevel.children.push({
-            name: part,
-            path: currentPath,
-            type: 'file',
-            icon: getFileIcon(part),
-          });
-        } else {
-          // It's a directory (tree) - only add if not already exists
-          const existing = currentLevel.children.find(
-            c => c.type === 'folder' && c.name === part
-          );
-          if (!existing) {
-            currentLevel.children.push({
-              name: part,
-              path: currentPath,
-              type: 'folder',
-              children: [],
-            });
-          }
-        }
-      } else {
-        // Navigate to or create intermediate folder
-        let folder = currentLevel.children.find(
-          c => c.type === 'folder' && c.name === part
-        ) as FolderNode | undefined;
-
-        if (!folder) {
-          folder = { name: part, path: currentPath, type: 'folder', children: [] };
-          currentLevel.children.push(folder);
-        }
-        currentLevel = folder;
-      }
-    }
-  }
-
-  return root.children;
 };
 
 // Transform storage-worker file list to our TreeNode format
