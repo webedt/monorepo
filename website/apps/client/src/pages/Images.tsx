@@ -205,6 +205,96 @@ const transformStorageFilesForImages = (
   return root.children || [];
 };
 
+// Transform GitHub tree to our filtered TreeNode format for images
+const transformGitHubTreeForImages = (
+  tree: { path: string; type: string; sha: string }[],
+  filterMode: EditorMode | 'all'
+): FileNode[] => {
+  const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Filter to only files and trees (directories)
+  const items = tree.filter(item => item.type === 'blob' || item.type === 'tree');
+
+  // Sort items: directories first, then alphabetically
+  const sortedItems = [...items].sort((a, b) => {
+    if (a.type === 'tree' && b.type !== 'tree') return -1;
+    if (a.type !== 'tree' && b.type === 'tree') return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  // First pass: identify all files and their types
+  const fileTypes = new Map<string, ImageFileType>();
+  for (const item of sortedItems) {
+    if (item.type === 'blob') {
+      const fileType = getImageFileType(item.path.split('/').pop() || '');
+      if (fileType) {
+        fileTypes.set(item.path, fileType);
+      }
+    }
+  }
+
+  // Build the tree structure
+  for (const item of sortedItems) {
+    const pathParts = item.path.split('/');
+    let currentLevel = root;
+
+    for (let i = 0; i < pathParts.length; i++) {
+      const part = pathParts[i];
+      const currentPath = pathParts.slice(0, i + 1).join('/');
+      const isLastPart = i === pathParts.length - 1;
+
+      if (isLastPart) {
+        if (item.type === 'blob') {
+          const fileType = fileTypes.get(item.path);
+
+          // Filter by mode - only include matching image files
+          if (!fileType) continue;
+          if (filterMode !== 'all') {
+            if (filterMode === 'image' && fileType !== 'image') continue;
+            if (filterMode === 'spritesheet' && fileType !== 'spritesheet') continue;
+            if (filterMode === 'animation' && fileType !== 'animation') continue;
+          }
+
+          currentLevel.children!.push({
+            name: part,
+            path: currentPath,
+            type: 'file',
+            icon: getFileIcon(part, fileType),
+            fileType,
+          });
+        } else {
+          // Directory - always add all directories
+          const existing = currentLevel.children!.find(
+            c => c.type === 'folder' && c.name === part
+          );
+          if (!existing) {
+            currentLevel.children!.push({
+              name: part,
+              path: currentPath,
+              type: 'folder',
+              children: [],
+            });
+          }
+        }
+      } else {
+        // Navigate to or create intermediate folder
+        let folder = currentLevel.children!.find(
+          c => c.type === 'folder' && c.name === part
+        ) as FileNode | undefined;
+
+        if (!folder) {
+          folder = { name: part, path: currentPath, type: 'folder', children: [] };
+          currentLevel.children!.push(folder);
+        }
+
+        currentLevel = folder;
+      }
+    }
+  }
+
+  return root.children || [];
+};
+
 // Props for split view support
 interface ImagesContentProps {
   sessionId?: string;
@@ -387,42 +477,88 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   };
 
   // Fetch file tree from storage-worker when imageSession is active
-  // Uses storage-worker only (no GitHub fallback)
+  // First tries storage-worker, falls back to GitHub if session not in storage yet
+  // NOTE: Storage-worker uses the database session ID as the storage key, not owner/repo/branch
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['file-tree', imageSession?.owner, imageSession?.repo, imageSession?.branch],
+    queryKey: ['file-tree', imageSession?.sessionId, imageSession?.owner, imageSession?.repo, imageSession?.branch],
     queryFn: async () => {
-      // Session path format: owner__repo__branch (no slashes)
-      const sessionPath = `${imageSession!.owner}__${imageSession!.repo}__${imageSession!.branch}`;
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession!.sessionId;
 
-      console.log('[Images] Fetching file tree from storage-worker:', sessionPath);
-      const files = await storageWorkerApi.listFiles(sessionPath);
-      return { source: 'storage', files: files || [] };
+      // Try storage-worker first if we have a session ID
+      if (storageSessionId) {
+        try {
+          console.log('[Images] Fetching file tree from storage-worker:', storageSessionId);
+          const files = await storageWorkerApi.listFiles(storageSessionId);
+          if (files && files.length > 0) {
+            return { source: 'storage', files };
+          }
+          // Empty result - session might not be uploaded yet, fall through to GitHub
+          console.log('[Images] Storage-worker returned empty, falling back to GitHub');
+        } catch (error) {
+          // Storage-worker failed (likely 404 - session not uploaded yet), fall back to GitHub
+          console.log('[Images] Storage-worker failed, falling back to GitHub:', error);
+        }
+      }
+
+      // Fall back to GitHub to get the file tree
+      if (imageSession!.owner && imageSession!.repo && imageSession!.branch) {
+        console.log('[Images] Fetching file tree from GitHub:', imageSession!.owner, imageSession!.repo, imageSession!.branch);
+        const response = await githubApi.getTree(imageSession!.owner, imageSession!.repo, imageSession!.branch);
+        return { source: 'github', tree: response.tree || [] };
+      }
+
+      return { source: 'empty', files: [], tree: [] };
     },
-    enabled: !!imageSession,
+    enabled: !!imageSession?.sessionId || (!!imageSession?.owner && !!imageSession?.repo && !!imageSession?.branch),
   });
 
   // Transform and filter the file tree based on editor mode
+  // Handles both storage-worker and GitHub sources
   const fileTree = useMemo(() => {
-    if (!treeData?.files) return [];
-    return transformStorageFilesForImages(treeData.files, editorMode);
+    if (!treeData) return [];
+    if (treeData.source === 'storage' && treeData.files) {
+      return transformStorageFilesForImages(treeData.files, editorMode);
+    }
+    if (treeData.source === 'github' && treeData.tree) {
+      return transformGitHubTreeForImages(treeData.tree, editorMode);
+    }
+    return [];
   }, [treeData, editorMode]);
+
+  // Track which source we're using for file operations
+  const treeSource = treeData?.source || 'unknown';
 
   // Count files by type for display
   const fileCounts = useMemo(() => {
-    if (!treeData?.files) return { image: 0, spritesheet: 0, animation: 0 };
+    if (!treeData) return { image: 0, spritesheet: 0, animation: 0 };
 
     const counts = { image: 0, spritesheet: 0, animation: 0 };
-    // Filter to only count files under workspace/
-    const workspaceFiles = treeData.files.filter(
-      (f: { path: string; type: string }) => f.path.startsWith('workspace/') && f.type === 'file'
-    );
-    for (const item of workspaceFiles) {
-      const fileName = item.path.split('/').pop() || '';
-      const fileType = getImageFileType(fileName);
-      if (fileType) {
-        counts[fileType]++;
+
+    if (treeData.source === 'storage' && treeData.files) {
+      // Filter to only count files under workspace/
+      const workspaceFiles = treeData.files.filter(
+        (f: { path: string; type: string }) => f.path.startsWith('workspace/') && f.type === 'file'
+      );
+      for (const item of workspaceFiles) {
+        const fileName = item.path.split('/').pop() || '';
+        const fileType = getImageFileType(fileName);
+        if (fileType) {
+          counts[fileType]++;
+        }
+      }
+    } else if (treeData.source === 'github' && treeData.tree) {
+      for (const item of treeData.tree) {
+        if (item.type === 'blob') {
+          const fileName = item.path.split('/').pop() || '';
+          const fileType = getImageFileType(fileName);
+          if (fileType) {
+            counts[fileType]++;
+          }
+        }
       }
     }
+
     return counts;
   }, [treeData]);
 
@@ -437,7 +573,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   };
 
   // Load image when a file is selected
-  // Uses storage-worker only (no GitHub fallback)
+  // First tries storage-worker, falls back to GitHub if not in storage
   // Always converts to data URL to avoid CORS issues with canvas
   const loadImage = useCallback(async (path: string) => {
     if (!imageSession) return;
@@ -446,13 +582,34 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     setImageUrl(null);
 
     try {
-      // Session path format: owner__repo__branch (no slashes)
-      const sessionPath = `${imageSession.owner}__${imageSession.repo}__${imageSession.branch}`;
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession.sessionId;
+      let blob: Blob | null = null;
 
-      // Fetch image from storage-worker
-      // Files in storage are under workspace/ prefix
-      console.log('[loadImage] Fetching from storage-worker:', sessionPath, `workspace/${path}`);
-      const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${path}`);
+      // Try storage-worker first
+      if (storageSessionId) {
+        try {
+          console.log('[loadImage] Fetching from storage-worker:', storageSessionId, `workspace/${path}`);
+          blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+        } catch {
+          console.log('[loadImage] Storage-worker failed, trying GitHub');
+        }
+      }
+
+      // Fall back to GitHub if storage didn't have the file
+      if (!blob && imageSession.owner && imageSession.repo && imageSession.branch) {
+        console.log('[loadImage] Fetching from GitHub:', path);
+        const response = await githubApi.getFileContent(imageSession.owner, imageSession.repo, path, imageSession.branch);
+        if (response.content) {
+          // Decode base64 content and create blob
+          const binaryString = atob(response.content);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          blob = new Blob([bytes], { type: 'application/octet-stream' });
+        }
+      }
 
       if (blob) {
         console.log('[loadImage] Got blob, size:', blob.size, 'type:', blob.type);
@@ -460,7 +617,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
         console.log('[loadImage] Converted to dataUrl, length:', dataUrl.length);
         setImageUrl(dataUrl);
       } else {
-        console.error('[Images] Image not found in storage:', path);
+        console.error('[Images] Image not found:', path);
       }
     } catch (error) {
       console.error('Failed to load image:', error);
@@ -623,8 +780,11 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     const base64Content = dataUrl.split(',')[1];
 
     try {
-      // Session path format: owner__repo__branch (no slashes)
-      const sessionPath = `${imageSession.owner}__${imageSession.repo}__${imageSession.branch}`;
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
       const storagePath = `workspace/${fullPath}`;
 
       // Convert base64 to Blob for storage-worker
@@ -637,7 +797,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       const blob = new Blob([byteArray], { type: mimeType });
 
       // Create file in storage-worker
-      const success = await storageWorkerApi.writeFile(sessionPath, storagePath, blob);
+      const success = await storageWorkerApi.writeFile(storageSessionId, storagePath, blob);
       if (!success) {
         throw new Error('Failed to create image in storage');
       }
@@ -728,18 +888,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       const byteArray = new Uint8Array(byteNumbers);
       const blob = new Blob([byteArray], { type: mimeType });
 
-      // Session path format: owner__repo__branch (no slashes)
-      const sessionPath = `${imageSession.owner}__${imageSession.repo}__${imageSession.branch}`;
+      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
+      const storageSessionId = imageSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
       const storagePath = `workspace/${selectedFile.path}`;
 
       console.log('[Save] Saving to storage-worker...', {
-        sessionPath,
+        storageSessionId,
         storagePath,
         blobSize: blob.size
       });
 
       // Save to storage-worker only
-      const storageResult = await storageWorkerApi.writeFile(sessionPath, storagePath, blob);
+      const storageResult = await storageWorkerApi.writeFile(storageSessionId, storagePath, blob);
 
       if (!storageResult) {
         throw new Error('Failed to save image to storage');

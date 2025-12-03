@@ -1,7 +1,13 @@
 /**
  * Helper utilities for generating and parsing session paths
- * Session path format: {owner}/{repo}/{branch}
+ * Session path format: {owner}__{repo}__{branch} (no slashes allowed)
+ *
+ * IMPORTANT: Session paths must NOT contain "/" characters.
+ * The storage-worker API validates this and will reject paths with slashes.
  */
+
+// Separator used between components (double underscore to avoid conflicts)
+const SESSION_PATH_SEPARATOR = '__';
 
 /**
  * Parse GitHub repository URL to extract owner and repository name
@@ -32,43 +38,65 @@ export function parseRepoUrl(repoUrl: string): { owner: string; repo: string } {
 }
 
 /**
+ * Sanitize a component for use in session path
+ * Replaces slashes and other problematic characters with dashes
+ */
+function sanitizeComponent(component: string): string {
+  return component
+    .replace(/\//g, '-')  // Replace slashes with dashes
+    .replace(/__/g, '-')  // Replace double underscores (our separator) with dashes
+    .replace(/[^a-zA-Z0-9._-]/g, '-'); // Replace other special chars with dashes
+}
+
+/**
  * Generate a session path from owner, repo, and branch
- * Format: {owner}/{repo}/{branch}
- * URL-encodes each component to handle special characters
+ * Format: {owner}__{repo}__{branch} (no slashes)
+ *
+ * All components are sanitized to remove slashes and special characters.
  */
 export function generateSessionPath(owner: string, repo: string, branch: string): string {
-  // URL-encode each component (but preserve forward slashes in branch names)
-  const encodedOwner = encodeURIComponent(owner);
-  const encodedRepo = encodeURIComponent(repo);
-  // For branch names, replace slashes with dashes to avoid path issues
-  const safeBranch = branch.replace(/\//g, '-');
-  const encodedBranch = encodeURIComponent(safeBranch);
+  const safeOwner = sanitizeComponent(owner);
+  const safeRepo = sanitizeComponent(repo);
+  const safeBranch = sanitizeComponent(branch);
 
-  return `${encodedOwner}/${encodedRepo}/${encodedBranch}`;
+  return `${safeOwner}${SESSION_PATH_SEPARATOR}${safeRepo}${SESSION_PATH_SEPARATOR}${safeBranch}`;
 }
 
 /**
  * Parse a session path back into its components
  */
 export function parseSessionPath(sessionPath: string): { owner: string; repo: string; branch: string } {
-  const parts = sessionPath.split('/');
+  const parts = sessionPath.split(SESSION_PATH_SEPARATOR);
 
   if (parts.length !== 3) {
-    throw new Error(`Invalid session path format: ${sessionPath}. Expected: owner/repo/branch`);
+    throw new Error(`Invalid session path format: ${sessionPath}. Expected: owner__repo__branch`);
   }
 
   return {
-    owner: decodeURIComponent(parts[0]),
-    repo: decodeURIComponent(parts[1]),
-    branch: decodeURIComponent(parts[2])
+    owner: parts[0],
+    repo: parts[1],
+    branch: parts[2]
   };
 }
 
 /**
  * Convert session path to a filesystem-safe directory name
- * Replaces slashes with dashes and URL-decodes
+ * Since session paths no longer contain slashes, this is now a passthrough
  */
 export function sessionPathToDir(sessionPath: string): string {
-  // Replace slashes with dashes and decode
-  return sessionPath.replace(/\//g, '-');
+  // Session path is already filesystem-safe (no slashes)
+  return sessionPath;
+}
+
+/**
+ * Validate that a session path does not contain slashes
+ * Throws an error if the path is invalid
+ */
+export function validateSessionPath(sessionPath: string): void {
+  if (sessionPath.includes('/')) {
+    throw new Error(`Session path must not contain "/" characters: ${sessionPath}`);
+  }
+  if (!sessionPath || sessionPath.trim() === '') {
+    throw new Error('Session path is required and cannot be empty');
+  }
 }
