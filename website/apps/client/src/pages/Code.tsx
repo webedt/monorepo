@@ -472,7 +472,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   }, [treeData]);
 
   // Track which source we're using for file operations
-  const treeSource = treeData?.source || 'unknown';
+  const _treeSource = treeData?.source || 'unknown';
 
   // Query to check for existing PR (for code sessions)
   const { data: prData, refetch: refetchPr } = useQuery({

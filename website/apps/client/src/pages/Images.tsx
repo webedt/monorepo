@@ -527,7 +527,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   }, [treeData, editorMode]);
 
   // Track which source we're using for file operations
-  const treeSource = treeData?.source || 'unknown';
+  const _treeSource = treeData?.source || 'unknown';
 
   // Count files by type for display
   const fileCounts = useMemo(() => {
