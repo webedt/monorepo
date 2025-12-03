@@ -655,7 +655,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                                   setIsRepoDropdownOpen(false);
                                   setRepoSearchQuery('');
                                 }}
-                                className={`w-full text-left px-4 py-2 text-sm hover:bg-primary/30 focus:bg-primary/30 focus:outline-none ${!selectedRepo ? 'bg-primary/10 font-semibold' : ''}`}
+                                className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${!selectedRepo ? 'bg-primary/20 font-semibold' : ''}`}
                               >
                                 No repository
                               </button>
@@ -672,7 +672,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                                       setIsRepoDropdownOpen(false);
                                       setRepoSearchQuery('');
                                     }}
-                                    className={`w-full text-left px-4 py-2 text-sm hover:bg-primary/30 focus:bg-primary/30 focus:outline-none ${selectedRepo === repo.cloneUrl ? 'bg-primary/10 font-semibold' : ''}`}
+                                    className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${selectedRepo === repo.cloneUrl ? 'bg-primary/20 font-semibold' : ''}`}
                                   >
                                     {repo.fullName}
                                   </button>
@@ -746,7 +746,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                                           setIsBranchDropdownOpen(false);
                                           setBranchSearchQuery('');
                                         }}
-                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-primary/30 focus:bg-primary/30 focus:outline-none ${baseBranch === branchName ? 'bg-primary/10 font-semibold' : ''}`}
+                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${baseBranch === branchName ? 'bg-primary/20 font-semibold' : ''}`}
                                       >
                                         {branchName}
                                       </button>
