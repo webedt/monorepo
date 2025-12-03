@@ -35,6 +35,31 @@ app.use((req, res, next) => {
 // Create storage service
 const storageService = new StorageService();
 
+/**
+ * Validate sessionPath - must not contain slashes for simplicity
+ * Returns error response if invalid, null if valid
+ */
+function validateSessionPath(sessionPath: string, res: Response): boolean {
+  if (sessionPath.includes('/')) {
+    res.status(400).json({
+      error: 'invalid_session_path',
+      message: 'Session path must not contain "/" characters',
+      sessionPath,
+      containerId: CONTAINER_ID,
+    });
+    return false;
+  }
+  if (!sessionPath || sessionPath.trim() === '') {
+    res.status(400).json({
+      error: 'invalid_session_path',
+      message: 'Session path is required and cannot be empty',
+      containerId: CONTAINER_ID,
+    });
+    return false;
+  }
+  return true;
+}
+
 // Initialize storage service
 storageService.initialize().catch((err) => {
   console.error('Failed to initialize storage service:', err);
@@ -66,6 +91,8 @@ app.get('/health', (req: Request, res: Response) => {
 app.post('/api/storage-worker/sessions/:sessionPath/upload', async (req: Request, res: Response) => {
   const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!validateSessionPath(sessionPath, res)) return;
 
   try {
     // Check if request has a file (multipart) or raw body
@@ -143,6 +170,8 @@ app.get('/api/storage-worker/sessions/:sessionPath/download', async (req: Reques
   const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
+  if (!validateSessionPath(sessionPath, res)) return;
+
   try {
     // Check if session exists
     const exists = await storageService.sessionExists(sessionPath);
@@ -218,6 +247,8 @@ app.get('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: R
   const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
+  if (!validateSessionPath(sessionPath, res)) return;
+
   try {
     const metadata = await storageService.getSessionMetadata(sessionPath);
 
@@ -251,6 +282,8 @@ app.head('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: 
   const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
 
+  if (!validateSessionPath(sessionPath, res)) return;
+
   try {
     const exists = await storageService.sessionExists(sessionPath);
 
@@ -271,6 +304,8 @@ app.head('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: 
 app.delete('/api/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
   const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!validateSessionPath(sessionPath, res)) return;
 
   try {
     await storageService.deleteSession(sessionPath);
@@ -306,6 +341,18 @@ app.post('/api/storage-worker/sessions/bulk-delete', async (req: Request, res: R
     return;
   }
 
+  // Validate all session paths
+  const invalidPaths = sessionPaths.filter(p => typeof p !== 'string' || p.includes('/') || !p.trim());
+  if (invalidPaths.length > 0) {
+    res.status(400).json({
+      error: 'invalid_session_path',
+      message: 'Session paths must not contain "/" characters and cannot be empty',
+      invalidPaths,
+      containerId: CONTAINER_ID,
+    });
+    return;
+  }
+
   try {
     await storageService.deleteSessions(sessionPaths);
 
@@ -326,12 +373,13 @@ app.post('/api/storage-worker/sessions/bulk-delete', async (req: Request, res: R
 
 /**
  * List files in a session
- * GET /api/storage-worker/sessions/.../files
- * Note: Using regex to capture multi-segment session paths (e.g., owner/repo/branch)
+ * GET /api/storage-worker/sessions/:sessionPath/files
  */
-app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
+app.get('/api/storage-worker/sessions/:sessionPath/files', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!validateSessionPath(sessionPath, res)) return;
 
   try {
     // Check if session exists
@@ -365,13 +413,15 @@ app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files$/, async (req: Request, r
 
 /**
  * Check if a specific file exists in a session
- * HEAD /api/storage-worker/sessions/.../files/...
+ * HEAD /api/storage-worker/sessions/:sessionPath/files/*
  * Returns 200 if file exists, 404 if not
  */
-app.head(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
-  const filePath = req.params[1];
+app.head('/api/storage-worker/sessions/:sessionPath/files/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!validateSessionPath(sessionPath, res)) return;
 
   if (!filePath) {
     res.status(400).end();
@@ -406,14 +456,15 @@ app.head(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Req
 
 /**
  * Get a specific file from a session
- * GET /api/storage-worker/sessions/.../files/...
- * Note: Using regex to capture multi-segment session paths and file paths
+ * GET /api/storage-worker/sessions/:sessionPath/files/*
  * Returns raw file content with appropriate Content-Type
  */
-app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0]; // e.g., owner/repo/branch
-  const filePath = req.params[1]; // The file path after /files/
+app.get('/api/storage-worker/sessions/:sessionPath/files/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!validateSessionPath(sessionPath, res)) return;
 
   console.log(`[READ] Request details:`, {
     originalUrl: req.originalUrl,
@@ -486,13 +537,15 @@ app.get(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Requ
 
 /**
  * Write/update a file in a session
- * PUT /api/storage-worker/sessions/.../files/...
+ * PUT /api/storage-worker/sessions/:sessionPath/files/*
  * Expects raw file content in the request body
  */
-app.put(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, express.raw({ type: '*/*', limit: '50mb' }), async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
-  const filePath = req.params[1];
+app.put('/api/storage-worker/sessions/:sessionPath/files/*', express.raw({ type: '*/*', limit: '50mb' }), async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!validateSessionPath(sessionPath, res)) return;
 
   console.log(`[WRITE] session-id: ${sessionPath}, file: ${filePath}, container: ${CONTAINER_ID}`);
 
@@ -528,12 +581,14 @@ app.put(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, express.raw({ ty
 
 /**
  * Delete a file from a session
- * DELETE /api/storage-worker/sessions/.../files/...
+ * DELETE /api/storage-worker/sessions/:sessionPath/files/*
  */
-app.delete(/^\/api\/storage-worker\/sessions\/(.+)\/files\/(.+)$/, async (req: Request, res: Response) => {
-  const sessionPath = req.params[0];
-  const filePath = req.params[1];
+app.delete('/api/storage-worker/sessions/:sessionPath/files/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const filePath = req.params[0]; // Express wildcard capture
   res.setHeader('X-Container-ID', CONTAINER_ID);
+
+  if (!validateSessionPath(sessionPath, res)) return;
 
   if (!filePath) {
     res.status(400).json({

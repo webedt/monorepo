@@ -27,13 +27,6 @@ interface FileNode {
   fileType?: ImageFileType; // For files: what kind of image asset
 }
 
-interface GitHubTreeItem {
-  path: string;
-  type: 'blob' | 'tree';
-  sha: string;
-  size?: number;
-}
-
 interface GitHubRepo {
   id: number;
   name: string;
@@ -108,25 +101,33 @@ const getFileIcon = (filename: string, fileType?: ImageFileType): string => {
   return iconMap[ext || ''] || '🖼️';
 };
 
-// Transform GitHub tree to our filtered TreeNode format
-// Now includes ALL directories, not just those with images
-const transformGitHubTreeForImages = (
-  items: GitHubTreeItem[],
+// Transform storage-worker files to our filtered TreeNode format for images
+// Storage files have path and type properties
+const transformStorageFilesForImages = (
+  files: { path: string; size: number; type: 'file' | 'directory' }[],
   filterMode: EditorMode | 'all'
 ): FileNode[] => {
   const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
 
+  // Filter to only include files under workspace/ and strip the prefix
+  const workspaceFiles = files
+    .filter(f => f.path.startsWith('workspace/'))
+    .map(f => ({
+      ...f,
+      path: f.path.replace(/^workspace\//, ''),
+    }));
+
   // Sort items: directories first, then alphabetically
-  const sortedItems = [...items].sort((a, b) => {
-    if (a.type === 'tree' && b.type !== 'tree') return -1;
-    if (a.type !== 'tree' && b.type === 'tree') return 1;
+  const sortedItems = [...workspaceFiles].sort((a, b) => {
+    if (a.type === 'directory' && b.type !== 'directory') return -1;
+    if (a.type !== 'directory' && b.type === 'directory') return 1;
     return a.path.localeCompare(b.path);
   });
 
   // First pass: identify all files and their types
   const fileTypes = new Map<string, ImageFileType>();
   for (const item of sortedItems) {
-    if (item.type === 'blob') {
+    if (item.type === 'file') {
       const fileType = getImageFileType(item.path.split('/').pop() || '');
       if (fileType) {
         fileTypes.set(item.path, fileType);
@@ -137,7 +138,7 @@ const transformGitHubTreeForImages = (
   // Collect all directory paths
   const allDirectories = new Set<string>();
   for (const item of sortedItems) {
-    if (item.type === 'tree') {
+    if (item.type === 'directory') {
       allDirectories.add(item.path);
     }
   }
@@ -153,7 +154,7 @@ const transformGitHubTreeForImages = (
       const isLastPart = i === pathParts.length - 1;
 
       if (isLastPart) {
-        if (item.type === 'blob') {
+        if (item.type === 'file') {
           const fileType = fileTypes.get(item.path);
 
           // Filter by mode - only include matching image files
@@ -385,34 +386,41 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     }
   };
 
-  // Fetch file tree from GitHub when imageSession is active
+  // Fetch file tree from storage-worker when imageSession is active
+  // Uses storage-worker only (no GitHub fallback)
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['github-tree', imageSession?.owner, imageSession?.repo, imageSession?.branch],
-    queryFn: () => githubApi.getTree(
-      imageSession!.owner,
-      imageSession!.repo,
-      imageSession!.branch
-    ),
+    queryKey: ['file-tree', imageSession?.owner, imageSession?.repo, imageSession?.branch],
+    queryFn: async () => {
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${imageSession!.owner}__${imageSession!.repo}__${imageSession!.branch}`;
+
+      console.log('[Images] Fetching file tree from storage-worker:', sessionPath);
+      const files = await storageWorkerApi.listFiles(sessionPath);
+      return { source: 'storage', files: files || [] };
+    },
     enabled: !!imageSession,
   });
 
   // Transform and filter the file tree based on editor mode
   const fileTree = useMemo(() => {
-    if (!treeData?.data?.tree) return [];
-    return transformGitHubTreeForImages(treeData.data.tree, editorMode);
+    if (!treeData?.files) return [];
+    return transformStorageFilesForImages(treeData.files, editorMode);
   }, [treeData, editorMode]);
 
   // Count files by type for display
   const fileCounts = useMemo(() => {
-    if (!treeData?.data?.tree) return { image: 0, spritesheet: 0, animation: 0 };
+    if (!treeData?.files) return { image: 0, spritesheet: 0, animation: 0 };
 
     const counts = { image: 0, spritesheet: 0, animation: 0 };
-    for (const item of treeData.data.tree) {
-      if (item.type === 'blob') {
-        const fileType = getImageFileType(item.path.split('/').pop() || '');
-        if (fileType) {
-          counts[fileType]++;
-        }
+    // Filter to only count files under workspace/
+    const workspaceFiles = treeData.files.filter(
+      (f: { path: string; type: string }) => f.path.startsWith('workspace/') && f.type === 'file'
+    );
+    for (const item of workspaceFiles) {
+      const fileName = item.path.split('/').pop() || '';
+      const fileType = getImageFileType(fileName);
+      if (fileType) {
+        counts[fileType]++;
       }
     }
     return counts;
@@ -429,8 +437,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   };
 
   // Load image when a file is selected
-  // Uses storage-worker to fetch files directly from the session tarball
-  // Falls back to GitHub API if not in storage
+  // Uses storage-worker only (no GitHub fallback)
   // Always converts to data URL to avoid CORS issues with canvas
   const loadImage = useCallback(async (path: string) => {
     if (!imageSession) return;
@@ -439,79 +446,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     setImageUrl(null);
 
     try {
-      // Build the session path: owner/repo/branch
-      const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${imageSession.owner}__${imageSession.repo}__${imageSession.branch}`;
 
-      // Try to get from storage-worker first
+      // Fetch image from storage-worker
       // Files in storage are under workspace/ prefix
-      const storageUrl = storageWorkerApi.getFileUrl(sessionPath, `workspace/${path}`);
+      console.log('[loadImage] Fetching from storage-worker:', sessionPath, `workspace/${path}`);
+      const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${path}`);
 
-      // Check if the file exists in storage by making a HEAD request
-      const checkResponse = await fetch(storageUrl, { method: 'HEAD', credentials: 'include' });
-
-      if (checkResponse.ok) {
-        // File exists in storage - fetch it and convert to data URL
-        // This avoids CORS issues when drawing to canvas
-        console.log('[loadImage] Fetching from storage:', storageUrl);
-        const imageResponse = await fetch(storageUrl, { credentials: 'include' });
-        const blob = await imageResponse.blob();
+      if (blob) {
         console.log('[loadImage] Got blob, size:', blob.size, 'type:', blob.type);
         const dataUrl = await blobToDataUrl(blob);
         console.log('[loadImage] Converted to dataUrl, length:', dataUrl.length);
         setImageUrl(dataUrl);
       } else {
-        // Fall back to GitHub API
-        console.log(`[Images] File not in storage, falling back to GitHub: ${path}`);
-        const response = await githubApi.getFileContent(
-          imageSession.owner,
-          imageSession.repo,
-          path,
-          imageSession.branch
-        );
-
-        console.log('[Images] GitHub response:', {
-          hasContent: !!response.data.content,
-          encoding: response.data.encoding,
-          hasDownloadUrl: !!response.data.download_url
-        });
-
-        // GitHub API returns base64 encoded content for binary files
-        if (response.data.content && response.data.encoding === 'base64') {
-          // Determine MIME type from extension
-          const ext = path.split('.').pop()?.toLowerCase();
-          const mimeTypes: Record<string, string> = {
-            png: 'image/png',
-            jpg: 'image/jpeg',
-            jpeg: 'image/jpeg',
-            gif: 'image/gif',
-            webp: 'image/webp',
-            svg: 'image/svg+xml',
-            ico: 'image/x-icon',
-            bmp: 'image/bmp',
-          };
-          const mimeType = mimeTypes[ext || ''] || 'image/png';
-
-          // Create data URL
-          const dataUrl = `data:${mimeType};base64,${response.data.content}`;
-          console.log('[Images] Created data URL from base64, length:', dataUrl.length);
-          setImageUrl(dataUrl);
-        } else if (response.data.download_url) {
-          // Fetch the download URL and convert to data URL to avoid CORS issues
-          console.log('[Images] Using download_url:', response.data.download_url);
-          try {
-            const imageResponse = await fetch(response.data.download_url);
-            const blob = await imageResponse.blob();
-            const dataUrl = await blobToDataUrl(blob);
-            console.log('[Images] Converted download to data URL, length:', dataUrl.length);
-            setImageUrl(dataUrl);
-          } catch (fetchError) {
-            // If fetching fails, use the URL directly (preview will work, but canvas may have issues)
-            console.error('[Images] Failed to fetch download_url:', fetchError);
-            setImageUrl(response.data.download_url);
-          }
-        } else {
-          console.error('[Images] No content or download_url in GitHub response');
-        }
+        console.error('[Images] Image not found in storage:', path);
       }
     } catch (error) {
       console.error('Failed to load image:', error);
@@ -566,17 +515,21 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   // Helper to count files in a directory
   const countFilesInDirectory = useCallback((dirPath: string): { images: number; spritesheets: number; animations: number; folders: number } => {
     const counts = { images: 0, spritesheets: 0, animations: 0, folders: 0 };
-    if (!treeData?.data?.tree) return counts;
+    if (!treeData?.files) return counts;
 
-    for (const item of treeData.data.tree) {
+    // Files in storage have workspace/ prefix, so we need to account for that
+    const workspacePrefix = 'workspace/';
+    const fullDirPath = workspacePrefix + dirPath;
+
+    for (const item of treeData.files) {
       // Check if item is directly inside this directory
-      if (item.path.startsWith(dirPath + '/')) {
-        const relativePath = item.path.slice(dirPath.length + 1);
+      if (item.path.startsWith(fullDirPath + '/')) {
+        const relativePath = item.path.slice(fullDirPath.length + 1);
         // Only count direct children (no more slashes in relative path)
         if (!relativePath.includes('/')) {
-          if (item.type === 'tree') {
+          if (item.type === 'directory') {
             counts.folders++;
-          } else if (item.type === 'blob') {
+          } else if (item.type === 'file') {
             const fileType = getImageFileType(item.path.split('/').pop() || '');
             if (fileType === 'image') counts.images++;
             else if (fileType === 'spritesheet') counts.spritesheets++;
@@ -590,13 +543,15 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
   // Generate unique filename for new image
   const generateNewImageFilename = useCallback((basePath: string, extension: string): string => {
-    if (!treeData?.data?.tree) return `image.${extension}`;
+    if (!treeData?.files) return `image.${extension}`;
 
     const existingFiles = new Set<string>();
-    const prefix = basePath ? `${basePath}/` : '';
+    // Files in storage have workspace/ prefix
+    const workspacePrefix = 'workspace/';
+    const prefix = basePath ? `${workspacePrefix}${basePath}/` : workspacePrefix;
 
-    for (const item of treeData.data.tree) {
-      if (item.type === 'blob' && item.path.startsWith(prefix)) {
+    for (const item of treeData.files) {
+      if (item.type === 'file' && item.path.startsWith(prefix)) {
         const relativePath = item.path.slice(prefix.length);
         if (!relativePath.includes('/')) {
           existingFiles.add(relativePath.toLowerCase());
@@ -668,23 +623,30 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     const base64Content = dataUrl.split(',')[1];
 
     try {
-      // Create file in GitHub
-      await githubApi.updateFile(
-        imageSession.owner,
-        imageSession.repo,
-        fullPath,
-        {
-          content: base64Content,
-          branch: imageSession.branch,
-          message: `Create new image: ${newImageFilename}`,
-        }
-      );
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${imageSession.owner}__${imageSession.repo}__${imageSession.branch}`;
+      const storagePath = `workspace/${fullPath}`;
+
+      // Convert base64 to Blob for storage-worker
+      const byteCharacters = atob(base64Content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+
+      // Create file in storage-worker
+      const success = await storageWorkerApi.writeFile(sessionPath, storagePath, blob);
+      if (!success) {
+        throw new Error('Failed to create image in storage');
+      }
 
       // Close modal
       setShowNewImageModal(false);
 
       // Refresh the file tree
-      await queryClient.invalidateQueries({ queryKey: ['github-tree'] });
+      await queryClient.invalidateQueries({ queryKey: ['file-tree'] });
 
       // Select the new file
       setSelectedFile({
@@ -766,41 +728,24 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       const byteArray = new Uint8Array(byteNumbers);
       const blob = new Blob([byteArray], { type: mimeType });
 
-      // Build session path for storage-worker
-      const sessionPath = `${imageSession.owner}/${imageSession.repo}/${imageSession.branch}`;
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${imageSession.owner}__${imageSession.repo}__${imageSession.branch}`;
       const storagePath = `workspace/${selectedFile.path}`;
 
-      console.log('[Save] Saving to storage-worker and GitHub...', {
+      console.log('[Save] Saving to storage-worker...', {
         sessionPath,
         storagePath,
         blobSize: blob.size
       });
 
-      // Save to both storage-worker (primary) and GitHub (for persistence)
-      // Storage-worker will create the session if it doesn't exist
-      const [storageResult, githubResult] = await Promise.all([
-        storageWorkerApi.writeFile(sessionPath, storagePath, blob)
-          .then(result => {
-            console.log('[Save] Storage-worker result:', result);
-            return result;
-          })
-          .catch(err => {
-            console.error('[Save] Storage-worker error:', err);
-            return false;
-          }),
-        githubApi.updateFile(
-          imageSession.owner,
-          imageSession.repo,
-          selectedFile.path,
-          {
-            content: base64Content,
-            branch: imageSession.branch,
-            message: `Update image: ${selectedFile.name}`,
-          }
-        ),
-      ]);
+      // Save to storage-worker only
+      const storageResult = await storageWorkerApi.writeFile(sessionPath, storagePath, blob);
 
-      console.log('[Save] Results - Storage:', storageResult, 'GitHub:', !!githubResult);
+      if (!storageResult) {
+        throw new Error('Failed to save image to storage');
+      }
+
+      console.log('[Save] Storage-worker result:', storageResult);
 
       // Update the imageUrl with the saved data URL so the canvas state is preserved
       // This prevents the image from disappearing after save
@@ -1445,7 +1390,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
         <span className="text-sm font-semibold uppercase tracking-wide">Image Explorer</span>
         <div className="flex gap-1">
           <button
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['github-tree'] })}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['file-tree'] })}
             className="p-1 hover:bg-base-200 rounded"
             title="Refresh"
           >

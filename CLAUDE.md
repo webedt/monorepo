@@ -118,7 +118,7 @@ The Storage Worker (`/storage-worker`) is the **single source of truth** for all
 |-----------|-------------------|----------------|
 | Read file content | ✅ Yes | ❌ No |
 | Write/update file | ✅ Yes | ❌ No |
-| List files | ✅ Yes | ❌ No (fallback only) |
+| List files | ✅ Yes | ❌ No |
 | Delete file | ✅ Yes | ❌ No |
 | Create commits | ❌ No | ✅ Yes |
 | Create PRs | ❌ No | ✅ Yes |
@@ -127,9 +127,26 @@ The Storage Worker (`/storage-worker`) is the **single source of truth** for all
 
 ### Session Path Format
 
-Storage worker uses session paths in the format: `{owner}/{repo}/{branch}`
+Storage worker uses session paths in the format: `{owner}__{repo}__{branch}` (double underscore separator)
 
-Example: `webedt/monorepo/webedt/feature-branch`
+**Important:** Session paths must NOT contain `/` characters. The storage-worker validates this and will reject requests with invalid session paths.
+
+Example: `webedt__monorepo__feature-branch`
+
+**Generation:** Session paths are generated using the `generateSessionPath()` helper:
+```typescript
+// ai-coding-worker/src/utils/sessionPathHelper.ts
+import { generateSessionPath } from './sessionPathHelper';
+
+const sessionPath = generateSessionPath(owner, repo, branch);
+// Result: "webedt__monorepo__feature-branch"
+```
+
+**Frontend Usage:**
+```typescript
+// Construct session path directly
+const sessionPath = `${owner}__${repo}__${branch}`;
+```
 
 ### Storage Worker API Endpoints
 
@@ -149,6 +166,9 @@ Sessions are created automatically when you write a file to a non-existent sessi
 
 ```typescript
 import { storageWorkerApi } from '@/lib/api';
+
+// Construct session path (double underscore separator, no slashes)
+const sessionPath = `${owner}__${repo}__${branch}`;
 
 // Read file
 const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${filePath}`);
@@ -370,4 +390,4 @@ When working across multiple projects:
 
 ---
 
-*Documentation last updated: 2025-11-23*
+*Documentation last updated: 2025-06-18*
