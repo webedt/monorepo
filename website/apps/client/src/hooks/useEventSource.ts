@@ -41,6 +41,25 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   const isMountedRef = useRef(true); // Track if component is actually mounted
   const maxRetryAttempts = 10; // Maximum retry attempts for 429 errors
 
+  // Use refs to always have access to the latest callbacks and body
+  // This prevents stale closure issues when the effect doesn't re-run
+  const onConnectedRef = useRef(onConnected);
+  const onCompletedRef = useRef(onCompleted);
+  const onMessageRef = useRef(onMessage);
+  const onErrorRef = useRef(onError);
+  const bodyRef = useRef(body);
+  const methodRef = useRef(method);
+
+  // Keep refs in sync with props
+  useEffect(() => {
+    onConnectedRef.current = onConnected;
+    onCompletedRef.current = onCompleted;
+    onMessageRef.current = onMessage;
+    onErrorRef.current = onError;
+    bodyRef.current = body;
+    methodRef.current = method;
+  });
+
   // Helper to reset inactivity timeout
   const resetInactivityTimeout = useCallback(() => {
     lastActivityRef.current = Date.now();
@@ -50,7 +69,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
     inactivityTimeoutRef.current = setTimeout(() => {
       console.warn(`[SSE] No activity for ${inactivityTimeout / 1000}s - stream may be hung`);
       // Notify via message so user sees something
-      onMessage?.({
+      onMessageRef.current?.({
         eventType: 'system',
         data: {
           type: 'message',
@@ -59,7 +78,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       });
       // Trigger completion to allow user to continue
       hasExplicitlyClosedRef.current = true;
-      onCompleted?.({ timedOut: true });
+      onCompletedRef.current?.({ timedOut: true });
       // Disconnect the hung stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -67,7 +86,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       }
       setIsConnected(false);
     }, inactivityTimeout);
-  }, [inactivityTimeout, onMessage, onCompleted]);
+  }, [inactivityTimeout]);
 
   const connect = useCallback(() => {
     // Cancel any pending cleanup (handles React Strict Mode remount)
@@ -99,7 +118,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       hasExplicitlyClosedRef.current = false;
 
       // Use fetch for POST, EventSource for GET
-      if (method === 'POST') {
+      // Use refs to get the latest values to avoid stale closures
+      if (methodRef.current === 'POST') {
         connectWithFetch();
       } else {
         const es = new EventSource(url);
@@ -109,9 +129,9 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       isConnectingRef.current = false;
       const error = err instanceof Error ? err : new Error('Failed to connect');
       setError(error);
-      onError?.(error);
+      onErrorRef.current?.(error);
     }
-  }, [url, method, body, onMessage, onError, onConnected, onCompleted, autoReconnect, maxReconnectAttempts]);
+  }, [url]); // Only depend on url - use refs for other values to avoid stale closures
 
   const connectWithFetch = async () => {
     if (!url) return;
@@ -126,7 +146,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(bodyRef.current),
         credentials: 'include',
         signal: controller.signal,
       });
@@ -165,7 +185,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
 
           // Notify user we're retrying
           try {
-            onMessage?.({
+            onMessageRef.current?.({
               eventType: 'system',
               data: {
                 type: 'message',
@@ -218,7 +238,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       setError(null);
       reconnectAttemptRef.current = 0;
       retryAttemptRef.current = 0; // Reset retry counter on successful connection
-      onConnected?.();
+      onConnectedRef.current?.();
 
       // Start inactivity timeout
       resetInactivityTimeout();
@@ -285,7 +305,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       if (!receivedCompletedEvent && !hasExplicitlyClosedRef.current) {
         console.log('[SSE] Stream ended without completed event - triggering completion');
         hasExplicitlyClosedRef.current = true;
-        onCompleted?.({ streamEndedWithoutCompletion: true });
+        onCompletedRef.current?.({ streamEndedWithoutCompletion: true });
       }
 
       setIsConnected(false);
@@ -311,7 +331,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       console.error('[SSE] Final error object:', error);
       console.error('[SSE] Final error message:', error.message);
       setError(error);
-      onError?.(error);
+      onErrorRef.current?.(error);
       abortControllerRef.current = null;
     }
   };
@@ -321,26 +341,26 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       hasExplicitlyClosedRef.current = true;
       try {
         const parsed = JSON.parse(data);
-        onCompleted?.(parsed);
+        onCompletedRef.current?.(parsed);
       } catch {
-        onCompleted?.();
+        onCompletedRef.current?.();
       }
       disconnect();
     } else if (eventType === 'error') {
       try {
         const parsed = JSON.parse(data);
         hasExplicitlyClosedRef.current = true;
-        onError?.(new Error(parsed.error || 'Stream error'));
+        onErrorRef.current?.(new Error(parsed.error || 'Stream error'));
         disconnect();
       } catch {
-        onMessage?.({ eventType: 'error', data });
+        onMessageRef.current?.({ eventType: 'error', data });
       }
     } else {
       try {
         const parsed = JSON.parse(data);
-        onMessage?.({ eventType, data: parsed });
+        onMessageRef.current?.({ eventType, data: parsed });
       } catch {
-        onMessage?.({ eventType, data });
+        onMessageRef.current?.({ eventType, data });
       }
     }
   };
@@ -352,7 +372,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         setIsConnected(true);
         setError(null);
         reconnectAttemptRef.current = 0;
-        onConnected?.();
+        onConnectedRef.current?.();
         // Start inactivity timeout for EventSource as well
         resetInactivityTimeout();
       };
@@ -362,9 +382,9 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         resetInactivityTimeout();
         try {
           const data = JSON.parse(event.data);
-          onMessage?.({ eventType: 'message', data });
+          onMessageRef.current?.({ eventType: 'message', data });
         } catch {
-          onMessage?.({ eventType: 'message', data: event.data });
+          onMessageRef.current?.({ eventType: 'message', data: event.data });
         }
       };
 
@@ -372,9 +392,9 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         resetInactivityTimeout();
         try {
           const data = JSON.parse(event.data);
-          onMessage?.({ eventType: 'connected', data });
+          onMessageRef.current?.({ eventType: 'connected', data });
         } catch {
-          onMessage?.({ eventType: 'connected', data: event.data });
+          onMessageRef.current?.({ eventType: 'connected', data: event.data });
         }
       });
 
@@ -386,9 +406,9 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           resetInactivityTimeout();
           try {
             const data = JSON.parse(event.data);
-            onMessage?.({ eventType, data });
+            onMessageRef.current?.({ eventType, data });
           } catch {
-            onMessage?.({ eventType, data: event.data });
+            onMessageRef.current?.({ eventType, data: event.data });
           }
         });
       });
@@ -402,9 +422,9 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         hasExplicitlyClosedRef.current = true;
         try {
           const data = JSON.parse(event.data);
-          onCompleted?.(data);
+          onCompletedRef.current?.(data);
         } catch {
-          onCompleted?.();
+          onCompletedRef.current?.();
         }
         disconnect();
       });
@@ -418,11 +438,11 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           const data = JSON.parse(event.data);
           setIsConnected(false);
           hasExplicitlyClosedRef.current = true;
-          onError?.(new Error(data.error || 'Stream error'));
+          onErrorRef.current?.(new Error(data.error || 'Stream error'));
           // Don't auto-reconnect on explicit error events
           disconnect();
         } catch {
-          onMessage?.({ eventType: 'error', data: event.data });
+          onMessageRef.current?.({ eventType: 'error', data: event.data });
         }
       });
 
@@ -438,7 +458,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
 
         // Only call onError if we're not auto-reconnecting or if we've exhausted retries
         if (!autoReconnect || reconnectAttemptRef.current >= maxReconnectAttempts) {
-          onError?.(err);
+          onErrorRef.current?.(err);
         }
 
         if (autoReconnect && reconnectAttemptRef.current < maxReconnectAttempts) {

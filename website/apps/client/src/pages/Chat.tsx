@@ -502,7 +502,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
       }
     } else if (session?.status === 'completed' || session?.status === 'error') {
-      if (isExecuting) {
+      // Only reset isExecuting if we don't have an active stream
+      // This prevents a race condition where the session status is stale (completed)
+      // but the user just submitted a new request (streamUrl is set)
+      if (isExecuting && !streamUrl) {
         console.log('[Chat] Session completed, setting isExecuting to false');
         setIsExecuting(false);
         // Also clear the global worker store
@@ -510,7 +513,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         console.log('[Chat] Cleared worker store for completed/errored session');
       }
     }
-  }, [session?.status, isExecuting, currentSessionId]);
+  }, [session?.status, isExecuting, currentSessionId, streamUrl]);
 
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
