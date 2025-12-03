@@ -49,9 +49,8 @@ export class StorageClient {
     }
 
     const tarPath = `${localPath}-complete.tar.gz`;
-    // URL-encode session path for API call
-    const encodedSessionPath = encodeURIComponent(sessionPath);
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}/download`;
+    // Session path should not contain slashes (validated by storage-worker)
+    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}/download`;
 
     try {
       logger.info('Downloading session from storage', {
@@ -225,9 +224,8 @@ export class StorageClient {
       );
 
       // Upload to storage worker
-      // URL-encode session path for API call
-      const encodedSessionPath = encodeURIComponent(sessionPath);
-      const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}/upload`;
+      // Session path should not contain slashes (validated by storage-worker)
+      const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}/upload`;
       await this.uploadFile(url, tarPath);
 
       // Cleanup
@@ -273,9 +271,8 @@ export class StorageClient {
   async sessionExists(sessionPath: string): Promise<boolean> {
     if (!this.enabled) return false;
 
-    // URL-encode session path for API call
-    const encodedSessionPath = encodeURIComponent(sessionPath);
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}`;
+    // Session path should not contain slashes (validated by storage-worker)
+    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}`;
 
     try {
       await this.makeRequest(url, 'HEAD');
@@ -294,9 +291,8 @@ export class StorageClient {
   async deleteSession(sessionPath: string): Promise<void> {
     if (!this.enabled) return;
 
-    // URL-encode session path for API call
-    const encodedSessionPath = encodeURIComponent(sessionPath);
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${encodedSessionPath}`;
+    // Session path should not contain slashes (validated by storage-worker)
+    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}`;
 
     try {
       await this.makeRequest(url, 'DELETE');
