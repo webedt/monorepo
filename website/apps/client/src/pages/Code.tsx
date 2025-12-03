@@ -442,27 +442,16 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   }, [preSelectedSettings, repos, codeSession, sessionId]);
 
   // Fetch file tree when code session is active
-  // Try storage-worker first, fall back to GitHub if session not in storage
+  // Uses storage-worker only (no GitHub fallback)
   const { data: treeData, isLoading: isLoadingTree } = useQuery({
     queryKey: ['file-tree', codeSession?.owner, codeSession?.repo, codeSession?.branch],
     queryFn: async () => {
-      const sessionPath = `${codeSession!.owner}/${codeSession!.repo}/${codeSession!.branch}`;
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${codeSession!.owner}__${codeSession!.repo}__${codeSession!.branch}`;
 
-      try {
-        // Try storage-worker first
-        const files = await storageWorkerApi.listFiles(sessionPath);
-        if (files && files.length > 0) {
-          console.log('[Code] Using storage-worker for file tree');
-          return { source: 'storage', files };
-        }
-      } catch (err) {
-        console.log('[Code] Storage-worker not available, falling back to GitHub');
-      }
-
-      // Fall back to GitHub
-      console.log('[Code] Using GitHub for file tree');
-      const response = await githubApi.getTree(codeSession!.owner, codeSession!.repo, codeSession!.branch);
-      return { source: 'github', data: response.data };
+      console.log('[Code] Fetching file tree from storage-worker:', sessionPath);
+      const files = await storageWorkerApi.listFiles(sessionPath);
+      return { source: 'storage', files: files || [] };
     },
     enabled: !!codeSession,
   });
@@ -470,10 +459,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Transform the tree into our TreeNode format
   const fileTree = useMemo(() => {
     if (!treeData) return [];
-    if (treeData.source === 'storage' && treeData.files) {
+    if (treeData.files) {
       return transformStorageFiles(treeData.files);
-    } else if (treeData.data?.tree) {
-      return transformGitHubTree(treeData.data.tree);
     }
     return [];
   }, [treeData]);
@@ -636,15 +623,15 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Clear previous image URL when loading a new file
     setImageUrl(null);
 
+    // Session path format: owner__repo__branch (no slashes)
+    const sessionPath = `${codeSession.owner}__${codeSession.repo}__${codeSession.branch}`;
+
     // Check if this is an image file
     if (isImageFile(path)) {
       setIsLoadingFile(true);
       setFileContent(null); // Clear text content for images
       try {
-        // Build session path: owner/repo/branch
-        const sessionPath = `${codeSession.owner}/${codeSession.repo}/${codeSession.branch}`;
-
-        // Try to fetch image from storage-worker first
+        // Fetch image from storage-worker
         const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${path}`);
 
         if (blob) {
@@ -652,18 +639,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           const url = URL.createObjectURL(blob);
           setImageUrl(url);
         } else {
-          // Fall back to GitHub for base64 encoded image
-          console.log(`[Code] Image not in storage, falling back to GitHub: ${path}`);
-          const response = await githubApi.getFileContent(
-            codeSession.owner,
-            codeSession.repo,
-            path,
-            codeSession.branch
-          );
-          // GitHub returns base64 encoded content for binary files
-          const base64Content = response.data.content || '';
-          const mimeType = getImageMimeType(path);
-          setImageUrl(`data:${mimeType};base64,${base64Content}`);
+          console.error(`[Code] Image not found in storage: ${path}`);
+          setFileContent(`// Error: Image not found in storage`);
         }
       } catch (error: any) {
         console.error('Failed to load image:', error);
@@ -683,47 +660,14 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     setIsLoadingFile(true);
     try {
-      // Build session path: owner/repo/branch
-      const sessionPath = `${codeSession.owner}/${codeSession.repo}/${codeSession.branch}`;
-
       // Fetch file content from storage-worker
       // Files in storage are under workspace/ prefix
       const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${path}`);
 
       if (content === null) {
-        // File not found in storage - might be a new session, fall back to GitHub
-        console.log(`[Code] File not in storage, falling back to GitHub: ${path}`);
-        const response = await githubApi.getFileContent(
-          codeSession.owner,
-          codeSession.repo,
-          path,
-          codeSession.branch
-        );
-        const githubContent = response.data.content || '';
-        setFileContent(githubContent);
-
-        // Initialize edit history for this file
-        setEditHistory(prev => {
-          const next = new Map(prev);
-          if (!next.has(path)) {
-            next.set(path, [githubContent]);
-          }
-          return next;
-        });
-        setHistoryIndex(prev => {
-          const next = new Map(prev);
-          if (!next.has(path)) {
-            next.set(path, 0);
-          }
-          return next;
-        });
-
-        // Store the original content for later comparison (no sha needed for storage-worker)
-        setPendingChanges(prev => {
-          const next = new Map(prev);
-          next.set(path, { content: githubContent, originalContent: githubContent });
-          return next;
-        });
+        // File not found in storage
+        console.error(`[Code] File not found in storage: ${path}`);
+        setFileContent(`// Error: File not found in storage`);
       } else {
         setFileContent(content);
 
@@ -971,31 +915,31 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     historyIndexRef.current = historyIndex;
   }, [historyIndex]);
 
-  // Save a single file to GitHub
-  const saveFile = useCallback(async (path: string, content: string, sha?: string) => {
+  // Save a single file to storage-worker
+  const saveFile = useCallback(async (path: string, content: string, _sha?: string) => {
     const session = codeSessionRef.current;
     if (!session) return null;
 
     try {
-      const response = await githubApi.updateFile(
-        session.owner,
-        session.repo,
-        path,
-        {
-          content,
-          branch: session.branch,
-          sha,
-          message: `Update ${path}`,
-        }
-      );
-      return response.data.sha; // Return new SHA for future updates
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${session.owner}__${session.repo}__${session.branch}`;
+      const storagePath = `workspace/${path}`;
+
+      console.log(`[Code] Saving file to storage-worker:`, { sessionPath, storagePath });
+
+      const success = await storageWorkerApi.writeFile(sessionPath, storagePath, content);
+      if (!success) {
+        throw new Error('Failed to write file to storage');
+      }
+
+      return null; // No SHA needed for storage-worker
     } catch (error: any) {
       console.error(`Failed to save file ${path}:`, error);
       throw error;
     }
   }, []);
 
-  // Auto-save function (debounced) - saves file to GitHub
+  // Auto-save function (debounced) - saves file to storage-worker
   const performAutoSave = useCallback(async (path: string, content: string) => {
     const session = codeSessionRef.current;
     if (!session) return;
@@ -1340,16 +1284,22 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       pathParts[pathParts.length - 1] = newName.trim();
       const newPath = pathParts.join('/');
 
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${codeSession.owner}__${codeSession.repo}__${codeSession.branch}`;
+
       if (fileOperation.itemType === 'file') {
-        await githubApi.renameFile(codeSession.owner, codeSession.repo, fileOperation.path, {
-          newPath,
-          branch: codeSession.branch,
-        });
+        // Rename file in storage-worker: read content, write to new path, delete old
+        const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${fileOperation.path}`);
+        if (content !== null) {
+          await storageWorkerApi.writeFile(sessionPath, `workspace/${newPath}`, content);
+          await storageWorkerApi.deleteFile(sessionPath, `workspace/${fileOperation.path}`);
+        } else {
+          throw new Error('File not found in storage');
+        }
       } else {
-        await githubApi.renameFolder(codeSession.owner, codeSession.repo, fileOperation.path, {
-          newFolderPath: newPath,
-          branch: codeSession.branch,
-        });
+        // For folders, we need to move all files - this is more complex
+        // For now, throw an error as folder rename requires listing all files
+        throw new Error('Folder rename is not yet supported in storage-worker mode');
       }
 
       // Refresh the file tree
@@ -1392,14 +1342,18 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     setOperationError(null);
 
     try {
+      // Session path format: owner__repo__branch (no slashes)
+      const sessionPath = `${codeSession.owner}__${codeSession.repo}__${codeSession.branch}`;
+
       if (fileOperation.itemType === 'file') {
-        await githubApi.deleteFile(codeSession.owner, codeSession.repo, fileOperation.path, {
-          branch: codeSession.branch,
-        });
+        const success = await storageWorkerApi.deleteFile(sessionPath, `workspace/${fileOperation.path}`);
+        if (!success) {
+          throw new Error('Failed to delete file from storage');
+        }
       } else {
-        await githubApi.deleteFolder(codeSession.owner, codeSession.repo, fileOperation.path, {
-          branch: codeSession.branch,
-        });
+        // For folders, we need to delete all files - this is more complex
+        // For now, throw an error as folder delete requires listing all files
+        throw new Error('Folder delete is not yet supported in storage-worker mode');
       }
 
       // Refresh the file tree
