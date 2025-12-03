@@ -87,13 +87,6 @@ interface GitHubRepo {
   defaultBranch: string;
 }
 
-interface GitHubTreeItem {
-  path: string;
-  type: 'blob' | 'tree';
-  sha: string;
-  size?: number;
-}
-
 interface CodeSession {
   owner: string;
   repo: string;

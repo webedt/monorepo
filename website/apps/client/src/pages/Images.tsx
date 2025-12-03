@@ -27,13 +27,6 @@ interface FileNode {
   fileType?: ImageFileType; // For files: what kind of image asset
 }
 
-interface GitHubTreeItem {
-  path: string;
-  type: 'blob' | 'tree';
-  sha: string;
-  size?: number;
-}
-
 interface GitHubRepo {
   id: number;
   name: string;
