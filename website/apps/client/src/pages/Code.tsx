@@ -471,9 +471,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     return [];
   }, [treeData]);
 
-  // Track which source we're using for file operations
-  const _treeSource = treeData?.source || 'unknown';
-
   // Query to check for existing PR (for code sessions)
   const { data: prData, refetch: refetchPr } = useQuery({
     queryKey: ['pr', codeSession?.owner, codeSession?.repo, codeSession?.branch],
