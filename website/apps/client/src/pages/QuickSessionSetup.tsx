@@ -419,7 +419,7 @@ export default function QuickSessionSetup() {
                           setRepoSearchQuery('');
                           setRepoHighlightedIndex(-1);
                         }}
-                        className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${!selectedRepo ? 'bg-primary/10 font-semibold' : ''} ${repoHighlightedIndex === 0 ? 'bg-base-200' : ''}`}
+                        className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${!selectedRepo ? 'bg-primary/20 font-semibold' : ''} ${repoHighlightedIndex === 0 ? 'bg-primary text-primary-content' : ''}`}
                         title="Session won't be saved to a repository"
                       >
                         <div>
@@ -439,7 +439,7 @@ export default function QuickSessionSetup() {
                               setRepoSearchQuery('');
                               setRepoHighlightedIndex(-1);
                             }}
-                            className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${selectedRepo === repo.cloneUrl ? 'bg-primary/10 font-semibold' : ''} ${repoHighlightedIndex === index + 1 ? 'bg-base-200' : ''}`}
+                            className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${selectedRepo === repo.cloneUrl ? 'bg-primary/20 font-semibold' : ''} ${repoHighlightedIndex === index + 1 ? 'bg-primary text-primary-content' : ''}`}
                           >
                             {repo.fullName}
                           </button>
@@ -515,7 +515,7 @@ export default function QuickSessionSetup() {
                               setBranchSearchQuery('');
                               setBranchHighlightedIndex(-1);
                             }}
-                            className={`w-full text-left px-4 py-2 text-sm hover:bg-base-200 ${branch === branchName ? 'bg-primary/10 font-semibold' : ''} ${branchHighlightedIndex === index ? 'bg-base-200' : ''}`}
+                            className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${branch === branchName ? 'bg-primary/20 font-semibold' : ''} ${branchHighlightedIndex === index ? 'bg-primary text-primary-content' : ''}`}
                           >
                             {branchName}
                           </button>
