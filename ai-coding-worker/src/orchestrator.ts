@@ -131,6 +131,101 @@ export class Orchestrator {
   }
 
   /**
+   * Initialize a repository for a session without running AI
+   * This clones the repo and uploads to storage, making files immediately available
+   */
+  async initializeRepository(options: {
+    websiteSessionId: string;
+    github: {
+      repoUrl: string;
+      branch: string;
+      accessToken: string;
+    };
+  }): Promise<{
+    clonedPath: string;
+    branch: string;
+    wasCloned: boolean;
+  }> {
+    const { websiteSessionId, github } = options;
+
+    logger.info('Initializing repository for session', {
+      component: 'Orchestrator',
+      websiteSessionId,
+      repoUrl: github.repoUrl,
+      branch: github.branch
+    });
+
+    // Create session directory
+    const sessionRoot = path.join(this.tmpDir, `session-${websiteSessionId}`);
+    const workspacePath = path.join(sessionRoot, 'workspace');
+
+    // Clean up any existing session directory
+    if (fs.existsSync(sessionRoot)) {
+      fs.rmSync(sessionRoot, { recursive: true, force: true });
+    }
+    fs.mkdirSync(workspacePath, { recursive: true });
+
+    // Clone the repository
+    const pullResult = await this.githubClient.pullRepository({
+      repoUrl: github.repoUrl,
+      branch: github.branch,
+      accessToken: github.accessToken,
+      workspaceRoot: workspacePath
+    });
+
+    // Extract relative path for metadata
+    const repoName = pullResult.targetPath.replace(workspacePath + '/', '');
+
+    // Create session metadata
+    const metadata: SessionMetadata = {
+      sessionId: websiteSessionId,
+      createdAt: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      github: {
+        repoUrl: github.repoUrl,
+        baseBranch: pullResult.branch,
+        clonedPath: repoName
+      }
+    };
+
+    // Save metadata
+    this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+    // Upload to storage-worker
+    logger.info('Uploading initialized session to storage', {
+      component: 'Orchestrator',
+      websiteSessionId,
+      sessionRoot
+    });
+
+    await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
+
+    // Clean up local session directory
+    try {
+      fs.rmSync(sessionRoot, { recursive: true, force: true });
+    } catch (cleanupError) {
+      logger.warn('Failed to cleanup local session directory', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+      });
+    }
+
+    logger.info('Repository initialized successfully', {
+      component: 'Orchestrator',
+      websiteSessionId,
+      clonedPath: repoName,
+      branch: pullResult.branch
+    });
+
+    return {
+      clonedPath: repoName,
+      branch: pullResult.branch,
+      wasCloned: pullResult.wasCloned
+    };
+  }
+
+  /**
    * Execute a complete workflow request
    */
   async execute(request: ExecuteRequest, req: Request, res: Response, abortSignal?: AbortSignal): Promise<void> {

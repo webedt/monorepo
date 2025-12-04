@@ -216,6 +216,139 @@ router.post('/create-code-session', requireAuth, async (req, res) => {
   }
 });
 
+// Initialize repository for a session - clones the repo and uploads to storage
+// This makes files immediately available in the Code view without running AI
+router.post('/:id/init-repository', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Check if user has GitHub access token
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    // Get the session
+    const sessions = await db
+      .select()
+      .from(chatSessions)
+      .where(and(
+        eq(chatSessions.id, sessionId),
+        eq(chatSessions.userId, authReq.user.id)
+      ))
+      .limit(1);
+
+    if (sessions.length === 0) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    const session = sessions[0];
+
+    // Verify session has repository info
+    if (!session.repositoryUrl || !session.baseBranch) {
+      res.status(400).json({
+        success: false,
+        error: 'Session does not have repository information'
+      });
+      return;
+    }
+
+    console.log(`[Sessions] Initializing repository for session ${sessionId}`);
+    console.log(`[Sessions] Repository: ${session.repositoryUrl}, Branch: ${session.baseBranch}`);
+
+    // Call AI worker to initialize the repository
+    const aiWorkerUrl = process.env.AI_WORKER_URL || 'http://localhost:5001';
+
+    // Try to call the AI worker with retries (worker might be scaling up)
+    let lastError: Error | null = null;
+    const maxRetries = 3;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[Sessions] Attempt ${attempt}/${maxRetries} to call AI worker init-repository`);
+
+        const response = await fetch(`${aiWorkerUrl}/init-repository`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            websiteSessionId: sessionId,
+            github: {
+              repoUrl: session.repositoryUrl,
+              branch: session.baseBranch,
+              accessToken: authReq.user.githubAccessToken,
+            }
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json() as { repository?: unknown };
+          console.log(`[Sessions] Repository initialized successfully for ${sessionId}`);
+
+          res.json({
+            success: true,
+            data: {
+              sessionId,
+              repository: result.repository,
+            }
+          });
+          return;
+        }
+
+        // Handle specific error codes
+        if (response.status === 429) {
+          // Worker is busy, retry with backoff
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.log(`[Sessions] AI worker busy, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // Other error - don't retry
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' })) as { message?: string };
+        throw new Error(errorData.message || `AI worker returned ${response.status}`);
+
+      } catch (err) {
+        lastError = err as Error;
+
+        // Check if it's a connection error (worker not ready)
+        const isConnectionError = err instanceof Error &&
+          (err.message.includes('fetch failed') ||
+           err.message.includes('ECONNREFUSED') ||
+           err.message.includes('ETIMEDOUT'));
+
+        if (isConnectionError && attempt < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.log(`[Sessions] Connection error on attempt ${attempt}, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // Not a retryable error or last attempt
+        throw err;
+      }
+    }
+
+    // All retries failed
+    throw lastError || new Error('Failed to initialize repository after retries');
+
+  } catch (error) {
+    console.error('Initialize repository error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to initialize repository'
+    });
+  }
+});
+
 // Get specific chat session
 router.get('/:id', requireAuth, async (req, res) => {
   try {

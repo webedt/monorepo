@@ -351,6 +351,13 @@ export const sessionsApi = {
     fetchApi(`/api/sessions/${id}/abort`, {
       method: 'POST',
     }),
+
+  // Initialize repository for a session - clones repo and uploads to storage
+  // This makes files immediately available before any AI execution
+  initializeRepository: (id: string) =>
+    fetchApi(`/api/sessions/${id}/init-repository`, {
+      method: 'POST',
+    }),
 };
 
 // Admin API
