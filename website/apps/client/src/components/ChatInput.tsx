@@ -726,7 +726,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         />
 
         {/* Controls inside the box */}
-        <div className="absolute bottom-3 left-3 right-14 flex flex-wrap gap-2 items-center">
+        <div className="absolute bottom-3 left-3 right-14 flex gap-2 items-center overflow-x-auto">
           {!hideRepoSelection && hasGithubAuth && (
             <>
               {isLoadingRepos ? (
@@ -742,14 +742,14 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                   {effectiveIsExecuting || isLocked ? (
                     /* Show as text labels when executing or locked */
                     <>
-                      <span className="badge badge-ghost text-xs">
+                      <span className="badge badge-ghost text-xs flex-shrink-0">
                         {selectedRepo
                           ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName ||
                             'No repository'
                           : 'No repository'}
                       </span>
                       {baseBranch && (
-                        <span className="badge badge-ghost text-xs">
+                        <span className="badge badge-ghost text-xs flex-shrink-0">
                           {baseBranch}
                         </span>
                       )}
@@ -758,7 +758,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                     /* Show as editable controls when not executing and not locked */
                     <>
                       {/* Custom dropdown with search */}
-                      <div className="relative repo-dropdown">
+                      <div className="relative repo-dropdown flex-shrink-0">
                         <button
                           type="button"
                           onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
@@ -836,7 +836,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                       {selectedRepo && (
                         <>
                           {/* Base Branch */}
-                          <div className="relative branch-dropdown">
+                          <div className="relative branch-dropdown flex-shrink-0">
                             <button
                               type="button"
                               onClick={() => {
@@ -918,7 +918,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
           {/* Status indicators - show if not configured */}
           {(!hasGithubAuth || !hasClaudeAuth) && (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 text-xs flex-shrink-0">
               {!hasGithubAuth && (
                 <Link
                   to="/settings"
