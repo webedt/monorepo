@@ -233,72 +233,6 @@ const transformStorageFiles = (files: { path: string; size: number; type: 'file'
   return root.children;
 };
 
-// Transform GitHub tree to our TreeNode format
-const transformGitHubTree = (tree: { path: string; type: string; sha: string }[]): TreeNode[] => {
-  const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
-
-  // Filter to only files and trees (directories), exclude blobs that are too large
-  const items = tree.filter(item => item.type === 'blob' || item.type === 'tree');
-
-  // Sort items: directories first, then alphabetically
-  const sortedItems = [...items].sort((a, b) => {
-    if (a.type === 'tree' && b.type !== 'tree') return -1;
-    if (a.type !== 'tree' && b.type === 'tree') return 1;
-    return a.path.localeCompare(b.path);
-  });
-
-  for (const item of sortedItems) {
-    const pathParts = item.path.split('/').filter(p => p);
-    if (pathParts.length === 0) continue;
-
-    let currentLevel = root;
-
-    for (let i = 0; i < pathParts.length; i++) {
-      const part = pathParts[i];
-      const currentPath = pathParts.slice(0, i + 1).join('/');
-      const isLastPart = i === pathParts.length - 1;
-
-      if (isLastPart) {
-        if (item.type === 'blob') {
-          // It's a file
-          currentLevel.children.push({
-            name: part,
-            path: currentPath,
-            type: 'file',
-            icon: getFileIcon(part),
-          });
-        } else {
-          // It's a directory - only add if not already exists
-          const existing = currentLevel.children.find(
-            c => c.type === 'folder' && c.name === part
-          );
-          if (!existing) {
-            currentLevel.children.push({
-              name: part,
-              path: currentPath,
-              type: 'folder',
-              children: [],
-            });
-          }
-        }
-      } else {
-        // Navigate to or create intermediate folder
-        let folder = currentLevel.children.find(
-          c => c.type === 'folder' && c.name === part
-        ) as FolderNode | undefined;
-
-        if (!folder) {
-          folder = { name: part, path: currentPath, type: 'folder', children: [] };
-          currentLevel.children.push(folder);
-        }
-        currentLevel = folder;
-      }
-    }
-  }
-
-  return root.children;
-};
-
 // Props for split view support
 interface CodeProps {
   sessionId?: string;
@@ -421,52 +355,38 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   }, [preSelectedSettings, repos, codeSession, sessionId]);
 
-  // Fetch file tree when code session is active
-  // First tries storage-worker, falls back to GitHub if session not in storage yet
-  // NOTE: Storage-worker uses the database session ID as the storage key, not owner/repo/branch
-  const { data: treeData, isLoading: isLoadingTree } = useQuery({
-    queryKey: ['file-tree', codeSession?.sessionId, codeSession?.owner, codeSession?.repo, codeSession?.branch],
+  // Fetch file tree from storage-worker when code session is active
+  // NOTE: Storage-worker uses the database session ID as the storage key
+  const { data: treeData, isLoading: isLoadingTree, error: treeError } = useQuery({
+    queryKey: ['file-tree', codeSession?.sessionId],
     queryFn: async () => {
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
       const storageSessionId = codeSession!.sessionId;
 
-      // Try storage-worker first if we have a session ID
-      if (storageSessionId) {
-        try {
-          console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
-          const files = await storageWorkerApi.listFiles(storageSessionId);
-          if (files && files.length > 0) {
-            return { source: 'storage', files };
-          }
-          // Empty result - session might not be uploaded yet, fall through to GitHub
-          console.log('[Code] Storage-worker returned empty, falling back to GitHub');
-        } catch (error) {
-          // Storage-worker failed (likely 404 - session not uploaded yet), fall back to GitHub
-          console.log('[Code] Storage-worker failed, falling back to GitHub:', error);
-        }
+      if (!storageSessionId) {
+        throw new Error('No session ID available');
       }
 
-      // Fall back to GitHub to get the file tree
-      if (codeSession!.owner && codeSession!.repo && codeSession!.branch) {
-        console.log('[Code] Fetching file tree from GitHub:', codeSession!.owner, codeSession!.repo, codeSession!.branch);
-        const response = await githubApi.getTree(codeSession!.owner, codeSession!.repo, codeSession!.branch);
-        return { source: 'github', tree: response.tree || [] };
+      console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
+      const files = await storageWorkerApi.listFiles(storageSessionId);
+
+      if (files && files.length > 0) {
+        return { source: 'storage', files };
       }
 
-      return { source: 'empty', files: [], tree: [] };
+      // Empty result - session might not have any files yet
+      console.log('[Code] Storage-worker returned empty file list');
+      return { source: 'storage', files: [] };
     },
-    enabled: !!codeSession?.sessionId || (!!codeSession?.owner && !!codeSession?.repo && !!codeSession?.branch),
+    enabled: !!codeSession?.sessionId,
+    retry: 1, // Only retry once for faster feedback
   });
 
-  // Transform the tree into our TreeNode format
-  // Handles both storage-worker and GitHub sources
+  // Transform the tree into our TreeNode format (storage-worker only)
   const fileTree = useMemo(() => {
     if (!treeData) return [];
     if (treeData.source === 'storage' && treeData.files) {
       return transformStorageFiles(treeData.files);
-    }
-    if (treeData.source === 'github' && treeData.tree) {
-      return transformGitHubTree(treeData.tree);
     }
     return [];
   }, [treeData]);
@@ -621,8 +541,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   };
 
-  // Load file content when a file is selected
-  // First tries storage-worker, falls back to GitHub if not in storage
+  // Load file content from storage-worker when a file is selected
   const loadFileContent = useCallback(async (path: string) => {
     if (!codeSession) return;
 
@@ -632,46 +551,24 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
     const storageSessionId = codeSession.sessionId;
 
+    if (!storageSessionId) {
+      setFileContent(`// Error: No session ID available`);
+      return;
+    }
+
     // Check if this is an image file
     if (isImageFile(path)) {
       setIsLoadingFile(true);
       setFileContent(null); // Clear text content for images
       try {
-        // Try storage-worker first
-        if (storageSessionId) {
-          try {
-            const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
-            if (blob) {
-              const url = URL.createObjectURL(blob);
-              setImageUrl(url);
-              setIsLoadingFile(false);
-              return;
-            }
-          } catch {
-            // Fall through to GitHub
-          }
+        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          setImageUrl(url);
+        } else {
+          console.error(`[Code] Image not found: ${path}`);
+          setFileContent(`// Error: Image not found in storage`);
         }
-
-        // Fall back to GitHub
-        if (codeSession.owner && codeSession.repo && codeSession.branch) {
-          const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.branch);
-          if (response.content) {
-            // Decode base64 content and create blob
-            const binaryString = atob(response.content);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
-            }
-            const blob = new Blob([bytes], { type: 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
-            setImageUrl(url);
-            setIsLoadingFile(false);
-            return;
-          }
-        }
-
-        console.error(`[Code] Image not found: ${path}`);
-        setFileContent(`// Error: Image not found`);
       } catch (error: any) {
         console.error('Failed to load image:', error);
         setFileContent(`// Error loading image: ${error.message}`);
@@ -690,26 +587,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     setIsLoadingFile(true);
     try {
-      let content: string | null = null;
-
-      // Try storage-worker first
-      if (storageSessionId) {
-        try {
-          content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
-        } catch {
-          // Fall through to GitHub
-          console.log('[Code] Storage-worker failed for file, trying GitHub');
-        }
-      }
-
-      // Fall back to GitHub if storage didn't have the file
-      if (content === null && codeSession.owner && codeSession.repo && codeSession.branch) {
-        console.log('[Code] Fetching file from GitHub:', path);
-        const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.branch);
-        if (response.content) {
-          content = atob(response.content);
-        }
-      }
+      console.log('[Code] Fetching file from storage-worker:', path);
+      const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
 
       if (content === null) {
         // File not found in storage
@@ -1714,11 +1593,20 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
             <div className="flex items-center justify-center py-8">
               <span className="loading loading-spinner loading-sm"></span>
             </div>
+          ) : treeError ? (
+            <div className="px-3 py-4 text-sm text-center">
+              <div className="text-error mb-2">⚠️ Failed to load files</div>
+              <div className="text-base-content/70 text-xs">
+                {treeError.message?.toLowerCase().includes('session not found') || treeError.message?.includes('session_not_found')
+                  ? 'Session not found in storage. The AI may still be processing files.'
+                  : treeError.message || 'Unknown error'}
+              </div>
+            </div>
           ) : fileTree.length > 0 ? (
             renderFileTree(fileTree)
           ) : (
             <div className="px-3 py-4 text-sm text-base-content/70 text-center">
-              No files found
+              No files found. Run AI to generate files.
             </div>
           )}
         </div>
