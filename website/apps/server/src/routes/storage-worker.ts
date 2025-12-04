@@ -270,7 +270,7 @@ router.get('/storage-worker/sessions/:sessionPath/files', async (req: Request, r
       return;
     }
 
-    const data = await response.json();
+    const data = await response.json() as { files?: unknown[] };
     console.log('[StorageWorker] List files success:', {
       sessionPath,
       fileCount: data.files?.length || 0,
