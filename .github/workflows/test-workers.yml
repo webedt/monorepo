@@ -1,0 +1,363 @@
+name: Test Workers (AI Coding Worker & Storage Worker)
+
+on:
+  push:
+    paths:
+      - "ai-coding-worker/**"
+      - "storage-worker/**"
+      - ".github/workflows/test-workers.yml"
+  pull_request:
+    paths:
+      - "ai-coding-worker/**"
+      - "storage-worker/**"
+      - ".github/workflows/test-workers.yml"
+  workflow_dispatch:
+    inputs:
+      test_target:
+        description: 'Which worker to test'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - ai-coding-worker
+          - storage-worker
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  test-storage-worker:
+    if: ${{ github.event.inputs.test_target != 'ai-coding-worker' }}
+    runs-on: ubuntu-latest
+
+    services:
+      minio:
+        image: minio/minio:latest
+        ports:
+          - 9000:9000
+          - 9001:9001
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --entrypoint "minio server /data --console-address :9001"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: storage-worker/package-lock.json
+
+      - name: Install dependencies
+        working-directory: storage-worker
+        run: npm ci
+
+      - name: Create .env file from secrets
+        working-directory: storage-worker
+        run: |
+          cat << EOF > .env
+          # Server Configuration
+          PORT=3000
+
+          # MinIO Configuration
+          MINIO_ENDPOINT=localhost
+          MINIO_PORT=9000
+          MINIO_USE_SSL=false
+          MINIO_ACCESS_KEY=${{ secrets.TEST_MINIO_ACCESS_KEY || 'minioadmin' }}
+          MINIO_SECRET_KEY=${{ secrets.TEST_MINIO_SECRET_KEY || 'minioadmin' }}
+          MINIO_ROOT_USER=${{ secrets.TEST_MINIO_ACCESS_KEY || 'minioadmin' }}
+          MINIO_ROOT_PASSWORD=${{ secrets.TEST_MINIO_SECRET_KEY || 'minioadmin' }}
+          MINIO_BUCKET=sessions
+
+          # Build Information
+          BUILD_COMMIT_SHA=${{ github.sha }}
+          BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp || 'test' }}
+          BUILD_IMAGE_TAG=${{ github.ref_name }}
+          EOF
+
+      - name: Wait for MinIO to be ready
+        run: |
+          echo "Waiting for MinIO to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:9000/minio/health/live; then
+              echo "MinIO is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+      - name: Create MinIO bucket
+        run: |
+          # Install mc (MinIO client)
+          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc
+          chmod +x mc
+          ./mc alias set myminio http://localhost:9000 minioadmin minioadmin
+          ./mc mb myminio/sessions --ignore-existing
+
+      - name: Run storage worker tests
+        working-directory: storage-worker
+        run: npm test
+        env:
+          MINIO_ENDPOINT: localhost
+          MINIO_PORT: 9000
+          MINIO_USE_SSL: false
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          MINIO_BUCKET: sessions
+
+      - name: Start storage worker for integration tests
+        working-directory: storage-worker
+        run: |
+          npm run build || true
+          npm start &
+          sleep 5
+        env:
+          PORT: 3000
+          MINIO_ENDPOINT: localhost
+          MINIO_PORT: 9000
+          MINIO_USE_SSL: false
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          MINIO_BUCKET: sessions
+
+      - name: Run integration tests
+        run: |
+          echo "Testing Storage Worker Endpoints..."
+
+          # Test health endpoint
+          echo "Testing GET /health..."
+          curl -s -f http://localhost:3000/health | jq .
+
+          # Test list sessions (should be empty initially)
+          echo "Testing GET /api/storage-worker/sessions..."
+          curl -s -f http://localhost:3000/api/storage-worker/sessions | jq .
+
+          # Create a test tarball
+          echo "Creating test tarball..."
+          mkdir -p /tmp/test-session
+          echo "test content" > /tmp/test-session/test.txt
+          tar -czf /tmp/test-session.tar.gz -C /tmp/test-session .
+
+          # Test upload
+          echo "Testing POST /api/storage-worker/sessions/test-session-1/upload..."
+          curl -s -f -X POST \
+            -H "Content-Type: application/gzip" \
+            --data-binary @/tmp/test-session.tar.gz \
+            http://localhost:3000/api/storage-worker/sessions/test-session-1/upload | jq .
+
+          # Test HEAD (check exists)
+          echo "Testing HEAD /api/storage-worker/sessions/test-session-1..."
+          curl -s -I http://localhost:3000/api/storage-worker/sessions/test-session-1
+
+          # Test GET session metadata
+          echo "Testing GET /api/storage-worker/sessions/test-session-1..."
+          curl -s -f http://localhost:3000/api/storage-worker/sessions/test-session-1 | jq .
+
+          # Test list files
+          echo "Testing GET /api/storage-worker/sessions/test-session-1/files..."
+          curl -s -f http://localhost:3000/api/storage-worker/sessions/test-session-1/files | jq .
+
+          # Test get file
+          echo "Testing GET /api/storage-worker/sessions/test-session-1/files/test.txt..."
+          curl -s -f http://localhost:3000/api/storage-worker/sessions/test-session-1/files/test.txt
+
+          # Test download
+          echo "Testing GET /api/storage-worker/sessions/test-session-1/download..."
+          curl -s -f -o /tmp/downloaded.tar.gz http://localhost:3000/api/storage-worker/sessions/test-session-1/download
+          tar -tzf /tmp/downloaded.tar.gz
+
+          # Test delete
+          echo "Testing DELETE /api/storage-worker/sessions/test-session-1..."
+          curl -s -f -X DELETE http://localhost:3000/api/storage-worker/sessions/test-session-1 | jq .
+
+          echo "All storage worker tests passed!"
+
+  test-ai-coding-worker:
+    if: ${{ github.event.inputs.test_target != 'storage-worker' }}
+    runs-on: ubuntu-latest
+
+    services:
+      minio:
+        image: minio/minio:latest
+        ports:
+          - 9000:9000
+          - 9001:9001
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --entrypoint "minio server /data --console-address :9001"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ai-coding-worker/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ai-coding-worker
+        run: npm ci
+
+      - name: Create .env file from secrets
+        working-directory: ai-coding-worker
+        run: |
+          cat << EOF > .env
+          # Server Configuration
+          PORT=5000
+          TMP_DIR=/tmp
+
+          # MinIO Configuration
+          MINIO_ENDPOINT=localhost
+          MINIO_PORT=9000
+          MINIO_USE_SSL=false
+          MINIO_ACCESS_KEY=${{ secrets.TEST_MINIO_ACCESS_KEY || 'minioadmin' }}
+          MINIO_SECRET_KEY=${{ secrets.TEST_MINIO_SECRET_KEY || 'minioadmin' }}
+          MINIO_BUCKET=sessions
+
+          # Storage Worker Configuration (if using external storage worker)
+          STORAGE_WORKER_URL=${{ secrets.TEST_STORAGE_WORKER_URL || 'http://localhost:3000' }}
+          STORAGE_WORKER_TIMEOUT=60000
+
+          # Coding Assistant Configuration (for integration tests)
+          CODING_ASSISTANT_PROVIDER=${{ secrets.TEST_CODING_ASSISTANT_PROVIDER || 'claude-code' }}
+          CODING_ASSISTANT_AUTHENTICATION=${{ secrets.TEST_CODING_ASSISTANT_AUTHENTICATION || '{}' }}
+
+          # GitHub Configuration (optional)
+          GITHUB_ACCESS_TOKEN=${{ secrets.TEST_GITHUB_ACCESS_TOKEN || '' }}
+
+          # Website API Configuration
+          WEBSITE_API_URL=${{ secrets.TEST_WEBSITE_API_URL || 'http://localhost:3000' }}
+          WORKER_CALLBACK_SECRET=${{ secrets.TEST_WORKER_CALLBACK_SECRET || '' }}
+
+          # Database Configuration (optional)
+          DB_BASE_URL=${{ secrets.TEST_DB_BASE_URL || '' }}
+
+          # Build Information
+          BUILD_COMMIT_SHA=${{ github.sha }}
+          BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp || 'test' }}
+          BUILD_IMAGE_TAG=${{ github.ref_name }}
+
+          # Logging
+          LOG_LEVEL=debug
+          EOF
+
+      - name: Wait for MinIO to be ready
+        run: |
+          echo "Waiting for MinIO to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:9000/minio/health/live; then
+              echo "MinIO is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+      - name: Create MinIO bucket
+        run: |
+          # Install mc (MinIO client)
+          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc
+          chmod +x mc
+          ./mc alias set myminio http://localhost:9000 minioadmin minioadmin
+          ./mc mb myminio/sessions --ignore-existing
+
+      - name: Run AI coding worker tests
+        working-directory: ai-coding-worker
+        run: npm test
+        env:
+          MINIO_ENDPOINT: localhost
+          MINIO_PORT: 9000
+          MINIO_USE_SSL: false
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          MINIO_BUCKET: sessions
+
+      - name: Start AI coding worker for integration tests
+        working-directory: ai-coding-worker
+        run: |
+          npm run build || true
+          npm start &
+          sleep 5
+        env:
+          PORT: 5000
+          TMP_DIR: /tmp
+          MINIO_ENDPOINT: localhost
+          MINIO_PORT: 9000
+          MINIO_USE_SSL: false
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          MINIO_BUCKET: sessions
+
+      - name: Run integration tests
+        run: |
+          echo "Testing AI Coding Worker Endpoints..."
+
+          # Test health endpoint
+          echo "Testing GET /health..."
+          curl -s -f http://localhost:5000/health | jq .
+
+          # Test status endpoint
+          echo "Testing GET /status..."
+          curl -s -f http://localhost:5000/status | jq .
+
+          # Test list sessions
+          echo "Testing GET /sessions..."
+          curl -s -f http://localhost:5000/sessions | jq .
+
+          # Test abort (should return ok even with no active execution)
+          echo "Testing POST /abort..."
+          curl -s -f -X POST http://localhost:5000/abort \
+            -H "Content-Type: application/json" \
+            -d '{}' | jq .
+
+          # Test execute endpoint (without real credentials - expect 400 for missing fields)
+          echo "Testing POST /execute (validation)..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:5000/execute \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          if [ "$HTTP_CODE" == "400" ]; then
+            echo "Execute endpoint correctly validates required fields"
+          fi
+
+          # Test 404 handling
+          echo "Testing 404 handling..."
+          curl -s http://localhost:5000/nonexistent | jq .
+
+          echo "All AI coding worker basic tests passed!"
+
+      - name: Run full integration test (if credentials available)
+        if: ${{ secrets.TEST_CODING_ASSISTANT_AUTHENTICATION != '' }}
+        run: |
+          echo "Running full integration test with real credentials..."
+
+          # Test execute with real credentials
+          curl -s -N -X POST http://localhost:5000/execute \
+            -H "Content-Type: application/json" \
+            -d '{
+              "userRequest": "echo hello world",
+              "codingAssistantProvider": "${{ secrets.TEST_CODING_ASSISTANT_PROVIDER }}",
+              "codingAssistantAuthentication": ${{ secrets.TEST_CODING_ASSISTANT_AUTHENTICATION }}
+            }' | head -20
+
+          echo "Full integration test completed!"
