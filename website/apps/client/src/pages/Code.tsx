@@ -430,15 +430,24 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     queryKey: ['file-tree', codeSession?.sessionId, codeSession?.owner, codeSession?.repo, codeSession?.baseBranch],
     queryFn: async () => {
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
-      const storageSessionId = codeSession!.sessionId;
+      const storageSessionId = codeSession?.sessionId;
 
+      // Safety check - should not happen due to enabled condition, but return empty if so
       if (!storageSessionId) {
-        throw new Error('No session ID available');
+        console.warn('[Code] Query ran without session ID - returning empty');
+        return { source: 'storage' as const, files: [] };
       }
 
       // First, try to get files from storage-worker (for sessions with AI execution)
       console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
-      const storageFiles = await storageWorkerApi.listFiles(storageSessionId);
+
+      let storageFiles: { path: string; size: number; type: 'file' | 'directory' }[] = [];
+      try {
+        storageFiles = await storageWorkerApi.listFiles(storageSessionId);
+      } catch (storageError) {
+        // Storage-worker might be unavailable or return error, log and continue to GitHub fallback
+        console.warn('[Code] Failed to fetch from storage-worker, trying GitHub:', storageError);
+      }
 
       if (storageFiles && storageFiles.length > 0) {
         console.log('[Code] Found files in storage-worker:', storageFiles.length);
@@ -468,6 +477,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     },
     enabled: !!codeSession?.sessionId,
     retry: 1, // Only retry once for faster feedback
+    refetchOnWindowFocus: false, // Don't refetch when window regains focus
+    staleTime: 30000, // Consider data fresh for 30 seconds
   });
 
   // Effect to initialize repository in background when storage is empty
@@ -493,7 +504,20 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         console.log('[Code] Repository initialized successfully:', result);
 
         // Refetch the file tree from storage-worker now that repo is initialized
-        await refetchTree();
+        // Use a small delay to ensure storage-worker has processed the upload
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        try {
+          const refetchResult = await refetchTree();
+          console.log('[Code] Refetch completed:', {
+            status: refetchResult.status,
+            source: refetchResult.data?.source,
+            hasError: !!refetchResult.error
+          });
+        } catch (refetchError) {
+          // Refetch failed, but we already have files from GitHub - this is ok
+          console.warn('[Code] Refetch after init failed, keeping GitHub source:', refetchError);
+        }
 
         setIsInitializingRepo(false);
       } catch (error) {
