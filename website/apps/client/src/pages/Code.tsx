@@ -750,7 +750,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     try {
       let content: string | null = null;
 
-      // If we're using GitHub source, fetch from GitHub API
+      // If we're using GitHub source, fetch from GitHub API directly
       if (isGitHubSource && codeSession.owner && codeSession.repo && codeSession.baseBranch) {
         console.log('[Code] Fetching file from GitHub API:', path);
         try {
@@ -771,9 +771,28 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           console.error('[Code] Failed to fetch from GitHub:', githubError);
         }
       } else {
-        // Fetch from storage-worker
+        // Try storage-worker first, fallback to GitHub API
         console.log('[Code] Fetching file from storage-worker:', path);
         content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
+
+        // If storage-worker returned null (file not found), try GitHub API as fallback
+        if (content === null && codeSession.owner && codeSession.repo && codeSession.baseBranch) {
+          console.log('[Code] Storage returned null, trying GitHub API fallback:', path);
+          try {
+            const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.baseBranch);
+            if (response.success && response.data?.content) {
+              const base64Content = response.data.content.replace(/\n/g, '');
+              const binaryString = atob(base64Content);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
+              content = new TextDecoder('utf-8').decode(bytes);
+            }
+          } catch (githubError) {
+            console.error('[Code] GitHub fallback also failed:', githubError);
+          }
+        }
       }
 
       if (content === null) {
