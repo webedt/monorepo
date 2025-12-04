@@ -287,6 +287,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [streamMethod, setStreamMethod] = useState<'GET' | 'POST'>('GET');
   const [streamBody, setStreamBody] = useState<any>(null);
+  const [isReconnecting, setIsReconnecting] = useState(false); // Track reconnection attempts
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
@@ -486,8 +487,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
   // Sync isExecuting with session status when returning to a running session
-  // When returning to a running/pending session, show the Processing panel even if no active stream
-  // This gives users visual feedback that the session is still processing
+  // When returning to a running/pending session, show the Processing panel AND connect to live stream
+  // This gives users visual feedback that the session is still processing and shows live events
   useEffect(() => {
     if (session?.status === 'running' || session?.status === 'pending') {
       // Set isExecuting=true for running/pending sessions to show Processing panel
@@ -501,6 +502,17 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           console.log('[Chat] Synced worker store for running session:', currentSessionId);
         }
       }
+
+      // If we don't have an active stream, try to connect to the live stream
+      // This allows users to see live events when they return to a running session
+      if (!streamUrl && currentSessionId && !isReconnecting) {
+        console.log('[Chat] Attempting to connect to live stream for running session:', currentSessionId);
+        setIsReconnecting(true); // Mark as reconnection attempt
+        const reconnectStreamUrl = sessionsApi.getStreamUrl(currentSessionId);
+        setStreamMethod('GET'); // Stream endpoint uses GET
+        setStreamBody(null);
+        setStreamUrl(reconnectStreamUrl);
+      }
     } else if (session?.status === 'completed' || session?.status === 'error') {
       // Only reset isExecuting if we don't have an active stream
       // This prevents a race condition where the session status is stale (completed)
@@ -508,12 +520,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       if (isExecuting && !streamUrl) {
         console.log('[Chat] Session completed, setting isExecuting to false');
         setIsExecuting(false);
+        setIsReconnecting(false); // Clear reconnection flag
         // Also clear the global worker store
         workerStore.stopExecution();
         console.log('[Chat] Cleared worker store for completed/errored session');
       }
     }
-  }, [session?.status, isExecuting, currentSessionId, streamUrl]);
+  }, [session?.status, isExecuting, currentSessionId, streamUrl, isReconnecting]);
 
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
@@ -1262,11 +1275,17 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       setIsExecuting(true);
       // Mark stream as active in global store
       workerStore.setActiveStream(true);
+      // Clear reconnection flag on successful connection
+      if (isReconnecting) {
+        console.log('[Chat] Reconnection successful, now receiving live events');
+        setIsReconnecting(false);
+      }
       console.log('[Chat] SSE stream connected, worker store updated');
     },
     onCompleted: (data) => {
       setIsExecuting(false);
       setStreamUrl(null);
+      setIsReconnecting(false); // Clear reconnection flag
       // Clear global worker state
       workerStore.stopExecution();
       console.log('[Chat] SSE stream completed, worker store cleared');
@@ -1324,6 +1343,18 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     },
     onError: (error) => {
       console.error('Stream error:', error);
+
+      // If this was a reconnection attempt, don't show an error to the user
+      // The polling mechanism will continue to work
+      if (isReconnecting) {
+        console.log('[Chat] Reconnection failed, falling back to polling');
+        setIsReconnecting(false);
+        setStreamUrl(null);
+        // Don't clear isExecuting - let the session status polling handle that
+        // Don't show error message to user for reconnection failures
+        return;
+      }
+
       messageIdCounter.current += 1;
       setMessages((prev) => [
         ...prev,
