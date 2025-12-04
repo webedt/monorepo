@@ -382,13 +382,16 @@ app.get('/api/storage-worker/sessions/:sessionPath/files', async (req: Request, 
   if (!validateSessionPath(sessionPath, res)) return;
 
   try {
-    // Check if session exists
+    // Check if session exists - if not, return empty file list instead of 404
+    // This is valid for new sessions that haven't had any files uploaded yet
     const exists = await storageService.sessionExists(sessionPath);
     if (!exists) {
-      res.status(404).json({
-        error: 'session_not_found',
-        message: `Session ${sessionPath} not found`,
+      res.json({
+        sessionPath,
+        count: 0,
+        files: [],
         containerId: CONTAINER_ID,
+        note: 'Session does not exist yet - no files uploaded',
       });
       return;
     }
