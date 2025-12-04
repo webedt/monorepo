@@ -260,8 +260,15 @@ router.get('/storage-worker/sessions/:sessionPath/files', async (req: Request, r
 
     if (!response.ok) {
       if (response.status === 404) {
-        console.log('[StorageWorker] List files 404 - session not found:', sessionPath);
-        res.status(404).json({ error: 'Session not found' });
+        // Session doesn't exist yet - return empty files array instead of 404
+        // This is expected for new sessions before any AI execution
+        console.log('[StorageWorker] List files 404 - session not found, returning empty:', sessionPath);
+        res.json({
+          sessionPath,
+          count: 0,
+          files: [],
+          note: 'Session does not exist yet - no files uploaded',
+        });
         return;
       }
       const error = await response.text();
