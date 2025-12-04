@@ -485,20 +485,43 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
+  // Track if we're subscribed to live events (vs executing our own request)
+  const [isSubscribedToLiveEvents, setIsSubscribedToLiveEvents] = useState(false);
+
   // Sync isExecuting with session status when returning to a running session
-  // When returning to a running/pending session, show the Processing panel even if no active stream
-  // This gives users visual feedback that the session is still processing
+  // When returning to a running/pending session, subscribe to live events
   useEffect(() => {
     if (session?.status === 'running' || session?.status === 'pending') {
-      // Set isExecuting=true for running/pending sessions to show Processing panel
-      // This handles the case when users navigate back to an in-progress session
-      if (!isExecuting) {
-        console.log('[Chat] Syncing isExecuting with session status:', session.status);
+      // If we're viewing a running session but DON'T have an active stream,
+      // subscribe to the live event stream to get new events
+      if (!streamUrl && sessionId && sessionId !== 'new') {
+        console.log('[Chat] Detected running session without stream, subscribing to live events:', sessionId);
+
+        // Get the highest event ID we've seen from the loaded events
+        // to avoid re-receiving events we already have
+        const lastEventId = eventsData?.data?.events?.length > 0
+          ? Math.max(...eventsData.data.events.map((e: DbEvent) => e.id))
+          : 0;
+
+        // Set up subscription to live events
+        const subscribeUrl = sessionsApi.getSubscribeUrl(sessionId, lastEventId);
+        console.log('[Chat] Subscribing to live events at:', subscribeUrl, 'lastEventId:', lastEventId);
+
+        setStreamUrl(subscribeUrl);
+        setStreamMethod('GET');
+        setStreamBody(null);
+        setIsSubscribedToLiveEvents(true);
         setIsExecuting(true);
-        // Also sync the global worker store to keep stop/interrupt button working
+
+        // Also sync the global worker store
+        workerStore.startExecution(sessionId);
+        console.log('[Chat] Synced worker store for subscribed session:', sessionId);
+      } else if (streamUrl && !isExecuting) {
+        // We have a stream URL but isExecuting is false - sync it
+        console.log('[Chat] Have stream URL, syncing isExecuting to true');
+        setIsExecuting(true);
         if (currentSessionId) {
           workerStore.startExecution(currentSessionId);
-          console.log('[Chat] Synced worker store for running session:', currentSessionId);
         }
       }
     } else if (session?.status === 'completed' || session?.status === 'error') {
@@ -508,12 +531,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       if (isExecuting && !streamUrl) {
         console.log('[Chat] Session completed, setting isExecuting to false');
         setIsExecuting(false);
+        setIsSubscribedToLiveEvents(false);
         // Also clear the global worker store
         workerStore.stopExecution();
         console.log('[Chat] Cleared worker store for completed/errored session');
       }
     }
-  }, [session?.status, isExecuting, currentSessionId, streamUrl]);
+  }, [session?.status, isExecuting, currentSessionId, streamUrl, sessionId, eventsData?.data?.events]);
 
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
@@ -1050,7 +1074,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       // Skip system events (but NOT commit_progress or github_pull_progress)
-      if (eventType === 'connected' || eventType === 'completed') {
+      if (eventType === 'connected' || eventType === 'completed' || eventType === 'subscribed') {
+        // 'subscribed' is sent when we connect to a live session subscription
+        console.log(`[Chat] Received ${eventType} event - acknowledged`);
         return;
       }
 
@@ -1265,11 +1291,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       console.log('[Chat] SSE stream connected, worker store updated');
     },
     onCompleted: (data) => {
+      const wasSubscribed = isSubscribedToLiveEvents;
       setIsExecuting(false);
       setStreamUrl(null);
+      setIsSubscribedToLiveEvents(false);
       // Clear global worker state
       workerStore.stopExecution();
-      console.log('[Chat] SSE stream completed, worker store cleared');
+      console.log('[Chat] SSE stream completed, worker store cleared, wasSubscribed:', wasSubscribed);
 
       // Show browser notification if enabled (only when tab is not focused)
       const notificationPrefs = getNotificationPrefs();
@@ -1290,8 +1318,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
       }
 
-      // Capture session ID from completion event
-      if (data?.websiteSessionId) {
+      // Only do session ID capture and navigation for execution we initiated
+      // (not when we were just subscribed to a running session)
+      if (!wasSubscribed && data?.websiteSessionId) {
         console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
         setCurrentSessionId(data.websiteSessionId);
         // Lock the fields after first submission completes
@@ -1316,6 +1345,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
             : `/session/${data.websiteSessionId}/chat`;
           navigate(targetPath, { replace: true });
         }
+      } else {
+        // For subscribed sessions, just invalidate queries to get final state
+        if (sessionId && sessionId !== 'new') {
+          queryClient.invalidateQueries({ queryKey: ['session-details', sessionId] });
+          queryClient.invalidateQueries({ queryKey: ['session-events', sessionId] });
+        }
       }
       // Refocus input after processing completes (with delay to ensure DOM updates)
       setTimeout(() => {
@@ -1337,6 +1372,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       ]);
       setIsExecuting(false);
       setStreamUrl(null);
+      setIsSubscribedToLiveEvents(false);
       // Clear global worker state on error
       workerStore.stopExecution();
       console.log('[Chat] SSE stream error, worker store cleared');

@@ -1,7 +1,8 @@
 import { Router } from 'express';
+import { EventEmitter } from 'events';
 import { db } from '../db/index';
 import { chatSessions, messages, users, events } from '../db/index';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, gt, asc } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { ensureValidToken } from '../lib/claudeAuth';
@@ -15,6 +16,11 @@ const router = Router();
 // Track which AI worker is handling each session for abort routing
 // Map of sessionId -> { workerUrl, containerId }
 export const activeWorkerSessions = new Map<string, { workerUrl: string; containerId: string }>();
+
+// Event emitter for live session updates - allows clients to subscribe to running sessions
+// This enables "reconnecting" to a running session's live stream
+export const sessionEventEmitter = new EventEmitter();
+sessionEventEmitter.setMaxListeners(100); // Allow many concurrent subscribers
 
 // Helper function to sanitize sensitive data for logging
 const sanitizeForLogging = (data: any): any => {
@@ -706,8 +712,15 @@ const executeHandler = async (req: any, res: any) => {
               // Skip certain events that don't need to be stored
               const skipEventTypes = ['completed', 'error'];
               if (!skipEventTypes.includes(effectiveEventType)) {
-                await db.insert(events).values({
+                const [insertedEvent] = await db.insert(events).values({
                   chatSessionId: chatSession.id,
+                  eventType: effectiveEventType,
+                  eventData: eventData,
+                }).returning();
+
+                // Emit the event for any subscribers (reconnecting clients)
+                sessionEventEmitter.emit(`session:${chatSession.id}`, {
+                  eventId: insertedEvent.id,
                   eventType: effectiveEventType,
                   eventData: eventData,
                 });
@@ -775,6 +788,12 @@ const executeHandler = async (req: any, res: any) => {
         console.error('[Execute] Failed to update session status to completed:', dbError);
         // Continue anyway to send completion event to client
       }
+
+      // Emit completion event for subscribers
+      sessionEventEmitter.emit(`session:${chatSession.id}`, {
+        eventType: 'completed',
+        eventData: { websiteSessionId: chatSession.id, completed: true },
+      });
 
       // Check if response is still writable before writing
       if (!res.writableEnded) {
@@ -876,5 +895,138 @@ const executeHandler = async (req: any, res: any) => {
 // Register both GET and POST routes
 router.get('/execute', requireAuth, executeHandler);
 router.post('/execute', requireAuth, executeHandler);
+
+/**
+ * Subscribe to live events for a running session
+ * This endpoint allows clients to reconnect to a running session and receive new events in real-time
+ *
+ * Query params:
+ *   - lastEventId: Optional. If provided, only events after this ID will be sent (for resuming)
+ *
+ * The endpoint will:
+ * 1. First send any missed events (from database, after lastEventId)
+ * 2. Then stream live events as they arrive
+ * 3. Send a 'completed' event when the session finishes
+ */
+router.get('/sessions/:id/subscribe', requireAuth, async (req, res) => {
+  const authReq = req as AuthRequest;
+  const sessionId = req.params.id;
+  const lastEventId = parseInt(req.query.lastEventId as string) || 0;
+
+  try {
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // If session is not running, return immediately
+    if (session.status !== 'running' && session.status !== 'pending') {
+      res.status(200).json({
+        success: true,
+        data: {
+          status: session.status,
+          message: 'Session is not currently running'
+        }
+      });
+      return;
+    }
+
+    console.log(`[Subscribe] Client subscribing to session ${sessionId} (lastEventId: ${lastEventId})`);
+
+    // Setup SSE
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+
+    // Send initial connection confirmation
+    res.write(`event: subscribed\n`);
+    res.write(`data: ${JSON.stringify({ sessionId, lastEventId })}\n\n`);
+
+    // First, send any missed events from the database
+    if (lastEventId > 0) {
+      const missedEvents = await db
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.chatSessionId, sessionId),
+            gt(events.id, lastEventId)
+          )
+        )
+        .orderBy(asc(events.id));
+
+      console.log(`[Subscribe] Sending ${missedEvents.length} missed events`);
+
+      for (const event of missedEvents) {
+        res.write(`event: ${event.eventType}\n`);
+        res.write(`data: ${JSON.stringify(event.eventData)}\n\n`);
+      }
+    }
+
+    // Set up listener for new events
+    const eventHandler = (data: { eventId?: number; eventType: string; eventData: any }) => {
+      if (!res.writableEnded) {
+        res.write(`event: ${data.eventType}\n`);
+        res.write(`data: ${JSON.stringify(data.eventData)}\n\n`);
+
+        // If this is a completion event, end the stream
+        if (data.eventType === 'completed') {
+          console.log(`[Subscribe] Session ${sessionId} completed, ending subscription`);
+          cleanup();
+          res.end();
+        }
+      }
+    };
+
+    // Subscribe to session events
+    sessionEventEmitter.on(`session:${sessionId}`, eventHandler);
+
+    // Cleanup function
+    const cleanup = () => {
+      sessionEventEmitter.off(`session:${sessionId}`, eventHandler);
+      console.log(`[Subscribe] Cleaned up subscription for session ${sessionId}`);
+    };
+
+    // Handle client disconnect
+    req.on('close', () => {
+      console.log(`[Subscribe] Client disconnected from session ${sessionId}`);
+      cleanup();
+    });
+
+    // Send periodic heartbeats to keep connection alive
+    const heartbeatInterval = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(`:heartbeat\n\n`);
+      } else {
+        clearInterval(heartbeatInterval);
+      }
+    }, 30000); // Every 30 seconds
+
+    // Clean up heartbeat on close
+    req.on('close', () => {
+      clearInterval(heartbeatInterval);
+    });
+
+  } catch (error) {
+    console.error('[Subscribe] Error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: 'Failed to subscribe to session' });
+    }
+  }
+});
 
 export default router;

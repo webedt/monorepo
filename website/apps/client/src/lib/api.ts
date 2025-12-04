@@ -328,6 +328,23 @@ export const sessionsApi = {
       method: 'POST',
       body: data,
     }),
+
+  // Subscribe to live events for a running session
+  // Returns the subscribe URL for use with EventSource/fetch
+  getSubscribeUrl: (id: string, lastEventId?: number) => {
+    const params = new URLSearchParams();
+    if (lastEventId !== undefined && lastEventId > 0) {
+      params.append('lastEventId', String(lastEventId));
+    }
+    const queryString = params.toString();
+    return `${API_BASE_URL}/api/sessions/${id}/subscribe${queryString ? `?${queryString}` : ''}`;
+  },
+
+  // Abort a running session
+  abort: (id: string) =>
+    fetchApi(`/api/sessions/${id}/abort`, {
+      method: 'POST',
+    }),
 };
 
 // Admin API
