@@ -153,15 +153,15 @@ function PreviewContent({ previewUrl }: { previewUrl: string | null }) {
         <svg className="w-4 h-4 text-base-content/60 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
         </svg>
-        <a
-          href={previewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-base-content/80 hover:text-primary truncate flex-1 hover:underline"
-          title={previewUrl}
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(previewUrl);
+          }}
+          className="text-sm text-base-content/80 hover:text-primary truncate flex-1 hover:underline text-left cursor-pointer"
+          title="Click to copy URL"
         >
           {previewUrl}
-        </a>
+        </button>
         <div className="flex items-center gap-1 flex-shrink-0">
           {/* Auto-refresh toggle */}
           <label className="flex items-center gap-1 cursor-pointer" title={autoRefreshEnabled ? "Auto-refresh enabled (click to disable)" : "Auto-refresh disabled (click to enable)"}>
