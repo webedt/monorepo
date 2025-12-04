@@ -290,7 +290,7 @@ router.post('/:id/init-repository', requireAuth, async (req, res) => {
         });
 
         if (response.ok) {
-          const result = await response.json();
+          const result = await response.json() as { repository?: unknown };
           console.log(`[Sessions] Repository initialized successfully for ${sessionId}`);
 
           res.json({
@@ -313,7 +313,7 @@ router.post('/:id/init-repository', requireAuth, async (req, res) => {
         }
 
         // Other error - don't retry
-        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' })) as { message?: string };
         throw new Error(errorData.message || `AI worker returned ${response.status}`);
 
       } catch (err) {
