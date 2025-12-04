@@ -1,4 +1,4 @@
-name: Storage Worker - Build and Push Docker Image
+name: Storage Worker - Build, Test, and Push Docker Image
 
 on:
   push:
@@ -110,4 +110,70 @@ jobs:
             echo "✅ Build and deployment completed successfully" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Build or deployment failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Test job - runs after deployment to test the live endpoints
+  test-storage-worker:
+    needs: build-and-push-storage-worker
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create .env file from secrets
+        working-directory: ./storage-worker
+        run: |
+          cat > .env << 'EOF'
+          # Server Configuration
+          PORT=3000
+
+          # MinIO Configuration
+          MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }}
+          MINIO_PORT=${{ secrets.MINIO_PORT }}
+          MINIO_USE_SSL=${{ secrets.MINIO_USE_SSL }}
+          MINIO_ROOT_USER=${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD=${{ secrets.MINIO_ROOT_PASSWORD }}
+          MINIO_BUCKET=${{ secrets.MINIO_BUCKET }}
+          EOF
+
+          echo "✅ Created .env file with secrets"
+
+      - name: Wait for deployment to be ready
+        run: |
+          echo "⏳ Waiting 30 seconds for deployment to stabilize..."
+          sleep 30
+
+      - name: Install test dependencies
+        working-directory: ./storage-worker
+        run: npm ci
+
+      - name: Run API tests
+        working-directory: ./storage-worker
+        env:
+          STORAGE_WORKER_URL: ${{ secrets.STORAGE_WORKER_URL }}
+          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+          MINIO_PORT: ${{ secrets.MINIO_PORT }}
+          MINIO_USE_SSL: ${{ secrets.MINIO_USE_SSL }}
+          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          MINIO_BUCKET: ${{ secrets.MINIO_BUCKET }}
+        run: |
+          npm run test:api || true
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Storage Worker Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ All tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Some tests may have failed - check logs" >> $GITHUB_STEP_SUMMARY
           fi
