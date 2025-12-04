@@ -419,9 +419,14 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   }, [preSelectedSettings, repos, codeSession, sessionId]);
 
-  // Fetch file tree - first try storage-worker, then fallback to GitHub API
+  // Track if we're initializing the repository
+  const [isInitializingRepo, setIsInitializingRepo] = useState(false);
+  const [repoInitError, setRepoInitError] = useState<string | null>(null);
+  const hasAttemptedInit = useRef(false);
+
+  // Fetch file tree - first try storage-worker, then initialize repo, then fallback to GitHub API
   // NOTE: Storage-worker uses the database session ID as the storage key
-  const { data: treeData, isLoading: isLoadingTree, error: treeError } = useQuery({
+  const { data: treeData, isLoading: isLoadingTree, error: treeError, refetch: refetchTree } = useQuery({
     queryKey: ['file-tree', codeSession?.sessionId, codeSession?.owner, codeSession?.repo, codeSession?.baseBranch],
     queryFn: async () => {
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
@@ -437,11 +442,12 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
       if (storageFiles && storageFiles.length > 0) {
         console.log('[Code] Found files in storage-worker:', storageFiles.length);
+        hasAttemptedInit.current = true; // No need to init, we have files
         return { source: 'storage' as const, files: storageFiles };
       }
 
-      // Storage is empty - fallback to GitHub API for new sessions
-      // This allows viewing files before AI execution
+      // Storage is empty - fallback to GitHub API for immediate display
+      // We'll trigger repository initialization in the background
       if (codeSession?.owner && codeSession?.repo && codeSession?.baseBranch) {
         console.log('[Code] Storage empty, fetching from GitHub API:', `${codeSession.owner}/${codeSession.repo}/${codeSession.baseBranch}`);
         try {
@@ -463,6 +469,43 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     enabled: !!codeSession?.sessionId,
     retry: 1, // Only retry once for faster feedback
   });
+
+  // Effect to initialize repository in background when storage is empty
+  useEffect(() => {
+    const initializeRepo = async () => {
+      // Only attempt once per session
+      if (hasAttemptedInit.current) return;
+
+      // Only initialize if we're showing GitHub source (meaning storage was empty)
+      if (treeData?.source !== 'github') return;
+
+      // Need a session ID to initialize
+      if (!codeSession?.sessionId) return;
+
+      hasAttemptedInit.current = true;
+      setIsInitializingRepo(true);
+      setRepoInitError(null);
+
+      console.log('[Code] Initiating background repository initialization for session:', codeSession.sessionId);
+
+      try {
+        const result = await sessionsApi.initializeRepository(codeSession.sessionId);
+        console.log('[Code] Repository initialized successfully:', result);
+
+        // Refetch the file tree from storage-worker now that repo is initialized
+        await refetchTree();
+
+        setIsInitializingRepo(false);
+      } catch (error) {
+        console.error('[Code] Failed to initialize repository:', error);
+        setRepoInitError(error instanceof Error ? error.message : 'Failed to initialize repository');
+        setIsInitializingRepo(false);
+        // Keep using GitHub API fallback - user can still view files read-only
+      }
+    };
+
+    initializeRepo();
+  }, [treeData?.source, codeSession?.sessionId, refetchTree]);
 
   // Transform the tree into our TreeNode format
   const fileTree = useMemo(() => {
@@ -1857,13 +1900,35 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
             </div>
           ) : fileContent !== null ? (
             <div className="h-full flex flex-col">
-              {/* GitHub Source Banner - shown when viewing files from GitHub API before AI execution */}
+              {/* GitHub Source Banner - shown when viewing files from GitHub API before repo is initialized */}
               {isGitHubSource && (
-                <div className="bg-info/20 border-b border-info/30 px-4 py-2 flex items-center gap-2 text-sm text-info-content">
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
-                  </svg>
-                  <span>Viewing files from GitHub (read-only). Run a task with AI to enable editing.</span>
+                <div className={`border-b px-4 py-2 flex items-center gap-2 text-sm ${
+                  repoInitError
+                    ? 'bg-warning/20 border-warning/30 text-warning-content'
+                    : isInitializingRepo
+                    ? 'bg-info/20 border-info/30 text-info-content'
+                    : 'bg-info/20 border-info/30 text-info-content'
+                }`}>
+                  {isInitializingRepo ? (
+                    <>
+                      <span className="loading loading-spinner loading-xs"></span>
+                      <span>Cloning repository to enable editing...</span>
+                    </>
+                  ) : repoInitError ? (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                      <span>Viewing files from GitHub (read-only). Repository sync failed.</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+                      </svg>
+                      <span>Viewing files from GitHub (read-only). Run a task with AI to enable editing.</span>
+                    </>
+                  )}
                 </div>
               )}
               <div className="flex-1 flex min-h-0">

@@ -322,6 +322,93 @@ app.post('/execute', async (req: Request, res: Response) => {
 });
 
 /**
+ * Initialize repository endpoint - clones a repository and uploads to storage
+ * This is a lightweight operation that doesn't run AI, just prepares the workspace
+ * Used when opening the Code view for a new session
+ */
+app.post('/init-repository', async (req: Request, res: Response) => {
+  console.log(`[Container ${containerId}] Received init-repository request`);
+  res.setHeader('X-Container-ID', containerId);
+
+  // Check if worker is busy
+  if (workerStatus === 'busy') {
+    console.log(`[Container ${containerId}] Rejecting init-repository - worker busy`);
+    res.status(429).json({
+      error: 'busy',
+      message: 'Worker is currently processing another request',
+      retryAfter: 5,
+      containerId
+    });
+    return;
+  }
+
+  const { websiteSessionId, github } = req.body;
+
+  // Validate required fields
+  if (!websiteSessionId) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required field: websiteSessionId',
+      containerId
+    });
+    return;
+  }
+
+  if (!github?.repoUrl || !github?.branch || !github?.accessToken) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required github fields: repoUrl, branch, accessToken',
+      containerId
+    });
+    return;
+  }
+
+  // Set worker to busy
+  workerStatus = 'busy';
+  console.log(`[Container ${containerId}] Starting repository initialization for session: ${websiteSessionId}`);
+
+  try {
+    // Initialize the repository using the orchestrator's method
+    const result = await orchestrator.initializeRepository({
+      websiteSessionId,
+      github: {
+        repoUrl: github.repoUrl,
+        branch: github.branch,
+        accessToken: github.accessToken,
+      }
+    });
+
+    console.log(`[Container ${containerId}] Repository initialized successfully:`, result);
+
+    res.json({
+      success: true,
+      sessionId: websiteSessionId,
+      repository: {
+        clonedPath: result.clonedPath,
+        branch: result.branch,
+        wasCloned: result.wasCloned,
+      },
+      containerId
+    });
+
+    // Exit after successful initialization (ephemeral container model)
+    await gracefulExit(0);
+
+  } catch (error) {
+    console.error(`[Container ${containerId}] Failed to initialize repository:`, error);
+
+    res.status(500).json({
+      error: 'init_failed',
+      message: error instanceof Error ? error.message : 'Failed to initialize repository',
+      containerId
+    });
+
+    // Exit with error code
+    await gracefulExit(1);
+  }
+});
+
+/**
  * Abort endpoint - allows client to abort the currently running execution
  * This will signal the Claude Agent SDK to stop processing
  */
@@ -437,6 +524,7 @@ app.use((req: Request, res: Response) => {
       'GET  /sessions/:sessionId',
       'GET  /sessions/:sessionId/stream',
       'POST /execute',
+      'POST /init-repository',
       'POST /abort',
       'POST /shutdown'
     ],
@@ -464,6 +552,7 @@ app.listen(PORT, () => {
   console.log('  GET    /sessions                  - List all sessions (from MinIO)');
   console.log('  DELETE /sessions/:id              - Delete a session');
   console.log('  POST   /execute                   - Execute coding assistant request');
+  console.log('  POST   /init-repository           - Clone repo and upload to storage (no AI)');
   console.log('  POST   /abort                     - Abort current execution');
   console.log('  POST   /shutdown                  - Signal worker to shutdown (client confirms receipt)');
   console.log('');
