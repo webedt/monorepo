@@ -233,6 +233,70 @@ const transformStorageFiles = (files: { path: string; size: number; type: 'file'
   return root.children;
 };
 
+// Transform GitHub API tree to our TreeNode format
+// GitHub tree items have type: 'blob' for files, 'tree' for directories
+const transformGitHubTree = (tree: { path: string; type: string; sha: string; size?: number }[]): TreeNode[] => {
+  const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Sort items: directories first, then alphabetically
+  const sortedItems = [...tree].sort((a, b) => {
+    if (a.type === 'tree' && b.type !== 'tree') return -1;
+    if (a.type !== 'tree' && b.type === 'tree') return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  for (const item of sortedItems) {
+    const pathParts = item.path.split('/').filter(p => p);
+    if (pathParts.length === 0) continue;
+
+    let currentLevel = root;
+
+    for (let i = 0; i < pathParts.length; i++) {
+      const part = pathParts[i];
+      const currentPath = pathParts.slice(0, i + 1).join('/');
+      const isLastPart = i === pathParts.length - 1;
+
+      if (isLastPart) {
+        if (item.type === 'blob') {
+          // It's a file
+          currentLevel.children.push({
+            name: part,
+            path: currentPath,
+            type: 'file',
+            icon: getFileIcon(part),
+          });
+        } else if (item.type === 'tree') {
+          // It's a directory - only add if not already exists
+          const existing = currentLevel.children.find(
+            c => c.type === 'folder' && c.name === part
+          );
+          if (!existing) {
+            currentLevel.children.push({
+              name: part,
+              path: currentPath,
+              type: 'folder',
+              children: [],
+            });
+          }
+        }
+      } else {
+        // Navigate to or create intermediate folder
+        let folder = currentLevel.children.find(
+          c => c.type === 'folder' && c.name === part
+        ) as FolderNode | undefined;
+
+        if (!folder) {
+          folder = { name: part, path: currentPath, type: 'folder', children: [] };
+          currentLevel.children.push(folder);
+        }
+        currentLevel = folder;
+      }
+    }
+  }
+
+  return root.children;
+};
+
 // Props for split view support
 interface CodeProps {
   sessionId?: string;
@@ -355,10 +419,10 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   }, [preSelectedSettings, repos, codeSession, sessionId]);
 
-  // Fetch file tree from storage-worker when code session is active
+  // Fetch file tree - first try storage-worker, then fallback to GitHub API
   // NOTE: Storage-worker uses the database session ID as the storage key
   const { data: treeData, isLoading: isLoadingTree, error: treeError } = useQuery({
-    queryKey: ['file-tree', codeSession?.sessionId],
+    queryKey: ['file-tree', codeSession?.sessionId, codeSession?.owner, codeSession?.repo, codeSession?.baseBranch],
     queryFn: async () => {
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
       const storageSessionId = codeSession!.sessionId;
@@ -367,29 +431,53 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         throw new Error('No session ID available');
       }
 
+      // First, try to get files from storage-worker (for sessions with AI execution)
       console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
-      const files = await storageWorkerApi.listFiles(storageSessionId);
+      const storageFiles = await storageWorkerApi.listFiles(storageSessionId);
 
-      if (files && files.length > 0) {
-        return { source: 'storage', files };
+      if (storageFiles && storageFiles.length > 0) {
+        console.log('[Code] Found files in storage-worker:', storageFiles.length);
+        return { source: 'storage' as const, files: storageFiles };
       }
 
-      // Empty result - session might not have any files yet
-      console.log('[Code] Storage-worker returned empty file list');
-      return { source: 'storage', files: [] };
+      // Storage is empty - fallback to GitHub API for new sessions
+      // This allows viewing files before AI execution
+      if (codeSession?.owner && codeSession?.repo && codeSession?.baseBranch) {
+        console.log('[Code] Storage empty, fetching from GitHub API:', `${codeSession.owner}/${codeSession.repo}/${codeSession.baseBranch}`);
+        try {
+          const response = await githubApi.getTree(codeSession.owner, codeSession.repo, codeSession.baseBranch, true);
+          if (response.success && response.data?.tree) {
+            console.log('[Code] Got file tree from GitHub:', response.data.tree.length, 'items');
+            return { source: 'github' as const, tree: response.data.tree };
+          }
+        } catch (githubError) {
+          console.error('[Code] Failed to fetch from GitHub API:', githubError);
+          // Fall through to return empty
+        }
+      }
+
+      // No files available from either source
+      console.log('[Code] No files available from storage or GitHub');
+      return { source: 'storage' as const, files: [] };
     },
     enabled: !!codeSession?.sessionId,
     retry: 1, // Only retry once for faster feedback
   });
 
-  // Transform the tree into our TreeNode format (storage-worker only)
+  // Transform the tree into our TreeNode format
   const fileTree = useMemo(() => {
     if (!treeData) return [];
-    if (treeData.source === 'storage' && treeData.files) {
+    if (treeData.source === 'storage' && 'files' in treeData) {
       return transformStorageFiles(treeData.files);
+    }
+    if (treeData.source === 'github' && 'tree' in treeData) {
+      return transformGitHubTree(treeData.tree);
     }
     return [];
   }, [treeData]);
+
+  // Track if we're using GitHub source (files are read-only until first AI execution)
+  const isGitHubSource = treeData?.source === 'github';
 
   // Query to check for existing PR (for code sessions)
   const { data: prData, refetch: refetchPr } = useQuery({
@@ -541,7 +629,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   };
 
-  // Load file content from storage-worker when a file is selected
+  // Load file content from storage-worker or GitHub API when a file is selected
   const loadFileContent = useCallback(async (path: string) => {
     if (!codeSession) return;
 
@@ -561,6 +649,12 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setIsLoadingFile(true);
       setFileContent(null); // Clear text content for images
       try {
+        // For GitHub source, we can't easily load images - show message
+        if (isGitHubSource) {
+          setFileContent(`// Image preview not available before first AI execution.\n// Run a task with the AI to sync the repository.`);
+          setIsLoadingFile(false);
+          return;
+        }
         const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
         if (blob) {
           const url = URL.createObjectURL(blob);
@@ -587,13 +681,30 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     setIsLoadingFile(true);
     try {
-      console.log('[Code] Fetching file from storage-worker:', path);
-      const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
+      let content: string | null = null;
+
+      // If we're using GitHub source, fetch from GitHub API
+      if (isGitHubSource && codeSession.owner && codeSession.repo && codeSession.baseBranch) {
+        console.log('[Code] Fetching file from GitHub API:', path);
+        try {
+          const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.baseBranch);
+          if (response.success && response.data?.content) {
+            // GitHub API returns base64 encoded content
+            content = atob(response.data.content);
+          }
+        } catch (githubError) {
+          console.error('[Code] Failed to fetch from GitHub:', githubError);
+        }
+      } else {
+        // Fetch from storage-worker
+        console.log('[Code] Fetching file from storage-worker:', path);
+        content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
+      }
 
       if (content === null) {
-        // File not found in storage
-        console.error(`[Code] File not found in storage: ${path}`);
-        setFileContent(`// Error: File not found in storage`);
+        // File not found
+        console.error(`[Code] File not found: ${path}`);
+        setFileContent(`// Error: File not found`);
       } else {
         setFileContent(content);
 
@@ -601,7 +712,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         setEditHistory(prev => {
           const next = new Map(prev);
           if (!next.has(path)) {
-            next.set(path, [content]);
+            next.set(path, [content!]);
           }
           return next;
         });
@@ -616,7 +727,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         // Store the original content for later comparison (no sha needed for storage-worker)
         setPendingChanges(prev => {
           const next = new Map(prev);
-          next.set(path, { content, originalContent: content });
+          next.set(path, { content: content!, originalContent: content! });
           return next;
         });
       }
@@ -626,7 +737,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     } finally {
       setIsLoadingFile(false);
     }
-  }, [codeSession, pendingChanges]);
+  }, [codeSession, pendingChanges, isGitHubSource]);
 
   // Cleanup object URLs for images when component unmounts or image changes
   useEffect(() => {
@@ -1745,42 +1856,55 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
               </div>
             </div>
           ) : fileContent !== null ? (
-            <div className="h-full flex">
-              {/* Line Numbers - using a single pre element for better performance */}
-              <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
-                {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
-              </pre>
+            <div className="h-full flex flex-col">
+              {/* GitHub Source Banner - shown when viewing files from GitHub API before AI execution */}
+              {isGitHubSource && (
+                <div className="bg-info/20 border-b border-info/30 px-4 py-2 flex items-center gap-2 text-sm text-info-content">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+                  </svg>
+                  <span>Viewing files from GitHub (read-only). Run a task with AI to enable editing.</span>
+                </div>
+              )}
+              <div className="flex-1 flex min-h-0">
+                {/* Line Numbers - using a single pre element for better performance */}
+                <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
+                  {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
+                </pre>
 
-              {/* Text Editor */}
-              <textarea
-                ref={textareaRef}
-                value={fileContent}
-                onChange={(e) => {
-                  const target = e.target as HTMLTextAreaElement;
-                  handleContentChange(target.value, target.selectionStart, target.selectionEnd);
-                }}
-                onKeyDown={(e) => {
-                  // Handle Tab key for indentation
-                  if (e.key === 'Tab') {
-                    e.preventDefault();
+                {/* Text Editor */}
+                <textarea
+                  ref={textareaRef}
+                  value={fileContent}
+                  readOnly={isGitHubSource}
+                  onChange={(e) => {
+                    if (isGitHubSource) return; // Prevent changes when in read-only mode
                     const target = e.target as HTMLTextAreaElement;
-                    const start = target.selectionStart;
-                    const end = target.selectionEnd;
-                    const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
-                    handleContentChange(newValue, start + 2, start + 2);
-                  }
-                }}
-                className="flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none"
-                spellCheck={false}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                style={{
-                  tabSize: 2,
-                  MozTabSize: 2,
-                  caretColor: 'auto',
-                }}
-              />
+                    handleContentChange(target.value, target.selectionStart, target.selectionEnd);
+                  }}
+                  onKeyDown={(e) => {
+                    // Handle Tab key for indentation
+                    if (e.key === 'Tab' && !isGitHubSource) {
+                      e.preventDefault();
+                      const target = e.target as HTMLTextAreaElement;
+                      const start = target.selectionStart;
+                      const end = target.selectionEnd;
+                      const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
+                      handleContentChange(newValue, start + 2, start + 2);
+                    }
+                  }}
+                  className={`flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none ${isGitHubSource ? 'cursor-default opacity-90' : ''}`}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  style={{
+                    tabSize: 2,
+                    MozTabSize: 2,
+                    caretColor: isGitHubSource ? 'transparent' : 'auto',
+                  }}
+                />
+              </div>
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-base-content/50">
