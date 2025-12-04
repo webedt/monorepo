@@ -236,30 +236,48 @@ router.delete('/storage-worker/sessions/:sessionPath/files/*', async (req: Reque
 // List files in a session
 router.get('/storage-worker/sessions/:sessionPath/files', async (req: Request, res: Response) => {
   const { sessionPath } = req.params;
+  const targetUrl = `${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files`;
+
+  console.log('[StorageWorker] List files request:', {
+    sessionPath,
+    targetUrl,
+    storageWorkerUrl: STORAGE_WORKER_URL,
+  });
 
   try {
-    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}/files`, {
+    const response = await fetch(targetUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
+    console.log('[StorageWorker] List files response:', {
+      sessionPath,
+      status: response.status,
+      ok: response.ok,
+    });
+
     if (!response.ok) {
       if (response.status === 404) {
+        console.log('[StorageWorker] List files 404 - session not found:', sessionPath);
         res.status(404).json({ error: 'Session not found' });
         return;
       }
       const error = await response.text();
-      console.error('[StorageWorker] List files failed:', error);
+      console.error('[StorageWorker] List files failed:', { sessionPath, status: response.status, error });
       res.status(response.status).json({ error: 'Failed to list files' });
       return;
     }
 
     const data = await response.json();
+    console.log('[StorageWorker] List files success:', {
+      sessionPath,
+      fileCount: data.files?.length || 0,
+    });
     res.json(data);
   } catch (error) {
-    console.error('[StorageWorker] Error listing files:', error);
+    console.error('[StorageWorker] Error listing files:', { sessionPath, error });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -322,30 +340,47 @@ router.post('/storage-worker/sessions/bulk-delete', async (req: Request, res: Re
 // Get session metadata
 router.get('/storage-worker/sessions/:sessionPath', async (req: Request, res: Response) => {
   const { sessionPath } = req.params;
+  const targetUrl = `${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}`;
+
+  console.log('[StorageWorker] Get session metadata request:', {
+    sessionPath,
+    targetUrl,
+  });
 
   try {
-    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}`, {
+    const response = await fetch(targetUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
+    console.log('[StorageWorker] Get session metadata response:', {
+      sessionPath,
+      status: response.status,
+      ok: response.ok,
+    });
+
     if (!response.ok) {
       if (response.status === 404) {
+        console.log('[StorageWorker] Get session metadata 404 - session not found:', sessionPath);
         res.status(404).json({ error: 'Session not found' });
         return;
       }
       const error = await response.text();
-      console.error('[StorageWorker] Get session metadata failed:', error);
+      console.error('[StorageWorker] Get session metadata failed:', { sessionPath, error });
       res.status(response.status).json({ error: 'Failed to get session metadata' });
       return;
     }
 
     const data = await response.json();
+    console.log('[StorageWorker] Get session metadata success:', {
+      sessionPath,
+      data,
+    });
     res.json(data);
   } catch (error) {
-    console.error('[StorageWorker] Error getting session metadata:', error);
+    console.error('[StorageWorker] Error getting session metadata:', { sessionPath, error });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
