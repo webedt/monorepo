@@ -89,12 +89,13 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
     console.log('[Voice] Keywords updated:', voiceKeywordsRef.current);
   }, [user?.voiceCommandKeywords]);
 
-  // Sync input with global voice transcript when component mounts (for navigation persistence)
+  // Clear any stale transcript when component mounts
+  // (We want voice recordings to be local to each page, just appending to existing input)
   useEffect(() => {
-    // If there's an active recording with accumulated transcript, sync to input
-    if (voiceStore.isRecording && voiceStore.transcript && !input) {
-      console.log('[Voice] Syncing transcript from global store:', voiceStore.transcript);
-      setInput(voiceStore.transcript);
+    // Clear any leftover transcript from previous pages - voice should append locally
+    if (voiceStore.transcript) {
+      console.log('[Voice] Clearing stale transcript on mount');
+      voiceStore.clearTranscript();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run on mount
@@ -498,20 +499,16 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             }
           }
 
-          // Calculate the new accumulated transcript (avoiding stale closure)
-          const currentTranscript = useVoiceRecordingStore.getState().transcript;
-          const accumulatedTranscript = currentTranscript ? currentTranscript + '\n' + newTranscript : newTranscript;
+          // Simply append the new transcript to whatever is currently in the input
+          // Get the current input value from the textarea directly to avoid stale closures
+          const currentInput = textareaRef.current?.value || '';
+          const appendedInput = currentInput ? currentInput + '\n' + newTranscript : newTranscript;
 
-          // Update global store and input field
-          voiceStore.setTranscript(accumulatedTranscript);
-          console.log('[Voice] Accumulated transcript:', accumulatedTranscript);
-          setInput(accumulatedTranscript);
+          console.log('[Voice] Appending to input. Current:', currentInput.substring(0, 50), '... New:', newTranscript);
+          setInput(appendedInput);
 
           // Auto-submit if keyword was detected (keep recording active)
-          if (shouldAutoSubmit && accumulatedTranscript.trim()) {
-            // Clear the accumulated transcript for next voice session
-            voiceStore.clearTranscript();
-
+          if (shouldAutoSubmit && appendedInput.trim()) {
             // Trigger submit after a brief delay to ensure state is updated
             // Note: We intentionally do NOT stop recording - user can continue speaking
             setTimeout(() => {
@@ -519,7 +516,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               // Look for the ChatInput form's submit button in the DOM
               const submitBtn = document.querySelector('form button[type="submit"]') as HTMLButtonElement;
               if (submitBtn && !submitBtn.disabled) {
-                console.log('[Voice] Clicking submit button (recording continues), text:', accumulatedTranscript);
+                console.log('[Voice] Clicking submit button (recording continues), text:', appendedInput);
                 submitBtn.click();
               } else {
                 console.log('[Voice] No enabled submit button found, text may have been cleared');
