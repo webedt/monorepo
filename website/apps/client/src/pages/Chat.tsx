@@ -456,7 +456,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     },
     enabled: !!sessionId && sessionId !== 'new',
     refetchInterval: () => {
-      if (isExecuting) return false;
+      // Don't poll while SSE stream is active to avoid duplicates
+      // We check streamUrl (not isExecuting) because isExecuting is also set when
+      // returning to a running session without an active SSE stream
+      if (streamUrl) return false;
       const session = sessionDetailsData?.data;
       return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
     },
@@ -476,7 +479,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // This prevents duplicate messages from both SSE and polling
     refetchInterval: () => {
       // Don't poll while SSE stream is active to avoid duplicates
-      if (isExecuting) return false;
+      // We check streamUrl (not isExecuting) because isExecuting is also set when
+      // returning to a running session without an active SSE stream - in that case
+      // we DO want to poll for new events
+      if (streamUrl) return false;
 
       const session = sessionDetailsData?.data;
       return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
