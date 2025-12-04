@@ -756,8 +756,16 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         try {
           const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.baseBranch);
           if (response.success && response.data?.content) {
-            // GitHub API returns base64 encoded content
-            content = atob(response.data.content);
+            // GitHub API returns base64 encoded content with possible newlines
+            // Remove newlines and decode, handling UTF-8 properly
+            const base64Content = response.data.content.replace(/\n/g, '');
+            // Use TextDecoder to properly handle UTF-8 encoded content
+            const binaryString = atob(base64Content);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            content = new TextDecoder('utf-8').decode(bytes);
           }
         } catch (githubError) {
           console.error('[Code] Failed to fetch from GitHub:', githubError);
