@@ -300,5 +300,5 @@ export const TAGLINES = [
   "Watch me edit, watch me nae nae.",
   "Baby edit, doo doo doo doo doo doo.",
   "I am the edit, goo-goo g'joob.",
-  "Rollin' with my e--dits",
+  "Rollin' with my e--dits.",
 ];
