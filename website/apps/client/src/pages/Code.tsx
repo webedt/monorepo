@@ -1764,16 +1764,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           </div>
         </div>
 
-        {/* Branch info */}
-        {codeSession && (
-          <div className="px-3 py-2 border-b border-base-300 bg-base-200">
-            <div className="text-xs text-base-content/70">Branch</div>
-            <div className="text-sm font-medium text-primary truncate" title={codeSession.branch}>
-              {codeSession.branch}
-            </div>
-          </div>
-        )}
-
         <div className="py-2">
           {isLoadingTree ? (
             <div className="flex items-center justify-center py-8">
