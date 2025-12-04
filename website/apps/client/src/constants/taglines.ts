@@ -137,7 +137,7 @@ export const TAGLINES = [
   "I understood that edit reference.",
   "I’m in this to edit.",
   "Is this a bug? …No, it’s an edit.",
-  "You wouldn’t download a car… editing is stealing!",
+  "You wouldn’t edit a car.",
   "Stay awhile and edit.",
   "It’s not a bug, it’s an edit.",
   "Hold my edit.",
