@@ -9,6 +9,7 @@ import { ensureValidCodexToken, isValidCodexAuth } from '../lib/codexAuth';
 import type { ClaudeAuth, CodexAuth, AIProvider, ProviderAuth } from '@webedt/shared';
 import { parseRepoUrl, generateSessionPath } from '../utils/sessionPathHelper';
 import { v4 as uuidv4 } from 'uuid';
+import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster';
 
 const router = Router();
 
@@ -546,6 +547,9 @@ const executeHandler = async (req: any, res: any) => {
       .set({ status: 'running' })
       .where(eq(chatSessions.id, chatSession.id));
 
+    // Mark session as active for event broadcasting (allows reconnection)
+    sessionEventBroadcaster.startSession(chatSession.id);
+
     // Stream events from ai-coding-worker to client
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -555,6 +559,7 @@ const executeHandler = async (req: any, res: any) => {
 
     console.log(`[Execute] ========== STARTING SSE STREAM FROM AI WORKER ==========`);
     console.log(`[Execute] Stream start time: ${new Date(streamStartTime).toISOString()}`);
+    console.log(`[Execute] Session ${chatSession.id} registered for event broadcasting`);
 
     try {
       while (true) {
@@ -722,6 +727,9 @@ const executeHandler = async (req: any, res: any) => {
                   res.write(`event: ${currentEvent}\n`);
                 }
                 res.write(`data: ${data}\n\n`);
+
+                // Broadcast to any reconnected clients
+                sessionEventBroadcaster.broadcast(chatSession.id, currentEvent || effectiveEventType, eventData);
               }
             } catch (e) {
               // Forward non-JSON data as-is (non-JSON event)
@@ -733,6 +741,9 @@ const executeHandler = async (req: any, res: any) => {
                 res.write(`event: ${currentEvent}\n`);
               }
               res.write(`data: ${data}\n\n`);
+
+              // Broadcast non-JSON events too
+              sessionEventBroadcaster.broadcast(chatSession.id, currentEvent || 'message', data);
             }
 
             currentEvent = ''; // Reset event type
@@ -750,6 +761,10 @@ const executeHandler = async (req: any, res: any) => {
       // Clean up session -> worker mapping
       activeWorkerSessions.delete(chatSession.id);
       console.log(`[Execute] Removed session ${chatSession.id} from active worker tracking`);
+
+      // End the session broadcasting (notifies any reconnected clients)
+      sessionEventBroadcaster.endSession(chatSession.id);
+      console.log(`[Execute] Ended event broadcasting for session ${chatSession.id}`);
 
       // Signal ai-coding-worker that we've received all data - allows faster shutdown
       try {
@@ -791,6 +806,9 @@ const executeHandler = async (req: any, res: any) => {
 
       // Clean up session -> worker mapping on error
       activeWorkerSessions.delete(chatSession.id);
+
+      // End the session broadcasting on error
+      sessionEventBroadcaster.endSession(chatSession.id);
 
       // Try to update session status, but don't fail if it doesn't work
       try {

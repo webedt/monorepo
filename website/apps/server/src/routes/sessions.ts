@@ -8,6 +8,8 @@ import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { getPreviewUrl } from '../utils/previewUrlHelper';
 import { activeWorkerSessions } from './execute';
+import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster';
+import { v4 as uuidv4 } from 'uuid';
 
 const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
 
@@ -1052,6 +1054,98 @@ router.post('/:id/worker-status', async (req, res) => {
   } catch (error) {
     console.error('Worker status callback error:', error);
     res.status(500).json({ success: false, error: 'Failed to update session status' });
+  }
+});
+
+// Stream events for a running session (SSE endpoint for reconnection)
+// This allows clients to reconnect to an already-running session and receive live events
+router.get('/:id/stream', requireAuth, async (req, res) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Check if the session is currently active (streaming from AI worker)
+    if (!sessionEventBroadcaster.isSessionActive(sessionId)) {
+      // Session is not currently streaming - return 204 No Content
+      // The client should fall back to polling the events endpoint
+      console.log(`[Sessions] Stream request for inactive session ${sessionId}`);
+      res.status(204).end();
+      return;
+    }
+
+    console.log(`[Sessions] Client reconnecting to active session stream: ${sessionId}`);
+
+    // Set up SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+
+    // Send a connected event
+    res.write(`event: connected\n`);
+    res.write(`data: ${JSON.stringify({ reconnected: true, sessionId })}\n\n`);
+
+    // Generate a unique subscriber ID
+    const subscriberId = uuidv4();
+
+    // Subscribe to session events
+    const unsubscribe = sessionEventBroadcaster.subscribe(sessionId, subscriberId, (event) => {
+      try {
+        // Check if response is still writable
+        if (res.writableEnded) {
+          unsubscribe();
+          return;
+        }
+
+        // Write the event in SSE format
+        res.write(`event: ${event.eventType}\n`);
+        res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+      } catch (err) {
+        console.error(`[Sessions] Error writing to stream for subscriber ${subscriberId}:`, err);
+        unsubscribe();
+      }
+    });
+
+    // Handle client disconnect
+    req.on('close', () => {
+      console.log(`[Sessions] Client disconnected from session stream: ${sessionId}`);
+      unsubscribe();
+    });
+
+    // Handle errors
+    req.on('error', (err) => {
+      console.error(`[Sessions] Stream error for session ${sessionId}:`, err);
+      unsubscribe();
+    });
+
+  } catch (error) {
+    console.error('Session stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: 'Failed to stream session events' });
+    }
   }
 });
 

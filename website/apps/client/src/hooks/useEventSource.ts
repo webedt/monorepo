@@ -122,7 +122,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       if (methodRef.current === 'POST') {
         connectWithFetch();
       } else {
-        const es = new EventSource(url);
+        // Use withCredentials to include cookies for authentication
+        const es = new EventSource(url, { withCredentials: true });
         setupEventSource(es);
       }
     } catch (err) {

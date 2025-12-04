@@ -328,6 +328,29 @@ export const sessionsApi = {
       method: 'POST',
       body: data,
     }),
+
+  // Get the URL for streaming events from a running session (for reconnection)
+  getStreamUrl: (id: string) => `${API_BASE_URL}/api/sessions/${id}/stream`,
+
+  // Check if a session has an active stream
+  checkStreamActive: async (id: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${id}/stream`, {
+        method: 'HEAD',
+        credentials: 'include',
+      });
+      // 200 means there's an active stream, 204 means no active stream
+      return response.status === 200;
+    } catch {
+      return false;
+    }
+  },
+
+  // Abort a running session
+  abort: (id: string) =>
+    fetchApi(`/api/sessions/${id}/abort`, {
+      method: 'POST',
+    }),
 };
 
 // Admin API
