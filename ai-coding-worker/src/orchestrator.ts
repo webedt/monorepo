@@ -342,6 +342,14 @@ export class Orchestrator {
       const sessionExisted = await this.sessionStorage.downloadSession(websiteSessionId, workspacePath);
       const isResuming = sessionExisted; // Determined by storage, not request params
 
+      // Send storage-worker status message
+      sendEvent({
+        type: 'message',
+        message: sessionExisted ? '🗄️ Session found in storage' : '🗄️ New session (not in storage)',
+        source: 'storage-worker',
+        timestamp: new Date().toISOString()
+      });
+
       // Load metadata if session exists
       let metadata: SessionMetadata | null = null;
       if (sessionExisted) {
@@ -807,16 +815,19 @@ export class Orchestrator {
           // Note: commit completion events are sent by github-worker
           // and forwarded via the event callback above - no need to duplicate here
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error('Failed to auto-commit via GitHub Worker', error, {
             component: 'Orchestrator',
             websiteSessionId
           });
           // Continue without auto-commit - not critical
+          // Include the actual error message so user knows what happened
           sendEvent({
             type: 'commit_progress',
-            stage: 'completed',
-            message: 'Auto-commit failed (non-critical)',
-            error: error instanceof Error ? error.message : String(error),
+            stage: 'error',
+            message: `📤 Auto-commit failed: ${errorMessage}`,
+            error: errorMessage,
+            source: 'ai-coding-worker',
             timestamp: new Date().toISOString()
           });
         }
@@ -829,6 +840,14 @@ export class Orchestrator {
       });
 
       await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
+
+      // Send storage-worker upload completion message
+      sendEvent({
+        type: 'message',
+        message: '🗄️ Session saved to storage',
+        source: 'storage-worker',
+        timestamp: new Date().toISOString()
+      });
 
       // Step 8: Send completion event
       const duration = Date.now() - startTime;
