@@ -12,6 +12,7 @@ import { GitHelper } from './utils/gitHelper'; // Used in fallback branch creati
 import { CredentialManager } from './utils/credentialManager';
 import { parseRepoUrl, generateSessionPath, sessionPathToDir } from './utils/sessionPathHelper';
 import { enrichEventWithRelativePaths } from './utils/filePathHelper';
+import { getEventEmoji } from './utils/emojiMapper';
 
 // Website API URL for callbacks (worker -> website server)
 const WEBSITE_API_URL = process.env.WEBSITE_API_URL || 'http://localhost:3000';
@@ -272,6 +273,12 @@ export class Orchestrator {
       // Add source if not already present
       if (!event.source) {
         event.source = 'ai-coding-worker';
+      }
+
+      // Apply emoji prefix to messages based on stage/type/source
+      if (event.message && typeof event.message === 'string') {
+        const emoji = getEventEmoji(event);
+        event.message = `${emoji} ${event.message}`;
       }
 
       // Write to response stream and check backpressure
