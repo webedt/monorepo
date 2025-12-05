@@ -9,8 +9,7 @@ import { StorageClient } from './storage/storageClient';
 import { ProviderFactory } from './providers/ProviderFactory';
 import { Request, Response } from 'express';
 import { logger } from './utils/logger';
-import { LLMHelper } from './utils/llmHelper';
-import { GitHelper } from './utils/gitHelper';
+import { GitHelper } from './utils/gitHelper'; // Used in fallback branch creation
 import { CredentialManager } from './utils/credentialManager';
 import { parseRepoUrl, generateSessionPath, sessionPathToDir } from './utils/sessionPathHelper';
 import { enrichEventWithRelativePaths } from './utils/filePathHelper';
@@ -328,7 +327,7 @@ export class Orchestrator {
       // Step 1: Validate request
       this.validateRequest(request);
 
-      // Step 1.5: Write credentials early so LLMHelper can use them
+      // Step 1.5: Write credentials early so GitHub Worker's LLM can use them
       // This ensures the same credentials used by the provider are available for LLM-based naming
       CredentialManager.writeClaudeCredentials(request.codingAssistantAuthentication);
       logger.info('Credentials written for LLM naming', {
@@ -469,7 +468,7 @@ export class Orchestrator {
         }
       }
 
-      // Step 4.5: Generate session title and branch name (ONLY for truly new sessions)
+      // Step 4.5: Create branch via GitHub Worker (ONLY for truly new sessions)
       // This should ONLY happen on the first message of a session, never on subsequent messages.
       // We check multiple conditions to ensure this:
       // 1. isResuming must be false (session didn't exist in storage)
@@ -484,7 +483,7 @@ export class Orchestrator {
         baseBranchForSession;
 
       if (shouldInitializeSession) {
-        logger.info('Initializing new session (first message)', {
+        logger.info('Initializing new session via GitHub Worker (first message)', {
           component: 'Orchestrator',
           websiteSessionId,
           isResuming,
@@ -494,119 +493,62 @@ export class Orchestrator {
         });
 
         try {
-          // Generate title and branch name using LLM
-          // LLMHelper reads credentials from ~/.claude/.credentials.json (written in Step 1.5)
-          sendEvent({
-            type: 'message',
-            message: 'Generating session title and branch name...',
-            timestamp: new Date().toISOString()
-          });
+          // Upload session to storage first so github-worker can download it
+          await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
 
-          // LLMHelper uses Claude Agent SDK (same auth as main execution)
-          const llmHelper = new LLMHelper(workspacePath);
-
+          // Call GitHub Worker to create branch with LLM-generated name
+          // GitHub Worker handles: LLM naming, branch creation, push, storage upload
           const userRequestText = this.serializeUserRequest(request.userRequest);
-          sendEvent({
-            type: 'debug',
-            message: `Calling generateSessionTitleAndBranch with request: "${userRequestText.substring(0, 100)}..."`,
-            timestamp: new Date().toISOString()
-          });
 
-          const result = await llmHelper.generateSessionTitleAndBranch(
-            userRequestText,
-            baseBranchForSession!
+          const createBranchResult = await this.githubWorkerClient.createBranch(
+            {
+              sessionId: websiteSessionId,
+              userRequest: userRequestText,
+              baseBranch: baseBranchForSession!,
+              repoUrl: request.github!.repoUrl,
+              claudeCredentials: request.codingAssistantAuthentication,
+              githubAccessToken: request.github!.accessToken!
+            },
+            (event) => {
+              // Forward events from github-worker with original source preserved
+              sendEvent({
+                type: event.type === 'progress' ? 'message' : event.type,
+                message: event.message,
+                stage: event.stage,
+                data: event.data,
+                error: event.error,
+                code: event.code,
+                source: 'github-worker',
+                timestamp: event.timestamp
+              } as SSEEvent);
+            }
           );
 
-          sendEvent({
-            type: 'debug',
-            message: `LLM returned: title="${result.title}", branchName="${result.branchName}"`,
-            timestamp: new Date().toISOString()
-          });
+          // Extract results from github-worker
+          branchName = createBranchResult.branchName;
+          const sessionTitle = createBranchResult.sessionTitle;
+          const sessionPath = createBranchResult.sessionPath;
 
-          const title = result.title;
-          const descriptivePart = result.branchName;
-
-          logger.info('Generated session title and branch name with LLM', {
+          logger.info('GitHub Worker created branch successfully', {
             component: 'Orchestrator',
             websiteSessionId,
-            sessionTitle: title,
-            descriptivePart
-          });
-
-          // Extract last 8 characters of session ID for suffix
-          const sessionIdSuffix = websiteSessionId.slice(-8);
-
-          // Construct full branch name: webedt/{descriptive}-{sessionIdSuffix}
-          branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
-
-          logger.info('Prepared session title and branch name', {
-            component: 'Orchestrator',
-            websiteSessionId,
-            sessionTitle: title,
             branchName,
-            baseBranch: baseBranchForSession
+            sessionTitle,
+            sessionPath
           });
 
-          sendEvent({
-            type: 'message',
-            message: `Creating branch: ${branchName}`,
-            timestamp: new Date().toISOString()
-          });
+          // Download updated session from storage (github-worker uploaded it)
+          await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
 
-          const gitHelper = new GitHelper(workspacePath);
-
-          // Create and checkout the new branch
-          await gitHelper.createBranch(branchName);
-
-          // Push empty branch to remote immediately to trigger GitHub Actions early
-          // This allows the site to start building while Claude Code is working
-          try {
-            sendEvent({
-              type: 'message',
-              message: `Pushing branch ${branchName} to trigger build...`,
-              timestamp: new Date().toISOString()
-            });
-
-            await gitHelper.push();
-
-            sendEvent({
-              type: 'message',
-              message: `Branch ${branchName} pushed - build starting`,
-              timestamp: new Date().toISOString()
-            });
-
-            logger.info('Early branch push completed', {
-              component: 'Orchestrator',
-              websiteSessionId,
-              branchName
-            });
-          } catch (pushError) {
-            // Non-critical - the final push after commits will still happen
-            logger.warn('Early branch push failed (non-critical)', {
-              component: 'Orchestrator',
-              websiteSessionId,
-              branchName,
-              error: pushError instanceof Error ? pushError.message : String(pushError)
-            });
-
-            sendEvent({
-              type: 'debug',
-              message: `Early push failed (will retry after commits): ${pushError instanceof Error ? pushError.message : String(pushError)}`,
-              timestamp: new Date().toISOString()
-            });
-          }
-
-          // Generate sessionPath now that we have the branch name
-          const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
-
-          // Update metadata with branch name, sessionPath, and title
+          // Update local metadata with results
           metadata.branch = branchName;
           metadata.sessionPath = sessionPath;
           metadata.repositoryOwner = repositoryOwner;
           metadata.repositoryName = repositoryName;
-          metadata.sessionTitle = title;
+          metadata.sessionTitle = sessionTitle;
           this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
 
+          // Send branch_created event
           sendEvent({
             type: 'branch_created',
             branchName: branchName,
@@ -619,78 +561,62 @@ export class Orchestrator {
           // Send session_name event with the generated title
           sendEvent({
             type: 'session_name',
-            sessionName: title,
+            sessionName: sessionTitle,
             branchName: branchName,
             timestamp: new Date().toISOString()
           });
 
-          logger.info('Branch created and session title generated', {
+          logger.info('Branch created and session title generated via GitHub Worker', {
             component: 'Orchestrator',
             websiteSessionId,
             sessionPath,
-            sessionTitle: title,
+            sessionTitle,
             branchName,
             baseBranch: baseBranchForSession
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          const errorStack = error instanceof Error ? error.stack : undefined;
 
-          logger.error('Failed to create branch and generate title', error, {
+          logger.error('Failed to create branch via GitHub Worker', error, {
             component: 'Orchestrator',
             websiteSessionId
           });
 
-          // Send detailed debug info about the failure
+          // Send error info
           sendEvent({
             type: 'debug',
-            message: `LLM naming failed: ${errorMessage}`,
+            message: `GitHub Worker branch creation failed: ${errorMessage}`,
             error: errorMessage,
-            stack: errorStack,
             timestamp: new Date().toISOString()
           });
 
-          // Use fallback values
-          const title = 'New Session';
-          const descriptivePart = 'auto-request';
-          const sessionIdSuffix = websiteSessionId.slice(-8);
-          branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
-
-          sendEvent({
-            type: 'debug',
-            message: `Using fallback: title="${title}", branch="${branchName}"`,
-            timestamp: new Date().toISOString()
-          });
-
-          // Still create the branch with fallback name
+          // Fallback: create branch locally if github-worker fails
           try {
+            const title = 'New Session';
+            const descriptivePart = 'auto-request';
+            const sessionIdSuffix = websiteSessionId.slice(-8);
+            branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
+
+            sendEvent({
+              type: 'debug',
+              message: `Using local fallback: title="${title}", branch="${branchName}"`,
+              source: 'ai-coding-worker',
+              timestamp: new Date().toISOString()
+            });
+
             const gitHelper = new GitHelper(workspacePath);
             await gitHelper.createBranch(branchName);
 
-            // Push empty branch to remote immediately to trigger GitHub Actions early
             try {
-              sendEvent({
-                type: 'message',
-                message: `Pushing branch ${branchName} to trigger build...`,
-                timestamp: new Date().toISOString()
-              });
-
               await gitHelper.push();
-
               sendEvent({
                 type: 'message',
                 message: `Branch ${branchName} pushed - build starting`,
+                source: 'ai-coding-worker',
                 timestamp: new Date().toISOString()
               });
-
-              logger.info('Early branch push completed (fallback)', {
-                component: 'Orchestrator',
-                websiteSessionId,
-                branchName
-              });
             } catch (pushError) {
-              // Non-critical - the final push after commits will still happen
-              logger.warn('Early branch push failed (non-critical, fallback)', {
+              logger.warn('Fallback branch push failed (non-critical)', {
                 component: 'Orchestrator',
                 websiteSessionId,
                 branchName,
@@ -824,143 +750,72 @@ export class Orchestrator {
         }
       );
 
-      // Step 6.5: Auto-commit changes (always enabled for GitHub sessions)
+      // Step 6.5: Auto-commit changes via GitHub Worker (always enabled for GitHub sessions)
       const shouldAutoCommit = !!metadata.github;
 
       if (shouldAutoCommit) {
         try {
-          const repoPath = path.join(sessionRoot, metadata.github!.clonedPath);
-          const gitHelper = new GitHelper(repoPath);
+          // Upload session to storage first so github-worker can download it
+          await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
 
-          // Get current branch name
-          const currentBranch = await gitHelper.getCurrentBranch();
+          logger.info('Calling GitHub Worker for auto-commit', {
+            component: 'Orchestrator',
+            websiteSessionId
+          });
 
-          // Check if there are changes to commit
-          const hasChanges = await gitHelper.hasChanges();
-
-          if (hasChanges) {
-            sendEvent({
-              type: 'commit_progress',
-              stage: 'analyzing',
-              message: 'Analyzing changes for auto-commit...',
-              branch: currentBranch,
-              timestamp: new Date().toISOString()
-            });
-
-            // Use the current branch (which is the pre-created branch if branch creation happened)
-            const targetBranch = currentBranch;
-
-            // Generate commit message using LLM (via Claude Agent SDK)
-            const llmHelper = new LLMHelper(workspacePath);
-
-            // Get git status and diff for commit message generation
-            const gitStatus = await gitHelper.getStatus();
-            const gitDiff = await gitHelper.getDiff();
-
-            sendEvent({
-              type: 'commit_progress',
-              stage: 'generating_message',
-              message: 'Generating commit message...',
-              branch: targetBranch,
-              timestamp: new Date().toISOString()
-            });
-
-            // Generate commit message
-            const commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
-
-            sendEvent({
-              type: 'commit_progress',
-              stage: 'committing',
-              message: `Attempting to commit changes to branch: ${targetBranch}`,
-              branch: targetBranch,
-              commitMessage,
-              timestamp: new Date().toISOString()
-            });
-
-            // Create commit
-            const commitHash = await gitHelper.commitAll(commitMessage);
-
-            sendEvent({
-              type: 'commit_progress',
-              stage: 'committed',
-              message: 'Changes committed successfully',
-              branch: targetBranch,
-              commitMessage,
-              commitHash,
-              timestamp: new Date().toISOString()
-            });
-
-            logger.info('Auto-commit completed', {
-              component: 'Orchestrator',
-              websiteSessionId,
-              commitHash,
-              commitMessage,
-              branch: targetBranch
-            });
-
-            // Push to remote
-            sendEvent({
-              type: 'commit_progress',
-              stage: 'pushing',
-              message: `Attempting to push branch ${targetBranch} to remote...`,
-              branch: targetBranch,
-              commitHash,
-              timestamp: new Date().toISOString()
-            });
-
-            try {
-              await gitHelper.push();
-
+          // Call GitHub Worker to commit and push changes
+          // GitHub Worker handles: change detection, LLM commit message, commit, push, storage upload
+          const commitResult = await this.githubWorkerClient.commitAndPush(
+            {
+              sessionId: websiteSessionId,
+              claudeCredentials: request.codingAssistantAuthentication,
+              githubAccessToken: request.github!.accessToken!
+            },
+            (event) => {
+              // Forward events from github-worker with original source preserved
+              // Map progress events to commit_progress for consistency
               sendEvent({
-                type: 'commit_progress',
-                stage: 'pushed',
-                message: `Successfully pushed branch ${targetBranch} to remote`,
-                branch: targetBranch,
-                commitHash,
-                timestamp: new Date().toISOString()
-              });
-
-              logger.info('Push completed', {
-                component: 'Orchestrator',
-                websiteSessionId,
-                commitHash,
-                branch: targetBranch
-              });
-            } catch (pushError) {
-              // Push failure is non-critical - commit is still saved locally
-              logger.error('Failed to push to remote (non-critical)', pushError, {
-                component: 'Orchestrator',
-                websiteSessionId,
-                branch: targetBranch
-              });
-
-              sendEvent({
-                type: 'commit_progress',
-                stage: 'push_failed',
-                message: `Failed to push branch ${targetBranch} to remote (commit saved locally)`,
-                branch: targetBranch,
-                error: pushError instanceof Error ? pushError.message : String(pushError),
-                timestamp: new Date().toISOString()
-              });
+                type: event.type === 'progress' ? 'commit_progress' : event.type,
+                message: event.message,
+                stage: event.stage,
+                data: event.data,
+                error: event.error,
+                code: event.code,
+                source: 'github-worker',
+                timestamp: event.timestamp
+              } as SSEEvent);
             }
+          );
 
-            // Send final completion event
-            sendEvent({
-              type: 'commit_progress',
-              stage: 'completed',
-              message: 'Auto-commit process completed',
-              branch: targetBranch,
-              timestamp: new Date().toISOString()
-            });
-          } else {
+          if (commitResult.skipped) {
             logger.info('No changes to auto-commit', {
               component: 'Orchestrator',
               websiteSessionId,
-              branch: currentBranch
+              reason: commitResult.reason
             });
+          } else {
+            logger.info('Auto-commit completed via GitHub Worker', {
+              component: 'Orchestrator',
+              websiteSessionId,
+              commitHash: commitResult.commitHash,
+              branch: commitResult.branch,
+              pushed: commitResult.pushed
+            });
+
+            // Download updated session from storage (github-worker uploaded it)
+            await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
           }
+
+          // Send final completion event
+          sendEvent({
+            type: 'commit_progress',
+            stage: 'completed',
+            message: commitResult.skipped ? `Auto-commit skipped: ${commitResult.reason}` : 'Auto-commit process completed',
+            branch: commitResult.branch,
+            timestamp: new Date().toISOString()
+          });
         } catch (error) {
-          logger.error('Failed to auto-commit changes', error, {
+          logger.error('Failed to auto-commit via GitHub Worker', error, {
             component: 'Orchestrator',
             websiteSessionId
           });
