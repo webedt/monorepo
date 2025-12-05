@@ -58,6 +58,93 @@ export interface CommitAndPushResult {
 }
 
 // ============================================================================
+// Pull Request Operations
+// ============================================================================
+
+export interface CreatePullRequestRequest {
+  owner: string;
+  repo: string;
+  title?: string;
+  head: string;
+  base: string;
+  body?: string;
+  githubAccessToken: string;
+}
+
+export interface CreatePullRequestResult {
+  number: number;
+  title: string;
+  state: string;
+  htmlUrl: string;
+  head: {
+    ref: string;
+    sha: string;
+  };
+  base: {
+    ref: string;
+    sha: string;
+  };
+  mergeable: boolean | null;
+  merged: boolean;
+}
+
+export interface MergePullRequestRequest {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  mergeMethod?: 'merge' | 'squash' | 'rebase';
+  commitTitle?: string;
+  commitMessage?: string;
+  githubAccessToken: string;
+}
+
+export interface MergePullRequestResult {
+  merged: boolean;
+  sha: string;
+  message: string;
+}
+
+export interface AutoPullRequestRequest {
+  owner: string;
+  repo: string;
+  branch: string;
+  base: string;
+  title?: string;
+  body?: string;
+  githubAccessToken: string;
+}
+
+export type AutoPRStep =
+  | 'started'
+  | 'checking_pr'
+  | 'creating_pr'
+  | 'pr_created'
+  | 'merging_base'
+  | 'base_merged'
+  | 'waiting_mergeable'
+  | 'merging_pr'
+  | 'pr_merged'
+  | 'deleting_branch'
+  | 'completed';
+
+export interface AutoPullRequestResult {
+  step: AutoPRStep;
+  progress?: string;
+  pr?: {
+    number: number;
+    htmlUrl: string;
+  };
+  mergeBase?: {
+    sha: string | null;
+    message: string;
+  };
+  mergePr?: {
+    merged: boolean;
+    sha: string;
+  };
+}
+
+// ============================================================================
 // SSE Events
 // ============================================================================
 

@@ -58,6 +58,85 @@ Commit changes with LLM-generated message and push.
 }
 ```
 
+### POST /create-pull-request
+Create a pull request on GitHub.
+
+```json
+{
+  "owner": "webedt",
+  "repo": "monorepo",
+  "title": "Add dark mode feature",
+  "head": "feature/dark-mode",
+  "base": "main",
+  "body": "This PR adds dark mode support",
+  "githubAccessToken": "ghp_xxx"
+}
+```
+
+Response (via SSE completed event):
+```json
+{
+  "number": 123,
+  "title": "Add dark mode feature",
+  "state": "open",
+  "htmlUrl": "https://github.com/webedt/monorepo/pull/123",
+  "head": { "ref": "feature/dark-mode", "sha": "abc123" },
+  "base": { "ref": "main", "sha": "def456" },
+  "mergeable": null,
+  "merged": false
+}
+```
+
+### POST /merge-pull-request
+Merge an existing pull request.
+
+```json
+{
+  "owner": "webedt",
+  "repo": "monorepo",
+  "pullNumber": 123,
+  "mergeMethod": "merge",
+  "commitTitle": "Merge PR #123",
+  "commitMessage": "Merges the dark mode feature",
+  "githubAccessToken": "ghp_xxx"
+}
+```
+
+Response (via SSE completed event):
+```json
+{
+  "merged": true,
+  "sha": "abc123",
+  "message": "Pull Request successfully merged"
+}
+```
+
+### POST /auto-pull-request
+Complete auto-merge workflow: create PR (or find existing), merge base into feature branch, wait for mergeable status, merge PR, and delete the feature branch.
+
+```json
+{
+  "owner": "webedt",
+  "repo": "monorepo",
+  "branch": "feature/dark-mode",
+  "base": "main",
+  "title": "Add dark mode feature",
+  "body": "This PR adds dark mode support",
+  "githubAccessToken": "ghp_xxx"
+}
+```
+
+Response (via SSE completed event):
+```json
+{
+  "step": "completed",
+  "progress": "Auto PR completed successfully!",
+  "pr": { "number": 123, "htmlUrl": "https://github.com/webedt/monorepo/pull/123" },
+  "mergeBase": { "sha": "abc123", "message": "Merged main into feature/dark-mode" },
+  "mergePr": { "merged": true, "sha": "def456" }
+}
+```
+
 ### GET /health
 Health check endpoint.
 
@@ -114,6 +193,27 @@ data: {"type": "error", "error": "Error message", "code": "error_code", "source"
 - `committing` - Creating commit
 - `pushing` - Pushing to remote
 - `uploading` - Uploading to storage
+
+**Create Pull Request:**
+- `creating_pr` - Creating pull request
+
+**Merge Pull Request:**
+- `merging_pr` - Merging pull request
+
+**Auto Pull Request:**
+- `started` - Starting auto PR process
+- `checking_pr` - Checking for existing PR
+- `pr_found` / `creating_pr` - Found existing or creating new PR
+- `pr_created` - PR created
+- `merging_base` - Merging base into feature branch
+- `base_merged` / `base_already_up_to_date` - Base merge result
+- `waiting_mergeable` - Waiting for PR to become mergeable
+- `polling` - Polling GitHub for mergeable status
+- `pr_mergeable` - PR is ready to merge
+- `merging_pr` - Merging the PR
+- `pr_merged` - PR successfully merged
+- `deleting_branch` - Deleting feature branch
+- `branch_deleted` / `branch_already_deleted` - Branch deletion result
 
 ## Environment Variables
 
@@ -177,7 +277,8 @@ github-worker/
     ├── operations/
     │   ├── cloneRepository.ts # Clone/pull repository
     │   ├── createBranch.ts    # Create branch with LLM naming
-    │   └── commitAndPush.ts   # Commit and push changes
+    │   ├── commitAndPush.ts   # Commit and push changes
+    │   └── pullRequest.ts     # PR operations (create, merge, auto-PR)
     ├── clients/
     │   └── githubClient.ts    # Git clone/pull operations
     ├── utils/
@@ -196,7 +297,13 @@ github-worker/
 3. **Token handling** - GitHub tokens only used in-memory, not persisted
 4. **Credential cleanup** - Claude credentials cleaned up after each operation
 
-## Integration with Other Workers
+## Integration with Other Services
+
+### Website Server
+Calls GitHub Worker for:
+- Create pull request (`POST /create-pull-request`)
+- Merge pull request (`POST /merge-pull-request`)
+- Auto-PR workflow (`POST /auto-pull-request`)
 
 ### AI Coding Worker
 Calls GitHub Worker for:

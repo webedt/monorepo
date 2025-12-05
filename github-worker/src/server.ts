@@ -2,10 +2,18 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import * as os from 'os';
-import { CloneRepositoryRequest, CreateBranchRequest, CommitAndPushRequest } from './types';
+import {
+  CloneRepositoryRequest,
+  CreateBranchRequest,
+  CommitAndPushRequest,
+  CreatePullRequestRequest,
+  MergePullRequestRequest,
+  AutoPullRequestRequest,
+} from './types';
 import { cloneRepository } from './operations/cloneRepository';
 import { createBranch } from './operations/createBranch';
 import { commitAndPush } from './operations/commitAndPush';
+import { createPullRequest, mergePullRequest, autoPullRequest } from './operations/pullRequest';
 import { logger } from './utils/logger';
 
 const app = express();
@@ -273,6 +281,214 @@ app.post('/commit-and-push', async (req: Request, res: Response) => {
 });
 
 /**
+ * Create pull request endpoint
+ * Creates a new pull request
+ */
+app.post('/create-pull-request', async (req: Request, res: Response) => {
+  logger.info('Received create-pull-request request', {
+    component: 'Server',
+    operation: 'create-pull-request'
+  });
+
+  // Check if worker is busy
+  if (workerStatus === 'busy') {
+    res.setHeader('X-Container-ID', containerId);
+    res.status(429).json({
+      error: 'busy',
+      message: 'Worker is currently processing another request',
+      retryAfter: 5,
+      containerId
+    });
+    return;
+  }
+
+  // Validate request
+  const request: CreatePullRequestRequest = req.body;
+  if (!request.owner || !request.repo || !request.head || !request.base || !request.githubAccessToken) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required fields: owner, repo, head, base, githubAccessToken',
+      containerId
+    });
+    return;
+  }
+
+  // Check for shutdown
+  if (shutdownRequested) {
+    res.status(503).json({
+      error: 'shutting_down',
+      message: 'Worker is shutting down',
+      containerId
+    });
+    return;
+  }
+
+  // Set worker to busy
+  workerStatus = 'busy';
+  activeOperation = 'create-pull-request';
+
+  setupSSE(res);
+
+  try {
+    await createPullRequest(request, res);
+    logger.info('Create pull request operation completed', {
+      component: 'Server',
+      owner: request.owner,
+      repo: request.repo
+    });
+  } catch (error) {
+    logger.error('Create pull request operation failed', error, {
+      component: 'Server',
+      owner: request.owner,
+      repo: request.repo
+    });
+  }
+
+  // Exit after completion (ephemeral model)
+  await gracefulExit(0);
+});
+
+/**
+ * Merge pull request endpoint
+ * Merges an existing pull request
+ */
+app.post('/merge-pull-request', async (req: Request, res: Response) => {
+  logger.info('Received merge-pull-request request', {
+    component: 'Server',
+    operation: 'merge-pull-request'
+  });
+
+  // Check if worker is busy
+  if (workerStatus === 'busy') {
+    res.setHeader('X-Container-ID', containerId);
+    res.status(429).json({
+      error: 'busy',
+      message: 'Worker is currently processing another request',
+      retryAfter: 5,
+      containerId
+    });
+    return;
+  }
+
+  // Validate request
+  const request: MergePullRequestRequest = req.body;
+  if (!request.owner || !request.repo || !request.pullNumber || !request.githubAccessToken) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required fields: owner, repo, pullNumber, githubAccessToken',
+      containerId
+    });
+    return;
+  }
+
+  // Check for shutdown
+  if (shutdownRequested) {
+    res.status(503).json({
+      error: 'shutting_down',
+      message: 'Worker is shutting down',
+      containerId
+    });
+    return;
+  }
+
+  // Set worker to busy
+  workerStatus = 'busy';
+  activeOperation = 'merge-pull-request';
+
+  setupSSE(res);
+
+  try {
+    await mergePullRequest(request, res);
+    logger.info('Merge pull request operation completed', {
+      component: 'Server',
+      owner: request.owner,
+      repo: request.repo,
+      pullNumber: request.pullNumber
+    });
+  } catch (error) {
+    logger.error('Merge pull request operation failed', error, {
+      component: 'Server',
+      owner: request.owner,
+      repo: request.repo,
+      pullNumber: request.pullNumber
+    });
+  }
+
+  // Exit after completion (ephemeral model)
+  await gracefulExit(0);
+});
+
+/**
+ * Auto pull request endpoint
+ * Creates PR, merges base into feature, waits for mergeable, merges PR, deletes branch
+ */
+app.post('/auto-pull-request', async (req: Request, res: Response) => {
+  logger.info('Received auto-pull-request request', {
+    component: 'Server',
+    operation: 'auto-pull-request'
+  });
+
+  // Check if worker is busy
+  if (workerStatus === 'busy') {
+    res.setHeader('X-Container-ID', containerId);
+    res.status(429).json({
+      error: 'busy',
+      message: 'Worker is currently processing another request',
+      retryAfter: 5,
+      containerId
+    });
+    return;
+  }
+
+  // Validate request
+  const request: AutoPullRequestRequest = req.body;
+  if (!request.owner || !request.repo || !request.branch || !request.base || !request.githubAccessToken) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required fields: owner, repo, branch, base, githubAccessToken',
+      containerId
+    });
+    return;
+  }
+
+  // Check for shutdown
+  if (shutdownRequested) {
+    res.status(503).json({
+      error: 'shutting_down',
+      message: 'Worker is shutting down',
+      containerId
+    });
+    return;
+  }
+
+  // Set worker to busy
+  workerStatus = 'busy';
+  activeOperation = 'auto-pull-request';
+
+  setupSSE(res);
+
+  try {
+    await autoPullRequest(request, res);
+    logger.info('Auto pull request operation completed', {
+      component: 'Server',
+      owner: request.owner,
+      repo: request.repo,
+      branch: request.branch
+    });
+  } catch (error) {
+    logger.error('Auto pull request operation failed', error, {
+      component: 'Server',
+      owner: request.owner,
+      repo: request.repo,
+      branch: request.branch
+    });
+  }
+
+  // Exit after completion (ephemeral model)
+  await gracefulExit(0);
+});
+
+/**
  * Shutdown endpoint
  */
 app.post('/shutdown', (req: Request, res: Response) => {
@@ -302,6 +518,9 @@ app.use((req: Request, res: Response) => {
       'POST /clone-repository',
       'POST /create-branch',
       'POST /commit-and-push',
+      'POST /create-pull-request',
+      'POST /merge-pull-request',
+      'POST /auto-pull-request',
       'POST /shutdown'
     ],
     containerId
@@ -361,12 +580,15 @@ app.listen(PORT, () => {
   console.log(`📊 Status: ${workerStatus}`);
   console.log('');
   console.log('Available endpoints:');
-  console.log('  GET  /health           - Health check');
-  console.log('  GET  /status           - Worker status (idle/busy)');
-  console.log('  POST /clone-repository - Clone GitHub repo into session');
-  console.log('  POST /create-branch    - Create branch with LLM naming');
-  console.log('  POST /commit-and-push  - Commit changes with LLM message');
-  console.log('  POST /shutdown         - Signal worker to shutdown');
+  console.log('  GET  /health              - Health check');
+  console.log('  GET  /status              - Worker status (idle/busy)');
+  console.log('  POST /clone-repository    - Clone GitHub repo into session');
+  console.log('  POST /create-branch       - Create branch with LLM naming');
+  console.log('  POST /commit-and-push     - Commit changes with LLM message');
+  console.log('  POST /create-pull-request - Create a new pull request');
+  console.log('  POST /merge-pull-request  - Merge an existing pull request');
+  console.log('  POST /auto-pull-request   - Auto PR: create, merge base, merge PR, delete branch');
+  console.log('  POST /shutdown            - Signal worker to shutdown');
   console.log('');
   console.log('Worker behavior:');
   console.log('  - Ephemeral: exits after completing each job');

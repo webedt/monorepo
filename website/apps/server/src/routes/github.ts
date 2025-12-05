@@ -643,7 +643,7 @@ router.post('/repos/:owner/:repo/generate-pr-content', requireAuth, async (req, 
   }
 });
 
-// Create a pull request
+// Create a pull request (via github-worker)
 router.post('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -660,69 +660,87 @@ router.post('/repos/:owner/:repo/pulls', requireAuth, async (req, res) => {
       return;
     }
 
-    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+    const githubWorkerUrl = process.env.GITHUB_WORKER_URL || 'http://localhost:5002';
 
-    const { data: pr } = await octokit.pulls.create({
-      owner,
-      repo,
-      title: title || `Merge ${head} into ${base}`,
-      head,
-      base,
-      body: body || '',
-    });
+    console.log(`[GitHub] Forwarding create PR request to github-worker: ${owner}/${repo} ${head} -> ${base}`);
 
-    console.log(`[GitHub] Created PR #${pr.number} for ${owner}/${repo}: ${head} -> ${base}`);
-
-    res.json({
-      success: true,
-      data: {
-        number: pr.number,
-        title: pr.title,
-        state: pr.state,
-        htmlUrl: pr.html_url,
-        head: {
-          ref: pr.head.ref,
-          sha: pr.head.sha,
-        },
-        base: {
-          ref: pr.base.ref,
-          sha: pr.base.sha,
-        },
-        mergeable: pr.mergeable,
-        merged: pr.merged,
+    // Call github-worker with SSE streaming
+    const response = await fetch(`${githubWorkerUrl}/create-pull-request`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
       },
+      body: JSON.stringify({
+        owner,
+        repo,
+        title: title || `Merge ${head} into ${base}`,
+        head,
+        base,
+        body: body || '',
+        githubAccessToken: authReq.user.githubAccessToken,
+      }),
     });
-  } catch (error: unknown) {
-    const err = error as { status?: number; message?: string; response?: { data?: { errors?: Array<{ message?: string }>; message?: string } } };
-    console.error('GitHub create PR error:', error);
 
-    // Handle case where PR already exists
-    if (err.status === 422 && err.response?.data?.errors?.some((e: { message?: string }) => e.message?.includes('already exists'))) {
-      res.status(409).json({ success: false, error: 'A pull request already exists for this branch' });
+    if (!response.ok || !response.body) {
+      const errorText = await response.text();
+      console.error(`[GitHub] github-worker create PR error: ${response.status} ${errorText}`);
+      res.status(response.status || 500).json({ success: false, error: errorText || 'Failed to create pull request' });
       return;
     }
 
-    // Extract detailed error message from GitHub API response
-    let errorMessage = 'Failed to create pull request';
-    if (err.response?.data?.message) {
-      errorMessage = err.response.data.message;
-    } else if (err.response?.data?.errors && err.response.data.errors.length > 0) {
-      const errorMessages = err.response.data.errors
-        .map((e: { message?: string }) => e.message)
-        .filter(Boolean)
-        .join('; ');
-      if (errorMessages) {
-        errorMessage = errorMessages;
+    // Parse SSE response from github-worker
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: any = null;
+    let errorData: any = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          try {
+            const eventData = JSON.parse(line.substring(5).trim());
+            if (eventData.type === 'completed' && eventData.data) {
+              result = eventData.data;
+            } else if (eventData.type === 'error') {
+              errorData = eventData;
+            }
+          } catch (e) {
+            // Non-JSON data, skip
+          }
+        }
       }
-    } else if (err.message) {
-      errorMessage = err.message;
     }
 
-    res.status(err.status || 500).json({ success: false, error: errorMessage });
+    if (errorData) {
+      console.error(`[GitHub] github-worker create PR error: ${errorData.error}`);
+      const statusCode = errorData.code === 'PR_EXISTS' ? 409 : 500;
+      res.status(statusCode).json({ success: false, error: errorData.error });
+      return;
+    }
+
+    if (result) {
+      console.log(`[GitHub] Created PR #${result.number} via github-worker for ${owner}/${repo}: ${head} -> ${base}`);
+      res.json({ success: true, data: result });
+    } else {
+      res.status(500).json({ success: false, error: 'No response from github-worker' });
+    }
+  } catch (error: unknown) {
+    const err = error as { message?: string };
+    console.error('GitHub create PR error:', error);
+    res.status(500).json({ success: false, error: err.message || 'Failed to create pull request' });
   }
 });
 
-// Merge a pull request
+// Merge a pull request (via github-worker)
 router.post('/repos/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
@@ -734,41 +752,85 @@ router.post('/repos/:owner/:repo/pulls/:pull_number/merge', requireAuth, async (
       return;
     }
 
-    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+    const githubWorkerUrl = process.env.GITHUB_WORKER_URL || 'http://localhost:5002';
 
-    const { data: result } = await octokit.pulls.merge({
-      owner,
-      repo,
-      pull_number: parseInt(pull_number, 10),
-      merge_method: merge_method || 'merge',
-      commit_title,
-      commit_message,
-    });
+    console.log(`[GitHub] Forwarding merge PR request to github-worker: ${owner}/${repo} PR #${pull_number}`);
 
-    console.log(`[GitHub] Merged PR #${pull_number} for ${owner}/${repo}`);
-
-    res.json({
-      success: true,
-      data: {
-        merged: result.merged,
-        message: result.message,
-        sha: result.sha,
+    // Call github-worker with SSE streaming
+    const response = await fetch(`${githubWorkerUrl}/merge-pull-request`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
       },
+      body: JSON.stringify({
+        owner,
+        repo,
+        pullNumber: parseInt(pull_number, 10),
+        mergeMethod: merge_method || 'merge',
+        commitTitle: commit_title,
+        commitMessage: commit_message,
+        githubAccessToken: authReq.user.githubAccessToken,
+      }),
     });
+
+    if (!response.ok || !response.body) {
+      const errorText = await response.text();
+      console.error(`[GitHub] github-worker merge PR error: ${response.status} ${errorText}`);
+      res.status(response.status || 500).json({ success: false, error: errorText || 'Failed to merge pull request' });
+      return;
+    }
+
+    // Parse SSE response from github-worker
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: any = null;
+    let errorData: any = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          try {
+            const eventData = JSON.parse(line.substring(5).trim());
+            if (eventData.type === 'completed' && eventData.data) {
+              result = eventData.data;
+            } else if (eventData.type === 'error') {
+              errorData = eventData;
+            }
+          } catch (e) {
+            // Non-JSON data, skip
+          }
+        }
+      }
+    }
+
+    if (errorData) {
+      console.error(`[GitHub] github-worker merge PR error: ${errorData.error}`);
+      let statusCode = 500;
+      if (errorData.code === 'PR_NOT_MERGEABLE') statusCode = 405;
+      if (errorData.code === 'MERGE_CONFLICT') statusCode = 409;
+      res.status(statusCode).json({ success: false, error: errorData.error });
+      return;
+    }
+
+    if (result) {
+      console.log(`[GitHub] Merged PR #${pull_number} via github-worker for ${owner}/${repo}`);
+      res.json({ success: true, data: result });
+    } else {
+      res.status(500).json({ success: false, error: 'No response from github-worker' });
+    }
   } catch (error: unknown) {
-    const err = error as { status?: number; message?: string };
+    const err = error as { message?: string };
     console.error('GitHub merge PR error:', error);
-
-    if (err.status === 405) {
-      res.status(405).json({ success: false, error: 'Pull request is not mergeable' });
-      return;
-    }
-    if (err.status === 409) {
-      res.status(409).json({ success: false, error: 'Merge conflict - head branch must be updated' });
-      return;
-    }
-
-    res.status(500).json({ success: false, error: 'Failed to merge pull request' });
+    res.status(500).json({ success: false, error: err.message || 'Failed to merge pull request' });
   }
 });
 
@@ -859,7 +921,7 @@ async function saveAutoPrLog(
   }
 }
 
-// Auto PR: Create PR, merge base branch, wait for mergeable, merge PR, and soft-delete session
+// Auto PR: Create PR, merge base branch, wait for mergeable, merge PR, and soft-delete session (via github-worker)
 // Note: Using wildcard (*) for branch because branch names can contain slashes (e.g., "user/feature-branch")
 router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, res) => {
   try {
@@ -879,14 +941,9 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       return;
     }
 
-    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
-    const results: {
-      step: string;
-      progress?: string;
-      pr?: { number: number; htmlUrl: string };
-      mergeBase?: { sha: string | null; message: string };
-      mergePr?: { merged: boolean; sha: string };
-    } = { step: 'started', progress: 'Starting Auto PR process...' };
+    const githubWorkerUrl = process.env.GITHUB_WORKER_URL || 'http://localhost:5002';
+
+    console.log(`[GitHub] Forwarding auto PR request to github-worker: ${owner}/${repo} ${branch} -> ${base}`);
 
     // Log the start of auto PR process
     await saveAutoPrLog(sessionId, 'started', {
@@ -898,276 +955,105 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       userId: authReq.user!.id,
     });
 
-    // Step 1: Check if PR already exists
-    let prNumber: number | null = null;
-    let prUrl: string | null = null;
-
-    results.step = 'checking_pr';
-    results.progress = 'Checking for existing pull request...';
-
-    const { data: existingPulls } = await octokit.pulls.list({
-      owner,
-      repo,
-      head: `${owner}:${branch}`,
-      base,
-      state: 'open',
+    // Call github-worker with SSE streaming
+    const response = await fetch(`${githubWorkerUrl}/auto-pull-request`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({
+        owner,
+        repo,
+        branch,
+        base,
+        title: title || `Merge ${branch} into ${base}`,
+        body: body || '',
+        githubAccessToken: authReq.user.githubAccessToken,
+      }),
     });
 
-    if (existingPulls.length > 0) {
-      prNumber = existingPulls[0].number;
-      prUrl = existingPulls[0].html_url;
-      console.log(`[GitHub] Using existing PR #${prNumber} for ${owner}/${repo}`);
-      results.progress = `Found existing PR #${prNumber}`;
+    if (!response.ok || !response.body) {
+      const errorText = await response.text();
+      console.error(`[GitHub] github-worker auto PR error: ${response.status} ${errorText}`);
 
-      await saveAutoPrLog(sessionId, 'pr_found', {
-        prNumber,
-        prUrl,
-        message: `Found existing PR #${prNumber}`,
-      });
-    } else {
-      // Create new PR
-      results.step = 'creating_pr';
-      results.progress = 'Creating pull request...';
-
-      try {
-        const { data: pr } = await octokit.pulls.create({
-          owner,
-          repo,
-          title: title || `Merge ${branch} into ${base}`,
-          head: branch,
-          base,
-          body: body || '',
-        });
-        prNumber = pr.number;
-        prUrl = pr.html_url;
-        console.log(`[GitHub] Created PR #${prNumber} for ${owner}/${repo}`);
-        results.progress = `Created PR #${prNumber}`;
-
-        await saveAutoPrLog(sessionId, 'pr_created', {
-          prNumber,
-          prUrl,
-          title: pr.title,
-          message: `Created PR #${prNumber}`,
-        });
-      } catch (createError: unknown) {
-        const createErr = createError as { status?: number; message?: string };
-        // If no commits between branches, cannot create PR
-        if (createErr.status === 422) {
-          await saveAutoPrLog(sessionId, 'no_commits', {
-            error: 'No commits between branches - nothing to merge',
-            status: 422,
-          });
-
-          res.status(422).json({
-            success: false,
-            error: 'No commits between branches - nothing to merge'
-          });
-          return;
-        }
-        throw createError;
-      }
-    }
-
-    results.step = 'pr_created';
-    results.pr = { number: prNumber!, htmlUrl: prUrl! };
-
-    // Step 2: Try to merge base into the feature branch (update branch)
-    results.step = 'merging_base';
-    results.progress = `Merging ${base} into ${branch}...`;
-
-    try {
-      const { data: mergeResult } = await octokit.repos.merge({
-        owner,
-        repo,
-        base: branch,
-        head: base,
-        commit_message: `Merge ${base} into ${branch}`,
-      });
-      results.step = 'base_merged';
-      results.mergeBase = { sha: mergeResult.sha, message: `Merged ${base} into ${branch}` };
-      results.progress = `Successfully merged ${base} into ${branch}`;
-      console.log(`[GitHub] Merged ${base} into ${branch}`);
-
-      await saveAutoPrLog(sessionId, 'base_merged', {
-        sha: mergeResult.sha,
-        message: `Merged ${base} into ${branch}`,
-      });
-    } catch (mergeError: unknown) {
-      const mergeErr = mergeError as { status?: number; message?: string };
-      // 204 = already up to date, 409 = conflict
-      if (mergeErr.status === 204) {
-        results.step = 'base_merged';
-        results.mergeBase = { sha: null, message: 'Branch already up to date' };
-        results.progress = `Branch ${branch} is already up to date with ${base}`;
-
-        await saveAutoPrLog(sessionId, 'base_already_up_to_date', {
-          message: `Branch ${branch} is already up to date with ${base}`,
-        });
-      } else if (mergeErr.status === 409) {
-        await saveAutoPrLog(sessionId, 'merge_conflict', {
-          error: 'Merge conflict when updating branch - manual resolution required',
-        });
-
-        // Return partial success - PR created but needs manual conflict resolution
-        res.status(409).json({
-          success: false,
-          error: 'Merge conflict when updating branch - manual resolution required',
-          data: results,
-        });
-        return;
-      } else {
-        throw mergeError;
-      }
-    }
-
-    // Step 3: Wait for PR to become mergeable
-    results.step = 'waiting_mergeable';
-    results.progress = 'Waiting for PR to be ready to merge...';
-
-    let mergeable: boolean | null = null;
-    let pollAttempts = 0;
-    const maxPollAttempts = 30; // 30 seconds max (30 attempts * 1 second)
-
-    while (pollAttempts < maxPollAttempts) {
-      const { data: prStatus } = await octokit.pulls.get({
-        owner,
-        repo,
-        pull_number: prNumber!,
+      await saveAutoPrLog(sessionId, 'error', {
+        error: errorText || 'Failed to complete auto PR',
+        status: response.status,
       });
 
-      mergeable = prStatus.mergeable;
-
-      if (mergeable === true) {
-        results.progress = 'PR is ready to merge!';
-        console.log(`[GitHub] PR #${prNumber} is mergeable after ${pollAttempts + 1} attempts`);
-
-        await saveAutoPrLog(sessionId, 'pr_mergeable', {
-          prNumber,
-          pollAttempts: pollAttempts + 1,
-          message: `PR #${prNumber} is ready to merge`,
-        });
-        break;
-      } else if (mergeable === false) {
-        await saveAutoPrLog(sessionId, 'pr_not_mergeable', {
-          prNumber,
-          error: 'PR has merge conflicts or branch protection rules prevent merging',
-        });
-
-        // PR is explicitly not mergeable
-        res.status(409).json({
-          success: false,
-          error: 'PR has merge conflicts or branch protection rules prevent merging',
-          data: results,
-        });
-        return;
-      }
-
-      // mergeable is null - GitHub is still calculating
-      pollAttempts++;
-      results.progress = `Waiting for PR status... (${pollAttempts}/${maxPollAttempts})`;
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    if (mergeable !== true) {
-      await saveAutoPrLog(sessionId, 'timeout', {
-        prNumber,
-        maxPollAttempts,
-        error: 'Timeout waiting for PR to become mergeable',
-      });
-
-      res.status(408).json({
-        success: false,
-        error: 'Timeout waiting for PR to become mergeable - please try merging manually',
-        data: results,
-      });
+      res.status(response.status || 500).json({ success: false, error: errorText || 'Failed to complete auto PR' });
       return;
     }
 
-    // Step 4: Merge the PR
-    results.step = 'merging_pr';
-    results.progress = `Merging PR #${prNumber}...`;
+    // Parse SSE response from github-worker
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: any = null;
+    let errorData: any = null;
+    let lastProgress: any = null;
 
-    try {
-      const { data: prMergeResult } = await octokit.pulls.merge({
-        owner,
-        repo,
-        pull_number: prNumber!,
-        merge_method: 'merge',
-      });
-      results.step = 'pr_merged';
-      results.mergePr = { merged: prMergeResult.merged, sha: prMergeResult.sha };
-      results.progress = `Successfully merged PR #${prNumber} into ${base}`;
-      console.log(`[GitHub] Merged PR #${prNumber} for ${owner}/${repo}`);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      await saveAutoPrLog(sessionId, 'pr_merged', {
-        prNumber,
-        merged: prMergeResult.merged,
-        sha: prMergeResult.sha,
-        message: `Successfully merged PR #${prNumber} into ${base}`,
-      });
-    } catch (prMergeError: unknown) {
-      const prMergeErr = prMergeError as { status?: number; message?: string };
-      if (prMergeErr.status === 405) {
-        await saveAutoPrLog(sessionId, 'pr_merge_failed', {
-          prNumber,
-          error: 'PR is not mergeable - check branch protection rules',
-          status: 405,
-        });
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-        res.status(405).json({
-          success: false,
-          error: 'PR is not mergeable - check branch protection rules',
-          data: results,
-        });
-        return;
-      }
-      if (prMergeErr.status === 409) {
-        await saveAutoPrLog(sessionId, 'pr_merge_conflict', {
-          prNumber,
-          error: 'Merge conflict when merging PR',
-          status: 409,
-        });
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          try {
+            const eventData = JSON.parse(line.substring(5).trim());
 
-        res.status(409).json({
-          success: false,
-          error: 'Merge conflict when merging PR',
-          data: results,
-        });
-        return;
-      }
-      throw prMergeError;
-    }
+            // Log progress events to database
+            if (eventData.type === 'progress') {
+              lastProgress = eventData;
+              await saveAutoPrLog(sessionId, eventData.stage, {
+                message: eventData.message,
+              });
+            }
 
-    // Step 5: Delete the feature branch (PR was merged, branch is no longer needed)
-    results.step = 'deleting_branch';
-    results.progress = `Deleting branch ${branch}...`;
-
-    try {
-      await octokit.git.deleteRef({
-        owner,
-        repo,
-        ref: `heads/${branch}`,
-      });
-      console.log(`[GitHub] Deleted branch ${owner}/${repo}/${branch} after Auto PR merge`);
-      results.progress = `Deleted branch ${branch}`;
-    } catch (branchDeleteError: unknown) {
-      const branchDeleteErr = branchDeleteError as { status?: number };
-      // 422 or 404 means branch doesn't exist (already deleted) - that's fine
-      if (branchDeleteErr.status === 422 || branchDeleteErr.status === 404) {
-        console.log(`[GitHub] Branch ${owner}/${repo}/${branch} already deleted`);
-        results.progress = `Branch ${branch} already deleted`;
-      } else {
-        // Log error but don't fail - PR was already merged successfully
-        console.error(`[GitHub] Failed to delete branch ${owner}/${repo}/${branch}:`, branchDeleteError);
-        results.progress = `Branch deletion skipped (non-critical error)`;
+            if (eventData.type === 'completed' && eventData.data) {
+              result = eventData.data;
+            } else if (eventData.type === 'error') {
+              errorData = eventData;
+            }
+          } catch (e) {
+            // Non-JSON data, skip
+          }
+        }
       }
     }
 
-    // Step 6: Soft-delete the session (if sessionId provided)
+    if (errorData) {
+      console.error(`[GitHub] github-worker auto PR error: ${errorData.error}`);
+
+      await saveAutoPrLog(sessionId, 'error', {
+        error: errorData.error,
+        code: errorData.code,
+      });
+
+      let statusCode = 500;
+      if (errorData.code === 'NO_COMMITS') statusCode = 422;
+      if (errorData.code === 'MERGE_CONFLICT') statusCode = 409;
+      if (errorData.code === 'PR_NOT_MERGEABLE') statusCode = 409;
+      if (errorData.code === 'TIMEOUT') statusCode = 408;
+
+      res.status(statusCode).json({ success: false, error: errorData.error });
+      return;
+    }
+
+    if (!result) {
+      res.status(500).json({ success: false, error: 'No response from github-worker' });
+      return;
+    }
+
+    console.log(`[GitHub] Auto PR completed via github-worker for ${owner}/${repo}: ${branch} -> ${base}`);
+
+    // Step 6: Soft-delete the session (if sessionId provided) - this stays on the website server
     if (sessionId) {
-      results.step = 'deleting_session';
-      results.progress = 'Cleaning up session...';
-
       try {
         // Verify session ownership before deleting
         const [session] = await db
@@ -1182,14 +1068,14 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
           .limit(1);
 
         if (session && session.userId === authReq.user!.id) {
-          // Soft delete the session (branch already deleted above)
+          // Soft delete the session (branch already deleted by github-worker)
           await db
             .update(chatSessions)
             .set({ deletedAt: new Date() })
             .where(eq(chatSessions.id, sessionId));
 
           console.log(`[GitHub] Soft-deleted session ${sessionId} after Auto PR`);
-          results.progress = 'Session moved to trash';
+          result.progress = 'Session moved to trash';
 
           await saveAutoPrLog(sessionId, 'session_deleted', {
             message: 'Session moved to trash after successful merge',
@@ -1204,51 +1090,30 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req, r
       } catch (deleteError) {
         // Log error but don't fail the entire operation - PR was already merged successfully
         console.error(`[GitHub] Failed to soft-delete session ${sessionId}:`, deleteError);
-        results.progress = 'Session cleanup skipped (non-critical error)';
+        result.progress = 'Session cleanup skipped (non-critical error)';
       }
     }
 
-    results.step = 'completed';
-    results.progress = 'Auto PR completed successfully!';
-
     await saveAutoPrLog(sessionId, 'completed', {
-      prNumber,
-      prUrl,
+      prNumber: result.pr?.number,
+      prUrl: result.pr?.htmlUrl,
       message: 'Auto PR completed successfully!',
     });
 
     res.json({
       success: true,
-      data: results,
+      data: result,
     });
   } catch (error: unknown) {
-    const err = error as { status?: number; message?: string; response?: { data?: { errors?: Array<{ message?: string }>; message?: string } } };
+    const err = error as { message?: string };
     console.error('GitHub auto PR error:', error);
 
-    // Extract detailed error message from GitHub API response
-    let errorMessage = 'Failed to complete auto PR';
-    if (err.response?.data?.message) {
-      errorMessage = err.response.data.message;
-    } else if (err.response?.data?.errors && err.response.data.errors.length > 0) {
-      const errorMessages = err.response.data.errors
-        .map((e: { message?: string }) => e.message)
-        .filter(Boolean)
-        .join('; ');
-      if (errorMessages) {
-        errorMessage = errorMessages;
-      }
-    } else if (err.message) {
-      errorMessage = err.message;
-    }
-
-    // Log error to database
     const { sessionId } = req.body;
     await saveAutoPrLog(sessionId, 'error', {
-      error: errorMessage,
-      status: err.status || 500,
+      error: err.message || 'Failed to complete auto PR',
     });
 
-    res.status(err.status || 500).json({ success: false, error: errorMessage });
+    res.status(500).json({ success: false, error: err.message || 'Failed to complete auto PR' });
   }
 });
 
