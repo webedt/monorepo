@@ -69,8 +69,8 @@ export class GitHubWorkerClient {
   private timeout: number;
 
   constructor() {
-    // Default to internal Docker service URL
-    const githubWorkerUrl = process.env.GITHUB_WORKER_URL || 'http://github-worker:5002';
+    // Default to internal Docker service URL if GITHUB_WORKER_URL is not set
+    const githubWorkerUrl = process.env.GITHUB_WORKER_URL || 'http://webedt-app-github-workers-x4o1nh_github-worker:5002';
     this.baseUrl = githubWorkerUrl.replace(/\/$/, '');
     this.timeout = parseInt(process.env.GITHUB_WORKER_TIMEOUT || '120000', 10);
 
