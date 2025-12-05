@@ -279,7 +279,7 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
 
   const updateMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
-      sessionsApi.update(id, title),
+      sessionsApi.update(id, { userRequest: title }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['session-details', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['session-for-layout', sessionId] });

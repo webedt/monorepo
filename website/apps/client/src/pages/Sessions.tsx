@@ -88,7 +88,7 @@ export default function Sessions() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
-      sessionsApi.update(id, title),
+      sessionsApi.update(id, { userRequest: title }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setEditingId(null);

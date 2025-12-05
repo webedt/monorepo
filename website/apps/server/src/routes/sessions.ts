@@ -621,15 +621,19 @@ router.patch('/:id', requireAuth, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
     const sessionId = req.params.id;
-    const { userRequest } = req.body;
+    const { userRequest, branch } = req.body;
 
     if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
     }
 
-    if (!userRequest || typeof userRequest !== 'string' || userRequest.trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Invalid title' });
+    // At least one field must be provided
+    const hasUserRequest = userRequest && typeof userRequest === 'string' && userRequest.trim().length > 0;
+    const hasBranch = branch && typeof branch === 'string' && branch.trim().length > 0;
+
+    if (!hasUserRequest && !hasBranch) {
+      res.status(400).json({ success: false, error: 'At least one field (userRequest or branch) must be provided' });
       return;
     }
 
@@ -650,10 +654,19 @@ router.patch('/:id', requireAuth, async (req, res) => {
       return;
     }
 
+    // Build update object with only provided fields
+    const updateData: { userRequest?: string; branch?: string } = {};
+    if (hasUserRequest) {
+      updateData.userRequest = userRequest.trim();
+    }
+    if (hasBranch) {
+      updateData.branch = branch.trim();
+    }
+
     // Update session
     const [updatedSession] = await db
       .update(chatSessions)
-      .set({ userRequest: userRequest.trim() })
+      .set(updateData)
       .where(eq(chatSessions.id, sessionId))
       .returning();
 

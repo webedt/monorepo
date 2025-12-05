@@ -281,10 +281,10 @@ export const sessionsApi = {
       body: { eventType, eventData },
     }),
 
-  update: (id: string, userRequest: string) =>
+  update: (id: string, data: { userRequest?: string; branch?: string }) =>
     fetchApi(`/api/sessions/${id}`, {
       method: 'PATCH',
-      body: { userRequest },
+      body: data,
     }),
 
   delete: (id: string) =>

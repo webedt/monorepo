@@ -574,8 +574,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const repositories: GitHubRepository[] = reposData?.data || [];
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, title }: { id: string; title: string }) =>
-      sessionsApi.update(id, title),
+    mutationFn: ({ id, title, branch }: { id: string; title?: string; branch?: string }) =>
+      sessionsApi.update(id, { userRequest: title, branch }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['session-details', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['session-for-layout', sessionId] });
@@ -1142,6 +1142,18 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               updateMutation.mutate({ id: sessionId, title: newTitle });
             }
           }
+        }
+      } else if (data.type === 'branch_created' && data.branchName) {
+        // Branch created - update session with the new branch name
+        const newBranch = data.branchName;
+        content = `Branch created: ${newBranch}`;
+        eventLabel = '🌿';
+        messageType = 'system';
+
+        // Update the session's branch in the database
+        if (sessionId && sessionId !== 'new') {
+          console.log('[Chat] Updating session branch to:', newBranch);
+          updateMutation.mutate({ id: sessionId, branch: newBranch });
         }
       } else if (data.type === 'assistant_message' && data.data) {
         const msgData = data.data;
