@@ -233,69 +233,6 @@ const transformStorageFiles = (files: { path: string; size: number; type: 'file'
   return root.children;
 };
 
-// Transform GitHub API tree to our TreeNode format
-// GitHub tree items have type: 'blob' for files, 'tree' for directories
-const transformGitHubTree = (tree: { path: string; type: string; sha: string; size?: number }[]): TreeNode[] => {
-  const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
-
-  // Sort items: directories first, then alphabetically
-  const sortedItems = [...tree].sort((a, b) => {
-    if (a.type === 'tree' && b.type !== 'tree') return -1;
-    if (a.type !== 'tree' && b.type === 'tree') return 1;
-    return a.path.localeCompare(b.path);
-  });
-
-  for (const item of sortedItems) {
-    const pathParts = item.path.split('/').filter(p => p);
-    if (pathParts.length === 0) continue;
-
-    let currentLevel = root;
-
-    for (let i = 0; i < pathParts.length; i++) {
-      const part = pathParts[i];
-      const currentPath = pathParts.slice(0, i + 1).join('/');
-      const isLastPart = i === pathParts.length - 1;
-
-      if (isLastPart) {
-        if (item.type === 'blob') {
-          // It's a file
-          currentLevel.children.push({
-            name: part,
-            path: currentPath,
-            type: 'file',
-            icon: getFileIcon(part),
-          });
-        } else if (item.type === 'tree') {
-          // It's a directory - only add if not already exists
-          const existing = currentLevel.children.find(
-            c => c.type === 'folder' && c.name === part
-          );
-          if (!existing) {
-            currentLevel.children.push({
-              name: part,
-              path: currentPath,
-              type: 'folder',
-              children: [],
-            });
-          }
-        }
-      } else {
-        // Navigate to or create intermediate folder
-        let folder = currentLevel.children.find(
-          c => c.type === 'folder' && c.name === part
-        ) as FolderNode | undefined;
-
-        if (!folder) {
-          folder = { name: part, path: currentPath, type: 'folder', children: [] };
-          currentLevel.children.push(folder);
-        }
-        currentLevel = folder;
-      }
-    }
-  }
-
-  return root.children;
-};
 
 // Props for split view support
 interface CodeProps {
@@ -419,132 +356,46 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   }, [preSelectedSettings, repos, codeSession, sessionId]);
 
-  // Track if we're initializing the repository
-  const [isInitializingRepo, setIsInitializingRepo] = useState(false);
-  const [repoInitError, setRepoInitError] = useState<string | null>(null);
-  const hasAttemptedInit = useRef(false);
-
-  // Fetch file tree - first try storage-worker, then initialize repo, then fallback to GitHub API
+  // Fetch file tree from storage-worker only
   // NOTE: Storage-worker uses the database session ID as the storage key
-  const { data: treeData, isLoading: isLoadingTree, error: treeError, refetch: refetchTree } = useQuery({
-    queryKey: ['file-tree', codeSession?.sessionId, codeSession?.owner, codeSession?.repo, codeSession?.baseBranch],
+  const { data: storageFiles, isLoading: isLoadingTree, error: treeError } = useQuery({
+    queryKey: ['file-tree', codeSession?.sessionId],
     queryFn: async () => {
-      // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
       const storageSessionId = codeSession?.sessionId;
 
-      // Safety check - should not happen due to enabled condition, but return empty if so
       if (!storageSessionId) {
         console.warn('[Code] Query ran without session ID - returning empty');
-        return { source: 'storage' as const, files: [] };
+        return [];
       }
 
-      // First, try to get files from storage-worker (for sessions with AI execution)
       console.log('[Code] Fetching file tree from storage-worker:', storageSessionId);
 
-      let storageFiles: { path: string; size: number; type: 'file' | 'directory' }[] = [];
       try {
-        storageFiles = await storageWorkerApi.listFiles(storageSessionId);
-      } catch (storageError) {
-        // Storage-worker might be unavailable or return error, log and continue to GitHub fallback
-        console.warn('[Code] Failed to fetch from storage-worker, trying GitHub:', storageError);
-      }
-
-      if (storageFiles && storageFiles.length > 0) {
-        console.log('[Code] Found files in storage-worker:', storageFiles.length);
-        hasAttemptedInit.current = true; // No need to init, we have files
-        return { source: 'storage' as const, files: storageFiles };
-      }
-
-      // Storage is empty - fallback to GitHub API for immediate display
-      // We'll trigger repository initialization in the background
-      if (codeSession?.owner && codeSession?.repo && codeSession?.baseBranch) {
-        console.log('[Code] Storage empty, fetching from GitHub API:', `${codeSession.owner}/${codeSession.repo}/${codeSession.baseBranch}`);
-        try {
-          const response = await githubApi.getTree(codeSession.owner, codeSession.repo, codeSession.baseBranch, true);
-          if (response.success && response.data?.tree) {
-            console.log('[Code] Got file tree from GitHub:', response.data.tree.length, 'items');
-            return { source: 'github' as const, tree: response.data.tree };
-          }
-        } catch (githubError) {
-          console.error('[Code] Failed to fetch from GitHub API:', githubError);
-          // Fall through to return empty
+        const files = await storageWorkerApi.listFiles(storageSessionId);
+        console.log('[Code] Found files in storage-worker:', files.length);
+        // Debug: log sample paths to diagnose filtering issues
+        if (files.length > 0) {
+          console.log('[Code] Sample file paths:', files.slice(0, 5).map(f => f.path));
         }
+        return files;
+      } catch (storageError) {
+        console.error('[Code] Failed to fetch from storage-worker:', storageError);
+        return [];
       }
-
-      // No files available from either source
-      console.log('[Code] No files available from storage or GitHub');
-      return { source: 'storage' as const, files: [] };
     },
     enabled: !!codeSession?.sessionId,
-    retry: 1, // Only retry once for faster feedback
-    refetchOnWindowFocus: false, // Don't refetch when window regains focus
-    staleTime: 30000, // Consider data fresh for 30 seconds
+    retry: 1,
+    refetchOnWindowFocus: false,
+    staleTime: 30000,
   });
 
-  // Effect to initialize repository in background when storage is empty
-  useEffect(() => {
-    const initializeRepo = async () => {
-      // Only attempt once per session
-      if (hasAttemptedInit.current) return;
-
-      // Only initialize if we're showing GitHub source (meaning storage was empty)
-      if (treeData?.source !== 'github') return;
-
-      // Need a session ID to initialize
-      if (!codeSession?.sessionId) return;
-
-      hasAttemptedInit.current = true;
-      setIsInitializingRepo(true);
-      setRepoInitError(null);
-
-      console.log('[Code] Initiating background repository initialization for session:', codeSession.sessionId);
-
-      try {
-        const result = await sessionsApi.initializeRepository(codeSession.sessionId);
-        console.log('[Code] Repository initialized successfully:', result);
-
-        // Refetch the file tree from storage-worker now that repo is initialized
-        // Use a small delay to ensure storage-worker has processed the upload
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        try {
-          const refetchResult = await refetchTree();
-          console.log('[Code] Refetch completed:', {
-            status: refetchResult.status,
-            source: refetchResult.data?.source,
-            hasError: !!refetchResult.error
-          });
-        } catch (refetchError) {
-          // Refetch failed, but we already have files from GitHub - this is ok
-          console.warn('[Code] Refetch after init failed, keeping GitHub source:', refetchError);
-        }
-
-        setIsInitializingRepo(false);
-      } catch (error) {
-        console.error('[Code] Failed to initialize repository:', error);
-        setRepoInitError(error instanceof Error ? error.message : 'Failed to initialize repository');
-        setIsInitializingRepo(false);
-        // Keep using GitHub API fallback - user can still view files read-only
-      }
-    };
-
-    initializeRepo();
-  }, [treeData?.source, codeSession?.sessionId, refetchTree]);
-
-  // Transform the tree into our TreeNode format
+  // Transform the files into our TreeNode format
   const fileTree = useMemo(() => {
-    if (!treeData) return [];
-    if (treeData.source === 'storage' && 'files' in treeData) {
-      return transformStorageFiles(treeData.files);
-    }
-    if (treeData.source === 'github' && 'tree' in treeData) {
-      return transformGitHubTree(treeData.tree);
-    }
-    return [];
-  }, [treeData]);
-
-  // Track if we're using GitHub source (files are read-only until first AI execution)
-  const isGitHubSource = treeData?.source === 'github';
+    if (!storageFiles || storageFiles.length === 0) return [];
+    const tree = transformStorageFiles(storageFiles);
+    console.log('[Code] Transformed file tree:', tree.length, 'root items');
+    return tree;
+  }, [storageFiles]);
 
   // Query to check for existing PR (for code sessions)
   const { data: prData, refetch: refetchPr } = useQuery({
@@ -716,12 +567,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setIsLoadingFile(true);
       setFileContent(null); // Clear text content for images
       try {
-        // For GitHub source, we can't easily load images - show message
-        if (isGitHubSource) {
-          setFileContent(`// Image preview not available before first AI execution.\n// Run a task with the AI to sync the repository.`);
-          setIsLoadingFile(false);
-          return;
-        }
         const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
         if (blob) {
           const url = URL.createObjectURL(blob);
@@ -748,52 +593,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     setIsLoadingFile(true);
     try {
-      let content: string | null = null;
-
-      // If we're using GitHub source, fetch from GitHub API directly
-      if (isGitHubSource && codeSession.owner && codeSession.repo && codeSession.baseBranch) {
-        console.log('[Code] Fetching file from GitHub API:', path);
-        try {
-          const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.baseBranch);
-          if (response.success && response.data?.content) {
-            // GitHub API returns base64 encoded content with possible newlines
-            // Remove newlines and decode, handling UTF-8 properly
-            const base64Content = response.data.content.replace(/\n/g, '');
-            // Use TextDecoder to properly handle UTF-8 encoded content
-            const binaryString = atob(base64Content);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
-            }
-            content = new TextDecoder('utf-8').decode(bytes);
-          }
-        } catch (githubError) {
-          console.error('[Code] Failed to fetch from GitHub:', githubError);
-        }
-      } else {
-        // Try storage-worker first, fallback to GitHub API
-        console.log('[Code] Fetching file from storage-worker:', path);
-        content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
-
-        // If storage-worker returned null (file not found), try GitHub API as fallback
-        if (content === null && codeSession.owner && codeSession.repo && codeSession.baseBranch) {
-          console.log('[Code] Storage returned null, trying GitHub API fallback:', path);
-          try {
-            const response = await githubApi.getFileContent(codeSession.owner, codeSession.repo, path, codeSession.baseBranch);
-            if (response.success && response.data?.content) {
-              const base64Content = response.data.content.replace(/\n/g, '');
-              const binaryString = atob(base64Content);
-              const bytes = new Uint8Array(binaryString.length);
-              for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-              }
-              content = new TextDecoder('utf-8').decode(bytes);
-            }
-          } catch (githubError) {
-            console.error('[Code] GitHub fallback also failed:', githubError);
-          }
-        }
-      }
+      console.log('[Code] Fetching file from storage-worker:', path);
+      const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
 
       if (content === null) {
         // File not found
@@ -806,7 +607,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         setEditHistory(prev => {
           const next = new Map(prev);
           if (!next.has(path)) {
-            next.set(path, [content!]);
+            next.set(path, [content]);
           }
           return next;
         });
@@ -821,7 +622,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         // Store the original content for later comparison (no sha needed for storage-worker)
         setPendingChanges(prev => {
           const next = new Map(prev);
-          next.set(path, { content: content!, originalContent: content! });
+          next.set(path, { content, originalContent: content });
           return next;
         });
       }
@@ -831,7 +632,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     } finally {
       setIsLoadingFile(false);
     }
-  }, [codeSession, pendingChanges, isGitHubSource]);
+  }, [codeSession, pendingChanges]);
 
   // Cleanup object URLs for images when component unmounts or image changes
   useEffect(() => {
@@ -1941,37 +1742,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
             </div>
           ) : fileContent !== null ? (
             <div className="h-full flex flex-col">
-              {/* GitHub Source Banner - shown when viewing files from GitHub API before repo is initialized */}
-              {isGitHubSource && (
-                <div className={`border-b px-4 py-2 flex items-center gap-2 text-sm ${
-                  repoInitError
-                    ? 'bg-warning/20 border-warning/30 text-warning-content'
-                    : isInitializingRepo
-                    ? 'bg-info/20 border-info/30 text-info-content'
-                    : 'bg-info/20 border-info/30 text-info-content'
-                }`}>
-                  {isInitializingRepo ? (
-                    <>
-                      <span className="loading loading-spinner loading-xs"></span>
-                      <span>Cloning repository to enable editing...</span>
-                    </>
-                  ) : repoInitError ? (
-                    <>
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                      <span>Viewing files from GitHub (read-only). Repository sync failed.</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
-                      </svg>
-                      <span>Viewing files from GitHub (read-only). Run a task with AI to enable editing.</span>
-                    </>
-                  )}
-                </div>
-              )}
               <div className="flex-1 flex min-h-0">
                 {/* Line Numbers - using a single pre element for better performance */}
                 <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
@@ -1982,15 +1752,13 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                 <textarea
                   ref={textareaRef}
                   value={fileContent}
-                  readOnly={isGitHubSource}
                   onChange={(e) => {
-                    if (isGitHubSource) return; // Prevent changes when in read-only mode
                     const target = e.target as HTMLTextAreaElement;
                     handleContentChange(target.value, target.selectionStart, target.selectionEnd);
                   }}
                   onKeyDown={(e) => {
                     // Handle Tab key for indentation
-                    if (e.key === 'Tab' && !isGitHubSource) {
+                    if (e.key === 'Tab') {
                       e.preventDefault();
                       const target = e.target as HTMLTextAreaElement;
                       const start = target.selectionStart;
@@ -1999,7 +1767,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                       handleContentChange(newValue, start + 2, start + 2);
                     }
                   }}
-                  className={`flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none ${isGitHubSource ? 'cursor-default opacity-90' : ''}`}
+                  className="flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none"
                   spellCheck={false}
                   autoComplete="off"
                   autoCorrect="off"
@@ -2007,7 +1775,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                   style={{
                     tabSize: 2,
                     MozTabSize: 2,
-                    caretColor: isGitHubSource ? 'transparent' : 'auto',
                   }}
                 />
               </div>
