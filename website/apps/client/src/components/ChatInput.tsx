@@ -687,7 +687,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
       )}
 
       {/* Multi-line input with controls and submit button inside */}
-      <div className="relative">
+      <div className="flex flex-col border border-base-300 rounded-lg shadow-lg overflow-hidden">
         <textarea
           ref={textareaRef}
           value={input}
@@ -695,7 +695,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           onPaste={handlePaste}
           placeholder="Describe what you want to code... (paste images, use voice input, or attach files)"
           rows={centered ? 6 : 4}
-          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-36 p-4 pb-16 ${centered ? 'text-lg' : 'text-base'} ${effectiveIsExecuting ? 'border-warning' : ''}`}
+          className={`w-full resize-none p-4 border-none outline-none bg-base-100 ${centered ? 'text-lg' : 'text-base'} ${effectiveIsExecuting ? 'border-warning' : ''}`}
           disabled={!user?.claudeAuth}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -725,8 +725,9 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           }}
         />
 
-        {/* Controls inside the box */}
-        <div className="absolute bottom-3 left-3 right-14 flex flex-wrap gap-2 items-center">
+        {/* Controls bar - separate from textarea */}
+        <div className="flex items-center justify-between bg-base-100 border-t border-base-300 px-3 py-2">
+          <div className="flex gap-2 items-center overflow-x-auto">
           {!hideRepoSelection && hasGithubAuth && (
             <>
               {isLoadingRepos ? (
@@ -742,14 +743,14 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                   {effectiveIsExecuting || isLocked ? (
                     /* Show as text labels when executing or locked */
                     <>
-                      <span className="badge badge-ghost text-xs">
+                      <span className="badge badge-ghost text-xs flex-shrink-0">
                         {selectedRepo
                           ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName ||
                             'No repository'
                           : 'No repository'}
                       </span>
                       {baseBranch && (
-                        <span className="badge badge-ghost text-xs">
+                        <span className="badge badge-ghost text-xs flex-shrink-0">
                           {baseBranch}
                         </span>
                       )}
@@ -758,7 +759,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                     /* Show as editable controls when not executing and not locked */
                     <>
                       {/* Custom dropdown with search */}
-                      <div className="relative repo-dropdown">
+                      <div className="relative repo-dropdown flex-shrink-0">
                         <button
                           type="button"
                           onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
@@ -836,7 +837,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                       {selectedRepo && (
                         <>
                           {/* Base Branch */}
-                          <div className="relative branch-dropdown">
+                          <div className="relative branch-dropdown flex-shrink-0">
                             <button
                               type="button"
                               onClick={() => {
@@ -918,7 +919,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
           {/* Status indicators - show if not configured */}
           {(!hasGithubAuth || !hasClaudeAuth) && (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 text-xs flex-shrink-0">
               {!hasGithubAuth && (
                 <Link
                   to="/settings"
@@ -945,10 +946,10 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               )}
             </div>
           )}
-        </div>
+          </div>
 
-        {/* Voice, Image attach, and Submit buttons inside textarea */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-1">
+          {/* Voice, Image attach, and Submit buttons */}
+          <div className="flex items-center gap-1 flex-shrink-0">
           {/* Hidden file input */}
           <input
             ref={fileInputRef}
@@ -1066,6 +1067,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               </svg>
             )}
           </button>
+          </div>
         </div>
       </div>
     </form>
