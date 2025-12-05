@@ -687,7 +687,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
       )}
 
       {/* Multi-line input with controls and submit button inside */}
-      <div className="flex flex-col border border-base-300 rounded-lg shadow-lg overflow-hidden">
+      <div className="flex flex-col border border-base-300 rounded-lg shadow-lg">
         <textarea
           ref={textareaRef}
           value={input}
