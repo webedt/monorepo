@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ExecuteRequest, SSEEvent, SessionMetadata, UserRequestContent } from './types';
 import { GitHubClient } from './clients/githubClient';
+import { GitHubWorkerClient } from './clients/githubWorkerClient';
 import { DBClient } from './clients/dbClient';
 import { StorageClient } from './storage/storageClient';
 import { ProviderFactory } from './providers/ProviderFactory';
@@ -24,6 +25,7 @@ const WORKER_CALLBACK_SECRET = process.env.WORKER_CALLBACK_SECRET;
  */
 export class Orchestrator {
   private githubClient: GitHubClient;
+  private githubWorkerClient: GitHubWorkerClient;
   private dbClient: DBClient;
   private sessionStorage: StorageClient;
   private tmpDir: string;
@@ -31,6 +33,7 @@ export class Orchestrator {
   constructor(tmpDir: string, dbBaseUrl?: string) {
     this.tmpDir = tmpDir || '/tmp';
     this.githubClient = new GitHubClient();
+    this.githubWorkerClient = new GitHubWorkerClient();
     this.dbClient = new DBClient(dbBaseUrl);
     this.sessionStorage = new StorageClient();
   }
@@ -132,7 +135,7 @@ export class Orchestrator {
 
   /**
    * Initialize a repository for a session without running AI
-   * This clones the repo and uploads to storage, making files immediately available
+   * Delegates to GitHub Worker for cloning and storage upload
    */
   async initializeRepository(options: {
     websiteSessionId: string;
@@ -148,80 +151,43 @@ export class Orchestrator {
   }> {
     const { websiteSessionId, github } = options;
 
-    logger.info('Initializing repository for session', {
+    logger.info('Initializing repository for session via GitHub Worker', {
       component: 'Orchestrator',
       websiteSessionId,
       repoUrl: github.repoUrl,
       branch: github.branch
     });
 
-    // Create session directory
-    const sessionRoot = path.join(this.tmpDir, `session-${websiteSessionId}`);
-    const workspacePath = path.join(sessionRoot, 'workspace');
-
-    // Clean up any existing session directory
-    if (fs.existsSync(sessionRoot)) {
-      fs.rmSync(sessionRoot, { recursive: true, force: true });
-    }
-    fs.mkdirSync(workspacePath, { recursive: true });
-
-    // Clone the repository
-    const pullResult = await this.githubClient.pullRepository({
-      repoUrl: github.repoUrl,
-      branch: github.branch,
-      accessToken: github.accessToken,
-      workspaceRoot: workspacePath
-    });
-
-    // Extract relative path for metadata
-    const repoName = pullResult.targetPath.replace(workspacePath + '/', '');
-
-    // Create session metadata
-    const metadata: SessionMetadata = {
-      sessionId: websiteSessionId,
-      createdAt: new Date().toISOString(),
-      lastModified: new Date().toISOString(),
-      github: {
+    // Delegate to GitHub Worker
+    const result = await this.githubWorkerClient.cloneRepository(
+      {
+        sessionId: websiteSessionId,
         repoUrl: github.repoUrl,
-        baseBranch: pullResult.branch,
-        clonedPath: repoName
+        branch: github.branch,
+        accessToken: github.accessToken
+      },
+      (event) => {
+        logger.info('GitHub Worker event', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          event: event.type,
+          stage: event.stage,
+          message: event.message
+        });
       }
-    };
+    );
 
-    // Save metadata
-    this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
-
-    // Upload to storage-worker
-    logger.info('Uploading initialized session to storage', {
+    logger.info('Repository initialized successfully via GitHub Worker', {
       component: 'Orchestrator',
       websiteSessionId,
-      sessionRoot
-    });
-
-    await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
-
-    // Clean up local session directory
-    try {
-      fs.rmSync(sessionRoot, { recursive: true, force: true });
-    } catch (cleanupError) {
-      logger.warn('Failed to cleanup local session directory', {
-        component: 'Orchestrator',
-        websiteSessionId,
-        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
-      });
-    }
-
-    logger.info('Repository initialized successfully', {
-      component: 'Orchestrator',
-      websiteSessionId,
-      clonedPath: repoName,
-      branch: pullResult.branch
+      clonedPath: result.clonedPath,
+      branch: result.branch
     });
 
     return {
-      clonedPath: repoName,
-      branch: pullResult.branch,
-      wasCloned: pullResult.wasCloned
+      clonedPath: result.clonedPath,
+      branch: result.branch,
+      wasCloned: result.wasCloned
     };
   }
 
