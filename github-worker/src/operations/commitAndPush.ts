@@ -61,7 +61,8 @@ export async function commitAndPush(
       throw new Error('Session has no cloned repository');
     }
 
-    const workspacePath = path.join(sessionRoot, metadata.github.clonedPath);
+    // Note: clonedPath is relative to workspace/ (e.g., "hello-world")
+    const workspacePath = path.join(sessionRoot, 'workspace', metadata.github.clonedPath);
     const gitHelper = new GitHelper(workspacePath);
 
     // Step 4: Check if it's a git repo

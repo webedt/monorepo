@@ -61,7 +61,8 @@ export async function createBranch(
       throw new Error('Session has no cloned repository');
     }
 
-    const workspacePath = path.join(sessionRoot, metadata.github.clonedPath);
+    // Note: clonedPath is relative to workspace/ (e.g., "hello-world")
+    const workspacePath = path.join(sessionRoot, 'workspace', metadata.github.clonedPath);
     const { owner, repo } = parseRepoUrl(repoUrl);
 
     // Step 4: Generate session title and branch name using LLM
