@@ -687,7 +687,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
       )}
 
       {/* Multi-line input with controls and submit button inside */}
-      <div className="relative">
+      <div className="flex flex-col border border-base-300 rounded-lg shadow-lg overflow-hidden">
         <textarea
           ref={textareaRef}
           value={input}
@@ -695,7 +695,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           onPaste={handlePaste}
           placeholder="Describe what you want to code... (paste images, use voice input, or attach files)"
           rows={centered ? 6 : 4}
-          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-14 p-4 pb-14 ${centered ? 'text-lg' : 'text-base'} ${effectiveIsExecuting ? 'border-warning' : ''}`}
+          className={`w-full resize-none p-4 border-none outline-none bg-base-100 ${centered ? 'text-lg' : 'text-base'} ${effectiveIsExecuting ? 'border-warning' : ''}`}
           disabled={!user?.claudeAuth}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -725,8 +725,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           }}
         />
 
-        {/* Controls inside the box */}
-        <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between bg-base-100 rounded-b-lg px-2 py-1.5">
+        {/* Controls bar - separate from textarea */}
+        <div className="flex items-center justify-between bg-base-100 border-t border-base-300 px-3 py-2">
           <div className="flex gap-2 items-center overflow-x-auto">
           {!hideRepoSelection && hasGithubAuth && (
             <>
