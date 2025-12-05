@@ -727,7 +727,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
         {/* Controls bar - separate from textarea */}
         <div className="flex items-center justify-between bg-base-100 border-t border-base-300 px-3 py-2">
-          <div className="flex gap-2 items-center overflow-x-auto">
+          <div className="flex gap-2 items-center flex-wrap">
           {!hideRepoSelection && hasGithubAuth && (
             <>
               {isLoadingRepos ? (
