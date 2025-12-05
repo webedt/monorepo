@@ -53,13 +53,20 @@ export interface CommitAndPushResult {
 }
 
 export interface SSEEvent {
-  type: 'progress' | 'completed' | 'error';
+  type: 'progress' | 'completed' | 'error' | 'branch_created' | 'session_name' | 'commit_progress';
   stage?: string;
   message?: string;
   data?: any;
   error?: string;
   code?: string;
   timestamp: string;
+  // Additional fields from github-worker events
+  branchName?: string;
+  baseBranch?: string;
+  sessionPath?: string;
+  sessionName?: string;
+  branch?: string;
+  commitHash?: string;
 }
 
 type SSEEventCallback = (event: SSEEvent) => void;
