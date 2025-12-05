@@ -402,7 +402,26 @@ export class StorageClient {
       if (entry.isDirectory()) {
         await this.copyDirectory(srcPath, destPath);
       } else {
-        await fs.promises.copyFile(srcPath, destPath);
+        // Remove existing destination file first to avoid permission issues
+        try {
+          await fs.promises.unlink(destPath);
+        } catch {
+          // File doesn't exist, that's fine
+        }
+
+        // Try copyFile first, fall back to read/write if permission denied
+        // (handles git pack files with restrictive permissions)
+        try {
+          await fs.promises.copyFile(srcPath, destPath);
+        } catch (err: any) {
+          if (err.code === 'EACCES') {
+            // Permission denied - read file contents and write to destination
+            const content = await fs.promises.readFile(srcPath);
+            await fs.promises.writeFile(destPath, content);
+          } else {
+            throw err;
+          }
+        }
       }
     }
   }
