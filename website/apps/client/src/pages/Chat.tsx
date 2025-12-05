@@ -124,25 +124,23 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
 
   // Handle git commit and pull progress events
   // These events may have nested data structure: { data: { message: "..." }, type: "...", timestamp: "..." }
+  // Note: Emojis are now embedded in the message by ai-coding-worker's emojiMapper
   if (eventType === 'commit_progress') {
     const message = data.data?.message || data.message;
     content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-    eventLabel = '📤';
     messageType = 'system';
   } else if (eventType === 'github_pull_progress') {
     const message = data.data?.message || data.message;
     content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-    eventLabel = '⬇️';
     messageType = 'system';
   }
   // Extract content from different event types
   else if (data.type === 'message' && data.message) {
     content = data.message;
-    eventLabel = '💬';
     messageType = 'system';
   } else if (data.type === 'session_name' && data.sessionName) {
-    content = `Session: ${data.sessionName}`;
-    eventLabel = '📝';
+    // Use message from backend (has emoji from emojiMapper) or construct our own
+    content = data.message || `📝 Session: ${data.sessionName}`;
     messageType = 'system';
   } else if (data.type === 'assistant_message' && data.data) {
     const msgData = data.data;
@@ -1104,27 +1102,25 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
       // Handle git commit and pull progress events
       // These events may have nested data structure: { data: { message: "..." }, type: "...", timestamp: "..." }
+      // Note: Emojis are now embedded in the message by ai-coding-worker's emojiMapper
       if (eventType === 'commit_progress') {
         const message = data.data?.message || data.message;
         content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-        eventLabel = '📤';
         messageType = 'system';
       } else if (eventType === 'github_pull_progress') {
         const message = data.data?.message || data.message;
         content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-        eventLabel = '⬇️';
         messageType = 'system';
       }
       // Extract content from different event types (matching server-side logic)
       else if (data.type === 'message' && data.message) {
         content = data.message;
-        eventLabel = '💬';
         messageType = 'system';
       } else if (data.type === 'session_name' && data.sessionName) {
         // Session name - auto-save if not manually edited
         const newTitle = data.sessionName;
-        content = `Session: ${newTitle}`;
-        eventLabel = '📝';
+        // Use message from backend (has emoji from emojiMapper) or construct our own
+        content = data.message || `📝 Session: ${newTitle}`;
         messageType = 'system';
 
         // Auto-update the session title if:
@@ -1146,8 +1142,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       } else if (data.type === 'branch_created' && data.branchName) {
         // Branch created - update session with the new branch name
         const newBranch = data.branchName;
-        content = `Branch created: ${newBranch}`;
-        eventLabel = '🌿';
+        // Use message from backend (has emoji from emojiMapper) or construct our own
+        content = data.message || `🌿 Branch created: ${newBranch}`;
         messageType = 'system';
 
         // Update the session's branch in the database

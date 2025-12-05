@@ -243,12 +243,13 @@ export async function initSession(
     storageClient.saveMetadata(sessionRoot, metadata!);
 
     // Send branch_created event (forwarded by ai-coding-worker to website)
+    // Note: Emojis are added by ai-coding-worker's emojiMapper
     sendEvent(res, {
       type: 'branch_created',
       branchName: branchName,
       baseBranch: baseBranch,
       sessionPath: sessionPath,
-      message: `🌿 Branch created: ${branchName}`
+      message: `Branch created: ${branchName}`
     });
 
     // Send session_name event (forwarded by ai-coding-worker to website)
@@ -256,7 +257,7 @@ export async function initSession(
       type: 'session_name',
       sessionName: title,
       branchName: branchName,
-      message: `📝 Session: ${title}`
+      message: `Session: ${title}`
     });
 
     // Step 8: Upload to storage
