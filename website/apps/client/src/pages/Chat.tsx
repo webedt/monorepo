@@ -93,6 +93,19 @@ function clearDraft(sessionId: string) {
   }
 }
 
+// Helper to format source indicator
+function formatSourceLabel(source?: string): string {
+  if (!source) return '';
+  const sourceMap: Record<string, string> = {
+    'github-worker': '[github-worker]',
+    'ai-coding-worker': '[ai-coding-worker]',
+    'storage-worker': '[storage-worker]',
+    'claude-agent-sdk': '[claude]',
+    'codex-sdk': '[codex]',
+  };
+  return sourceMap[source] || `[${source}]`;
+}
+
 // Helper to convert raw SSE events from database to displayable messages
 function convertEventToMessage(event: DbEvent, sessionId: string): Message | null {
   const eventType = event.eventType;
@@ -102,6 +115,7 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   let messageType: 'assistant' | 'system' = 'assistant';
   let eventLabel = '';
   let model: string | undefined = undefined;
+  let source: string | undefined = data?.source;
 
   // Skip if data is undefined or null
   if (!data) {
@@ -188,11 +202,14 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
           if (toolMessages.length > 0) {
             content = toolMessages.join('\n');
             messageType = 'system';
+            // Add source label if present
+            const toolSourceLabel = formatSourceLabel(source);
+            const toolFinalContent = toolSourceLabel ? `${toolSourceLabel} ${content}` : content;
             return {
               id: event.id,
               chatSessionId: sessionId,
               type: messageType,
-              content: content,
+              content: toolFinalContent,
               timestamp: new Date(event.timestamp),
               model,
             };
@@ -251,8 +268,13 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
     return null;
   }
 
-  // Add event label if present (inline emoji before message)
-  const finalContent = eventLabel ? `${eventLabel} ${content}` : content;
+  // Add source label and event label if present
+  const sourceLabel = formatSourceLabel(source);
+  let finalContent = content;
+  if (sourceLabel || eventLabel) {
+    const prefix = [sourceLabel, eventLabel].filter(Boolean).join(' ');
+    finalContent = `${prefix} ${content}`;
+  }
 
   return {
     id: event.id,
@@ -1072,6 +1094,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       let messageType: 'assistant' | 'system' = 'assistant';
       let eventLabel = '';
       let model: string | undefined = undefined;
+      const source: string | undefined = data?.source;
 
       // Skip if data is undefined or null
       if (!data) {
@@ -1177,6 +1200,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
               if (toolMessages.length > 0) {
                 const toolContent = toolMessages.join('\n');
+                // Add source label if present
+                const toolSourceLabel = formatSourceLabel(source);
+                const toolFinalContent = toolSourceLabel ? `${toolSourceLabel} ${toolContent}` : toolContent;
                 // Create and add the tool message immediately
                 messageIdCounter.current += 1;
                 setMessages((prev) => [
@@ -1185,7 +1211,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                     id: Date.now() + messageIdCounter.current,
                     chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
                     type: 'system',
-                    content: toolContent,
+                    content: toolFinalContent,
                     timestamp: new Date(),
                     model,
                   },
@@ -1253,8 +1279,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         return;
       }
 
-      // Add event label if present (inline emoji before message)
-      const finalContent = eventLabel ? `${eventLabel} ${content}` : content;
+      // Add source label and event label if present
+      const sourceLabel = formatSourceLabel(source);
+      let finalContent = content;
+      if (sourceLabel || eventLabel) {
+        const prefix = [sourceLabel, eventLabel].filter(Boolean).join(' ');
+        finalContent = `${prefix} ${content}`;
+      }
 
       messageIdCounter.current += 1;
       setMessages((prev) => [

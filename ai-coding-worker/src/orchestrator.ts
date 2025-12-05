@@ -273,6 +273,11 @@ export class Orchestrator {
         return;
       }
 
+      // Add source if not already present
+      if (!event.source) {
+        event.source = 'ai-coding-worker';
+      }
+
       // Write to response stream and check backpressure
       const canWrite = res.write(`data: ${JSON.stringify(event)}\n\n`);
       eventsSent++;
@@ -803,8 +808,17 @@ export class Orchestrator {
           // Forward provider events to SSE stream
           // Enrich events with relative paths for better display on frontend
           const enrichedEvent = enrichEventWithRelativePaths(event, workspacePath!);
+
+          // Determine source based on provider
+          const providerSource = request.codingAssistantProvider === 'ClaudeAgentSDK'
+            ? 'claude-agent-sdk'
+            : request.codingAssistantProvider === 'Codex'
+              ? 'codex-sdk'
+              : 'ai-coding-worker';
+
           sendEvent({
             ...enrichedEvent,
+            source: providerSource as any,
             timestamp: new Date().toISOString()
           });
         }

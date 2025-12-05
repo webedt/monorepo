@@ -12,7 +12,7 @@ import { logger } from '../utils/logger';
  * Send SSE event to client
  */
 function sendEvent(res: Response, event: any): void {
-  res.write(`data: ${JSON.stringify({ ...event, timestamp: new Date().toISOString() })}\n\n`);
+  res.write(`data: ${JSON.stringify({ ...event, source: 'github-worker', timestamp: new Date().toISOString() })}\n\n`);
 }
 
 /**

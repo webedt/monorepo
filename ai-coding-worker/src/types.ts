@@ -67,9 +67,12 @@ export interface ExecuteRequest {
 }
 
 // SSE Event types
+export type EventSource = 'ai-coding-worker' | 'github-worker' | 'storage-worker' | 'claude-agent-sdk' | 'codex-sdk';
+
 export interface SSEEvent {
   type: string;
   timestamp: string;
+  source?: EventSource;
   [key: string]: any;
 }
 

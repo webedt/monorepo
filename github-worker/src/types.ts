@@ -62,17 +62,20 @@ export interface CommitAndPushResult {
 // ============================================================================
 
 export type SSEEventType = 'progress' | 'completed' | 'error';
+export type EventSource = 'ai-coding-worker' | 'github-worker' | 'storage-worker' | 'claude-agent-sdk' | 'codex-sdk';
 
 export interface ProgressEvent {
   type: 'progress';
   stage: string;
   message: string;
+  source: EventSource;
   timestamp: string;
 }
 
 export interface CompletedEvent<T = any> {
   type: 'completed';
   data: T;
+  source: EventSource;
   timestamp: string;
 }
 
@@ -80,6 +83,7 @@ export interface ErrorEvent {
   type: 'error';
   error: string;
   code: string;
+  source: EventSource;
   timestamp: string;
 }
 
