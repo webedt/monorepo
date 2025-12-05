@@ -1,7 +1,10 @@
-import { Codex } from '@openai/codex-sdk';
 import { BaseProvider, ProviderOptions, ProviderStreamEvent } from './BaseProvider';
 import { CredentialManager } from '../utils/credentialManager';
 import { UserRequestContent, TextBlock } from '../types';
+
+// Dynamic import for ESM-only @openai/codex-sdk package
+// The SDK is ESM-only but we compile to CommonJS, so we use dynamic import
+type CodexType = import('@openai/codex-sdk').Codex;
 
 /**
  * Codex provider for OpenAI Codex CLI integration
@@ -11,7 +14,7 @@ import { UserRequestContent, TextBlock } from '../types';
  */
 export class CodexProvider extends BaseProvider {
   private model?: string;
-  private codex?: Codex;
+  private codex?: CodexType;
 
   constructor(authentication: string, workspace: string, model?: string, isResuming?: boolean) {
     super(authentication, workspace);
@@ -37,8 +40,9 @@ export class CodexProvider extends BaseProvider {
     });
 
     try {
-      // Initialize Codex client
+      // Initialize Codex client using dynamic import (ESM-only package)
       // The SDK reads authentication from environment variables or config files
+      const { Codex } = await import('@openai/codex-sdk');
       this.codex = new Codex();
 
       // Convert structured content to plain text (Codex doesn't support images yet)
