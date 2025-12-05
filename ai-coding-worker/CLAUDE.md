@@ -101,6 +101,7 @@ docker stack rm unified-worker-stack
    - `DBClient` - Stub for database persistence
    - `CredentialManager` - Writes provider credentials to filesystem
    - `LLMHelper` - Uses Claude Agent SDK to generate session names and commit messages
+   - `emojiMapper` - Centralized emoji assignment for SSE messages based on stage/type/source
 
 ### Request Flow
 
@@ -115,19 +116,15 @@ orchestrator.ts: Step 1.5 - Write credentials early (for LLM naming)
     ↓
 SessionManager: Step 2 - Download/create session workspace
     ↓
-GitHubClient: Step 4 - Clone repository (if specified)
-    ↓
-LLMHelper: Step 4.5 - Generate session title & branch name (new sessions only)
-    ↓
-GitHelper: Create branch (webedt/{name}-{sessionSuffix})
+GitHub Worker: Step 4 - Call /init-session (clone + create branch in single call)
     ↓
 ProviderFactory: Step 5 - Create provider instance
     ↓
 Provider: Step 6 - Execute user request (streaming)
     ↓
-SSE events → Client
+SSE events → Client (with emojis applied by emojiMapper)
     ↓
-GitHelper: Step 7 - Auto-commit & push changes (if autoCommit enabled)
+GitHub Worker: Step 7 - Call /commit-and-push (if autoCommit enabled)
     ↓
 SessionManager: Step 8 - Upload session to storage
     ↓
@@ -246,9 +243,44 @@ data: {"type": "assistant_message", "data": {...}, "source": "claude-agent-sdk",
 data: {"type": "completed", "sessionId": "...", "duration": 12345, "source": "ai-coding-worker", "timestamp": "..."}
 ```
 
+### Emoji Mapper (Centralized Emoji Assignment)
+
+The `emojiMapper` utility centralizes all emoji assignment for SSE messages. Sub-workers (github-worker, storage-worker) send semantic stages without emojis, and ai-coding-worker applies appropriate emojis before forwarding to the frontend.
+
+**How it works:**
+1. Sub-workers send events with `stage`, `type`, and `source` fields (no emojis in messages)
+2. `orchestrator.ts` imports `getEventEmoji()` from `emojiMapper`
+3. Before forwarding events, emojis are prepended to the message based on priority:
+   - Stage-specific emoji (most specific, e.g., `cloning` → 📥)
+   - Type-specific emoji (fallback, e.g., `branch_created` → 🌿)
+   - Source-specific emoji (default, e.g., `github-worker` → 🐙)
+
+**Stage Emoji Mapping:**
+| Stage | Emoji | Description |
+|-------|-------|-------------|
+| `preparing` | 🔧 | Preparing credentials/initialization |
+| `downloading_session` | 📥 | Downloading from storage |
+| `checking_session` | 🔍 | Checking for existing session |
+| `session_found` | 📂 | Existing session found |
+| `new_session` | 🆕 | Creating new session |
+| `cloning` | 📥 | Cloning repository |
+| `cloned` | ✅ | Clone complete |
+| `generating_name` | 🤖 | LLM generating names |
+| `name_generated` | ✨ | Name generated |
+| `creating_branch` | 🌿 | Creating git branch |
+| `pushing` | 📤 | Pushing to remote |
+| `uploading` | 📤 | Uploading to storage |
+| `analyzing` | 🔍 | Analyzing changes |
+| `committing` | 💾 | Creating commit |
+| `error` | ❌ | Operation failed |
+
+**Key files:**
+- [emojiMapper.ts](src/utils/emojiMapper.ts) - Emoji mapping utility
+- [orchestrator.ts](src/orchestrator.ts) - Applies emojis in `sendEvent()`
+
 ### LLM-Based Session Naming
 
-For new sessions, the worker generates a human-readable session title and git branch name using the Claude Agent SDK (Haiku model). This happens in Step 4.5 of the orchestrator flow.
+For new sessions, the worker generates a human-readable session title and git branch name using the Claude Agent SDK (Haiku model). This happens via the GitHub Worker's `/init-session` endpoint.
 
 **How it works:**
 1. Credentials are written to `~/.claude/.credentials.json` (Step 1.5)

@@ -32,6 +32,32 @@ Clone a GitHub repository into a session.
 }
 ```
 
+### POST /init-session
+Combined operation: clone repository AND create branch with LLM-generated name in a single call. This avoids 429 busy responses that can occur when calling `/clone-repository` and `/create-branch` sequentially.
+
+```json
+{
+  "sessionId": "abc123",
+  "repoUrl": "https://github.com/owner/repo",
+  "branch": "main",
+  "userRequest": "Add dark mode toggle",
+  "claudeCredentials": "...",
+  "githubAccessToken": "ghp_xxx"
+}
+```
+
+Response (via SSE completed event):
+```json
+{
+  "clonedPath": "repo",
+  "branch": "main",
+  "wasCloned": true,
+  "branchName": "webedt/add-dark-mode-abc12345",
+  "sessionTitle": "Add Dark Mode Toggle",
+  "sessionPath": "owner__repo__webedt-add-dark-mode-abc12345"
+}
+```
+
 ### POST /create-branch
 Create a new branch with LLM-generated name.
 
@@ -175,6 +201,18 @@ data: {"type": "error", "error": "Error message", "code": "error_code", "source"
 - `cloned` - Clone complete
 - `uploading` - Uploading to storage
 
+**Init Session (clone + create branch):**
+- `preparing` - Preparing credentials
+- `checking_session` - Checking for existing session
+- `session_found` / `new_session` - Session status
+- `cloning` - Cloning repository
+- `cloned` - Clone complete
+- `generating_name` - LLM generating session title and branch name
+- `name_generated` - Name generated
+- `creating_branch` - Creating git branch
+- `pushing` - Pushing to remote
+- `uploading` - Uploading to storage
+
 **Create Branch:**
 - `preparing` - Preparing credentials
 - `downloading_session` - Downloading session
@@ -276,6 +314,7 @@ github-worker/
     ├── types.ts               # Request/response types
     ├── operations/
     │   ├── cloneRepository.ts # Clone/pull repository
+    │   ├── initSession.ts     # Combined clone + create branch
     │   ├── createBranch.ts    # Create branch with LLM naming
     │   ├── commitAndPush.ts   # Commit and push changes
     │   └── pullRequest.ts     # PR operations (create, merge, auto-PR)
@@ -307,8 +346,8 @@ Calls GitHub Worker for:
 
 ### AI Coding Worker
 Calls GitHub Worker for:
-- Initial repository clone (`POST /clone-repository`)
-- Branch creation with session naming (`POST /create-branch`)
+- Initialize new sessions (`POST /init-session`) - combines clone + branch creation
+- Initial repository clone (`POST /clone-repository`) - fallback for resumed sessions
 - Auto-commit after AI execution (`POST /commit-and-push`)
 
 ### Collaborative Session Worker

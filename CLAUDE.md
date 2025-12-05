@@ -264,18 +264,19 @@ await githubApi.createPR(...);
 ```
 1. User sends prompt → Website
 2. Website → AI Coding Worker: POST /execute
-3. AI Coding Worker → GitHub Worker: POST /clone-repository
-   └── GitHub Worker → Storage Worker: Download existing session (if any)
-   └── GitHub Worker → Storage Worker: Upload cloned repo
-4. AI Coding Worker → GitHub Worker: POST /create-branch
-   └── Uses LLM to generate branch name from user request
-5. AI Coding Worker → Claude Agent SDK: Execute user prompt
+3. AI Coding Worker → GitHub Worker: POST /init-session
+   └── Combines clone + branch creation in one operation
+   └── Uses LLM to generate session title and branch name
+   └── GitHub Worker → Storage Worker: Upload session
+4. AI Coding Worker → Claude Agent SDK: Execute user prompt
    └── Streams SSE events back to Website
-6. AI Coding Worker → GitHub Worker: POST /commit-and-push
+5. AI Coding Worker → GitHub Worker: POST /commit-and-push
    └── Uses LLM to generate commit message from diff
-7. AI Coding Worker → Storage Worker: Upload final session state
-8. Worker exits (ephemeral model)
+6. AI Coding Worker → Storage Worker: Upload final session state
+7. Worker exits (ephemeral model)
 ```
+
+**Note:** The `/init-session` endpoint combines `/clone-repository` and `/create-branch` into a single call, avoiding the 429 busy response that could occur when calling two endpoints sequentially.
 
 ### SSE Event Flow with Source Indicators
 
@@ -459,8 +460,12 @@ docker-compose logs -f
 | `/health` | GET | Health check with worker status |
 | `/status` | GET | Worker idle/busy status |
 | `/clone-repository` | POST | Clone repo into session (SSE) |
+| `/init-session` | POST | Clone + create branch combined (SSE) |
 | `/create-branch` | POST | Create branch with LLM naming (SSE) |
 | `/commit-and-push` | POST | Commit and push changes (SSE) |
+| `/create-pull-request` | POST | Create PR on GitHub (SSE) |
+| `/merge-pull-request` | POST | Merge existing PR (SSE) |
+| `/auto-pull-request` | POST | Full auto-merge workflow (SSE) |
 
 ### Storage Worker (internal)
 
@@ -608,4 +613,4 @@ When working across multiple projects:
 
 ---
 
-*Documentation last updated: 2025-12-04*
+*Documentation last updated: 2025-12-05*
