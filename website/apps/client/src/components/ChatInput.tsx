@@ -695,7 +695,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           onPaste={handlePaste}
           placeholder="Describe what you want to code... (paste images, use voice input, or attach files)"
           rows={centered ? 6 : 4}
-          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-36 p-4 pb-12 ${centered ? 'text-lg' : 'text-base'} ${effectiveIsExecuting ? 'border-warning' : ''}`}
+          className={`textarea textarea-bordered w-full shadow-lg resize-none pr-14 p-4 pb-14 ${centered ? 'text-lg' : 'text-base'} ${effectiveIsExecuting ? 'border-warning' : ''}`}
           disabled={!user?.claudeAuth}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -726,7 +726,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         />
 
         {/* Controls inside the box */}
-        <div className="absolute bottom-0 left-0 right-14 flex gap-2 items-center overflow-x-auto bg-base-100 px-3 py-2 rounded-b-lg">
+        <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between bg-base-100 rounded-b-lg px-2 py-1.5">
+          <div className="flex gap-2 items-center overflow-x-auto">
           {!hideRepoSelection && hasGithubAuth && (
             <>
               {isLoadingRepos ? (
@@ -945,10 +946,10 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               )}
             </div>
           )}
-        </div>
+          </div>
 
-        {/* Voice, Image attach, and Submit buttons inside textarea */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-1">
+          {/* Voice, Image attach, and Submit buttons */}
+          <div className="flex items-center gap-1 flex-shrink-0">
           {/* Hidden file input */}
           <input
             ref={fileInputRef}
@@ -1066,6 +1067,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               </svg>
             )}
           </button>
+          </div>
         </div>
       </div>
     </form>
