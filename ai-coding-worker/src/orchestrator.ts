@@ -453,18 +453,12 @@ export class Orchestrator {
           }
 
           // Update workspace path to cloned repo
-          workspacePath = path.join(sessionRoot, cloneResult.clonedPath);
+          // Note: github-worker stores repos under sessionRoot/workspace/{repoName}
+          workspacePath = path.join(sessionRoot, 'workspace', cloneResult.clonedPath);
           baseBranchForSession = cloneResult.branch;
 
-          sendEvent({
-            type: 'github_pull_progress',
-            data: {
-              type: 'completed',
-              message: cloneResult.wasCloned ? '⬇️ Repository cloned successfully' : '⬇️ Repository updated successfully',
-              targetPath: workspacePath
-            },
-            timestamp: new Date().toISOString()
-          });
+          // Note: github-worker already sends progress events with emojis via the callback
+          // This is just an internal completion event for tracking, not user-visible
 
           logger.info('Repository cloned via GitHub Worker', {
             component: 'Orchestrator',
