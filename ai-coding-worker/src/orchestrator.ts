@@ -2,7 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ExecuteRequest, SSEEvent, SessionMetadata, UserRequestContent } from './types';
-import { GitHubClient } from './clients/githubClient';
 import { GitHubWorkerClient } from './clients/githubWorkerClient';
 import { DBClient } from './clients/dbClient';
 import { StorageClient } from './storage/storageClient';
@@ -23,7 +22,6 @@ const WORKER_CALLBACK_SECRET = process.env.WORKER_CALLBACK_SECRET;
  * Uses storage-worker for session storage - downloads session at start, uploads at end
  */
 export class Orchestrator {
-  private githubClient: GitHubClient;
   private githubWorkerClient: GitHubWorkerClient;
   private dbClient: DBClient;
   private sessionStorage: StorageClient;
@@ -31,7 +29,6 @@ export class Orchestrator {
 
   constructor(tmpDir: string, dbBaseUrl?: string) {
     this.tmpDir = tmpDir || '/tmp';
-    this.githubClient = new GitHubClient();
     this.githubWorkerClient = new GitHubWorkerClient();
     this.dbClient = new DBClient(dbBaseUrl);
     this.sessionStorage = new StorageClient();
@@ -417,53 +414,64 @@ export class Orchestrator {
             workspacePath
           });
         } else {
-          // Repo doesn't exist - clone/pull it
+          // Repo doesn't exist - clone via GitHub Worker
           sendEvent({
             type: 'message',
-            message: `Pulling repository: ${request.github.repoUrl}`,
+            message: `Cloning repository: ${request.github.repoUrl}`,
             timestamp: new Date().toISOString()
           });
 
-          const pullResult = await this.githubClient.pullRepository({
-            repoUrl: request.github.repoUrl,
-            branch: request.github.branch,
-            directory: request.github.directory,
-            accessToken: request.github.accessToken,
-            workspaceRoot: workspacePath
-          });
+          // Call GitHub Worker to clone the repository
+          const cloneResult = await this.githubWorkerClient.cloneRepository(
+            {
+              sessionId: websiteSessionId,
+              repoUrl: request.github.repoUrl,
+              branch: request.github.branch,
+              directory: request.github.directory,
+              accessToken: request.github.accessToken!
+            },
+            (event) => {
+              // Forward progress events from github-worker
+              if (event.type === 'progress') {
+                sendEvent({
+                  type: 'message',
+                  message: event.message,
+                  source: 'github-worker',
+                  timestamp: event.timestamp
+                });
+              }
+            }
+          );
 
-          // Extract relative path for metadata
-          const repoName = pullResult.targetPath.replace(workspacePath + '/', '');
+          // Download the session from storage (github-worker uploaded it)
+          await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
 
-          // Update metadata with GitHub info
-          metadata.github = {
-            repoUrl: request.github.repoUrl,
-            baseBranch: pullResult.branch,
-            clonedPath: repoName
-          };
+          // Reload metadata after download
+          const updatedMetadata = await this.sessionStorage.getMetadata(websiteSessionId, sessionRoot);
+          if (updatedMetadata) {
+            Object.assign(metadata, updatedMetadata);
+          }
 
           // Update workspace path to cloned repo
-          workspacePath = pullResult.targetPath;
-          baseBranchForSession = pullResult.branch;
-
-          // Save updated metadata
-          this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+          workspacePath = path.join(sessionRoot, cloneResult.clonedPath);
+          baseBranchForSession = cloneResult.branch;
 
           sendEvent({
             type: 'github_pull_progress',
             data: {
               type: 'completed',
-              message: pullResult.wasCloned ? 'Repository cloned successfully' : 'Repository updated successfully',
-              targetPath: pullResult.targetPath
+              message: cloneResult.wasCloned ? '⬇️ Repository cloned successfully' : '⬇️ Repository updated successfully',
+              targetPath: workspacePath
             },
             timestamp: new Date().toISOString()
           });
 
-          logger.info('Repository cloned', {
+          logger.info('Repository cloned via GitHub Worker', {
             component: 'Orchestrator',
             websiteSessionId,
             repoUrl: request.github.repoUrl,
-            branch: pullResult.branch
+            branch: cloneResult.branch,
+            clonedPath: cloneResult.clonedPath
           });
         }
       }
