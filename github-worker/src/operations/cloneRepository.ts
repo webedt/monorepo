@@ -124,7 +124,7 @@ export async function cloneRepository(
     sendEvent(res, {
       type: 'progress',
       stage: 'cloned',
-      message: pullResult.wasCloned ? '⬇️ Repository cloned successfully' : '⬇️ Repository updated successfully'
+      message: pullResult.wasCloned ? 'Repository cloned successfully' : 'Repository updated successfully'
     });
 
     // Step 4: Update metadata

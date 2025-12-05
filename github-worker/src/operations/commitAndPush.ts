@@ -102,7 +102,7 @@ export async function commitAndPush(
       sendEvent(res, {
         type: 'commit_progress',
         stage: 'completed',
-        message: '📤 Auto-commit skipped: No changes to commit',
+        message: 'Auto-commit skipped: No changes to commit',
         branch: currentBranch
       });
 
@@ -240,7 +240,7 @@ export async function commitAndPush(
     sendEvent(res, {
       type: 'commit_progress',
       stage: 'completed',
-      message: pushed ? `📤 Changes committed and pushed` : `📤 Changes committed (push pending)`,
+      message: pushed ? 'Changes committed and pushed' : 'Changes committed (push pending)',
       branch: currentBranch,
       commitHash
     });

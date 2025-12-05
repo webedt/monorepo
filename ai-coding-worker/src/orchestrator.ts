@@ -345,7 +345,7 @@ export class Orchestrator {
       // Send storage-worker status message
       sendEvent({
         type: 'message',
-        message: sessionExisted ? '🗄️ Session found in storage' : '🗄️ New session (not in storage)',
+        message: sessionExisted ? 'Session found in storage' : 'New session (not in storage)',
         source: 'storage-worker',
         timestamp: new Date().toISOString()
       });
@@ -825,7 +825,7 @@ export class Orchestrator {
           sendEvent({
             type: 'commit_progress',
             stage: 'error',
-            message: `📤 Auto-commit failed: ${errorMessage}`,
+            message: `Auto-commit failed: ${errorMessage}`,
             error: errorMessage,
             source: 'ai-coding-worker',
             timestamp: new Date().toISOString()
@@ -844,7 +844,7 @@ export class Orchestrator {
       // Send storage-worker upload completion message
       sendEvent({
         type: 'message',
-        message: '🗄️ Session saved to storage',
+        message: 'Session saved to storage',
         source: 'storage-worker',
         timestamp: new Date().toISOString()
       });

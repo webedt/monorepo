@@ -128,7 +128,7 @@ export async function initSession(
       sendEvent(res, {
         type: 'progress',
         stage: 'cloned',
-        message: '⬇️ Repository cloned successfully'
+        message: 'Repository cloned successfully'
       });
 
       // Create/update metadata
