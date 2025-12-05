@@ -287,8 +287,10 @@ export class StorageService {
         const parser = new tar.Parser();
 
         parser.on('entry', (entry) => {
+          // Normalize path (remove leading ./ or /) to match getSessionFile behavior
+          const normalizedPath = entry.path.replace(/^\.?\//, '');
           files.push({
-            path: entry.path,
+            path: normalizedPath,
             size: entry.size || 0,
             type: entry.type === 'Directory' ? 'directory' : 'file',
           });
