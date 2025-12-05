@@ -11,10 +11,8 @@ This is a monorepo containing multiple related projects:
 | **AI Coding Worker** | `/ai-coding-worker` | Provider-agnostic API for executing coding assistant requests with Docker Swarm orchestration |
 | **Collaborative Session Worker** | `/collaborative-session-worker` | WebSocket-based real-time collaboration with CRDT synchronization and MinIO persistence |
 | **GitHub Worker** | `/github-worker` | Ephemeral worker for GitHub/Git operations (clone, branch, commit, push) with SSE streaming |
-| **Storage Worker** | `/storage-worker` | Storage service for session management |
+| **Storage Worker** | `/storage-worker` | Storage service for session management with MinIO |
 | **Website** | `/website` | Web application with path-based routing and Dokploy deployment |
-
-Each project has its own `CLAUDE.md` file with project-specific details. **Always read the project-specific CLAUDE.md when working within a project directory.**
 
 ## Git Commit Message Rules
 
@@ -44,20 +42,12 @@ Subject Line [Required]
 
 ### Good Examples
 
-✅ **Simple:**
 ```
 Add commit-based versioning system
-```
-
-```
 Update API endpoint to support dynamic paths
-```
-
-```
 Fix navigation overlay height issue
 ```
 
-✅ **With Details:**
 ```
 Enhance ColyseusManager and GameRoom for improved room management
 
@@ -66,168 +56,27 @@ Enhance ColyseusManager and GameRoom for improved room management
 - Ensure fallback behavior when roomCode is not provided
 ```
 
-### Anti-Patterns (Don't Do This)
-
-❌ **Using conventional commit prefixes:**
-```
-feat: add new feature
-fix: resolve bug
-```
-
-❌ **Using emojis:**
-```
-✨ Add new feature
-🐛 Fix bug
-```
-
-❌ **Past tense:**
-```
-Added new feature
-Fixed bug
-```
-
-❌ **Not starting with a verb:**
-```
-New feature implementation
-```
-
 ### Good Subject Line Verbs
 
-- **Add** - Create a new feature, file, or capability
-- **Update** - Modify existing functionality or content
-- **Remove** - Delete code, files, or features
-- **Fix** - Resolve a bug or issue
-- **Refactor** - Restructure code without changing functionality
-- **Enhance** - Improve existing functionality
-- **Rename** - Change names for clarity
-- **Move** - Relocate files or code
-- **Extract** - Pull out code into separate components
-- **Merge** - Combine branches or features
-- **Improve** - Make something better
-- **Optimize** - Improve performance
-- **Document** - Add or update documentation
+Add, Update, Remove, Fix, Refactor, Enhance, Rename, Move, Extract, Merge, Improve, Optimize, Document
 
-## File Management Architecture
-
-**CRITICAL REQUIREMENT:** All file read and write operations MUST go through the **Storage Worker** service.
-
-### Storage Worker as Primary File Interface
-
-The Storage Worker (`/storage-worker`) is the **single source of truth** for all file operations within sessions:
-
-| Operation | Use Storage Worker | Use GitHub API |
-|-----------|-------------------|----------------|
-| Read file content | ✅ Yes | ❌ No |
-| Write/update file | ✅ Yes | ❌ No |
-| List files | ✅ Yes | ❌ No |
-| Delete file | ✅ Yes | ❌ No |
-| Create commits | ❌ No | ✅ Yes |
-| Create PRs | ❌ No | ✅ Yes |
-| Branch operations | ❌ No | ✅ Yes |
-| AI coding execution | N/A | Via ai-coding-worker |
-
-### Session Path Format
-
-Storage worker uses session paths in the format: `{owner}__{repo}__{branch}` (double underscore separator)
-
-**Important:** Session paths must NOT contain `/` characters. The storage-worker validates this and will reject requests with invalid session paths.
-
-Example: `webedt__monorepo__feature-branch`
-
-**Generation:** Session paths are generated using the `generateSessionPath()` helper:
-```typescript
-// ai-coding-worker/src/utils/sessionPathHelper.ts
-import { generateSessionPath } from './sessionPathHelper';
-
-const sessionPath = generateSessionPath(owner, repo, branch);
-// Result: "webedt__monorepo__feature-branch"
-```
-
-**Frontend Usage:**
-```typescript
-// Construct session path directly
-const sessionPath = `${owner}__${repo}__${branch}`;
-```
-
-### Storage Worker API Endpoints
-
-```
-GET    /api/storage-worker/sessions/:sessionPath/files           - List all files
-GET    /api/storage-worker/sessions/:sessionPath/files/*         - Read file content
-PUT    /api/storage-worker/sessions/:sessionPath/files/*         - Write/update file
-DELETE /api/storage-worker/sessions/:sessionPath/files/*         - Delete file
-HEAD   /api/storage-worker/sessions/:sessionPath/files/*         - Check if file exists
-```
-
-### On-Demand Session Creation
-
-Sessions are created automatically when you write a file to a non-existent session. No explicit "create session" call is needed.
-
-### Frontend API Usage (Website)
-
-```typescript
-import { storageWorkerApi } from '@/lib/api';
-
-// Construct session path (double underscore separator, no slashes)
-const sessionPath = `${owner}__${repo}__${branch}`;
-
-// Read file
-const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${filePath}`);
-const blob = await storageWorkerApi.getFileBlob(sessionPath, `workspace/${filePath}`);
-
-// Write file
-await storageWorkerApi.writeFile(sessionPath, `workspace/${filePath}`, content);
-
-// List files
-const files = await storageWorkerApi.listFiles(sessionPath);
-
-// Delete file
-await storageWorkerApi.deleteFile(sessionPath, `workspace/${filePath}`);
-```
-
-### GitHub API Usage (Limited to Git Operations)
-
-GitHub API should ONLY be used for:
-- Creating/deleting branches
-- Creating commits (from storage worker content)
-- Creating/managing pull requests
-- Repository metadata
-
-```typescript
-import { githubApi } from '@/lib/api';
-
-// Git operations only
-await githubApi.createBranch(...);
-await githubApi.updateFile(...);  // For committing changes
-await githubApi.createPR(...);
-```
-
-### Why Storage Worker First?
-
-1. **Performance** - Local/cached file access is faster than GitHub API
-2. **Consistency** - Single source of truth for session state
-3. **Offline capability** - Changes persist locally before syncing
-4. **Rate limiting** - Avoids GitHub API rate limits
-5. **Binary files** - Better handling of images and large files
+---
 
 ## System Architecture
 
 ### High-Level Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              FRONTEND                                        │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                         Website (React)                                │  │
-│  │  - Chat UI for AI interactions                                        │  │
-│  │  - File browser/editor                                                 │  │
-│  │  - GitHub OAuth integration                                            │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                                    ▼                                         │
-│                          Dokploy Reverse Proxy                               │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
+                              FRONTEND
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │                         Website (React)                                │
+  │  - Chat UI for AI interactions                                        │
+  │  - File browser/editor                                                 │
+  │  - GitHub OAuth integration                                            │
+  └───────────────────────────────────────────────────────────────────────┘
+                                    │
+                          Dokploy Reverse Proxy
+                                    │
          ┌───────────────────────────┼───────────────────────────┐
          │                           │                           │
          ▼                           ▼                           ▼
@@ -239,15 +88,12 @@ await githubApi.createPR(...);
 │  10 replicas    │       │  5 replicas     │       │  2 replicas     │
 └────────┬────────┘       └────────┬────────┘       └────────┬────────┘
          │                         │                         │
-         │                         │                         │
          └─────────────────────────┼─────────────────────────┘
                                    │
                                    ▼
                           ┌─────────────────┐
                           │     MinIO       │
                           │  (S3 Storage)   │
-                          │                 │
-                          │  Sessions data  │
                           └─────────────────┘
 ```
 
@@ -259,7 +105,7 @@ await githubApi.createPR(...);
 | **GitHub Worker** | Handle Git operations | - Clone/pull repositories<br>- Create branches (LLM-named)<br>- Commit changes (LLM messages)<br>- Push to remote |
 | **Storage Worker** | Manage session persistence | - Store/retrieve sessions<br>- File CRUD operations<br>- Session metadata<br>- Interface to MinIO |
 
-### Request Flow Example: New Chat Session
+### Request Flow: New Chat Session
 
 ```
 1. User sends prompt → Website
@@ -276,78 +122,9 @@ await githubApi.createPR(...);
 7. Worker exits (ephemeral model)
 ```
 
-**Note:** The `/init-session` endpoint combines `/clone-repository` and `/create-branch` into a single call, avoiding the 429 busy response that could occur when calling two endpoints sequentially.
-
-### SSE Event Flow with Source Indicators
-
-All workers emit SSE events with a `source` field to identify origin:
-
-```
-┌──────────────────┐
-│   Website Chat   │◄─────────────────────────────────────────┐
-└──────────────────┘                                          │
-                                                              │
-Events from different sources:                                │
-                                                              │
-[ai-coding-worker] Initializing session...                    │
-[github-worker] Cloning repository...                         │
-[github-worker] Repository cloned successfully                │
-[github-worker] Creating branch: webedt/add-dark-mode-abc123  │
-[claude] I'll help you add dark mode...                       │
-[claude] 📝 Editing src/App.tsx                               │
-[claude] ✓ Changes complete                                   │
-[github-worker] Committing changes...                         │
-[github-worker] Pushed to remote successfully                 │
-[ai-coding-worker] Session completed                          ▼
-```
-
-**Event Source Types:**
-- `ai-coding-worker` - Orchestration events
-- `github-worker` - Git/GitHub operations
-- `storage-worker` - Storage operations
-- `claude-agent-sdk` / `claude` - Claude AI responses
-- `codex-sdk` / `codex` - Codex AI responses
-
-### Docker Swarm Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Docker Swarm Cluster                        │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │  webedt-app-ai-coding-workers-gy4wew_ai-coding-worker     │ │
-│  │  ├── replica 1  (idle)                                    │ │
-│  │  ├── replica 2  (busy → processing request)               │ │
-│  │  ├── replica 3  (idle)                                    │ │
-│  │  ├── ...                                                  │ │
-│  │  └── replica 10 (idle)                                    │ │
-│  │  Port: *:5001→5000                                        │ │
-│  └────────────────────────────────────────────────────────────┘ │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │  webedt-app-github-workers-x4o1nh_github-worker           │ │
-│  │  ├── replica 1-5 (ephemeral)                              │ │
-│  │  Port: *:5003→5002                                        │ │
-│  └────────────────────────────────────────────────────────────┘ │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │  webedt-app-storage-worker-t1avua_storage-worker          │ │
-│  │  ├── replica 1-2 (persistent)                             │ │
-│  │  Internal network only                                     │ │
-│  └────────────────────────────────────────────────────────────┘ │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │  webedt-app-storage-worker-t1avua_minio                   │ │
-│  │  MinIO S3-compatible storage                               │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Common Architectural Patterns
-
 ### Ephemeral Worker Model
 
-AI Coding Worker, GitHub Worker, and Collaborative Session Worker all use an ephemeral worker model:
+AI Coding Worker, GitHub Worker, and Collaborative Session Worker use an ephemeral worker model:
 
 - Workers exit after completing each job (`process.exit(0)` on success)
 - Docker Swarm automatically restarts workers after exit
@@ -356,89 +133,63 @@ AI Coding Worker, GitHub Worker, and Collaborative Session Worker all use an eph
 - Prevents memory leaks over time
 - Workers return 429 status when busy
 
-### Session Management
+---
 
-Projects use isolated workspace patterns:
+## File Management Architecture
 
-- Each session gets isolated workspace: `/workspace/session-{uuid}/`
-- Metadata stored in `.session-metadata.json` or `metadata.json`
-- Session state persists across worker restarts
-- Workspaces can be backed by volumes or object storage (MinIO)
+**CRITICAL REQUIREMENT:** All file read and write operations MUST go through the **Storage Worker** service.
 
-### Docker Swarm Deployment
+### Storage Worker as Primary File Interface
 
-Common deployment pattern across worker services:
+The Storage Worker (`/storage-worker`) is the **single source of truth** for all file operations within sessions:
 
-```bash
-# Initialize swarm (first time only)
-docker swarm init
+| Operation | Use Storage Worker | Use GitHub API |
+|-----------|-------------------|----------------|
+| Read file content | Yes | No |
+| Write/update file | Yes | No |
+| List files | Yes | No |
+| Delete file | Yes | No |
+| Create commits | No | Yes |
+| Create PRs | No | Yes |
+| Branch operations | No | Yes |
+| AI coding execution | N/A | Via ai-coding-worker |
 
-# Deploy stack
-docker stack deploy -c swarm.yml {stack-name}
+### Session Path Format
 
-# Monitor deployment
-docker service ls
-docker service ps {service-name}
-docker service logs {service-name} -f
+Storage worker uses session paths in the format: `{owner}__{repo}__{branch}` (double underscore separator)
 
-# Scale workers
-docker service scale {service-name}=20
+**Important:** Session paths must NOT contain `/` characters. The storage-worker validates this and will reject requests with invalid session paths.
 
-# Remove stack
-docker stack rm {stack-name}
+Example: `webedt__monorepo__feature-branch`
+
+### Storage Worker API Endpoints
+
+```
+GET    /api/storage-worker/sessions/:sessionPath/files           - List all files
+GET    /api/storage-worker/sessions/:sessionPath/files/*         - Read file content
+PUT    /api/storage-worker/sessions/:sessionPath/files/*         - Write/update file
+DELETE /api/storage-worker/sessions/:sessionPath/files/*         - Delete file
+HEAD   /api/storage-worker/sessions/:sessionPath/files/*         - Check if file exists
 ```
 
-**Common Swarm Configuration:**
-- Multiple worker replicas (5-10) for load balancing
-- Restart policy: `any` condition
-- Rolling updates with automatic rollback
-- Resource limits (CPU: 0.5-2 cores, Memory: 1-4GB per worker)
+### Frontend API Usage
 
-### Environment Variables
+```typescript
+import { storageWorkerApi } from '@/lib/api';
 
-Common environment variable patterns:
+const sessionPath = `${owner}__${repo}__${branch}`;
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | varies | Server port (5000, 8080, etc.) |
-| `WORKSPACE_DIR` | `/workspace` | Base directory for session workspaces |
-| `NODE_ENV` | `production` | Node environment |
+// Read file
+const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${filePath}`);
 
-## Development Commands
+// Write file
+await storageWorkerApi.writeFile(sessionPath, `workspace/${filePath}`, content);
 
-### Common Node.js Patterns
-
-```bash
-# Install dependencies
-npm install
-# or
-pnpm install
-
-# Run in development mode
-npm run dev
-
-# Build TypeScript
-npm run build
-
-# Run production build
-npm start
-
-# Run tests (if available)
-npm test
+// List files
+const files = await storageWorkerApi.listFiles(sessionPath);
 ```
 
-### Docker Development Patterns
-
-```bash
-# Build Docker image
-docker build -t {project-name}:latest .
-
-# Test with Docker Compose
-docker-compose up
-
-# View logs
-docker-compose logs -f
-```
+---
 
 ## API Reference
 
@@ -451,7 +202,6 @@ docker-compose logs -f
 | `/sessions` | GET | List all sessions |
 | `/execute` | POST | Execute AI coding request (SSE) |
 | `/abort` | POST | Abort current execution |
-| `/init-repository` | POST | Initialize repository in session |
 
 ### GitHub Worker (port 5003)
 
@@ -478,90 +228,367 @@ docker-compose logs -f
 | `/api/storage-worker/sessions/:path/upload` | POST | Upload session archive |
 | `/api/storage-worker/sessions/:path/download` | GET | Download session archive |
 | `/api/storage-worker/sessions/:path/files` | GET | List files in session |
-| `/api/storage-worker/sessions/:path/files/*` | GET | Read file content |
-| `/api/storage-worker/sessions/:path/files/*` | PUT | Write file content |
-| `/api/storage-worker/sessions/:path/files/*` | DELETE | Delete file |
+| `/api/storage-worker/sessions/:path/files/*` | GET/PUT/DELETE | File operations |
 
-## Testing
+---
 
-### Running API Tests
+## AI Coding Worker
 
-Each worker has API tests that can be run against local or production endpoints:
+Provider-agnostic API for executing coding assistant requests with Docker Swarm orchestration.
 
-```bash
-# AI Coding Worker tests
-cd ai-coding-worker
-AI_CODING_WORKER_URL=http://localhost:5001 npm run test:api
+### Core Components
 
-# Storage Worker tests
-cd storage-worker
-STORAGE_WORKER_URL=http://localhost:3000 npm run test:api
+1. **server.ts** - Express server with SSE streaming endpoints
+2. **orchestrator.ts** - Main execution orchestrator
+3. **SessionManager** - Manages session persistence
+4. **Provider System** - `ClaudeCodeProvider`, `CodexProvider`
+5. **emojiMapper** - Centralized emoji assignment for SSE messages
+
+### Request Flow
+
+```
+Client → POST /execute
+    ↓
+server.ts: Check worker status (idle/busy)
+    ↓
+orchestrator.ts: Validate request, write credentials
+    ↓
+SessionManager: Download/create session workspace
+    ↓
+GitHub Worker: Call /init-session (clone + create branch)
+    ↓
+ProviderFactory: Create provider instance
+    ↓
+Provider: Execute user request (streaming)
+    ↓
+SSE events → Client (with emojis applied by emojiMapper)
+    ↓
+GitHub Worker: Call /commit-and-push (if autoCommit enabled)
+    ↓
+SessionManager: Upload session to storage
+    ↓
+Worker exits (ephemeral model)
 ```
 
-### Testing from Production Server
+### Authentication
 
-```bash
-# Test via SSH to production server
-ssh ehub2023 'curl -s http://127.0.0.1:5001/health | jq'
-ssh ehub2023 'curl -s http://127.0.0.1:5003/health | jq'
+Authentication is passed **per request** via `codingAssistantAuthentication` field:
 
-# Test storage worker via Docker network
-ssh ehub2023 'docker exec $(docker ps --filter "name=ai-coding-worker" -q | head -1) \
-  node -e "fetch(\"http://storage-worker:3000/health\").then(r=>r.text()).then(console.log)"'
+```json
+{
+  "codingAssistantAuthentication": "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-...\",\"refreshToken\":\"sk-ant-ort01-...\",\"expiresAt\":1763242829010}}"
+}
 ```
 
-### Environment Variables for Testing
+The `CredentialManager.writeClaudeCredentials()` writes this to `~/.claude/.credentials.json` for the SDK.
 
-Create `.env` files from `.env.example` in each worker directory. Key variables:
+### SSE Event Types
 
-```bash
-# For test files
-AI_CODING_WORKER_URL=http://localhost:5001
-STORAGE_WORKER_URL=http://localhost:3000
-CODING_ASSISTANT_PROVIDER=ClaudeAgentSDK
-CODING_ASSISTANT_AUTHENTICATION={"claudeAiOauth":{...}}
+| Event Type | Source | Description |
+|------------|--------|-------------|
+| `connected` | `ai-coding-worker` | Initial connection with session ID |
+| `message` | `ai-coding-worker` | Progress messages |
+| `branch_created` | `ai-coding-worker` | Git branch created with session name |
+| `session_name` | `ai-coding-worker` | Generated session title and branch name |
+| `assistant_message` | `claude-agent-sdk` | Provider output (forwarded from SDK) |
+| `commit_progress` | `ai-coding-worker` | Auto-commit progress stages |
+| `completed` | `ai-coding-worker` | Job finished with duration |
+| `error` | `ai-coding-worker` | Error occurred with code |
+
+### Emoji Mapper (Centralized Emoji Assignment)
+
+The `emojiMapper` utility centralizes all emoji assignment for SSE messages. Sub-workers send semantic stages without emojis, and ai-coding-worker applies appropriate emojis before forwarding to the frontend.
+
+**Stage Emoji Mapping:**
+
+| Stage | Emoji | Description |
+|-------|-------|-------------|
+| `preparing` | 🔧 | Preparing credentials/initialization |
+| `downloading_session` | 📥 | Downloading from storage |
+| `checking_session` | 🔍 | Checking for existing session |
+| `session_found` | 📂 | Existing session found |
+| `new_session` | 🆕 | Creating new session |
+| `cloning` | 📥 | Cloning repository |
+| `cloned` | ✅ | Clone complete |
+| `generating_name` | 🤖 | LLM generating names |
+| `name_generated` | ✨ | Name generated |
+| `creating_branch` | 🌿 | Creating git branch |
+| `pushing` | 📤 | Pushing to remote |
+| `uploading` | 📤 | Uploading to storage |
+| `analyzing` | 🔍 | Analyzing changes |
+| `committing` | 💾 | Creating commit |
+| `error` | ❌ | Operation failed |
+
+### Image Support
+
+The AI Coding Worker supports sending images to Claude Code along with text prompts:
+
+```json
+{
+  "userRequest": [
+    { "type": "text", "text": "What's in this screenshot?" },
+    {
+      "type": "image",
+      "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUg..."
+      }
+    }
+  ]
+}
 ```
 
-## Project-Specific Details
+Supported formats: `image/jpeg`, `image/png`, `image/gif`, `image/webp`
 
-For detailed information about each project, see the respective CLAUDE.md files:
+### Environment Variables
 
-- **AI Coding Worker**: [ai-coding-worker/CLAUDE.md](ai-coding-worker/CLAUDE.md)
-  - Provider system (Claude Code, Codex)
-  - SSE streaming endpoints
-  - GitHub integration
-  - Authentication handling
-  - Image support for multimodal requests
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `5000` | Server port |
+| `WORKSPACE_DIR` | `/workspace` | Session workspace root |
+| `DB_BASE_URL` | - | Optional database API URL |
 
-- **Collaborative Session Worker**: [collaborative-session-worker/CLAUDE.md](collaborative-session-worker/CLAUDE.md)
-  - WebSocket protocols and message types
-  - CRDT synchronization with Yjs
-  - MinIO integration
-  - Auto-commit functionality
-  - Collaboration manager
+---
 
-- **GitHub Worker**: [github-worker/CLAUDE.md](github-worker/CLAUDE.md)
-  - Repository cloning and pulling
-  - Branch creation with LLM-generated names
-  - Commit and push with LLM-generated messages
-  - SSE streaming for real-time progress
-  - Ephemeral worker model
+## GitHub Worker
 
-- **Website**: [website/CLAUDE.md](website/CLAUDE.md)
-  - Path-based routing requirements
-  - Vite and React Router configuration
-  - Dokploy deployment patterns
-  - Version management
-  - Deployment URLs and links
+Ephemeral worker service for GitHub/Git operations with SSE streaming.
 
-## Website Deployment Link Requirements
+### POST /init-session
 
-**CRITICAL REQUIREMENT (Website Project):** When working on the `/website` project and completing ANY task that involves code changes, commits, or pushes, you MUST ALWAYS display clickable links to:
+Combined operation: clone repository AND create branch with LLM-generated name in a single call. This avoids 429 busy responses that can occur when calling `/clone-repository` and `/create-branch` sequentially.
 
-1. The GitHub repository (linked to the specific branch)
-2. The deployment site (using path-based routing)
+Request:
+```json
+{
+  "sessionId": "abc123",
+  "repoUrl": "https://github.com/owner/repo",
+  "branch": "main",
+  "userRequest": "Add dark mode toggle",
+  "claudeCredentials": "...",
+  "githubAccessToken": "ghp_xxx"
+}
+```
 
-**Required Format:**
+Response (via SSE completed event):
+```json
+{
+  "clonedPath": "repo",
+  "branch": "main",
+  "wasCloned": true,
+  "branchName": "webedt/add-dark-mode-abc12345",
+  "sessionTitle": "Add Dark Mode Toggle",
+  "sessionPath": "owner__repo__webedt-add-dark-mode-abc12345"
+}
+```
+
+### POST /commit-and-push
+
+Commit changes with LLM-generated message and push:
+
+```json
+{
+  "sessionId": "abc123",
+  "claudeCredentials": "...",
+  "githubAccessToken": "ghp_xxx",
+  "userId": "user123"
+}
+```
+
+### POST /create-pull-request
+
+Create a pull request on GitHub:
+
+```json
+{
+  "owner": "webedt",
+  "repo": "monorepo",
+  "title": "Add dark mode feature",
+  "head": "feature/dark-mode",
+  "base": "main",
+  "body": "This PR adds dark mode support",
+  "githubAccessToken": "ghp_xxx"
+}
+```
+
+### POST /auto-pull-request
+
+Complete auto-merge workflow: create PR (or find existing), merge base into feature branch, wait for mergeable status, merge PR, and delete the feature branch.
+
+### SSE Progress Stages
+
+**Init Session:**
+`preparing` → `checking_session` → `session_found`/`new_session` → `cloning` → `cloned` → `generating_name` → `name_generated` → `creating_branch` → `pushing` → `uploading`
+
+**Commit and Push:**
+`preparing` → `downloading_session` → `analyzing` → `changes_detected` → `generating_message` → `committing` → `pushing` → `uploading`
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `5002` | Server port |
+| `TMP_DIR` | `/tmp` | Temporary directory for workspaces |
+| `STORAGE_WORKER_URL` | (internal) | URL to storage worker service |
+
+---
+
+## Storage Worker
+
+MinIO-based storage service for session management with file-level access.
+
+### Architecture
+
+Unlike other workers, the Storage Worker is **NOT ephemeral**:
+- Runs continuously to handle storage requests
+- Maintains persistent connections to MinIO
+- Sessions stored as tarball archives (`session.tar.gz`)
+- Supports both session-level and file-level operations
+
+### Session Operations
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/storage-worker/sessions` | List all sessions |
+| `GET` | `/api/storage-worker/sessions/:sessionPath` | Get session metadata |
+| `HEAD` | `/api/storage-worker/sessions/:sessionPath` | Check if session exists |
+| `DELETE` | `/api/storage-worker/sessions/:sessionPath` | Delete a session |
+| `POST` | `/api/storage-worker/sessions/:sessionPath/upload` | Upload session tarball |
+| `GET` | `/api/storage-worker/sessions/:sessionPath/download` | Download session tarball |
+
+### File Operations
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/storage-worker/sessions/:sessionPath/files` | List files in session |
+| `GET` | `/api/storage-worker/sessions/:sessionPath/files/*` | Read file content |
+| `PUT` | `/api/storage-worker/sessions/:sessionPath/files/*` | Write/update file |
+| `DELETE` | `/api/storage-worker/sessions/:sessionPath/files/*` | Delete file |
+| `HEAD` | `/api/storage-worker/sessions/:sessionPath/files/*` | Check if file exists |
+
+### Storage Format
+
+Sessions are stored as gzipped tarballs in MinIO:
+
+```
+minio/sessions/{sessionPath}/session.tar.gz
+├── workspace/              # User workspace files
+├── .session-metadata.json  # Session metadata
+└── .stream-events.jsonl    # SSE event log (optional)
+```
+
+### On-Demand Session Creation
+
+Sessions are created automatically when you write a file to a non-existent session. No explicit "create session" call is needed.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `MINIO_ENDPOINT` | - | MinIO server hostname |
+| `MINIO_PORT` | `9000` | MinIO server port |
+| `MINIO_ROOT_USER` | - | MinIO access key |
+| `MINIO_ROOT_PASSWORD` | - | MinIO secret key |
+| `MINIO_BUCKET` | `sessions` | Bucket name for sessions |
+
+---
+
+## Collaborative Session Worker
+
+WebSocket-based collaborative session worker with CRDT synchronization and auto-commit functionality.
+
+### Core Components
+
+1. **WebSocket Server** - Handles client connections and message routing
+2. **Session Storage** - MinIO integration for persistent session storage
+3. **Collaboration Manager** - CRDT-based conflict-free synchronization using Yjs
+4. **Auto-Commit** - Automatic git commits after cooldown period
+
+### Session Lifecycle
+
+1. **Client Connection**: Client connects via WebSocket and joins a session
+2. **Session Download**: Worker downloads session from MinIO (if exists)
+3. **Collaboration**: Multiple users can edit files simultaneously
+4. **Auto-Commit**: After cooldown period with no activity, changes are committed
+5. **Session Upload**: On disconnect or cleanup, session is uploaded to MinIO
+
+### Message Types
+
+**Client → Server:**
+- `join` - Join a session
+- `fileOperation` - Perform file operation (create, update, delete, rename)
+- `yjsUpdate` - Yjs CRDT update
+- `getFiles` - List files in workspace
+- `getFile` - Get file content
+
+**Server → Client:**
+- `joined` - Successfully joined session
+- `userJoined` / `userLeft` - User events
+- `fileOperation` - File operation from another user
+- `yjsUpdate` - CRDT update from another user
+- `files` / `fileContent` - Response to queries
+- `error` - Error message
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | WebSocket server port |
+| `WORKSPACE_DIR` | `/workspace` | Base directory for workspaces |
+| `COOLDOWN_MS` | `300000` | Auto-commit cooldown (5 minutes) |
+
+---
+
+## Website
+
+Web application with path-based routing and Dokploy deployment.
+
+### Deployment URLs
+
+This project uses Dokploy for deployments with path-based routing:
+
+```
+https://github.etdofresh.com/{owner}/{repo}/{branch}/
+```
+
+**Examples:**
+- `https://github.etdofresh.com/webedt/monorepo/main/`
+- `https://github.etdofresh.com/webedt/monorepo/claude-rename-session-abc123/`
+
+**Pattern:**
+- Owner and repo are lowercased
+- Branch name preserves original case (slashes replaced with dashes)
+- Example: Branch `claude/test-feature` becomes `claude-test-feature`
+
+### Path-Based Routing Requirements
+
+**CRITICAL:** Three files MUST be updated to support path-based routing:
+
+1. **`apps/client/index.html`** - Base tag detection
+2. **`apps/client/src/App.tsx`** - React Router basename
+3. **`apps/client/src/lib/api.ts`** - API base URL detection
+
+Each file must detect the path-based pattern by checking for 3 path segments:
+
+```javascript
+if (pathSegments.length >= 3 && !appRoutes.includes(pathSegments[0])) {
+  basePath = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+} else {
+  basePath = '/';
+}
+```
+
+### Version Management
+
+Version numbers are **automatically calculated** by GitHub Actions:
+- `MAJOR.MINOR.PATCH` where PATCH = commits since tag
+- Example: Tag `v1.2.0` + 5 commits = `1.2.5`
+
+### Displaying Links After Tasks
+
+**CRITICAL REQUIREMENT:** After completing ANY task that involves code changes, commits, or pushes in the website project, you MUST ALWAYS display:
 
 ```
 **Links:**
@@ -570,41 +597,56 @@ GitHub Branch: [https://github.com/webedt/monorepo/tree/{branch-name}](https://g
 Live Site: [https://github.etdofresh.com/webedt/monorepo/{branch}/](https://github.etdofresh.com/webedt/monorepo/{branch}/)
 ```
 
-**Deployment URL Construction:**
+---
 
-The deployment URL uses path-based routing:
+## Development Commands
 
-```
-https://github.etdofresh.com/{owner}/{repo}/{branch}/
-```
+### Common Node.js Patterns
 
-- Owner and repo are converted to lowercase
-- Branch name preserves original case
-- Slashes in branch names are replaced with dashes
-- Example: `claude/test-feature` → `https://github.etdofresh.com/webedt/monorepo/claude-test-feature/`
+```bash
+# Install dependencies
+npm install  # or pnpm install
 
-**Example:**
+# Run in development mode
+npm run dev
 
-```
-Branch: claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD
+# Build TypeScript
+npm run build
 
-**Links:**
-
-GitHub Branch: [https://github.com/webedt/monorepo/tree/claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD](https://github.com/webedt/monorepo/tree/claude/rename-session-013mmcCbpCN5AGE8fbU3GKSD)
-Live Site: [https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/](https://github.etdofresh.com/webedt/monorepo/claude-rename-session-013mmcCbpCN5AGE8fbU3GKSD/)
+# Run production build
+npm start
 ```
 
-See [website/CLAUDE.md](website/CLAUDE.md) for complete details on path-based routing and deployment URLs.
+### Docker Swarm Deployment
 
-## Working with Multiple Projects
+```bash
+# Initialize swarm (first time only)
+docker swarm init
 
-When working across multiple projects:
+# Deploy stack
+docker stack deploy -c swarm.yml {stack-name}
 
-1. **Always check the project-specific CLAUDE.md** for special requirements
-2. **Use consistent git commit messages** across all projects
-3. **Test changes locally** before pushing
-4. **Build and verify compilation** - Run `npm run build` (or `pnpm run build`) before committing and pushing to ensure there are no TypeScript or build errors
-5. **Consider dependencies** between projects if changes affect multiple services
+# Monitor deployment
+docker service ls
+docker service ps {service-name}
+docker service logs {service-name} -f
+
+# Scale workers
+docker service scale {service-name}=20
+
+# Remove stack
+docker stack rm {stack-name}
+```
+
+### Testing from Production Server
+
+```bash
+# Test via SSH to production server
+ssh ehub2023 'curl -s http://127.0.0.1:5001/health | jq'
+ssh ehub2023 'curl -s http://127.0.0.1:5003/health | jq'
+```
+
+---
 
 ## Repository Links
 
