@@ -395,271 +395,271 @@ export class Orchestrator {
       });
 
       // Step 4: Setup GitHub repository if provided
-      // Track the base branch for later use in session initialization
-      let baseBranchForSession: string | undefined;
-
       if (request.github) {
-        // Check if repo already exists in session
+        // Check if repo already exists in session (resuming session)
         const repoAlreadyExists = metadata.github?.clonedPath &&
-          fs.existsSync(path.join(sessionRoot, metadata.github.clonedPath));
+          fs.existsSync(path.join(sessionRoot, 'workspace', metadata.github.clonedPath));
 
         if (repoAlreadyExists) {
           // Repo exists - use it from metadata
-          workspacePath = path.join(sessionRoot, metadata.github!.clonedPath);
-          baseBranchForSession = metadata.github!.baseBranch;
+          workspacePath = path.join(sessionRoot, 'workspace', metadata.github!.clonedPath);
           logger.info('Using existing cloned repo from session', {
             component: 'Orchestrator',
             websiteSessionId,
             clonedPath: metadata.github!.clonedPath,
-            workspacePath
+            workspacePath,
+            branch: metadata.branch
           });
         } else {
-          // Repo doesn't exist - clone via GitHub Worker
-          sendEvent({
-            type: 'message',
-            message: `Cloning repository: ${request.github.repoUrl}`,
-            timestamp: new Date().toISOString()
-          });
+          // New session - use init-session to clone AND create branch in one call
+          // This avoids the 429 busy issue from two sequential github-worker calls
+          const shouldInitializeSession =
+            !isResuming &&
+            !metadata.branch &&
+            !metadata.sessionTitle;
 
-          // Call GitHub Worker to clone the repository
-          const cloneResult = await this.githubWorkerClient.cloneRepository(
-            {
-              sessionId: websiteSessionId,
+          if (shouldInitializeSession) {
+            logger.info('Initializing new session via GitHub Worker /init-session', {
+              component: 'Orchestrator',
+              websiteSessionId,
               repoUrl: request.github.repoUrl,
-              branch: request.github.branch,
-              directory: request.github.directory,
-              accessToken: request.github.accessToken!
-            },
-            (event) => {
-              // Forward progress events from github-worker
-              if (event.type === 'progress') {
+              branch: request.github.branch
+            });
+
+            sendEvent({
+              type: 'message',
+              message: `Initializing session: ${request.github.repoUrl}`,
+              timestamp: new Date().toISOString()
+            });
+
+            try {
+              // Call GitHub Worker to clone repository AND create branch in one operation
+              const userRequestText = this.serializeUserRequest(request.userRequest);
+
+              const initResult = await this.githubWorkerClient.initSession(
+                {
+                  sessionId: websiteSessionId,
+                  repoUrl: request.github.repoUrl,
+                  branch: request.github.branch,
+                  directory: request.github.directory,
+                  userRequest: userRequestText,
+                  claudeCredentials: request.codingAssistantAuthentication,
+                  githubAccessToken: request.github.accessToken!
+                },
+                (event) => {
+                  // Forward events from github-worker with original source preserved
+                  // Map 'progress' to 'message', but keep special types like branch_created, session_name
+                  const eventType = event.type === 'progress' ? 'message' : event.type;
+                  sendEvent({
+                    type: eventType,
+                    message: event.message,
+                    stage: event.stage,
+                    data: event.data,
+                    error: event.error,
+                    code: event.code,
+                    source: 'github-worker',
+                    timestamp: event.timestamp,
+                    // Pass through additional fields for branch_created and session_name events
+                    ...(event.branchName && { branchName: event.branchName }),
+                    ...(event.baseBranch && { baseBranch: event.baseBranch }),
+                    ...(event.sessionPath && { sessionPath: event.sessionPath }),
+                    ...(event.sessionName && { sessionName: event.sessionName })
+                  } as SSEEvent);
+                }
+              );
+
+              // Extract results from github-worker
+              branchName = initResult.branchName;
+              const sessionTitle = initResult.sessionTitle;
+              const sessionPath = initResult.sessionPath;
+
+              logger.info('GitHub Worker init-session completed successfully', {
+                component: 'Orchestrator',
+                websiteSessionId,
+                clonedPath: initResult.clonedPath,
+                baseBranch: initResult.branch,
+                branchName,
+                sessionTitle,
+                sessionPath
+              });
+
+              // Download updated session from storage (github-worker uploaded it)
+              await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
+
+              // Reload metadata after download
+              const updatedMetadata = await this.sessionStorage.getMetadata(websiteSessionId, sessionRoot);
+              if (updatedMetadata) {
+                Object.assign(metadata, updatedMetadata);
+              }
+
+              // Update workspace path to cloned repo
+              workspacePath = path.join(sessionRoot, 'workspace', initResult.clonedPath);
+
+              // Update local metadata with results
+              metadata.branch = branchName;
+              metadata.sessionPath = sessionPath;
+              metadata.repositoryOwner = repositoryOwner;
+              metadata.repositoryName = repositoryName;
+              metadata.sessionTitle = sessionTitle;
+              this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+
+              logger.error('Failed to initialize session via GitHub Worker', error, {
+                component: 'Orchestrator',
+                websiteSessionId
+              });
+
+              // Send error info
+              sendEvent({
+                type: 'debug',
+                message: `GitHub Worker init-session failed: ${errorMessage}`,
+                error: errorMessage,
+                timestamp: new Date().toISOString()
+              });
+
+              // Fallback: clone and create branch locally if github-worker fails
+              try {
+                // First, try to clone via simpler clone-repository endpoint
                 sendEvent({
                   type: 'message',
-                  message: event.message,
-                  source: 'github-worker',
-                  timestamp: event.timestamp
+                  message: `Fallback: Cloning repository...`,
+                  timestamp: new Date().toISOString()
+                });
+
+                const cloneResult = await this.githubWorkerClient.cloneRepository(
+                  {
+                    sessionId: websiteSessionId,
+                    repoUrl: request.github.repoUrl,
+                    branch: request.github.branch,
+                    directory: request.github.directory,
+                    accessToken: request.github.accessToken!
+                  },
+                  (event) => {
+                    if (event.type === 'progress') {
+                      sendEvent({
+                        type: 'message',
+                        message: event.message,
+                        source: 'github-worker',
+                        timestamp: event.timestamp
+                      });
+                    }
+                  }
+                );
+
+                // Download the session from storage
+                await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
+
+                // Update workspace path
+                workspacePath = path.join(sessionRoot, 'workspace', cloneResult.clonedPath);
+
+                // Now create branch locally
+                const title = 'New Session';
+                const descriptivePart = 'auto-request';
+                const sessionIdSuffix = websiteSessionId.slice(-8);
+                branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
+
+                sendEvent({
+                  type: 'debug',
+                  message: `Using local fallback: title="${title}", branch="${branchName}"`,
+                  source: 'ai-coding-worker',
+                  timestamp: new Date().toISOString()
+                });
+
+                const gitHelper = new GitHelper(workspacePath);
+                await gitHelper.createBranch(branchName);
+
+                try {
+                  await gitHelper.push();
+                  sendEvent({
+                    type: 'message',
+                    message: `Branch ${branchName} pushed - build starting`,
+                    source: 'ai-coding-worker',
+                    timestamp: new Date().toISOString()
+                  });
+                } catch (pushError) {
+                  logger.warn('Fallback branch push failed (non-critical)', {
+                    component: 'Orchestrator',
+                    websiteSessionId,
+                    branchName,
+                    error: pushError instanceof Error ? pushError.message : String(pushError)
+                  });
+                }
+
+                const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
+                metadata.branch = branchName;
+                metadata.sessionPath = sessionPath;
+                metadata.repositoryOwner = repositoryOwner;
+                metadata.repositoryName = repositoryName;
+                metadata.sessionTitle = title;
+                this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
+
+                sendEvent({
+                  type: 'branch_created',
+                  branchName: branchName,
+                  baseBranch: cloneResult.branch,
+                  sessionPath: sessionPath,
+                  message: `Created and checked out branch: ${branchName}`,
+                  timestamp: new Date().toISOString()
+                });
+
+                sendEvent({
+                  type: 'session_name',
+                  sessionName: title,
+                  branchName: branchName,
+                  timestamp: new Date().toISOString()
+                });
+              } catch (fallbackError) {
+                sendEvent({
+                  type: 'message',
+                  message: `Warning: Failed to initialize session - ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+                  timestamp: new Date().toISOString()
                 });
               }
             }
-          );
-
-          // Download the session from storage (github-worker uploaded it)
-          await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
-
-          // Reload metadata after download
-          const updatedMetadata = await this.sessionStorage.getMetadata(websiteSessionId, sessionRoot);
-          if (updatedMetadata) {
-            Object.assign(metadata, updatedMetadata);
-          }
-
-          // Update workspace path to cloned repo
-          // Note: github-worker stores repos under sessionRoot/workspace/{repoName}
-          workspacePath = path.join(sessionRoot, 'workspace', cloneResult.clonedPath);
-          baseBranchForSession = cloneResult.branch;
-
-          // Note: github-worker already sends progress events with emojis via the callback
-          // This is just an internal completion event for tracking, not user-visible
-
-          logger.info('Repository cloned via GitHub Worker', {
-            component: 'Orchestrator',
-            websiteSessionId,
-            repoUrl: request.github.repoUrl,
-            branch: cloneResult.branch,
-            clonedPath: cloneResult.clonedPath
-          });
-        }
-      }
-
-      // Step 4.5: Create branch via GitHub Worker (ONLY for truly new sessions)
-      // This should ONLY happen on the first message of a session, never on subsequent messages.
-      // We check multiple conditions to ensure this:
-      // 1. isResuming must be false (session didn't exist in storage)
-      // 2. metadata.branch must not be set (no branch was created yet)
-      // 3. metadata.sessionTitle must not be set (no title was generated yet)
-      // 4. request.github must be provided (we need a repo to create a branch)
-      const shouldInitializeSession =
-        !isResuming &&
-        !metadata.branch &&
-        !metadata.sessionTitle &&
-        request.github &&
-        baseBranchForSession;
-
-      if (shouldInitializeSession) {
-        logger.info('Initializing new session via GitHub Worker (first message)', {
-          component: 'Orchestrator',
-          websiteSessionId,
-          isResuming,
-          hasBranch: !!metadata.branch,
-          hasTitle: !!metadata.sessionTitle,
-          hasGithub: !!request.github
-        });
-
-        try {
-          // Upload session to storage first so github-worker can download it
-          await this.sessionStorage.uploadSession(websiteSessionId, sessionRoot);
-
-          // Call GitHub Worker to create branch with LLM-generated name
-          // GitHub Worker handles: LLM naming, branch creation, push, storage upload
-          const userRequestText = this.serializeUserRequest(request.userRequest);
-
-          const createBranchResult = await this.githubWorkerClient.createBranch(
-            {
-              sessionId: websiteSessionId,
-              userRequest: userRequestText,
-              baseBranch: baseBranchForSession!,
-              repoUrl: request.github!.repoUrl,
-              claudeCredentials: request.codingAssistantAuthentication,
-              githubAccessToken: request.github!.accessToken!
-            },
-            (event) => {
-              // Forward events from github-worker with original source preserved
-              // Map 'progress' to 'message', but keep special types like branch_created, session_name
-              const eventType = event.type === 'progress' ? 'message' : event.type;
-              sendEvent({
-                type: eventType,
-                message: event.message,
-                stage: event.stage,
-                data: event.data,
-                error: event.error,
-                code: event.code,
-                source: 'github-worker',
-                timestamp: event.timestamp,
-                // Pass through additional fields for branch_created and session_name events
-                ...(event.branchName && { branchName: event.branchName }),
-                ...(event.baseBranch && { baseBranch: event.baseBranch }),
-                ...(event.sessionPath && { sessionPath: event.sessionPath }),
-                ...(event.sessionName && { sessionName: event.sessionName })
-              } as SSEEvent);
-            }
-          );
-
-          // Extract results from github-worker
-          branchName = createBranchResult.branchName;
-          const sessionTitle = createBranchResult.sessionTitle;
-          const sessionPath = createBranchResult.sessionPath;
-
-          logger.info('GitHub Worker created branch successfully', {
-            component: 'Orchestrator',
-            websiteSessionId,
-            branchName,
-            sessionTitle,
-            sessionPath
-          });
-
-          // Download updated session from storage (github-worker uploaded it)
-          await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
-
-          // Update local metadata with results
-          metadata.branch = branchName;
-          metadata.sessionPath = sessionPath;
-          metadata.repositoryOwner = repositoryOwner;
-          metadata.repositoryName = repositoryName;
-          metadata.sessionTitle = sessionTitle;
-          this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
-
-          // Note: branch_created and session_name events are sent by github-worker
-          // and forwarded via the event callback above - no need to duplicate here
-
-          logger.info('Branch created and session title generated via GitHub Worker', {
-            component: 'Orchestrator',
-            websiteSessionId,
-            sessionPath,
-            sessionTitle,
-            branchName,
-            baseBranch: baseBranchForSession
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          logger.error('Failed to create branch via GitHub Worker', error, {
-            component: 'Orchestrator',
-            websiteSessionId
-          });
-
-          // Send error info
-          sendEvent({
-            type: 'debug',
-            message: `GitHub Worker branch creation failed: ${errorMessage}`,
-            error: errorMessage,
-            timestamp: new Date().toISOString()
-          });
-
-          // Fallback: create branch locally if github-worker fails
-          try {
-            const title = 'New Session';
-            const descriptivePart = 'auto-request';
-            const sessionIdSuffix = websiteSessionId.slice(-8);
-            branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
-
-            sendEvent({
-              type: 'debug',
-              message: `Using local fallback: title="${title}", branch="${branchName}"`,
-              source: 'ai-coding-worker',
-              timestamp: new Date().toISOString()
-            });
-
-            const gitHelper = new GitHelper(workspacePath);
-            await gitHelper.createBranch(branchName);
-
-            try {
-              await gitHelper.push();
-              sendEvent({
-                type: 'message',
-                message: `Branch ${branchName} pushed - build starting`,
-                source: 'ai-coding-worker',
-                timestamp: new Date().toISOString()
-              });
-            } catch (pushError) {
-              logger.warn('Fallback branch push failed (non-critical)', {
-                component: 'Orchestrator',
-                websiteSessionId,
-                branchName,
-                error: pushError instanceof Error ? pushError.message : String(pushError)
-              });
-            }
-
-            const sessionPath = generateSessionPath(repositoryOwner!, repositoryName!, branchName);
-            metadata.branch = branchName;
-            metadata.sessionPath = sessionPath;
-            metadata.repositoryOwner = repositoryOwner;
-            metadata.repositoryName = repositoryName;
-            metadata.sessionTitle = title;
-            this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
-
-            sendEvent({
-              type: 'branch_created',
-              branchName: branchName,
-              baseBranch: baseBranchForSession!,
-              sessionPath: sessionPath,
-              message: `Created and checked out branch: ${branchName}`,
-              timestamp: new Date().toISOString()
-            });
-
-            sendEvent({
-              type: 'session_name',
-              sessionName: title,
-              branchName: branchName,
-              timestamp: new Date().toISOString()
-            });
-          } catch (branchError) {
+          } else {
+            // Not a new session but repo doesn't exist - just clone it
             sendEvent({
               type: 'message',
-              message: `Warning: Failed to create branch - ${branchError instanceof Error ? branchError.message : String(branchError)}`,
+              message: `Cloning repository: ${request.github.repoUrl}`,
               timestamp: new Date().toISOString()
+            });
+
+            const cloneResult = await this.githubWorkerClient.cloneRepository(
+              {
+                sessionId: websiteSessionId,
+                repoUrl: request.github.repoUrl,
+                branch: request.github.branch,
+                directory: request.github.directory,
+                accessToken: request.github.accessToken!
+              },
+              (event) => {
+                if (event.type === 'progress') {
+                  sendEvent({
+                    type: 'message',
+                    message: event.message,
+                    source: 'github-worker',
+                    timestamp: event.timestamp
+                  });
+                }
+              }
+            );
+
+            // Download the session from storage
+            await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
+
+            // Update workspace path
+            workspacePath = path.join(sessionRoot, 'workspace', cloneResult.clonedPath);
+
+            logger.info('Repository cloned via GitHub Worker', {
+              component: 'Orchestrator',
+              websiteSessionId,
+              clonedPath: cloneResult.clonedPath,
+              branch: cloneResult.branch
             });
           }
         }
-      } else if (request.github) {
-        // Log why we're skipping session initialization
-        logger.info('Skipping session initialization (not first message or already initialized)', {
-          component: 'Orchestrator',
-          websiteSessionId,
-          isResuming,
-          hasBranch: !!metadata.branch,
-          hasTitle: !!metadata.sessionTitle,
-          existingBranch: metadata.branch,
-          existingTitle: metadata.sessionTitle
-        });
       }
 
       // Update DB with session metadata

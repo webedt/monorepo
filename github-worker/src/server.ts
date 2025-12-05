@@ -4,6 +4,7 @@ import cors from 'cors';
 import * as os from 'os';
 import {
   CloneRepositoryRequest,
+  InitSessionRequest,
   CreateBranchRequest,
   CommitAndPushRequest,
   CreatePullRequestRequest,
@@ -11,6 +12,7 @@ import {
   AutoPullRequestRequest,
 } from './types';
 import { cloneRepository } from './operations/cloneRepository';
+import { initSession } from './operations/initSession';
 import { createBranch } from './operations/createBranch';
 import { commitAndPush } from './operations/commitAndPush';
 import { createPullRequest, mergePullRequest, autoPullRequest } from './operations/pullRequest';
@@ -138,6 +140,73 @@ app.post('/clone-repository', async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Clone repository operation failed', error, {
+      component: 'Server',
+      sessionId: request.sessionId
+    });
+  }
+
+  // Exit after completion (ephemeral model)
+  await gracefulExit(0);
+});
+
+/**
+ * Init session endpoint
+ * Clones repository AND creates branch in a single operation
+ */
+app.post('/init-session', async (req: Request, res: Response) => {
+  logger.info('Received init-session request', {
+    component: 'Server',
+    operation: 'init-session'
+  });
+
+  // Check if worker is busy
+  if (workerStatus === 'busy') {
+    res.setHeader('X-Container-ID', containerId);
+    res.status(429).json({
+      error: 'busy',
+      message: 'Worker is currently processing another request',
+      retryAfter: 5,
+      containerId
+    });
+    return;
+  }
+
+  // Validate request
+  const request: InitSessionRequest = req.body;
+  if (!request.sessionId || !request.repoUrl || !request.userRequest ||
+      !request.claudeCredentials || !request.githubAccessToken) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required fields: sessionId, repoUrl, userRequest, claudeCredentials, githubAccessToken',
+      containerId
+    });
+    return;
+  }
+
+  // Check for shutdown
+  if (shutdownRequested) {
+    res.status(503).json({
+      error: 'shutting_down',
+      message: 'Worker is shutting down',
+      containerId
+    });
+    return;
+  }
+
+  // Set worker to busy
+  workerStatus = 'busy';
+  activeOperation = 'init-session';
+
+  setupSSE(res);
+
+  try {
+    await initSession(request, res, TMP_DIR);
+    logger.info('Init session operation completed', {
+      component: 'Server',
+      sessionId: request.sessionId
+    });
+  } catch (error) {
+    logger.error('Init session operation failed', error, {
       component: 'Server',
       sessionId: request.sessionId
     });
@@ -516,6 +585,7 @@ app.use((req: Request, res: Response) => {
       'GET  /health',
       'GET  /status',
       'POST /clone-repository',
+      'POST /init-session',
       'POST /create-branch',
       'POST /commit-and-push',
       'POST /create-pull-request',
@@ -583,6 +653,7 @@ app.listen(PORT, () => {
   console.log('  GET  /health              - Health check');
   console.log('  GET  /status              - Worker status (idle/busy)');
   console.log('  POST /clone-repository    - Clone GitHub repo into session');
+  console.log('  POST /init-session        - Clone + create branch (combined)');
   console.log('  POST /create-branch       - Create branch with LLM naming');
   console.log('  POST /commit-and-push     - Commit changes with LLM message');
   console.log('  POST /create-pull-request - Create a new pull request');

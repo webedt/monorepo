@@ -21,6 +21,25 @@ export interface CloneRepositoryResult {
   wasCloned: boolean;
 }
 
+export interface InitSessionRequest {
+  sessionId: string;
+  repoUrl: string;
+  branch?: string;
+  directory?: string;
+  userRequest: string;
+  claudeCredentials: string;
+  githubAccessToken: string;
+}
+
+export interface InitSessionResult {
+  clonedPath: string;
+  branch: string;
+  wasCloned: boolean;
+  branchName: string;
+  sessionTitle: string;
+  sessionPath: string;
+}
+
 export interface CreateBranchRequest {
   sessionId: string;
   userRequest: string;
@@ -96,6 +115,20 @@ export class GitHubWorkerClient {
   ): Promise<CloneRepositoryResult> {
     return this.makeSSERequest<CloneRepositoryResult>(
       '/clone-repository',
+      request,
+      onEvent
+    );
+  }
+
+  /**
+   * Initialize a session: clone repository and create branch in one operation
+   */
+  async initSession(
+    request: InitSessionRequest,
+    onEvent?: SSEEventCallback
+  ): Promise<InitSessionResult> {
+    return this.makeSSERequest<InitSessionResult>(
+      '/init-session',
       request,
       onEvent
     );

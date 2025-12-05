@@ -21,6 +21,31 @@ export interface CloneRepositoryResult {
 }
 
 // ============================================================================
+// Init Session (Clone + Create Branch combined)
+// ============================================================================
+
+export interface InitSessionRequest {
+  sessionId: string;
+  repoUrl: string;
+  branch?: string;         // Base branch to clone
+  directory?: string;      // Custom directory name
+  userRequest: string;     // User's message for LLM naming
+  claudeCredentials: string;
+  githubAccessToken: string;
+}
+
+export interface InitSessionResult {
+  // From clone
+  clonedPath: string;
+  branch: string;          // Base branch that was cloned
+  wasCloned: boolean;
+  // From branch creation
+  branchName: string;      // New branch name
+  sessionTitle: string;
+  sessionPath: string;
+}
+
+// ============================================================================
 // Create Branch
 // ============================================================================
 
