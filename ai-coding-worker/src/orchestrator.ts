@@ -511,15 +511,22 @@ export class Orchestrator {
             },
             (event) => {
               // Forward events from github-worker with original source preserved
+              // Map 'progress' to 'message', but keep special types like branch_created, session_name
+              const eventType = event.type === 'progress' ? 'message' : event.type;
               sendEvent({
-                type: event.type === 'progress' ? 'message' : event.type,
+                type: eventType,
                 message: event.message,
                 stage: event.stage,
                 data: event.data,
                 error: event.error,
                 code: event.code,
                 source: 'github-worker',
-                timestamp: event.timestamp
+                timestamp: event.timestamp,
+                // Pass through additional fields for branch_created and session_name events
+                ...(event.branchName && { branchName: event.branchName }),
+                ...(event.baseBranch && { baseBranch: event.baseBranch }),
+                ...(event.sessionPath && { sessionPath: event.sessionPath }),
+                ...(event.sessionName && { sessionName: event.sessionName })
               } as SSEEvent);
             }
           );
@@ -548,23 +555,8 @@ export class Orchestrator {
           metadata.sessionTitle = sessionTitle;
           this.sessionStorage.saveMetadata(websiteSessionId, sessionRoot, metadata);
 
-          // Send branch_created event
-          sendEvent({
-            type: 'branch_created',
-            branchName: branchName,
-            baseBranch: baseBranchForSession!,
-            sessionPath: sessionPath,
-            message: `Created and checked out branch: ${branchName}`,
-            timestamp: new Date().toISOString()
-          });
-
-          // Send session_name event with the generated title
-          sendEvent({
-            type: 'session_name',
-            sessionName: sessionTitle,
-            branchName: branchName,
-            timestamp: new Date().toISOString()
-          });
+          // Note: branch_created and session_name events are sent by github-worker
+          // and forwarded via the event callback above - no need to duplicate here
 
           logger.info('Branch created and session title generated via GitHub Worker', {
             component: 'Orchestrator',
@@ -773,16 +765,20 @@ export class Orchestrator {
             },
             (event) => {
               // Forward events from github-worker with original source preserved
-              // Map progress events to commit_progress for consistency
+              // Map progress events to commit_progress, but keep commit_progress as-is
+              const eventType = event.type === 'progress' ? 'commit_progress' : event.type;
               sendEvent({
-                type: event.type === 'progress' ? 'commit_progress' : event.type,
+                type: eventType,
                 message: event.message,
                 stage: event.stage,
                 data: event.data,
                 error: event.error,
                 code: event.code,
                 source: 'github-worker',
-                timestamp: event.timestamp
+                timestamp: event.timestamp,
+                // Pass through additional fields
+                ...(event.branch && { branch: event.branch }),
+                ...(event.commitHash && { commitHash: event.commitHash })
               } as SSEEvent);
             }
           );
@@ -806,14 +802,8 @@ export class Orchestrator {
             await this.sessionStorage.downloadSession(websiteSessionId, sessionRoot);
           }
 
-          // Send final completion event
-          sendEvent({
-            type: 'commit_progress',
-            stage: 'completed',
-            message: commitResult.skipped ? `Auto-commit skipped: ${commitResult.reason}` : 'Auto-commit process completed',
-            branch: commitResult.branch,
-            timestamp: new Date().toISOString()
-          });
+          // Note: commit completion events are sent by github-worker
+          // and forwarded via the event callback above - no need to duplicate here
         } catch (error) {
           logger.error('Failed to auto-commit via GitHub Worker', error, {
             component: 'Orchestrator',

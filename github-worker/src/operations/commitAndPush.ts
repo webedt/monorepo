@@ -97,6 +97,14 @@ export async function commitAndPush(
     if (!hasChanges) {
       const currentBranch = await gitHelper.getCurrentBranch();
 
+      // Send user-visible skip message
+      sendEvent(res, {
+        type: 'commit_progress',
+        stage: 'completed',
+        message: '📤 Auto-commit skipped: No changes to commit',
+        branch: currentBranch
+      });
+
       sendEvent(res, {
         type: 'completed',
         data: {
@@ -225,13 +233,16 @@ export async function commitAndPush(
     }
 
     // Step 10: Upload session back to storage
-    sendEvent(res, {
-      type: 'progress',
-      stage: 'uploading',
-      message: 'Uploading session to storage...'
-    });
-
     await storageClient.uploadSession(sessionId, sessionRoot);
+
+    // Send user-visible completion message
+    sendEvent(res, {
+      type: 'commit_progress',
+      stage: 'completed',
+      message: pushed ? `📤 Changes committed and pushed` : `📤 Changes committed (push pending)`,
+      branch: currentBranch,
+      commitHash
+    });
 
     // Step 11: Send completed event
     const result: CommitAndPushResult = {

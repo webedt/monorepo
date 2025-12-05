@@ -133,11 +133,6 @@ export async function createBranch(
 
     try {
       await gitHelper.push();
-      sendEvent(res, {
-        type: 'progress',
-        stage: 'pushed',
-        message: 'Branch pushed successfully'
-      });
     } catch (pushError) {
       // Non-critical - log but continue
       logger.warn('Early branch push failed (non-critical)', {
@@ -145,12 +140,6 @@ export async function createBranch(
         sessionId,
         branchName,
         error: pushError instanceof Error ? pushError.message : String(pushError)
-      });
-
-      sendEvent(res, {
-        type: 'progress',
-        stage: 'push_warning',
-        message: 'Push failed (will retry after commits)'
       });
     }
 
@@ -164,13 +153,24 @@ export async function createBranch(
 
     storageClient.saveMetadata(sessionRoot, metadata);
 
-    // Step 8: Upload to storage
+    // Send branch_created event (forwarded by ai-coding-worker to website)
     sendEvent(res, {
-      type: 'progress',
-      stage: 'uploading',
-      message: 'Uploading session to storage...'
+      type: 'branch_created',
+      branchName: branchName,
+      baseBranch: baseBranch,
+      sessionPath: sessionPath,
+      message: `🌿 Branch created: ${branchName}`
     });
 
+    // Send session_name event (forwarded by ai-coding-worker to website)
+    sendEvent(res, {
+      type: 'session_name',
+      sessionName: title,
+      branchName: branchName,
+      message: `📝 Session: ${title}`
+    });
+
+    // Step 8: Upload to storage
     await storageClient.uploadSession(sessionId, sessionRoot);
 
     // Step 9: Send completed event
