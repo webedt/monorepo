@@ -10,6 +10,7 @@ This is a monorepo containing multiple related projects:
 |---------|------|-------------|
 | **AI Coding Worker** | `/ai-coding-worker` | Provider-agnostic API for executing coding assistant requests with Docker Swarm orchestration |
 | **Collaborative Session Worker** | `/collaborative-session-worker` | WebSocket-based real-time collaboration with CRDT synchronization and MinIO persistence |
+| **GitHub Worker** | `/github-worker` | Ephemeral worker for GitHub/Git operations (clone, branch, commit, push) with SSE streaming |
 | **Storage Worker** | `/storage-worker` | Storage service for session management |
 | **Website** | `/website` | Web application with path-based routing and Dokploy deployment |
 
@@ -324,6 +325,13 @@ For detailed information about each project, see the respective CLAUDE.md files:
   - Auto-commit functionality
   - Collaboration manager
 
+- **GitHub Worker**: [github-worker/CLAUDE.md](github-worker/CLAUDE.md)
+  - Repository cloning and pulling
+  - Branch creation with LLM-generated names
+  - Commit and push with LLM-generated messages
+  - SSE streaming for real-time progress
+  - Ephemeral worker model
+
 - **Website**: [website/CLAUDE.md](website/CLAUDE.md)
   - Path-based routing requirements
   - Vite and React Router configuration
@@ -390,4 +398,4 @@ When working across multiple projects:
 
 ---
 
-*Documentation last updated: 2025-06-18*
+*Documentation last updated: 2025-12-04*
