@@ -9,6 +9,7 @@ This repository consolidates multiple projects into a single monorepo with indep
 ├── website/                           # Website project (pnpm workspace)
 ├── ai-coding-worker/                  # AI Coding Worker service
 ├── collaborative-session-worker/       # Collaborative Session Worker service
+├── github-worker/                     # GitHub Worker service (Git operations)
 ├── storage-worker/                    # Storage Worker service
 └── .github/
     └── workflows/                     # Centralized GitHub Actions workflows
@@ -16,6 +17,7 @@ This repository consolidates multiple projects into a single monorepo with indep
         ├── website-cleanup-dokploy.yml
         ├── ai-coding-worker-docker-build-push.yml
         ├── collaborative-session-worker-docker-build-push.yml
+        ├── github-worker-docker-build-push.yml
         └── storage-worker-docker-build-push.yml
 ```
 
@@ -41,7 +43,14 @@ This repository consolidates multiple projects into a single monorepo with indep
 - **Deployment**: Docker Registry
 - **Workflow**: `collaborative-session-worker-docker-build-push.yml` - Builds and pushes Docker images on main branch
 
-### 4. Storage Worker
+### 4. GitHub Worker
+- **Path**: `github-worker/`
+- **Type**: Node.js/TypeScript worker service
+- **Deployment**: Docker Registry
+- **Workflow**: `github-worker-docker-build-push.yml` - Builds and pushes Docker images on main branch
+- **Purpose**: Handles Git operations (clone, branch, commit, push) with LLM-generated branch names and commit messages
+
+### 5. Storage Worker
 - **Path**: `storage-worker/`
 - **Type**: Node.js/TypeScript worker service
 - **Deployment**: Docker Registry
@@ -129,6 +138,7 @@ This monorepo was created by consolidating:
 - https://github.com/webedt/website
 - https://github.com/webedt/ai-coding-worker
 - https://github.com/webedt/collaborative-session-worker
+- https://github.com/webedt/github-worker
 - https://github.com/webedt/storage-worker
 
 All git history from the original repositories has been preserved in their respective folders.

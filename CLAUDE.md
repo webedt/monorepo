@@ -210,11 +210,143 @@ await githubApi.createPR(...);
 4. **Rate limiting** - Avoids GitHub API rate limits
 5. **Binary files** - Better handling of images and large files
 
+## System Architecture
+
+### High-Level Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              FRONTEND                                        │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                         Website (React)                                │  │
+│  │  - Chat UI for AI interactions                                        │  │
+│  │  - File browser/editor                                                 │  │
+│  │  - GitHub OAuth integration                                            │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                         │
+│                                    ▼                                         │
+│                          Dokploy Reverse Proxy                               │
+└────────────────────────────────────┬────────────────────────────────────────┘
+                                     │
+         ┌───────────────────────────┼───────────────────────────┐
+         │                           │                           │
+         ▼                           ▼                           ▼
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│  AI Coding      │       │  GitHub         │       │  Storage        │
+│  Worker         │◄─────►│  Worker         │◄─────►│  Worker         │
+│  (port 5001)    │       │  (port 5003)    │       │  (internal)     │
+│                 │       │                 │       │                 │
+│  10 replicas    │       │  5 replicas     │       │  2 replicas     │
+└────────┬────────┘       └────────┬────────┘       └────────┬────────┘
+         │                         │                         │
+         │                         │                         │
+         └─────────────────────────┼─────────────────────────┘
+                                   │
+                                   ▼
+                          ┌─────────────────┐
+                          │     MinIO       │
+                          │  (S3 Storage)   │
+                          │                 │
+                          │  Sessions data  │
+                          └─────────────────┘
+```
+
+### Worker Responsibilities
+
+| Worker | Purpose | Key Operations |
+|--------|---------|----------------|
+| **AI Coding Worker** | Execute AI coding requests | - Receive user prompts<br>- Route to provider (Claude/Codex)<br>- Stream SSE responses<br>- Orchestrate GitHub operations |
+| **GitHub Worker** | Handle Git operations | - Clone/pull repositories<br>- Create branches (LLM-named)<br>- Commit changes (LLM messages)<br>- Push to remote |
+| **Storage Worker** | Manage session persistence | - Store/retrieve sessions<br>- File CRUD operations<br>- Session metadata<br>- Interface to MinIO |
+
+### Request Flow Example: New Chat Session
+
+```
+1. User sends prompt → Website
+2. Website → AI Coding Worker: POST /execute
+3. AI Coding Worker → GitHub Worker: POST /clone-repository
+   └── GitHub Worker → Storage Worker: Download existing session (if any)
+   └── GitHub Worker → Storage Worker: Upload cloned repo
+4. AI Coding Worker → GitHub Worker: POST /create-branch
+   └── Uses LLM to generate branch name from user request
+5. AI Coding Worker → Claude Agent SDK: Execute user prompt
+   └── Streams SSE events back to Website
+6. AI Coding Worker → GitHub Worker: POST /commit-and-push
+   └── Uses LLM to generate commit message from diff
+7. AI Coding Worker → Storage Worker: Upload final session state
+8. Worker exits (ephemeral model)
+```
+
+### SSE Event Flow with Source Indicators
+
+All workers emit SSE events with a `source` field to identify origin:
+
+```
+┌──────────────────┐
+│   Website Chat   │◄─────────────────────────────────────────┐
+└──────────────────┘                                          │
+                                                              │
+Events from different sources:                                │
+                                                              │
+[ai-coding-worker] Initializing session...                    │
+[github-worker] Cloning repository...                         │
+[github-worker] Repository cloned successfully                │
+[github-worker] Creating branch: webedt/add-dark-mode-abc123  │
+[claude] I'll help you add dark mode...                       │
+[claude] 📝 Editing src/App.tsx                               │
+[claude] ✓ Changes complete                                   │
+[github-worker] Committing changes...                         │
+[github-worker] Pushed to remote successfully                 │
+[ai-coding-worker] Session completed                          ▼
+```
+
+**Event Source Types:**
+- `ai-coding-worker` - Orchestration events
+- `github-worker` - Git/GitHub operations
+- `storage-worker` - Storage operations
+- `claude-agent-sdk` / `claude` - Claude AI responses
+- `codex-sdk` / `codex` - Codex AI responses
+
+### Docker Swarm Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Docker Swarm Cluster                        │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  webedt-app-ai-coding-workers-gy4wew_ai-coding-worker     │ │
+│  │  ├── replica 1  (idle)                                    │ │
+│  │  ├── replica 2  (busy → processing request)               │ │
+│  │  ├── replica 3  (idle)                                    │ │
+│  │  ├── ...                                                  │ │
+│  │  └── replica 10 (idle)                                    │ │
+│  │  Port: *:5001→5000                                        │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  webedt-app-github-workers-x4o1nh_github-worker           │ │
+│  │  ├── replica 1-5 (ephemeral)                              │ │
+│  │  Port: *:5003→5002                                        │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  webedt-app-storage-worker-t1avua_storage-worker          │ │
+│  │  ├── replica 1-2 (persistent)                             │ │
+│  │  Internal network only                                     │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  webedt-app-storage-worker-t1avua_minio                   │ │
+│  │  MinIO S3-compatible storage                               │ │
+│  └────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ## Common Architectural Patterns
 
 ### Ephemeral Worker Model
 
-Both the AI Coding Worker and Collaborative Session Worker use an ephemeral worker model:
+AI Coding Worker, GitHub Worker, and Collaborative Session Worker all use an ephemeral worker model:
 
 - Workers exit after completing each job (`process.exit(0)` on success)
 - Docker Swarm automatically restarts workers after exit
@@ -305,6 +437,84 @@ docker-compose up
 
 # View logs
 docker-compose logs -f
+```
+
+## API Reference
+
+### AI Coding Worker (port 5001)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check with worker status |
+| `/status` | GET | Worker idle/busy status |
+| `/sessions` | GET | List all sessions |
+| `/execute` | POST | Execute AI coding request (SSE) |
+| `/abort` | POST | Abort current execution |
+| `/init-repository` | POST | Initialize repository in session |
+
+### GitHub Worker (port 5003)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check with worker status |
+| `/status` | GET | Worker idle/busy status |
+| `/clone-repository` | POST | Clone repo into session (SSE) |
+| `/create-branch` | POST | Create branch with LLM naming (SSE) |
+| `/commit-and-push` | POST | Commit and push changes (SSE) |
+
+### Storage Worker (internal)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/api/storage-worker/sessions` | GET | List all sessions |
+| `/api/storage-worker/sessions/:path` | GET | Get session metadata |
+| `/api/storage-worker/sessions/:path` | HEAD | Check session exists |
+| `/api/storage-worker/sessions/:path/upload` | POST | Upload session archive |
+| `/api/storage-worker/sessions/:path/download` | GET | Download session archive |
+| `/api/storage-worker/sessions/:path/files` | GET | List files in session |
+| `/api/storage-worker/sessions/:path/files/*` | GET | Read file content |
+| `/api/storage-worker/sessions/:path/files/*` | PUT | Write file content |
+| `/api/storage-worker/sessions/:path/files/*` | DELETE | Delete file |
+
+## Testing
+
+### Running API Tests
+
+Each worker has API tests that can be run against local or production endpoints:
+
+```bash
+# AI Coding Worker tests
+cd ai-coding-worker
+AI_CODING_WORKER_URL=http://localhost:5001 npm run test:api
+
+# Storage Worker tests
+cd storage-worker
+STORAGE_WORKER_URL=http://localhost:3000 npm run test:api
+```
+
+### Testing from Production Server
+
+```bash
+# Test via SSH to production server
+ssh ehub2023 'curl -s http://127.0.0.1:5001/health | jq'
+ssh ehub2023 'curl -s http://127.0.0.1:5003/health | jq'
+
+# Test storage worker via Docker network
+ssh ehub2023 'docker exec $(docker ps --filter "name=ai-coding-worker" -q | head -1) \
+  node -e "fetch(\"http://storage-worker:3000/health\").then(r=>r.text()).then(console.log)"'
+```
+
+### Environment Variables for Testing
+
+Create `.env` files from `.env.example` in each worker directory. Key variables:
+
+```bash
+# For test files
+AI_CODING_WORKER_URL=http://localhost:5001
+STORAGE_WORKER_URL=http://localhost:3000
+CODING_ASSISTANT_PROVIDER=ClaudeAgentSDK
+CODING_ASSISTANT_AUTHENTICATION={"claudeAiOauth":{...}}
 ```
 
 ## Project-Specific Details

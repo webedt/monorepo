@@ -194,6 +194,17 @@ Each event is in the format:
 data: <JSON object>\n\n
 ```
 
+**SSE Source Indicators:**
+
+All events include a `source` field to identify the origin:
+
+| Source | Description |
+|--------|-------------|
+| `ai-coding-worker` | Events from the AI Coding Worker orchestration layer |
+| `claude-agent-sdk` | Events forwarded from the Claude Agent SDK |
+| `codex-sdk` | Events forwarded from the Codex SDK |
+| `github-worker` | Events from GitHub operations (clone, branch, commit) |
+
 **Event Types:**
 
 ```typescript
@@ -204,6 +215,7 @@ data: <JSON object>\n\n
   resuming: boolean;
   resumedFrom?: string;
   provider: string;
+  source: "ai-coding-worker";
   timestamp: string;
 }
 
@@ -211,6 +223,7 @@ data: <JSON object>\n\n
 {
   type: "message";
   message: string;
+  source: "ai-coding-worker";
   timestamp: string;
 }
 
@@ -222,6 +235,7 @@ data: <JSON object>\n\n
     message?: string;
     targetPath?: string;
   };
+  source: "ai-coding-worker";
   timestamp: string;
 }
 
@@ -234,13 +248,15 @@ data: <JSON object>\n\n
   commitMessage?: string;
   commitHash?: string;
   error?: string;
+  source: "ai-coding-worker";
   timestamp: string;
 }
 
-// Provider output (forwarded as-is from Claude Code/Codex)
+// Provider output (forwarded from Claude Code/Codex)
 {
   type: "assistant_message";
   // ... provider-specific fields (varies by provider)
+  source: "claude-agent-sdk" | "codex-sdk";
 }
 
 // Job completed
@@ -248,6 +264,7 @@ data: <JSON object>\n\n
   type: "completed";
   sessionId: string;
   duration_ms: number;
+  source: "ai-coding-worker";
   timestamp: string;
 }
 
@@ -256,6 +273,7 @@ data: <JSON object>\n\n
   type: "error";
   error: string;
   code?: "VALIDATION_ERROR" | "GITHUB_ERROR" | "PROVIDER_ERROR" | "EXECUTION_ERROR" | "UNKNOWN_ERROR";
+  source: "ai-coding-worker";
   timestamp: string;
 }
 ```

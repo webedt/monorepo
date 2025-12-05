@@ -66,18 +66,54 @@ Worker status (idle/busy).
 
 ## SSE Event Format
 
-All operation endpoints use SSE (Server-Sent Events) for real-time progress updates:
+All operation endpoints use SSE (Server-Sent Events) for real-time progress updates. Every event includes a `source` field to identify the origin:
 
 ```
-data: {"type": "progress", "stage": "cloning", "message": "Cloning repository...", "timestamp": "..."}
-data: {"type": "progress", "stage": "uploading", "message": "Uploading to storage...", "timestamp": "..."}
-data: {"type": "completed", "data": {...}, "timestamp": "..."}
+data: {"type": "progress", "stage": "cloning", "message": "Cloning repository...", "source": "github-worker", "timestamp": "..."}
+data: {"type": "progress", "stage": "uploading", "message": "Uploading to storage...", "source": "github-worker", "timestamp": "..."}
+data: {"type": "completed", "data": {...}, "source": "github-worker", "timestamp": "..."}
 ```
 
 Error events:
 ```
-data: {"type": "error", "error": "Error message", "code": "error_code", "timestamp": "..."}
+data: {"type": "error", "error": "Error message", "code": "error_code", "source": "github-worker", "timestamp": "..."}
 ```
+
+### Event Types
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `progress` | `stage`, `message`, `source`, `timestamp` | Operation progress |
+| `completed` | `data`, `source`, `timestamp` | Operation completed successfully |
+| `error` | `error`, `code`, `source`, `timestamp` | Operation failed |
+
+### Progress Stages by Operation
+
+**Clone Repository:**
+- `downloading_session` - Checking for existing session
+- `session_found` / `new_session` - Session status
+- `cloning` - Cloning repository
+- `cloned` - Clone complete
+- `uploading` - Uploading to storage
+
+**Create Branch:**
+- `preparing` - Preparing credentials
+- `downloading_session` - Downloading session
+- `generating_name` - LLM generating branch name
+- `name_generated` - Name generated
+- `creating_branch` - Creating git branch
+- `pushing` - Pushing to remote
+- `uploading` - Uploading to storage
+
+**Commit and Push:**
+- `preparing` - Preparing credentials
+- `downloading_session` - Downloading session
+- `analyzing` - Analyzing changes
+- `changes_detected` - Changes found
+- `generating_message` - LLM generating commit message
+- `committing` - Creating commit
+- `pushing` - Pushing to remote
+- `uploading` - Uploading to storage
 
 ## Environment Variables
 

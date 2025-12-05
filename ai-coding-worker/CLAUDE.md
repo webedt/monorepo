@@ -214,16 +214,37 @@ case 'new-provider':
 3. Update `ProviderFactory.getSupportedProviders()` array
 
 ### SSE Event Types
-- `connected` - Initial connection with session ID
-- `message` - Progress messages
-- `github_pull_progress` - Repo clone/pull status
-- `branch_created` - Git branch created with session name
-- `session_name` - Generated session title and branch name
-- `debug` - Debug information (for troubleshooting)
-- `assistant_message` - Provider output (forwarded as-is)
-- `commit_progress` - Auto-commit progress stages
-- `completed` - Job finished with duration
-- `error` - Error occurred with code
+
+All SSE events include a `source` field to identify the origin. This allows clients to distinguish between events from different parts of the system.
+
+| Event Type | Source | Description |
+|------------|--------|-------------|
+| `connected` | `ai-coding-worker` | Initial connection with session ID |
+| `message` | `ai-coding-worker` | Progress messages |
+| `github_pull_progress` | `ai-coding-worker` | Repo clone/pull status |
+| `branch_created` | `ai-coding-worker` | Git branch created with session name |
+| `session_name` | `ai-coding-worker` | Generated session title and branch name |
+| `debug` | `ai-coding-worker` | Debug information (for troubleshooting) |
+| `assistant_message` | `claude-agent-sdk` or `codex-sdk` | Provider output (forwarded from SDK) |
+| `commit_progress` | `ai-coding-worker` | Auto-commit progress stages |
+| `completed` | `ai-coding-worker` | Job finished with duration |
+| `error` | `ai-coding-worker` | Error occurred with code |
+
+### SSE Event Sources
+
+| Source | Description |
+|--------|-------------|
+| `ai-coding-worker` | Events from the AI Coding Worker orchestration layer |
+| `claude-agent-sdk` | Events forwarded from the Claude Agent SDK |
+| `codex-sdk` | Events forwarded from the Codex SDK |
+
+### SSE Event Format
+
+```
+data: {"type": "message", "message": "Cloning repository...", "source": "ai-coding-worker", "timestamp": "..."}
+data: {"type": "assistant_message", "data": {...}, "source": "claude-agent-sdk", "timestamp": "..."}
+data: {"type": "completed", "sessionId": "...", "duration": 12345, "source": "ai-coding-worker", "timestamp": "..."}
+```
 
 ### LLM-Based Session Naming
 

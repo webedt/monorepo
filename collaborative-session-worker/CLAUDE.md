@@ -275,6 +275,26 @@ ls /workspace/
 mc ls minio/sessions/
 ```
 
+## Integration with Other Services
+
+### Storage Worker
+
+The Collaborative Session Worker uses the Storage Worker for persistent session storage:
+- Downloads session from MinIO on client join
+- Uploads session to MinIO on disconnect or cleanup
+- Session state persists across worker restarts
+
+### GitHub Worker
+
+Calls GitHub Worker for auto-commit functionality:
+- `POST /commit-and-push` - Commits changes after cooldown period
+
+### AI Coding Worker
+
+AI Coding Worker may interact with collaborative sessions:
+- Session workspaces are shared via Storage Worker
+- File changes sync through CRDT synchronization
+
 ## Security Considerations
 
 1. **User Authentication**: Not implemented - should be added at gateway/proxy level
