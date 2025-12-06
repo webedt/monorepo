@@ -18,7 +18,7 @@ export class StorageClient {
   constructor() {
     // Default to internal-api-server on dokploy network
     // Note: ai-coding-worker connects directly to internal-api-server, not through website facade
-    const storageUrl = process.env.INTERNAL_API_URL || 'http://internal-api-server:3000';
+    const storageUrl = process.env.INTERNAL_API_URL || 'http://webedt-app-webedt-internal-api-server-juit1b:3000';
     this.enabled = true;
     this.baseUrl = storageUrl.replace(/\/$/, '');
     this.timeout = parseInt(process.env.STORAGE_TIMEOUT || '60000', 10);

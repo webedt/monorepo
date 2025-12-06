@@ -584,8 +584,8 @@ jobs:
             echo "  ✅ INTERNAL_API_URL configured"
           else
             # Default to internal docker network name
-            ENV_VARS="${ENV_VARS}\nINTERNAL_API_URL=http://internal-api-server:3000"
-            echo "  ✅ INTERNAL_API_URL=http://internal-api-server:3000 (default)"
+            ENV_VARS="${ENV_VARS}\nINTERNAL_API_URL=http://webedt-app-webedt-internal-api-server-juit1b:3000"
+            echo "  ✅ INTERNAL_API_URL=http://webedt-app-webedt-internal-api-server-juit1b:3000 (default)"
           fi
 
           echo ""

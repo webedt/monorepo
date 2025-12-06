@@ -12,7 +12,7 @@ const app = express();
 // Configuration
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://internal-api-server:3000';
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://webedt-app-webedt-internal-api-server-juit1b:3000';
 
 // CORS configuration
 const ALLOWED_ORIGINS = NODE_ENV === 'production'
