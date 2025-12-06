@@ -7,8 +7,8 @@ import { logger } from '../utils/logger';
 import { SessionMetadata, SSEEvent } from '../types';
 
 /**
- * Storage client for communicating with main-server storage endpoints
- * (Previously communicated with storage-worker, now consolidated into main-server)
+ * Storage client for communicating with internal-api-server storage endpoints
+ * This connects directly to internal-api-server (not through website facade)
  */
 export class StorageClient {
   private baseUrl: string;
@@ -16,14 +16,14 @@ export class StorageClient {
   private enabled: boolean;
 
   constructor() {
-    // Default to main-server external URL if STORAGE_WORKER_URL is not set
-    // Note: storage endpoints are now served by main-server at /api/storage/*
-    const storageUrl = process.env.STORAGE_WORKER_URL || 'https://webedt.etdofresh.com';
+    // Default to internal-api-server on dokploy network
+    // Note: ai-coding-worker connects directly to internal-api-server, not through website facade
+    const storageUrl = process.env.INTERNAL_API_URL || 'http://internal-api-server:3000';
     this.enabled = true;
     this.baseUrl = storageUrl.replace(/\/$/, '');
-    this.timeout = parseInt(process.env.STORAGE_WORKER_TIMEOUT || '60000', 10);
+    this.timeout = parseInt(process.env.STORAGE_TIMEOUT || '60000', 10);
 
-    logger.info('Storage worker client initialized', {
+    logger.info('Storage client initialized', {
       component: 'StorageClient',
       baseUrl: this.baseUrl
     });

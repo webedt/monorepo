@@ -1,8 +1,8 @@
 {
-  "name": "@webedt/main-server",
+  "name": "@webedt/internal-api-server",
   "version": "1.0.0",
   "type": "module",
-  "description": "Consolidated main server for WebEDT - handles API, database, storage, and GitHub operations",
+  "description": "Internal API server for WebEDT - handles API, database, storage, and GitHub operations (not publicly accessible)",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

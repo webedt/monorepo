@@ -184,20 +184,7 @@ app.use('/api/storage', storageRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', transcribeRoutes);
 
-// Serve static files in production
-if (NODE_ENV === 'production') {
-  const clientDistPath = path.join(__dirname, '../../website-client/dist');
-  app.use(express.static(clientDistPath));
-
-  // Handle client-side routing - send index.html for non-API routes
-  app.get('*', (req, res, next) => {
-    // Skip API routes - let them 404 properly
-    if (req.path.startsWith('/api/')) {
-      return next();
-    }
-    res.sendFile(path.join(clientDistPath, 'index.html'));
-  });
-}
+// Note: Static file serving removed - handled by website-server facade
 
 // Error handler
 app.use(
@@ -215,7 +202,7 @@ app.use(
 // Start server
 app.listen(PORT, () => {
   console.log('='.repeat(60));
-  console.log('🖥️  Main Server');
+  console.log('Internal API Server');
   console.log('='.repeat(60));
   console.log(`🆔 Container ID: ${CONTAINER_ID}`);
   console.log(`📡 Server running on port ${PORT}`);

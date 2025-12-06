@@ -11,7 +11,7 @@ services:
     environment:
       - PORT=5000
       - TMP_DIR=/tmp
-      - STORAGE_WORKER_URL=${STORAGE_WORKER_URL:-https://webedt.etdofresh.com}
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://internal-api-server:3000}
       - DB_BASE_URL=${DB_BASE_URL:-}
     networks:
       - dokploy-network

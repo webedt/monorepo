@@ -1,17 +1,17 @@
-name: Main Server - Build and Push Docker Image
+name: Internal API Server - Build and Push Docker Image
 
 on:
   push:
     paths:
-      - "main-server/**"
-      - ".github/workflows/main-server-docker-build-push.yml"
+      - "internal-api-server/**"
+      - ".github/workflows/internal-api-server-docker-build-push.yml"
 
 env:
   REGISTRY: dockerregistry.etdofresh.com
-  IMAGE_NAME: main-server
+  IMAGE_NAME: internal-api-server
 
 jobs:
-  build-and-push-main-server:
+  build-and-push-internal-api-server:
     runs-on: self-hosted
     permissions:
       contents: read
@@ -45,7 +45,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./main-server
+          context: ./internal-api-server
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -72,7 +72,7 @@ jobs:
             echo "⚠️ DOKPLOY_MAIN_SERVER_COMPOSE_ID not set or set to 'skip'"
             echo "📦 Image was pushed successfully to registry"
             echo "ℹ️ To enable auto-deployment:"
-            echo "   1. Create a Compose in Dokploy for main-server"
+            echo "   1. Create a Compose in Dokploy for internal-api-server"
             echo "   2. Set DOKPLOY_MAIN_SERVER_COMPOSE_ID variable in GitHub"
             exit 0
           fi
@@ -80,7 +80,7 @@ jobs:
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
-          echo "🚀 Deploying main-server to Dokploy..."
+          echo "🚀 Deploying internal-api-server to Dokploy..."
           echo "Compose ID: ${COMPOSE_ID}"
 
           # Trigger deployment using tRPC endpoint (compose.deploy for stack deployments)

@@ -3,7 +3,7 @@ name: Website - Deploy to Dokploy
 on:
   push:
     paths:
-      - "website-client/**"
+      - "website/**"
       - ".github/workflows/website-deploy-dokploy.yml"
   workflow_dispatch:
   repository_dispatch:
@@ -243,7 +243,7 @@ jobs:
             echo "  - Name: ${REPO_NAME}"
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
-            echo "  - Build Path: website-client"
+            echo "  - Build Path: website"
             echo "  - Auto Deploy: disabled (GitHub Actions will trigger deployments)"
 
             GITHUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
@@ -258,7 +258,7 @@ jobs:
                   \"repository\": \"${REPO_NAME}\",
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
-                  \"buildPath\": \"website-client\",
+                  \"buildPath\": \"website\",
                   \"enableSubmodules\": false,
                   \"autoDeploy\": false
                 }
@@ -285,7 +285,7 @@ jobs:
                 \"replicas\": 1,
                 \"buildType\": \"dockerfile\",
                 \"dockerfile\": \"Dockerfile\",
-                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\nVITE_API_BASE_URL=https://webedt.etdofresh.com\"
+                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\"
               }
             }"
 
@@ -319,7 +319,7 @@ jobs:
             echo "  - Name: ${REPO_NAME}"
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
-            echo "  - Build Path: website-client"
+            echo "  - Build Path: website"
             echo "  - Auto Deploy: disabled (GitHub Actions will trigger deployments)"
 
             # Create new application (with server ID for cloud provider)
@@ -385,7 +385,7 @@ jobs:
                   \"repository\": \"${REPO_NAME}\",
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
-                  \"buildPath\": \"website-client\",
+                  \"buildPath\": \"website\",
                   \"enableSubmodules\": false,
                   \"autoDeploy\": false
                 }
@@ -413,7 +413,7 @@ jobs:
                 \"replicas\": 1,
                 \"buildType\": \"dockerfile\",
                 \"dockerfile\": \"Dockerfile\",
-                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\nVITE_API_BASE_URL=https://webedt.etdofresh.com\"
+                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\"
               }
             }"
 
@@ -529,7 +529,7 @@ jobs:
                     \"applicationId\": \"${APP_ID}\",
                     \"host\": \"${DOMAIN}\",
                     \"path\": \"${PATH_PREFIX}\",
-                    \"port\": 80,
+                    \"port\": 3000,
                     \"https\": true,
                     \"certificateType\": \"letsencrypt\",
                     \"domainType\": \"application\",
@@ -559,7 +559,7 @@ jobs:
           echo "  - Name: ${APP_NAME}"
           echo "  - Domain: https://${DOMAIN}${PATH_PREFIX}"
           echo "  - Strip Prefix: enabled (${PATH_PREFIX} will be removed)"
-          echo "  - Port: 80"
+          echo "  - Port: 3000"
           echo "  - Environment: ${DOKPLOY_ENVIRONMENT_ID}"
 
       - name: Configure Environment Variables
@@ -567,15 +567,26 @@ jobs:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
+          INTERNAL_API_URL: ${{ secrets.INTERNAL_API_URL }}
         run: |
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
-          echo "🔧 Configuring environment variables for static website..."
+          echo "🔧 Configuring environment variables for website server..."
 
-          # Static website only needs NODE_ENV
+          # Website server needs NODE_ENV and INTERNAL_API_URL
           ENV_VARS="NODE_ENV=production"
           echo "  ✅ NODE_ENV=production configured"
+
+          # Add INTERNAL_API_URL if set
+          if [ -n "$INTERNAL_API_URL" ]; then
+            ENV_VARS="${ENV_VARS}\nINTERNAL_API_URL=${INTERNAL_API_URL}"
+            echo "  ✅ INTERNAL_API_URL configured"
+          else
+            # Default to internal docker network name
+            ENV_VARS="${ENV_VARS}\nINTERNAL_API_URL=http://internal-api-server:3000"
+            echo "  ✅ INTERNAL_API_URL=http://internal-api-server:3000 (default)"
+          fi
 
           echo ""
           echo "📝 Setting environment variable(s)..."
