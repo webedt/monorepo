@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi } from '@/lib/api';
 import SessionLayout from '@/components/SessionLayout';
 import { useEmbedded } from '@/contexts/EmbeddedContext';
-import type { GitHubPullRequest } from '@webedt/shared';
+import type { GitHubPullRequest } from '@/shared';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const AUTO_REFRESH_INTERVAL = 5; // seconds

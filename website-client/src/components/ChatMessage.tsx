@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
-import type { Message } from '@webedt/shared';
+import type { Message } from '@/shared';
 import type { ImageAttachment } from '@/components/ChatInput';
 
 interface ChatMessageProps {

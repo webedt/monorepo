@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { sessionsApi, githubApi } from '@/lib/api';
 import { useAuthStore, useSessionLastPageStore, useSessionsSidebarStore } from '@/lib/store';
-import type { ChatSession, GitHubRepository } from '@webedt/shared';
+import type { ChatSession, GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
 import type { ImageAttachment } from './ChatInput';
 

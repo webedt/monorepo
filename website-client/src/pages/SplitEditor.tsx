@@ -5,7 +5,7 @@ import SplitEditorLayout, { parseSplitRoute } from '@/components/SplitEditorLayo
 import { sessionsApi, githubApi } from '@/lib/api';
 import { useAuthStore, useSplitViewStore } from '@/lib/store';
 import { useEffect } from 'react';
-import type { GitHubRepository } from '@webedt/shared';
+import type { GitHubRepository } from '@/shared';
 
 export default function SplitEditor() {
   const { sessionId, splitPages } = useParams<{ sessionId?: string; splitPages: string }>();

@@ -3,15 +3,80 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { githubApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
-import type { GitHubRepository } from '@webedt/shared';
+import type { GitHubRepository } from '@/shared';
 
-export default function QuickChatSetup() {
+type ActivityType = 'chat' | 'code' | 'images' | 'sound' | 'scene' | 'preview';
+
+interface Activity {
+  id: ActivityType;
+  title: string;
+  icon: JSX.Element;
+}
+
+const activities: Activity[] = [
+  {
+    id: 'chat',
+    title: 'Chat',
+    icon: (
+      <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'code',
+    title: 'Code',
+    icon: (
+      <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'images',
+    title: 'Images and Animations',
+    icon: (
+      <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-3.5l-3-4 4-5 3 4 2-2.5 4 5H10z"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'sound',
+    title: 'Sound and Music',
+    icon: (
+      <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'scene',
+    title: 'Scene and Object Editor',
+    icon: (
+      <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 2l-5.5 9h11L12 2zm0 3.84L13.93 9h-3.87L12 5.84zM17.5 13c-2.49 0-4.5 2.01-4.5 4.5s2.01 4.5 4.5 4.5 4.5-2.01 4.5-4.5-2.01-4.5-4.5-4.5zm0 7c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5zM3 21.5h8v-8H3v8zm2-6h4v4H5v-4z"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'preview',
+    title: 'Preview',
+    icon: (
+      <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+      </svg>
+    ),
+  },
+];
+
+export default function NewSession() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
 
   // Repository and branch state
   const [selectedRepo, setSelectedRepo] = useState('');
-  const [branch, setBranch] = useState('main');
+  const [baseBranch, setBaseBranch] = useState('main');
 
   // Repository search state
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
@@ -92,10 +157,10 @@ export default function QuickChatSetup() {
   }, [selectedRepo, hasLoadedFromStorage]);
 
   // Fetch branches for the selected repository
-  const fetchBranches = async () => {
-    if (!selectedRepo) return;
+  const fetchBranches = async (repoCloneUrl: string) => {
+    if (!repoCloneUrl) return;
 
-    const match = selectedRepo.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+    const match = repoCloneUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
     if (!match) return;
 
     const [, owner, repo] = match;
@@ -105,14 +170,27 @@ export default function QuickChatSetup() {
       const response = await githubApi.getBranches(owner, repo);
       const branchNames = response.data.map((b: any) => b.name);
       setBranches(branchNames);
-      setIsBranchDropdownOpen(true);
     } catch (error) {
       console.error('Failed to fetch branches:', error);
-      alert('Failed to fetch branches. Please try again.');
+      setBranches([]);
     } finally {
       setIsLoadingBranches(false);
     }
   };
+
+  // Auto-fetch branches and set default branch when repository changes
+  useEffect(() => {
+    if (selectedRepo && hasLoadedFromStorage) {
+      const selectedRepoData = sortedRepositories.find((r) => r.cloneUrl === selectedRepo);
+      if (selectedRepoData) {
+        setBaseBranch(selectedRepoData.defaultBranch || 'main');
+        fetchBranches(selectedRepo);
+      }
+    } else if (!selectedRepo) {
+      setBranches([]);
+      setBaseBranch('main');
+    }
+  }, [selectedRepo, hasLoadedFromStorage]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -239,9 +317,9 @@ export default function QuickChatSetup() {
       e.stopPropagation();
       // If nothing highlighted, select first item
       const indexToSelect = branchHighlightedIndex >= 0 ? branchHighlightedIndex : 0;
-      const branchName = filteredBranches[indexToSelect];
-      if (branchName) {
-        setBranch(branchName);
+      const branch = filteredBranches[indexToSelect];
+      if (branch) {
+        setBaseBranch(branch);
       }
       setIsBranchDropdownOpen(false);
       setBranchSearchQuery('');
@@ -254,13 +332,25 @@ export default function QuickChatSetup() {
     }
   };
 
-  const handleStart = () => {
-    // Navigate to chat page with pre-selected settings
-    navigate('/session/new', {
+  const handleActivityClick = (activityId: ActivityType) => {
+    // Navigate to /session/new/{section} for all activities
+    const sectionMap: Record<ActivityType, string> = {
+      chat: 'chat',
+      code: 'code',
+      images: 'images',
+      sound: 'sound',
+      scene: 'scene-editor',
+      preview: 'preview',
+    };
+
+    const section = sectionMap[activityId];
+    const route = `/session/new/${section}`;
+
+    // Navigate with pre-selected settings
+    navigate(route, {
       state: {
         preSelectedSettings: {
           repositoryUrl: selectedRepo || undefined,
-          baseBranch: branch || undefined,
           locked: true, // Lock these settings
         }
       }
@@ -268,34 +358,25 @@ export default function QuickChatSetup() {
   };
 
   return (
-    <div className="min-h-screen bg-base-200 flex items-start justify-center px-4 pt-20">
-      <div className="max-w-4xl w-full">
-        <div className="bg-base-100 rounded-2xl shadow-xl p-8">
-          {/* Title and Description */}
-          <div className="text-center mb-8">
-            <div className="flex justify-center mb-4 text-primary">
-              <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
-              </svg>
-            </div>
-            <h1 className="text-4xl font-bold text-base-content mb-2">
-              Start Chat
-            </h1>
-            <p className="text-base-content/70">Configure your workspace to begin.</p>
-          </div>
+    <div className="min-h-screen bg-base-200 flex items-start justify-center px-4 pt-8">
+      <div className="max-w-5xl w-full">
+        <div className="text-center mb-4">
+          <h1 className="text-3xl font-bold text-base-content mb-2">Start a New Session</h1>
+          <p className="text-sm text-base-content/70">Configure your workspace and choose an activity to begin.</p>
+        </div>
 
-          {/* Single Row: Repository and Branch */}
-          <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-base-100 rounded-2xl shadow-xl p-4 mb-4">
+          <div className="flex flex-col md:flex-row gap-3">
             {/* Repository Selector */}
-            <div>
-              <label className="label pb-2">
-                <span className="label-text font-semibold">Repository</span>
+            <div className="flex-1">
+              <label className="label py-1">
+                <span className="label-text font-semibold text-sm">Repository</span>
               </label>
               <div className="relative repo-dropdown">
                 <button
                   type="button"
                   onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
-                  className="relative flex items-center justify-between w-full h-12 px-4 border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
+                  className="relative flex items-center justify-between w-full h-9 px-3 text-sm border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
                   disabled={!hasGithubAuth || isLoadingRepos}
                 >
                   <span className="truncate flex items-center gap-2">
@@ -377,33 +458,28 @@ export default function QuickChatSetup() {
             </div>
 
             {/* Base Branch Selector */}
-            <div>
-              <label className="label pb-2">
-                <span className="label-text font-semibold">Base Branch</span>
+            <div className="flex-1">
+              <label className="label py-1">
+                <span className="label-text font-semibold text-sm">Base Branch</span>
               </label>
               <div className="relative branch-dropdown">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!isBranchDropdownOpen && selectedRepo && branches.length === 0) {
-                      fetchBranches();
-                    } else {
-                      setIsBranchDropdownOpen(!isBranchDropdownOpen);
-                    }
-                  }}
-                  className="relative flex items-center justify-between w-full h-12 px-4 border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
+                  onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+                  className="relative flex items-center justify-between w-full h-9 px-3 text-sm border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
                   disabled={!selectedRepo || isLoadingBranches}
                 >
-                  <span className="truncate">
-                    {isLoadingBranches ? 'Loading...' : branch || 'main'}
+                  <span className="truncate flex items-center gap-2">
+                    {isLoadingBranches ? (
+                      <>
+                        <span className="loading loading-spinner loading-xs"></span>
+                        Loading...
+                      </>
+                    ) : baseBranch || 'main'}
                   </span>
-                  {isLoadingBranches ? (
-                    <span className="loading loading-spinner loading-sm ml-2 flex-shrink-0"></span>
-                  ) : (
-                    <svg className="w-4 h-4 ml-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  )}
+                  <svg className="w-4 h-4 ml-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
                 {isBranchDropdownOpen && (
                   <div className="absolute top-full left-0 mt-2 w-full max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
@@ -431,19 +507,24 @@ export default function QuickChatSetup() {
                             type="button"
                             data-branch-item
                             onClick={() => {
-                              setBranch(branchName);
+                              setBaseBranch(branchName);
                               setIsBranchDropdownOpen(false);
                               setBranchSearchQuery('');
                               setBranchHighlightedIndex(-1);
                             }}
-                            className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${branch === branchName ? 'bg-primary/20 font-semibold' : ''} ${branchHighlightedIndex === index ? 'bg-primary text-primary-content' : ''}`}
+                            className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${baseBranch === branchName ? 'bg-primary/20 font-semibold' : ''} ${branchHighlightedIndex === index ? 'bg-primary text-primary-content' : ''}`}
                           >
                             {branchName}
                           </button>
                         ))
                       ) : (
-                        <div className="p-4 text-xs text-base-content/50 text-center">
-                          {branches.length === 0 ? 'No branches loaded' : 'No branches found'}
+                        <div className="p-4 text-xs text-base-content/50 text-center flex items-center justify-center gap-2">
+                          {isLoadingBranches ? (
+                            <>
+                              <span className="loading loading-spinner loading-xs"></span>
+                              Loading branches...
+                            </>
+                          ) : 'No branches found'}
                         </div>
                       )}
                     </div>
@@ -452,24 +533,32 @@ export default function QuickChatSetup() {
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Action button */}
-          <div className="flex justify-center pt-4 relative">
-            <button
-              onClick={handleStart}
-              disabled={isLoadingRepos}
-              className="btn btn-primary px-12 disabled:opacity-50"
-            >
-              {isLoadingRepos ? (
-                <>
-                  <span className="loading loading-spinner loading-sm"></span>
-                  Loading...
-                </>
-              ) : (
-                'Start Session'
-              )}
-            </button>
+        {/* Activity Selection */}
+        <div className="bg-base-100 rounded-2xl shadow-xl p-4 relative">
+          <h2 className="text-xl font-bold text-center mb-4">What would you like to do?</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            {activities.map((activity) => (
+              <button
+                key={activity.id}
+                onClick={() => handleActivityClick(activity.id)}
+                disabled={isLoadingRepos}
+                className="flex flex-col items-center justify-center p-4 bg-base-200 hover:bg-base-300 rounded-lg transition-all hover:scale-105 active:scale-95 border-2 border-transparent hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:border-transparent"
+              >
+                <div className="text-primary mb-2">
+                  {activity.icon}
+                </div>
+                <h3 className="text-sm font-semibold text-center">{activity.title}</h3>
+              </button>
+            ))}
           </div>
+          {/* Loading overlay */}
+          {isLoadingRepos && (
+            <div className="absolute inset-0 bg-base-100/80 rounded-2xl flex items-center justify-center">
+              <span className="loading loading-spinner loading-lg text-primary"></span>
+            </div>
+          )}
         </div>
       </div>
     </div>

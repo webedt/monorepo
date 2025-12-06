@@ -186,7 +186,7 @@ app.use('/api', transcribeRoutes);
 
 // Serve static files in production
 if (NODE_ENV === 'production') {
-  const clientDistPath = path.join(__dirname, '../../website/apps/client/dist');
+  const clientDistPath = path.join(__dirname, '../../website-client/dist');
   app.use(express.static(clientDistPath));
 
   // Handle client-side routing - send index.html for non-API routes

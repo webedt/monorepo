@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { sessionsApi } from '@/lib/api';
-import type { ChatSession } from '@webedt/shared';
+import type { ChatSession } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
 
 export default function Trash() {

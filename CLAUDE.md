@@ -10,7 +10,7 @@ This is a monorepo containing the following projects:
 |---------|------|-------------|
 | **Main Server** | `/main-server` | Consolidated persistent server handling API, database, storage, and GitHub operations |
 | **AI Coding Worker** | `/ai-coding-worker` | Provider-agnostic ephemeral worker for LLM execution with Docker Swarm orchestration |
-| **Website** | `/website` | React web application with path-based routing and Dokploy deployment |
+| **Website Client** | `/website-client` | React web application (Vite) served by main-server |
 
 ---
 

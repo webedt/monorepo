@@ -1,5 +1,5 @@
 import SessionLayout from './SessionLayout';
-import type { GitHubRepository } from '@webedt/shared';
+import type { GitHubRepository } from '@/shared';
 
 interface EditorPageWrapperProps {
   isEmbedded?: boolean;

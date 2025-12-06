@@ -3,32 +3,25 @@
 # - API routes
 # - Storage operations (MinIO)
 # - GitHub operations
-# - Website static files (built from website/apps/client)
+# - Website static files (built from website-client)
 
 FROM node:20-alpine AS base
-
-# Install pnpm for website build
-RUN npm install -g pnpm
 
 # ============================================================================
 # Stage 1: Build website client
 # ============================================================================
 FROM base AS website-build
 
-WORKDIR /app/website
+WORKDIR /app/website-client
 
-# Copy workspace configuration
-COPY website/pnpm-workspace.yaml website/package.json website/pnpm-lock.yaml website/.npmrc ./
-COPY website/tsconfig.base.json ./
-
-# Copy all packages
-COPY website/packages ./packages
-
-# Copy client app only (server is now in main-server)
-COPY website/apps/client ./apps/client
+# Copy website-client files
+COPY website-client/package*.json ./
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+RUN npm install
+
+# Copy source code
+COPY website-client/ ./
 
 # Build args for version info
 ARG BUILD_VERSION=0.0.137
@@ -40,16 +33,16 @@ RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
     SHA_VALUE="${BUILD_SHA:-}" && \
     if [ -n "$TIMESTAMP_VALUE" ]; then TIMESTAMP_EXPORT="'$TIMESTAMP_VALUE'"; else TIMESTAMP_EXPORT="null"; fi && \
     if [ -n "$SHA_VALUE" ]; then SHA_EXPORT="'$SHA_VALUE'"; else SHA_EXPORT="null"; fi && \
-    echo "// Auto-generated from build args" > /app/website/apps/client/src/version.ts && \
-    echo "// Version: ${BUILD_VERSION}" >> /app/website/apps/client/src/version.ts && \
-    echo "export const VERSION = '${BUILD_VERSION}';" >> /app/website/apps/client/src/version.ts && \
-    echo "export const VERSION_TIMESTAMP: string | null = $TIMESTAMP_EXPORT;" >> /app/website/apps/client/src/version.ts && \
-    echo "export const VERSION_SHA: string | null = $SHA_EXPORT;" >> /app/website/apps/client/src/version.ts && \
-    echo "export const GITHUB_REPO_URL = 'https://github.com/webedt/monorepo';" >> /app/website/apps/client/src/version.ts && \
+    echo "// Auto-generated from build args" > /app/website-client/src/version.ts && \
+    echo "// Version: ${BUILD_VERSION}" >> /app/website-client/src/version.ts && \
+    echo "export const VERSION = '${BUILD_VERSION}';" >> /app/website-client/src/version.ts && \
+    echo "export const VERSION_TIMESTAMP: string | null = $TIMESTAMP_EXPORT;" >> /app/website-client/src/version.ts && \
+    echo "export const VERSION_SHA: string | null = $SHA_EXPORT;" >> /app/website-client/src/version.ts && \
+    echo "export const GITHUB_REPO_URL = 'https://github.com/webedt/monorepo';" >> /app/website-client/src/version.ts && \
     echo "✓ Generated version.ts: VERSION=${BUILD_VERSION}, SHA=${SHA_VALUE:0:7}"
 
 # Build client (React/Vite app)
-RUN pnpm --filter @webedt/client build
+RUN npm run build
 
 # ============================================================================
 # Stage 2: Build main-server
@@ -93,10 +86,9 @@ RUN npm install --omit=dev
 # Copy built main-server
 COPY --from=server-build /app/dist ./dist
 
-# Copy built website client to expected location
-# main-server expects it at ../../website/apps/client/dist relative to src
-RUN mkdir -p /app/website/apps/client
-COPY --from=website-build /app/website/apps/client/dist /app/website/apps/client/dist
+# Copy built website client
+RUN mkdir -p /app/website-client
+COPY --from=website-build /app/website-client/dist /app/website-client/dist
 
 # Set environment variables
 ENV PORT=3000

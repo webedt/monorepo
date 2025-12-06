@@ -1,75 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { githubApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
-import type { GitHubRepository } from '@webedt/shared';
+import type { GitHubRepository } from '@/shared';
 
-type ActivityType = 'code' | 'images' | 'sound' | 'scene' | 'preview';
-
-interface ActivityInfo {
-  id: ActivityType;
-  title: string;
-  route: string;
-  icon: JSX.Element;
-}
-
-const activityInfo: Record<ActivityType, ActivityInfo> = {
-  code: {
-    id: 'code',
-    title: 'Code',
-    route: '/code',
-    icon: (
-      <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
-      </svg>
-    ),
-  },
-  images: {
-    id: 'images',
-    title: 'Images and Animations',
-    route: '/images',
-    icon: (
-      <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-3.5l-3-4 4-5 3 4 2-2.5 4 5H10z"/>
-      </svg>
-    ),
-  },
-  sound: {
-    id: 'sound',
-    title: 'Sound and Music',
-    route: '/sound',
-    icon: (
-      <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/>
-      </svg>
-    ),
-  },
-  scene: {
-    id: 'scene',
-    title: 'Scene and Object Editor',
-    route: '/scene-editor',
-    icon: (
-      <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 2l-5.5 9h11L12 2zm0 3.84L13.93 9h-3.87L12 5.84zM17.5 13c-2.49 0-4.5 2.01-4.5 4.5s2.01 4.5 4.5 4.5 4.5-2.01 4.5-4.5-2.01-4.5-4.5-4.5zm0 7c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5zM3 21.5h8v-8H3v8zm2-6h4v4H5v-4z"/>
-      </svg>
-    ),
-  },
-  preview: {
-    id: 'preview',
-    title: 'Preview',
-    route: '/preview',
-    icon: (
-      <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-      </svg>
-    ),
-  },
-};
-
-export default function QuickSessionSetup() {
+export default function QuickChatSetup() {
   const navigate = useNavigate();
-  const { activity } = useParams<{ activity: ActivityType }>();
   const user = useAuthStore((state) => state.user);
 
   // Repository and branch state
@@ -93,9 +30,6 @@ export default function QuickSessionSetup() {
   const branchListRef = useRef<HTMLDivElement>(null);
 
   const hasGithubAuth = !!user?.githubAccessToken;
-
-  // Validate activity
-  const currentActivity = activity && activityInfo[activity] ? activityInfo[activity] : null;
 
   // Load repositories
   const { data: reposData, isLoading: isLoadingRepos } = useQuery({
@@ -321,32 +255,17 @@ export default function QuickSessionSetup() {
   };
 
   const handleStart = () => {
-    if (!currentActivity) return;
-
-    // Navigate to the activity page with pre-selected settings
-    navigate(currentActivity.route, {
+    // Navigate to chat page with pre-selected settings
+    navigate('/session/new', {
       state: {
         preSelectedSettings: {
           repositoryUrl: selectedRepo || undefined,
           baseBranch: branch || undefined,
+          locked: true, // Lock these settings
         }
       }
     });
   };
-
-  if (!currentActivity) {
-    return (
-      <div className="min-h-screen bg-base-200 flex items-center justify-center px-4">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-base-content mb-4">Invalid Activity</h1>
-          <p className="text-base-content/70 mb-6">The activity you requested does not exist.</p>
-          <button onClick={() => navigate('/new-session')} className="btn btn-primary">
-            Go to New Session
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-base-200 flex items-start justify-center px-4 pt-20">
@@ -355,10 +274,12 @@ export default function QuickSessionSetup() {
           {/* Title and Description */}
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4 text-primary">
-              {currentActivity.icon}
+              <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
+              </svg>
             </div>
             <h1 className="text-4xl font-bold text-base-content mb-2">
-              Start {currentActivity.title}
+              Start Chat
             </h1>
             <p className="text-base-content/70">Configure your workspace to begin.</p>
           </div>

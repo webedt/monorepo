@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
-import type { GitHubPullRequest } from '@webedt/shared';
+import type { GitHubPullRequest } from '@/shared';
 import { useEventSource } from '@/hooks/useEventSource';
 import { useBrowserNotification, getNotificationPrefs } from '@/hooks/useBrowserNotification';
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
@@ -10,7 +10,7 @@ import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components
 import { ImageViewer } from '@/components/ImageViewer';
 import { ChatMessage } from '@/components/ChatMessage';
 import SessionLayout from '@/components/SessionLayout';
-import type { Message, GitHubRepository, ChatSession } from '@webedt/shared';
+import type { Message, GitHubRepository, ChatSession } from '@/shared';
 
 // Helper to render text with clickable links
 function LinkifyText({ text, className }: { text: string; className?: string }) {

@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import type { GitHubRepository, User } from '@webedt/shared';
+import type { GitHubRepository, User } from '@/shared';
 import { githubApi } from '@/lib/api';
 import { useVoiceRecordingStore, useIsWorkerExecuting } from '@/lib/store';
 

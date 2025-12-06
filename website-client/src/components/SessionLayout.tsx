@@ -7,7 +7,7 @@ import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
 import SessionsSidebar from './SessionsSidebar';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/version';
-import type { GitHubRepository } from '@webedt/shared';
+import type { GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
 import { TAGLINES } from '@/constants/taglines';
 

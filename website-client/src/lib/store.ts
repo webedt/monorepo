@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { User } from '@webedt/shared';
+import type { User } from '@/shared';
 
 // ============================================================================
 // WORKER STATE MANAGEMENT

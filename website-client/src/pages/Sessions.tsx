@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { sessionsApi, githubApi } from '@/lib/api';
 import { useAuthStore, useSessionLastPageStore } from '@/lib/store';
 import ChatInput, { type ImageAttachment } from '@/components/ChatInput';
-import type { ChatSession, GitHubRepository } from '@webedt/shared';
+import type { ChatSession, GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
 
 // Helper to get the session URL with last visited page
