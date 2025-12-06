@@ -9,6 +9,9 @@ on:
   repository_dispatch:
     types: [deploy-main]
 
+env:
+  DEFAULT_INTERNAL_API_URL: http://webedt-app-webedt-internal-api-server-juit1b:3000
+
 jobs:
   configure-dokploy:
     runs-on: self-hosted
@@ -34,6 +37,9 @@ jobs:
           echo "- DOKPLOY_ENVIRONMENT_ID: ${{ vars.DOKPLOY_ENVIRONMENT_ID || '❌ Not set' }}"
           echo "- DOKPLOY_GITHUB_ID: ${{ vars.DOKPLOY_GITHUB_ID || '❌ Not set' }}"
           echo "- DOKPLOY_SERVER_ID: ${{ vars.DOKPLOY_SERVER_ID || '❌ Not set' }}"
+          echo ""
+          echo "### Environment"
+          echo "- DEFAULT_INTERNAL_API_URL: ${{ env.DEFAULT_INTERNAL_API_URL }}"
           echo ""
           echo "### Repository"
           echo "- Repository: ${{ github.repository }}"
@@ -558,6 +564,7 @@ jobs:
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
           INTERNAL_API_URL: ${{ secrets.INTERNAL_API_URL }}
+          DEFAULT_INTERNAL_API_URL: ${{ env.DEFAULT_INTERNAL_API_URL }}
         run: |
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
@@ -568,14 +575,13 @@ jobs:
           ENV_VARS="NODE_ENV=production"
           echo "  ✅ NODE_ENV=production configured"
 
-          # Add INTERNAL_API_URL if set
+          # Add INTERNAL_API_URL - use secret if set, otherwise use default from workflow env
           if [ -n "$INTERNAL_API_URL" ]; then
             ENV_VARS="${ENV_VARS}\nINTERNAL_API_URL=${INTERNAL_API_URL}"
-            echo "  ✅ INTERNAL_API_URL configured"
+            echo "  ✅ INTERNAL_API_URL configured (from secret)"
           else
-            # Default to internal docker network name
-            ENV_VARS="${ENV_VARS}\nINTERNAL_API_URL=http://webedt-app-webedt-internal-api-server-juit1b:3000"
-            echo "  ✅ INTERNAL_API_URL=http://webedt-app-webedt-internal-api-server-juit1b:3000 (default)"
+            ENV_VARS="${ENV_VARS}\nINTERNAL_API_URL=${DEFAULT_INTERNAL_API_URL}"
+            echo "  ✅ INTERNAL_API_URL=${DEFAULT_INTERNAL_API_URL} (default)"
           fi
 
           echo ""

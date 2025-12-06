@@ -9,6 +9,7 @@ on:
 env:
   REGISTRY: dockerregistry.etdofresh.com
   IMAGE_NAME: ai-coding-worker
+  DEFAULT_INTERNAL_API_URL: http://webedt-app-webedt-internal-api-server-juit1b:3000
 
 jobs:
   build-and-push-ai-coding-worker:
@@ -34,6 +35,7 @@ jobs:
           echo "### Environment"
           echo "- REGISTRY: ${{ env.REGISTRY }}"
           echo "- IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+          echo "- DEFAULT_INTERNAL_API_URL: ${{ env.DEFAULT_INTERNAL_API_URL }}"
 
       - name: Checkout repository
         uses: actions/checkout@v4
