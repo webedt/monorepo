@@ -285,7 +285,7 @@ jobs:
                 \"replicas\": 1,
                 \"buildType\": \"dockerfile\",
                 \"dockerfile\": \"Dockerfile\",
-                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\"
+                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\nVITE_API_BASE_URL=https://webedt.etdofresh.com\"
               }
             }"
 
@@ -413,7 +413,7 @@ jobs:
                 \"replicas\": 1,
                 \"buildType\": \"dockerfile\",
                 \"dockerfile\": \"Dockerfile\",
-                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\"
+                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_SHA=${BUILD_SHA}\nVITE_API_BASE_URL=https://webedt.etdofresh.com\"
               }
             }"
 

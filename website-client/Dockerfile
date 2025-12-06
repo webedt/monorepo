@@ -12,10 +12,14 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Build args for version info
+# Build args for version info and API configuration
 ARG BUILD_VERSION=0.0.137
 ARG BUILD_TIMESTAMP=
 ARG BUILD_SHA=
+ARG VITE_API_BASE_URL=https://webedt.etdofresh.com
+
+# Set environment variable for Vite build
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 # Generate version.ts from build args
 RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
