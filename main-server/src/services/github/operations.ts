@@ -200,7 +200,7 @@ export class GitHubOperations {
       // Try to download existing session
       let sessionExisted = false;
       try {
-        const sessionData = await this.storageService.downloadSession(sessionId);
+        const sessionData = await this.storageService.downloadSessionToBuffer(sessionId);
         if (sessionData) {
           // Extract session to local directory
           fs.mkdirSync(sessionRoot, { recursive: true });

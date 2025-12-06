@@ -3,8 +3,14 @@
  * Consolidated from website/apps/server/src/lib/claudeAuth.ts
  */
 
-import type { ClaudeAuth } from '@webedt/shared';
 import { logger } from '../utils/logger.js';
+
+// Define ClaudeAuth type locally (was previously in @webedt/shared)
+export interface ClaudeAuth {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
 
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';

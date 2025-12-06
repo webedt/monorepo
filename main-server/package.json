@@ -1,6 +1,7 @@
 {
   "name": "@webedt/main-server",
   "version": "1.0.0",
+  "type": "module",
   "description": "Consolidated main server for WebEDT - handles API, database, storage, and GitHub operations",
   "main": "dist/index.js",
   "scripts": {

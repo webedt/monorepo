@@ -130,6 +130,98 @@ class StorageServiceClass {
   }
 
   /**
+   * Download session and return as Buffer (for GitHubOperations compatibility)
+   * Returns null if session doesn't exist
+   */
+  async downloadSessionToBuffer(sessionPath: string): Promise<Buffer | null> {
+    validateSessionPath(sessionPath);
+    const minio = getMinioClient();
+    const bucket = getBucket();
+    const objectName = `${sessionPath}/session.tar.gz`;
+
+    try {
+      logger.info(`Downloading session ${sessionPath} to buffer...`, { component: 'StorageService' });
+      const stream = await minio.getObject(bucket, objectName);
+      const chunks: Buffer[] = [];
+
+      return new Promise((resolve, reject) => {
+        stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
+        stream.on('error', reject);
+      });
+    } catch (err: unknown) {
+      const error = err as { code?: string };
+      if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
+        logger.info(`Session ${sessionPath} not found in MinIO`, { component: 'StorageService' });
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Extract a session tarball Buffer to a directory path
+   */
+  async extractSessionToPath(sessionData: Buffer, destinationPath: string): Promise<void> {
+    logger.info(`Extracting session to ${destinationPath}...`, { component: 'StorageService' });
+
+    if (!fs.existsSync(destinationPath)) {
+      fs.mkdirSync(destinationPath, { recursive: true });
+    }
+
+    const gunzip = createGunzip();
+    const readable = Readable.from(sessionData);
+
+    return new Promise((resolve, reject) => {
+      const extractStream = tar.extract({ cwd: destinationPath });
+      readable.pipe(gunzip).pipe(extractStream);
+
+      extractStream.on('finish', () => {
+        logger.info(`Session extracted to ${destinationPath}`, { component: 'StorageService' });
+        resolve();
+      });
+      extractStream.on('error', reject);
+      gunzip.on('error', reject);
+    });
+  }
+
+  /**
+   * Upload a session from a directory path (creates tarball and uploads)
+   */
+  async uploadSessionFromPath(sessionPath: string, sourcePath: string): Promise<void> {
+    validateSessionPath(sessionPath);
+    const minio = getMinioClient();
+    const bucket = getBucket();
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const tmpTarball = path.join(os.tmpdir(), `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.tar.gz`);
+
+    try {
+      logger.info(`Creating tarball from ${sourcePath}...`, { component: 'StorageService' });
+
+      await tar.create(
+        { gzip: true, file: tmpTarball, cwd: sourcePath },
+        ['.']
+      );
+
+      const stats = fs.statSync(tmpTarball);
+      const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+      logger.info(`Uploading session ${sessionPath} (${sizeMB} MB)...`, { component: 'StorageService' });
+
+      await minio.fPutObject(bucket, objectName, tmpTarball);
+
+      logger.info(`Session ${sessionPath} uploaded successfully from path`, { component: 'StorageService' });
+    } finally {
+      try {
+        if (fs.existsSync(tmpTarball)) {
+          fs.unlinkSync(tmpTarball);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
    * List all sessions in MinIO
    */
   async listSessions(): Promise<SessionMetadata[]> {
@@ -489,5 +581,6 @@ class StorageServiceClass {
   }
 }
 
-// Export singleton instance
+// Export class for type usage and singleton instance
+export { StorageServiceClass as StorageService };
 export const storageService = new StorageServiceClass();

@@ -7,9 +7,21 @@ import { Request, Response, NextFunction } from 'express';
 import { lucia } from '../auth.js';
 import type { User, Session } from 'lucia';
 
+// Extend Express Request type to include auth properties
+declare global {
+  namespace Express {
+    interface Request {
+      user?: User | null;
+      session?: Session | null;
+    }
+  }
+}
+
+// AuthRequest is the same as Request but with user and session guaranteed non-null
+// Use this type after requireAuth middleware
 export interface AuthRequest extends Request {
-  user: User | null;
-  session: Session | null;
+  user: User;
+  session: Session;
 }
 
 export async function authMiddleware(
@@ -17,13 +29,11 @@ export async function authMiddleware(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  const authReq = req as AuthRequest;
-
   const sessionId = lucia.readSessionCookie(req.headers.cookie ?? '');
 
   if (!sessionId) {
-    authReq.user = null;
-    authReq.session = null;
+    req.user = null;
+    req.session = null;
     next();
     return;
   }
@@ -38,15 +48,13 @@ export async function authMiddleware(
     res.appendHeader('Set-Cookie', lucia.createBlankSessionCookie().serialize());
   }
 
-  authReq.user = user;
-  authReq.session = session;
+  req.user = user;
+  req.session = session;
   next();
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const authReq = req as AuthRequest;
-
-  if (!authReq.user || !authReq.session) {
+  if (!req.user || !req.session) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return;
   }
@@ -55,14 +63,12 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  const authReq = req as AuthRequest;
-
-  if (!authReq.user || !authReq.session) {
+  if (!req.user || !req.session) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return;
   }
 
-  if (!authReq.user.isAdmin) {
+  if (!req.user.isAdmin) {
     res.status(403).json({ success: false, error: 'Forbidden: Admin access required' });
     return;
   }
