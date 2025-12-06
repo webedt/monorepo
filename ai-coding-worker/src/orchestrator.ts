@@ -1093,10 +1093,26 @@ export class Orchestrator {
 
     try {
       // Write credentials for the provider
-      if (provider === 'claude-code') {
+      // Handle both naming conventions (e.g., 'claude-code' and 'ClaudeAgentSDK')
+      const providerLower = provider.toLowerCase();
+      if (providerLower === 'claude-code' || providerLower === 'claudeagentsdk') {
+        logger.info('Writing Claude credentials for query', {
+          component: 'Orchestrator',
+          provider,
+          authLength: authentication.length
+        });
         CredentialManager.writeClaudeCredentials(authentication);
-      } else if (provider === 'codex' || provider === 'cursor') {
+      } else if (providerLower === 'codex' || providerLower === 'cursor') {
+        logger.info('Writing Codex credentials for query', {
+          component: 'Orchestrator',
+          provider
+        });
         CredentialManager.writeCodexCredentials(authentication);
+      } else {
+        logger.warn('Unknown provider for query, no credentials written', {
+          component: 'Orchestrator',
+          provider
+        });
       }
 
       // Use LLMHelper which already has the query logic
