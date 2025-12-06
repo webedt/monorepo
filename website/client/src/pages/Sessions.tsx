@@ -98,17 +98,79 @@ export default function Sessions() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => sessionsApi.delete(id),
-    onSuccess: () => {
+    onMutate: async (id: string) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['sessions'] });
+
+      // Snapshot the previous value
+      const previousSessions = queryClient.getQueryData(['sessions']);
+
+      // Optimistically remove the session from the list
+      queryClient.setQueryData(['sessions'], (old: any) => {
+        if (!old?.data?.sessions) return old;
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            sessions: old.data.sessions.filter((s: ChatSession) => s.id !== id),
+          },
+        };
+      });
+
+      // Return context with the previous value
+      return { previousSessions };
+    },
+    onError: (_err, _id, context) => {
+      // Roll back to previous state on error
+      if (context?.previousSessions) {
+        queryClient.setQueryData(['sessions'], context.previousSessions);
+      }
+    },
+    onSuccess: (_data, id) => {
+      setSelectedIds((prev) => prev.filter((i) => i !== id));
+    },
+    onSettled: () => {
+      // Refetch to ensure consistency with server
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setSelectedIds([]);
     },
   });
 
   const deleteBulkMutation = useMutation({
     mutationFn: (ids: string[]) => sessionsApi.deleteBulk(ids),
+    onMutate: async (ids: string[]) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['sessions'] });
+
+      // Snapshot the previous value
+      const previousSessions = queryClient.getQueryData(['sessions']);
+
+      // Optimistically remove the sessions from the list
+      queryClient.setQueryData(['sessions'], (old: any) => {
+        if (!old?.data?.sessions) return old;
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            sessions: old.data.sessions.filter((s: ChatSession) => !ids.includes(s.id)),
+          },
+        };
+      });
+
+      // Return context with the previous value
+      return { previousSessions };
+    },
+    onError: (_err, _ids, context) => {
+      // Roll back to previous state on error
+      if (context?.previousSessions) {
+        queryClient.setQueryData(['sessions'], context.previousSessions);
+      }
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setSelectedIds([]);
+    },
+    onSettled: () => {
+      // Refetch to ensure consistency with server
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
   });
 
@@ -313,8 +375,16 @@ export default function Sessions() {
               <button
                 onClick={handleBulkDelete}
                 className="btn btn-error btn-sm"
+                disabled={deleteBulkMutation.isPending}
               >
-                Delete selected
+                {deleteBulkMutation.isPending ? (
+                  <>
+                    <span className="loading loading-spinner loading-xs"></span>
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete selected'
+                )}
               </button>
             </div>
           )}
