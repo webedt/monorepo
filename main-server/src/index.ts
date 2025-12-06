@@ -30,7 +30,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import sessionsRoutes from './routes/sessions.js';
 import githubRoutes from './routes/github.js';
-import storageWorkerRoutes from './routes/storage-worker.js';
+import storageRoutes from './routes/storage.js';
 import adminRoutes from './routes/admin.js';
 import transcribeRoutes from './routes/transcribe.js';
 
@@ -180,7 +180,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/github', githubRoutes);
-app.use('/api/storage-worker', storageWorkerRoutes);
+app.use('/api/storage', storageRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', transcribeRoutes);
 
@@ -242,7 +242,7 @@ app.listen(PORT, () => {
   console.log('  GET  /api/github/oauth                 - Start GitHub OAuth');
   console.log('  GET  /api/github/repos                 - List repos');
   console.log('');
-  console.log('  GET  /api/storage-worker/sessions/...  - Storage operations');
+  console.log('  GET  /api/storage/sessions/...         - Storage operations');
   console.log('');
   console.log('  GET  /api/admin/users                  - List all users (admin)');
   console.log('  GET  /api/admin/users/:id              - Get user by ID (admin)');
