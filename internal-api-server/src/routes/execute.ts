@@ -539,6 +539,14 @@ const executeHandler = async (req: Request, res: Response) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 600000); // 10 minutes
 
+      logger.info('Calling AI worker', {
+        component: 'ExecuteRoute',
+        sessionId: chatSession.id,
+        aiWorkerUrl: `${AI_WORKER_URL}/execute`,
+        workspacePath: aiWorkerPayload.workspacePath,
+        provider: providerName
+      });
+
       try {
         const aiResponse = await fetch(`${AI_WORKER_URL}/execute`, {
           method: 'POST',
@@ -551,6 +559,14 @@ const executeHandler = async (req: Request, res: Response) => {
         });
 
         clearTimeout(timeout);
+
+        logger.info('AI worker response received', {
+          component: 'ExecuteRoute',
+          sessionId: chatSession.id,
+          status: aiResponse.status,
+          ok: aiResponse.ok,
+          hasBody: !!aiResponse.body
+        });
 
         const workerContainerId = aiResponse.headers.get('X-Container-ID') || 'unknown';
         activeWorkerSessions.set(chatSession.id, {
@@ -572,9 +588,17 @@ const executeHandler = async (req: Request, res: Response) => {
         const decoder = new TextDecoder();
         let buffer = '';
 
+        let eventCount = 0;
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            logger.info('AI worker stream ended', {
+              component: 'ExecuteRoute',
+              sessionId: chatSession.id,
+              eventsReceived: eventCount
+            });
+            break;
+          }
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
@@ -584,6 +608,7 @@ const executeHandler = async (req: Request, res: Response) => {
             if (!line.trim()) continue;
 
             if (line.startsWith('data:')) {
+              eventCount++;
               const data = line.substring(5).trim();
               try {
                 const eventData = JSON.parse(data);
