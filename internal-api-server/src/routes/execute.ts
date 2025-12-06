@@ -539,12 +539,13 @@ const executeHandler = async (req: Request, res: Response) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 600000); // 10 minutes
 
-      logger.info('Calling AI worker', {
+      logger.info('Calling AI worker for LLM execution', {
         component: 'ExecuteRoute',
         sessionId: chatSession.id,
         aiWorkerUrl: `${AI_WORKER_URL}/execute`,
         workspacePath: aiWorkerPayload.workspacePath,
-        provider: providerName
+        provider: providerName,
+        payloadSize: JSON.stringify(aiWorkerPayload).length
       });
 
       try {
