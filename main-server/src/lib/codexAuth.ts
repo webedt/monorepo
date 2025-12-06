@@ -3,8 +3,15 @@
  * Consolidated from website/apps/server/src/lib/codexAuth.ts
  */
 
-import type { CodexAuth } from '@webedt/shared';
 import { logger } from '../utils/logger.js';
+
+// Define CodexAuth type locally (was previously in @webedt/shared)
+export interface CodexAuth {
+  apiKey?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+}
 
 const TOKEN_BUFFER_TIME = 5 * 60 * 1000; // Refresh 5 minutes before expiration
 

@@ -263,7 +263,7 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
       sessionId: session[0].id,
       sessionPath: session[0].sessionPath,
       status: session[0].status,
-      events: storedEvents.map(e => ({
+      events: storedEvents.map((e: typeof storedEvents[number]) => ({
         id: e.id,
         eventType: e.eventType,
         eventData: e.eventData,

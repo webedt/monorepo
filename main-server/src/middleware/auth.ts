@@ -8,20 +8,21 @@ import { lucia } from '../auth.js';
 import type { User, Session } from 'lucia';
 
 // Extend Express Request type to include auth properties
+// Note: Using 'authSession' to avoid conflict with express-session's 'session'
 declare global {
   namespace Express {
     interface Request {
       user?: User | null;
-      session?: Session | null;
+      authSession?: Session | null;
     }
   }
 }
 
-// AuthRequest is the same as Request but with user and session guaranteed non-null
+// AuthRequest is the same as Request but with user and authSession guaranteed non-null
 // Use this type after requireAuth middleware
 export interface AuthRequest extends Request {
   user: User;
-  session: Session;
+  authSession: Session;
 }
 
 export async function authMiddleware(
@@ -33,7 +34,7 @@ export async function authMiddleware(
 
   if (!sessionId) {
     req.user = null;
-    req.session = null;
+    req.authSession = null;
     next();
     return;
   }
@@ -49,12 +50,12 @@ export async function authMiddleware(
   }
 
   req.user = user;
-  req.session = session;
+  req.authSession = session;
   next();
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user || !req.session) {
+  if (!req.user || !req.authSession) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return;
   }
@@ -63,7 +64,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user || !req.session) {
+  if (!req.user || !req.authSession) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return;
   }

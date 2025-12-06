@@ -15,8 +15,8 @@ import * as path from 'path';
 import { db, chatSessions, messages, users, events } from '../db/index.js';
 import { eq, and, or } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { ensureValidToken } from '../lib/claudeAuth.js';
-import { ensureValidCodexToken, isValidCodexAuth } from '../lib/codexAuth.js';
+import { ensureValidToken, ClaudeAuth } from '../lib/claudeAuth.js';
+import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../lib/codexAuth.js';
 import { StorageService } from '../services/storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../services/github/operations.js';
 import { logger } from '../utils/logger.js';
@@ -24,7 +24,9 @@ import { generateSessionPath } from '../utils/sessionPathHelper.js';
 import { getEventEmoji } from '../utils/emojiMapper.js';
 import { WORKSPACE_DIR, AI_WORKER_URL } from '../config/env.js';
 
-import type { ClaudeAuth, CodexAuth, AIProvider, ProviderAuth } from '@webedt/shared';
+// Define types locally (were previously in @webedt/shared)
+export type AIProvider = 'claude' | 'codex';
+export type ProviderAuth = ClaudeAuth | CodexAuth;
 
 const router = Router();
 
@@ -362,7 +364,7 @@ const executeHandler = async (req: Request, res: Response) => {
           chatSessionId: chatSession.id,
           eventType: event.type,
           eventData: event
-        }).catch(err => {
+        }).catch((err: Error) => {
           logger.error('Failed to store event', err, {
             component: 'ExecuteRoute',
             sessionId: chatSession.id
@@ -402,7 +404,7 @@ const executeHandler = async (req: Request, res: Response) => {
 
       let sessionExisted = false;
       try {
-        const sessionData = await storageService.downloadSession(chatSession.id);
+        const sessionData = await storageService.downloadSessionToBuffer(chatSession.id);
         if (sessionData) {
           fs.mkdirSync(sessionRoot, { recursive: true });
           await storageService.extractSessionToPath(sessionData, sessionRoot);
