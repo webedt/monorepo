@@ -76,6 +76,9 @@ function isAllowedRoute(path: string): boolean {
 const apiProxyOptions: Options = {
   target: INTERNAL_API_URL,
   changeOrigin: true,
+  // Cookie handling for session persistence
+  cookieDomainRewrite: '',  // Remove domain restriction so cookies work across proxy
+  cookiePathRewrite: '/',   // Ensure cookie path is root
   // Preserve the full path including /api prefix
   pathRewrite: (path, req) => '/api' + path,
   // Handle proxy errors
