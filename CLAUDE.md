@@ -8,11 +8,158 @@ This is a monorepo containing multiple related projects:
 
 | Project | Path | Description |
 |---------|------|-------------|
+| **Main Server** | `/main-server` | **[NEW]** Consolidated persistent server handling API, database, storage, and GitHub operations |
 | **AI Coding Worker** | `/ai-coding-worker` | Provider-agnostic API for executing coding assistant requests with Docker Swarm orchestration |
 | **Collaborative Session Worker** | `/collaborative-session-worker` | WebSocket-based real-time collaboration with CRDT synchronization and MinIO persistence |
-| **GitHub Worker** | `/github-worker` | Ephemeral worker for GitHub/Git operations (clone, branch, commit, push) with SSE streaming |
-| **Storage Worker** | `/storage-worker` | Storage service for session management with MinIO |
+| **GitHub Worker** | `/github-worker` | *(To be deprecated)* Ephemeral worker for GitHub/Git operations |
+| **Storage Worker** | `/storage-worker` | *(To be deprecated)* Storage service for session management with MinIO |
 | **Website** | `/website` | Web application with path-based routing and Dokploy deployment |
+
+---
+
+## Main Server (New Architecture)
+
+The Main Server (`/main-server`) consolidates the Website backend, Storage Worker, and GitHub Worker into a single persistent service. This simplifies the architecture and improves performance by reducing inter-service communication.
+
+### Architecture Overview
+
+```
+                              FRONTEND
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │                         Website (React)                                │
+  │  - Chat UI for AI interactions                                        │
+  │  - File browser/editor                                                 │
+  │  - GitHub OAuth integration                                            │
+  └───────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                              MAIN SERVER
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  (Single persistent service)                                          │
+  │                                                                       │
+  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐       │
+  │  │   API Routes    │  │  Storage Layer  │  │  GitHub Layer   │       │
+  │  │  - /execute     │  │  - MinIO client │  │  - Clone repos  │       │
+  │  │  - /resume      │  │  - File CRUD    │  │  - Create branch│       │
+  │  │  - /sessions    │  │  - Tarball ops  │  │  - Commit/push  │       │
+  │  │  - /files       │  │                 │  │  - PR operations│       │
+  │  └─────────────────┘  └─────────────────┘  └─────────────────┘       │
+  │                                                                       │
+  │  ┌─────────────────┐  ┌─────────────────┐                            │
+  │  │  Database Layer │  │ Worker Manager  │                            │
+  │  │  - PostgreSQL   │  │  - Spawn workers│                            │
+  │  │  - Drizzle ORM  │  │  - Stream SSE   │                            │
+  │  │  - Sessions/msgs│  │                 │                            │
+  │  └─────────────────┘  └─────────────────┘                            │
+  └───────────────────────────────────────────────────────────────────────┘
+                                    │
+                    Spawn per-request (LLM execution only)
+                                    │
+                                    ▼
+                       AI CODING WORKER (ephemeral)
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  (Simplified - LLM execution only)                                    │
+  │  - Receives workspace path from Main Server                           │
+  │  - Executes Claude Agent SDK / Codex                                  │
+  │  - Streams events back to Main Server                                 │
+  │  - NO storage operations                                              │
+  │  - NO GitHub operations                                               │
+  └───────────────────────────────────────────────────────────────────────┘
+```
+
+### Main Server Directory Structure
+
+```
+main-server/
+├── src/
+│   ├── index.ts                    # Express app entrypoint
+│   ├── auth.ts                     # Lucia authentication
+│   ├── config/
+│   │   └── env.ts                  # Environment configuration
+│   ├── db/
+│   │   ├── index.ts                # Database connection
+│   │   ├── schema.ts               # PostgreSQL schema
+│   │   └── schema-sqlite.ts        # SQLite schema
+│   ├── routes/
+│   │   ├── execute.ts              # Main /execute endpoint
+│   │   └── resume.ts               # Session replay endpoint
+│   ├── services/
+│   │   ├── storage/
+│   │   │   ├── minioClient.ts      # MinIO client
+│   │   │   └── storageService.ts   # Storage operations
+│   │   └── github/
+│   │       ├── gitHelper.ts        # Git operations
+│   │       ├── githubClient.ts     # Repository clone/pull
+│   │       └── operations.ts       # High-level GitHub ops
+│   ├── middleware/
+│   │   └── auth.ts                 # Auth middleware
+│   ├── lib/
+│   │   ├── claudeAuth.ts           # Claude OAuth helpers
+│   │   ├── codexAuth.ts            # Codex auth helpers
+│   │   └── llmHelper.ts            # LLM naming helpers
+│   └── utils/
+│       ├── logger.ts               # Structured logging
+│       ├── sessionPathHelper.ts    # Session path utilities
+│       └── emojiMapper.ts          # SSE emoji decoration
+├── package.json
+├── tsconfig.json
+└── Dockerfile
+```
+
+### Main Server API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check with service status |
+| `/api/execute` | POST | Execute AI coding request (SSE) |
+| `/api/resume/:sessionId` | GET | Replay stored events (SSE) |
+| `/api/sessions/:sessionId/events` | GET | Get all events (JSON) |
+
+### Request Flow (New Architecture)
+
+```
+1. Frontend POST /api/execute
+   │
+2. Main Server: Authenticate, validate request
+   │
+3. Main Server: Create/update database session
+   │
+4. Main Server: Check MinIO for existing session
+   │
+5. If new session:
+   │  a. Main Server: Clone repo via GitHub service
+   │  b. Main Server: Generate session title/branch via LLM
+   │  c. Main Server: Create branch, push
+   │  d. Main Server: Store session in MinIO
+   │
+6. Main Server: Spawn AI Coding Worker
+   │  - Pass: workspace path, credentials, user request
+   │
+7. Main Server: Proxy SSE from AI Worker to Frontend
+   │  - Store events to database for replay
+   │
+8. When AI Worker completes:
+   │  a. Main Server: Commit changes via GitHub service
+   │  b. Main Server: Push to remote
+   │  c. Main Server: Upload session to MinIO
+   │
+9. Main Server: Update database status, send completion
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `NODE_ENV` | `development` | Environment mode |
+| `DATABASE_URL` | - | PostgreSQL connection string |
+| `MINIO_ENDPOINT` | - | MinIO server hostname |
+| `MINIO_PORT` | `9000` | MinIO server port |
+| `MINIO_ROOT_USER` | - | MinIO access key |
+| `MINIO_ROOT_PASSWORD` | - | MinIO secret key |
+| `MINIO_BUCKET` | `sessions` | Session storage bucket |
+| `AI_WORKER_URL` | `http://localhost:5001` | AI Worker endpoint |
+| `WORKSPACE_DIR` | `/workspace` | Base workspace directory |
 
 ## Git Commit Message Rules
 
