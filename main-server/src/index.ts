@@ -31,9 +31,103 @@ import userRoutes from './routes/user.js';
 import sessionsRoutes from './routes/sessions.js';
 import githubRoutes from './routes/github.js';
 import storageWorkerRoutes from './routes/storage-worker.js';
+import adminRoutes from './routes/admin.js';
+import transcribeRoutes from './routes/transcribe.js';
+
+// Import database for orphan cleanup
+import { db, chatSessions, events } from './db/index.js';
+import { eq, and, lt, sql, count } from 'drizzle-orm';
 
 // Import middleware
 import { authMiddleware } from './middleware/auth.js';
+
+/**
+ * Clean up orphaned sessions that are stuck in 'running' status
+ * This handles cases where:
+ * 1. The server restarted while a job was running and the worker callback failed
+ * 2. The worker crashed without sending a completion callback
+ * 3. Network issues prevented the callback from reaching the server
+ */
+async function cleanupOrphanedSessions(): Promise<void> {
+  try {
+    const timeoutThreshold = new Date(Date.now() - ORPHAN_SESSION_TIMEOUT_MINUTES * 60 * 1000);
+
+    // Find sessions stuck in 'running' or 'pending' for too long
+    const stuckSessions = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          sql`${chatSessions.status} IN ('running', 'pending')`,
+          lt(chatSessions.createdAt, timeoutThreshold)
+        )
+      );
+
+    if (stuckSessions.length === 0) {
+      return; // No orphaned sessions
+    }
+
+    logger.info(`[OrphanCleanup] Found ${stuckSessions.length} potentially orphaned session(s)`);
+
+    for (const session of stuckSessions) {
+      try {
+        // Check if session has a 'completed' event stored (worker finished but callback failed)
+        const completedEvents = await db
+          .select()
+          .from(events)
+          .where(
+            and(
+              eq(events.chatSessionId, session.id),
+              eq(events.eventType, 'completed')
+            )
+          )
+          .limit(1);
+
+        // Check if session has any events at all (worker started processing)
+        const eventCountResult = await db
+          .select({ count: count() })
+          .from(events)
+          .where(eq(events.chatSessionId, session.id));
+
+        const totalEvents = eventCountResult[0]?.count || 0;
+
+        // Determine the appropriate status:
+        // - If there's a 'completed' event, mark as completed
+        // - If there are events but no completion, mark as error (worker likely crashed mid-execution)
+        // - If there are no events, mark as error (worker never started or crashed immediately)
+        let newStatus: 'completed' | 'error';
+        let reason: string;
+
+        if (completedEvents.length > 0) {
+          newStatus = 'completed';
+          reason = 'Found completed event in database';
+        } else if (totalEvents > 0) {
+          newStatus = 'error';
+          reason = `Worker processed ${totalEvents} events but never sent completion`;
+        } else {
+          newStatus = 'error';
+          reason = 'No events found - worker may have never started';
+        }
+
+        await db
+          .update(chatSessions)
+          .set({
+            status: newStatus,
+            completedAt: new Date()
+          })
+          .where(eq(chatSessions.id, session.id));
+
+        logger.info(`[OrphanCleanup] Updated session ${session.id} from '${session.status}' to '${newStatus}' (${reason})`);
+      } catch (sessionError) {
+        logger.error(`[OrphanCleanup] Error processing session ${session.id}:`, sessionError);
+      }
+    }
+
+    logger.info(`[OrphanCleanup] Cleanup completed for ${stuckSessions.length} session(s)`);
+  } catch (error) {
+    logger.error('[OrphanCleanup] Error during orphan session cleanup:', error);
+  }
+}
 
 // Get __dirname equivalent for ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -87,6 +181,8 @@ app.use('/api/user', userRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/github', githubRoutes);
 app.use('/api/storage-worker', storageWorkerRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api', transcribeRoutes);
 
 // Serve static files in production
 if (NODE_ENV === 'production') {
@@ -147,14 +243,28 @@ app.listen(PORT, () => {
   console.log('  GET  /api/github/repos                 - List repos');
   console.log('');
   console.log('  GET  /api/storage-worker/sessions/...  - Storage operations');
+  console.log('');
+  console.log('  GET  /api/admin/users                  - List all users (admin)');
+  console.log('  GET  /api/admin/users/:id              - Get user by ID (admin)');
+  console.log('  POST /api/admin/users                  - Create user (admin)');
+  console.log('  PUT  /api/admin/users/:id              - Update user (admin)');
+  console.log('  DELETE /api/admin/users/:id            - Delete user (admin)');
+  console.log('  POST /api/admin/impersonate/:id        - Impersonate user (admin)');
+  console.log('  GET  /api/admin/stats                  - Get system stats (admin)');
+  console.log('');
+  console.log('  POST /api/transcribe                   - Transcribe audio (Whisper)');
   console.log('='.repeat(60));
 
-  // TODO: Add orphan session cleanup
   // Schedule periodic orphan cleanup
-  // logger.info(`Scheduling orphan cleanup: timeout=${ORPHAN_SESSION_TIMEOUT_MINUTES}min, interval=${ORPHAN_CLEANUP_INTERVAL_MINUTES}min`);
-  // setInterval(() => {
-  //   cleanupOrphanedSessions();
-  // }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+  logger.info(`Scheduling orphan cleanup: timeout=${ORPHAN_SESSION_TIMEOUT_MINUTES}min, interval=${ORPHAN_CLEANUP_INTERVAL_MINUTES}min`);
+
+  // Run initial cleanup on startup
+  cleanupOrphanedSessions();
+
+  // Schedule periodic cleanup
+  setInterval(() => {
+    cleanupOrphanedSessions();
+  }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
 });
 
 // Graceful shutdown

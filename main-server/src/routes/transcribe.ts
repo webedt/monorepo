@@ -1,3 +1,8 @@
+/**
+ * Transcription routes for audio-to-text using OpenAI Whisper
+ * Consolidated from website/apps/server/src/routes/transcribe.ts
+ */
+
 import express, { Request, Response } from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
@@ -31,18 +36,20 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
 
     // Check if OpenAI API key is configured
     if (!apiKey) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'OpenAI API key not configured. Please use browser fallback.',
       });
+      return;
     }
 
     // Check if file was uploaded
     if (!req.file) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'No audio file provided',
       });
+      return;
     }
 
     console.log('Transcribing audio file:', {
@@ -66,23 +73,24 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
         'Authorization': `Bearer ${apiKey}`,
         ...formData.getHeaders(),
       },
-      body: formData as any,
+      body: formData as unknown as BodyInit,
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI API error:', errorText);
-      return res.status(response.status).json({
+      res.status(response.status).json({
         success: false,
         error: `OpenAI API error: ${response.statusText}`,
       });
+      return;
     }
 
     const result = await response.json() as { text: string };
 
     console.log('Transcription successful:', result.text.substring(0, 100) + '...');
 
-    return res.json({
+    res.json({
       success: true,
       data: {
         text: result.text,
@@ -90,7 +98,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
     });
   } catch (error) {
     console.error('Transcription error:', error);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to transcribe audio',
     });

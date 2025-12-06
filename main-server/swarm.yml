@@ -25,6 +25,8 @@ services:
       # GitHub OAuth
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      # OpenAI (for transcription)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Workspace directories
       TMP_DIR: /tmp
       WORKSPACE_DIR: /workspace

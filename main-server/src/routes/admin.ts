@@ -1,9 +1,14 @@
+/**
+ * Admin routes for user management
+ * Consolidated from website/apps/server/src/routes/admin.ts
+ */
+
 import { Router } from 'express';
-import { db } from '../db/index';
-import { users, sessions } from '../db/schema';
-import { AuthRequest, requireAdmin } from '../middleware/auth';
+import { db } from '../db/index.js';
+import { users, sessions } from '../db/schema.js';
+import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { eq, sql } from 'drizzle-orm';
-import { lucia } from '../auth';
+import { lucia } from '../auth.js';
 import bcrypt from 'bcrypt';
 
 const router = Router();
@@ -115,7 +120,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       return;
     }
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
 
     if (email !== undefined) updateData.email = email;
     if (displayName !== undefined) updateData.displayName = displayName;
@@ -198,8 +203,8 @@ router.post('/users/:id/impersonate', requireAdmin, async (req, res) => {
     }
 
     // Invalidate current session
-    if (authReq.session) {
-      await lucia.invalidateSession(authReq.session.id);
+    if (authReq.authSession) {
+      await lucia.invalidateSession(authReq.authSession.id);
     }
 
     // Create new session for target user
