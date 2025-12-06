@@ -76,8 +76,8 @@ function isAllowedRoute(path: string): boolean {
 const apiProxyOptions: Options = {
   target: INTERNAL_API_URL,
   changeOrigin: true,
-  // Don't modify the path - forward as-is
-  pathRewrite: undefined,
+  // Preserve the full path including /api prefix
+  pathRewrite: (path, req) => '/api' + path,
   // Handle proxy errors
   on: {
     error: (err, req, res) => {
