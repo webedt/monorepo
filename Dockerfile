@@ -1,11 +1,19 @@
-# Multi-stage build for WebEDT monorepo - Website
-# This Dockerfile is placed at the root of the monorepo for deployment systems
-# It builds the website application located in the website/ subdirectory
+# Multi-stage build for WebEDT main-server
+# This Dockerfile builds the main-server which consolidates:
+# - API routes
+# - Storage operations (MinIO)
+# - GitHub operations
+# - Website static files (built from website/apps/client)
 
 FROM node:20-alpine AS base
 
-# Install pnpm
+# Install pnpm for website build
 RUN npm install -g pnpm
+
+# ============================================================================
+# Stage 1: Build website client
+# ============================================================================
+FROM base AS website-build
 
 WORKDIR /app/website
 
@@ -16,18 +24,13 @@ COPY website/tsconfig.base.json ./
 # Copy all packages
 COPY website/packages ./packages
 
-# Copy apps
-COPY website/apps ./apps
+# Copy client app only (server is now in main-server)
+COPY website/apps/client ./apps/client
 
-# Install all dependencies
+# Install dependencies
 RUN pnpm install --frozen-lockfile
 
-# Build stage
-FROM base AS build
-
-WORKDIR /app/website
-
-# Build args for version info (passed from GitHub Actions via Dokploy)
+# Build args for version info
 ARG BUILD_VERSION=0.0.137
 ARG BUILD_TIMESTAMP=
 ARG BUILD_SHA=
@@ -48,50 +51,62 @@ RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
 # Build client (React/Vite app)
 RUN pnpm --filter @webedt/client build
 
-# Build server (Express API)
-RUN pnpm --filter @webedt/server build
+# ============================================================================
+# Stage 2: Build main-server
+# ============================================================================
+FROM node:20-slim AS server-build
 
-# Production stage
-FROM node:20-alpine AS production
+WORKDIR /app
 
-# Install build dependencies for native modules and SQLite
-RUN apk add --no-cache \
-    python3 \
-    py3-setuptools \
-    make \
-    g++ \
-    sqlite-dev
+# Copy main-server files
+COPY main-server/package*.json ./
+COPY main-server/tsconfig.json ./
 
-# Install pnpm
-RUN npm install -g pnpm
+# Install dependencies
+RUN npm install
 
-WORKDIR /app/website
+# Copy source code
+COPY main-server/src ./src
 
-# Copy workspace configuration
-COPY website/pnpm-workspace.yaml website/package.json website/pnpm-lock.yaml website/.npmrc ./
-COPY website/tsconfig.base.json ./
+# Build TypeScript
+RUN npm run build
 
-# Copy package.json files for all workspaces
-COPY website/packages/shared/package.json ./packages/shared/
-COPY website/apps/client/package.json ./apps/client/
-COPY website/apps/server/package.json ./apps/server/
+# ============================================================================
+# Stage 3: Production
+# ============================================================================
+FROM node:20-slim AS production
 
-# Install all dependencies (needed for rebuilding native modules)
-RUN pnpm install --frozen-lockfile
+# Install git (needed for git operations)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-# Manually rebuild native modules using npm in pnpm store
-RUN cd /app/website/node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npm run build-release
-RUN cd /app/website/node_modules/.pnpm/bcrypt@*/node_modules/bcrypt && npm rebuild
+WORKDIR /app
 
-# Copy built artifacts from build stage
-COPY --from=build /app/website/apps/client/dist ./apps/client/dist
-COPY --from=build /app/website/apps/server/dist ./apps/server/dist
+# Build arguments for version tracking
+ARG BUILD_COMMIT_SHA=unknown
+ARG BUILD_TIMESTAMP=unknown
+ARG BUILD_IMAGE_TAG=unknown
 
-# Expose port 3000 (unified server port)
+# Copy main-server package files and install production deps
+COPY main-server/package*.json ./
+RUN npm install --omit=dev
+
+# Copy built main-server
+COPY --from=server-build /app/dist ./dist
+
+# Copy built website client to expected location
+# main-server expects it at ../../website/apps/client/dist relative to src
+RUN mkdir -p /app/website/apps/client
+COPY --from=website-build /app/website/apps/client/dist /app/website/apps/client/dist
+
+# Set environment variables
+ENV PORT=3000
+ENV NODE_ENV=production
+ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
+ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
+ENV BUILD_IMAGE_TAG=$BUILD_IMAGE_TAG
+
+# Expose port
 EXPOSE 3000
 
-# Set working directory to server
-WORKDIR /app/website/apps/server
-
 # Start the server
-CMD ["node", "dist/index.js"]
+CMD ["npm", "start"]
