@@ -190,7 +190,11 @@ if (NODE_ENV === 'production') {
   app.use(express.static(clientDistPath));
 
   // Handle client-side routing - send index.html for non-API routes
-  app.get('*', (req, res) => {
+  app.get('*', (req, res, next) => {
+    // Skip API routes - let them 404 properly
+    if (req.path.startsWith('/api/')) {
+      return next();
+    }
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 }
