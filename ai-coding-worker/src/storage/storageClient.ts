@@ -16,9 +16,9 @@ export class StorageClient {
   private enabled: boolean;
 
   constructor() {
-    // Default to main-server URL if STORAGE_WORKER_URL is not set
+    // Default to main-server external URL if STORAGE_WORKER_URL is not set
     // Note: storage endpoints are now served by main-server at /api/storage-worker/*
-    const storageUrl = process.env.STORAGE_WORKER_URL || 'http://main-server:3000';
+    const storageUrl = process.env.STORAGE_WORKER_URL || 'https://webedt.etdofresh.com';
     this.enabled = true;
     this.baseUrl = storageUrl.replace(/\/$/, '');
     this.timeout = parseInt(process.env.STORAGE_WORKER_TIMEOUT || '60000', 10);
