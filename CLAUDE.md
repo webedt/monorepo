@@ -8,9 +8,9 @@ This is a monorepo containing the following projects:
 
 | Project | Path | Description |
 |---------|------|-------------|
-| **Main Server** | `/main-server` | Consolidated persistent server handling API, database, storage, and GitHub operations |
+| **Website** | `/website` | React frontend + Express API facade (proxies public API routes) |
+| **Internal API Server** | `/internal-api-server` | Internal backend handling API, database, storage, and GitHub operations |
 | **AI Coding Worker** | `/ai-coding-worker` | Provider-agnostic ephemeral worker for LLM execution with Docker Swarm orchestration |
-| **Website Client** | `/website-client` | React web application (Vite) served by main-server |
 
 ---
 
@@ -19,16 +19,18 @@ This is a monorepo containing the following projects:
 ```
                               FRONTEND
   ┌───────────────────────────────────────────────────────────────────────┐
-  │                         Website (React)                                │
-  │  - Chat UI for AI interactions                                        │
-  │  - File browser/editor                                                 │
-  │  - GitHub OAuth integration                                            │
+  │                    Website (React + Express Facade)                    │
+  │  - React client (Vite)                                                │
+  │  - Express server serving static files + proxying /api/* routes       │
+  │  - Route whitelisting for public API access                           │
   └───────────────────────────────────────────────────────────────────────┘
                                     │
+                         Proxy allowed /api/* routes
+                                    │
                                     ▼
-                              MAIN SERVER
+                         INTERNAL API SERVER
   ┌───────────────────────────────────────────────────────────────────────┐
-  │  (Single persistent service - consolidates backend, storage, GitHub)  │
+  │  (Private service - only accessible via dokploy-network)              │
   │                                                                       │
   │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐       │
   │  │   API Routes    │  │  Storage Layer  │  │  GitHub Layer   │       │
@@ -52,28 +54,89 @@ This is a monorepo containing the following projects:
                        AI CODING WORKER (ephemeral)
   ┌───────────────────────────────────────────────────────────────────────┐
   │  (Simplified - LLM execution only)                                    │
-  │  - Receives workspace path from Main Server                           │
+  │  - Receives workspace path from Internal API Server                   │
   │  - Executes Claude Agent SDK / Codex                                  │
-  │  - Streams events back to Main Server                                 │
+  │  - Streams events back to Internal API Server                         │
   │  - Exits after each job (Docker Swarm restarts)                       │
   └───────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Main Server
+## Website
 
-The Main Server (`/main-server`) is the central backend service that consolidates:
-- Website backend API routes
+The Website (`/website`) contains both the React frontend and an Express API facade server.
+
+### Structure
+
+```
+website/
+├── client/                    # React frontend (Vite)
+│   ├── src/
+│   │   ├── App.tsx
+│   │   ├── lib/api.ts
+│   │   └── ...
+│   └── package.json
+├── server/                    # Express API facade
+│   ├── src/
+│   │   └── index.ts          # Proxy middleware + static serving
+│   └── package.json
+├── Dockerfile                 # Multi-stage build
+└── docker-compose.yml
+```
+
+### API Facade
+
+The Express server acts as a facade that:
+1. Serves the React static files
+2. Proxies allowed `/api/*` routes to the Internal API Server
+3. Blocks internal-only routes from public access
+
+**Allowed Routes (public):**
+- `/api/auth` - Authentication
+- `/api/user` - User settings
+- `/api/sessions` - Session management
+- `/api/github` - GitHub OAuth & repos
+- `/api/execute` - AI execution
+- `/api/resume` - Session replay
+- `/api/transcribe` - Audio transcription
+- `/api/admin` - Admin (requires admin auth)
+
+**Blocked Routes (internal only):**
+- `/api/storage/sessions/*/upload` - Only ai-worker should upload
+- `/api/storage/sessions/*/download` - Only ai-worker should download tarballs
+- `/api/storage/sessions/bulk-delete` - Internal batch operations
+- `/api/sessions/*/worker-status` - Only ai-worker reports status
+
+### Deployment URLs
+
+Path-based routing via Dokploy:
+
+```
+https://github.etdofresh.com/{owner}/{repo}/{branch}/
+```
+
+**Examples:**
+- `https://github.etdofresh.com/webedt/monorepo/main/`
+- `https://github.etdofresh.com/webedt/monorepo/feature-branch/`
+
+---
+
+## Internal API Server
+
+The Internal API Server (`/internal-api-server`) is the central backend service that consolidates:
+- All API routes (auth, sessions, execute, etc.)
 - Storage operations (MinIO)
 - GitHub operations (clone, branch, commit, push)
 - User authentication (Lucia)
 - Session management (PostgreSQL)
 
+**Note:** This server is only accessible internally via the dokploy-network. Public access goes through the Website facade.
+
 ### Directory Structure
 
 ```
-main-server/
+internal-api-server/
 ├── src/
 │   ├── index.ts                    # Express app entrypoint
 │   ├── auth.ts                     # Lucia authentication
@@ -89,7 +152,7 @@ main-server/
 │   │   ├── auth.ts                 # Authentication routes
 │   │   ├── user.ts                 # User management
 │   │   ├── github.ts               # GitHub OAuth
-│   │   ├── storage-worker.ts       # Storage operations
+│   │   ├── storage.ts              # Storage operations
 │   │   ├── admin.ts                # Admin routes
 │   │   └── transcribe.ts           # Audio transcription
 │   ├── services/
@@ -130,7 +193,7 @@ main-server/
 | `/api/user/*` | - | User management (claude-auth, preferred-provider) |
 | `/api/sessions/*` | - | Session CRUD operations |
 | `/api/github/*` | - | GitHub OAuth and repo operations |
-| `/api/storage-worker/*` | - | Storage operations (files, sessions) |
+| `/api/storage/*` | - | Storage operations (files, sessions) |
 | `/api/admin/*` | - | Admin user management |
 | `/api/transcribe` | POST | Audio transcription (OpenAI Whisper) |
 
@@ -179,39 +242,7 @@ Provider-agnostic ephemeral worker for executing LLM coding requests.
 |----------|---------|-------------|
 | `PORT` | `5000` | Server port |
 | `WORKSPACE_DIR` | `/workspace` | Session workspace root |
-| `STORAGE_WORKER_URL` | - | Main Server URL for storage |
-| `GITHUB_WORKER_URL` | - | Main Server URL for GitHub |
-
----
-
-## Website
-
-React web application with Vite and path-based routing.
-
-### Structure
-
-```
-website/
-└── apps/
-    └── client/           # React frontend
-        ├── src/
-        │   ├── App.tsx
-        │   ├── lib/api.ts
-        │   └── ...
-        └── index.html
-```
-
-### Deployment URLs
-
-Path-based routing via Dokploy:
-
-```
-https://github.etdofresh.com/{owner}/{repo}/{branch}/
-```
-
-**Examples:**
-- `https://github.etdofresh.com/webedt/monorepo/main/`
-- `https://github.etdofresh.com/webedt/monorepo/feature-branch/`
+| `INTERNAL_API_URL` | `http://webedt-app-webedt-internal-api-server-juit1b:3000` | Internal API Server URL |
 
 ---
 
@@ -253,14 +284,14 @@ Add, Update, Remove, Fix, Refactor, Enhance, Rename, Move, Extract, Merge, Impro
 
 ### Storage Operations
 
-All file operations go through the Main Server storage routes:
+All file operations go through the Internal API Server storage routes (accessed via website facade or directly for internal services):
 
 ```
-GET    /api/storage-worker/sessions/:sessionPath/files           - List files
-GET    /api/storage-worker/sessions/:sessionPath/files/*         - Read file
-PUT    /api/storage-worker/sessions/:sessionPath/files/*         - Write file
-DELETE /api/storage-worker/sessions/:sessionPath/files/*         - Delete file
-HEAD   /api/storage-worker/sessions/:sessionPath/files/*         - Check exists
+GET    /api/storage/sessions/:sessionPath/files           - List files
+GET    /api/storage/sessions/:sessionPath/files/*         - Read file
+PUT    /api/storage/sessions/:sessionPath/files/*         - Write file
+DELETE /api/storage/sessions/:sessionPath/files/*         - Delete file
+HEAD   /api/storage/sessions/:sessionPath/files/*         - Check exists
 ```
 
 ### Session Path Format
@@ -357,4 +388,4 @@ Live Site: [https://github.etdofresh.com/webedt/monorepo/{branch}/](https://gith
 
 ---
 
-*Documentation last updated: 2025-12-05*
+*Documentation last updated: 2025-12-06*

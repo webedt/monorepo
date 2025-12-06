@@ -104,8 +104,8 @@ New files: ${status.not_added.join(', ') || 'none'}
       await this.git.add('.');
 
       // Ensure Git identity is configured
-      await this.git.addConfig('user.name', 'Main Server');
-      await this.git.addConfig('user.email', 'worker@main-server.local');
+      await this.git.addConfig('user.name', 'Internal API Server');
+      await this.git.addConfig('user.email', 'worker@internal-api-server.local');
 
       // Commit
       const result = await this.git.commit(message);

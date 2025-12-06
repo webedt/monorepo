@@ -2,8 +2,8 @@
  * Execute Route
  * Main /execute endpoint that orchestrates the complete workflow
  *
- * New Architecture:
- * - Main Server handles orchestration (previously in ai-coding-worker)
+ * Architecture:
+ * - Internal API Server handles orchestration
  * - Uses integrated storage and GitHub services
  * - Spawns AI worker only for LLM execution
  */
@@ -342,7 +342,7 @@ const executeHandler = async (req: Request, res: Response) => {
       if (clientDisconnected) return;
 
       if (!event.source) {
-        event.source = 'main-server';
+        event.source = 'internal-api-server';
       }
 
       if (!event.timestamp) {
@@ -387,7 +387,7 @@ const executeHandler = async (req: Request, res: Response) => {
         sessionId: chatSession.id,
         resuming: isResuming,
         provider: providerName,
-        message: 'Connected to Main Server'
+        message: 'Connected to Internal API Server'
       });
 
       // Check for existing session in storage
@@ -455,7 +455,7 @@ const executeHandler = async (req: Request, res: Response) => {
                 message: event.message,
                 stage: event.stage,
                 data: event.data,
-                source: 'main-server'
+                source: 'internal-api-server'
               });
             }
           );
@@ -650,7 +650,7 @@ const executeHandler = async (req: Request, res: Response) => {
                 message: event.message,
                 stage: event.stage,
                 data: event.data,
-                source: 'main-server'
+                source: 'internal-api-server'
               });
             }
           );

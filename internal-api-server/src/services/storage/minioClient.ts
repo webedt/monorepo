@@ -1,5 +1,5 @@
 /**
- * MinIO client initialization for main-server
+ * MinIO client initialization for internal-api-server
  */
 
 import { Client as MinioClient } from 'minio';

@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  main-server:
+  internal-api-server:
     build: .
-    image: dockerregistry.etdofresh.com/main-server:latest
+    image: dockerregistry.etdofresh.com/internal-api-server:latest
     ports:
       - "3000:3000"
     environment:

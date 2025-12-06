@@ -161,7 +161,7 @@ app.get('/health', (req, res) => {
     success: true,
     data: {
       status: 'ok',
-      service: 'main-server',
+      service: 'internal-api-server',
       containerId: CONTAINER_ID,
       build: {
         commitSha: BUILD_COMMIT_SHA,

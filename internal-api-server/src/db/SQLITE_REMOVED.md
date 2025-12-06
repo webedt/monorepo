@@ -1,10 +1,10 @@
 # SQLite Support Removed
 
-SQLite support was removed from main-server to simplify builds and avoid native compilation issues (better-sqlite3 requires native binaries that need Visual Studio build tools on Windows and platform-specific compilation).
+SQLite support was removed from internal-api-server to simplify builds and avoid native compilation issues (better-sqlite3 requires native binaries that need Visual Studio build tools on Windows and platform-specific compilation).
 
 ## Current Setup
 
-The main-server now requires PostgreSQL. Set the `DATABASE_URL` environment variable:
+The internal-api-server now requires PostgreSQL. Set the `DATABASE_URL` environment variable:
 
 ```bash
 DATABASE_URL=postgresql://user:password@localhost:5432/database

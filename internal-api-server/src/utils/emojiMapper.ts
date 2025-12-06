@@ -72,7 +72,7 @@ const typeEmojis: Record<string, string> = {
 const sourceEmojis: Record<string, string> = {
   'storage': '🗄️',
   'github': '🐙',
-  'main-server': '🖥️',
+  'internal-api-server': '🖥️',
   'ai-worker': '🤖',
   'claude': '🤖',
 };

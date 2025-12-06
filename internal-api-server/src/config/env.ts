@@ -1,5 +1,5 @@
 /**
- * Environment configuration for main-server
+ * Environment configuration for internal-api-server
  * Centralizes all environment variable access with type safety and defaults
  */
 

@@ -1,5 +1,5 @@
 /**
- * Simple structured logger for main-server
+ * Simple structured logger for internal-api-server
  */
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';

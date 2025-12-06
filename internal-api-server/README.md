@@ -1,6 +1,6 @@
-# Main Server
+# Internal API Server
 
-Consolidated main server for WebEDT - a single persistent service that handles API endpoints, database operations, storage management, and GitHub integration.
+Internal API server for WebEDT - a single persistent service that handles API endpoints, database operations, storage management, and GitHub integration. This server is only accessible internally via the dokploy-network.
 
 ## Architecture
 
@@ -12,11 +12,11 @@ This server consolidates functionality that was previously split across multiple
 | Storage Worker | MinIO session management, file operations |
 | GitHub Worker | Clone, branch, commit, push operations |
 
-The Main Server orchestrates AI Coding Workers, which remain as separate ephemeral containers that only handle LLM execution.
+The Internal API Server orchestrates AI Coding Workers, which remain as separate ephemeral containers that only handle LLM execution.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                              Main Server                                 │
+│                         Internal API Server                              │
 │                                                                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
 │  │ API Routes  │  │  Database   │  │   Storage   │  │   GitHub    │   │
@@ -40,7 +40,7 @@ The Main Server orchestrates AI Coding Workers, which remain as separate ephemer
 ## Project Structure
 
 ```
-main-server/
+internal-api-server/
 ├── src/
 │   ├── index.ts                 # Express app entrypoint
 │   ├── auth.ts                  # Lucia authentication setup
@@ -56,7 +56,7 @@ main-server/
 │   │   ├── user.ts              # User settings endpoints
 │   │   ├── sessions.ts          # Session CRUD endpoints
 │   │   ├── github.ts            # GitHub OAuth/repos endpoints
-│   │   └── storage-worker.ts    # Storage operations proxy
+│   │   └── storage.ts           # Storage operations
 │   ├── services/
 │   │   ├── storage/
 │   │   │   ├── storageService.ts  # MinIO operations
@@ -150,13 +150,13 @@ GET /api/github/oauth       - Start GitHub OAuth flow
 GET /api/github/repos       - List user's repositories
 ```
 
-### Storage (Proxied)
+### Storage
 
 ```
-GET    /api/storage-worker/sessions/:path/files     - List files
-GET    /api/storage-worker/sessions/:path/files/*   - Read file
-PUT    /api/storage-worker/sessions/:path/files/*   - Write file
-DELETE /api/storage-worker/sessions/:path/files/*   - Delete file
+GET    /api/storage/sessions/:path/files     - List files
+GET    /api/storage/sessions/:path/files/*   - Read file
+PUT    /api/storage/sessions/:path/files/*   - Write file
+DELETE /api/storage/sessions/:path/files/*   - Delete file
 ```
 
 ## Environment Variables
@@ -256,24 +256,24 @@ SESSION_SECRET=your-secret-key
 ALLOWED_ORIGINS=https://your-domain.com
 EOF
 
-# Start main-server
+# Start internal-api-server
 docker compose up -d
 
 # View logs
-docker compose logs -f main-server
+docker compose logs -f internal-api-server
 ```
 
 ### Docker (Manual)
 
 ```bash
 # Build image
-docker build -t main-server .
+docker build -t internal-api-server .
 
 # Run container
 docker run -p 3000:3000 \
   -e DATABASE_URL=postgresql://... \
   -e MINIO_ENDPOINT=minio \
-  main-server
+  internal-api-server
 ```
 
 ### Docker Swarm / Dokploy
@@ -282,11 +282,11 @@ For production deployment with Docker Swarm:
 
 ```bash
 # Deploy the stack
-docker stack deploy -c swarm.yml main-server
+docker stack deploy -c swarm.yml internal-api-server
 
 # View service status
 docker service ls
-docker service logs main-server_main-server -f
+docker service logs internal-api-server_internal-api-server -f
 ```
 
 The `swarm.yml` expects these environment variables to be set:
@@ -321,3 +321,4 @@ npm run db:studio     # Open Drizzle Studio
 
 - SQLite support was removed to simplify builds. See `src/db/SQLITE_REMOVED.md` for reintroduction instructions.
 - The server requires `DATABASE_URL` to be set - there is no fallback database.
+- This server is not publicly accessible - public API access goes through the website facade.
