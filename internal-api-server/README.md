@@ -70,8 +70,10 @@ internal-api-server/
 │   ├── lib/
 │   │   ├── claudeAuth.ts        # Claude OAuth token management
 │   │   ├── codexAuth.ts         # Codex/OpenAI auth helpers
-│   │   ├── llmHelper.ts         # LLM naming (branch, commit)
 │   │   └── sessionEventBroadcaster.ts
+│   ├── services/
+│   │   ├── aiWorker/
+│   │   │   └── aiWorkerClient.ts  # Client for AI worker /query endpoint
 │   └── utils/
 │       ├── logger.ts            # Logging utility
 │       ├── emojiMapper.ts       # SSE event emoji assignment

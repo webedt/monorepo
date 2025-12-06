@@ -9,7 +9,7 @@ import * as path from 'path';
 import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './githubClient.js';
 import { GitHelper } from './gitHelper.js';
-import { LLMHelper } from '../../lib/llmHelper.js';
+import { AIWorkerClient } from '../aiWorker/aiWorkerClient.js';
 import { StorageService } from '../storage/storageService.js';
 import { logger } from '../../utils/logger.js';
 import { generateSessionPath } from '../../utils/sessionPathHelper.js';
@@ -42,6 +42,9 @@ export interface InitSessionOptions {
   userRequest: string;
   githubAccessToken: string;
   workspaceRoot: string;
+  // Coding assistant credentials for LLM-based naming (optional)
+  codingAssistantProvider?: string;
+  codingAssistantAuthentication?: string;
 }
 
 export interface InitSessionResult {
@@ -58,6 +61,9 @@ export interface CommitAndPushOptions {
   sessionId: string;
   workspacePath: string;
   userId?: string;
+  // Coding assistant credentials for LLM-based commit messages (optional)
+  codingAssistantProvider?: string;
+  codingAssistantAuthentication?: string;
 }
 
 export interface CommitAndPushResult {
@@ -250,38 +256,55 @@ export class GitHubOperations {
         metadata = this.updateMetadataWithClone(sessionRoot, sessionId, repoUrl, pullResult, metadata);
       }
 
-      // Generate session title and branch name using LLM
+      // Generate session title and branch name
       const repoPath = path.join(sessionRoot, 'workspace', clonedPath);
       const { owner, repo } = parseRepoUrl(repoUrl);
 
       progress({ type: 'progress', stage: 'generating_name', message: 'Generating session title and branch name...' });
 
-      const llmHelper = new LLMHelper(repoPath);
       let title: string;
       let descriptivePart: string;
 
-      try {
-        const result = await llmHelper.generateSessionTitleAndBranch(userRequest, baseBranch);
-        title = result.title;
-        descriptivePart = result.branchName;
+      // Only use LLM if credentials are provided
+      if (options.codingAssistantProvider && options.codingAssistantAuthentication) {
+        try {
+          const aiWorkerClient = new AIWorkerClient();
+          const result = await aiWorkerClient.generateSessionTitleAndBranch(
+            userRequest,
+            baseBranch,
+            options.codingAssistantProvider,
+            options.codingAssistantAuthentication
+          );
+          title = result.title;
+          descriptivePart = result.branchName;
 
-        logger.info('Generated session title and branch name', {
+          logger.info('Generated session title and branch name via AI worker', {
+            component: 'GitHubOperations',
+            sessionId,
+            title,
+            descriptivePart
+          });
+        } catch (llmError) {
+          logger.warn('AI worker naming failed, using fallback', {
+            component: 'GitHubOperations',
+            sessionId,
+            error: llmError instanceof Error ? llmError.message : String(llmError)
+          });
+
+          title = 'New Session';
+          descriptivePart = 'auto-request';
+
+          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback naming (LLM unavailable)' });
+        }
+      } else {
+        // No credentials provided, use fallback
+        logger.info('No coding assistant credentials, using fallback naming', {
           component: 'GitHubOperations',
-          sessionId,
-          title,
-          descriptivePart
-        });
-      } catch (llmError) {
-        logger.warn('LLM naming failed, using fallback', {
-          component: 'GitHubOperations',
-          sessionId,
-          error: llmError instanceof Error ? llmError.message : String(llmError)
+          sessionId
         });
 
         title = 'New Session';
         descriptivePart = 'auto-request';
-
-        progress({ type: 'progress', stage: 'fallback', message: 'Using fallback naming (LLM unavailable)' });
       }
 
       // Construct full branch name: webedt/{descriptive}-{sessionIdSuffix}
@@ -438,34 +461,50 @@ export class GitHubOperations {
         data: { status: gitStatus }
       });
 
-      // Generate commit message using LLM
+      // Generate commit message using AI worker
       progress({ type: 'progress', stage: 'generating_message', message: 'Generating commit message...' });
 
-      const llmHelper = new LLMHelper(workspacePath);
       let commitMessage: string;
 
-      try {
-        commitMessage = await llmHelper.generateCommitMessage(gitStatus, gitDiff);
+      // Only use AI worker if credentials are provided
+      if (options.codingAssistantProvider && options.codingAssistantAuthentication) {
+        try {
+          const aiWorkerClient = new AIWorkerClient();
+          commitMessage = await aiWorkerClient.generateCommitMessage(
+            gitStatus,
+            gitDiff,
+            options.codingAssistantProvider,
+            options.codingAssistantAuthentication
+          );
 
-        if (userId) {
-          commitMessage = `${commitMessage}\n\nCommitted by: ${userId}`;
+          if (userId) {
+            commitMessage = `${commitMessage}\n\nCommitted by: ${userId}`;
+          }
+
+          logger.info('Generated commit message via AI worker', {
+            component: 'GitHubOperations',
+            sessionId,
+            commitMessage
+          });
+        } catch (llmError) {
+          logger.warn('AI worker commit message generation failed, using fallback', {
+            component: 'GitHubOperations',
+            sessionId,
+            error: llmError instanceof Error ? llmError.message : String(llmError)
+          });
+
+          commitMessage = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
+
+          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback commit message (AI worker unavailable)' });
         }
-
-        logger.info('Generated commit message', {
+      } else {
+        // No credentials provided, use fallback
+        logger.info('No coding assistant credentials, using fallback commit message', {
           component: 'GitHubOperations',
-          sessionId,
-          commitMessage
-        });
-      } catch (llmError) {
-        logger.warn('LLM commit message generation failed, using fallback', {
-          component: 'GitHubOperations',
-          sessionId,
-          error: llmError instanceof Error ? llmError.message : String(llmError)
+          sessionId
         });
 
         commitMessage = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
-
-        progress({ type: 'progress', stage: 'fallback', message: 'Using fallback commit message (LLM unavailable)' });
       }
 
       // Commit changes

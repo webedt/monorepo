@@ -1068,4 +1068,62 @@ export class Orchestrator {
   async deleteSession(sessionPath: string): Promise<void> {
     await this.sessionStorage.deleteSession(sessionPath);
   }
+
+  /**
+   * Run a one-off LLM query without creating a persistent session
+   * Used for generating session titles, branch names, commit messages, etc.
+   */
+  async runQuery(options: {
+    prompt: string;
+    provider: string;
+    authentication: string;
+  }): Promise<string> {
+    const { prompt, provider, authentication } = options;
+
+    logger.info('Running one-off LLM query', {
+      component: 'Orchestrator',
+      provider,
+      promptLength: prompt.length
+    });
+
+    // Create a temporary directory for the query
+    const queryId = `query-${Date.now()}`;
+    const queryDir = path.join(this.tmpDir, queryId);
+    fs.mkdirSync(queryDir, { recursive: true });
+
+    try {
+      // Write credentials for the provider
+      if (provider === 'claude-code') {
+        CredentialManager.writeClaudeCredentials(authentication);
+      } else if (provider === 'codex' || provider === 'cursor') {
+        CredentialManager.writeCodexCredentials(authentication);
+      }
+
+      // Use LLMHelper which already has the query logic
+      const { LLMHelper } = await import('./utils/llmHelper');
+      const llmHelper = new LLMHelper(queryDir);
+
+      // Run the query
+      const result = await llmHelper.runRawQuery(prompt);
+
+      logger.info('LLM query completed', {
+        component: 'Orchestrator',
+        resultLength: result.length
+      });
+
+      return result;
+
+    } finally {
+      // Clean up temporary directory
+      try {
+        fs.rmSync(queryDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        logger.warn('Failed to clean up query directory', {
+          component: 'Orchestrator',
+          queryDir,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        });
+      }
+    }
+  }
 }

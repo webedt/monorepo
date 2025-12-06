@@ -24,6 +24,13 @@ export class LLMHelper {
   }
 
   /**
+   * Run a raw query with a custom prompt (public method for one-off queries)
+   */
+  async runRawQuery(prompt: string): Promise<string> {
+    return this.runQuery(prompt, 1);
+  }
+
+  /**
    * Run a quick query using Claude Agent SDK
    */
   private async runQuery(prompt: string, maxTurns: number = 1): Promise<string> {

@@ -409,6 +409,105 @@ app.post('/init-repository', async (req: Request, res: Response) => {
 });
 
 /**
+ * One-off LLM query endpoint
+ * Creates a temporary session, runs a quick LLM query, and returns the result
+ * Used for generating session titles, branch names, commit messages, etc.
+ * This does NOT exit the worker after completion (lightweight operation)
+ */
+app.post('/query', async (req: Request, res: Response) => {
+  console.log(`[Container ${containerId}] Received query request`);
+  res.setHeader('X-Container-ID', containerId);
+
+  // Check if worker is busy with a full execution
+  if (workerStatus === 'busy') {
+    console.log(`[Container ${containerId}] Rejecting query - worker busy`);
+    res.status(429).json({
+      error: 'busy',
+      message: 'Worker is currently processing another request',
+      retryAfter: 5,
+      containerId
+    });
+    return;
+  }
+
+  const {
+    prompt,
+    codingAssistantProvider,
+    codingAssistantAuthentication,
+    queryType // 'session_title_branch' | 'commit_message'
+  } = req.body;
+
+  // Validate required fields
+  if (!prompt) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required field: prompt',
+      containerId
+    });
+    return;
+  }
+
+  // Use environment variables as fallback
+  const provider = codingAssistantProvider || DEFAULT_CODING_ASSISTANT_PROVIDER;
+  const authentication = codingAssistantAuthentication || DEFAULT_CODING_ASSISTANT_AUTHENTICATION;
+
+  if (!provider) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required field: codingAssistantProvider (not in request or environment)',
+      containerId
+    });
+    return;
+  }
+
+  if (!authentication) {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required field: codingAssistantAuthentication (not in request or environment)',
+      containerId
+    });
+    return;
+  }
+
+  // Set worker to busy temporarily
+  workerStatus = 'busy';
+  console.log(`[Container ${containerId}] Processing query (type: ${queryType || 'generic'})`);
+
+  try {
+    // Run the query through the orchestrator
+    const result = await orchestrator.runQuery({
+      prompt,
+      provider,
+      authentication: typeof authentication === 'object' ? JSON.stringify(authentication) : authentication,
+    });
+
+    console.log(`[Container ${containerId}] Query completed successfully`);
+
+    // Return to idle (this is a lightweight operation, worker doesn't exit)
+    workerStatus = 'idle';
+
+    res.json({
+      success: true,
+      result,
+      queryType,
+      containerId
+    });
+
+  } catch (error) {
+    console.error(`[Container ${containerId}] Query failed:`, error);
+
+    // Return to idle
+    workerStatus = 'idle';
+
+    res.status(500).json({
+      error: 'query_failed',
+      message: error instanceof Error ? error.message : 'Failed to run query',
+      containerId
+    });
+  }
+});
+
+/**
  * Abort endpoint - allows client to abort the currently running execution
  * This will signal the Claude Agent SDK to stop processing
  */
@@ -525,6 +624,7 @@ app.use((req: Request, res: Response) => {
       'GET  /sessions/:sessionId/stream',
       'POST /execute',
       'POST /init-repository',
+      'POST /query',
       'POST /abort',
       'POST /shutdown'
     ],
@@ -553,6 +653,7 @@ app.listen(PORT, () => {
   console.log('  DELETE /sessions/:id              - Delete a session');
   console.log('  POST   /execute                   - Execute coding assistant request');
   console.log('  POST   /init-repository           - Clone repo and upload to storage (no AI)');
+  console.log('  POST   /query                     - One-off LLM query (titles, commits, etc)');
   console.log('  POST   /abort                     - Abort current execution');
   console.log('  POST   /shutdown                  - Signal worker to shutdown (client confirms receipt)');
   console.log('');
