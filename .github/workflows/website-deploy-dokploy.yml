@@ -3,7 +3,7 @@ name: Website - Deploy to Dokploy
 on:
   push:
     paths:
-      - "website/**"
+      - "website-client/**"
       - ".github/workflows/website-deploy-dokploy.yml"
   workflow_dispatch:
   repository_dispatch:
@@ -243,7 +243,7 @@ jobs:
             echo "  - Name: ${REPO_NAME}"
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
-            echo "  - Build Path: /"
+            echo "  - Build Path: website-client"
             echo "  - Auto Deploy: disabled (GitHub Actions will trigger deployments)"
 
             GITHUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
@@ -258,7 +258,7 @@ jobs:
                   \"repository\": \"${REPO_NAME}\",
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
-                  \"buildPath\": \"/\",
+                  \"buildPath\": \"website-client\",
                   \"enableSubmodules\": false,
                   \"autoDeploy\": false
                 }
@@ -319,7 +319,7 @@ jobs:
             echo "  - Name: ${REPO_NAME}"
             echo "  - Branch: ${GITHUB_BRANCH}"
             echo "  - GitHub ID: ${DOKPLOY_GITHUB_ID}"
-            echo "  - Build Path: /"
+            echo "  - Build Path: website-client"
             echo "  - Auto Deploy: disabled (GitHub Actions will trigger deployments)"
 
             # Create new application (with server ID for cloud provider)
@@ -385,7 +385,7 @@ jobs:
                   \"repository\": \"${REPO_NAME}\",
                   \"owner\": \"${REPO_OWNER}\",
                   \"branch\": \"${GITHUB_BRANCH}\",
-                  \"buildPath\": \"/\",
+                  \"buildPath\": \"website-client\",
                   \"enableSubmodules\": false,
                   \"autoDeploy\": false
                 }
@@ -529,7 +529,7 @@ jobs:
                     \"applicationId\": \"${APP_ID}\",
                     \"host\": \"${DOMAIN}\",
                     \"path\": \"${PATH_PREFIX}\",
-                    \"port\": 3000,
+                    \"port\": 80,
                     \"https\": true,
                     \"certificateType\": \"letsencrypt\",
                     \"domainType\": \"application\",
@@ -559,7 +559,7 @@ jobs:
           echo "  - Name: ${APP_NAME}"
           echo "  - Domain: https://${DOMAIN}${PATH_PREFIX}"
           echo "  - Strip Prefix: enabled (${PATH_PREFIX} will be removed)"
-          echo "  - Port: 3000"
+          echo "  - Port: 80"
           echo "  - Environment: ${DOKPLOY_ENVIRONMENT_ID}"
 
       - name: Configure Environment Variables
@@ -567,137 +567,39 @@ jobs:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
-          APP_DOMAIN: ${{ steps.dokploy_app.outputs.domain }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
-          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
-          GITHUB_OAUTH_REDIRECT_URL: ${{ secrets.GH_OAUTH_REDIRECT_URL }}
-          AI_WORKER_URL: ${{ secrets.AI_WORKER_URL }}
         run: |
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
-          echo "🔧 Configuring environment variables..."
+          echo "🔧 Configuring environment variables for static website..."
 
-          # Build environment variable string
-          ENV_VARS=""
-          ENV_COUNT=0
-
-          # Add DATABASE_URL if it exists
-          if [ -n "$DATABASE_URL" ]; then
-            if [ -n "$ENV_VARS" ]; then
-              ENV_VARS="${ENV_VARS}\n"
-            fi
-            ENV_VARS="${ENV_VARS}DATABASE_URL=${DATABASE_URL}"
-            echo "  ✅ DATABASE_URL configured"
-            ENV_COUNT=$((ENV_COUNT + 1))
-          fi
-
-          # Add SESSION_SECRET if it exists
-          if [ -n "$SESSION_SECRET" ]; then
-            if [ -n "$ENV_VARS" ]; then
-              ENV_VARS="${ENV_VARS}\n"
-            fi
-            ENV_VARS="${ENV_VARS}SESSION_SECRET=${SESSION_SECRET}"
-            echo "  ✅ SESSION_SECRET configured"
-            ENV_COUNT=$((ENV_COUNT + 1))
-          fi
-
-          # Add GitHub OAuth credentials if they exist
-          if [ -n "$GITHUB_OAUTH_CLIENT_ID" ]; then
-            if [ -n "$ENV_VARS" ]; then
-              ENV_VARS="${ENV_VARS}\n"
-            fi
-            ENV_VARS="${ENV_VARS}GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID}"
-            echo "  ✅ GITHUB_OAUTH_CLIENT_ID configured"
-            ENV_COUNT=$((ENV_COUNT + 1))
-          fi
-
-          if [ -n "$GITHUB_OAUTH_CLIENT_SECRET" ]; then
-            if [ -n "$ENV_VARS" ]; then
-              ENV_VARS="${ENV_VARS}\n"
-            fi
-            ENV_VARS="${ENV_VARS}GITHUB_OAUTH_CLIENT_SECRET=${GITHUB_OAUTH_CLIENT_SECRET}"
-            echo "  ✅ GITHUB_OAUTH_CLIENT_SECRET configured"
-            ENV_COUNT=$((ENV_COUNT + 1))
-          fi
-
-          if [ -n "$GITHUB_OAUTH_REDIRECT_URL" ]; then
-            if [ -n "$ENV_VARS" ]; then
-              ENV_VARS="${ENV_VARS}\n"
-            fi
-            ENV_VARS="${ENV_VARS}GITHUB_OAUTH_REDIRECT_URL=${GITHUB_OAUTH_REDIRECT_URL}"
-            echo "  ✅ GITHUB_OAUTH_REDIRECT_URL configured"
-            ENV_COUNT=$((ENV_COUNT + 1))
-          fi
-
-          # Add AI Worker URL if it exists
-          if [ -n "$AI_WORKER_URL" ]; then
-            if [ -n "$ENV_VARS" ]; then
-              ENV_VARS="${ENV_VARS}\n"
-            fi
-            ENV_VARS="${ENV_VARS}AI_WORKER_URL=${AI_WORKER_URL}"
-            echo "  ✅ AI_WORKER_URL configured"
-            ENV_COUNT=$((ENV_COUNT + 1))
-          fi
-
-          # Add ALLOWED_ORIGINS using the application domain
-          if [ -n "$APP_DOMAIN" ]; then
-            if [ -n "$ENV_VARS" ]; then
-              ENV_VARS="${ENV_VARS}\n"
-            fi
-            ENV_VARS="${ENV_VARS}ALLOWED_ORIGINS=https://${APP_DOMAIN}"
-            echo "  ✅ ALLOWED_ORIGINS configured"
-            ENV_COUNT=$((ENV_COUNT + 1))
-          fi
-
-          # Always set NODE_ENV to production for deployed environments
-          if [ -n "$ENV_VARS" ]; then
-            ENV_VARS="${ENV_VARS}\n"
-          fi
-          ENV_VARS="${ENV_VARS}NODE_ENV=production"
+          # Static website only needs NODE_ENV
+          ENV_VARS="NODE_ENV=production"
           echo "  ✅ NODE_ENV=production configured"
-          ENV_COUNT=$((ENV_COUNT + 1))
 
-          # Always set PORT to 3000
-          if [ -n "$ENV_VARS" ]; then
-            ENV_VARS="${ENV_VARS}\n"
-          fi
-          ENV_VARS="${ENV_VARS}PORT=3000"
-          echo "  ✅ PORT=3000 configured"
-          ENV_COUNT=$((ENV_COUNT + 1))
+          echo ""
+          echo "📝 Setting environment variable(s)..."
 
-          # Update application environment variables if any were configured
-          if [ "$ENV_COUNT" -gt 0 ]; then
-            echo ""
-            echo "📝 Setting ${ENV_COUNT} environment variable(s)..."
+          UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/application.update" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"applicationId\": \"${APPLICATION_ID}\",
+                \"env\": \"${ENV_VARS}\"
+              }
+            }")
 
-            UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
-              "${DOKPLOY_URL}/api/trpc/application.update" \
-              -H 'accept: application/json' \
-              -H 'Content-Type: application/json' \
-              -H "x-api-key: ${DOKPLOY_API_KEY}" \
-              -d "{
-                \"json\": {
-                  \"applicationId\": \"${APPLICATION_ID}\",
-                  \"env\": \"${ENV_VARS}\"
-                }
-              }")
+          UPDATE_HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
+          UPDATE_BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
 
-            UPDATE_HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
-            UPDATE_BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
-
-            if [ "$UPDATE_HTTP_CODE" -ge 200 ] && [ "$UPDATE_HTTP_CODE" -lt 300 ]; then
-              echo "✅ Environment variables configured successfully"
-            else
-              echo "⚠️  Warning: Failed to set environment variables (HTTP ${UPDATE_HTTP_CODE})"
-              echo "Response: ${UPDATE_BODY}"
-              echo "Application will use default/in-memory configuration"
-            fi
+          if [ "$UPDATE_HTTP_CODE" -ge 200 ] && [ "$UPDATE_HTTP_CODE" -lt 300 ]; then
+            echo "✅ Environment variables configured successfully"
           else
-            echo "ℹ️  No environment variables configured"
-            echo "Application will use in-memory storage and defaults"
+            echo "⚠️  Warning: Failed to set environment variables (HTTP ${UPDATE_HTTP_CODE})"
+            echo "Response: ${UPDATE_BODY}"
           fi
           echo ""
 
