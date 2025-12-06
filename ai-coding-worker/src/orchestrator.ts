@@ -7,21 +7,25 @@ import { logger } from './utils/logger';
 import { CredentialManager } from './utils/credentialManager';
 import { enrichEventWithRelativePaths } from './utils/filePathHelper';
 import { getEventEmoji } from './utils/emojiMapper';
+import { StorageClient } from './storage/storageClient';
+
+// Local workspace root for downloaded sessions
+const WORKSPACE_ROOT = process.env.WORKSPACE_DIR || '/workspace';
 
 /**
- * Simplified orchestrator for executing coding assistant requests
+ * Orchestrator for executing coding assistant requests
  *
- * This worker is now purely an LLM execution engine:
- * - Receives a workspacePath from internal-api-server
- * - Validates the path exists
- * - Runs the LLM provider
- * - Streams events back
- *
- * All session management (storage, GitHub operations) is handled by internal-api-server.
+ * This worker handles LLM execution with session sync:
+ * - Downloads session from storage (via internal-api-server)
+ * - Runs the LLM provider in the extracted workspace
+ * - Uploads session back to storage after completion
+ * - Streams events back to caller
  */
 export class Orchestrator {
+  private storageClient: StorageClient;
+
   constructor() {
-    // No dependencies needed - all session management is in internal-api-server
+    this.storageClient = new StorageClient();
   }
 
   /**
@@ -37,25 +41,33 @@ export class Orchestrator {
   /**
    * Execute an LLM request
    *
-   * Simplified flow:
-   * 1. Validate workspacePath exists (provided by internal-api-server)
-   * 2. Write credentials for the provider
-   * 3. Run the LLM provider
-   * 4. Stream events back to caller
-   *
-   * All session management (storage, GitHub) is handled by internal-api-server.
+   * Flow:
+   * 1. Download session from storage (using websiteSessionId)
+   * 2. Extract to local workspace
+   * 3. Write credentials for the provider
+   * 4. Run the LLM provider
+   * 5. Upload session back to storage
+   * 6. Stream events back to caller
    */
   async execute(request: ExecuteRequest, req: Request, res: Response, abortSignal?: AbortSignal): Promise<void> {
     const startTime = Date.now();
 
-    // workspacePath is required - provided by internal-api-server
-    const workspacePath = request.workspacePath;
     const websiteSessionId = request.websiteSessionId || 'unknown';
+    // Local paths for this session
+    const sessionRoot = path.join(WORKSPACE_ROOT, `session-${websiteSessionId}`);
+    // workspacePath tells us where the repo is within the session (e.g., /workspace/session-xxx/workspace/hello-world)
+    // We need to extract just the relative repo path from it
+    const repoRelativePath = this.extractRepoPath(request.workspacePath);
+    const localWorkspacePath = repoRelativePath
+      ? path.join(sessionRoot, 'workspace', repoRelativePath)
+      : path.join(sessionRoot, 'workspace');
 
     logger.info('Received execute request', {
       component: 'Orchestrator',
       websiteSessionId,
-      workspacePath,
+      originalWorkspacePath: request.workspacePath,
+      localWorkspacePath,
+      repoRelativePath,
       provider: request.codingAssistantProvider
     });
 
@@ -122,19 +134,51 @@ export class Orchestrator {
       // Step 1: Validate request
       this.validateRequest(request);
 
-      // Step 2: Validate workspace path exists
-      if (!workspacePath) {
-        throw new Error('workspacePath is required');
+      // Step 2: Download session from storage
+      sendEvent({
+        type: 'message',
+        stage: 'downloading',
+        message: 'Downloading session from storage...',
+        timestamp: new Date().toISOString()
+      });
+
+      // Clean up any existing local directory
+      if (fs.existsSync(sessionRoot)) {
+        fs.rmSync(sessionRoot, { recursive: true, force: true });
       }
 
-      if (!fs.existsSync(workspacePath)) {
-        throw new Error(`Workspace path does not exist: ${workspacePath}`);
+      // Download and extract session
+      const sessionDownloaded = await this.storageClient.downloadSession(websiteSessionId, sessionRoot);
+
+      if (sessionDownloaded) {
+        logger.info('Session downloaded from storage', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          sessionRoot
+        });
+      } else {
+        logger.info('No existing session in storage, created empty workspace', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          sessionRoot
+        });
       }
 
-      logger.info('Workspace validated', {
+      // Ensure the workspace path exists after download
+      if (!fs.existsSync(localWorkspacePath)) {
+        // Create workspace directory if it doesn't exist
+        fs.mkdirSync(localWorkspacePath, { recursive: true });
+        logger.info('Created workspace directory', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          localWorkspacePath
+        });
+      }
+
+      logger.info('Workspace ready', {
         component: 'Orchestrator',
         websiteSessionId,
-        workspacePath
+        localWorkspacePath
       });
 
       // Step 3: Write credentials for the provider
@@ -162,7 +206,7 @@ export class Orchestrator {
       const provider = ProviderFactory.createProvider(
         request.codingAssistantProvider,
         request.codingAssistantAuthentication,
-        workspacePath,
+        localWorkspacePath,
         request.providerOptions,
         false // resuming flag - internal-api-server handles session state
       );
@@ -172,13 +216,13 @@ export class Orchestrator {
         request.userRequest,
         {
           authentication: request.codingAssistantAuthentication,
-          workspace: workspacePath,
+          workspace: localWorkspacePath,
           providerOptions: request.providerOptions,
           abortSignal
         },
         (event) => {
           // Enrich events with relative paths for better display on frontend
-          const enrichedEvent = enrichEventWithRelativePaths(event, workspacePath);
+          const enrichedEvent = enrichEventWithRelativePaths(event, localWorkspacePath);
 
           // Determine source based on provider
           const providerSource = request.codingAssistantProvider === 'ClaudeAgentSDK'
@@ -195,7 +239,23 @@ export class Orchestrator {
         }
       );
 
-      // Step 7: Send completion event
+      // Step 7: Upload session back to storage
+      sendEvent({
+        type: 'message',
+        stage: 'uploading',
+        message: 'Uploading session to storage...',
+        timestamp: new Date().toISOString()
+      });
+
+      await this.storageClient.uploadSession(websiteSessionId, sessionRoot);
+
+      logger.info('Session uploaded to storage', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        sessionRoot
+      });
+
+      // Step 8: Send completion event
       const duration = Date.now() - startTime;
       sendEvent({
         type: 'completed',
@@ -211,6 +271,20 @@ export class Orchestrator {
         durationMs: duration
       });
 
+      // Cleanup local session directory
+      try {
+        if (fs.existsSync(sessionRoot)) {
+          fs.rmSync(sessionRoot, { recursive: true, force: true });
+        }
+      } catch (cleanupError) {
+        logger.warn('Failed to cleanup local session directory', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          sessionRoot,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        });
+      }
+
       logger.info('Closing SSE stream - all events sent', {
         component: 'Orchestrator',
         websiteSessionId,
@@ -225,6 +299,31 @@ export class Orchestrator {
         websiteSessionId,
         provider: request.codingAssistantProvider
       });
+
+      // Try to upload session even on error (to preserve any partial work)
+      try {
+        if (fs.existsSync(sessionRoot)) {
+          await this.storageClient.uploadSession(websiteSessionId, sessionRoot);
+          logger.info('Session uploaded after error', {
+            component: 'Orchestrator',
+            websiteSessionId
+          });
+        }
+      } catch (uploadError) {
+        logger.error('Failed to upload session after error', uploadError, {
+          component: 'Orchestrator',
+          websiteSessionId
+        });
+      }
+
+      // Cleanup local session directory
+      try {
+        if (fs.existsSync(sessionRoot)) {
+          fs.rmSync(sessionRoot, { recursive: true, force: true });
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
 
       // Send error event
       sendEvent({
@@ -297,6 +396,34 @@ export class Orchestrator {
       return 'invalid_request';
     }
     return 'internal_error';
+  }
+
+  /**
+   * Extract the repository path from a full workspace path
+   * e.g., /workspace/session-xxx/workspace/hello-world -> hello-world
+   */
+  private extractRepoPath(workspacePath: string): string | null {
+    if (!workspacePath) return null;
+
+    // Pattern: /workspace/session-{id}/workspace/{repo-name}
+    // We want to extract just the repo-name part
+    const match = workspacePath.match(/\/workspace\/session-[^/]+\/workspace\/(.+)$/);
+    if (match) {
+      return match[1];
+    }
+
+    // Alternative: just get the last path component if it looks like a repo name
+    const parts = workspacePath.split('/').filter(p => p);
+    if (parts.length > 0) {
+      const lastPart = parts[parts.length - 1];
+      // If the last part is 'workspace', there's no repo subdirectory
+      if (lastPart === 'workspace') {
+        return null;
+      }
+      return lastPart;
+    }
+
+    return null;
   }
 
   /**
