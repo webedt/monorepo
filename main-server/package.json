@@ -27,7 +27,6 @@
     "@lucia-auth/adapter-postgresql": "^3.1.2",
     "@lucia-auth/adapter-sqlite": "^3.0.2",
     "@octokit/rest": "^21.1.1",
-    "@webedt/shared": "workspace:*",
     "bcrypt": "^5.1.1",
     "better-sqlite3": "^11.10.0",
     "better-sse": "^0.13.0",
