@@ -44,7 +44,7 @@ export interface InitSessionOptions {
   workspaceRoot: string;
   // Coding assistant credentials for LLM-based naming (optional)
   codingAssistantProvider?: string;
-  codingAssistantAuthentication?: string;
+  codingAssistantAuthentication?: string | object;
 }
 
 export interface InitSessionResult {
@@ -63,7 +63,7 @@ export interface CommitAndPushOptions {
   userId?: string;
   // Coding assistant credentials for LLM-based commit messages (optional)
   codingAssistantProvider?: string;
-  codingAssistantAuthentication?: string;
+  codingAssistantAuthentication?: string | object;
 }
 
 export interface CommitAndPushResult {
@@ -269,11 +269,15 @@ export class GitHubOperations {
       if (options.codingAssistantProvider && options.codingAssistantAuthentication) {
         try {
           const aiWorkerClient = new AIWorkerClient();
+          // Serialize authentication if it's an object
+          const authString = typeof options.codingAssistantAuthentication === 'object'
+            ? JSON.stringify(options.codingAssistantAuthentication)
+            : options.codingAssistantAuthentication;
           const result = await aiWorkerClient.generateSessionTitleAndBranch(
             userRequest,
             baseBranch,
             options.codingAssistantProvider,
-            options.codingAssistantAuthentication
+            authString
           );
           title = result.title;
           descriptivePart = result.branchName;
@@ -470,11 +474,15 @@ export class GitHubOperations {
       if (options.codingAssistantProvider && options.codingAssistantAuthentication) {
         try {
           const aiWorkerClient = new AIWorkerClient();
+          // Serialize authentication if it's an object
+          const authString = typeof options.codingAssistantAuthentication === 'object'
+            ? JSON.stringify(options.codingAssistantAuthentication)
+            : options.codingAssistantAuthentication;
           commitMessage = await aiWorkerClient.generateCommitMessage(
             gitStatus,
             gitDiff,
             options.codingAssistantProvider,
-            options.codingAssistantAuthentication
+            authString
           );
 
           if (userId) {

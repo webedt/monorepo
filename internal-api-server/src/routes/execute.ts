@@ -445,7 +445,9 @@ const executeHandler = async (req: Request, res: Response) => {
               branch: effectiveBranch,
               userRequest: serializeUserRequest(userRequest),
               githubAccessToken: user.githubAccessToken,
-              workspaceRoot: WORKSPACE_DIR
+              workspaceRoot: WORKSPACE_DIR,
+              codingAssistantProvider: providerName,
+              codingAssistantAuthentication: providerAuth
             },
             (event) => {
               // Forward progress events
