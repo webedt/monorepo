@@ -532,7 +532,7 @@ const executeHandler = async (req: Request, res: Response) => {
         codingAssistantProvider: providerName,
         codingAssistantAuthentication: providerAuth,
         workspacePath: workspacePath,
-        sessionId: chatSession.id,
+        websiteSessionId: chatSession.id,
         providerOptions: user.preferredModel ? { model: user.preferredModel } : undefined
       };
 
