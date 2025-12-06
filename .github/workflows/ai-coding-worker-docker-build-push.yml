@@ -9,7 +9,7 @@ on:
 env:
   REGISTRY: dockerregistry.etdofresh.com
   IMAGE_NAME: ai-coding-worker
-  INTERNAL_API_URL: http://webedt-app-webedt-internal-api-server-juit1b:3000
+  INTERNAL_API_URL: http://webedt-app-webedt-internal-api-server-juit1b-internal-api-server-1:3000
 
 jobs:
   build-and-push-ai-coding-worker:

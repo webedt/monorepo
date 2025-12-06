@@ -10,7 +10,7 @@ on:
     types: [deploy-main]
 
 env:
-  DEFAULT_INTERNAL_API_URL: 'http://webedt-app-webedt-internal-api-server-juit1b:3000'
+  DEFAULT_INTERNAL_API_URL: 'http://webedt-app-webedt-internal-api-server-juit1b-internal-api-server-1:3000'
 
 jobs:
   configure-dokploy:
