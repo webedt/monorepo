@@ -59,6 +59,7 @@ export interface SSEEvent {
   error?: string;
   code?: string;
   source?: string;
+  endpoint?: string;  // e.g., '/execute', '/init-session', '/commit-push'
   timestamp?: string;
   sessionId?: string;
   branchName?: string;
@@ -349,6 +350,11 @@ const executeHandler = async (req: Request, res: Response) => {
         event.timestamp = new Date().toISOString();
       }
 
+      // Format source to include endpoint for debugging (e.g., "internal-api-server:/execute")
+      if (event.endpoint && event.source) {
+        event.source = `${event.source}:${event.endpoint}`;
+      }
+
       // Apply emoji
       if (event.message && typeof event.message === 'string') {
         const emoji = getEventEmoji(event);
@@ -387,14 +393,16 @@ const executeHandler = async (req: Request, res: Response) => {
         sessionId: chatSession.id,
         resuming: isResuming,
         provider: providerName,
-        message: 'Connected to Internal API Server'
+        message: 'Connected to Internal API Server',
+        endpoint: '/execute'
       });
 
       // Check for existing session in storage
       sendEvent({
         type: 'progress',
         stage: 'checking_session',
-        message: 'Checking for existing session...'
+        message: 'Checking for existing session...',
+        endpoint: '/execute'
       });
 
       // Clean up local directory if exists
@@ -412,7 +420,8 @@ const executeHandler = async (req: Request, res: Response) => {
           sendEvent({
             type: 'message',
             stage: 'session_found',
-            message: 'Existing session found in storage'
+            message: 'Existing session found in storage',
+            endpoint: '/execute'
           });
         }
       } catch {
@@ -434,7 +443,8 @@ const executeHandler = async (req: Request, res: Response) => {
           sendEvent({
             type: 'message',
             stage: 'initializing',
-            message: `Initializing session for ${effectiveRepoUrl}`
+            message: `Initializing session for ${effectiveRepoUrl}`,
+            endpoint: '/execute'
           });
 
           // Use integrated GitHub operations
@@ -450,13 +460,14 @@ const executeHandler = async (req: Request, res: Response) => {
               codingAssistantAuthentication: providerAuth
             },
             (event) => {
-              // Forward progress events
+              // Forward progress events with endpoint context
               const eventType = event.type === 'progress' ? 'message' : event.type;
               sendEvent({
                 type: eventType,
                 message: event.message,
                 stage: event.stage,
                 data: event.data,
+                endpoint: event.endpoint,
                 source: 'internal-api-server'
               });
             }
@@ -482,21 +493,8 @@ const executeHandler = async (req: Request, res: Response) => {
           chatSession.sessionPath = sessionPath;
           workspacePath = initResult.localPath;
 
-          // Send branch_created and session_name events
-          sendEvent({
-            type: 'branch_created',
-            branchName: initResult.branchName,
-            baseBranch: initResult.branch,
-            sessionPath: sessionPath,
-            message: `Branch created: ${initResult.branchName}`
-          });
-
-          sendEvent({
-            type: 'session_name',
-            sessionName: initResult.sessionTitle,
-            branchName: initResult.branchName,
-            message: `Session: ${initResult.sessionTitle}`
-          });
+          // Note: branch_created and session_name events are already sent by initSession()
+          // via the progress callback - no need to send them again here
 
         } else if (sessionExisted) {
           // Use existing workspace from downloaded session
@@ -523,7 +521,8 @@ const executeHandler = async (req: Request, res: Response) => {
       sendEvent({
         type: 'message',
         message: `Executing with ${providerName}`,
-        stage: 'starting_ai'
+        stage: 'starting_ai',
+        endpoint: '/execute'
       });
 
       // Prepare payload for AI worker (now LLM-only)
@@ -636,7 +635,8 @@ const executeHandler = async (req: Request, res: Response) => {
         sendEvent({
           type: 'commit_progress',
           stage: 'starting',
-          message: 'Auto-committing changes...'
+          message: 'Auto-committing changes...',
+          endpoint: '/execute'
         });
 
         try {
@@ -652,6 +652,7 @@ const executeHandler = async (req: Request, res: Response) => {
                 message: event.message,
                 stage: event.stage,
                 data: event.data,
+                endpoint: event.endpoint,
                 source: 'internal-api-server'
               });
             }
@@ -680,7 +681,8 @@ const executeHandler = async (req: Request, res: Response) => {
           sendEvent({
             type: 'commit_progress',
             stage: 'error',
-            message: `Auto-commit failed: ${commitError instanceof Error ? commitError.message : String(commitError)}`
+            message: `Auto-commit failed: ${commitError instanceof Error ? commitError.message : String(commitError)}`,
+            endpoint: '/execute'
           });
         }
       }
@@ -689,7 +691,8 @@ const executeHandler = async (req: Request, res: Response) => {
       sendEvent({
         type: 'message',
         stage: 'uploading',
-        message: 'Saving session to storage...'
+        message: 'Saving session to storage...',
+        endpoint: '/execute'
       });
 
       await storageService.uploadSessionFromPath(chatSession.id, sessionRoot);
@@ -698,7 +701,8 @@ const executeHandler = async (req: Request, res: Response) => {
         type: 'message',
         stage: 'uploaded',
         message: 'Session saved to storage',
-        source: 'storage-worker'
+        source: 'storage-worker',
+        endpoint: '/execute'
       });
 
       // ========================================================================
@@ -716,7 +720,8 @@ const executeHandler = async (req: Request, res: Response) => {
         type: 'completed',
         sessionId: chatSession.id,
         duration_ms: duration,
-        message: 'Session completed'
+        message: 'Session completed',
+        endpoint: '/execute'
       });
 
       res.write(`event: completed\n`);
@@ -771,7 +776,8 @@ const executeHandler = async (req: Request, res: Response) => {
       sendEvent({
         type: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
-        code: 'execution_error'
+        code: 'execution_error',
+        endpoint: '/execute'
       });
 
       res.write(`event: completed\n`);

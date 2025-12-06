@@ -192,7 +192,7 @@ export class GitHubOperations {
     const workspaceDir = path.join(sessionRoot, 'workspace');
 
     const progress = onProgress || (() => {});
-    const endpoint = 'internal-api-server/init-session';
+    const endpoint = '/init-session';
 
     try {
       progress({ type: 'progress', stage: 'preparing', message: 'Preparing session initialization...', endpoint });
@@ -239,20 +239,20 @@ export class GitHubOperations {
             clonedPath: metadata.github.clonedPath
           });
 
-          progress({ type: 'progress', stage: 'repo_exists', message: 'Repository already exists in session' });
+          progress({ type: 'progress', stage: 'repo_exists', message: 'Repository already exists in session', endpoint });
 
           clonedPath = metadata.github.clonedPath;
           baseBranch = metadata.github.baseBranch;
         } else {
           // Repo path in metadata but doesn't exist - clone it
-          const pullResult = await this.cloneRepo(repoUrl, branch, directory, githubAccessToken, workspaceDir, progress);
+          const pullResult = await this.cloneRepo(repoUrl, branch, directory, githubAccessToken, workspaceDir, progress, endpoint);
           clonedPath = pullResult.clonedPath;
           baseBranch = pullResult.branch;
           metadata = this.updateMetadataWithClone(sessionRoot, sessionId, repoUrl, pullResult, metadata);
         }
       } else {
         // No repo - clone it
-        const pullResult = await this.cloneRepo(repoUrl, branch, directory, githubAccessToken, workspaceDir, progress);
+        const pullResult = await this.cloneRepo(repoUrl, branch, directory, githubAccessToken, workspaceDir, progress, endpoint);
         clonedPath = pullResult.clonedPath;
         baseBranch = pullResult.branch;
         metadata = this.updateMetadataWithClone(sessionRoot, sessionId, repoUrl, pullResult, metadata);
@@ -262,7 +262,7 @@ export class GitHubOperations {
       const repoPath = path.join(sessionRoot, 'workspace', clonedPath);
       const { owner, repo } = parseRepoUrl(repoUrl);
 
-      progress({ type: 'progress', stage: 'generating_name', message: 'Generating session title and branch name...' });
+      progress({ type: 'progress', stage: 'generating_name', message: 'Generating session title and branch name...', endpoint });
 
       let title: string;
       let descriptivePart: string;
@@ -300,7 +300,7 @@ export class GitHubOperations {
           title = 'New Session';
           descriptivePart = 'auto-request';
 
-          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback naming (LLM unavailable)' });
+          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback naming (LLM unavailable)', endpoint });
         }
       } else {
         // No credentials provided, use fallback
@@ -317,16 +317,16 @@ export class GitHubOperations {
       const sessionIdSuffix = sessionId.slice(-8);
       const branchName = `webedt/${descriptivePart}-${sessionIdSuffix}`;
 
-      progress({ type: 'progress', stage: 'name_generated', message: `Generated: "${title}" → ${branchName}` });
+      progress({ type: 'progress', stage: 'name_generated', message: `Generated: "${title}" → ${branchName}`, endpoint });
 
       // Create and checkout branch
-      progress({ type: 'progress', stage: 'creating_branch', message: `Creating branch: ${branchName}` });
+      progress({ type: 'progress', stage: 'creating_branch', message: `Creating branch: ${branchName}`, endpoint });
 
       const gitHelper = new GitHelper(repoPath);
       await gitHelper.createBranch(branchName);
 
       // Push branch to remote
-      progress({ type: 'progress', stage: 'pushing', message: `Pushing branch ${branchName} to trigger build...` });
+      progress({ type: 'progress', stage: 'pushing', message: `Pushing branch ${branchName} to trigger build...`, endpoint });
 
       try {
         await gitHelper.push();
@@ -353,17 +353,19 @@ export class GitHubOperations {
       progress({
         type: 'branch_created',
         message: `Branch created: ${branchName}`,
-        data: { branchName, baseBranch, sessionPath }
+        data: { branchName, baseBranch, sessionPath },
+        endpoint
       });
 
       progress({
         type: 'session_name',
         message: `Session: ${title}`,
-        data: { sessionName: title, branchName }
+        data: { sessionName: title, branchName },
+        endpoint
       });
 
       // Upload to storage
-      progress({ type: 'progress', stage: 'uploading', message: 'Uploading session to storage...' });
+      progress({ type: 'progress', stage: 'uploading', message: 'Uploading session to storage...', endpoint });
 
       await this.storageService.uploadSessionFromPath(sessionId, sessionRoot);
 
@@ -414,9 +416,10 @@ export class GitHubOperations {
   ): Promise<CommitAndPushResult> {
     const { sessionId, workspacePath, userId } = options;
     const progress = onProgress || (() => {});
+    const endpoint = '/commit-push';
 
     try {
-      progress({ type: 'progress', stage: 'analyzing', message: 'Analyzing changes...' });
+      progress({ type: 'progress', stage: 'analyzing', message: 'Analyzing changes...', endpoint });
 
       const gitHelper = new GitHelper(workspacePath);
 
@@ -442,7 +445,8 @@ export class GitHubOperations {
           type: 'commit_progress',
           stage: 'completed',
           message: 'Auto-commit skipped: No changes to commit',
-          data: { branch: currentBranch }
+          data: { branch: currentBranch },
+          endpoint
         });
 
         return {
@@ -464,11 +468,12 @@ export class GitHubOperations {
         type: 'progress',
         stage: 'changes_detected',
         message: `Changes detected on branch: ${currentBranch}`,
-        data: { status: gitStatus }
+        data: { status: gitStatus },
+        endpoint
       });
 
       // Generate commit message using AI worker
-      progress({ type: 'progress', stage: 'generating_message', message: 'Generating commit message...' });
+      progress({ type: 'progress', stage: 'generating_message', message: 'Generating commit message...', endpoint });
 
       let commitMessage: string;
 
@@ -505,7 +510,7 @@ export class GitHubOperations {
 
           commitMessage = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
 
-          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback commit message (AI worker unavailable)' });
+          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback commit message (AI worker unavailable)', endpoint });
         }
       } else {
         // No credentials provided, use fallback
@@ -518,21 +523,21 @@ export class GitHubOperations {
       }
 
       // Commit changes
-      progress({ type: 'progress', stage: 'committing', message: 'Committing changes...', data: { commitMessage } });
+      progress({ type: 'progress', stage: 'committing', message: 'Committing changes...', data: { commitMessage }, endpoint });
 
       const commitHash = await gitHelper.commitAll(commitMessage);
 
-      progress({ type: 'progress', stage: 'committed', message: 'Changes committed successfully', data: { commitHash } });
+      progress({ type: 'progress', stage: 'committed', message: 'Changes committed successfully', data: { commitHash }, endpoint });
 
       // Push to remote
-      progress({ type: 'progress', stage: 'pushing', message: `Pushing to remote branch: ${currentBranch}...` });
+      progress({ type: 'progress', stage: 'pushing', message: `Pushing to remote branch: ${currentBranch}...`, endpoint });
 
       let pushed = false;
       try {
         await gitHelper.push();
         pushed = true;
 
-        progress({ type: 'progress', stage: 'pushed', message: 'Changes pushed successfully' });
+        progress({ type: 'progress', stage: 'pushed', message: 'Changes pushed successfully', endpoint });
 
         logger.info('Push completed', {
           component: 'GitHubOperations',
@@ -551,7 +556,8 @@ export class GitHubOperations {
           type: 'progress',
           stage: 'push_failed',
           message: 'Push failed (commit saved locally)',
-          data: { error: pushError instanceof Error ? pushError.message : String(pushError) }
+          data: { error: pushError instanceof Error ? pushError.message : String(pushError) },
+          endpoint
         });
       }
 
@@ -559,7 +565,8 @@ export class GitHubOperations {
         type: 'commit_progress',
         stage: 'completed',
         message: pushed ? 'Changes committed and pushed' : 'Changes committed (push pending)',
-        data: { branch: currentBranch, commitHash }
+        data: { branch: currentBranch, commitHash },
+        endpoint
       });
 
       logger.info('Commit and push completed', {
@@ -872,9 +879,10 @@ export class GitHubOperations {
     directory: string | undefined,
     accessToken: string,
     workspaceDir: string,
-    progress: ProgressCallback
+    progress: ProgressCallback,
+    endpoint: string
   ): Promise<{ clonedPath: string; branch: string }> {
-    progress({ type: 'progress', stage: 'cloning', message: `Cloning repository: ${repoUrl}` });
+    progress({ type: 'progress', stage: 'cloning', message: `Cloning repository: ${repoUrl}`, endpoint });
 
     const pullResult = await this.githubClient.pullRepository({
       repoUrl,
@@ -886,7 +894,7 @@ export class GitHubOperations {
 
     const repoName = pullResult.targetPath.replace(workspaceDir + path.sep, '').replace(workspaceDir + '/', '');
 
-    progress({ type: 'progress', stage: 'cloned', message: 'Repository cloned successfully' });
+    progress({ type: 'progress', stage: 'cloned', message: 'Repository cloned successfully', endpoint });
 
     return { clonedPath: repoName, branch: pullResult.branch };
   }
