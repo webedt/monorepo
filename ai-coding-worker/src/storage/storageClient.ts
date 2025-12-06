@@ -17,7 +17,7 @@ export class StorageClient {
 
   constructor() {
     // Default to main-server external URL if STORAGE_WORKER_URL is not set
-    // Note: storage endpoints are now served by main-server at /api/storage-worker/*
+    // Note: storage endpoints are now served by main-server at /api/storage/*
     const storageUrl = process.env.STORAGE_WORKER_URL || 'https://webedt.etdofresh.com';
     this.enabled = true;
     this.baseUrl = storageUrl.replace(/\/$/, '');
@@ -51,7 +51,7 @@ export class StorageClient {
 
     const tarPath = `${localPath}-complete.tar.gz`;
     // Session path should not contain slashes (validated by storage-worker)
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}/download`;
+    const url = `${this.baseUrl}/api/storage/sessions/${sessionPath}/download`;
 
     try {
       logger.info('Downloading session from storage', {
@@ -226,7 +226,7 @@ export class StorageClient {
 
       // Upload to storage worker
       // Session path should not contain slashes (validated by storage-worker)
-      const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}/upload`;
+      const url = `${this.baseUrl}/api/storage/sessions/${sessionPath}/upload`;
       await this.uploadFile(url, tarPath);
 
       // Cleanup
@@ -252,7 +252,7 @@ export class StorageClient {
   async listSessions(): Promise<string[]> {
     if (!this.enabled) return [];
 
-    const url = `${this.baseUrl}/api/storage-worker/sessions`;
+    const url = `${this.baseUrl}/api/storage/sessions`;
 
     try {
       const response = await this.makeRequest(url, 'GET');
@@ -273,7 +273,7 @@ export class StorageClient {
     if (!this.enabled) return false;
 
     // Session path should not contain slashes (validated by storage-worker)
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}`;
+    const url = `${this.baseUrl}/api/storage/sessions/${sessionPath}`;
 
     try {
       await this.makeRequest(url, 'HEAD');
@@ -293,7 +293,7 @@ export class StorageClient {
     if (!this.enabled) return;
 
     // Session path should not contain slashes (validated by storage-worker)
-    const url = `${this.baseUrl}/api/storage-worker/sessions/${sessionPath}`;
+    const url = `${this.baseUrl}/api/storage/sessions/${sessionPath}`;
 
     try {
       await this.makeRequest(url, 'DELETE');
