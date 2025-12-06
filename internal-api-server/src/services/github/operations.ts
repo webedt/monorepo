@@ -148,6 +148,7 @@ export type ProgressCallback = (event: {
   stage?: string;
   message: string;
   data?: unknown;
+  endpoint?: string;  // e.g., 'internal-api-server/git/clone'
 }) => void;
 
 // ============================================================================
@@ -191,12 +192,13 @@ export class GitHubOperations {
     const workspaceDir = path.join(sessionRoot, 'workspace');
 
     const progress = onProgress || (() => {});
+    const endpoint = 'internal-api-server/init-session';
 
     try {
-      progress({ type: 'progress', stage: 'preparing', message: 'Preparing session initialization...' });
+      progress({ type: 'progress', stage: 'preparing', message: 'Preparing session initialization...', endpoint });
 
       // Check for existing session in storage
-      progress({ type: 'progress', stage: 'checking_session', message: 'Checking for existing session...' });
+      progress({ type: 'progress', stage: 'checking_session', message: 'Checking for existing session...', endpoint });
 
       // Clean up any existing local directory
       if (fs.existsSync(sessionRoot)) {
@@ -212,7 +214,7 @@ export class GitHubOperations {
           fs.mkdirSync(sessionRoot, { recursive: true });
           await this.storageService.extractSessionToPath(sessionData, sessionRoot);
           sessionExisted = true;
-          progress({ type: 'progress', stage: 'session_found', message: 'Existing session found' });
+          progress({ type: 'progress', stage: 'session_found', message: 'Existing session found', endpoint });
         }
       } catch {
         // Session doesn't exist, create new
@@ -220,7 +222,7 @@ export class GitHubOperations {
 
       if (!sessionExisted) {
         fs.mkdirSync(workspaceDir, { recursive: true });
-        progress({ type: 'progress', stage: 'new_session', message: 'Creating new session' });
+        progress({ type: 'progress', stage: 'new_session', message: 'Creating new session', endpoint });
       }
 
       // Check if repo already exists in session
