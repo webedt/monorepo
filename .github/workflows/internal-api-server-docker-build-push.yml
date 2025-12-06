@@ -9,7 +9,7 @@ on:
 env:
   REGISTRY: dockerregistry.etdofresh.com
   IMAGE_NAME: internal-api-server
-  INTERNAL_API_URL: http://webedt-app-webedt-internal-api-server-juit1b-internal-api-server-1:3000
+  INTERNAL_API_URL: http://internal-api-server:3000
 
 jobs:
   build-and-push-internal-api-server:
