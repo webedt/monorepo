@@ -7,8 +7,8 @@ import { logger } from '../utils/logger';
 import { SessionMetadata, SSEEvent } from '../types';
 
 /**
- * Storage client for communicating with storage-worker service
- * Replaces direct MinIO integration
+ * Storage client for communicating with main-server storage endpoints
+ * (Previously communicated with storage-worker, now consolidated into main-server)
  */
 export class StorageClient {
   private baseUrl: string;
@@ -16,8 +16,9 @@ export class StorageClient {
   private enabled: boolean;
 
   constructor() {
-    // Default to internal Docker service URL if STORAGE_WORKER_URL is not set
-    const storageUrl = process.env.STORAGE_WORKER_URL || 'http://webedt-app-storage-worker-t1avua_storage-worker:3000';
+    // Default to main-server URL if STORAGE_WORKER_URL is not set
+    // Note: storage endpoints are now served by main-server at /api/storage-worker/*
+    const storageUrl = process.env.STORAGE_WORKER_URL || 'http://main-server:3000';
     this.enabled = true;
     this.baseUrl = storageUrl.replace(/\/$/, '');
     this.timeout = parseInt(process.env.STORAGE_WORKER_TIMEOUT || '60000', 10);
