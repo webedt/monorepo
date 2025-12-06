@@ -20,36 +20,26 @@ jobs:
           ref: ${{ github.event_name == 'repository_dispatch' && 'main' || github.ref }}
           fetch-depth: 0
 
-      - name: Display Configuration
-        env:
-          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
-          DOKPLOY_PROJECT_ID: ${{ vars.DOKPLOY_PROJECT_ID }}
-          DOKPLOY_ENVIRONMENT_ID: ${{ vars.DOKPLOY_ENVIRONMENT_ID }}
-          DOKPLOY_GITHUB_ID: ${{ vars.DOKPLOY_GITHUB_ID }}
-          DOKPLOY_SERVER_ID: ${{ vars.DOKPLOY_SERVER_ID }}
+      - name: Show configuration
         run: |
-          echo "=========================================="
-          echo "🔧 Deployment Configuration"
-          echo "=========================================="
+          echo "## Configuration"
           echo ""
-          echo "📦 Repository Information:"
-          echo "  - Repository: ${{ github.repository }}"
-          echo "  - Branch: ${{ github.ref_name }}"
-          echo "  - Commit SHA: ${{ github.sha }}"
-          echo "  - Event: ${{ github.event_name }}"
-          echo "  - Project: website"
+          echo "### Secrets (availability check)"
+          echo "- DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- INTERNAL_API_URL: ${{ secrets.INTERNAL_API_URL != '' && '✅ Set' || '❌ Not set (will use default)' }}"
           echo ""
-          echo "🔐 Dokploy Configuration:"
-          echo "  - Dokploy URL: ${DOKPLOY_URL}"
-          echo "  - Project ID: ${DOKPLOY_PROJECT_ID}"
-          echo "  - Environment ID: ${DOKPLOY_ENVIRONMENT_ID}"
-          echo "  - GitHub Integration ID: ${DOKPLOY_GITHUB_ID}"
-          echo "  - Server ID: ${DOKPLOY_SERVER_ID}"
-          echo "  - API Key: [MASKED]"
+          echo "### Variables"
+          echo "- DOKPLOY_URL: ${{ vars.DOKPLOY_URL || '❌ Not set' }}"
+          echo "- DOKPLOY_PROJECT_ID: ${{ vars.DOKPLOY_PROJECT_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_ENVIRONMENT_ID: ${{ vars.DOKPLOY_ENVIRONMENT_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_GITHUB_ID: ${{ vars.DOKPLOY_GITHUB_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_SERVER_ID: ${{ vars.DOKPLOY_SERVER_ID || '❌ Not set' }}"
           echo ""
-          echo "ℹ️  Note: Build will be handled by Dokploy from Dockerfile"
-          echo ""
-          echo "=========================================="
+          echo "### Repository"
+          echo "- Repository: ${{ github.repository }}"
+          echo "- Branch: ${{ github.ref_name }}"
+          echo "- Commit SHA: ${{ github.sha }}"
+          echo "- Event: ${{ github.event_name }}"
 
       - name: Generate deployment metadata
         id: metadata

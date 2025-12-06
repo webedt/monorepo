@@ -18,6 +18,23 @@ jobs:
       packages: write
 
     steps:
+      - name: Show configuration
+        run: |
+          echo "## Configuration"
+          echo ""
+          echo "### Secrets (availability check)"
+          echo "- DOCKER_REGISTRY_USERNAME: ${{ secrets.DOCKER_REGISTRY_USERNAME != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
+          echo ""
+          echo "### Variables"
+          echo "- DOKPLOY_URL: ${{ vars.DOKPLOY_URL || '❌ Not set' }}"
+          echo "- DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID || '❌ Not set' }}"
+          echo ""
+          echo "### Environment"
+          echo "- REGISTRY: ${{ env.REGISTRY }}"
+          echo "- IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
