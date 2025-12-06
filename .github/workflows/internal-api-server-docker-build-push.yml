@@ -28,6 +28,15 @@ jobs:
           echo "- DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD != '' && '✅ Set' || '❌ Not set' }}"
           echo "- DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
           echo ""
+          echo "### Internal API Server Secrets"
+          echo "- DATABASE_URL: ${{ secrets.INTERNAL_API_DATABASE_URL != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
+          echo ""
           echo "### Variables"
           echo "- DOKPLOY_URL: ${{ vars.DOKPLOY_URL || '❌ Not set' }}"
           echo "- DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID || '❌ Not set' }}"
@@ -78,6 +87,98 @@ jobs:
 
       - name: Image digest
         run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
+
+      - name: Configure Compose Environment Variables
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID }}
+          # Internal API Server secrets
+          DATABASE_URL: ${{ secrets.INTERNAL_API_DATABASE_URL }}
+          MINIO_ENDPOINT: ${{ vars.MINIO_ENDPOINT || 'webedt-app-minio-0fslch-minio-1' }}
+          MINIO_PORT: ${{ vars.MINIO_PORT || '9000' }}
+          MINIO_USE_SSL: ${{ vars.MINIO_USE_SSL || 'false' }}
+          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          MINIO_BUCKET: ${{ vars.MINIO_BUCKET || 'sessions' }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          AI_WORKER_URL: ${{ vars.AI_WORKER_URL || 'http://webedt-app-ai-coding-workers-gy4wew_ai-coding-worker:5000' }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://github.etdofresh.com,https://webedt.etdofresh.com' }}
+          GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Skip if COMPOSE_ID is not set
+          if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
+            echo "⚠️ COMPOSE_ID not set, skipping environment configuration"
+            exit 0
+          fi
+
+          # Strip trailing slash from DOKPLOY_URL if present
+          DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          echo "🔧 Configuring environment variables for internal-api-server..."
+
+          # Build environment variables string (newline separated KEY=VALUE pairs)
+          ENV_VARS="PORT=3000
+NODE_ENV=production
+DATABASE_URL=${DATABASE_URL}
+MINIO_ENDPOINT=${MINIO_ENDPOINT}
+MINIO_PORT=${MINIO_PORT}
+MINIO_USE_SSL=${MINIO_USE_SSL}
+MINIO_ROOT_USER=${MINIO_ROOT_USER}
+MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+MINIO_BUCKET=${MINIO_BUCKET}
+SESSION_SECRET=${SESSION_SECRET}
+AI_WORKER_URL=${AI_WORKER_URL}
+ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+OPENAI_API_KEY=${OPENAI_API_KEY}"
+
+          # Escape the env vars for JSON
+          ENV_VARS_ESCAPED=$(echo "$ENV_VARS" | jq -Rs .)
+
+          echo "  ✅ PORT=3000"
+          echo "  ✅ NODE_ENV=production"
+          echo "  ✅ DATABASE_URL=***"
+          echo "  ✅ MINIO_ENDPOINT=${MINIO_ENDPOINT}"
+          echo "  ✅ MINIO_PORT=${MINIO_PORT}"
+          echo "  ✅ MINIO_USE_SSL=${MINIO_USE_SSL}"
+          echo "  ✅ MINIO_ROOT_USER=***"
+          echo "  ✅ MINIO_ROOT_PASSWORD=***"
+          echo "  ✅ MINIO_BUCKET=${MINIO_BUCKET}"
+          echo "  ✅ SESSION_SECRET=***"
+          echo "  ✅ AI_WORKER_URL=${AI_WORKER_URL}"
+          echo "  ✅ ALLOWED_ORIGINS=${ALLOWED_ORIGINS}"
+          echo "  ✅ GITHUB_CLIENT_ID=***"
+          echo "  ✅ GITHUB_CLIENT_SECRET=***"
+          echo "  ✅ OPENAI_API_KEY=***"
+          echo ""
+
+          # Update compose environment variables
+          UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/compose.update" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"composeId\": \"${COMPOSE_ID}\",
+                \"env\": ${ENV_VARS_ESCAPED}
+              }
+            }")
+
+          UPDATE_HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
+          UPDATE_BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
+
+          if [ "$UPDATE_HTTP_CODE" -ge 200 ] && [ "$UPDATE_HTTP_CODE" -lt 300 ]; then
+            echo "✅ Environment variables configured successfully"
+          else
+            echo "⚠️  Warning: Failed to set environment variables (HTTP ${UPDATE_HTTP_CODE})"
+            echo "Response: ${UPDATE_BODY}"
+          fi
 
       - name: Deploy to Dokploy
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
