@@ -10,7 +10,7 @@ on:
     types: [deploy-main]
 
 env:
-  INTERNAL_API_URL: ${{ secrets.INTERNAL_API_URL || 'http://webedt-app-webedt-internal-api-server-juit1b:3000' }}
+  DEFAULT_INTERNAL_API_URL: 'http://webedt-app-webedt-internal-api-server-juit1b:3000'
 
 jobs:
   configure-dokploy:
@@ -39,7 +39,8 @@ jobs:
           echo "- DOKPLOY_SERVER_ID: ${{ vars.DOKPLOY_SERVER_ID || '❌ Not set' }}"
           echo ""
           echo "### Environment"
-          echo "- INTERNAL_API_URL: ${{ env.INTERNAL_API_URL }}"
+          echo "- DEFAULT_INTERNAL_API_URL: ${{ env.DEFAULT_INTERNAL_API_URL }}"
+          echo "- INTERNAL_API_URL (resolved): ${{ secrets.INTERNAL_API_URL || env.DEFAULT_INTERNAL_API_URL }}"
           echo ""
           echo "### Repository"
           echo "- Repository: ${{ github.repository }}"
@@ -563,7 +564,7 @@ jobs:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
-          INTERNAL_API_URL: ${{ env.INTERNAL_API_URL }}
+          INTERNAL_API_URL: ${{ secrets.INTERNAL_API_URL || env.DEFAULT_INTERNAL_API_URL }}
         run: |
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
