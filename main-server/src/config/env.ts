@@ -16,7 +16,11 @@ export const BUILD_TIMESTAMP = process.env.BUILD_TIMESTAMP || 'unknown';
 export const BUILD_IMAGE_TAG = process.env.BUILD_IMAGE_TAG || 'unknown';
 
 // CORS configuration
-export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];
+// Default includes production domains if ALLOWED_ORIGINS not explicitly set
+const DEFAULT_ORIGINS = NODE_ENV === 'production'
+  ? ['https://webedt.etdofresh.com', 'https://github.etdofresh.com']
+  : ['http://localhost:5173', 'http://localhost:3000'];
+export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || DEFAULT_ORIGINS;
 
 // Session storage paths
 export const TMP_DIR = process.env.TMP_DIR || '/tmp';
