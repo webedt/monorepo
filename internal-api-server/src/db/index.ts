@@ -133,17 +133,19 @@ pool.query(`
       (SELECT COUNT(*) FROM events) as events_count
   `);
 }).then((result) => {
+  console.log('');
+  console.log('Database Statistics:');
   if (result && result.rows && result.rows[0]) {
     const stats = result.rows[0];
-    console.log('');
-    console.log('Database Statistics:');
     console.log(`  Users:              ${stats.users_count}`);
     console.log(`  Sessions:           ${stats.sessions_count}`);
     console.log(`  Chat Sessions:      ${stats.chat_sessions_count} (${stats.active_chat_sessions_count} active)`);
     console.log(`  Messages:           ${stats.messages_count}`);
     console.log(`  Events:             ${stats.events_count}`);
-    console.log('');
+  } else {
+    console.log('  (No stats available - result:', JSON.stringify(result), ')');
   }
+  console.log('');
 }).catch((err) => {
   console.error('Error creating PostgreSQL tables:', err);
 });
