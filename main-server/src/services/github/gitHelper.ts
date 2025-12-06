@@ -2,11 +2,8 @@
  * Helper for Git operations (status, diff, commit, push, branch)
  */
 
-import simpleGitModule, { SimpleGit } from 'simple-git';
+import { simpleGit, SimpleGit } from 'simple-git';
 import { logger } from '../../utils/logger.js';
-
-// Handle ESM/CommonJS interop for simple-git
-const simpleGit = (simpleGitModule as unknown as { default: typeof simpleGitModule }).default || simpleGitModule;
 
 export class GitHelper {
   private git: SimpleGit;
