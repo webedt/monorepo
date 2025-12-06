@@ -1,25 +1,19 @@
 /**
- * Lucia Authentication Configuration
+ * Lucia Authentication Configuration - PostgreSQL Only
  * Consolidated from website/apps/server/src/auth.ts
+ *
+ * Note: SQLite support was removed to simplify builds.
+ * See src/db/SQLITE_REMOVED.md for instructions on reintroducing SQLite if needed.
  */
 
 import { Lucia } from 'lucia';
 import { NodePostgresAdapter } from '@lucia-auth/adapter-postgresql';
-import { BetterSqlite3Adapter } from '@lucia-auth/adapter-sqlite';
-import { pool, sqliteDb } from './db/index.js';
+import { pool } from './db/index.js';
 
-// Use PostgreSQL adapter if DATABASE_URL is set, otherwise SQLite
-const usePostgres = !!process.env.DATABASE_URL;
-
-const adapter = usePostgres
-  ? new NodePostgresAdapter(pool!, {
-      user: 'users',
-      session: 'sessions',
-    })
-  : new BetterSqlite3Adapter(sqliteDb!, {
-      user: 'users',
-      session: 'sessions',
-    });
+const adapter = new NodePostgresAdapter(pool, {
+  user: 'users',
+  session: 'sessions',
+});
 
 export const lucia = new Lucia(adapter, {
   sessionCookie: {
