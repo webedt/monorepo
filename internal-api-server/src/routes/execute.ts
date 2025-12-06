@@ -631,14 +631,33 @@ const executeHandler = async (req: Request, res: Response) => {
                   eventsSent++;
 
                   // Store to database
-                  await db.insert(events).values({
-                    chatSessionId: chatSession.id,
-                    eventType: eventData.type,
-                    eventData: eventData
-                  });
+                  try {
+                    await db.insert(events).values({
+                      chatSessionId: chatSession.id,
+                      eventType: eventData.type,
+                      eventData: eventData
+                    });
+                    logger.debug('Event stored to database', {
+                      component: 'ExecuteRoute',
+                      sessionId: chatSession.id,
+                      eventType: eventData.type,
+                      eventCount
+                    });
+                  } catch (dbError) {
+                    logger.error('Failed to store event to database', dbError, {
+                      component: 'ExecuteRoute',
+                      sessionId: chatSession.id,
+                      eventType: eventData.type
+                    });
+                  }
                 }
-              } catch {
+              } catch (parseError) {
                 // Forward non-JSON data as-is
+                logger.warn('Failed to parse SSE event data', {
+                  component: 'ExecuteRoute',
+                  sessionId: chatSession.id,
+                  data: data.substring(0, 200)
+                });
                 res.write(`data: ${data}\n\n`);
               }
             }
