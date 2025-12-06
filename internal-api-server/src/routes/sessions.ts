@@ -434,6 +434,12 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const sessionId = req.params.id;
 
+    logger.info('Getting events for session', {
+      component: 'Sessions',
+      sessionId,
+      userId: authReq.user?.id
+    });
+
     if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
@@ -447,6 +453,10 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       .limit(1);
 
     if (!session) {
+      logger.warn('Session not found for events request', {
+        component: 'Sessions',
+        sessionId
+      });
       res.status(404).json({ success: false, error: 'Session not found' });
       return;
     }
@@ -462,6 +472,12 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       .from(events)
       .where(eq(events.chatSessionId, sessionId))
       .orderBy(asc(events.timestamp));
+
+    logger.info('Events fetched for session', {
+      component: 'Sessions',
+      sessionId,
+      eventCount: sessionEvents.length
+    });
 
     res.json({
       success: true,

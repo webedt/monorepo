@@ -611,8 +611,24 @@ const executeHandler = async (req: Request, res: Response) => {
             if (line.startsWith('data:')) {
               eventCount++;
               const data = line.substring(5).trim();
+
+              logger.info('Received SSE event from AI worker', {
+                component: 'ExecuteRoute',
+                sessionId: chatSession.id,
+                eventCount,
+                dataLength: data.length,
+                dataPreview: data.substring(0, 100)
+              });
+
               try {
                 const eventData = JSON.parse(data);
+
+                logger.info('Parsed SSE event', {
+                  component: 'ExecuteRoute',
+                  sessionId: chatSession.id,
+                  eventType: eventData.type,
+                  eventCount
+                });
 
                 // Forward event with appropriate source
                 const providerSource = providerName === 'ClaudeAgentSDK'
