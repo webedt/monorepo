@@ -35,6 +35,8 @@ services:
       # OpenAI (for transcription)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
 
+    networks:
+      - dokploy-network
     deploy:
       replicas: 1
       update_config:
@@ -50,3 +52,7 @@ services:
           memory: 1G
         reservations:
           memory: 256M
+
+networks:
+  dokploy-network:
+    external: true
