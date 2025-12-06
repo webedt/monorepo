@@ -6,8 +6,6 @@ import { Orchestrator } from './orchestrator';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const TMP_DIR = process.env.TMP_DIR || '/tmp';
-const DB_BASE_URL = process.env.DB_BASE_URL;
 
 // Container identification (Docker sets HOSTNAME to container ID)
 const containerId = process.env.HOSTNAME || 'unknown';
@@ -21,9 +19,6 @@ const BUILD_IMAGE_TAG = process.env.BUILD_IMAGE_TAG || 'unknown';
 const DEFAULT_CODING_ASSISTANT_PROVIDER = process.env.CODING_ASSISTANT_PROVIDER;
 const DEFAULT_CODING_ASSISTANT_AUTHENTICATION = process.env.CODING_ASSISTANT_AUTHENTICATION;
 
-// Default GitHub token from environment (optional fallback)
-const DEFAULT_GITHUB_ACCESS_TOKEN = process.env.GITHUB_ACCESS_TOKEN;
-
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -35,8 +30,8 @@ let shutdownRequested = false;
 let activeAbortController: AbortController | null = null;
 let activeSessionId: string | null = null;
 
-// Create orchestrator instance
-const orchestrator = new Orchestrator(TMP_DIR, DB_BASE_URL);
+// Create orchestrator instance (simplified - no longer needs TMP_DIR or DB_BASE_URL)
+const orchestrator = new Orchestrator();
 
 /**
  * Redact sensitive tokens from logs
@@ -75,7 +70,6 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: 'ai-coding-worker',
-    tmpDir: TMP_DIR,
     workerStatus,
     containerId,
     build: {
@@ -100,64 +94,16 @@ app.get('/status', (req: Request, res: Response) => {
 });
 
 /**
- * List all sessions
- * Returns array of session IDs from MinIO
- */
-app.get('/sessions', async (req: Request, res: Response) => {
-  res.setHeader('X-Container-ID', containerId);
-  try {
-    const sessionIds = await orchestrator.listSessions();
-
-    res.json({
-      count: sessionIds.length,
-      sessions: sessionIds.map(id => ({ sessionId: id, storage: 'minio' })),
-      containerId
-    });
-  } catch (error) {
-    console.error(`[Container ${containerId}] Error listing sessions:`, error);
-    res.status(500).json({
-      error: 'internal_error',
-      message: 'Failed to list sessions',
-      containerId
-    });
-  }
-});
-
-/**
- * Delete a session
- * Removes session from MinIO storage
- */
-app.delete('/sessions/:sessionId', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
-  res.setHeader('X-Container-ID', containerId);
-
-  try {
-    await orchestrator.deleteSession(sessionId);
-
-    res.json({
-      sessionId,
-      deleted: true,
-      containerId
-    });
-  } catch (error) {
-    console.error(`[Container ${containerId}] Error deleting session ${sessionId}:`, error);
-    res.status(500).json({
-      error: 'internal_error',
-      message: 'Failed to delete session',
-      containerId
-    });
-  }
-});
-
-/**
- * Unified execute endpoint
- * Handles all coding assistant operations via JSON payload
+ * Execute endpoint - runs LLM against a workspace
  *
- * Request modes (implicit from payload):
- * 1. Simple: Just userRequest + provider + token
- * 2. GitHub: Include github object to clone/pull repo
- * 3. Resume: Include resumeSessionId to continue session
- * 4. Full: GitHub + database persistence
+ * This is now a simplified LLM execution engine. All session management
+ * (storage, GitHub operations) is handled by internal-api-server.
+ *
+ * Required fields:
+ * - userRequest: The prompt/request for the LLM
+ * - codingAssistantProvider: The LLM provider to use
+ * - codingAssistantAuthentication: Auth credentials for the provider
+ * - workspacePath: Path to the workspace directory (provided by internal-api-server)
  */
 app.post('/execute', async (req: Request, res: Response) => {
   console.log(`[Container ${containerId}] Received execute request`);
@@ -229,14 +175,6 @@ app.post('/execute', async (req: Request, res: Response) => {
     }
   }
 
-  // Use environment variable as fallback for GitHub access token
-  if (request.github && (!request.github.accessToken || request.github.accessToken === 'FROM_ENV')) {
-    if (DEFAULT_GITHUB_ACCESS_TOKEN) {
-      request.github.accessToken = DEFAULT_GITHUB_ACCESS_TOKEN;
-      console.log('[Server] Using GITHUB_ACCESS_TOKEN from environment');
-    }
-  }
-
   // Check if shutdown was requested - reject new work
   if (shutdownRequested) {
     workerStatus = 'idle';
@@ -272,9 +210,8 @@ app.post('/execute', async (req: Request, res: Response) => {
   console.log('  - codingAssistantProvider:', request.codingAssistantProvider);
   console.log('  - codingAssistantAuthentication type:', typeof request.codingAssistantAuthentication);
   console.log('  - codingAssistantAuthentication value:', redactSensitiveData(request.codingAssistantAuthentication).substring(0, 200) + '...');
+  console.log('  - workspacePath:', request.workspacePath || 'N/A');
   console.log('  - websiteSessionId:', request.websiteSessionId || 'N/A');
-  console.log('  - github:', request.github ? redactSensitiveData(request.github) : 'N/A');
-  console.log('  - database:', request.database ? 'Configured' : 'N/A');
   console.log('  - providerOptions:', request.providerOptions ? JSON.stringify(request.providerOptions) : 'N/A');
 
   // Normalize codingAssistantAuthentication to string (handle both object and string formats)
@@ -319,93 +256,6 @@ app.post('/execute', async (req: Request, res: Response) => {
   })();
 
   activeExecution = executionPromise;
-});
-
-/**
- * Initialize repository endpoint - clones a repository and uploads to storage
- * This is a lightweight operation that doesn't run AI, just prepares the workspace
- * Used when opening the Code view for a new session
- */
-app.post('/init-repository', async (req: Request, res: Response) => {
-  console.log(`[Container ${containerId}] Received init-repository request`);
-  res.setHeader('X-Container-ID', containerId);
-
-  // Check if worker is busy
-  if (workerStatus === 'busy') {
-    console.log(`[Container ${containerId}] Rejecting init-repository - worker busy`);
-    res.status(429).json({
-      error: 'busy',
-      message: 'Worker is currently processing another request',
-      retryAfter: 5,
-      containerId
-    });
-    return;
-  }
-
-  const { websiteSessionId, github } = req.body;
-
-  // Validate required fields
-  if (!websiteSessionId) {
-    res.status(400).json({
-      error: 'invalid_request',
-      message: 'Missing required field: websiteSessionId',
-      containerId
-    });
-    return;
-  }
-
-  if (!github?.repoUrl || !github?.branch || !github?.accessToken) {
-    res.status(400).json({
-      error: 'invalid_request',
-      message: 'Missing required github fields: repoUrl, branch, accessToken',
-      containerId
-    });
-    return;
-  }
-
-  // Set worker to busy
-  workerStatus = 'busy';
-  console.log(`[Container ${containerId}] Starting repository initialization for session: ${websiteSessionId}`);
-
-  try {
-    // Initialize the repository using the orchestrator's method
-    const result = await orchestrator.initializeRepository({
-      websiteSessionId,
-      github: {
-        repoUrl: github.repoUrl,
-        branch: github.branch,
-        accessToken: github.accessToken,
-      }
-    });
-
-    console.log(`[Container ${containerId}] Repository initialized successfully:`, result);
-
-    res.json({
-      success: true,
-      sessionId: websiteSessionId,
-      repository: {
-        clonedPath: result.clonedPath,
-        branch: result.branch,
-        wasCloned: result.wasCloned,
-      },
-      containerId
-    });
-
-    // Exit after successful initialization (ephemeral container model)
-    await gracefulExit(0);
-
-  } catch (error) {
-    console.error(`[Container ${containerId}] Failed to initialize repository:`, error);
-
-    res.status(500).json({
-      error: 'init_failed',
-      message: error instanceof Error ? error.message : 'Failed to initialize repository',
-      containerId
-    });
-
-    // Exit with error code
-    await gracefulExit(1);
-  }
 });
 
 /**
@@ -619,11 +469,7 @@ app.use((req: Request, res: Response) => {
     availableEndpoints: [
       'GET  /health',
       'GET  /status',
-      'GET  /sessions',
-      'GET  /sessions/:sessionId',
-      'GET  /sessions/:sessionId/stream',
       'POST /execute',
-      'POST /init-repository',
       'POST /query',
       'POST /abort',
       'POST /shutdown'
@@ -637,36 +483,29 @@ app.use((req: Request, res: Response) => {
  */
 app.listen(PORT, () => {
   console.log('='.repeat(60));
-  console.log('🚀 Unified Coding Assistant Worker (MinIO Storage)');
+  console.log('🚀 AI Coding Worker (LLM Execution Engine)');
   console.log('='.repeat(60));
   console.log(`🆔 Container ID: ${containerId}`);
   console.log(`📡 Server running on port ${PORT}`);
-  console.log(`📁 Temp directory: ${TMP_DIR}`);
-  console.log(`🗄️  Storage: MinIO (${process.env.MINIO_ENDPOINT || 'Not configured'})`);
-  console.log(`💾 Database URL: ${DB_BASE_URL || 'Not configured'}`);
   console.log(`📊 Status: ${workerStatus}`);
   console.log('');
   console.log('Available endpoints:');
   console.log('  GET    /health                    - Health check');
   console.log('  GET    /status                    - Worker status (idle/busy)');
-  console.log('  GET    /sessions                  - List all sessions (from MinIO)');
-  console.log('  DELETE /sessions/:id              - Delete a session');
-  console.log('  POST   /execute                   - Execute coding assistant request');
-  console.log('  POST   /init-repository           - Clone repo and upload to storage (no AI)');
+  console.log('  POST   /execute                   - Execute LLM against workspace');
   console.log('  POST   /query                     - One-off LLM query (titles, commits, etc)');
   console.log('  POST   /abort                     - Abort current execution');
-  console.log('  POST   /shutdown                  - Signal worker to shutdown (client confirms receipt)');
+  console.log('  POST   /shutdown                  - Signal worker to shutdown');
   console.log('');
   console.log('Supported providers:');
-  console.log('  - claude-code');
-  console.log('  - codex / cursor');
+  console.log('  - ClaudeAgentSDK (claude-code)');
+  console.log('  - Codex');
   console.log('');
   console.log('Worker behavior:');
   console.log('  - Ephemeral: exits after completing each job');
   console.log('  - Returns 429 if busy (load balancer will retry)');
-  console.log('  - Sessions stored in MinIO for complete isolation');
-  console.log('  - Downloads session at start, uploads at end');
-  console.log('  - Container tracking via X-Container-ID header');
+  console.log('  - Receives workspacePath from internal-api-server');
+  console.log('  - All session management handled by internal-api-server');
   console.log('='.repeat(60));
 });
 

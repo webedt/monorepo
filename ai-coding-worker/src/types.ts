@@ -32,31 +32,12 @@ export interface ExecuteRequest {
   codingAssistantProvider: string;
   codingAssistantAuthentication: string;
 
-  // Optional: Website session ID (UUID)
-  // For new sessions: undefined (will be generated)
-  // For resuming: provide the UUID
-  // This is separate from the provider's internal session ID (stored in metadata)
+  // Required: Workspace path (provided by internal-api-server)
+  // This is the path to the working directory where the LLM should operate
+  workspacePath: string;
+
+  // Optional: Website session ID (for logging/tracking)
   websiteSessionId?: string;
-
-  // Optional: GitHub integration
-  github?: {
-    repoUrl: string;
-    branch?: string;
-    directory?: string;
-    accessToken?: string;
-    refreshToken?: string;
-  };
-
-  // Optional: Database persistence
-  database?: {
-    accessToken: string; // Uses websiteSessionId for session identification
-  };
-
-  // Optional: Workspace configuration
-  workspace?: {
-    path?: string;
-    environment?: string;
-  };
 
   // Optional: Provider-specific options
   providerOptions?: {
