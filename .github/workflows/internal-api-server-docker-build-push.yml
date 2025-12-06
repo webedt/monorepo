@@ -120,25 +120,29 @@ jobs:
 
           echo "🔧 Configuring environment variables for internal-api-server..."
 
-          # Build environment variables string (newline separated KEY=VALUE pairs)
-          ENV_VARS="PORT=3000
-NODE_ENV=production
-DATABASE_URL=${DATABASE_URL}
-MINIO_ENDPOINT=${MINIO_ENDPOINT}
-MINIO_PORT=${MINIO_PORT}
-MINIO_USE_SSL=${MINIO_USE_SSL}
-MINIO_ROOT_USER=${MINIO_ROOT_USER}
-MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-MINIO_BUCKET=${MINIO_BUCKET}
-SESSION_SECRET=${SESSION_SECRET}
-AI_WORKER_URL=${AI_WORKER_URL}
-ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
-GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
-GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-OPENAI_API_KEY=${OPENAI_API_KEY}"
+          # Build environment variables string using heredoc
+          ENV_VARS=$(cat <<ENVEOF
+          PORT=3000
+          NODE_ENV=production
+          DATABASE_URL=${DATABASE_URL}
+          MINIO_ENDPOINT=${MINIO_ENDPOINT}
+          MINIO_PORT=${MINIO_PORT}
+          MINIO_USE_SSL=${MINIO_USE_SSL}
+          MINIO_ROOT_USER=${MINIO_ROOT_USER}
+          MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+          MINIO_BUCKET=${MINIO_BUCKET}
+          SESSION_SECRET=${SESSION_SECRET}
+          AI_WORKER_URL=${AI_WORKER_URL}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+          GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+          GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+          OPENAI_API_KEY=${OPENAI_API_KEY}
+          ENVEOF
+          )
 
-          # Escape the env vars for JSON
-          ENV_VARS_ESCAPED=$(echo "$ENV_VARS" | jq -Rs .)
+          # Remove leading whitespace from each line and escape for JSON
+          ENV_VARS_CLEANED=$(echo "$ENV_VARS" | sed 's/^[[:space:]]*//')
+          ENV_VARS_ESCAPED=$(echo "$ENV_VARS_CLEANED" | jq -Rs .)
 
           echo "  ✅ PORT=3000"
           echo "  ✅ NODE_ENV=production"
