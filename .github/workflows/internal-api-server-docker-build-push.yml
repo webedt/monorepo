@@ -29,7 +29,7 @@ jobs:
           echo "- DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
           echo ""
           echo "### Internal API Server Secrets"
-          echo "- DATABASE_URL: ${{ secrets.INTERNAL_API_DATABASE_URL != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- DATABASE_URL: ${{ secrets.DATABASE_URL != '' && '✅ Set' || '❌ Not set' }}"
           echo "- MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER != '' && '✅ Set' || '❌ Not set' }}"
           echo "- MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD != '' && '✅ Set' || '❌ Not set' }}"
           echo "- SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && '✅ Set' || '❌ Not set' }}"
@@ -95,7 +95,7 @@ jobs:
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID }}
           # Internal API Server secrets
-          DATABASE_URL: ${{ secrets.INTERNAL_API_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           MINIO_ENDPOINT: ${{ vars.MINIO_ENDPOINT || 'webedt-app-minio-0fslch-minio-1' }}
           MINIO_PORT: ${{ vars.MINIO_PORT || '9000' }}
           MINIO_USE_SSL: ${{ vars.MINIO_USE_SSL || 'false' }}
