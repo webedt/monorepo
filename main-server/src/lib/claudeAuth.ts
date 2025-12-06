@@ -6,10 +6,14 @@
 import { logger } from '../utils/logger.js';
 
 // Define ClaudeAuth type locally (was previously in @webedt/shared)
+// Must match the schema in db/schema.ts
 export interface ClaudeAuth {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
+  scopes?: string[];
+  subscriptionType?: string;
+  rateLimitTier?: string;
 }
 
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';

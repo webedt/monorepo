@@ -11,9 +11,9 @@ export const users = pgTable('users', {
     accessToken: string;
     refreshToken: string;
     expiresAt: number;
-    scopes: string[];
-    subscriptionType: string;
-    rateLimitTier: string;
+    scopes?: string[];
+    subscriptionType?: string;
+    rateLimitTier?: string;
   }>(),
   codexAuth: json('codex_auth').$type<{
     apiKey?: string;
