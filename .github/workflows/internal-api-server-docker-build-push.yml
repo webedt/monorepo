@@ -65,15 +65,15 @@ jobs:
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          COMPOSE_ID: ${{ vars.DOKPLOY_MAIN_SERVER_COMPOSE_ID }}
+          COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID }}
         run: |
           # Skip deployment if COMPOSE_ID is not set or set to "skip"
           if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
-            echo "⚠️ DOKPLOY_MAIN_SERVER_COMPOSE_ID not set or set to 'skip'"
+            echo "⚠️ DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID not set or set to 'skip'"
             echo "📦 Image was pushed successfully to registry"
             echo "ℹ️ To enable auto-deployment:"
             echo "   1. Create a Compose in Dokploy for internal-api-server"
-            echo "   2. Set DOKPLOY_MAIN_SERVER_COMPOSE_ID variable in GitHub"
+            echo "   2. Set DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID variable in GitHub"
             exit 0
           fi
 
@@ -126,7 +126,7 @@ jobs:
       - name: Deployment Summary
         if: always() && github.ref == 'refs/heads/main'
         run: |
-          echo "## Main Server Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "## Internal API Server Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
