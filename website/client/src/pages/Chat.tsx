@@ -117,8 +117,17 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
   let model: string | undefined = undefined;
   let source: string | undefined = data?.source;
 
+  // Debug: log every event conversion attempt
+  console.log('[convertEventToMessage] Processing event:', {
+    eventType,
+    dataType: data?.type,
+    hasData: !!data,
+    hasDataData: !!data?.data
+  });
+
   // Skip if data is undefined or null
   if (!data) {
+    console.log('[convertEventToMessage] Skipping - no data');
     return null;
   }
 
@@ -263,6 +272,7 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
 
   // Skip if no meaningful content
   if (!content) {
+    console.log('[convertEventToMessage] Skipping - no content extracted', { eventType, dataType: data?.type });
     return null;
   }
 
@@ -273,6 +283,8 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
     const prefix = [sourceLabel, eventLabel].filter(Boolean).join(' ');
     finalContent = `${prefix} ${content}`;
   }
+
+  console.log('[convertEventToMessage] Returning message:', { eventType, contentLength: finalContent.length, messageType });
 
   return {
     id: event.id,
@@ -827,14 +839,37 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Convert raw events to displayable messages
     const dbEvents: DbEvent[] = eventsData?.data?.events || [];
+
+    // Debug logging
+    console.log('[Chat] Merging messages:', {
+      sessionId,
+      rawMessagesCount: messagesData?.data?.messages?.length || 0,
+      filteredDbMessagesCount: dbMessages.length,
+      rawEventsCount: dbEvents.length,
+      messagesData: messagesData?.data,
+      eventsData: eventsData?.data
+    });
+
     const eventMessages = dbEvents
       .map((event) => convertEventToMessage(event, sessionId))
       .filter((msg): msg is Message => msg !== null);
+
+    console.log('[Chat] Converted events to messages:', {
+      eventMessagesCount: eventMessages.length,
+      firstEvent: dbEvents[0],
+      firstEventMessage: eventMessages[0]
+    });
 
     // Merge and sort by timestamp
     const allMessages = [...dbMessages, ...eventMessages].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
+
+    console.log('[Chat] Final merged messages:', {
+      totalCount: allMessages.length,
+      dbMessagesCount: dbMessages.length,
+      eventMessagesCount: eventMessages.length
+    });
 
     setMessages(allMessages);
   }, [eventsData, messagesData, sessionId]);
