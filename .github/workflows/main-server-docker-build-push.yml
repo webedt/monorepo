@@ -1,0 +1,120 @@
+name: Main Server - Build and Push Docker Image
+
+on:
+  push:
+    paths:
+      - "main-server/**"
+      - ".github/workflows/main-server-docker-build-push.yml"
+
+env:
+  REGISTRY: dockerregistry.etdofresh.com
+  IMAGE_NAME: main-server
+
+jobs:
+  build-and-push-main-server:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./main-server
+          platforms: linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_COMMIT_SHA=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
+            BUILD_IMAGE_TAG=${{ github.ref_name }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Image digest
+        run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
+
+      - name: Deploy to Dokploy
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          COMPOSE_ID: ${{ vars.DOKPLOY_MAIN_SERVER_COMPOSE_ID }}
+        run: |
+          # Skip deployment if COMPOSE_ID is not set
+          if [ -z "$COMPOSE_ID" ]; then
+            echo "⚠️ DOKPLOY_MAIN_SERVER_COMPOSE_ID not set, skipping deployment"
+            exit 0
+          fi
+
+          # Strip trailing slash from DOKPLOY_URL if present
+          DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          echo "🚀 Deploying main-server to Dokploy..."
+
+          # Trigger deployment using tRPC endpoint (compose.deploy for stack deployments)
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/compose.deploy" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"composeId\": \"${COMPOSE_ID}\"
+              }
+            }")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Code: ${HTTP_CODE}"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Deployment triggered successfully!"
+            echo "Compose ID: ${COMPOSE_ID}"
+          else
+            echo "❌ Deployment failed with status code: ${HTTP_CODE}"
+            echo "Response: ${BODY}"
+            exit 1
+          fi
+
+      - name: Deployment Summary
+        if: always() && github.ref == 'refs/heads/main'
+        run: |
+          echo "## Main Server Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Build and deployment completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build or deployment failed" >> $GITHUB_STEP_SUMMARY
+          fi
