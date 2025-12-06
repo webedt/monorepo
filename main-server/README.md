@@ -242,7 +242,28 @@ npm run build
 npm start
 ```
 
-### Docker
+### Docker Compose
+
+Uses external PostgreSQL and MinIO services on the dokploy-network:
+
+```bash
+# Create .env file with required variables
+cat > .env << EOF
+DATABASE_URL=postgresql://user:pass@host:5432/db
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+SESSION_SECRET=your-secret-key
+ALLOWED_ORIGINS=https://your-domain.com
+EOF
+
+# Start main-server
+docker compose up -d
+
+# View logs
+docker compose logs -f main-server
+```
+
+### Docker (Manual)
 
 ```bash
 # Build image
@@ -254,6 +275,26 @@ docker run -p 3000:3000 \
   -e MINIO_ENDPOINT=minio \
   main-server
 ```
+
+### Docker Swarm / Dokploy
+
+For production deployment with Docker Swarm:
+
+```bash
+# Deploy the stack
+docker stack deploy -c swarm.yml main-server
+
+# View service status
+docker service ls
+docker service logs main-server_main-server -f
+```
+
+The `swarm.yml` expects these environment variables to be set:
+- `DATABASE_URL` - PostgreSQL connection string
+- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` - MinIO credentials
+- `SESSION_SECRET` - Session encryption key
+- `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` - GitHub OAuth
+- `ALLOWED_ORIGINS` - CORS allowed origins
 
 ## Database
 
