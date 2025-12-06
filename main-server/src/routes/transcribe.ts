@@ -73,7 +73,7 @@ router.post('/transcribe', upload.single('audio'), async (req: Request, res: Res
         'Authorization': `Bearer ${apiKey}`,
         ...formData.getHeaders(),
       },
-      body: formData as unknown as BodyInit,
+      body: formData as unknown as import('node-fetch').BodyInit,
     });
 
     if (!response.ok) {
