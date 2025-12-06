@@ -122,6 +122,28 @@ pool.query(`
   `);
 }).then(() => {
   console.log('PostgreSQL migrations applied successfully!');
+  // Show database stats on startup
+  return pool.query(`
+    SELECT
+      (SELECT COUNT(*) FROM users) as users_count,
+      (SELECT COUNT(*) FROM sessions) as sessions_count,
+      (SELECT COUNT(*) FROM chat_sessions) as chat_sessions_count,
+      (SELECT COUNT(*) FROM chat_sessions WHERE deleted_at IS NULL) as active_chat_sessions_count,
+      (SELECT COUNT(*) FROM messages) as messages_count,
+      (SELECT COUNT(*) FROM events) as events_count
+  `);
+}).then((result) => {
+  if (result && result.rows && result.rows[0]) {
+    const stats = result.rows[0];
+    console.log('');
+    console.log('Database Statistics:');
+    console.log(`  Users:              ${stats.users_count}`);
+    console.log(`  Sessions:           ${stats.sessions_count}`);
+    console.log(`  Chat Sessions:      ${stats.chat_sessions_count} (${stats.active_chat_sessions_count} active)`);
+    console.log(`  Messages:           ${stats.messages_count}`);
+    console.log(`  Events:             ${stats.events_count}`);
+    console.log('');
+  }
 }).catch((err) => {
   console.error('Error creating PostgreSQL tables:', err);
 });
