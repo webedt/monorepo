@@ -91,9 +91,20 @@ const apiProxyOptions: Options = {
       }
     },
     proxyReq: (proxyReq, req) => {
+      // Forward cookies from the original request
+      if (req.headers.cookie) {
+        proxyReq.setHeader('Cookie', req.headers.cookie);
+      }
       // Log proxied requests in development
       if (NODE_ENV === 'development') {
         console.log(`[Proxy] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${req.url}`);
+      }
+    },
+    proxyRes: (proxyRes, req, res) => {
+      // Log Set-Cookie headers for debugging
+      const setCookie = proxyRes.headers['set-cookie'];
+      if (setCookie) {
+        console.log(`[Proxy] Set-Cookie received for ${req.url}:`, setCookie);
       }
     },
   },

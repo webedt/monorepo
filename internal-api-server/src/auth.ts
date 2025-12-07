@@ -17,10 +17,13 @@ const adapter = new NodePostgresAdapter(pool, {
 
 export const lucia = new Lucia(adapter, {
   sessionCookie: {
+    name: 'auth_session',
     attributes: {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
+      // Domain is intentionally not set - allows cookie to work on the origin domain
+      // The proxy (website server) rewrites cookies to work properly
     },
   },
   getUserAttributes: (attributes) => {
