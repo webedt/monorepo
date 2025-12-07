@@ -26,6 +26,7 @@ export const users = pgTable('users', {
   voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),
   defaultLandingPage: text('default_landing_page').default('store').notNull(),
   preferredModel: text('preferred_model'),
+  chatVerbosityLevel: text('chat_verbosity_level').default('verbose').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

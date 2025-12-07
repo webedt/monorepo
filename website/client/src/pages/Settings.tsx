@@ -71,6 +71,7 @@ export default function Settings() {
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [defaultLandingPage, setDefaultLandingPage] = useState<'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
   const [preferredModel, setPreferredModel] = useState(user?.preferredModel || '');
+  const [chatVerbosity, setChatVerbosity] = useState<'minimal' | 'normal' | 'verbose'>(user?.chatVerbosityLevel || 'verbose');
 
   // Voice command keywords state
   const [voiceKeywords, setVoiceKeywords] = useState<string[]>(user?.voiceCommandKeywords || []);
@@ -153,6 +154,10 @@ export default function Settings() {
   useEffect(() => {
     setPreferredProvider(user?.preferredProvider || 'claude');
   }, [user?.preferredProvider]);
+
+  useEffect(() => {
+    setChatVerbosity(user?.chatVerbosityLevel || 'verbose');
+  }, [user?.chatVerbosityLevel]);
 
   // Close keyword dropdown when clicking outside
   useEffect(() => {
@@ -288,6 +293,17 @@ export default function Settings() {
     },
     onError: (error) => {
       alert(`Failed to update preferred model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const updateChatVerbosity = useMutation({
+    mutationFn: userApi.updateChatVerbosity,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Chat verbosity updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update chat verbosity: ${error instanceof Error ? error.message : 'Unknown error'}`);
     },
   });
 
@@ -762,6 +778,53 @@ export default function Settings() {
       case 'preferences':
         return (
           <div className="space-y-6">
+            {/* Chat Verbosity */}
+            <div className="card bg-base-100 shadow">
+              <div className="card-body">
+                <h2 className="card-title mb-2">Chat Verbosity</h2>
+
+                <div className="space-y-6">
+                  <p className="text-sm text-base-content/70 leading-relaxed">
+                    Control how much detail is shown during coding sessions. This affects the progress messages displayed while the AI is working.
+                  </p>
+
+                  <div className="divider my-4"></div>
+
+                  <div className="form-control w-full">
+                    <div className="mb-3">
+                      <span className="font-medium text-base text-base-content">Detail Level</span>
+                    </div>
+                    <select
+                      value={chatVerbosity}
+                      onChange={(e) => setChatVerbosity(e.target.value as 'minimal' | 'normal' | 'verbose')}
+                      className="select select-bordered w-full max-w-md"
+                    >
+                      <option value="minimal">Minimal - Only show final results and errors</option>
+                      <option value="normal">Normal - Show key milestones and status updates</option>
+                      <option value="verbose">Verbose - Show all operations (current behavior)</option>
+                    </select>
+                    <div className="mt-2">
+                      <span className="text-sm text-base-content/60">
+                        {chatVerbosity === 'minimal' && 'Hides all progress messages, only shows user messages, AI responses, and errors'}
+                        {chatVerbosity === 'normal' && 'Shows branch creation, commits, and key status updates, hides individual file operations'}
+                        {chatVerbosity === 'verbose' && 'Shows every file read, write, edit, and command execution'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-start pt-2">
+                    <button
+                      onClick={() => updateChatVerbosity.mutate(chatVerbosity)}
+                      disabled={updateChatVerbosity.isPending || chatVerbosity === user?.chatVerbosityLevel}
+                      className="btn btn-primary min-w-[140px]"
+                    >
+                      {updateChatVerbosity.isPending ? 'Saving...' : 'Save Setting'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Default Landing Page */}
             <div className="card bg-base-100 shadow">
               <div className="card-body">
