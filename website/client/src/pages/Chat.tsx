@@ -496,15 +496,18 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   });
 
   // Load existing session events if sessionId provided (raw SSE events for replay)
-  const { data: eventsData } = useQuery({
+  const { data: eventsData, refetch: refetchEvents } = useQuery({
     queryKey: ['session-events', sessionId],
     queryFn: () => {
       if (!sessionId || sessionId === 'new') {
         throw new Error('Invalid session ID');
       }
+      console.log('[Chat] Fetching events for session:', sessionId);
       return sessionsApi.getEvents(sessionId);
     },
     enabled: !!sessionId && sessionId !== 'new',
+    // Don't use cached data - always fetch fresh on mount
+    staleTime: 0,
     // Poll every 2 seconds if session is running or pending, but NOT while SSE stream is active
     // This prevents duplicate messages from both SSE and polling
     refetchInterval: () => {
@@ -556,9 +559,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         // Also clear the global worker store
         workerStore.stopExecution();
         console.log('[Chat] Cleared worker store for completed/errored session');
+        // Refetch events to ensure we have all stored events from the database
+        refetchEvents();
+        console.log('[Chat] Triggered events refetch after session completion');
       }
     }
-  }, [session?.status, isExecuting, currentSessionId, streamUrl, isReconnecting]);
+  }, [session?.status, isExecuting, currentSessionId, streamUrl, isReconnecting, refetchEvents]);
 
   // Load current session details to check if locked
   const { data: currentSessionData } = useQuery({
