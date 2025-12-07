@@ -120,7 +120,22 @@ export class StorageClient {
         cwd: tmpExtractDir
       });
 
-      progress('extract_complete', 'Tarball extraction complete');
+      // Count extracted files for logging
+      const extractedFileCount = this.countFilesRecursive(tmpExtractDir);
+      const extractedItems = fs.readdirSync(tmpExtractDir);
+
+      progress('extract_complete', `Tarball extraction complete (${extractedFileCount} files)`, {
+        totalFileCount: extractedFileCount,
+        topLevelItems: extractedItems
+      });
+
+      logger.info('Tarball extracted', {
+        component: 'StorageClient',
+        sessionPath,
+        tmpExtractDir,
+        totalFileCount: extractedFileCount,
+        topLevelItems: extractedItems
+      });
 
       // Move entire session contents to final location (preserving structure)
       // The tarball contains: workspace/, .session-metadata.json, etc.
@@ -128,7 +143,6 @@ export class StorageClient {
       fs.mkdirSync(localPath, { recursive: true });
 
       // Copy all contents from tmpExtractDir to localPath
-      const extractedItems = fs.readdirSync(tmpExtractDir);
       for (const item of extractedItems) {
         const srcPath = path.join(tmpExtractDir, item);
         const destPath = path.join(localPath, item);
@@ -141,16 +155,21 @@ export class StorageClient {
         }
       }
 
-      progress('files_copied', 'Session files copied to workspace', {
+      // Count files after copy to verify
+      const copiedFileCount = this.countFilesRecursive(localPath);
+
+      progress('files_copied', `Session files copied to workspace (${copiedFileCount} files)`, {
         itemCount: extractedItems.length,
-        items: extractedItems
+        items: extractedItems,
+        totalFileCount: copiedFileCount
       });
 
       logger.info('Extracted session contents', {
         component: 'StorageClient',
         sessionPath,
         localPath,
-        items: extractedItems
+        topLevelItems: extractedItems,
+        totalFileCount: copiedFileCount
       });
 
       // Restore ~/.claude if it exists
@@ -470,6 +489,29 @@ export class StorageClient {
   }
 
   // Helper methods
+
+  /**
+   * Count files recursively in a directory
+   */
+  private countFilesRecursive(dirPath: string): number {
+    if (!fs.existsSync(dirPath)) return 0;
+
+    let count = 0;
+    const items = fs.readdirSync(dirPath);
+
+    for (const item of items) {
+      const itemPath = path.join(dirPath, item);
+      const stat = fs.statSync(itemPath);
+
+      if (stat.isDirectory()) {
+        count += this.countFilesRecursive(itemPath);
+      } else {
+        count++;
+      }
+    }
+
+    return count;
+  }
 
   private async copyDirectory(src: string, dest: string): Promise<void> {
     await fs.promises.mkdir(dest, { recursive: true });

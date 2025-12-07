@@ -195,9 +195,22 @@ export class Orchestrator {
         : [];
       const hasGitDir = workspaceFiles.includes('.git');
 
+      // Also check what's in sessionRoot and sessionRoot/workspace for debugging
+      const sessionRootFiles = fs.existsSync(sessionRoot)
+        ? fs.readdirSync(sessionRoot)
+        : [];
+      const sessionWorkspaceDir = path.join(sessionRoot, 'workspace');
+      const sessionWorkspaceFiles = fs.existsSync(sessionWorkspaceDir)
+        ? fs.readdirSync(sessionWorkspaceDir)
+        : [];
+
       logger.info('Workspace ready', {
         component: 'Orchestrator',
         websiteSessionId,
+        sessionRoot,
+        sessionRootFiles,
+        sessionWorkspaceDir,
+        sessionWorkspaceFiles,
         localWorkspacePath,
         workspaceExists: fs.existsSync(localWorkspacePath),
         fileCount: workspaceFiles.length,
@@ -213,7 +226,10 @@ export class Orchestrator {
         data: {
           fileCount: workspaceFiles.length,
           hasGitDir,
-          path: localWorkspacePath
+          path: localWorkspacePath,
+          sessionRoot,
+          sessionRootFiles,
+          sessionWorkspaceFiles
         },
         timestamp: new Date().toISOString()
       });

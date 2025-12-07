@@ -251,7 +251,16 @@ class StorageServiceClass {
     const tmpTarball = path.join(os.tmpdir(), `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.tar.gz`);
 
     try {
-      logger.info(`Creating tarball from ${sourcePath}...`, { component: 'StorageService' });
+      // Count files before creating tarball for debugging
+      const fileCount = this.countFilesRecursive(sourcePath);
+      const topLevelItems = fs.existsSync(sourcePath) ? fs.readdirSync(sourcePath) : [];
+
+      logger.info(`Creating tarball from ${sourcePath}...`, {
+        component: 'StorageService',
+        sourcePath,
+        totalFileCount: fileCount,
+        topLevelItems
+      });
 
       await tar.create(
         { gzip: true, file: tmpTarball, cwd: sourcePath },
@@ -260,11 +269,19 @@ class StorageServiceClass {
 
       const stats = fs.statSync(tmpTarball);
       const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
-      logger.info(`Uploading session ${sessionPath} (${sizeMB} MB)...`, { component: 'StorageService' });
+      logger.info(`Uploading session ${sessionPath} (${sizeMB} MB, ${fileCount} files)...`, {
+        component: 'StorageService',
+        sessionPath,
+        sizeMB,
+        totalFileCount: fileCount
+      });
 
       await minio.fPutObject(bucket, objectName, tmpTarball);
 
-      logger.info(`Session ${sessionPath} uploaded successfully from path`, { component: 'StorageService' });
+      logger.info(`Session ${sessionPath} uploaded successfully from path`, {
+        component: 'StorageService',
+        totalFileCount: fileCount
+      });
     } finally {
       try {
         if (fs.existsSync(tmpTarball)) {
@@ -274,6 +291,29 @@ class StorageServiceClass {
         // Ignore cleanup errors
       }
     }
+  }
+
+  /**
+   * Count files recursively in a directory
+   */
+  private countFilesRecursive(dirPath: string): number {
+    if (!fs.existsSync(dirPath)) return 0;
+
+    let count = 0;
+    const items = fs.readdirSync(dirPath);
+
+    for (const item of items) {
+      const itemPath = path.join(dirPath, item);
+      const stat = fs.statSync(itemPath);
+
+      if (stat.isDirectory()) {
+        count += this.countFilesRecursive(itemPath);
+      } else {
+        count++;
+      }
+    }
+
+    return count;
   }
 
   /**
