@@ -103,6 +103,9 @@ const apiProxyOptions: Options = {
 app.use('/api', (req, res, next) => {
   const fullPath = '/api' + req.path;
 
+  // Log ALL API requests for debugging (temporarily enabled in production)
+  console.log(`[API Request] ${req.method} ${fullPath}`);
+
   // Block internal-only routes
   if (isBlockedRoute(fullPath)) {
     console.log(`[Blocked] ${req.method} ${fullPath}`);

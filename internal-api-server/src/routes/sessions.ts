@@ -77,6 +77,18 @@ async function deleteFromStorageWorker(sessionPath: string): Promise<{ success: 
 
 const router = Router();
 
+// Log all incoming requests to sessions routes for debugging
+router.use((req: Request, res: Response, next) => {
+  logger.info(`Sessions route request: ${req.method} ${req.path}`, {
+    component: 'Sessions',
+    method: req.method,
+    path: req.path,
+    fullUrl: req.originalUrl,
+    hasAuth: !!(req as AuthRequest).user
+  });
+  next();
+});
+
 // Get all chat sessions for user (excluding deleted ones)
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
