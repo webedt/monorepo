@@ -734,6 +734,45 @@ const executeHandler = async (req: Request, res: Response) => {
       // PHASE 4: Post-Execution (Commit & Upload)
       // ========================================================================
 
+      // Re-download session from storage to get AI worker's changes
+      // The AI worker uploads its modified workspace back to storage, so we need
+      // to download it to get the latest files before doing commit checks
+      await sendEvent({
+        type: 'message',
+        stage: 'downloading_session',
+        message: 'Downloading updated session from storage...',
+        endpoint: '/execute'
+      });
+
+      try {
+        // Clear local directory and re-extract from storage
+        if (fs.existsSync(sessionRoot)) {
+          fs.rmSync(sessionRoot, { recursive: true, force: true });
+        }
+
+        const updatedSessionData = await storageService.downloadSessionToBuffer(chatSession.id);
+        if (updatedSessionData) {
+          fs.mkdirSync(sessionRoot, { recursive: true });
+          await storageService.extractSessionToPath(updatedSessionData, sessionRoot);
+          logger.info('Re-downloaded session with AI worker changes', {
+            component: 'ExecuteRoute',
+            sessionId: chatSession.id,
+            sessionRoot
+          });
+        } else {
+          logger.warn('No session data found in storage after AI worker execution', {
+            component: 'ExecuteRoute',
+            sessionId: chatSession.id
+          });
+        }
+      } catch (downloadError) {
+        logger.error('Failed to re-download session from storage', downloadError, {
+          component: 'ExecuteRoute',
+          sessionId: chatSession.id
+        });
+        // Continue with existing local files as fallback
+      }
+
       // Auto-commit if GitHub session
       if (effectiveRepoUrl && user.githubAccessToken && workspacePath) {
         await sendEvent({
