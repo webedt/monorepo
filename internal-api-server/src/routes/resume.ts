@@ -10,6 +10,8 @@ import { eq, and, or, asc } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
 import { activeWorkerSessions } from './execute.js';
+import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -188,7 +190,68 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       timestamp: new Date().toISOString()
     })}\n\n`);
 
-    // Send completion event
+    // For running sessions, subscribe to live events from the broadcaster
+    if (session.status === 'running' && sessionEventBroadcaster.isSessionActive(session.id)) {
+      const subscriberId = uuidv4();
+      let clientDisconnected = false;
+
+      logger.info('Subscribing to live events for running session', {
+        component: 'ResumeRoute',
+        sessionId: session.id,
+        subscriberId
+      });
+
+      // Send a marker that we're now receiving live events
+      res.write(`data: ${JSON.stringify({
+        type: 'live_stream_start',
+        message: 'Now receiving live events',
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+
+      // Subscribe to live events
+      const unsubscribe = sessionEventBroadcaster.subscribe(session.id, subscriberId, (event) => {
+        if (clientDisconnected) return;
+
+        try {
+          // Forward the event to the client
+          res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+
+          // If this is a completed event, end the connection
+          if (event.eventType === 'completed') {
+            res.write(`event: completed\n`);
+            res.write(`data: ${JSON.stringify({
+              websiteSessionId: session.id,
+              completed: true,
+              replayed: false
+            })}\n\n`);
+            res.end();
+            unsubscribe();
+          }
+        } catch (err) {
+          logger.error('Error writing live event to client', err as Error, {
+            component: 'ResumeRoute',
+            sessionId: session.id,
+            subscriberId
+          });
+        }
+      });
+
+      // Handle client disconnect
+      req.on('close', () => {
+        clientDisconnected = true;
+        unsubscribe();
+        logger.info('Client disconnected from live stream', {
+          component: 'ResumeRoute',
+          sessionId: session.id,
+          subscriberId
+        });
+      });
+
+      // Don't end the response - keep it open for live events
+      return;
+    }
+
+    // For completed/error sessions, send completion and end
     res.write(`event: completed\n`);
     res.write(`data: ${JSON.stringify({
       websiteSessionId: session.id,
