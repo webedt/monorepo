@@ -31,11 +31,7 @@ const stageEmojis: Record<string, string> = {
   // Analysis/changes
   'analyzing': '🔍',
   'changes_detected': '📝',
-
-  // Commit operations
   'generating_message': '🤖',
-  'committing': '💾',
-  'committed': '✅',
 
   // PR operations
   'creating_pr': '📋',
@@ -61,7 +57,6 @@ const typeEmojis: Record<string, string> = {
   'branch_created': '🌿',
   'session_name': '📝',
   'session_started': '🚀',
-  'commit_progress': '📤',
   'pr_progress': '📋',
   'tool_use': '🔧',
   'tool_result': '📋',

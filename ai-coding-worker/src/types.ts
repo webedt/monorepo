@@ -111,16 +111,6 @@ export interface ErrorEvent extends SSEEvent {
   code?: string;
 }
 
-export interface CommitProgressEvent extends SSEEvent {
-  type: 'commit_progress';
-  stage: 'analyzing' | 'creating_branch' | 'generating_message' | 'committing' | 'committed' | 'pushing' | 'pushed' | 'push_failed' | 'completed';
-  message: string;
-  branch?: string;
-  commitMessage?: string;
-  commitHash?: string;
-  error?: string;
-}
-
 // Error response types
 export interface APIError {
   error: string;

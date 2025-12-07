@@ -3,7 +3,7 @@ import { logger } from './logger';
 import { CredentialManager } from './credentialManager';
 
 /**
- * Helper for making one-off LLM requests for commit message and branch name generation
+ * Helper for making one-off LLM requests for session title and branch name generation
  * Uses Claude Agent SDK (same as main execution) to leverage OAuth authentication
  * Uses Haiku for fast, cost-effective responses
  */
@@ -65,42 +65,6 @@ export class LLMHelper {
     }
 
     return result;
-  }
-
-  /**
-   * Generate a commit message from git diff output
-   */
-  async generateCommitMessage(gitStatus: string, gitDiff: string): Promise<string> {
-    try {
-      const prompt = `Analyze the following git changes and generate a concise commit message. Follow these rules:
-- Use imperative mood (e.g., "Add feature" not "Added feature")
-- Keep the summary line under 72 characters
-- Be specific about what changed
-- Only return the commit message text, nothing else - no explanations, no markdown
-
-Git status:
-${gitStatus}
-
-Git diff:
-${gitDiff.substring(0, 4000)}
-
-Return ONLY the commit message:`;
-
-      const result = await this.runQuery(prompt);
-      const commitMessage = result.trim();
-
-      logger.info('Generated commit message', {
-        component: 'LLMHelper',
-        commitMessage
-      });
-
-      return commitMessage || 'Update files';
-    } catch (error) {
-      logger.error('Failed to generate commit message', error, {
-        component: 'LLMHelper'
-      });
-      return 'Update files';
-    }
   }
 
   /**
