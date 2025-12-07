@@ -496,14 +496,22 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   });
 
   // Load existing session events if sessionId provided (raw SSE events for replay)
-  const { data: eventsData, refetch: refetchEvents } = useQuery({
+  const { data: eventsData, refetch: refetchEvents, isLoading: eventsLoading, isError: eventsError, error: eventsErrorObj } = useQuery({
     queryKey: ['session-events', sessionId],
-    queryFn: () => {
+    queryFn: async () => {
       if (!sessionId || sessionId === 'new') {
         throw new Error('Invalid session ID');
       }
       console.log('[Chat] Fetching events for session:', sessionId);
-      return sessionsApi.getEvents(sessionId);
+      const result = await sessionsApi.getEvents(sessionId);
+      console.log('[Chat] Events API response:', {
+        sessionId,
+        success: result?.success,
+        eventsCount: result?.data?.events?.length,
+        total: result?.data?.total,
+        rawResult: result
+      });
+      return result;
     },
     enabled: !!sessionId && sessionId !== 'new',
     // Don't use cached data - always fetch fresh on mount
@@ -518,6 +526,18 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
     },
   });
+
+  // Log events query state changes
+  useEffect(() => {
+    console.log('[Chat] Events query state:', {
+      sessionId,
+      eventsLoading,
+      eventsError,
+      eventsErrorObj: eventsErrorObj?.message,
+      eventsDataExists: !!eventsData,
+      eventsCount: eventsData?.data?.events?.length
+    });
+  }, [sessionId, eventsLoading, eventsError, eventsErrorObj, eventsData]);
 
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
