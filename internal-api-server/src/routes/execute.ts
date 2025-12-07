@@ -557,6 +557,31 @@ const executeHandler = async (req: Request, res: Response) => {
         fs.mkdirSync(workspacePath, { recursive: true });
       }
 
+      // Ensure session is uploaded to storage before calling AI worker
+      // This is important because the AI worker downloads the session separately
+      // and needs to have the latest files (especially for resumed sessions)
+      if (fs.existsSync(sessionRoot)) {
+        const workspaceContent = fs.existsSync(workspacePath) ? fs.readdirSync(workspacePath) : [];
+        if (workspaceContent.length > 0) {
+          await sendEvent({
+            type: 'message',
+            stage: 'syncing_session',
+            message: 'Syncing session to storage...',
+            endpoint: '/execute'
+          });
+
+          await storageService.uploadSessionFromPath(chatSession.id, sessionRoot);
+
+          logger.info('Session synced to storage before AI worker', {
+            component: 'ExecuteRoute',
+            sessionId: chatSession.id,
+            sessionRoot,
+            workspacePath,
+            fileCount: workspaceContent.length
+          });
+        }
+      }
+
       // ========================================================================
       // PHASE 3: AI Worker Execution
       // ========================================================================

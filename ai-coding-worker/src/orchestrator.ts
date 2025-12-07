@@ -175,10 +175,33 @@ export class Orchestrator {
         });
       }
 
+      // Verify workspace is ready with files
+      const workspaceFiles = fs.existsSync(localWorkspacePath)
+        ? fs.readdirSync(localWorkspacePath)
+        : [];
+      const hasGitDir = workspaceFiles.includes('.git');
+
       logger.info('Workspace ready', {
         component: 'Orchestrator',
         websiteSessionId,
-        localWorkspacePath
+        localWorkspacePath,
+        workspaceExists: fs.existsSync(localWorkspacePath),
+        fileCount: workspaceFiles.length,
+        hasGitDir,
+        files: workspaceFiles.slice(0, 20) // First 20 files for debugging
+      });
+
+      // Send workspace state event to client for debugging
+      sendEvent({
+        type: 'message',
+        stage: 'workspace_ready',
+        message: `Workspace ready with ${workspaceFiles.length} files${hasGitDir ? ' (git repo)' : ''}`,
+        data: {
+          fileCount: workspaceFiles.length,
+          hasGitDir,
+          path: localWorkspacePath
+        },
+        timestamp: new Date().toISOString()
       });
 
       // Step 3: Write credentials for the provider
