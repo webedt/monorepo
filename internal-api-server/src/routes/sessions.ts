@@ -1073,6 +1073,7 @@ router.post('/:id/worker-status', async (req: Request, res: Response) => {
 });
 
 // Stream events for a running session (SSE endpoint for reconnection)
+// This provides HYBRID replay + live: first sends stored events, then subscribes to live
 router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
@@ -1100,58 +1101,122 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Check if the session is currently active
-    if (!sessionEventBroadcaster.isSessionActive(sessionId)) {
+    // Check if the session is currently active in broadcaster
+    const isActive = sessionEventBroadcaster.isSessionActive(sessionId);
+
+    // Also check DB-backed activity for running sessions (handles server restart case)
+    const workerLastActivity = session.workerLastActivity;
+    const activityThresholdMs = 2 * 60 * 1000; // 2 minutes
+    const isRecentlyActive = session.status === 'running' && workerLastActivity &&
+      (Date.now() - new Date(workerLastActivity).getTime() < activityThresholdMs);
+
+    // If session is not active and not recently active, return 204 (no content)
+    if (!isActive && !isRecentlyActive) {
       logger.info(`Stream request for inactive session ${sessionId}`, { component: 'Sessions' });
       res.status(204).end();
       return;
     }
 
-    logger.info(`Client reconnecting to active session stream: ${sessionId}`, { component: 'Sessions' });
+    logger.info(`Client reconnecting to session stream: ${sessionId}`, {
+      component: 'Sessions',
+      isActive,
+      isRecentlyActive
+    });
 
     // Set up SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
     });
 
     // Send a connected event
     res.write(`event: connected\n`);
     res.write(`data: ${JSON.stringify({ reconnected: true, sessionId })}\n\n`);
 
-    // Generate a unique subscriber ID
-    const subscriberId = uuidv4();
+    // PHASE 1: Replay stored events from database
+    const storedEvents = await db
+      .select()
+      .from(events)
+      .where(eq(events.chatSessionId, sessionId))
+      .orderBy(asc(events.id));
 
-    // Subscribe to session events
-    const unsubscribe = sessionEventBroadcaster.subscribe(sessionId, subscriberId, (event) => {
-      try {
-        // Check if response is still writable
-        if (res.writableEnded) {
+    logger.info(`Replaying ${storedEvents.length} stored events for reconnection`, {
+      component: 'Sessions',
+      sessionId
+    });
+
+    // Send replay start marker
+    res.write(`data: ${JSON.stringify({
+      type: 'replay_start',
+      totalEvents: storedEvents.length,
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+
+    // Replay each stored event
+    for (const event of storedEvents) {
+      if (res.writableEnded) break;
+      const eventData = {
+        ...(event.eventData as object),
+        _replayed: true,
+        _originalTimestamp: event.timestamp
+      };
+      res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+    }
+
+    // Send replay end marker
+    res.write(`data: ${JSON.stringify({
+      type: 'replay_end',
+      totalEvents: storedEvents.length,
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+
+    // PHASE 2: Subscribe to live events (only if session is still active)
+    if (isActive) {
+      // Generate a unique subscriber ID
+      const subscriberId = uuidv4();
+
+      // Subscribe to session events
+      const unsubscribe = sessionEventBroadcaster.subscribe(sessionId, subscriberId, (event) => {
+        try {
+          // Check if response is still writable
+          if (res.writableEnded) {
+            unsubscribe();
+            return;
+          }
+
+          // Write the live event in SSE format
+          res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+        } catch (err) {
+          logger.error(`Error writing to stream for subscriber ${subscriberId}`, err as Error, { component: 'Sessions' });
           unsubscribe();
-          return;
         }
+      });
 
-        // Write the event in SSE format
-        res.write(`event: ${event.eventType}\n`);
-        res.write(`data: ${JSON.stringify(event.data)}\n\n`);
-      } catch (err) {
-        logger.error(`Error writing to stream for subscriber ${subscriberId}`, err as Error, { component: 'Sessions' });
+      // Handle client disconnect
+      req.on('close', () => {
+        logger.info(`Client disconnected from session stream: ${sessionId}`, { component: 'Sessions' });
         unsubscribe();
-      }
-    });
+      });
 
-    // Handle client disconnect
-    req.on('close', () => {
-      logger.info(`Client disconnected from session stream: ${sessionId}`, { component: 'Sessions' });
-      unsubscribe();
-    });
-
-    // Handle errors
-    req.on('error', (err) => {
-      logger.error(`Stream error for session ${sessionId}`, err, { component: 'Sessions' });
-      unsubscribe();
-    });
+      // Handle errors
+      req.on('error', (err) => {
+        logger.error(`Stream error for session ${sessionId}`, err, { component: 'Sessions' });
+        unsubscribe();
+      });
+    } else {
+      // Session is not in active broadcaster but was recently active
+      // Send completion event since we can't subscribe to live stream
+      res.write(`event: completed\n`);
+      res.write(`data: ${JSON.stringify({
+        websiteSessionId: sessionId,
+        completed: true,
+        replayed: true,
+        note: 'Live stream not available, events replayed from database'
+      })}\n\n`);
+      res.end();
+    }
 
   } catch (error) {
     logger.error('Session stream error', error as Error, { component: 'Sessions' });

@@ -74,10 +74,16 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
 
     // Handle 'running' sessions
     if (session.status === 'running') {
-      // Check if AI Worker is still active
+      // Check if AI Worker is still active using both in-memory map and DB activity
       const activeWorker = activeWorkerSessions.get(session.id);
 
-      if (activeWorker) {
+      // Also check DB-backed activity timestamp (survives server restarts)
+      const workerLastActivity = session.workerLastActivity;
+      const activityThresholdMs = 2 * 60 * 1000; // 2 minutes
+      const isRecentlyActive = workerLastActivity &&
+        (Date.now() - new Date(workerLastActivity).getTime() < activityThresholdMs);
+
+      if (activeWorker || isRecentlyActive) {
         // Worker is still active - send reconnect info
         res.write(`data: ${JSON.stringify({
           type: 'reconnected',
@@ -87,26 +93,24 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
           timestamp: new Date().toISOString()
         })}\n\n`);
 
-        // Note: The original SSE stream is still being written to the original client
-        // This endpoint can only replay past events, not tap into the live stream
-        // For true reconnection, we would need a pub/sub mechanism
-
         logger.info('Reconnected to active session', {
           component: 'ResumeRoute',
           sessionId: session.id,
-          workerContainerId: activeWorker.containerId
+          activeWorkerInMemory: !!activeWorker,
+          workerLastActivity: workerLastActivity
         });
       } else {
         // Worker is no longer active but session is marked as running
         // This indicates an orphaned session - mark it as error
         await db
           .update(chatSessions)
-          .set({ status: 'error', completedAt: new Date() })
+          .set({ status: 'error', completedAt: new Date(), workerLastActivity: null })
           .where(eq(chatSessions.id, session.id));
 
         logger.warn('Orphaned running session detected, marking as error', {
           component: 'ResumeRoute',
-          sessionId: session.id
+          sessionId: session.id,
+          workerLastActivity: workerLastActivity
         });
 
         res.write(`data: ${JSON.stringify({

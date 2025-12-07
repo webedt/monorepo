@@ -1122,6 +1122,44 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         return;
       }
 
+      // Handle heartbeat events - just record activity, don't display
+      if (eventType === 'heartbeat') {
+        workerStore.recordHeartbeat();
+        return;
+      }
+
+      // Handle replay markers from reconnection
+      if (data?.type === 'replay_start') {
+        console.log('[Chat] Starting event replay, total events:', data.totalEvents);
+        // Show a system message that we're replaying
+        if (data.totalEvents > 0) {
+          messageIdCounter.current += 1;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + messageIdCounter.current,
+              chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+              type: 'system',
+              content: `📜 Replaying ${data.totalEvents} previous events...`,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+        return;
+      }
+      if (data?.type === 'replay_end') {
+        console.log('[Chat] Replay complete, now receiving live events');
+        return;
+      }
+
+      // Skip replayed events that we already have (de-duplicate)
+      if (data?._replayed) {
+        // For replayed events, don't create duplicate messages
+        // The message content was already processed, just update the display
+        workerStore.recordHeartbeat();
+        // Continue processing to add the message to the list
+      }
+
       // Extract content from various possible locations
       let content: string | null = null;
       let messageType: 'assistant' | 'system' = 'assistant';

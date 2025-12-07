@@ -414,6 +414,13 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         });
       });
 
+      // Listen for heartbeat events (keeps connection alive during long operations)
+      es.addEventListener('heartbeat', () => {
+        resetInactivityTimeout();
+        // Forward heartbeat to message handler so it can be processed by the component
+        onMessageRef.current?.({ eventType: 'heartbeat', data: {} });
+      });
+
       es.addEventListener('completed', (event: MessageEvent) => {
         // Clear inactivity timeout on completion
         if (inactivityTimeoutRef.current) {

@@ -23,6 +23,7 @@ import { logger } from '../utils/logger.js';
 import { generateSessionPath } from '../utils/sessionPathHelper.js';
 import { getEventEmoji } from '../utils/emojiMapper.js';
 import { WORKSPACE_DIR, AI_WORKER_URL } from '../config/env.js';
+import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 
 // Define types locally (were previously in @webedt/shared)
 export type AIProvider = 'claude' | 'codex';
@@ -338,8 +339,12 @@ const executeHandler = async (req: Request, res: Response) => {
       clientDisconnected = true;
     });
 
+    // Track last activity update time to throttle DB updates
+    let lastActivityUpdate = 0;
+    const ACTIVITY_UPDATE_INTERVAL = 10000; // Update DB every 10 seconds max
+
     // Helper to send SSE events
-    const sendEvent = (event: SSEEvent) => {
+    const sendEvent = async (event: SSEEvent) => {
       if (clientDisconnected) return;
 
       if (!event.source) {
@@ -361,34 +366,65 @@ const executeHandler = async (req: Request, res: Response) => {
         event.message = `${emoji} ${event.message}`;
       }
 
+      // Store event to database BEFORE sending to client (prevents data loss)
+      if (event.type !== 'completed' && event.type !== 'error') {
+        try {
+          await db.insert(events).values({
+            chatSessionId: chatSession.id,
+            eventType: event.type,
+            eventData: event
+          });
+        } catch (err) {
+          logger.error('Failed to store event', err as Error, {
+            component: 'ExecuteRoute',
+            sessionId: chatSession.id,
+            eventType: event.type
+          });
+        }
+      }
+
+      // Update workerLastActivity (throttled to reduce DB load)
+      const now = Date.now();
+      if (now - lastActivityUpdate > ACTIVITY_UPDATE_INTERVAL) {
+        lastActivityUpdate = now;
+        db.update(chatSessions)
+          .set({ workerLastActivity: new Date() })
+          .where(eq(chatSessions.id, chatSession.id))
+          .catch((err: Error) => {
+            logger.error('Failed to update worker activity', err, {
+              component: 'ExecuteRoute',
+              sessionId: chatSession.id
+            });
+          });
+      }
+
+      // Broadcast event to any reconnecting clients
+      sessionEventBroadcaster.broadcast(chatSession.id, event.type, event);
+
       res.write(`data: ${JSON.stringify(event)}\n\n`);
       eventsSent++;
-
-      // Store event to database
-      if (event.type !== 'completed' && event.type !== 'error') {
-        db.insert(events).values({
-          chatSessionId: chatSession.id,
-          eventType: event.type,
-          eventData: event
-        }).catch((err: Error) => {
-          logger.error('Failed to store event', err, {
-            component: 'ExecuteRoute',
-            sessionId: chatSession.id
-          });
-        });
-      }
     };
 
     const startTime = Date.now();
     sessionRoot = path.join(WORKSPACE_DIR, `session-${chatSession.id}`);
     const isResuming = !!websiteSessionId;
 
+    // Start session in broadcaster (allows reconnecting clients to subscribe)
+    sessionEventBroadcaster.startSession(chatSession.id);
+
+    // Setup heartbeat interval (keeps connection alive and signals activity)
+    const heartbeatInterval = setInterval(() => {
+      if (!clientDisconnected && !res.writableEnded) {
+        res.write(`event: heartbeat\ndata: {}\n\n`);
+      }
+    }, 30000); // Send heartbeat every 30 seconds
+
     try {
       // ========================================================================
       // PHASE 1: Session Initialization (previously in ai-coding-worker)
       // ========================================================================
 
-      sendEvent({
+      await sendEvent({
         type: 'connected',
         sessionId: chatSession.id,
         resuming: isResuming,
@@ -398,7 +434,7 @@ const executeHandler = async (req: Request, res: Response) => {
       });
 
       // Check for existing session in storage
-      sendEvent({
+      await sendEvent({
         type: 'progress',
         stage: 'checking_session',
         message: 'Checking for existing session...',
@@ -417,7 +453,7 @@ const executeHandler = async (req: Request, res: Response) => {
           fs.mkdirSync(sessionRoot, { recursive: true });
           await storageService.extractSessionToPath(sessionData, sessionRoot);
           sessionExisted = true;
-          sendEvent({
+          await sendEvent({
             type: 'message',
             stage: 'session_found',
             message: 'Existing session found in storage',
@@ -440,7 +476,7 @@ const executeHandler = async (req: Request, res: Response) => {
         const shouldInitialize = !isResuming && !chatSession.branch && !chatSession.sessionPath;
 
         if (shouldInitialize) {
-          sendEvent({
+          await sendEvent({
             type: 'message',
             stage: 'initializing',
             message: `Initializing session for ${effectiveRepoUrl}`,
@@ -518,7 +554,7 @@ const executeHandler = async (req: Request, res: Response) => {
       // PHASE 3: AI Worker Execution
       // ========================================================================
 
-      sendEvent({
+      await sendEvent({
         type: 'message',
         message: `Executing with ${providerName}`,
         stage: 'starting_ai',
@@ -693,7 +729,7 @@ const executeHandler = async (req: Request, res: Response) => {
 
       // Auto-commit if GitHub session
       if (effectiveRepoUrl && user.githubAccessToken && workspacePath) {
-        sendEvent({
+        await sendEvent({
           type: 'commit_progress',
           stage: 'starting',
           message: 'Auto-committing changes...',
@@ -708,6 +744,7 @@ const executeHandler = async (req: Request, res: Response) => {
               userId: user.id
             },
             (event) => {
+              // Note: callback is sync, sendEvent returns Promise but we don't await here
               sendEvent({
                 type: 'commit_progress',
                 message: event.message,
@@ -739,7 +776,7 @@ const executeHandler = async (req: Request, res: Response) => {
             sessionId: chatSession.id
           });
 
-          sendEvent({
+          await sendEvent({
             type: 'commit_progress',
             stage: 'error',
             message: `Auto-commit failed: ${commitError instanceof Error ? commitError.message : String(commitError)}`,
@@ -749,7 +786,7 @@ const executeHandler = async (req: Request, res: Response) => {
       }
 
       // Upload session to storage
-      sendEvent({
+      await sendEvent({
         type: 'message',
         stage: 'uploading',
         message: 'Saving session to storage...',
@@ -758,7 +795,7 @@ const executeHandler = async (req: Request, res: Response) => {
 
       await storageService.uploadSessionFromPath(chatSession.id, sessionRoot);
 
-      sendEvent({
+      await sendEvent({
         type: 'message',
         stage: 'uploaded',
         message: 'Session saved to storage',
@@ -770,14 +807,20 @@ const executeHandler = async (req: Request, res: Response) => {
       // PHASE 5: Completion
       // ========================================================================
 
+      // Clear heartbeat interval
+      clearInterval(heartbeatInterval);
+
+      // End session in broadcaster
+      sessionEventBroadcaster.endSession(chatSession.id);
+
       const duration = Date.now() - startTime;
 
       await db
         .update(chatSessions)
-        .set({ status: 'completed', completedAt: new Date() })
+        .set({ status: 'completed', completedAt: new Date(), workerLastActivity: null })
         .where(eq(chatSessions.id, chatSession.id));
 
-      sendEvent({
+      await sendEvent({
         type: 'completed',
         sessionId: chatSession.id,
         duration_ms: duration,
@@ -806,6 +849,12 @@ const executeHandler = async (req: Request, res: Response) => {
       });
 
     } catch (error) {
+      // Clear heartbeat interval on error
+      clearInterval(heartbeatInterval);
+
+      // End session in broadcaster
+      sessionEventBroadcaster.endSession(chatSession.id);
+
       logger.error('Execution failed', error, {
         component: 'ExecuteRoute',
         sessionId: chatSession.id
@@ -831,10 +880,10 @@ const executeHandler = async (req: Request, res: Response) => {
 
       await db
         .update(chatSessions)
-        .set({ status: 'error', completedAt: new Date() })
+        .set({ status: 'error', completedAt: new Date(), workerLastActivity: null })
         .where(eq(chatSessions.id, chatSession.id));
 
-      sendEvent({
+      await sendEvent({
         type: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
         code: 'execution_error',

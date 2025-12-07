@@ -56,6 +56,7 @@ export const chatSessions = pgTable('chat_sessions', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
   deletedAt: timestamp('deleted_at'), // Soft delete timestamp
+  workerLastActivity: timestamp('worker_last_activity'), // Last time worker sent an event (for orphan detection)
 });
 
 export const messages = pgTable('messages', {
