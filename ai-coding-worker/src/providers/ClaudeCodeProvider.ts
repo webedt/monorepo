@@ -31,13 +31,28 @@ export class ClaudeCodeProvider extends BaseProvider {
   ): Promise<void> {
     const queryOptions = this.createQueryOptions(options);
 
+    // Verify workspace files exist right before SDK execution
+    const fs = await import('fs');
+    const workspaceFiles = fs.existsSync(queryOptions.cwd!)
+      ? fs.readdirSync(queryOptions.cwd!)
+      : [];
+
     console.log('[ClaudeCodeProvider] Starting execution with options:', {
       model: queryOptions.model,
       cwd: queryOptions.cwd,
       permissionMode: queryOptions.permissionMode,
       resumeSessionId: queryOptions.resume,
-      hasStructuredContent: typeof userRequest !== 'string'
+      hasStructuredContent: typeof userRequest !== 'string',
+      workspaceFileCount: workspaceFiles.length,
+      workspaceFiles: workspaceFiles.slice(0, 20)
     });
+
+    if (workspaceFiles.length === 0) {
+      console.error('[ClaudeCodeProvider] CRITICAL: Workspace is EMPTY right before SDK query!', {
+        cwd: queryOptions.cwd,
+        exists: fs.existsSync(queryOptions.cwd!)
+      });
+    }
 
     try {
       // Prepare the prompt parameter based on request type

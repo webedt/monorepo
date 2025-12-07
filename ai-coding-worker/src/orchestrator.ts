@@ -288,6 +288,29 @@ export class Orchestrator {
         false // resuming flag - internal-api-server handles session state
       );
 
+      // Final verification right before execution - check files are still there
+      const preExecFiles = fs.existsSync(localWorkspacePath)
+        ? fs.readdirSync(localWorkspacePath)
+        : [];
+      logger.info('Pre-execution workspace verification', {
+        component: 'Orchestrator',
+        websiteSessionId,
+        localWorkspacePath,
+        fileCount: preExecFiles.length,
+        files: preExecFiles,
+        workspaceExists: fs.existsSync(localWorkspacePath),
+        sessionRootExists: fs.existsSync(sessionRoot)
+      });
+
+      if (preExecFiles.length === 0) {
+        logger.error('CRITICAL: Workspace is empty right before provider execution!', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          localWorkspacePath,
+          sessionRoot
+        });
+      }
+
       // Step 6: Execute provider and stream results
       await provider.execute(
         request.userRequest,
