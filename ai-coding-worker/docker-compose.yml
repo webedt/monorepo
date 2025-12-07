@@ -3,11 +3,10 @@ version: '3.8'
 services:
   ai-coding-worker:
     image: dockerregistry.etdofresh.com/ai-coding-worker:latest
-    ports:
-      - target: 5000
-        published: 5000
-        protocol: tcp
-        mode: ingress
+    # Note: With endpoint_mode: dnsrr, we can't use ingress mode ports
+    # The service is accessed via internal DNS from within the dokploy-network
+    expose:
+      - "5000"
     environment:
       - PORT=5000
       - TMP_DIR=/tmp
@@ -18,6 +17,7 @@ services:
       - dokploy-network
     deploy:
       replicas: 10
+      endpoint_mode: dnsrr
       restart_policy:
         condition: any
         delay: 0s
