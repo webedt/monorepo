@@ -759,6 +759,12 @@ const executeHandler = async (req: Request, res: Response) => {
       // PHASE 4: Post-Execution (Commit & Upload)
       // ========================================================================
 
+      logger.info('Starting Phase 4: Post-Execution', {
+        component: 'ExecuteRoute',
+        sessionId: chatSession.id,
+        sessionRoot
+      });
+
       // Re-download session from storage to get AI worker's changes
       // The AI worker uploads its modified workspace back to storage, so we need
       // to download it to get the latest files before doing commit checks
@@ -856,7 +862,24 @@ const executeHandler = async (req: Request, res: Response) => {
       }
 
       // Auto-commit if GitHub session
+      logger.info('Checking auto-commit conditions', {
+        component: 'ExecuteRoute',
+        sessionId: chatSession.id,
+        hasRepoUrl: !!effectiveRepoUrl,
+        hasGithubToken: !!user.githubAccessToken,
+        hasWorkspacePath: !!workspacePath,
+        workspacePath,
+        workspaceExists: workspacePath ? fs.existsSync(workspacePath) : false
+      });
+
       if (effectiveRepoUrl && user.githubAccessToken && workspacePath) {
+        logger.info('Starting auto-commit', {
+          component: 'ExecuteRoute',
+          sessionId: chatSession.id,
+          workspacePath,
+          provider: providerName
+        });
+
         await sendEvent({
           type: 'commit_progress',
           stage: 'starting',
@@ -869,7 +892,9 @@ const executeHandler = async (req: Request, res: Response) => {
             {
               sessionId: chatSession.id,
               workspacePath: workspacePath,
-              userId: user.id
+              userId: user.id,
+              codingAssistantProvider: providerName,
+              codingAssistantAuthentication: providerAuth
             },
             (event) => {
               // Note: callback is sync, sendEvent returns Promise but we don't await here
