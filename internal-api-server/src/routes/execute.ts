@@ -754,11 +754,42 @@ const executeHandler = async (req: Request, res: Response) => {
         if (updatedSessionData) {
           fs.mkdirSync(sessionRoot, { recursive: true });
           await storageService.extractSessionToPath(updatedSessionData, sessionRoot);
+
+          // Re-read metadata to get the correct workspace path after re-extraction
+          const metadataPath = path.join(sessionRoot, '.session-metadata.json');
+          if (fs.existsSync(metadataPath)) {
+            try {
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+              if (metadata.github?.clonedPath) {
+                workspacePath = path.join(sessionRoot, 'workspace', metadata.github.clonedPath);
+              } else {
+                workspacePath = path.join(sessionRoot, 'workspace');
+              }
+            } catch {
+              workspacePath = path.join(sessionRoot, 'workspace');
+            }
+          } else {
+            workspacePath = path.join(sessionRoot, 'workspace');
+          }
+
           logger.info('Re-downloaded session with AI worker changes', {
             component: 'ExecuteRoute',
             sessionId: chatSession.id,
-            sessionRoot
+            sessionRoot,
+            workspacePath,
+            workspaceExists: fs.existsSync(workspacePath)
           });
+
+          // Log git status for debugging
+          if (fs.existsSync(workspacePath)) {
+            const gitDir = path.join(workspacePath, '.git');
+            logger.info('Workspace state after re-download', {
+              component: 'ExecuteRoute',
+              sessionId: chatSession.id,
+              hasGitDir: fs.existsSync(gitDir),
+              files: fs.readdirSync(workspacePath).slice(0, 20) // First 20 files
+            });
+          }
         } else {
           logger.warn('No session data found in storage after AI worker execution', {
             component: 'ExecuteRoute',

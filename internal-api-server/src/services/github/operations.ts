@@ -438,6 +438,16 @@ export class GitHubOperations {
 
       // Check for changes
       const hasChanges = await gitHelper.hasChanges();
+      const preCheckStatus = await gitHelper.getStatus();
+
+      logger.info('Git status check for auto-commit', {
+        component: 'GitHubOperations',
+        sessionId,
+        workspacePath,
+        hasChanges,
+        gitStatus: preCheckStatus
+      });
+
       if (!hasChanges) {
         const currentBranch = await gitHelper.getCurrentBranch();
 
