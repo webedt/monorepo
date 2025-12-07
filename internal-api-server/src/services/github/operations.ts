@@ -447,11 +447,44 @@ export class GitHubOperations {
         // Log what's in the workspace for debugging
         try {
           const contents = fs.readdirSync(workspacePath);
+          const gitDirPath = path.join(workspacePath, '.git');
+          let gitContents: string[] = [];
+          let gitHeadContent = '';
+          let gitConfigContent = '';
+
+          if (fs.existsSync(gitDirPath)) {
+            try {
+              gitContents = fs.readdirSync(gitDirPath);
+
+              // Check HEAD file
+              const headPath = path.join(gitDirPath, 'HEAD');
+              if (fs.existsSync(headPath)) {
+                gitHeadContent = fs.readFileSync(headPath, 'utf-8').substring(0, 200);
+              }
+
+              // Check config file
+              const configPath = path.join(gitDirPath, 'config');
+              if (fs.existsSync(configPath)) {
+                gitConfigContent = fs.readFileSync(configPath, 'utf-8').substring(0, 500);
+              }
+            } catch (gitReadError) {
+              logger.error('Failed to read .git contents', gitReadError, {
+                component: 'GitHubOperations',
+                sessionId,
+                gitDirPath
+              });
+            }
+          }
+
           logger.warn('Workspace is not a git repo', {
             component: 'GitHubOperations',
             sessionId,
             workspacePath,
-            contents
+            contents,
+            gitDirExists: fs.existsSync(gitDirPath),
+            gitContents,
+            gitHeadContent,
+            gitConfigContent
           });
         } catch (e) {
           logger.error('Failed to read workspace contents', e, {

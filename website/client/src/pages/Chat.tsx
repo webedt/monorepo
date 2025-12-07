@@ -1435,9 +1435,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
 
         // Scroll to bottom to show the latest results
-        setTimeout(() => {
+        // Use multiple timeouts to handle query invalidation re-renders
+        const scrollToBottom = () => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
+        };
+        setTimeout(scrollToBottom, 100);
+        setTimeout(scrollToBottom, 500);
+        setTimeout(scrollToBottom, 1000);
 
         // Navigate to the session URL if not already there
         if (!sessionId || sessionId !== data.websiteSessionId) {

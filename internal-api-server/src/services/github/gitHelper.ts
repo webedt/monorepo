@@ -195,7 +195,12 @@ New files: ${status.not_added.join(', ') || 'none'}
     try {
       await this.git.status();
       return true;
-    } catch {
+    } catch (error) {
+      logger.error('Git status check failed', error, {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
       return false;
     }
   }
