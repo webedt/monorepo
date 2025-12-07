@@ -413,6 +413,12 @@ const executeHandler = async (req: Request, res: Response) => {
     // Start session in broadcaster (allows reconnecting clients to subscribe)
     sessionEventBroadcaster.startSession(chatSession.id);
 
+    // Update session status to 'running' (for new sessions that start as 'pending')
+    await db
+      .update(chatSessions)
+      .set({ status: 'running' })
+      .where(eq(chatSessions.id, chatSession.id));
+
     // Setup heartbeat interval (keeps connection alive and signals activity)
     const heartbeatInterval = setInterval(() => {
       if (!clientDisconnected && !res.writableEnded) {
