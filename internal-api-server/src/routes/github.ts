@@ -803,101 +803,78 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
       sessionId
     });
 
-    // Set up SSE response for streaming progress
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
-    });
-
-    // Helper to send SSE events
-    const sendEvent = (data: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
-
-    try {
-      // Execute auto PR workflow using GitHubOperations
-      const result = await githubOperations.autoPullRequest(
-        {
-          owner,
-          repo,
-          branch,
-          base,
-          title,
-          body,
-          githubAccessToken: authReq.user.githubAccessToken
-        },
-        (event) => {
-          // Forward progress events to client
-          sendEvent({
-            type: 'progress',
-            stage: event.stage,
-            message: event.message,
-            data: event.data
-          });
-        }
-      );
-
-      // Send completion event
-      sendEvent({
-        type: 'completed',
-        success: true,
-        data: result
-      });
-
-      // If sessionId provided, soft-delete the session (move to trash)
-      if (sessionId) {
-        try {
-          await db
-            .update(chatSessions)
-            .set({ deletedAt: new Date() })
-            .where(
-              and(
-                eq(chatSessions.id, sessionId),
-                eq(chatSessions.userId, authReq.user!.id),
-                isNull(chatSessions.deletedAt)
-              )
-            );
-          logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
-            component: 'GitHub'
-          });
-        } catch (sessionError) {
-          logger.warn(`Failed to soft-delete session ${sessionId} after Auto PR`, {
-            component: 'GitHub',
-            error: sessionError instanceof Error ? sessionError.message : String(sessionError)
-          });
-        }
-      }
-
-      logger.info(`Auto PR completed for ${owner}/${repo}: ${branch} -> ${base}`, {
-        component: 'GitHub',
-        prNumber: result.pr?.number
-      });
-
-    } catch (workflowError) {
-      const errorMessage = workflowError instanceof Error ? workflowError.message : String(workflowError);
-      logger.error('Auto PR workflow error', workflowError as Error, {
-        component: 'GitHub',
+    // Execute auto PR workflow using GitHubOperations
+    const result = await githubOperations.autoPullRequest(
+      {
         owner,
         repo,
         branch,
-        base
-      });
+        base,
+        title,
+        body,
+        githubAccessToken: authReq.user.githubAccessToken
+      },
+      (event) => {
+        // Log progress events
+        logger.info(`Auto PR progress: ${event.stage} - ${event.message}`, {
+          component: 'GitHub',
+          owner,
+          repo,
+          stage: event.stage
+        });
+      }
+    );
 
-      sendEvent({
-        type: 'error',
-        success: false,
-        error: errorMessage
-      });
+    // If sessionId provided, soft-delete the session (move to trash)
+    if (sessionId) {
+      try {
+        await db
+          .update(chatSessions)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              eq(chatSessions.id, sessionId),
+              eq(chatSessions.userId, authReq.user!.id),
+              isNull(chatSessions.deletedAt)
+            )
+          );
+        logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
+          component: 'GitHub'
+        });
+      } catch (sessionError) {
+        logger.warn(`Failed to soft-delete session ${sessionId} after Auto PR`, {
+          component: 'GitHub',
+          error: sessionError instanceof Error ? sessionError.message : String(sessionError)
+        });
+      }
     }
 
-    res.end();
-  } catch (error) {
-    logger.error('Auto PR handler error', error as Error, { component: 'GitHub' });
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: 'Failed to execute Auto PR' });
+    logger.info(`Auto PR completed for ${owner}/${repo}: ${branch} -> ${base}`, {
+      component: 'GitHub',
+      prNumber: result.pr?.number
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    logger.error('Auto PR error', error as Error, {
+      component: 'GitHub',
+      owner: req.params.owner,
+      repo: req.params.repo
+    });
+
+    // Handle specific error cases
+    if (err.message?.includes('conflict')) {
+      res.status(409).json({ success: false, error: err.message });
+      return;
     }
+
+    if (err.message?.includes('Timeout')) {
+      res.status(408).json({ success: false, error: err.message });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: err.message || 'Failed to execute Auto PR' });
   }
 });
 
