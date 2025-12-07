@@ -94,14 +94,31 @@ export class StorageClient {
         cwd: tmpExtractDir
       });
 
-      // Move workspace contents to final location
-      const workspaceExtractPath = path.join(tmpExtractDir, 'workspace');
-      if (fs.existsSync(workspaceExtractPath)) {
-        fs.mkdirSync(localPath, { recursive: true });
-        await this.copyDirectory(workspaceExtractPath, localPath);
-      } else {
-        fs.mkdirSync(localPath, { recursive: true });
+      // Move entire session contents to final location (preserving structure)
+      // The tarball contains: workspace/, .session-metadata.json, etc.
+      // We need to copy the entire structure to localPath (sessionRoot)
+      fs.mkdirSync(localPath, { recursive: true });
+
+      // Copy all contents from tmpExtractDir to localPath
+      const extractedItems = fs.readdirSync(tmpExtractDir);
+      for (const item of extractedItems) {
+        const srcPath = path.join(tmpExtractDir, item);
+        const destPath = path.join(localPath, item);
+
+        const stat = fs.statSync(srcPath);
+        if (stat.isDirectory()) {
+          await this.copyDirectory(srcPath, destPath);
+        } else {
+          await fs.promises.copyFile(srcPath, destPath);
+        }
       }
+
+      logger.info('Extracted session contents', {
+        component: 'StorageClient',
+        sessionPath,
+        localPath,
+        items: extractedItems
+      });
 
       // Restore ~/.claude if it exists
       const claudeExtractPath = path.join(tmpExtractDir, '.claude');
