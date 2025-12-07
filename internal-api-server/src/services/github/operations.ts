@@ -149,7 +149,7 @@ export type ProgressCallback = (event: {
   message: string;
   data?: unknown;
   endpoint?: string;  // e.g., 'internal-api-server/git/clone'
-}) => void;
+}) => void | Promise<void>;
 
 // ============================================================================
 // Helper Functions
@@ -419,7 +419,7 @@ export class GitHubOperations {
     const endpoint = '/commit-push';
 
     try {
-      progress({ type: 'progress', stage: 'analyzing', message: 'Analyzing changes...', endpoint });
+      await progress({ type: 'progress', stage: 'analyzing', message: 'Analyzing changes...', endpoint });
 
       const gitHelper = new GitHelper(workspacePath);
 
@@ -494,6 +494,15 @@ export class GitHubOperations {
           });
         }
 
+        // Emit progress event before returning so client knows what happened
+        await progress({
+          type: 'commit_progress',
+          stage: 'completed',
+          message: 'Auto-commit skipped: Not a git repository',
+          data: { skipped: true, reason: 'Not a git repository' },
+          endpoint
+        });
+
         return {
           commitHash: '',
           commitMessage: '',
@@ -525,7 +534,7 @@ export class GitHubOperations {
       });
 
       // Send analysis result to client
-      progress({
+      await progress({
         type: 'commit_progress',
         stage: 'analysis_complete',
         message: hasChanges
@@ -536,7 +545,7 @@ export class GitHubOperations {
       });
 
       if (!hasChanges) {
-        progress({
+        await progress({
           type: 'commit_progress',
           stage: 'completed',
           message: 'Auto-commit skipped: No changes to commit',
@@ -556,7 +565,7 @@ export class GitHubOperations {
 
       // gitDiff already retrieved earlier for debugging
 
-      progress({
+      await progress({
         type: 'commit_progress',
         stage: 'changes_detected',
         message: `Changes detected on branch: ${currentBranch}`,
@@ -565,7 +574,7 @@ export class GitHubOperations {
       });
 
       // Generate commit message using AI worker
-      progress({ type: 'progress', stage: 'generating_message', message: 'Generating commit message...', endpoint });
+      await progress({ type: 'progress', stage: 'generating_message', message: 'Generating commit message...', endpoint });
 
       let commitMessage: string;
 
@@ -602,7 +611,7 @@ export class GitHubOperations {
 
           commitMessage = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
 
-          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback commit message (AI worker unavailable)', endpoint });
+          await progress({ type: 'progress', stage: 'fallback', message: 'Using fallback commit message (AI worker unavailable)', endpoint });
         }
       } else {
         // No credentials provided, use fallback
@@ -615,21 +624,21 @@ export class GitHubOperations {
       }
 
       // Commit changes
-      progress({ type: 'progress', stage: 'committing', message: 'Committing changes...', data: { commitMessage }, endpoint });
+      await progress({ type: 'progress', stage: 'committing', message: 'Committing changes...', data: { commitMessage }, endpoint });
 
       const commitHash = await gitHelper.commitAll(commitMessage);
 
-      progress({ type: 'progress', stage: 'committed', message: 'Changes committed successfully', data: { commitHash }, endpoint });
+      await progress({ type: 'progress', stage: 'committed', message: 'Changes committed successfully', data: { commitHash }, endpoint });
 
       // Push to remote
-      progress({ type: 'progress', stage: 'pushing', message: `Pushing to remote branch: ${currentBranch}...`, endpoint });
+      await progress({ type: 'progress', stage: 'pushing', message: `Pushing to remote branch: ${currentBranch}...`, endpoint });
 
       let pushed = false;
       try {
         await gitHelper.push();
         pushed = true;
 
-        progress({ type: 'progress', stage: 'pushed', message: 'Changes pushed successfully', endpoint });
+        await progress({ type: 'progress', stage: 'pushed', message: 'Changes pushed successfully', endpoint });
 
         logger.info('Push completed', {
           component: 'GitHubOperations',
@@ -644,7 +653,7 @@ export class GitHubOperations {
           branch: currentBranch
         });
 
-        progress({
+        await progress({
           type: 'progress',
           stage: 'push_failed',
           message: 'Push failed (commit saved locally)',
@@ -653,7 +662,7 @@ export class GitHubOperations {
         });
       }
 
-      progress({
+      await progress({
         type: 'commit_progress',
         stage: 'completed',
         message: pushed ? 'Changes committed and pushed' : 'Changes committed (push pending)',

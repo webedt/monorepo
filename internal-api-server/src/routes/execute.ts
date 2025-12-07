@@ -896,9 +896,8 @@ const executeHandler = async (req: Request, res: Response) => {
               codingAssistantProvider: providerName,
               codingAssistantAuthentication: providerAuth
             },
-            (event) => {
-              // Note: callback is sync, sendEvent returns Promise but we don't await here
-              sendEvent({
+            async (event) => {
+              await sendEvent({
                 type: 'commit_progress',
                 message: event.message,
                 stage: event.stage,
@@ -914,6 +913,15 @@ const executeHandler = async (req: Request, res: Response) => {
               component: 'ExecuteRoute',
               sessionId: chatSession.id,
               reason: commitResult.reason
+            });
+
+            // Send backup skip event (in case progress callback didn't fire)
+            await sendEvent({
+              type: 'commit_progress',
+              stage: 'skipped',
+              message: `Auto-commit skipped: ${commitResult.reason}`,
+              data: { reason: commitResult.reason },
+              endpoint: '/execute'
             });
           } else {
             logger.info('Changes committed', {
