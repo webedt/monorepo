@@ -200,15 +200,35 @@ export class StorageClient {
         localPath
       });
 
+      // localPath is sessionRoot which contains:
+      //   workspace/repo-name/   (the git repo with files)
+      //   .session-metadata.json
+      // We need to preserve this structure in the tarball
+
       // Create temporary package directory
       const tmpPackageDir = `${localPath}-package`;
       fs.mkdirSync(tmpPackageDir, { recursive: true });
 
-      // Copy workspace
-      const workspaceDestDir = path.join(tmpPackageDir, 'workspace');
-      await this.copyDirectory(localPath, workspaceDestDir);
+      // Copy entire session root contents (workspace/, .session-metadata.json, etc.)
+      const sessionItems = fs.readdirSync(localPath);
+      for (const item of sessionItems) {
+        const srcPath = path.join(localPath, item);
+        const destPath = path.join(tmpPackageDir, item);
+        const stat = fs.statSync(srcPath);
+        if (stat.isDirectory()) {
+          await this.copyDirectory(srcPath, destPath);
+        } else {
+          await fs.promises.copyFile(srcPath, destPath);
+        }
+      }
 
-      // Copy ~/.claude if exists
+      logger.info('Copied session contents for upload', {
+        component: 'StorageClient',
+        sessionPath,
+        items: sessionItems
+      });
+
+      // Copy ~/.claude if exists (merge into package)
       if (fs.existsSync(claudeDir)) {
         const claudeDestDir = path.join(tmpPackageDir, '.claude');
         logger.info('Backing up ~/.claude to session storage', {
@@ -230,7 +250,7 @@ export class StorageClient {
         });
       }
 
-      // Copy ~/.codex if exists
+      // Copy ~/.codex if exists (merge into package)
       if (fs.existsSync(codexDir)) {
         const codexDestDir = path.join(tmpPackageDir, '.codex');
         await this.copyDirectory(codexDir, codexDestDir);
