@@ -52,7 +52,30 @@ New files: ${status.not_added.join(', ') || 'none'}
    */
   async hasChanges(): Promise<boolean> {
     try {
+      // Refresh git index before checking status
+      // This is important after extracting files from a tarball
+      // because git's index might be out of sync with the actual file contents
+      try {
+        await this.git.raw(['update-index', '--refresh']);
+      } catch {
+        // Ignore errors - this might fail if there are actual changes
+        // which is fine, we just want to refresh the index cache
+      }
+
       const status = await this.git.status();
+
+      logger.info('Git status check result', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        isClean: status.isClean(),
+        modified: status.modified,
+        notAdded: status.not_added,
+        deleted: status.deleted,
+        created: status.created,
+        renamed: status.renamed,
+        staged: status.staged
+      });
+
       return !status.isClean();
     } catch (error) {
       logger.error('Failed to check for changes', error, { component: 'GitHelper' });

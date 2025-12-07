@@ -808,12 +808,38 @@ const executeHandler = async (req: Request, res: Response) => {
           // Log git status for debugging
           if (fs.existsSync(workspacePath)) {
             const gitDir = path.join(workspacePath, '.git');
+            const files = fs.readdirSync(workspacePath);
             logger.info('Workspace state after re-download', {
               component: 'ExecuteRoute',
               sessionId: chatSession.id,
+              workspacePath,
               hasGitDir: fs.existsSync(gitDir),
-              files: fs.readdirSync(workspacePath).slice(0, 20) // First 20 files
+              fileCount: files.length,
+              files: files.slice(0, 20) // First 20 files
             });
+
+            // Run git status to see changes
+            if (fs.existsSync(gitDir)) {
+              try {
+                const { execSync } = await import('child_process');
+                const gitStatus = execSync('git status --porcelain', { cwd: workspacePath, encoding: 'utf-8' });
+                const gitDiff = execSync('git diff --stat', { cwd: workspacePath, encoding: 'utf-8' });
+                const gitLog = execSync('git log --oneline -3', { cwd: workspacePath, encoding: 'utf-8' });
+                logger.info('Git state after re-download', {
+                  component: 'ExecuteRoute',
+                  sessionId: chatSession.id,
+                  gitStatusOutput: gitStatus || '(clean)',
+                  gitDiffStat: gitDiff || '(no diff)',
+                  recentCommits: gitLog
+                });
+              } catch (gitErr) {
+                logger.warn('Failed to get git status after re-download', {
+                  component: 'ExecuteRoute',
+                  sessionId: chatSession.id,
+                  error: gitErr instanceof Error ? gitErr.message : String(gitErr)
+                });
+              }
+            }
           }
         } else {
           logger.warn('No session data found in storage after AI worker execution', {

@@ -441,12 +441,19 @@ export class GitHubOperations {
       const gitStatus = await gitHelper.getStatus();
       const currentBranch = await gitHelper.getCurrentBranch();
 
+      // Get more detailed git info for debugging
+      const gitDiff = await gitHelper.getDiff();
+
       logger.info('Git status check for auto-commit', {
         component: 'GitHubOperations',
         sessionId,
         workspacePath,
+        workspaceExists: fs.existsSync(workspacePath),
         hasChanges,
-        gitStatus
+        currentBranch,
+        gitStatus,
+        gitDiffLength: gitDiff.length,
+        gitDiffPreview: gitDiff.substring(0, 500)
       });
 
       // Send analysis result to client
@@ -479,8 +486,7 @@ export class GitHubOperations {
         };
       }
 
-      // Get git diff for commit message generation
-      const gitDiff = await gitHelper.getDiff();
+      // gitDiff already retrieved earlier for debugging
 
       progress({
         type: 'commit_progress',
