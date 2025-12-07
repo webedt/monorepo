@@ -312,11 +312,22 @@ export class Orchestrator {
       }
 
       // Step 6: Execute provider and stream results
+      // Extract resumeSessionId from providerOptions for Claude SDK resume functionality
+      const resumeSessionId = request.providerOptions?.resumeSessionId;
+      if (resumeSessionId) {
+        logger.info('Resuming with provider session ID', {
+          component: 'Orchestrator',
+          websiteSessionId,
+          resumeSessionId
+        });
+      }
+
       await provider.execute(
         request.userRequest,
         {
           authentication: request.codingAssistantAuthentication,
           workspace: localWorkspacePath,
+          resumeSessionId, // Pass at top level for Claude SDK
           providerOptions: request.providerOptions,
           abortSignal
         },

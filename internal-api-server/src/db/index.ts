@@ -121,6 +121,9 @@ pool.query(`
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'chat_sessions' AND column_name = 'worker_last_activity') THEN
         ALTER TABLE chat_sessions ADD COLUMN worker_last_activity TIMESTAMP;
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'chat_sessions' AND column_name = 'provider_session_id') THEN
+        ALTER TABLE chat_sessions ADD COLUMN provider_session_id TEXT;
+      END IF;
     END $$;
   `);
 }).then(() => {

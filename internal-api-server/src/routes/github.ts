@@ -10,8 +10,14 @@ import { eq, and, isNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
+import { GitHubOperations } from '../services/github/operations.js';
+import { StorageService } from '../services/storage/storageService.js';
 
 const router = Router();
+
+// Initialize services for Auto PR
+const storageService = new StorageService();
+const githubOperations = new GitHubOperations(storageService);
 
 // Helper function to get the frontend URL for redirects
 function getFrontendUrl(path: string, storedOrigin?: string): string {
@@ -771,6 +777,127 @@ router.post('/repos/:owner/:repo/branches/*/merge-base', requireAuth, async (req
     }
 
     res.status(500).json({ success: false, error: 'Failed to merge base branch' });
+  }
+});
+
+// Auto PR - Automatically create/update PR, merge base, and merge PR
+router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const branch = req.params[0];
+    const { base, title, body, sessionId } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!base) {
+      res.status(400).json({ success: false, error: 'Base branch is required' });
+      return;
+    }
+
+    logger.info(`Starting Auto PR for ${owner}/${repo}: ${branch} -> ${base}`, {
+      component: 'GitHub',
+      sessionId
+    });
+
+    // Set up SSE response for streaming progress
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+
+    // Helper to send SSE events
+    const sendEvent = (data: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      // Execute auto PR workflow using GitHubOperations
+      const result = await githubOperations.autoPullRequest(
+        {
+          owner,
+          repo,
+          branch,
+          base,
+          title,
+          body,
+          githubAccessToken: authReq.user.githubAccessToken
+        },
+        (event) => {
+          // Forward progress events to client
+          sendEvent({
+            type: 'progress',
+            stage: event.stage,
+            message: event.message,
+            data: event.data
+          });
+        }
+      );
+
+      // Send completion event
+      sendEvent({
+        type: 'completed',
+        success: true,
+        data: result
+      });
+
+      // If sessionId provided, soft-delete the session (move to trash)
+      if (sessionId) {
+        try {
+          await db
+            .update(chatSessions)
+            .set({ deletedAt: new Date() })
+            .where(
+              and(
+                eq(chatSessions.id, sessionId),
+                eq(chatSessions.userId, authReq.user!.id),
+                isNull(chatSessions.deletedAt)
+              )
+            );
+          logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
+            component: 'GitHub'
+          });
+        } catch (sessionError) {
+          logger.warn(`Failed to soft-delete session ${sessionId} after Auto PR`, {
+            component: 'GitHub',
+            error: sessionError instanceof Error ? sessionError.message : String(sessionError)
+          });
+        }
+      }
+
+      logger.info(`Auto PR completed for ${owner}/${repo}: ${branch} -> ${base}`, {
+        component: 'GitHub',
+        prNumber: result.pr?.number
+      });
+
+    } catch (workflowError) {
+      const errorMessage = workflowError instanceof Error ? workflowError.message : String(workflowError);
+      logger.error('Auto PR workflow error', workflowError as Error, {
+        component: 'GitHub',
+        owner,
+        repo,
+        branch,
+        base
+      });
+
+      sendEvent({
+        type: 'error',
+        success: false,
+        error: errorMessage
+      });
+    }
+
+    res.end();
+  } catch (error) {
+    logger.error('Auto PR handler error', error as Error, { component: 'GitHub' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: 'Failed to execute Auto PR' });
+    }
   }
 });
 

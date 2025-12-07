@@ -600,7 +600,11 @@ const executeHandler = async (req: Request, res: Response) => {
         codingAssistantAuthentication: providerAuth,
         workspacePath: workspacePath,
         websiteSessionId: chatSession.id,
-        providerOptions: user.preferredModel ? { model: user.preferredModel } : undefined
+        providerOptions: {
+          ...(user.preferredModel ? { model: user.preferredModel } : {}),
+          // Pass provider session ID for conversation resume (Claude SDK uses this)
+          ...(chatSession.providerSessionId ? { resumeSessionId: chatSession.providerSessionId } : {})
+        }
       };
 
       // Forward to AI worker
@@ -697,6 +701,32 @@ const executeHandler = async (req: Request, res: Response) => {
                   eventType: eventData.type,
                   eventCount
                 });
+
+                // Capture provider session ID for conversation resume
+                if (eventData.type === 'provider_session' && eventData.data?.sessionId) {
+                  const providerSessionId = eventData.data.sessionId;
+                  logger.info('Captured provider session ID', {
+                    component: 'ExecuteRoute',
+                    sessionId: chatSession.id,
+                    providerSessionId
+                  });
+                  // Update database with provider session ID
+                  try {
+                    await db
+                      .update(chatSessions)
+                      .set({ providerSessionId })
+                      .where(eq(chatSessions.id, chatSession.id));
+                    chatSession.providerSessionId = providerSessionId;
+                  } catch (updateError) {
+                    logger.error('Failed to update provider session ID', updateError, {
+                      component: 'ExecuteRoute',
+                      sessionId: chatSession.id,
+                      providerSessionId
+                    });
+                  }
+                  // Don't forward this internal event to the client
+                  continue;
+                }
 
                 // Forward event with appropriate source
                 const providerSource = providerName === 'ClaudeAgentSDK'

@@ -51,6 +51,7 @@ export const chatSessions = pgTable('chat_sessions', {
   repositoryUrl: text('repository_url'),
   baseBranch: text('base_branch'),
   branch: text('branch'), // Working branch name - populated when branch is created
+  providerSessionId: text('provider_session_id'), // Claude SDK session ID for conversation resume
   autoCommit: boolean('auto_commit').default(false).notNull(),
   locked: boolean('locked').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),

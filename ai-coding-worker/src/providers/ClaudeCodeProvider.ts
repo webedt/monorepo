@@ -91,9 +91,16 @@ export class ClaudeCodeProvider extends BaseProvider {
       for await (const message of queryStream) {
         lastMessage = message;
 
-        // Log important message types
+        // Log important message types and emit session_id for persistence
         if (message.type === 'system' && message.subtype === 'init') {
           console.log('[ClaudeCodeProvider] Claude Code initialized, session:', message.session_id);
+          // Emit provider_session event so the caller can capture and persist the session_id
+          onEvent({
+            type: 'provider_session',
+            data: {
+              sessionId: message.session_id
+            }
+          });
         }
 
         // Log error messages
