@@ -163,7 +163,10 @@ class StorageServiceClass {
    * Extract a session tarball Buffer to a directory path
    */
   async extractSessionToPath(sessionData: Buffer, destinationPath: string): Promise<void> {
-    logger.info(`Extracting session to ${destinationPath}...`, { component: 'StorageService' });
+    logger.info(`Extracting session to ${destinationPath}...`, {
+      component: 'StorageService',
+      tarballSize: sessionData.length
+    });
 
     if (!fs.existsSync(destinationPath)) {
       fs.mkdirSync(destinationPath, { recursive: true });
@@ -172,12 +175,64 @@ class StorageServiceClass {
     const gunzip = createGunzip();
     const readable = Readable.from(sessionData);
 
+    // Track what files are being extracted
+    const extractedPaths: string[] = [];
+
     return new Promise((resolve, reject) => {
-      const extractStream = tar.extract({ cwd: destinationPath });
+      const extractStream = tar.extract({
+        cwd: destinationPath,
+        onentry: (entry) => {
+          extractedPaths.push(entry.path);
+        }
+      });
       readable.pipe(gunzip).pipe(extractStream);
 
       extractStream.on('finish', () => {
-        logger.info(`Session extracted to ${destinationPath}`, { component: 'StorageService' });
+        // Log extracted contents
+        const gitRelatedPaths = extractedPaths.filter(p =>
+          p.includes('.git') || p.startsWith('.git')
+        );
+
+        logger.info(`Session extracted to ${destinationPath}`, {
+          component: 'StorageService',
+          totalFilesExtracted: extractedPaths.length,
+          gitRelatedFiles: gitRelatedPaths.length,
+          gitPaths: gitRelatedPaths.slice(0, 20), // Log first 20 git-related paths
+          samplePaths: extractedPaths.slice(0, 10) // Log first 10 paths
+        });
+
+        // Verify what's actually on disk after extraction
+        const checkGitDir = (basePath: string) => {
+          const gitDirPath = path.join(basePath, 'workspace');
+          if (fs.existsSync(gitDirPath)) {
+            const items = fs.readdirSync(gitDirPath);
+            for (const item of items) {
+              const itemPath = path.join(gitDirPath, item);
+              if (fs.statSync(itemPath).isDirectory()) {
+                const subGitDir = path.join(itemPath, '.git');
+                if (fs.existsSync(subGitDir)) {
+                  try {
+                    const gitContents = fs.readdirSync(subGitDir);
+                    logger.info(`Git directory found after extraction`, {
+                      component: 'StorageService',
+                      repoDir: item,
+                      gitDirPath: subGitDir,
+                      gitContents
+                    });
+                  } catch (e) {
+                    logger.error(`Failed to read git dir after extraction`, e, {
+                      component: 'StorageService',
+                      subGitDir
+                    });
+                  }
+                }
+              }
+            }
+          }
+        };
+
+        checkGitDir(destinationPath);
+
         resolve();
       });
       extractStream.on('error', reject);
