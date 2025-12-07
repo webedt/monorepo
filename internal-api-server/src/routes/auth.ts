@@ -10,6 +10,9 @@ import { db, users } from '../db/index.js';
 import { lucia } from '../auth.js';
 import { eq } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
+import { ensureValidToken, ClaudeAuth } from '../lib/claudeAuth.js';
+import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../lib/codexAuth.js';
+import { logger } from '../utils/logger.js';
 
 const router = Router();
 
@@ -207,6 +210,59 @@ router.get('/session', async (req: Request, res: Response) => {
       return;
     }
 
+    // Check and refresh Claude OAuth token if needed
+    let claudeAuth = freshUser.claudeAuth;
+    if (claudeAuth && claudeAuth.accessToken && claudeAuth.refreshToken && claudeAuth.expiresAt) {
+      try {
+        const refreshedClaudeAuth = await ensureValidToken(claudeAuth as ClaudeAuth);
+        if (refreshedClaudeAuth !== claudeAuth) {
+          // Token was refreshed, update database
+          await db
+            .update(users)
+            .set({ claudeAuth: refreshedClaudeAuth })
+            .where(eq(users.id, freshUser.id));
+          claudeAuth = refreshedClaudeAuth;
+          logger.info('Claude OAuth token refreshed during session check', {
+            component: 'AuthRoute',
+            userId: freshUser.id
+          });
+        }
+      } catch (refreshError) {
+        // Log but don't fail the session request - return the existing token
+        // The user can still use other features or re-authenticate
+        logger.error('Failed to refresh Claude OAuth token during session check', refreshError, {
+          component: 'AuthRoute',
+          userId: freshUser.id
+        });
+      }
+    }
+
+    // Check and refresh Codex OAuth token if needed
+    let codexAuth = freshUser.codexAuth;
+    if (codexAuth && isValidCodexAuth(codexAuth) && codexAuth.accessToken && codexAuth.expiresAt) {
+      try {
+        const refreshedCodexAuth = await ensureValidCodexToken(codexAuth as CodexAuth);
+        if (refreshedCodexAuth !== codexAuth) {
+          // Token was refreshed, update database
+          await db
+            .update(users)
+            .set({ codexAuth: refreshedCodexAuth })
+            .where(eq(users.id, freshUser.id));
+          codexAuth = refreshedCodexAuth;
+          logger.info('Codex OAuth token refreshed during session check', {
+            component: 'AuthRoute',
+            userId: freshUser.id
+          });
+        }
+      } catch (refreshError) {
+        // Log but don't fail the session request
+        logger.error('Failed to refresh Codex OAuth token during session check', refreshError, {
+          component: 'AuthRoute',
+          userId: freshUser.id
+        });
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -216,7 +272,8 @@ router.get('/session', async (req: Request, res: Response) => {
           displayName: freshUser.displayName,
           githubId: freshUser.githubId,
           githubAccessToken: freshUser.githubAccessToken,
-          claudeAuth: freshUser.claudeAuth,
+          claudeAuth: claudeAuth,
+          codexAuth: codexAuth,
           imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
           voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
           defaultLandingPage: freshUser.defaultLandingPage || 'store',
