@@ -504,13 +504,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
       console.log('[Chat] Fetching events for session:', sessionId);
       const result = await sessionsApi.getEvents(sessionId);
-      console.log('[Chat] Events API response:', {
-        sessionId,
-        success: result?.success,
-        eventsCount: result?.data?.events?.length,
-        total: result?.data?.total,
-        rawResult: result
-      });
+      console.log(`[Chat] Events API response: sessionId=${sessionId}, success=${result?.success}, eventsCount=${result?.data?.events?.length}, total=${result?.data?.total}`);
       return result;
     },
     enabled: !!sessionId && sessionId !== 'new',
@@ -529,14 +523,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Log events query state changes
   useEffect(() => {
-    console.log('[Chat] Events query state:', {
-      sessionId,
-      eventsLoading,
-      eventsError,
-      eventsErrorObj: eventsErrorObj?.message,
-      eventsDataExists: !!eventsData,
-      eventsCount: eventsData?.data?.events?.length
-    });
+    console.log(`[Chat] Events query state: sessionId=${sessionId}, loading=${eventsLoading}, error=${eventsError}, eventsCount=${eventsData?.data?.events?.length || 0}`);
   }, [sessionId, eventsLoading, eventsError, eventsErrorObj, eventsData]);
 
   const session: ChatSession | undefined = sessionDetailsData?.data;
@@ -866,36 +853,21 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Convert raw events to displayable messages
     const dbEvents: DbEvent[] = eventsData?.data?.events || [];
 
-    // Debug logging
-    console.log('[Chat] Merging messages:', {
-      sessionId,
-      rawMessagesCount: messagesData?.data?.messages?.length || 0,
-      filteredDbMessagesCount: dbMessages.length,
-      rawEventsCount: dbEvents.length,
-      messagesData: messagesData?.data,
-      eventsData: eventsData?.data
-    });
+    // Debug logging - use primitive values for production visibility
+    console.log(`[Chat] Merging messages: sessionId=${sessionId}, rawMessagesCount=${messagesData?.data?.messages?.length || 0}, filteredDbMessagesCount=${dbMessages.length}, rawEventsCount=${dbEvents.length}`);
 
     const eventMessages = dbEvents
       .map((event) => convertEventToMessage(event, sessionId))
       .filter((msg): msg is Message => msg !== null);
 
-    console.log('[Chat] Converted events to messages:', {
-      eventMessagesCount: eventMessages.length,
-      firstEvent: dbEvents[0],
-      firstEventMessage: eventMessages[0]
-    });
+    console.log(`[Chat] Converted events to messages: eventMessagesCount=${eventMessages.length}`);
 
     // Merge and sort by timestamp
     const allMessages = [...dbMessages, ...eventMessages].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 
-    console.log('[Chat] Final merged messages:', {
-      totalCount: allMessages.length,
-      dbMessagesCount: dbMessages.length,
-      eventMessagesCount: eventMessages.length
-    });
+    console.log(`[Chat] Final merged messages: totalCount=${allMessages.length}, dbMessagesCount=${dbMessages.length}, eventMessagesCount=${eventMessages.length}`);
 
     setMessages(allMessages);
   }, [eventsData, messagesData, sessionId]);
