@@ -8,10 +8,41 @@ import { logger } from '../../utils/logger.js';
 export class GitHelper {
   private git: SimpleGit;
   private workspacePath: string;
+  private safeDirectoryAdded: boolean = false;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
     this.git = simpleGit(workspacePath);
+  }
+
+  /**
+   * Add the workspace to git's safe.directory config to avoid
+   * "dubious ownership" errors when running git commands on
+   * directories owned by different users
+   */
+  private async ensureSafeDirectory(): Promise<void> {
+    if (this.safeDirectoryAdded) {
+      return;
+    }
+
+    try {
+      // Add the workspace path to git's safe.directory config
+      // This is necessary because the directory may be owned by a different user
+      // (e.g., when extracted from a tarball by the AI worker)
+      await this.git.raw(['config', '--global', '--add', 'safe.directory', this.workspacePath]);
+      this.safeDirectoryAdded = true;
+      logger.info('Added workspace to git safe.directory', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath
+      });
+    } catch (error) {
+      logger.warn('Failed to add workspace to safe.directory', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      // Continue anyway - the directory might already be safe
+    }
   }
 
   /**
@@ -193,6 +224,8 @@ New files: ${status.not_added.join(', ') || 'none'}
    */
   async isGitRepo(): Promise<boolean> {
     try {
+      // Ensure the directory is marked as safe before checking
+      await this.ensureSafeDirectory();
       await this.git.status();
       return true;
     } catch (error) {
