@@ -576,37 +576,75 @@ export class GitHubOperations {
       // Generate commit message using AI worker
       await progress({ type: 'progress', stage: 'generating_message', message: 'Generating commit message...', endpoint });
 
-      let commitMessage: string;
+      let commitMessage: string = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
 
       // Only use AI worker if credentials are provided
       if (options.codingAssistantProvider && options.codingAssistantAuthentication) {
-        try {
-          const aiWorkerClient = new AIWorkerClient();
-          // Serialize authentication if it's an object
-          const authString = typeof options.codingAssistantAuthentication === 'object'
-            ? JSON.stringify(options.codingAssistantAuthentication)
-            : options.codingAssistantAuthentication;
-          commitMessage = await aiWorkerClient.generateCommitMessage(
-            gitStatus,
-            gitDiff,
-            options.codingAssistantProvider,
-            authString
-          );
+        const aiWorkerClient = new AIWorkerClient();
+        // Serialize authentication if it's an object
+        const authString = typeof options.codingAssistantAuthentication === 'object'
+          ? JSON.stringify(options.codingAssistantAuthentication)
+          : options.codingAssistantAuthentication;
 
-          if (userId) {
-            commitMessage = `${commitMessage}\n\nCommitted by: ${userId}`;
+        // Retry logic with exponential backoff (1s, 2s, 3s)
+        const retryDelays = [1000, 2000, 3000];
+        let lastError: Error | null = null;
+        let success = false;
+
+        for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+          try {
+            commitMessage = await aiWorkerClient.generateCommitMessage(
+              gitStatus,
+              gitDiff,
+              options.codingAssistantProvider,
+              authString
+            );
+
+            if (userId) {
+              commitMessage = `${commitMessage}\n\nCommitted by: ${userId}`;
+            }
+
+            logger.info('Generated commit message via AI worker', {
+              component: 'GitHubOperations',
+              sessionId,
+              commitMessage,
+              attempt: attempt + 1
+            });
+
+            success = true;
+            break;
+          } catch (llmError) {
+            lastError = llmError instanceof Error ? llmError : new Error(String(llmError));
+
+            if (attempt < retryDelays.length) {
+              const delay = retryDelays[attempt];
+              logger.warn('AI worker commit message generation failed, retrying...', {
+                component: 'GitHubOperations',
+                sessionId,
+                attempt: attempt + 1,
+                nextRetryMs: delay,
+                error: lastError.message
+              });
+
+              await progress({
+                type: 'progress',
+                stage: 'generating_message_retry',
+                message: `Retrying commit message generation (attempt ${attempt + 2}/${retryDelays.length + 1})...`,
+                endpoint
+              });
+
+              // Wait before retrying
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
           }
+        }
 
-          logger.info('Generated commit message via AI worker', {
+        if (!success) {
+          logger.warn('AI worker commit message generation failed after all retries, using fallback', {
             component: 'GitHubOperations',
             sessionId,
-            commitMessage
-          });
-        } catch (llmError) {
-          logger.warn('AI worker commit message generation failed, using fallback', {
-            component: 'GitHubOperations',
-            sessionId,
-            error: llmError instanceof Error ? llmError.message : String(llmError)
+            totalAttempts: retryDelays.length + 1,
+            error: lastError?.message
           });
 
           commitMessage = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
