@@ -118,6 +118,9 @@ pool.query(`
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'messages' AND column_name = 'images') THEN
         ALTER TABLE messages ADD COLUMN images JSONB;
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'chat_sessions' AND column_name = 'worker_last_activity') THEN
+        ALTER TABLE chat_sessions ADD COLUMN worker_last_activity TIMESTAMP;
+      END IF;
     END $$;
   `);
 }).then(() => {
