@@ -438,24 +438,34 @@ export class GitHubOperations {
 
       // Check for changes
       const hasChanges = await gitHelper.hasChanges();
-      const preCheckStatus = await gitHelper.getStatus();
+      const gitStatus = await gitHelper.getStatus();
+      const currentBranch = await gitHelper.getCurrentBranch();
 
       logger.info('Git status check for auto-commit', {
         component: 'GitHubOperations',
         sessionId,
         workspacePath,
         hasChanges,
-        gitStatus: preCheckStatus
+        gitStatus
+      });
+
+      // Send analysis result to client
+      progress({
+        type: 'commit_progress',
+        stage: 'analysis_complete',
+        message: hasChanges
+          ? `Analysis complete: Changes found on branch ${currentBranch}`
+          : `Analysis complete: No changes found on branch ${currentBranch}`,
+        data: { hasChanges, branch: currentBranch, status: gitStatus },
+        endpoint
       });
 
       if (!hasChanges) {
-        const currentBranch = await gitHelper.getCurrentBranch();
-
         progress({
           type: 'commit_progress',
           stage: 'completed',
           message: 'Auto-commit skipped: No changes to commit',
-          data: { branch: currentBranch },
+          data: { branch: currentBranch, skipped: true },
           endpoint
         });
 
@@ -469,13 +479,11 @@ export class GitHubOperations {
         };
       }
 
-      // Get git status and diff
-      const gitStatus = await gitHelper.getStatus();
+      // Get git diff for commit message generation
       const gitDiff = await gitHelper.getDiff();
-      const currentBranch = await gitHelper.getCurrentBranch();
 
       progress({
-        type: 'progress',
+        type: 'commit_progress',
         stage: 'changes_detected',
         message: `Changes detected on branch: ${currentBranch}`,
         data: { status: gitStatus },
