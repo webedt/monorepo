@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import { ExecuteRequest, SSEEvent, UserRequestContent } from './types';
 import { ProviderFactory } from './providers/ProviderFactory';
 import { Request, Response } from 'express';
@@ -203,6 +204,30 @@ export class Orchestrator {
         },
         timestamp: new Date().toISOString()
       });
+
+      // Add workspace to git's safe.directory to avoid "dubious ownership" errors
+      // This is necessary because the directory may be owned by a different user
+      // after extraction from the tarball
+      if (hasGitDir) {
+        try {
+          execSync(`git config --global --add safe.directory "${localWorkspacePath}"`, {
+            stdio: 'pipe'
+          });
+          logger.info('Added workspace to git safe.directory', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            localWorkspacePath
+          });
+        } catch (gitConfigError) {
+          logger.warn('Failed to add workspace to git safe.directory', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            localWorkspacePath,
+            error: gitConfigError instanceof Error ? gitConfigError.message : String(gitConfigError)
+          });
+          // Continue anyway - git operations might still work
+        }
+      }
 
       // Step 3: Write credentials for the provider
       CredentialManager.writeClaudeCredentials(request.codingAssistantAuthentication);
