@@ -288,7 +288,7 @@ export default function SessionsSidebar() {
 
   return (
     <div
-      className={`flex flex-col bg-base-100 border-r border-base-300 transition-all duration-300 h-full ${
+      className={`flex flex-col bg-base-100 border-r border-base-300 transition-all duration-300 h-full relative z-[65] ${
         isExpanded ? 'w-80' : 'w-12'
       }`}
     >
@@ -416,7 +416,7 @@ export default function SessionsSidebar() {
                     </button>
 
                     {isRepoDropdownOpen && (
-                      <div className="absolute top-full left-0 mt-1 w-full max-h-48 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
+                      <div className="absolute top-full left-0 mt-1 w-full max-h-48 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-[70]">
                         <div className="p-1.5 sticky top-0 bg-base-100 border-b border-base-300">
                           <input
                             type="text"

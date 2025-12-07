@@ -59,7 +59,7 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
     <>
       {/* Backdrop */}
       <div
-        className={`fixed inset-0 bg-black/50 z-40 transition-opacity md:hidden ${
+        className={`fixed inset-0 bg-black/50 z-[70] transition-opacity md:hidden ${
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         aria-hidden="true"
@@ -68,7 +68,7 @@ export default function MobileMenu({ isOpen, onClose, navItems, title = 'Menu', 
       {/* Slide-in Menu */}
       <div
         ref={menuRef}
-        className={`fixed top-0 left-0 h-full w-64 bg-base-100 shadow-xl z-50 transform transition-transform duration-300 ease-in-out md:hidden ${
+        className={`fixed top-0 left-0 h-full w-64 bg-base-100 shadow-xl z-[80] transform transition-transform duration-300 ease-in-out md:hidden ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
