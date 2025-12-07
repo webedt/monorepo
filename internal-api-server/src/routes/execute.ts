@@ -345,8 +345,6 @@ const executeHandler = async (req: Request, res: Response) => {
 
     // Helper to send SSE events
     const sendEvent = async (event: SSEEvent) => {
-      if (clientDisconnected) return;
-
       if (!event.source) {
         event.source = 'internal-api-server';
       }
@@ -366,7 +364,7 @@ const executeHandler = async (req: Request, res: Response) => {
         event.message = `${emoji} ${event.message}`;
       }
 
-      // Store event to database BEFORE sending to client (prevents data loss)
+      // Store event to database (even if client disconnected - for resume/replay)
       if (event.type !== 'completed' && event.type !== 'error') {
         try {
           await db.insert(events).values({
@@ -401,8 +399,11 @@ const executeHandler = async (req: Request, res: Response) => {
       // Broadcast event to any reconnecting clients
       sessionEventBroadcaster.broadcast(chatSession.id, event.type, event);
 
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-      eventsSent++;
+      // Only write to response if client is still connected
+      if (!clientDisconnected) {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+        eventsSent++;
+      }
     };
 
     const startTime = Date.now();
