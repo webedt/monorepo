@@ -588,8 +588,8 @@ export class GitHubOperations {
 
         // Retry logic with delays to allow Docker Swarm to route to different workers
         // Initial delay of 500ms before first attempt to let previous worker become free
-        // Then 1.5s, 2.5s, 3.5s between retries
-        const retryDelays = [1500, 2500, 3500];
+        // Then 5s, 10s, 15s between retries for Docker Swarm worker availability
+        const retryDelays = [5000, 10000, 15000];
         const maxAttempts = retryDelays.length + 1;
         let lastError: Error | null = null;
         let success = false;
