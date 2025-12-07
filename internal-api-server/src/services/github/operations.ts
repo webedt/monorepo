@@ -586,14 +586,23 @@ export class GitHubOperations {
           ? JSON.stringify(options.codingAssistantAuthentication)
           : options.codingAssistantAuthentication;
 
-        // Retry logic with exponential backoff (1s, 2s, 3s)
-        const retryDelays = [1000, 2000, 3000];
+        // Retry logic with delays to allow Docker Swarm to route to different workers
+        // Initial delay of 500ms before first attempt to let previous worker become free
+        // Then 1.5s, 2.5s, 3.5s between retries
+        const retryDelays = [1500, 2500, 3500];
+        const maxAttempts = retryDelays.length + 1;
         let lastError: Error | null = null;
         let success = false;
 
-        for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+        // Small initial delay to help Docker Swarm route to an available worker
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
           try {
-            commitMessage = await aiWorkerClient.generateCommitMessage(
+            // Create a new client instance for each attempt to avoid connection reuse
+            // which might route to the same (busy) worker
+            const freshClient = new AIWorkerClient();
+            commitMessage = await freshClient.generateCommitMessage(
               gitStatus,
               gitDiff,
               options.codingAssistantProvider,
@@ -629,11 +638,11 @@ export class GitHubOperations {
               await progress({
                 type: 'progress',
                 stage: 'generating_message_retry',
-                message: `Retrying commit message generation (attempt ${attempt + 2}/${retryDelays.length + 1})...`,
+                message: `Retrying commit message generation (attempt ${attempt + 2}/${maxAttempts})...`,
                 endpoint
               });
 
-              // Wait before retrying
+              // Wait before retrying - gives Docker Swarm time to route to different worker
               await new Promise(resolve => setTimeout(resolve, delay));
             }
           }
