@@ -423,9 +423,44 @@ export class GitHubOperations {
 
       const gitHelper = new GitHelper(workspacePath);
 
+      // Log workspace path details for debugging
+      logger.info('Checking git repo status', {
+        component: 'GitHubOperations',
+        sessionId,
+        workspacePath,
+        workspaceExists: fs.existsSync(workspacePath),
+        gitDirPath: path.join(workspacePath, '.git'),
+        gitDirExists: fs.existsSync(path.join(workspacePath, '.git'))
+      });
+
       // Check if it's a git repo
       const isRepo = await gitHelper.isGitRepo();
+
+      logger.info('Git repo check result', {
+        component: 'GitHubOperations',
+        sessionId,
+        workspacePath,
+        isRepo
+      });
+
       if (!isRepo) {
+        // Log what's in the workspace for debugging
+        try {
+          const contents = fs.readdirSync(workspacePath);
+          logger.warn('Workspace is not a git repo', {
+            component: 'GitHubOperations',
+            sessionId,
+            workspacePath,
+            contents
+          });
+        } catch (e) {
+          logger.error('Failed to read workspace contents', e, {
+            component: 'GitHubOperations',
+            sessionId,
+            workspacePath
+          });
+        }
+
         return {
           commitHash: '',
           commitMessage: '',

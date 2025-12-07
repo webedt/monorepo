@@ -1434,6 +1434,11 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
         queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
 
+        // Scroll to bottom to show the latest results
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+
         // Navigate to the session URL if not already there
         if (!sessionId || sessionId !== data.websiteSessionId) {
           console.log('[Chat] Navigating to session:', data.websiteSessionId);
