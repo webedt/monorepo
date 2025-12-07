@@ -168,12 +168,12 @@ router.post('/logout', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
-    if (!authReq.session) {
+    if (!authReq.authSession) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
 
-    await lucia.invalidateSession(authReq.session.id);
+    await lucia.invalidateSession(authReq.authSession.id);
     const blankCookie = lucia.createBlankSessionCookie();
 
     res
@@ -190,7 +190,7 @@ router.get('/session', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
-    if (!authReq.user || !authReq.session) {
+    if (!authReq.user || !authReq.authSession) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
@@ -224,7 +224,7 @@ router.get('/session', async (req: Request, res: Response) => {
           isAdmin: freshUser.isAdmin,
           createdAt: freshUser.createdAt,
         },
-        session: authReq.session,
+        session: authReq.authSession,
       },
     });
   } catch (error) {

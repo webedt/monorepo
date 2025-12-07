@@ -49,7 +49,7 @@ router.get('/oauth', requireAuth, (req: Request, res: Response) => {
   }
 
   const state = Buffer.from(JSON.stringify({
-    sessionId: authReq.session!.id,
+    sessionId: authReq.authSession!.id,
     userId: authReq.user!.id,
     timestamp: Date.now(),
     returnOrigin,
