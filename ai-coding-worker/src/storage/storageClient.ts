@@ -44,8 +44,15 @@ export class StorageClient {
 
   /**
    * Download session from storage to local workspace
+   * @param onProgress - Optional callback for progress events
    */
-  async downloadSession(sessionPath: string, localPath: string): Promise<boolean> {
+  async downloadSession(
+    sessionPath: string,
+    localPath: string,
+    onProgress?: (stage: string, message: string, data?: Record<string, unknown>) => void
+  ): Promise<boolean> {
+    const progress = onProgress || (() => {});
+
     if (!this.enabled) {
       // Without storage worker, just create empty directory
       if (!fs.existsSync(localPath)) {
@@ -59,6 +66,8 @@ export class StorageClient {
     const url = `${this.baseUrl}/api/storage/sessions/${sessionPath}/download`;
 
     try {
+      progress('download_starting', 'Starting session download...', { url });
+
       logger.info('Downloading session from storage', {
         component: 'StorageClient',
         sessionPath,
@@ -75,6 +84,7 @@ export class StorageClient {
 
       if (!downloaded) {
         // New session - create empty workspace
+        progress('download_not_found', 'No existing session, creating new workspace');
         logger.info('Session not found in storage, creating new workspace', {
           component: 'StorageClient',
           sessionPath
@@ -83,7 +93,23 @@ export class StorageClient {
         return false;
       }
 
+      // Get tarball size for logging
+      const tarStats = fs.statSync(tarPath);
+      progress('download_complete', 'Session tarball downloaded', {
+        sizeBytes: tarStats.size,
+        sizeMB: (tarStats.size / 1024 / 1024).toFixed(2)
+      });
+
+      logger.info('Session tarball downloaded', {
+        component: 'StorageClient',
+        sessionPath,
+        tarPath,
+        sizeBytes: tarStats.size
+      });
+
       // Extract tarball
+      progress('extract_starting', 'Extracting session tarball...');
+
       const tmpExtractDir = `${localPath}-extract`;
       const homeDir = process.env.HOME || '/home/worker';
 
@@ -93,6 +119,8 @@ export class StorageClient {
         file: tarPath,
         cwd: tmpExtractDir
       });
+
+      progress('extract_complete', 'Tarball extraction complete');
 
       // Move entire session contents to final location (preserving structure)
       // The tarball contains: workspace/, .session-metadata.json, etc.
@@ -112,6 +140,11 @@ export class StorageClient {
           await fs.promises.copyFile(srcPath, destPath);
         }
       }
+
+      progress('files_copied', 'Session files copied to workspace', {
+        itemCount: extractedItems.length,
+        items: extractedItems
+      });
 
       logger.info('Extracted session contents', {
         component: 'StorageClient',
@@ -159,6 +192,10 @@ export class StorageClient {
       // Cleanup
       fs.unlinkSync(tarPath);
       fs.rmSync(tmpExtractDir, { recursive: true, force: true });
+
+      progress('session_ready', 'Session fully downloaded and extracted', {
+        localPath
+      });
 
       logger.info('Session downloaded successfully', {
         component: 'StorageClient',

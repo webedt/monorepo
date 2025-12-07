@@ -148,8 +148,21 @@ export class Orchestrator {
         fs.rmSync(sessionRoot, { recursive: true, force: true });
       }
 
-      // Download and extract session
-      const sessionDownloaded = await this.storageClient.downloadSession(websiteSessionId, sessionRoot);
+      // Download and extract session with progress callbacks
+      const sessionDownloaded = await this.storageClient.downloadSession(
+        websiteSessionId,
+        sessionRoot,
+        (stage, message, data) => {
+          // Send progress events to client for visibility into download/extract process
+          sendEvent({
+            type: 'message',
+            stage: `download_${stage}`,
+            message,
+            data,
+            timestamp: new Date().toISOString()
+          });
+        }
+      );
 
       if (sessionDownloaded) {
         logger.info('Session downloaded from storage', {
