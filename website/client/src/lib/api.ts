@@ -51,14 +51,26 @@ async function fetchApi<T = any>(endpoint: string, options: ApiOptions = {}): Pr
     config.body = JSON.stringify(body);
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+  const fullUrl = `${API_BASE_URL}${endpoint}`;
+  console.log(`[fetchApi] Requesting: ${fullUrl}`);
+
+  const response = await fetch(fullUrl, config);
+
+  console.log(`[fetchApi] Response for ${endpoint}:`, {
+    status: response.status,
+    ok: response.ok,
+    statusText: response.statusText
+  });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
+    console.error(`[fetchApi] Error for ${endpoint}:`, error);
     throw new Error(error.error || 'Request failed');
   }
 
-  return response.json();
+  const data = await response.json();
+  console.log(`[fetchApi] Success for ${endpoint}:`, { dataKeys: Object.keys(data || {}) });
+  return data;
 }
 
 // Auth API
