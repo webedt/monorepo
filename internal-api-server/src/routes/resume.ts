@@ -262,17 +262,25 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
       .where(eq(events.chatSessionId, session[0].id))
       .orderBy(asc(events.id));
 
+    // Format response to match what client expects (data.events, data.total)
+    const formattedEvents = storedEvents.map((e: typeof storedEvents[number]) => ({
+      id: e.id,
+      chatSessionId: session[0].id,
+      eventType: e.eventType,
+      eventData: e.eventData,
+      timestamp: e.timestamp
+    }));
+
     res.json({
       success: true,
-      sessionId: session[0].id,
-      sessionPath: session[0].sessionPath,
-      status: session[0].status,
-      events: storedEvents.map((e: typeof storedEvents[number]) => ({
-        id: e.id,
-        eventType: e.eventType,
-        eventData: e.eventData,
-        timestamp: e.timestamp
-      }))
+      data: {
+        events: formattedEvents,
+        total: formattedEvents.length,
+        // Include session info for convenience
+        sessionId: session[0].id,
+        sessionPath: session[0].sessionPath,
+        status: session[0].status,
+      }
     });
 
   } catch (error) {
