@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
+import { sessionsApi, githubApi, getApiBaseUrl } from '@/lib/api';
 import type { GitHubPullRequest } from '@/shared';
 import { useEventSource } from '@/hooks/useEventSource';
 import { useBrowserNotification, getNotificationPrefs } from '@/hooks/useBrowserNotification';
@@ -384,6 +384,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const chatInputRef = useRef<ChatInputRef>(null);
   const isNearBottomRef = useRef(true); // Track if user is near bottom for smart auto-scroll
   const previousSessionIdRef = useRef<string | undefined>(undefined); // Track session changes for initial scroll
+  const isInitialSessionLoadRef = useRef(false); // Track initial session load to skip scroll preservation
   const [lastRequest, setLastRequest] = useState<{
     input: string;
     selectedRepo: string;
@@ -631,7 +632,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     queryKey: ['currentSession', currentSessionId],
     queryFn: async () => {
       if (!currentSessionId) return null;
-      const response = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/sessions/${currentSessionId}`, {
         credentials: 'include',
       });
       if (!response.ok) throw new Error('Failed to fetch session');
@@ -924,13 +925,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Preserve scroll position when updating messages from database
     // This prevents the chat from jumping to top when queries are refetched after completion
+    // BUT skip this during initial session load - we want to scroll to bottom in that case
     const container = messagesContainerRef.current;
     const savedScrollTop = container?.scrollTop ?? 0;
+    const shouldPreserveScroll = !isInitialSessionLoadRef.current && savedScrollTop > 0;
 
     setMessages(allMessages);
 
-    // Restore scroll position after React re-renders
-    if (container && savedScrollTop > 0) {
+    // Restore scroll position after React re-renders (only if not initial load)
+    if (container && shouldPreserveScroll) {
       requestAnimationFrame(() => {
         container.scrollTop = savedScrollTop;
       });
@@ -1049,24 +1052,37 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Only trigger when sessionId changes to a valid session (not 'new')
     if (sessionId && sessionId !== 'new' && sessionId !== previousSessionIdRef.current) {
       previousSessionIdRef.current = sessionId;
+      // Mark that we're doing initial session load - this prevents scroll position preservation
+      // from fighting with our scroll-to-bottom behavior
+      isInitialSessionLoadRef.current = true;
+    } else if (!sessionId || sessionId === 'new') {
+      // Reset when navigating to new session page
+      previousSessionIdRef.current = undefined;
+      isInitialSessionLoadRef.current = false;
+    }
+  }, [sessionId]);
 
-      // Wait for messages to load, then scroll to bottom
-      // Use a small delay to ensure the DOM has updated with messages
+  // Scroll to bottom after messages load during initial session entry
+  // This is separate from the sessionId change detection to ensure messages are actually loaded
+  useEffect(() => {
+    if (isInitialSessionLoadRef.current && messages.length > 0) {
+      // Messages have loaded, scroll to bottom
       const scrollToBottom = () => {
         if (messagesEndRef.current) {
           messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
           // Reset isNearBottomRef since we're now at the bottom
           isNearBottomRef.current = true;
         }
+        // Clear the flag after scrolling - subsequent message updates won't trigger this
+        isInitialSessionLoadRef.current = false;
       };
 
-      // Try scrolling after a short delay to allow messages to render
-      setTimeout(scrollToBottom, 100);
-    } else if (!sessionId || sessionId === 'new') {
-      // Reset when navigating to new session page
-      previousSessionIdRef.current = undefined;
+      // Use requestAnimationFrame to ensure DOM has rendered, then scroll
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
     }
-  }, [sessionId, messages.length]); // Also depend on messages.length to scroll after messages load
+  }, [messages.length]);
 
   // Reset state when navigating to new chat (sessionId becomes undefined)
   useEffect(() => {
@@ -1148,7 +1164,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Always use POST
       setStreamMethod('POST');
       setStreamBody(params);
-      setStreamUrl(`${API_BASE_URL}/api/execute`);
+      setStreamUrl(`${getApiBaseUrl()}/api/execute`);
 
       setIsExecuting(true);
 
@@ -1171,7 +1187,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     onMessage: (event) => {
       // Log all events to see what we're receiving
       console.log('Received SSE event:', event);
-      console.log('Full event data structure:', JSON.stringify(event, null, 2));
 
       const { eventType, data } = event;
 
@@ -1706,7 +1721,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Always use POST to allow reading error body in response
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${API_BASE_URL}/api/execute`);
+    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
 
     setInput('');
     setImages([]);
@@ -1762,7 +1777,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Always use POST
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${API_BASE_URL}/api/execute`);
+    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
   };
 
   // Handle interrupting current job
@@ -1771,7 +1786,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     try {
       // Send abort signal to server
-      await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/abort`, {
+      await fetch(`${getApiBaseUrl()}/api/sessions/${currentSessionId}/abort`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -1865,7 +1880,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
         setStreamMethod('POST');
         setStreamBody(requestParams);
-        setStreamUrl(`${API_BASE_URL}/api/execute`);
+        setStreamUrl(`${getApiBaseUrl()}/api/execute`);
       }, 500);
     }
   }, [isExecuting, messageQueue.length, currentSessionId, sessionId]);

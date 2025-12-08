@@ -1,9 +1,19 @@
+// Cached API base URL - computed once on first access
+let cachedApiBaseUrl: string | null = null;
+
 // Detect API base URL for path-based routing
 function getApiBaseUrl(): string {
+  // Return cached value if already computed
+  if (cachedApiBaseUrl !== null) {
+    return cachedApiBaseUrl;
+  }
+
   // If explicitly set via env var, use it
   const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
   if (envBaseUrl) {
-    return envBaseUrl;
+    cachedApiBaseUrl = envBaseUrl;
+    console.log('[API] Using env API_BASE_URL:', cachedApiBaseUrl);
+    return cachedApiBaseUrl;
   }
 
   // Detect from current pathname for path-based routing
@@ -17,19 +27,26 @@ function getApiBaseUrl(): string {
   if (pathSegments.length >= 3 && !['login', 'register', 'session', 'settings'].includes(pathSegments[0])) {
     // Check for monorepo pattern: /owner/repo/website/branch/
     if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
-      return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
+      cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
+    } else {
+      // Standard format: /owner/repo/branch/...
+      cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
     }
-    // Standard format: /owner/repo/branch/...
-    return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+  } else {
+    // Default to empty string for root-based deployments
+    cachedApiBaseUrl = '';
   }
 
-  // Default to empty string for root-based deployments
-  return '';
+  console.log('[API] Detected API_BASE_URL:', cachedApiBaseUrl);
+  console.log('[API] Current pathname:', pathname);
+  return cachedApiBaseUrl;
 }
 
+// Export the function for runtime URL detection (preferred for code-split bundles)
+export { getApiBaseUrl };
+
+// Also export a static constant for backward compatibility (computed once at module load)
 export const API_BASE_URL = getApiBaseUrl();
-console.log('[API] Detected API_BASE_URL:', API_BASE_URL);
-console.log('[API] Current pathname:', window.location.pathname);
 
 interface ApiOptions extends RequestInit {
   body?: any;
@@ -51,7 +68,7 @@ async function fetchApi<T = any>(endpoint: string, options: ApiOptions = {}): Pr
     config.body = JSON.stringify(body);
   }
 
-  const fullUrl = `${API_BASE_URL}${endpoint}`;
+  const fullUrl = `${getApiBaseUrl()}${endpoint}`;
   console.log(`[fetchApi] Requesting: ${fullUrl}`);
 
   const response = await fetch(fullUrl, config);
@@ -98,7 +115,7 @@ export const authApi = {
 // GitHub API
 export const githubApi = {
   connect: () => {
-    window.location.href = `${API_BASE_URL}/api/github/oauth`;
+    window.location.href = `${getApiBaseUrl()}/api/github/oauth`;
   },
 
   getRepos: () => fetchApi('/api/github/repos'),
@@ -378,12 +395,12 @@ export const sessionsApi = {
     }),
 
   // Get the URL for streaming events from a running session (for reconnection)
-  getStreamUrl: (id: string) => `${API_BASE_URL}/api/sessions/${id}/stream`,
+  getStreamUrl: (id: string) => `${getApiBaseUrl()}/api/sessions/${id}/stream`,
 
   // Check if a session has an active stream
   checkStreamActive: async (id: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/sessions/${id}/stream`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/sessions/${id}/stream`, {
         method: 'HEAD',
         credentials: 'include',
       });
@@ -469,7 +486,7 @@ export const storageWorkerApi = {
 
   sessionExists: async (sessionId: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionId}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/storage-worker/sessions/${sessionId}`, {
         method: 'HEAD',
         credentials: 'include',
       });
@@ -487,12 +504,12 @@ export const storageWorkerApi = {
 
   // Get a file's raw URL (for images, etc.)
   getFileUrl: (sessionPath: string, filePath: string): string => {
-    return `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    return `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
   },
 
   // Get file content as blob
   getFileBlob: async (sessionPath: string, filePath: string): Promise<Blob | null> => {
-    const url = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    const url = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
     try {
       const response = await fetch(url, {
         credentials: 'include',
@@ -518,13 +535,13 @@ export const storageWorkerApi = {
 
   // Get file content as text
   getFileText: async (sessionPath: string, filePath: string): Promise<string | null> => {
-    const url = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    const url = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
 
     console.log(`[StorageWorker] getFileText request:`, {
       sessionPath,
       filePath,
       url,
-      apiBaseUrl: API_BASE_URL,
+      apiBaseUrl: getApiBaseUrl(),
     });
 
     try {
@@ -559,7 +576,7 @@ export const storageWorkerApi = {
     const body = typeof content === 'string' ? content : content;
     const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
     const contentSize = typeof content === 'string' ? content.length : content.size;
-    const url = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    const url = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
 
     console.log(`[StorageWorker] Writing file:`, {
       sessionPath,
@@ -567,7 +584,7 @@ export const storageWorkerApi = {
       contentType,
       contentSize,
       url,
-      apiBaseUrl: API_BASE_URL,
+      apiBaseUrl: getApiBaseUrl(),
     });
 
     try {
@@ -617,7 +634,7 @@ export const storageWorkerApi = {
 
           // Check if session exists
           try {
-            const sessionCheckUrl = `${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}`;
+            const sessionCheckUrl = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}`;
             const sessionCheck = await fetch(sessionCheckUrl, {
               method: 'HEAD',
               credentials: 'include',
@@ -633,7 +650,7 @@ export const storageWorkerApi = {
 
           // Check if we can list sessions at all (to verify API is reachable)
           try {
-            const listUrl = `${API_BASE_URL}/api/storage-worker/sessions`;
+            const listUrl = `${getApiBaseUrl()}/api/storage-worker/sessions`;
             const listCheck = await fetch(listUrl, {
               method: 'GET',
               credentials: 'include',
@@ -667,7 +684,7 @@ export const storageWorkerApi = {
   // Delete a file from a session
   deleteFile: async (sessionPath: string, filePath: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -710,9 +727,9 @@ export function createExecuteEventSource(data: {
     params.append('github', JSON.stringify(data.github));
   }
 
-  const fullUrl = `${API_BASE_URL}/api/execute?${params}`;
+  const fullUrl = `${getApiBaseUrl()}/api/execute?${params}`;
   console.log('[API] Creating EventSource with URL:', fullUrl);
-  console.log('[API] API_BASE_URL:', API_BASE_URL);
+  console.log('[API] API_BASE_URL:', getApiBaseUrl());
   console.log('[API] Selected provider:', data.provider || 'default');
 
   return new EventSource(fullUrl, {
