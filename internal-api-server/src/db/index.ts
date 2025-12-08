@@ -124,6 +124,9 @@ pool.query(`
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'chat_sessions' AND column_name = 'provider_session_id') THEN
         ALTER TABLE chat_sessions ADD COLUMN provider_session_id TEXT;
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chat_verbosity_level') THEN
+        ALTER TABLE users ADD COLUMN chat_verbosity_level TEXT NOT NULL DEFAULT 'verbose';
+      END IF;
     END $$;
   `);
 }).then(() => {
