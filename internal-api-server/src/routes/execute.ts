@@ -19,9 +19,7 @@ import { ensureValidToken, ClaudeAuth } from '../lib/claudeAuth.js';
 import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../lib/codexAuth.js';
 import { StorageService } from '../services/storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../services/github/operations.js';
-import { logger } from '../utils/logger.js';
-import { generateSessionPath } from '../utils/sessionPathHelper.js';
-import { getEventEmoji } from '../utils/emojiMapper.js';
+import { logger, generateSessionPath, getEventEmoji } from '@webedt/shared';
 import { WORKSPACE_DIR, AI_WORKER_URL } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 

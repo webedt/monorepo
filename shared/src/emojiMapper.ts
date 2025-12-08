@@ -1,7 +1,6 @@
 /**
  * Emoji mapper for SSE messages
  * Centralizes emoji assignment based on message stage/action
- * Sub-workers send semantic stages, ai-coding-worker applies emojis
  */
 
 // Stage-to-emoji mapping for progress/message events
@@ -31,7 +30,11 @@ const stageEmojis: Record<string, string> = {
   // Analysis/changes
   'analyzing': '🔍',
   'changes_detected': '📝',
+
+  // Commit operations
   'generating_message': '🤖',
+  'committing': '💾',
+  'committed': '✅',
 
   // PR operations
   'creating_pr': '📋',
@@ -57,6 +60,7 @@ const typeEmojis: Record<string, string> = {
   'branch_created': '🌿',
   'session_name': '📝',
   'session_started': '🚀',
+  'commit_progress': '📤',
   'pr_progress': '📋',
   'tool_use': '🔧',
   'tool_result': '📋',
@@ -66,9 +70,11 @@ const typeEmojis: Record<string, string> = {
 
 // Source-specific default emojis
 const sourceEmojis: Record<string, string> = {
+  'storage': '🗄️',
   'storage-worker': '🗄️',
-  'github-worker': '🐙',
-  'ai-coding-worker': '🤖',
+  'github': '🐙',
+  'internal-api-server': '🖥️',
+  'ai-worker': '🤖',
   'claude': '🤖',
 };
 

@@ -8,7 +8,7 @@ import { Router, Request, Response } from 'express';
 import { db, chatSessions, events } from '../db/index.js';
 import { eq, and, or, asc } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '@webedt/shared';
 import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';

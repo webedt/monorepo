@@ -18,7 +18,7 @@ import {
   logEnvConfig
 } from './config/env.js';
 
-import { logger } from './utils/logger.js';
+import { logger } from '@webedt/shared';
 
 // Import database
 import './db/index.js';

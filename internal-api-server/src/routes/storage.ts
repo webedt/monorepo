@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { Readable } from 'stream';
 import { storageService } from '../services/storage/storageService.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '@webedt/shared';
 
 const router = Router();
 

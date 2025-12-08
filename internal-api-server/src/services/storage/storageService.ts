@@ -10,8 +10,7 @@ import { Readable } from 'stream';
 import * as tar from 'tar';
 import { createGunzip } from 'zlib';
 import { getMinioClient, getBucket, initializeBucket } from './minioClient.js';
-import { logger } from '../../utils/logger.js';
-import { validateSessionPath } from '../../utils/sessionPathHelper.js';
+import { logger, validateSessionPath } from '@webedt/shared';
 
 export interface SessionMetadata {
   sessionPath: string;

@@ -1,0 +1,23 @@
+{
+  "name": "@webedt/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shared utilities for WebEDT monorepo",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "webedt",
+    "shared",
+    "utilities"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.6.3"
+  }
+}

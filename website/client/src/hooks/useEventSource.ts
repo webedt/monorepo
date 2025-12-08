@@ -343,7 +343,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       try {
         const parsed = JSON.parse(data);
         onCompletedRef.current?.(parsed);
-      } catch {
+      } catch (e) {
+        console.debug('[SSE] Could not parse completed event data as JSON, using default completion', e);
         onCompletedRef.current?.();
       }
       disconnect();
@@ -353,14 +354,16 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         hasExplicitlyClosedRef.current = true;
         onErrorRef.current?.(new Error(parsed.error || 'Stream error'));
         disconnect();
-      } catch {
+      } catch (e) {
+        console.debug('[SSE] Could not parse error event data as JSON, forwarding as message', e);
         onMessageRef.current?.({ eventType: 'error', data });
       }
     } else {
       try {
         const parsed = JSON.parse(data);
         onMessageRef.current?.({ eventType, data: parsed });
-      } catch {
+      } catch (e) {
+        console.debug(`[SSE] Could not parse ${eventType} event data as JSON, forwarding raw`, e);
         onMessageRef.current?.({ eventType, data });
       }
     }
@@ -384,7 +387,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         try {
           const data = JSON.parse(event.data);
           onMessageRef.current?.({ eventType: 'message', data });
-        } catch {
+        } catch (e) {
+          console.debug('[SSE] Could not parse message event data as JSON, forwarding raw', e);
           onMessageRef.current?.({ eventType: 'message', data: event.data });
         }
       };
@@ -394,7 +398,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         try {
           const data = JSON.parse(event.data);
           onMessageRef.current?.({ eventType: 'connected', data });
-        } catch {
+        } catch (e) {
+          console.debug('[SSE] Could not parse connected event data as JSON, forwarding raw', e);
           onMessageRef.current?.({ eventType: 'connected', data: event.data });
         }
       });
@@ -408,7 +413,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           try {
             const data = JSON.parse(event.data);
             onMessageRef.current?.({ eventType, data });
-          } catch {
+          } catch (e) {
+            console.debug(`[SSE] Could not parse ${eventType} event data as JSON, forwarding raw`, e);
             onMessageRef.current?.({ eventType, data: event.data });
           }
         });
@@ -431,7 +437,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         try {
           const data = JSON.parse(event.data);
           onCompletedRef.current?.(data);
-        } catch {
+        } catch (e) {
+          console.debug('[SSE] Could not parse completed event data as JSON, using default completion', e);
           onCompletedRef.current?.();
         }
         disconnect();
@@ -449,7 +456,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           onErrorRef.current?.(new Error(data.error || 'Stream error'));
           // Don't auto-reconnect on explicit error events
           disconnect();
-        } catch {
+        } catch (e) {
+          console.debug('[SSE] Could not parse error event data as JSON, forwarding as message', e);
           onMessageRef.current?.({ eventType: 'error', data: event.data });
         }
       });

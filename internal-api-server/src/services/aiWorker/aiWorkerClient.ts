@@ -5,7 +5,7 @@
  */
 
 import { AI_WORKER_URL } from '../../config/env.js';
-import { logger } from '../../utils/logger.js';
+import { logger } from '@webedt/shared';
 
 export interface QueryRequest {
   prompt: string;

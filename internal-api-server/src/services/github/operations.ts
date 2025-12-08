@@ -11,8 +11,7 @@ import { GitHubClient } from './githubClient.js';
 import { GitHelper } from './gitHelper.js';
 import { AIWorkerClient } from '../aiWorker/aiWorkerClient.js';
 import { StorageService } from '../storage/storageService.js';
-import { logger } from '../../utils/logger.js';
-import { generateSessionPath } from '../../utils/sessionPathHelper.js';
+import { logger, generateSessionPath } from '@webedt/shared';
 
 // ============================================================================
 // Types
