@@ -112,6 +112,9 @@ export default function Settings() {
   const [isKeywordDropdownOpen, setIsKeywordDropdownOpen] = useState(false);
   const keywordDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Stop listening after submit state (local state for immediate UI feedback)
+  const [stopListeningAfterSubmit, setStopListeningAfterSubmit] = useState<boolean>(user?.stopListeningAfterSubmit ?? false);
+
   // Browser notification state
   const { permission, isSupported, requestPermission } = useBrowserNotification();
   const [notificationPrefs, setNotificationPrefsState] = useState(getNotificationPrefs);
@@ -184,6 +187,10 @@ export default function Settings() {
   useEffect(() => {
     setChatVerbosity(user?.chatVerbosityLevel || 'verbose');
   }, [user?.chatVerbosityLevel]);
+
+  useEffect(() => {
+    setStopListeningAfterSubmit(user?.stopListeningAfterSubmit ?? false);
+  }, [user?.stopListeningAfterSubmit]);
 
   // Close keyword dropdown when clicking outside
   useEffect(() => {
@@ -1355,8 +1362,14 @@ export default function Settings() {
                   <label className="label cursor-pointer justify-start gap-4">
                     <input
                       type="checkbox"
-                      checked={user?.stopListeningAfterSubmit ?? false}
-                      onChange={(e) => updateStopListeningAfterSubmit.mutate(e.target.checked)}
+                      checked={stopListeningAfterSubmit}
+                      onChange={(e) => {
+                        const newValue = e.target.checked;
+                        // Update local state immediately for responsive UI
+                        setStopListeningAfterSubmit(newValue);
+                        // Then persist to server
+                        updateStopListeningAfterSubmit.mutate(newValue);
+                      }}
                       disabled={updateStopListeningAfterSubmit.isPending}
                       className="checkbox checkbox-primary"
                     />
