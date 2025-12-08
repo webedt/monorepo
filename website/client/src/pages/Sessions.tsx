@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { sessionsApi, githubApi } from '@/lib/api';
-import { useAuthStore, useSessionLastPageStore } from '@/lib/store';
+import { useAuthStore, useSessionLastPageStore, useRecentReposStore } from '@/lib/store';
 import ChatInput, { type ImageAttachment } from '@/components/ChatInput';
 import type { ChatSession, GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
@@ -23,6 +23,7 @@ export default function Sessions() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const { getLastPage } = useSessionLastPageStore();
+  const { addRecentRepo } = useRecentReposStore();
 
   // Session editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -76,15 +77,17 @@ export default function Sessions() {
   }, [repositories, hasLoadedFromStorage]);
 
   // Save selected repo to localStorage whenever it changes (including clearing)
+  // Also add to recent repos when a repo is selected
   useEffect(() => {
     if (hasLoadedFromStorage) {
       if (selectedRepo) {
         localStorage.setItem('lastSelectedRepo', selectedRepo);
+        addRecentRepo(selectedRepo);
       } else {
         localStorage.removeItem('lastSelectedRepo');
       }
     }
-  }, [selectedRepo, hasLoadedFromStorage]);
+  }, [selectedRepo, hasLoadedFromStorage, addRecentRepo]);
 
   const updateMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>

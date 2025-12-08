@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 're
 import { Link } from 'react-router-dom';
 import type { GitHubRepository, User } from '@/shared';
 import { githubApi } from '@/lib/api';
-import { useVoiceRecordingStore, useIsWorkerExecuting } from '@/lib/store';
+import { useVoiceRecordingStore, useIsWorkerExecuting, useRecentReposStore } from '@/lib/store';
 
 export interface ImageAttachment {
   id: string;
@@ -115,21 +115,38 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const [branches, setBranches] = useState<string[]>([]);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
 
+  // Recent repos store
+  const { recentRepoUrls, addRecentRepo, removeRecentRepo } = useRecentReposStore();
+
   // Sort repositories alphabetically by fullName
   const sortedRepositories = [...repositories].sort((a, b) =>
     a.fullName.localeCompare(b.fullName)
   );
 
-  // Filter repositories based on fuzzy search with space-separated terms
-  const filteredRepositories = sortedRepositories.filter((repo) => {
-    if (!repoSearchQuery.trim()) return true;
+  // Get recent repos that still exist in the repositories list
+  const recentRepos = recentRepoUrls
+    .map(url => repositories.find(r => r.cloneUrl === url))
+    .filter((r): r is GitHubRepository => r !== undefined);
 
+  // Get non-recent repos (those not in the recent list)
+  const nonRecentRepos = sortedRepositories.filter(
+    repo => !recentRepoUrls.includes(repo.cloneUrl)
+  );
+
+  // Filter function for repos based on fuzzy search
+  const matchesSearch = (repo: GitHubRepository) => {
+    if (!repoSearchQuery.trim()) return true;
     const searchTerms = repoSearchQuery.toLowerCase().trim().split(/\s+/);
     const repoName = repo.fullName.toLowerCase();
-
-    // Check if all search terms match
     return searchTerms.every(term => repoName.includes(term));
-  });
+  };
+
+  // Filter recent and non-recent repos separately
+  const filteredRecentRepos = recentRepos.filter(matchesSearch);
+  const filteredNonRecentRepos = nonRecentRepos.filter(matchesSearch);
+
+  // Combined filtered repos for keyboard navigation (recent first, then non-recent)
+  const filteredRepositories = [...filteredRecentRepos, ...filteredNonRecentRepos];
 
   // Filter branches based on fuzzy search with space-separated terms
   const filteredBranches = branches.filter((branchName) => {
@@ -822,25 +839,85 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                               >
                                 No repository
                               </button>
-                              {/* Filtered repositories */}
-                              {filteredRepositories.length > 0 ? (
-                                filteredRepositories.map((repo, index) => (
-                                  <button
-                                    key={repo.id}
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setSelectedRepo(repo.cloneUrl);
-                                      setIsRepoDropdownOpen(false);
-                                      setRepoSearchQuery('');
-                                    }}
-                                    className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${repoHighlightedIndex === index + 1 ? 'bg-primary text-primary-content' : ''} ${selectedRepo === repo.cloneUrl ? 'bg-primary/20 font-semibold' : ''}`}
-                                  >
-                                    {repo.fullName}
-                                  </button>
-                                ))
-                              ) : (
+
+                              {/* Recent repositories section */}
+                              {filteredRecentRepos.length > 0 && (
+                                <>
+                                  <div className="px-4 py-1 text-xs font-semibold text-base-content/50 bg-base-200 border-y border-base-300">
+                                    Recent
+                                  </div>
+                                  {filteredRecentRepos.map((repo, index) => (
+                                    <div
+                                      key={`recent-${repo.id}`}
+                                      className={`flex items-center group hover:bg-primary focus-within:bg-primary ${repoHighlightedIndex === index + 1 ? 'bg-primary' : ''} ${selectedRepo === repo.cloneUrl ? 'bg-primary/20' : ''}`}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setSelectedRepo(repo.cloneUrl);
+                                          addRecentRepo(repo.cloneUrl);
+                                          setIsRepoDropdownOpen(false);
+                                          setRepoSearchQuery('');
+                                        }}
+                                        className={`flex-1 text-left px-4 py-2 text-sm focus:outline-none group-hover:text-primary-content ${repoHighlightedIndex === index + 1 ? 'text-primary-content' : ''} ${selectedRepo === repo.cloneUrl ? 'font-semibold' : ''}`}
+                                      >
+                                        {repo.fullName}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          removeRecentRepo(repo.cloneUrl);
+                                        }}
+                                        className="px-2 py-1 mr-2 text-base-content/40 hover:text-error hover:bg-error/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                        title="Remove from recent"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+
+                              {/* All other repositories section */}
+                              {filteredNonRecentRepos.length > 0 && (
+                                <>
+                                  {filteredRecentRepos.length > 0 && (
+                                    <div className="px-4 py-1 text-xs font-semibold text-base-content/50 bg-base-200 border-y border-base-300">
+                                      All Repositories
+                                    </div>
+                                  )}
+                                  {filteredNonRecentRepos.map((repo, index) => {
+                                    // Calculate the correct highlight index accounting for "No repo" (1) + recent repos
+                                    const highlightIndex = 1 + filteredRecentRepos.length + index;
+                                    return (
+                                      <button
+                                        key={repo.id}
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setSelectedRepo(repo.cloneUrl);
+                                          addRecentRepo(repo.cloneUrl);
+                                          setIsRepoDropdownOpen(false);
+                                          setRepoSearchQuery('');
+                                        }}
+                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${repoHighlightedIndex === highlightIndex ? 'bg-primary text-primary-content' : ''} ${selectedRepo === repo.cloneUrl ? 'bg-primary/20 font-semibold' : ''}`}
+                                      >
+                                        {repo.fullName}
+                                      </button>
+                                    );
+                                  })}
+                                </>
+                              )}
+
+                              {/* No results message */}
+                              {filteredRecentRepos.length === 0 && filteredNonRecentRepos.length === 0 && (
                                 <div className="p-4 text-xs text-base-content/50 text-center">
                                   No repositories found
                                 </div>
