@@ -340,8 +340,8 @@ export default function QuickSessionSetup() {
         <div className="text-center">
           <h1 className="text-3xl font-bold text-base-content mb-4">Invalid Activity</h1>
           <p className="text-base-content/70 mb-6">The activity you requested does not exist.</p>
-          <button onClick={() => navigate('/new-session')} className="btn btn-primary">
-            Go to New Session
+          <button onClick={() => navigate('/sessions')} className="btn btn-primary">
+            Go to Sessions
           </button>
         </div>
       </div>
