@@ -1,3 +1,6 @@
+// Chat verbosity level type
+export type ChatVerbosityLevel = 'minimal' | 'normal' | 'verbose';
+
 // User types
 export interface User {
   id: string;
@@ -13,6 +16,7 @@ export interface User {
   stopListeningAfterSubmit: boolean;
   defaultLandingPage: 'store' | 'library' | 'community' | 'sessions';
   preferredModel?: string | null;
+  chatVerbosityLevel: ChatVerbosityLevel; // Controls how much detail to show in chat
   isAdmin: boolean;
   createdAt: Date;
 }

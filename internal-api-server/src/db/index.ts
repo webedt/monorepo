@@ -127,6 +127,9 @@ pool.query(`
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'stop_listening_after_submit') THEN
         ALTER TABLE users ADD COLUMN stop_listening_after_submit BOOLEAN NOT NULL DEFAULT FALSE;
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chat_verbosity_level') THEN
+        ALTER TABLE users ADD COLUMN chat_verbosity_level TEXT NOT NULL DEFAULT 'verbose';
+      END IF;
     END $$;
   `);
 }).then(() => {

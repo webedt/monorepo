@@ -365,4 +365,35 @@ router.post('/preferred-model', requireAuth, async (req: Request, res: Response)
   }
 });
 
+// Update chat verbosity level
+router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { verbosityLevel } = req.body;
+
+    // Validate verbosity level is one of the valid options
+    const validLevels = ['minimal', 'normal', 'verbose'];
+    if (!validLevels.includes(verbosityLevel)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid verbosity level. Must be one of: minimal, normal, verbose',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ chatVerbosityLevel: verbosityLevel })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Chat verbosity level updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update chat verbosity level error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update chat verbosity level' });
+  }
+});
+
 export default router;

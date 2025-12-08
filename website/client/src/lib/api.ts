@@ -266,6 +266,12 @@ export const userApi = {
       method: 'POST',
       body: { preferredModel },
     }),
+
+  updateChatVerbosity: (verbosityLevel: 'minimal' | 'normal' | 'verbose') =>
+    fetchApi('/api/user/chat-verbosity', {
+      method: 'POST',
+      body: { verbosityLevel },
+    }),
 };
 
 // Sessions API
