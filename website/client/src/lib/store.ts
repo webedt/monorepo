@@ -716,3 +716,84 @@ export const useSessionsSidebarStore = create<SessionsSidebarState>((set, get) =
     saveSidebarState(newState);
   },
 }));
+
+// ============================================================================
+// RECENT REPOSITORIES
+// ============================================================================
+// This store tracks the most recently used repositories (up to 5), allowing
+// users to quickly switch between frequently used repos. The list is ordered
+// by most recent first, and repos can be manually removed.
+// ============================================================================
+
+const RECENT_REPOS_STORAGE_KEY = 'recentRepos';
+const MAX_RECENT_REPOS = 5;
+
+// Each recent repo entry stores the cloneUrl (used as identifier)
+interface RecentReposState {
+  // List of recent repo cloneUrls, most recent first
+  recentRepoUrls: string[];
+
+  // Add a repo to the recent list (moves to front if already exists)
+  addRecentRepo: (cloneUrl: string) => void;
+
+  // Remove a repo from the recent list
+  removeRecentRepo: (cloneUrl: string) => void;
+
+  // Get the recent repos list
+  getRecentRepos: () => string[];
+}
+
+// Load initial state from localStorage
+function loadRecentRepos(): string[] {
+  try {
+    const stored = localStorage.getItem(RECENT_REPOS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Ensure it's an array and limit to max
+      if (Array.isArray(parsed)) {
+        return parsed.slice(0, MAX_RECENT_REPOS);
+      }
+    }
+  } catch (e) {
+    console.warn('[RecentRepos] Failed to load from localStorage:', e);
+  }
+  return [];
+}
+
+// Save state to localStorage
+function saveRecentRepos(repos: string[]) {
+  try {
+    localStorage.setItem(RECENT_REPOS_STORAGE_KEY, JSON.stringify(repos));
+  } catch (e) {
+    console.warn('[RecentRepos] Failed to save to localStorage:', e);
+  }
+}
+
+export const useRecentReposStore = create<RecentReposState>((set, get) => ({
+  recentRepoUrls: loadRecentRepos(),
+
+  addRecentRepo: (cloneUrl: string) => {
+    if (!cloneUrl) return; // Don't add empty strings
+
+    set((state) => {
+      // Remove if already exists (will be re-added at front)
+      const filtered = state.recentRepoUrls.filter(url => url !== cloneUrl);
+      // Add to front and limit to max
+      const newList = [cloneUrl, ...filtered].slice(0, MAX_RECENT_REPOS);
+      saveRecentRepos(newList);
+      return { recentRepoUrls: newList };
+    });
+  },
+
+  removeRecentRepo: (cloneUrl: string) => {
+    set((state) => {
+      const newList = state.recentRepoUrls.filter(url => url !== cloneUrl);
+      saveRecentRepos(newList);
+      return { recentRepoUrls: newList };
+    });
+  },
+
+  getRecentRepos: () => {
+    return get().recentRepoUrls;
+  },
+}));
