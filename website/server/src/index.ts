@@ -72,15 +72,23 @@ function isAllowedRoute(path: string): boolean {
   return ALLOWED_API_ROUTES.some(route => path.startsWith(route));
 }
 
+// Extract owner/repo prefix from a URL path for cookie scoping
+// e.g., /webedt/monorepo/branch-name/login -> /webedt/monorepo
+function getOwnerRepoPath(urlPath: string): string {
+  const segments = urlPath.split('/').filter(Boolean);
+  // Need at least owner/repo (2 segments)
+  if (segments.length >= 2) {
+    return `/${segments[0]}/${segments[1]}`;
+  }
+  return '/';
+}
+
 // Proxy middleware for /api routes
 const apiProxyOptions: Options = {
   target: INTERNAL_API_URL,
   changeOrigin: true,
   // Cookie handling for session persistence
-  // Set cookie path to '/' so cookies are shared across all branches on the same domain
-  // This allows logging in once on github.etdofresh.com and having it work for all preview branches
   cookieDomainRewrite: '',  // Remove domain restriction so cookies work across proxy
-  cookiePathRewrite: '/',   // Always use root path so cookies are shared across all paths
   // Preserve the full path including /api prefix
   pathRewrite: (path, req) => '/api' + path,
   // Handle proxy errors
@@ -103,10 +111,31 @@ const apiProxyOptions: Options = {
       }
     },
     proxyRes: (proxyRes, req, res) => {
-      // Log Set-Cookie headers for debugging
+      // Rewrite cookie path based on the Referer to scope cookies to owner/repo
+      // This allows all branches of the same repo to share auth session
       const setCookie = proxyRes.headers['set-cookie'];
       if (setCookie) {
-        console.log(`[Proxy] Set-Cookie received for ${req.url}:`, setCookie);
+        const referer = req.headers.referer || req.headers.origin || '';
+        let cookiePath = '/';
+
+        try {
+          if (referer) {
+            const refererUrl = new URL(referer);
+            cookiePath = getOwnerRepoPath(refererUrl.pathname);
+          }
+        } catch (e) {
+          // If referer parsing fails, fall back to root
+          console.log('[Proxy] Failed to parse referer for cookie path:', referer);
+        }
+
+        // Rewrite the Path in each Set-Cookie header
+        const rewrittenCookies = setCookie.map(cookie => {
+          // Replace Path=/ or Path=/anything with our computed path
+          return cookie.replace(/Path=\/[^;]*/i, `Path=${cookiePath}`).replace(/Path=\//i, `Path=${cookiePath}`);
+        });
+
+        proxyRes.headers['set-cookie'] = rewrittenCookies;
+        console.log(`[Proxy] Set-Cookie rewritten for ${req.url} with path=${cookiePath}:`, rewrittenCookies);
       }
     },
   },
