@@ -99,7 +99,6 @@ export default function Layout() {
   const isEditorMode = location.pathname === '/sessions' ||
                        location.pathname === '/trash' ||
                        location.pathname.startsWith('/session/') ||
-                       location.pathname === '/new-session' ||
                        location.pathname.startsWith('/quick-setup/') ||
                        (location.pathname === '/settings' && settingsOrigin === 'editor');
 
@@ -127,14 +126,6 @@ export default function Layout() {
 
   // Editor mode navigation items
   const editorNavItems: NavItem[] = [
-    // New page hidden temporarily
-    // {
-    //   to: '/new-session',
-    //   label: 'New',
-    //   icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>,
-    //   disabled: location.pathname === '/new-session',
-    //   isActive: location.pathname === '/new-session'
-    // },
     {
       to: '/sessions',
       label: 'Sessions',
@@ -391,15 +382,6 @@ export default function Layout() {
                       className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
                     >
                       📂 My Sessions
-                    </Link>
-
-                    {/* New Session link */}
-                    <Link
-                      to="/new-session"
-                      onClick={() => setUserMenuOpen(false)}
-                      className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
-                    >
-                      ➕ New Session
                     </Link>
 
                     {/* Settings link */}
