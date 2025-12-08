@@ -305,7 +305,20 @@ export default function SessionLayout({
 
               {/* Logo - Desktop Only */}
               <div className="hidden md:flex flex-col justify-center py-2">
-                <Link to="/store" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <Link
+                  to={(() => {
+                    const landingPageRoutes: Record<string, string> = {
+                      store: '/store',
+                      library: '/library',
+                      community: '/community',
+                      sessions: '/sessions',
+                    };
+                    return user?.defaultLandingPage ? (landingPageRoutes[user.defaultLandingPage] || '/sessions') : '/sessions';
+                  })()}
+                  className="font-semibold text-lg leading-tight"
+                >
+                  WebEDT
+                </Link>
                 <div
                   className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
                   onClick={nextTagline}
@@ -344,7 +357,20 @@ export default function SessionLayout({
             <div className="flex-1 flex items-center justify-center">
               {/* Logo - Mobile Only (Centered) */}
               <div className="md:hidden flex flex-col items-center justify-center py-2">
-                <Link to="/store" className="font-semibold text-lg leading-tight">WebEDT</Link>
+                <Link
+                  to={(() => {
+                    const landingPageRoutes: Record<string, string> = {
+                      store: '/store',
+                      library: '/library',
+                      community: '/community',
+                      sessions: '/sessions',
+                    };
+                    return user?.defaultLandingPage ? (landingPageRoutes[user.defaultLandingPage] || '/sessions') : '/sessions';
+                  })()}
+                  className="font-semibold text-lg leading-tight"
+                >
+                  WebEDT
+                </Link>
                 <div
                   className="text-[10px] text-base-content/30 leading-tight italic cursor-pointer hover:text-base-content/40 transition-colors"
                   onClick={nextTagline}
