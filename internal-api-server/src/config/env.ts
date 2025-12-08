@@ -40,7 +40,7 @@ export const AI_WORKER_TIMEOUT_MS = parseInt(process.env.AI_WORKER_TIMEOUT_MS ||
 export const AI_WORKER_PORT = parseInt(process.env.AI_WORKER_PORT || '5000', 10);
 
 // Worker Coordinator configuration (replaces DNSRR with direct routing)
-export const USE_WORKER_COORDINATOR = process.env.USE_WORKER_COORDINATOR === 'true';
+export const USE_WORKER_COORDINATOR = process.env.USE_WORKER_COORDINATOR !== 'false';
 export const DOCKER_SOCKET_PATH = process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock';
 export const WORKER_SWARM_SERVICE_NAME = process.env.WORKER_SWARM_SERVICE_NAME || 'ai-coding-worker';
 export const WORKER_COORDINATOR_REFRESH_INTERVAL_MS = parseInt(
