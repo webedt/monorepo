@@ -83,9 +83,15 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   // only use the parent's isExecuting prop
   const effectiveIsExecuting = ignoreGlobalExecution ? isExecuting : (isExecuting || isGloballyExecuting);
 
+  // Default voice command keywords (used when user hasn't configured any)
+  const DEFAULT_VOICE_KEYWORDS = ['over', 'submit', 'enter', 'period'];
+
   // Keep voiceKeywordsRef in sync with user's voice command keywords
+  // If user has no keywords configured, use the defaults
   useEffect(() => {
-    voiceKeywordsRef.current = user?.voiceCommandKeywords || [];
+    const userKeywords = user?.voiceCommandKeywords;
+    // Use user's keywords if they have any, otherwise fall back to defaults
+    voiceKeywordsRef.current = (userKeywords && userKeywords.length > 0) ? userKeywords : DEFAULT_VOICE_KEYWORDS;
     console.log('[Voice] Keywords updated:', voiceKeywordsRef.current);
   }, [user?.voiceCommandKeywords]);
 
