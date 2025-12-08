@@ -389,6 +389,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const hasUserEditedTitleRef = useRef(false);
   const chatInputRef = useRef<ChatInputRef>(null);
   const isNearBottomRef = useRef(true); // Track if user is near bottom for smart auto-scroll
+  const previousSessionIdRef = useRef<string | undefined>(undefined); // Track session changes for initial scroll
   const [lastRequest, setLastRequest] = useState<{
     input: string;
     selectedRepo: string;
@@ -1047,6 +1048,31 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  // Scroll to bottom when entering a session (e.g., from My Sessions page)
+  // This ensures users see the latest messages when opening an existing session
+  useEffect(() => {
+    // Only trigger when sessionId changes to a valid session (not 'new')
+    if (sessionId && sessionId !== 'new' && sessionId !== previousSessionIdRef.current) {
+      previousSessionIdRef.current = sessionId;
+
+      // Wait for messages to load, then scroll to bottom
+      // Use a small delay to ensure the DOM has updated with messages
+      const scrollToBottom = () => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
+          // Reset isNearBottomRef since we're now at the bottom
+          isNearBottomRef.current = true;
+        }
+      };
+
+      // Try scrolling after a short delay to allow messages to render
+      setTimeout(scrollToBottom, 100);
+    } else if (!sessionId || sessionId === 'new') {
+      // Reset when navigating to new session page
+      previousSessionIdRef.current = undefined;
+    }
+  }, [sessionId, messages.length]); // Also depend on messages.length to scroll after messages load
 
   // Reset state when navigating to new chat (sessionId becomes undefined)
   useEffect(() => {
