@@ -946,14 +946,30 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // BUT skip this during initial session load - we want to scroll to bottom in that case
     const container = messagesContainerRef.current;
     const savedScrollTop = container?.scrollTop ?? 0;
+    const savedScrollHeight = container?.scrollHeight ?? 0;
+    const clientHeight = container?.clientHeight ?? 0;
+
+    // Calculate if user was near bottom before the update
+    // This is more reliable than using isNearBottomRef which may be stale
+    const wasNearBottom = savedScrollHeight - savedScrollTop - clientHeight < 150;
+
+    // Preserve scroll if not initial load AND either:
+    // 1. User was not near bottom (preserve their scroll position), OR
+    // 2. User was near bottom (we'll scroll to bottom after the update)
     const shouldPreserveScroll = !isInitialSessionLoadRef.current && savedScrollTop > 0;
 
     setMessages(allMessages);
 
-    // Restore scroll position after React re-renders (only if not initial load)
-    if (container && shouldPreserveScroll) {
+    // Restore scroll position after React re-renders
+    if (container && !isInitialSessionLoadRef.current) {
       requestAnimationFrame(() => {
-        container.scrollTop = savedScrollTop;
+        if (wasNearBottom) {
+          // User was near bottom, scroll to the new bottom
+          messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+        } else if (shouldPreserveScroll) {
+          // User was scrolled up, preserve their position
+          container.scrollTop = savedScrollTop;
+        }
       });
     }
   }, [eventsData, messagesData, sessionId, user?.chatVerbosityLevel]);
@@ -1057,9 +1073,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   }, [messages.length]); // Re-attach when messages change
 
   // Smart auto-scroll: only scroll to bottom when messages change AND user is near bottom
+  // Note: During streaming, new messages are added via setMessages in the SSE handler,
+  // which triggers this effect. After stream completion, messages are updated via the
+  // merge effect which handles its own scrolling - we use isNearBottomRef to coordinate.
   useEffect(() => {
     // Only auto-scroll if user is near the bottom - respect their scroll position
-    if (isNearBottomRef.current) {
+    // The merge effect handles scroll for DB-fetched messages, so this primarily
+    // handles live streaming messages. Using 'smooth' behavior for streaming gives
+    // a nice UX as messages come in.
+    if (isNearBottomRef.current && !isInitialSessionLoadRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
@@ -1553,16 +1575,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
         queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
 
-        // Scroll to bottom only if user is near the bottom - respect their scroll position
-        // Use multiple timeouts to handle query invalidation re-renders
-        const scrollToBottomIfNear = () => {
-          if (isNearBottomRef.current) {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-          }
-        };
-        setTimeout(scrollToBottomIfNear, 100);
-        setTimeout(scrollToBottomIfNear, 500);
-        setTimeout(scrollToBottomIfNear, 1000);
+        // Note: Scroll handling is now done in the messages merge effect (useEffect on eventsData/messagesData)
+        // which properly preserves scroll position or scrolls to bottom based on user's position
 
         // Navigate to the session URL if not already there
         if (!sessionId || sessionId !== data.websiteSessionId) {
