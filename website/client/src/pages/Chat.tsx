@@ -10,7 +10,7 @@ import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components
 import { ImageViewer } from '@/components/ImageViewer';
 import { ChatMessage } from '@/components/ChatMessage';
 import SessionLayout from '@/components/SessionLayout';
-import type { Message, GitHubRepository, ChatSession } from '@/shared';
+import type { Message, GitHubRepository, ChatSession, ChatVerbosityLevel } from '@/shared';
 
 // Helper to render text with clickable links
 function LinkifyText({ text, className }: { text: string; className?: string }) {
@@ -294,6 +294,61 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
     timestamp: new Date(event.timestamp),
     model,
   };
+}
+
+// Helper to determine if a message should be shown based on verbosity level
+function shouldShowMessage(message: Message, verbosityLevel: ChatVerbosityLevel): boolean {
+  // Always show user, assistant, and error messages
+  if (message.type !== 'system') {
+    return true;
+  }
+
+  // If verbose, show everything
+  if (verbosityLevel === 'verbose') {
+    return true;
+  }
+
+  // For minimal, hide all system messages
+  if (verbosityLevel === 'minimal') {
+    return false;
+  }
+
+  // For 'normal' level, show key milestones but hide tool operations
+  const content = message.content;
+
+  // Tool operation patterns (hide these at normal level)
+  const toolOperationPatterns = [
+    /^📖 Reading:/,      // Read operations
+    /^📝 Writing:/,      // Write operations (not session name)
+    /^✏️ Editing:/,      // Edit operations
+    /^🔍 Searching for:/, // Grep searches
+    /^📁 Finding files:/, // Glob file finding
+    /^⚡ Running:/,      // Bash commands
+    /^🌐 Fetching:/,     // Web fetches
+    /^🔎 Searching web:/, // Web searches
+    /^🤖 Launching agent:/, // Task/agent operations
+    /\[claude\]/,        // Claude SDK messages
+    /\[codex\]/,         // Codex SDK messages
+    /\[ai-coding-worker\].*📖/, // Sourced read operations
+    /\[ai-coding-worker\].*📝 Writing/, // Sourced write operations (not session)
+    /\[ai-coding-worker\].*✏️/, // Sourced edit operations
+    /\[ai-coding-worker\].*🔍/, // Sourced grep operations
+    /\[ai-coding-worker\].*📁/, // Sourced glob operations
+    /\[ai-coding-worker\].*⚡/, // Sourced bash operations
+    /\[ai-coding-worker\].*🌐/, // Sourced web fetch operations
+    /\[ai-coding-worker\].*🔎/, // Sourced web search operations
+    /\[ai-coding-worker\].*🤖 Launching/, // Sourced agent operations
+  ];
+
+  // Check if it matches a tool operation pattern
+  for (const pattern of toolOperationPatterns) {
+    if (pattern.test(content)) {
+      return false;
+    }
+  }
+
+  // Show everything else (session name, branch creation, commit progress, etc.)
+  return true;
 }
 
 // Props for split view support
@@ -2040,7 +2095,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         <>
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
             <div className="max-w-4xl mx-auto space-y-4">
-              {messages.map((message) => (
+              {messages
+                .filter((message) => shouldShowMessage(message, user?.chatVerbosityLevel || 'verbose'))
+                .map((message) => (
                 message.type === 'system' ? (
                   // Compact inline status update - no panel, faint text, inline timestamp
                   <div key={message.id} className="text-xs text-base-content/40 py-0.5">
