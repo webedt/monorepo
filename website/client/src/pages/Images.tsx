@@ -271,7 +271,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
   // Track modified images for commit functionality
   const [modifiedImages, setModifiedImages] = useState<Set<string>>(new Set());
-  const [_commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
+  const [_commitStatus, _setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
 
   // PR-related state
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
