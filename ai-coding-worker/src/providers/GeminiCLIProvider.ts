@@ -7,34 +7,24 @@ import { CredentialManager } from '../utils/credentialManager';
 /**
  * Gemini CLI provider implementation
  *
- * Wraps the Gemini CLI tool to support OAuth authentication for Pro model access.
- * Falls back to API key mode if no OAuth credentials are available.
+ * Wraps the Gemini CLI tool with OAuth authentication for Pro model access.
+ * Requires OAuth credentials from ~/.gemini/oauth_creds.json
  */
 export class GeminiCLIProvider extends BaseProvider {
   private model?: string;
-  private isOAuthMode: boolean = false;
   private geminiPath: string;
   private currentProcess: ChildProcess | null = null;
 
   constructor(authentication: string, workspace: string, model?: string, isResuming?: boolean) {
     super(authentication, workspace);
-    this.model = model || 'gemini-2.5-pro'; // Default to Pro model when using CLI
+    this.model = model || 'gemini-2.5-pro'; // Default to Pro model
     this.geminiPath = process.env.GEMINI_CLI_PATH || 'gemini';
 
-    // Write credentials and determine auth mode
+    // Write OAuth credentials to ~/.gemini/oauth_creds.json
     CredentialManager.writeGeminiCredentials(authentication);
 
-    // Check if we're in OAuth mode
-    try {
-      const parsed = JSON.parse(authentication);
-      this.isOAuthMode = !!(parsed.accessToken && parsed.refreshToken);
-    } catch {
-      this.isOAuthMode = false;
-    }
-
-    console.log('[GeminiCLIProvider] Provider initialized', {
+    console.log('[GeminiCLIProvider] Provider initialized with OAuth', {
       model: this.model,
-      isOAuthMode: this.isOAuthMode,
       geminiPath: this.geminiPath,
       isResuming: !!isResuming
     });
@@ -51,7 +41,6 @@ export class GeminiCLIProvider extends BaseProvider {
     console.log('[GeminiCLIProvider] Starting execution with options:', {
       workspace: this.workspace,
       model: this.model,
-      isOAuthMode: this.isOAuthMode,
       hasStructuredContent: typeof userRequest !== 'string'
     });
 
@@ -72,7 +61,7 @@ export class GeminiCLIProvider extends BaseProvider {
           type: 'system',
           subtype: 'init',
           session_id: sessionId,
-          message: `Gemini CLI provider initialized (${this.isOAuthMode ? 'OAuth' : 'API Key'} mode)`
+          message: 'Gemini CLI provider initialized with OAuth'
         }
       });
 
@@ -390,17 +379,11 @@ export class GeminiCLIProvider extends BaseProvider {
   }
 
   /**
-   * Validate Gemini credentials
+   * Validate Gemini OAuth credentials
    */
   async validateToken(): Promise<boolean> {
     try {
-      // Check if we have OAuth credentials or API key
-      if (this.isOAuthMode) {
-        return CredentialManager.hasGeminiOAuthCredentials();
-      }
-
-      // Check for API key in environment
-      return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+      return CredentialManager.hasGeminiOAuthCredentials();
     } catch (error) {
       console.error('[GeminiCLIProvider] Token validation failed:', error);
       return false;

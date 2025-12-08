@@ -13,18 +13,14 @@ import type { ClaudeAuth } from './lib/claudeAuth.js';
 import type { CodexAuth } from './lib/codexAuth.js';
 
 /**
- * Gemini authentication supports two modes:
- * 1. API Key - for basic access (Flash models only)
- * 2. OAuth - for full access including Pro models (from ~/.gemini/oauth_creds.json)
+ * Gemini authentication - OAuth only (from ~/.gemini/oauth_creds.json)
+ * Users must authenticate locally with `gemini auth login` and paste their credentials
  */
 export interface GeminiAuth {
-  // API Key authentication (mutually exclusive with OAuth)
-  apiKey?: string;
-
   // OAuth authentication (from Gemini CLI login)
-  accessToken?: string;
-  refreshToken?: string;
-  expiresAt?: number;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
   tokenType?: string;
   scope?: string;
 }

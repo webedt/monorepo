@@ -17,6 +17,8 @@ import { eq, and, or } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '../lib/claudeAuth.js';
 import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../lib/codexAuth.js';
+import { ensureValidGeminiToken, isValidGeminiAuth } from '../lib/geminiAuth.js';
+import type { GeminiAuth } from '../auth.js';
 import { StorageService } from '../services/storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../services/github/operations.js';
 import { logger, generateSessionPath, getEventEmoji } from '@webedt/shared';
@@ -172,10 +174,10 @@ const executeHandler = async (req: Request, res: Response) => {
         return;
       }
     } else if (selectedProvider === 'gemini') {
-      if (!user.geminiAuth?.apiKey) {
+      if (!user.geminiAuth?.accessToken || !user.geminiAuth?.refreshToken) {
         res.status(400).json({
           success: false,
-          error: 'Gemini authentication not configured. Please add your Gemini API key in Settings.'
+          error: 'Gemini OAuth not configured. Run `gemini auth login` locally and paste your credentials in Settings.'
         });
         return;
       }
@@ -321,9 +323,18 @@ const executeHandler = async (req: Request, res: Response) => {
       providerName = 'GithubCopilot';
       providerAuth = { apiKey: user.githubAccessToken! };
     } else if (selectedProvider === 'gemini') {
-      // Gemini uses the API key
+      // Gemini uses OAuth credentials with token refresh
+      let geminiAuth: GeminiAuth = user.geminiAuth!;
       providerName = 'Gemini';
-      providerAuth = { apiKey: user.geminiAuth!.apiKey };
+
+      const refreshedAuth = await ensureValidGeminiToken(geminiAuth);
+      if (refreshedAuth !== geminiAuth) {
+        await db
+          .update(users)
+          .set({ geminiAuth: refreshedAuth })
+          .where(eq(users.id, user.id));
+      }
+      providerAuth = refreshedAuth;
     } else {
       let claudeAuth: ClaudeAuth = user.claudeAuth!;
       providerName = 'ClaudeAgentSDK';

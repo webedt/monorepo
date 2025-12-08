@@ -225,13 +225,19 @@ export const userApi = {
       method: 'DELETE',
     }),
 
+  // Gemini OAuth - accepts raw JSON from ~/.gemini/oauth_creds.json
+  // Supports both camelCase and snake_case formats
   updateGeminiAuth: (geminiAuth: {
-    apiKey?: string;
     accessToken?: string;
     refreshToken?: string;
     expiresAt?: number;
     tokenType?: string;
     scope?: string;
+    // Also accept snake_case from Gemini CLI file
+    access_token?: string;
+    refresh_token?: string;
+    expiry_date?: number;
+    token_type?: string;
   }) =>
     fetchApi('/api/user/gemini-auth', {
       method: 'POST',

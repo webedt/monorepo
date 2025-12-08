@@ -210,11 +210,9 @@ export class CredentialManager {
 
   /**
    * Write Gemini credentials
-   * Supports two authentication modes:
-   * 1. API Key - Sets GEMINI_API_KEY env var and writes to ~/.gemini/.env
-   * 2. OAuth - Writes to ~/.gemini/oauth_creds.json (for Pro model access)
+   * OAuth only - writes to ~/.gemini/oauth_creds.json for Gemini CLI
    *
-   * @param authentication - Gemini authentication JSON structure
+   * @param authentication - Gemini OAuth JSON structure
    */
   static writeGeminiCredentials(authentication: string): void {
     let parsed: any;
@@ -222,59 +220,41 @@ export class CredentialManager {
     try {
       parsed = JSON.parse(authentication);
     } catch {
-      // Not JSON, treat as plain API key
-      parsed = { apiKey: authentication };
+      throw new Error('Invalid Gemini credentials: must be valid JSON OAuth credentials');
     }
 
-    // Check if this is OAuth authentication (has accessToken)
-    if (parsed.accessToken && parsed.refreshToken) {
-      // OAuth mode - write to oauth_creds.json for Gemini CLI
-      const oauthCredentialPath = this.getGeminiOAuthCredentialPath();
+    // Support both camelCase and snake_case formats
+    const accessToken = parsed.accessToken || parsed.access_token;
+    const refreshToken = parsed.refreshToken || parsed.refresh_token;
+    const expiresAt = parsed.expiresAt || parsed.expiry_date;
 
-      // Format for Gemini CLI oauth_creds.json
-      const oauthCredentials = {
-        access_token: parsed.accessToken,
-        refresh_token: parsed.refreshToken,
-        token_type: parsed.tokenType || 'Bearer',
-        expiry_date: parsed.expiresAt || (Date.now() + 3600000), // Default 1 hour
-        scope: parsed.scope || 'openid https://www.googleapis.com/auth/userinfo.email'
-      };
-
-      this.writeCredentialFile(oauthCredentialPath, oauthCredentials);
-      console.log('[CredentialManager] Wrote Gemini OAuth credentials to:', oauthCredentialPath);
-
-      // Also create a basic settings.json if it doesn't exist
-      const settingsPath = this.getGeminiSettingsPath();
-      if (!fs.existsSync(settingsPath)) {
-        this.writeCredentialFile(settingsPath, {
-          selectedAuthType: 'oauth',
-          theme: 'system'
-        });
-        console.log('[CredentialManager] Created Gemini settings.json');
-      }
+    if (!accessToken || !refreshToken) {
+      throw new Error('Invalid Gemini credentials: missing accessToken/access_token or refreshToken/refresh_token');
     }
-    // API Key mode
-    else if (parsed.apiKey) {
-      const apiKey = parsed.apiKey;
 
-      // Set GEMINI_API_KEY environment variable (preferred by Gemini CLI)
-      process.env.GEMINI_API_KEY = apiKey;
-      console.log('[CredentialManager] Set GEMINI_API_KEY environment variable');
+    // Write to oauth_creds.json for Gemini CLI
+    const oauthCredentialPath = this.getGeminiOAuthCredentialPath();
 
-      // Also set GOOGLE_API_KEY for compatibility
-      process.env.GOOGLE_API_KEY = apiKey;
+    // Format for Gemini CLI oauth_creds.json (uses snake_case)
+    const oauthCredentials = {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: parsed.tokenType || parsed.token_type || 'Bearer',
+      expiry_date: expiresAt || (Date.now() + 3600000), // Default 1 hour
+      scope: parsed.scope || 'openid https://www.googleapis.com/auth/userinfo.email'
+    };
 
-      // Write to ~/.gemini/.env for persistence
-      const envPath = this.getGeminiEnvPath();
-      const dir = path.dirname(envPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      }
-      fs.writeFileSync(envPath, `GEMINI_API_KEY=${apiKey}\n`, { mode: 0o600 });
-      console.log('[CredentialManager] Wrote Gemini API key to:', envPath);
-    }
-    else {
-      console.warn('[CredentialManager] Unknown Gemini auth format, no credentials written');
+    this.writeCredentialFile(oauthCredentialPath, oauthCredentials);
+    console.log('[CredentialManager] Wrote Gemini OAuth credentials to:', oauthCredentialPath);
+
+    // Also create a basic settings.json if it doesn't exist
+    const settingsPath = this.getGeminiSettingsPath();
+    if (!fs.existsSync(settingsPath)) {
+      this.writeCredentialFile(settingsPath, {
+        selectedAuthType: 'oauth',
+        theme: 'system'
+      });
+      console.log('[CredentialManager] Created Gemini settings.json');
     }
   }
 

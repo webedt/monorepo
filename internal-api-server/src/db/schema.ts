@@ -22,10 +22,9 @@ export const users = pgTable('users', {
     expiresAt?: number;
   }>(),
   geminiAuth: json('gemini_auth').$type<{
-    apiKey?: string;
-    accessToken?: string;
-    refreshToken?: string;
-    expiresAt?: number;
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
     tokenType?: string;
     scope?: string;
   }>(),

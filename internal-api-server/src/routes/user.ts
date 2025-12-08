@@ -118,45 +118,34 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-// Update Gemini authentication (API Key or OAuth)
+// Update Gemini authentication (OAuth only - from ~/.gemini/oauth_creds.json)
 router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     let geminiAuth = req.body.geminiAuth || req.body;
 
-    // Validate Gemini auth structure - must have apiKey OR OAuth tokens
-    const hasApiKey = geminiAuth && geminiAuth.apiKey;
-    const hasOAuth = geminiAuth && geminiAuth.accessToken && geminiAuth.refreshToken;
+    // Support both camelCase (our format) and snake_case (Gemini CLI format)
+    const accessToken = geminiAuth.accessToken || geminiAuth.access_token;
+    const refreshToken = geminiAuth.refreshToken || geminiAuth.refresh_token;
+    const expiresAt = geminiAuth.expiresAt || geminiAuth.expiry_date;
 
-    if (!hasApiKey && !hasOAuth) {
+    // Validate OAuth credentials are present
+    if (!accessToken || !refreshToken) {
       res.status(400).json({
         success: false,
-        error: 'Invalid Gemini auth. Must include either apiKey or OAuth tokens (accessToken + refreshToken).',
+        error: 'Invalid Gemini auth. Must include OAuth tokens (accessToken/access_token and refreshToken/refresh_token). Run `gemini auth login` locally and paste the contents of ~/.gemini/oauth_creds.json',
       });
       return;
     }
 
-    // Normalize the auth object
-    const normalizedAuth: {
-      apiKey?: string;
-      accessToken?: string;
-      refreshToken?: string;
-      expiresAt?: number;
-      tokenType?: string;
-      scope?: string;
-    } = {};
-
-    if (hasApiKey) {
-      normalizedAuth.apiKey = geminiAuth.apiKey;
-    }
-
-    if (hasOAuth) {
-      normalizedAuth.accessToken = geminiAuth.accessToken;
-      normalizedAuth.refreshToken = geminiAuth.refreshToken;
-      normalizedAuth.expiresAt = geminiAuth.expiresAt || geminiAuth.expiry_date;
-      normalizedAuth.tokenType = geminiAuth.tokenType || geminiAuth.token_type || 'Bearer';
-      normalizedAuth.scope = geminiAuth.scope;
-    }
+    // Normalize the auth object to our format
+    const normalizedAuth = {
+      accessToken,
+      refreshToken,
+      expiresAt: expiresAt || Date.now() + 3600000, // Default 1 hour if not provided
+      tokenType: geminiAuth.tokenType || geminiAuth.token_type || 'Bearer',
+      scope: geminiAuth.scope,
+    };
 
     // Update user with Gemini auth
     await db
@@ -164,10 +153,9 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       .set({ geminiAuth: normalizedAuth })
       .where(eq(users.id, authReq.user!.id));
 
-    const authType = hasOAuth ? 'OAuth' : 'API Key';
     res.json({
       success: true,
-      data: { message: `Gemini ${authType} authentication updated successfully` },
+      data: { message: 'Gemini OAuth authentication updated successfully' },
     });
   } catch (error) {
     console.error('Update Gemini auth error:', error);

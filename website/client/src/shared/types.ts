@@ -10,6 +10,7 @@ export interface User {
   githubAccessToken: string | null;
   claudeAuth: ClaudeAuth | null;
   codexAuth: CodexAuth | null;           // OpenAI Codex credentials
+  geminiAuth: GeminiAuth | null;         // Gemini OAuth credentials
   preferredProvider: AIProvider;          // User's preferred AI provider
   imageResizeMaxDimension: number;
   voiceCommandKeywords: string[];
@@ -38,11 +39,20 @@ export interface CodexAuth {
   expiresAt?: number;
 }
 
+// Gemini OAuth authentication (for Gemini CLI)
+export interface GeminiAuth {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  tokenType?: string;
+  scope?: string;
+}
+
 // Union type for provider authentication
-export type ProviderAuth = ClaudeAuth | CodexAuth;
+export type ProviderAuth = ClaudeAuth | CodexAuth | GeminiAuth;
 
 // Provider types
-export type AIProvider = 'claude' | 'codex';
+export type AIProvider = 'claude' | 'codex' | 'gemini';
 
 // Session types
 export interface ChatSession {

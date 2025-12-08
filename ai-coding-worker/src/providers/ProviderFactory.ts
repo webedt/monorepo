@@ -2,25 +2,12 @@ import { BaseProvider } from './BaseProvider';
 import { ClaudeCodeProvider } from './ClaudeCodeProvider';
 import { CodexProvider } from './CodexProvider';
 import { GithubCopilotProvider } from './GithubCopilotProvider';
-import { GeminiProvider } from './GeminiProvider';
 import { GeminiCLIProvider } from './GeminiCLIProvider';
 
 /**
  * Factory for creating coding assistant provider instances
  */
 export class ProviderFactory {
-  /**
-   * Check if authentication contains OAuth credentials (vs API key)
-   */
-  private static hasOAuthCredentials(authentication: string): boolean {
-    try {
-      const parsed = JSON.parse(authentication);
-      return !!(parsed.accessToken && parsed.refreshToken);
-    } catch {
-      return false;
-    }
-  }
-
   /**
    * Create a provider instance based on provider name
    */
@@ -53,17 +40,9 @@ export class ProviderFactory {
       case 'gemini':
       case 'google':
       case 'google-gemini':
-        // Use CLI provider for OAuth credentials (Pro model access)
-        // Fall back to SDK provider for API key (Flash models)
-        if (this.hasOAuthCredentials(authentication)) {
-          console.log('[ProviderFactory] Using GeminiCLIProvider for OAuth authentication');
-          return new GeminiCLIProvider(authentication, workspace, options?.model, isResuming);
-        }
-        console.log('[ProviderFactory] Using GeminiProvider (SDK) for API key authentication');
-        return new GeminiProvider(authentication, workspace, options?.model, isResuming);
-
       case 'gemini-cli':
-        // Force CLI provider regardless of auth type
+        // Gemini uses CLI provider with OAuth authentication only
+        console.log('[ProviderFactory] Using GeminiCLIProvider for OAuth authentication');
         return new GeminiCLIProvider(authentication, workspace, options?.model, isResuming);
 
       default:
