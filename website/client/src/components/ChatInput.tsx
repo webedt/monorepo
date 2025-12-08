@@ -83,17 +83,14 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   // only use the parent's isExecuting prop
   const effectiveIsExecuting = ignoreGlobalExecution ? isExecuting : (isExecuting || isGloballyExecuting);
 
-  // Default voice command keywords (used when user hasn't configured any)
-  const DEFAULT_VOICE_KEYWORDS = ['over', 'submit', 'enter', 'period'];
-
   // Keep voiceKeywordsRef in sync with user's voice command keywords
-  // If user has no keywords configured, use the defaults
+  // We depend on the entire user object to catch any updates, not just voiceCommandKeywords
+  // This ensures we pick up keywords even if the user object reference changes
   useEffect(() => {
-    const userKeywords = user?.voiceCommandKeywords;
-    // Use user's keywords if they have any, otherwise fall back to defaults
-    voiceKeywordsRef.current = (userKeywords && userKeywords.length > 0) ? userKeywords : DEFAULT_VOICE_KEYWORDS;
-    console.log('[Voice] Keywords updated:', voiceKeywordsRef.current);
-  }, [user?.voiceCommandKeywords]);
+    const keywords = user?.voiceCommandKeywords || [];
+    voiceKeywordsRef.current = keywords;
+    console.log('[Voice] Keywords updated from user:', keywords, 'User ID:', user?.id);
+  }, [user]);
 
   // Clear any stale transcript when component mounts
   // (We want voice recordings to be local to each page, just appending to existing input)
@@ -526,14 +523,20 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 
             // Trigger submit after a brief delay to ensure state is updated
             setTimeout(() => {
-              // Find the submit button dynamically (not via formRef, which may be stale after navigation)
-              // Look for the ChatInput form's submit button in the DOM
-              const submitBtn = document.querySelector('form button[type="submit"]') as HTMLButtonElement;
-              if (submitBtn && !submitBtn.disabled) {
-                console.log('[Voice] Clicking submit button, text:', appendedInput, 'stopListening:', shouldStopListening);
-                submitBtn.click();
+              // Find the form dynamically in DOM (formRef may be stale after navigation)
+              // Use requestSubmit() which properly triggers the form's onSubmit handler
+              const form = document.querySelector('form');
+              if (form) {
+                console.log('[Voice] Submitting form via requestSubmit, text:', appendedInput, 'stopListening:', shouldStopListening);
+                try {
+                  form.requestSubmit();
+                } catch (error) {
+                  // Fallback for browsers that don't support requestSubmit
+                  console.log('[Voice] requestSubmit not supported, dispatching submit event');
+                  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                }
               } else {
-                console.log('[Voice] No enabled submit button found, text may have been cleared');
+                console.log('[Voice] No form found in DOM');
               }
             }, 150);
           }

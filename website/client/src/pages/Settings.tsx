@@ -1242,14 +1242,7 @@ export default function Settings() {
                     </div>
                     <div className="flex flex-wrap gap-2 min-h-[2.5rem] p-3 bg-base-200 rounded-lg">
                       {voiceKeywords.length === 0 ? (
-                        <>
-                          {DEFAULT_KEYWORDS.map((keyword) => (
-                            <span key={keyword} className="badge badge-primary badge-outline gap-1">
-                              {keyword}
-                              <span className="text-xs opacity-60">(default)</span>
-                            </span>
-                          ))}
-                        </>
+                        <span className="text-sm text-base-content/50">No keywords selected. Add keywords below to enable voice auto-submit.</span>
                       ) : (
                         voiceKeywords.map((keyword) => (
                           <span
@@ -1275,9 +1268,7 @@ export default function Settings() {
                     </div>
                     <div className="mt-2">
                       <span className="text-sm text-base-content/60">
-                        {voiceKeywords.length === 0
-                          ? 'Default keywords are used when no custom keywords are configured. Add keywords below to customize.'
-                          : 'Pre-defined keywords (highlighted) cannot be removed'}
+                        Pre-defined keywords (highlighted) cannot be removed
                       </span>
                     </div>
                   </div>
