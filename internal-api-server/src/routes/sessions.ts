@@ -5,15 +5,19 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
+import * as os from 'os';
+import * as path from 'path';
 import { db, chatSessions, messages, users, events } from '../db/index.js';
 import type { ChatSession } from '../db/schema.js';
 import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath } from '@webedt/shared';
 import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
+import { GitHubOperations } from '../services/github/operations.js';
+import { storageService } from '../services/storage/storageService.js';
 
 const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
 
@@ -170,22 +174,75 @@ router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Create a code-only session (no AI execution, just for tracking file operations)
+// This endpoint clones the repository and uploads files to storage
 router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { title, repositoryUrl, repositoryOwner, repositoryName, baseBranch, branch } = req.body;
+    const { title, repositoryUrl, repositoryOwner, repositoryName, baseBranch } = req.body;
 
-    if (!repositoryOwner || !repositoryName || !branch) {
+    if (!repositoryOwner || !repositoryName) {
       res.status(400).json({
         success: false,
-        error: 'Missing required fields: repositoryOwner, repositoryName, branch'
+        error: 'Missing required fields: repositoryOwner, repositoryName'
+      });
+      return;
+    }
+
+    // Require GitHub access token for cloning
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({
+        success: false,
+        error: 'GitHub access token required. Please connect your GitHub account.'
       });
       return;
     }
 
     // Generate UUID for the session
     const sessionId = crypto.randomUUID();
-    const sessionPath = `${repositoryOwner}/${repositoryName}/${branch}`;
+    const repoUrl = repositoryUrl || `https://github.com/${repositoryOwner}/${repositoryName}.git`;
+    const effectiveBaseBranch = baseBranch || 'main';
+
+    logger.info(`Creating code session ${sessionId} for ${repositoryOwner}/${repositoryName}`, {
+      component: 'Sessions',
+      sessionId,
+      repoUrl,
+      baseBranch: effectiveBaseBranch
+    });
+
+    // Initialize storage service
+    await storageService.initialize();
+
+    // Create GitHubOperations instance
+    const githubOperations = new GitHubOperations(storageService);
+
+    // Define workspace root (temporary directory for cloning)
+    const workspaceRoot = path.join(os.tmpdir(), 'code-sessions');
+
+    // Call initSession to clone the repo and upload to storage
+    // This generates a branch name and session title
+    const initResult = await githubOperations.initSession(
+      {
+        sessionId,
+        repoUrl,
+        branch: effectiveBaseBranch,
+        userRequest: title || 'Code editing session',
+        githubAccessToken: authReq.user.githubAccessToken,
+        workspaceRoot,
+        // No coding assistant for code-only sessions
+        codingAssistantProvider: undefined,
+        codingAssistantAuthentication: undefined
+      },
+      (event) => {
+        logger.info(`Init session progress: ${event.message}`, {
+          component: 'Sessions',
+          sessionId,
+          stage: event.stage
+        });
+      }
+    );
+
+    // Generate session path using the branch name from initResult
+    const sessionPath = generateSessionPath(repositoryOwner, repositoryName, initResult.branchName);
 
     // Create the session with 'completed' status - code sessions don't have active AI processing
     const [chatSession] = await db
@@ -193,13 +250,13 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
       .values({
         id: sessionId,
         userId: authReq.user!.id,
-        userRequest: title || 'Code editing session',
+        userRequest: initResult.sessionTitle || title || 'Code editing session',
         status: 'completed',
-        repositoryUrl: repositoryUrl || `https://github.com/${repositoryOwner}/${repositoryName}.git`,
+        repositoryUrl: repoUrl,
         repositoryOwner,
         repositoryName,
-        baseBranch: baseBranch || 'main',
-        branch,
+        baseBranch: effectiveBaseBranch,
+        branch: initResult.branchName,
         sessionPath,
         autoCommit: false,
         locked: true,
@@ -215,13 +272,21 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
         content: `Started code editing session on repository ${repositoryOwner}/${repositoryName}`,
       });
 
-    logger.info(`Created code session ${sessionId} for ${sessionPath}`, { component: 'Sessions' });
+    logger.info(`Created code session ${sessionId} with branch ${initResult.branchName}`, {
+      component: 'Sessions',
+      sessionId,
+      sessionPath,
+      branchName: initResult.branchName,
+      sessionTitle: initResult.sessionTitle
+    });
 
     res.json({
       success: true,
       data: {
         sessionId: chatSession.id,
         sessionPath: chatSession.sessionPath,
+        branchName: initResult.branchName,
+        sessionTitle: initResult.sessionTitle
       },
     });
   } catch (error) {

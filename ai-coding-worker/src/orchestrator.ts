@@ -357,7 +357,20 @@ export class Orchestrator {
         timestamp: new Date().toISOString()
       });
 
-      await this.storageClient.uploadSession(websiteSessionId, sessionRoot);
+      await this.storageClient.uploadSession(
+        websiteSessionId,
+        sessionRoot,
+        (stage, message, data) => {
+          // Send progress events to client for visibility into upload process
+          sendEvent({
+            type: 'message',
+            stage: `upload_${stage}`,
+            message,
+            data,
+            timestamp: new Date().toISOString()
+          });
+        }
+      );
 
       logger.info('Session uploaded to storage', {
         component: 'Orchestrator',

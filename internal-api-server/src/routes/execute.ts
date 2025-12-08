@@ -1074,11 +1074,30 @@ const executeHandler = async (req: Request, res: Response) => {
         }
       }
 
-      // Upload session to storage
+      // Upload session to storage with file count
+      const countFilesRecursive = (dirPath: string): number => {
+        if (!fs.existsSync(dirPath)) return 0;
+        let count = 0;
+        const items = fs.readdirSync(dirPath);
+        for (const item of items) {
+          const itemPath = path.join(dirPath, item);
+          const stat = fs.statSync(itemPath);
+          if (stat.isDirectory()) {
+            count += countFilesRecursive(itemPath);
+          } else {
+            count++;
+          }
+        }
+        return count;
+      };
+
+      const uploadFileCount = fs.existsSync(sessionRoot) ? countFilesRecursive(sessionRoot) : 0;
+
       await sendEvent({
         type: 'message',
         stage: 'uploading',
-        message: 'Saving session to storage...',
+        message: `Saving session to storage (${uploadFileCount} files)...`,
+        data: { totalFileCount: uploadFileCount },
         endpoint: '/execute'
       });
 
@@ -1087,7 +1106,8 @@ const executeHandler = async (req: Request, res: Response) => {
       await sendEvent({
         type: 'message',
         stage: 'uploaded',
-        message: 'Session saved to storage',
+        message: `Session saved to storage (${uploadFileCount} files)`,
+        data: { totalFileCount: uploadFileCount },
         source: 'storage-worker',
         endpoint: '/execute'
       });
