@@ -13,9 +13,6 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL;
-// Base path for path-based deployments (e.g., /webedt/monorepo/branch)
-// This is set by the deployment system when running under a path prefix
-const BASE_PATH = process.env.BASE_PATH || '/';
 
 if (!INTERNAL_API_URL) {
   console.error('ERROR: INTERNAL_API_URL environment variable is required');
@@ -80,8 +77,10 @@ const apiProxyOptions: Options = {
   target: INTERNAL_API_URL,
   changeOrigin: true,
   // Cookie handling for session persistence
+  // Set cookie path to '/' so cookies are shared across all branches on the same domain
+  // This allows logging in once on github.etdofresh.com and having it work for all preview branches
   cookieDomainRewrite: '',  // Remove domain restriction so cookies work across proxy
-  cookiePathRewrite: BASE_PATH,   // Set cookie path to match deployment base path
+  cookiePathRewrite: '/',   // Always use root path so cookies are shared across all paths
   // Preserve the full path including /api prefix
   pathRewrite: (path, req) => '/api' + path,
   // Handle proxy errors
@@ -172,7 +171,6 @@ app.listen(PORT, () => {
   console.log(`Port: ${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);
   console.log(`Internal API: ${INTERNAL_API_URL}`);
-  console.log(`Base Path: ${BASE_PATH}`);
   console.log(`Client dist: ${clientDistPath}`);
   console.log('');
   console.log('Allowed API routes:');
