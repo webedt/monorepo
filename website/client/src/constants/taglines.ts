@@ -146,7 +146,7 @@ export const TAGLINES = [
   "Friends don’t let friends skip edits.",
   "Friends don’t lie… they edit.",
   "I can edit this all day.",
-  "That wasn’t editing, that was controlled falling.",
+  "That wasn’t flying, that was controlled editing.",
   "We have an edit. We have a Hulk.",
   "You either crank 90s or crank edits.",
   "I’m not locked in here with edits… Edits are locked in here with me.",
