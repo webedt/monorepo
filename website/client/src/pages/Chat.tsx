@@ -2025,8 +2025,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         </button>
       )}
 
-      {/* Create PR button - show if no open PR exists, not merged, and auto PR is not in progress */}
-      {!existingPr && !mergedPr && prLoading !== 'auto' && (
+      {/* Create PR button - show if no open PR exists, not merged, not executing, and auto PR is not in progress */}
+      {!existingPr && !mergedPr && !isExecuting && prLoading !== 'auto' && (
         <button
           onClick={handleCreatePR}
           className="btn btn-xs btn-primary"
@@ -2041,8 +2041,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         </button>
       )}
 
-      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged or auto PR in progress */}
-      {!mergedPr && prLoading !== 'auto' && (
+      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged, executing, or auto PR in progress */}
+      {!mergedPr && !isExecuting && prLoading !== 'auto' && (
         <button
           onClick={handleAutoPR}
           className="btn btn-xs btn-accent"
