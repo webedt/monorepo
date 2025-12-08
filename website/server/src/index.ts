@@ -72,11 +72,17 @@ function isAllowedRoute(path: string): boolean {
   return ALLOWED_API_ROUTES.some(route => path.startsWith(route));
 }
 
-// Extract owner/repo prefix from a URL path for cookie scoping
-// e.g., /webedt/monorepo/branch-name/login -> /webedt/monorepo
-function getOwnerRepoPath(urlPath: string): string {
+// Extract owner/repo/branch prefix from a URL path for cookie scoping
+// e.g., /webedt/monorepo/branch-name/login -> /webedt/monorepo/branch-name
+// This ensures cookies are scoped to the specific preview branch
+function getOwnerRepoBranchPath(urlPath: string): string {
   const segments = urlPath.split('/').filter(Boolean);
-  // Need at least owner/repo (2 segments)
+  // For preview deployments: need owner/repo/branch (3 segments minimum)
+  // e.g., /webedt/monorepo/feature-branch/session -> /webedt/monorepo/feature-branch
+  if (segments.length >= 3) {
+    return `/${segments[0]}/${segments[1]}/${segments[2]}`;
+  }
+  // Fallback for root deployment (2 segments): /owner/repo
   if (segments.length >= 2) {
     return `/${segments[0]}/${segments[1]}`;
   }
@@ -111,8 +117,8 @@ const apiProxyOptions: Options = {
       }
     },
     proxyRes: (proxyRes, req, res) => {
-      // Rewrite cookie path based on the Referer to scope cookies to owner/repo
-      // This allows all branches of the same repo to share auth session
+      // Rewrite cookie path based on the Referer to scope cookies to owner/repo/branch
+      // This ensures auth cookies work correctly in preview deployments
       const setCookie = proxyRes.headers['set-cookie'];
       if (setCookie) {
         const referer = req.headers.referer || req.headers.origin || '';
@@ -121,7 +127,7 @@ const apiProxyOptions: Options = {
         try {
           if (referer) {
             const refererUrl = new URL(referer);
-            cookiePath = getOwnerRepoPath(refererUrl.pathname);
+            cookiePath = getOwnerRepoBranchPath(refererUrl.pathname);
           }
         } catch (e) {
           // If referer parsing fails, fall back to root
