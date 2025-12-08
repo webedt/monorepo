@@ -13,11 +13,15 @@ export interface CodexAuth {
   expiresAt?: number;
 }
 
-const TOKEN_BUFFER_TIME = 5 * 60 * 1000; // Refresh 5 minutes before expiration
+// Refresh 10 minutes before expiration to provide buffer for:
+// - Network latency and retries
+// - Long-running operations that need valid tokens throughout
+// - Edge cases where refresh might fail and need retry
+const TOKEN_BUFFER_TIME = 10 * 60 * 1000;
 
 /**
  * Check if a Codex access token needs to be refreshed
- * Returns true if token expires within the buffer time
+ * Returns true if token expires within the buffer time or is already expired
  *
  * Note: API key authentication doesn't expire, only OAuth tokens do
  */
@@ -30,7 +34,22 @@ export function shouldRefreshToken(codexAuth: CodexAuth): boolean {
   // OAuth token - check expiration
   if (codexAuth.accessToken && codexAuth.expiresAt) {
     const now = Date.now();
-    return codexAuth.expiresAt - now <= TOKEN_BUFFER_TIME;
+    const timeUntilExpiry = codexAuth.expiresAt - now;
+    const needsRefresh = timeUntilExpiry <= TOKEN_BUFFER_TIME;
+
+    if (needsRefresh) {
+      const isExpired = timeUntilExpiry <= 0;
+      logger.info('Codex token refresh check', {
+        component: 'CodexAuth',
+        needsRefresh: true,
+        isExpired,
+        timeUntilExpiryMs: timeUntilExpiry,
+        timeUntilExpiryMinutes: Math.round(timeUntilExpiry / 60000),
+        expiresAt: new Date(codexAuth.expiresAt).toISOString()
+      });
+    }
+
+    return needsRefresh;
   }
 
   // No valid auth found

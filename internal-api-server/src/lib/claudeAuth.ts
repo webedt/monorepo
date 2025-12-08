@@ -18,7 +18,11 @@ export interface ClaudeAuth {
 
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const TOKEN_BUFFER_TIME = 5 * 60 * 1000; // Refresh 5 minutes before expiration
+// Refresh 10 minutes before expiration to provide buffer for:
+// - Network latency and retries
+// - Long-running operations that need valid tokens throughout
+// - Edge cases where refresh might fail and need retry
+const TOKEN_BUFFER_TIME = 10 * 60 * 1000;
 
 interface RefreshTokenResponse {
   access_token: string;
@@ -28,14 +32,27 @@ interface RefreshTokenResponse {
 
 /**
  * Check if a Claude access token needs to be refreshed
- * Returns true if token expires within the buffer time
+ * Returns true if token expires within the buffer time or is already expired
  */
 export function shouldRefreshToken(claudeAuth: ClaudeAuth): boolean {
   const now = Date.now();
   const expiresAt = claudeAuth.expiresAt;
+  const timeUntilExpiry = expiresAt - now;
+  const needsRefresh = timeUntilExpiry <= TOKEN_BUFFER_TIME;
 
-  // Refresh if token expires within the buffer time
-  return expiresAt - now <= TOKEN_BUFFER_TIME;
+  if (needsRefresh) {
+    const isExpired = timeUntilExpiry <= 0;
+    logger.info('Token refresh check', {
+      component: 'ClaudeAuth',
+      needsRefresh: true,
+      isExpired,
+      timeUntilExpiryMs: timeUntilExpiry,
+      timeUntilExpiryMinutes: Math.round(timeUntilExpiry / 60000),
+      expiresAt: new Date(expiresAt).toISOString()
+    });
+  }
+
+  return needsRefresh;
 }
 
 /**
