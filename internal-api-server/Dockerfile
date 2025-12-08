@@ -11,15 +11,23 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-COPY tsconfig.json ./
+# Copy shared package first and build it
+COPY shared/package*.json ./shared/
+COPY shared/tsconfig.json ./shared/
+COPY shared/src ./shared/src
+WORKDIR /app/shared
+RUN npm install && npm run build
 
-# Install dependencies
+# Copy internal-api-server package files
+WORKDIR /app/internal-api-server
+COPY internal-api-server/package*.json ./
+COPY internal-api-server/tsconfig.json ./
+
+# Install dependencies (this will link to ../shared)
 RUN npm install
 
 # Copy source code
-COPY src ./src
+COPY internal-api-server/src ./src
 
 # Build TypeScript
 RUN npm run build

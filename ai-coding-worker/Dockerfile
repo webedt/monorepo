@@ -16,15 +16,23 @@ RUN useradd -m -u 1001 worker && \
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-COPY tsconfig.json ./
+# Copy shared package first and build it
+COPY shared/package*.json ./shared/
+COPY shared/tsconfig.json ./shared/
+COPY shared/src ./shared/src
+WORKDIR /app/shared
+RUN npm install && npm run build
 
-# Install dependencies
+# Copy ai-coding-worker package files
+WORKDIR /app/ai-coding-worker
+COPY ai-coding-worker/package*.json ./
+COPY ai-coding-worker/tsconfig.json ./
+
+# Install dependencies (this will link to ../shared)
 RUN npm install
 
 # Copy source code
-COPY src ./src
+COPY ai-coding-worker/src ./src
 
 # Build TypeScript
 RUN npm run build
