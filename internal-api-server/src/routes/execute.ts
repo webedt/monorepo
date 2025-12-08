@@ -1087,28 +1087,47 @@ const executeHandler = async (req: Request, res: Response) => {
     }
 
   } catch (error) {
+    // Log detailed error information for debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
     logger.error('Execute handler error', error, {
       component: 'ExecuteRoute',
-      userId: user?.id
+      userId: user?.id,
+      errorMessage,
+      errorStack
+    });
+
+    // Also log to console for immediate visibility
+    console.error('[ExecuteRoute] Error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      userId: user?.id,
+      sessionId: chatSession?.id
     });
 
     if (chatSession?.id) {
-      await db
-        .update(chatSessions)
-        .set({ status: 'error', completedAt: new Date() })
-        .where(eq(chatSessions.id, chatSession.id));
+      try {
+        await db
+          .update(chatSessions)
+          .set({ status: 'error', completedAt: new Date() })
+          .where(eq(chatSessions.id, chatSession.id));
+      } catch (dbError) {
+        console.error('[ExecuteRoute] Failed to update session status:', dbError);
+      }
     }
 
     if (res.headersSent) {
       if (!res.writableEnded) {
         res.write(`event: error\n`);
-        res.write(`data: ${JSON.stringify({ error: 'Internal server error' })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: errorMessage || 'Internal server error' })}\n\n`);
         res.write(`event: completed\n`);
         res.write(`data: ${JSON.stringify({ completed: true })}\n\n`);
         res.end();
       }
     } else {
-      res.status(500).json({ success: false, error: 'Internal server error' });
+      // Return the actual error message for better debugging
+      res.status(500).json({ success: false, error: errorMessage || 'Internal server error' });
     }
   }
 };
