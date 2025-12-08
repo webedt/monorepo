@@ -1237,8 +1237,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         throw new Error('Folder rename is not yet supported in storage-worker mode');
       }
 
-      // Refresh the file tree
-      queryClient.invalidateQueries({ queryKey: ['file-tree'] });
+      // Refresh the file tree (use session-specific query key to avoid affecting other Code instances in split view)
+      queryClient.invalidateQueries({ queryKey: ['file-tree', codeSession.sessionId] });
 
       // Log the rename operation as a chat message (persisted to database)
       const itemTypeIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
@@ -1294,8 +1294,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         throw new Error('Folder delete is not yet supported in storage-worker mode');
       }
 
-      // Refresh the file tree
-      queryClient.invalidateQueries({ queryKey: ['file-tree'] });
+      // Refresh the file tree (use session-specific query key to avoid affecting other Code instances in split view)
+      queryClient.invalidateQueries({ queryKey: ['file-tree', codeSession.sessionId] });
 
       // Log the delete operation as a chat message (persisted to database)
       const deleteIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
@@ -1573,7 +1573,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           <span className="text-sm font-semibold uppercase tracking-wide">Explorer</span>
           <div className="flex gap-1">
             <button
-              onClick={() => queryClient.invalidateQueries({ queryKey: ['file-tree'] })}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['file-tree', codeSession?.sessionId] })}
               className="p-1 hover:bg-base-200 rounded"
               title="Refresh"
             >
