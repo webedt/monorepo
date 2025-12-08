@@ -5,8 +5,21 @@ ARG BUILD_COMMIT_SHA=unknown
 ARG BUILD_TIMESTAMP=unknown
 ARG BUILD_IMAGE_TAG=unknown
 
-# Install git (required for cloning repositories)
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+# Install git (required for cloning repositories) and GitHub CLI (for Copilot)
+RUN apt-get update && apt-get install -y git curl && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && apt-get install -y gh && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Gemini CLI globally (for OAuth-based Gemini access)
+# The official Google Gemini CLI package - try multiple possible names
+RUN npm install -g @anthropic-ai/claude-code && \
+    (npm install -g @google-gemini/cli 2>/dev/null || \
+     npm install -g gemini-cli 2>/dev/null || \
+     npm install -g @google/gemini-cli 2>/dev/null || \
+     echo "Gemini CLI not found - will use SDK fallback")
 
 # Create non-root user (required for Claude Code --dangerously-skip-permissions)
 RUN useradd -m -u 1001 worker && \

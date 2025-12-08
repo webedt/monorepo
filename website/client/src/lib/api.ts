@@ -242,7 +242,31 @@ export const userApi = {
       method: 'DELETE',
     }),
 
-  updatePreferredProvider: (provider: 'claude' | 'codex') =>
+  // Gemini OAuth - accepts raw JSON from ~/.gemini/oauth_creds.json
+  // Supports both camelCase and snake_case formats
+  updateGeminiAuth: (geminiAuth: {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    tokenType?: string;
+    scope?: string;
+    // Also accept snake_case from Gemini CLI file
+    access_token?: string;
+    refresh_token?: string;
+    expiry_date?: number;
+    token_type?: string;
+  }) =>
+    fetchApi('/api/user/gemini-auth', {
+      method: 'POST',
+      body: { geminiAuth },
+    }),
+
+  removeGeminiAuth: () =>
+    fetchApi('/api/user/gemini-auth', {
+      method: 'DELETE',
+    }),
+
+  updatePreferredProvider: (provider: 'claude' | 'codex' | 'copilot' | 'gemini') =>
     fetchApi('/api/user/preferred-provider', {
       method: 'POST',
       body: { provider },
@@ -674,7 +698,7 @@ export const storageWorkerApi = {
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;
-  provider?: 'claude' | 'codex';
+  provider?: 'claude' | 'codex' | 'copilot' | 'gemini';
   github?: {
     repoUrl: string;
     branch: string;

@@ -21,6 +21,13 @@ export const users = pgTable('users', {
     refreshToken?: string;
     expiresAt?: number;
   }>(),
+  geminiAuth: json('gemini_auth').$type<{
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    tokenType?: string;
+    scope?: string;
+  }>(),
   preferredProvider: text('preferred_provider').default('claude').notNull(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
   voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),
@@ -53,6 +60,7 @@ export const chatSessions = pgTable('chat_sessions', {
   repositoryUrl: text('repository_url'),
   baseBranch: text('base_branch'),
   branch: text('branch'), // Working branch name - populated when branch is created
+  provider: text('provider').default('claude'), // 'claude' | 'codex' | 'copilot' | 'gemini'
   providerSessionId: text('provider_session_id'), // Claude SDK session ID for conversation resume
   autoCommit: boolean('auto_commit').default(false).notNull(),
   locked: boolean('locked').default(false).notNull(),

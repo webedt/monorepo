@@ -44,6 +44,7 @@ pool.query(`
     github_access_token TEXT,
     claude_auth JSONB,
     codex_auth JSONB,
+    gemini_auth JSONB,
     preferred_provider TEXT NOT NULL DEFAULT 'claude',
     image_resize_max_dimension INTEGER NOT NULL DEFAULT 1024,
     voice_command_keywords JSONB DEFAULT '[]'::jsonb,
@@ -70,6 +71,8 @@ pool.query(`
     repository_url TEXT,
     base_branch TEXT,
     branch TEXT,
+    provider TEXT DEFAULT 'claude',
+    provider_session_id TEXT,
     auto_commit BOOLEAN NOT NULL DEFAULT FALSE,
     locked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -129,6 +132,12 @@ pool.query(`
       END IF;
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chat_verbosity_level') THEN
         ALTER TABLE users ADD COLUMN chat_verbosity_level TEXT NOT NULL DEFAULT 'verbose';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'gemini_auth') THEN
+        ALTER TABLE users ADD COLUMN gemini_auth JSONB;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'chat_sessions' AND column_name = 'provider') THEN
+        ALTER TABLE chat_sessions ADD COLUMN provider TEXT DEFAULT 'claude';
       END IF;
     END $$;
   `);

@@ -389,6 +389,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const hasUserEditedTitleRef = useRef(false);
   const chatInputRef = useRef<ChatInputRef>(null);
   const isNearBottomRef = useRef(true); // Track if user is near bottom for smart auto-scroll
+  const previousSessionIdRef = useRef<string | undefined>(undefined); // Track session changes for initial scroll
   const [lastRequest, setLastRequest] = useState<{
     input: string;
     selectedRepo: string;
@@ -611,12 +612,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         setStreamUrl(reconnectStreamUrl);
       }
     } else if (session?.status === 'completed' || session?.status === 'error') {
-      // Only reset isExecuting if we don't have an active stream
-      // This prevents a race condition where the session status is stale (completed)
-      // but the user just submitted a new request (streamUrl is set)
-      if (isExecuting && !streamUrl) {
+      // Reset isExecuting when session is completed/errored
+      // Previously we checked `!streamUrl` to avoid race conditions, but this caused
+      // the processing indicator to get stuck if the stream ended without properly
+      // clearing state. Now we always clear isExecuting and also clear streamUrl
+      // to ensure consistent state cleanup.
+      if (isExecuting) {
         console.log('[Chat] Session completed, setting isExecuting to false');
         setIsExecuting(false);
+        setStreamUrl(null); // Also clear streamUrl to ensure consistent state
         setIsReconnecting(false); // Clear reconnection flag
         // Also clear the global worker store
         workerStore.stopExecution();
@@ -924,7 +928,19 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     console.log(`[Chat] Final merged messages: totalCount=${allMessages.length}, dbMessagesCount=${dbMessages.length}, eventMessagesCount=${eventMessages.length}`);
 
+    // Preserve scroll position when updating messages from database
+    // This prevents the chat from jumping to top when queries are refetched after completion
+    const container = messagesContainerRef.current;
+    const savedScrollTop = container?.scrollTop ?? 0;
+
     setMessages(allMessages);
+
+    // Restore scroll position after React re-renders
+    if (container && savedScrollTop > 0) {
+      requestAnimationFrame(() => {
+        container.scrollTop = savedScrollTop;
+      });
+    }
   }, [eventsData, messagesData, sessionId]);
 
   // Update locked state and repository settings when session data changes
@@ -1032,6 +1048,31 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  // Scroll to bottom when entering a session (e.g., from My Sessions page)
+  // This ensures users see the latest messages when opening an existing session
+  useEffect(() => {
+    // Only trigger when sessionId changes to a valid session (not 'new')
+    if (sessionId && sessionId !== 'new' && sessionId !== previousSessionIdRef.current) {
+      previousSessionIdRef.current = sessionId;
+
+      // Wait for messages to load, then scroll to bottom
+      // Use a small delay to ensure the DOM has updated with messages
+      const scrollToBottom = () => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
+          // Reset isNearBottomRef since we're now at the bottom
+          isNearBottomRef.current = true;
+        }
+      };
+
+      // Try scrolling after a short delay to allow messages to render
+      setTimeout(scrollToBottom, 100);
+    } else if (!sessionId || sessionId === 'new') {
+      // Reset when navigating to new session page
+      previousSessionIdRef.current = undefined;
+    }
+  }, [sessionId, messages.length]); // Also depend on messages.length to scroll after messages load
 
   // Reset state when navigating to new chat (sessionId becomes undefined)
   useEffect(() => {
