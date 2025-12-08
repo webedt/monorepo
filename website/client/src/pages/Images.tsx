@@ -298,7 +298,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
   // Track modified images for commit functionality
   const [modifiedImages, setModifiedImages] = useState<Set<string>>(new Set());
-  const [_commitStatus, _setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
+  const [commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
 
   // PR-related state
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
@@ -863,6 +863,33 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
       setIsSavingImage(false);
     }
   }, [imageSession, selectedFile, isSavingImage, canvasHistory, historyIndex]);
+
+  // Mark all modified images as committed (changes are synced when creating PR)
+  const commitChanges = useCallback(async () => {
+    if (!imageSession || modifiedImages.size === 0) return;
+
+    setCommitStatus('committing');
+
+    try {
+      // Log the commit action
+      const modifiedFilesList = Array.from(modifiedImages);
+      console.log(`Marking ${modifiedFilesList.length} image(s) as committed:`, modifiedFilesList);
+
+      // Clear modified images list (they're already saved to storage-worker)
+      setModifiedImages(new Set());
+      setCommitStatus('committed');
+
+      // Reset status after a short delay
+      setTimeout(() => {
+        setCommitStatus(prev => prev === 'committed' ? 'idle' : prev);
+      }, 2000);
+
+      console.log('Changes marked as committed');
+    } catch (error) {
+      console.error('Failed to commit changes:', error);
+      setCommitStatus('error');
+    }
+  }, [imageSession, modifiedImages]);
 
   // PR Handler Functions
   const handleCreatePR = async () => {
@@ -2326,6 +2353,43 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/></svg>
             Export
           </button>
+
+          {/* Modified files count and Commit button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-base-300 ml-2">
+            {modifiedImages.size > 0 && (
+              <div className="badge badge-warning badge-sm" title={`${modifiedImages.size} image(s) with uncommitted changes`}>
+                {modifiedImages.size} modified
+              </div>
+            )}
+
+            <button
+              onClick={commitChanges}
+              disabled={modifiedImages.size === 0 || commitStatus === 'committing'}
+              className="btn btn-sm btn-secondary gap-1"
+              title="Commit changes"
+            >
+              {commitStatus === 'committing' ? (
+                <>
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Committing...
+                </>
+              ) : commitStatus === 'committed' ? (
+                <>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Committed!
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                  Commit
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Canvas Area */}
