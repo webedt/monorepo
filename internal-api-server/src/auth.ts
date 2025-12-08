@@ -12,8 +12,21 @@ import { pool } from './db/index.js';
 import type { ClaudeAuth } from './lib/claudeAuth.js';
 import type { CodexAuth } from './lib/codexAuth.js';
 
+/**
+ * Gemini authentication supports two modes:
+ * 1. API Key - for basic access (Flash models only)
+ * 2. OAuth - for full access including Pro models (from ~/.gemini/oauth_creds.json)
+ */
 export interface GeminiAuth {
-  apiKey: string;
+  // API Key authentication (mutually exclusive with OAuth)
+  apiKey?: string;
+
+  // OAuth authentication (from Gemini CLI login)
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  tokenType?: string;
+  scope?: string;
 }
 
 const adapter = new NodePostgresAdapter(pool, {

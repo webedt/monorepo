@@ -225,7 +225,14 @@ export const userApi = {
       method: 'DELETE',
     }),
 
-  updateGeminiAuth: (geminiAuth: { apiKey: string }) =>
+  updateGeminiAuth: (geminiAuth: {
+    apiKey?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    tokenType?: string;
+    scope?: string;
+  }) =>
     fetchApi('/api/user/gemini-auth', {
       method: 'POST',
       body: { geminiAuth },

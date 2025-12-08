@@ -13,6 +13,14 @@ RUN apt-get update && apt-get install -y git curl && \
     apt-get update && apt-get install -y gh && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Gemini CLI globally (for OAuth-based Gemini access)
+# The official Google Gemini CLI package - try multiple possible names
+RUN npm install -g @anthropic-ai/claude-code && \
+    (npm install -g @google-gemini/cli 2>/dev/null || \
+     npm install -g gemini-cli 2>/dev/null || \
+     npm install -g @google/gemini-cli 2>/dev/null || \
+     echo "Gemini CLI not found - will use SDK fallback")
+
 # Create non-root user (required for Claude Code --dangerously-skip-permissions)
 RUN useradd -m -u 1001 worker && \
     mkdir -p /workspace && \

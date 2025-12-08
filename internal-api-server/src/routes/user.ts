@@ -118,30 +118,56 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-// Update Gemini authentication (Google API Key)
+// Update Gemini authentication (API Key or OAuth)
 router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     let geminiAuth = req.body.geminiAuth || req.body;
 
-    // Validate Gemini auth structure - must have apiKey
-    if (!geminiAuth || !geminiAuth.apiKey) {
+    // Validate Gemini auth structure - must have apiKey OR OAuth tokens
+    const hasApiKey = geminiAuth && geminiAuth.apiKey;
+    const hasOAuth = geminiAuth && geminiAuth.accessToken && geminiAuth.refreshToken;
+
+    if (!hasApiKey && !hasOAuth) {
       res.status(400).json({
         success: false,
-        error: 'Invalid Gemini auth. Must include apiKey.',
+        error: 'Invalid Gemini auth. Must include either apiKey or OAuth tokens (accessToken + refreshToken).',
       });
       return;
+    }
+
+    // Normalize the auth object
+    const normalizedAuth: {
+      apiKey?: string;
+      accessToken?: string;
+      refreshToken?: string;
+      expiresAt?: number;
+      tokenType?: string;
+      scope?: string;
+    } = {};
+
+    if (hasApiKey) {
+      normalizedAuth.apiKey = geminiAuth.apiKey;
+    }
+
+    if (hasOAuth) {
+      normalizedAuth.accessToken = geminiAuth.accessToken;
+      normalizedAuth.refreshToken = geminiAuth.refreshToken;
+      normalizedAuth.expiresAt = geminiAuth.expiresAt || geminiAuth.expiry_date;
+      normalizedAuth.tokenType = geminiAuth.tokenType || geminiAuth.token_type || 'Bearer';
+      normalizedAuth.scope = geminiAuth.scope;
     }
 
     // Update user with Gemini auth
     await db
       .update(users)
-      .set({ geminiAuth })
+      .set({ geminiAuth: normalizedAuth })
       .where(eq(users.id, authReq.user!.id));
 
+    const authType = hasOAuth ? 'OAuth' : 'API Key';
     res.json({
       success: true,
-      data: { message: 'Gemini authentication updated successfully' },
+      data: { message: `Gemini ${authType} authentication updated successfully` },
     });
   } catch (error) {
     console.error('Update Gemini auth error:', error);

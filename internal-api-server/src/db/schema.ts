@@ -22,7 +22,12 @@ export const users = pgTable('users', {
     expiresAt?: number;
   }>(),
   geminiAuth: json('gemini_auth').$type<{
-    apiKey: string;
+    apiKey?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    tokenType?: string;
+    scope?: string;
   }>(),
   preferredProvider: text('preferred_provider').default('claude').notNull(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
