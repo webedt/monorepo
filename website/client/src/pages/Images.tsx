@@ -102,6 +102,25 @@ const getFileIcon = (filename: string, fileType?: ImageFileType): string => {
   return iconMap[ext || ''] || '🖼️';
 };
 
+// Helper to recursively remove empty folders from the tree
+const removeEmptyFolders = (nodes: FileNode[]): FileNode[] => {
+  return nodes
+    .map(node => {
+      if (node.type === 'folder' && node.children) {
+        // Recursively clean children first
+        const cleanedChildren = removeEmptyFolders(node.children);
+        return { ...node, children: cleanedChildren };
+      }
+      return node;
+    })
+    .filter(node => {
+      // Keep files
+      if (node.type === 'file') return true;
+      // Keep folders that have children
+      return node.children && node.children.length > 0;
+    });
+};
+
 // Transform storage-worker files to our filtered TreeNode format for images
 // Storage files have path and type properties
 const transformStorageFilesForImages = (
@@ -111,8 +130,15 @@ const transformStorageFilesForImages = (
   const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
 
   // Filter to only include files under workspace/ and strip the prefix
+  // Also filter out .git directories and their contents
   const workspaceFiles = files
     .filter(f => f.path.startsWith('workspace/'))
+    .filter(f => {
+      // Exclude .git folder and anything inside it
+      const pathWithoutPrefix = f.path.replace(/^workspace\//, '');
+      const parts = pathWithoutPrefix.split('/');
+      return !parts.some(part => part === '.git');
+    })
     .map(f => ({
       ...f,
       path: f.path.replace(/^workspace\//, ''),
@@ -203,7 +229,8 @@ const transformStorageFilesForImages = (
     }
   }
 
-  return root.children || [];
+  // Remove empty folders from the tree
+  return removeEmptyFolders(root.children || []);
 };
 
 // Props for split view support
