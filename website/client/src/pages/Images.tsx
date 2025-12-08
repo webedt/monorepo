@@ -669,8 +669,8 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       // Close modal
       setShowNewImageModal(false);
 
-      // Refresh the file tree
-      await queryClient.invalidateQueries({ queryKey: ['file-tree'] });
+      // Refresh the file tree (use session-specific query key to avoid affecting other components in split view)
+      await queryClient.invalidateQueries({ queryKey: ['file-tree', imageSession?.sessionId] });
 
       // Select the new file
       setSelectedFile({
@@ -1417,7 +1417,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
         <span className="text-sm font-semibold uppercase tracking-wide">Image Explorer</span>
         <div className="flex gap-1">
           <button
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['file-tree'] })}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['file-tree', imageSession?.sessionId] })}
             className="p-1 hover:bg-base-200 rounded"
             title="Refresh"
           >
