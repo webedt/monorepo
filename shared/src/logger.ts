@@ -1,5 +1,5 @@
 /**
- * Simple structured logger for unified worker
+ * Simple structured logger for WebEDT services
  */
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -8,7 +8,7 @@ interface LogContext {
   component?: string;
   sessionId?: string;
   provider?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 class Logger {
@@ -20,13 +20,13 @@ class Logger {
     if (context) {
       const parts: string[] = [];
       if (context.component) parts.push(`component=${context.component}`);
-      if (context.sessionId) parts.push(`session=${context.sessionId.substring(0, 8)}`);
+      if (context.sessionId) parts.push(`session=${String(context.sessionId).substring(0, 8)}`);
       if (context.provider) parts.push(`provider=${context.provider}`);
 
       // Add any other context fields
       Object.keys(context).forEach(key => {
         if (!['component', 'sessionId', 'provider'].includes(key)) {
-          parts.push(`${key}=${context[key]}`);
+          parts.push(`${key}=${String(context[key])}`);
         }
       });
 
@@ -52,7 +52,7 @@ class Logger {
     console.warn(this.formatMessage('warn', message, context));
   }
 
-  error(message: string, error?: Error | any, context?: LogContext): void {
+  error(message: string, error?: Error | unknown, context?: LogContext): void {
     console.error(this.formatMessage('error', message, context));
     if (error) {
       if (error instanceof Error) {
@@ -68,3 +68,4 @@ class Logger {
 }
 
 export const logger = new Logger();
+export type { LogContext };

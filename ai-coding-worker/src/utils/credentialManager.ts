@@ -185,36 +185,6 @@ export class CredentialManager {
   }
 
   /**
-   * Read Claude Agent SDK credentials
-   * @returns API key
-   */
-  static readClaudeCredentials(): string {
-    const credentialPath = this.getClaudeCredentialPath();
-    const credentials = this.readCredentialFile(credentialPath);
-
-    if (!credentials.apiKey) {
-      throw new Error('Invalid Claude credentials: missing apiKey');
-    }
-
-    return credentials.apiKey;
-  }
-
-  /**
-   * Read Codex SDK credentials
-   * @returns Auth token
-   */
-  static readCodexCredentials(): string {
-    const credentialPath = this.getCodexCredentialPath();
-    const credentials = this.readCredentialFile(credentialPath);
-
-    if (!credentials.authToken) {
-      throw new Error('Invalid Codex credentials: missing authToken');
-    }
-
-    return credentials.authToken;
-  }
-
-  /**
    * Check if credential file exists
    * @param credentialPath - Path to check
    * @returns true if file exists

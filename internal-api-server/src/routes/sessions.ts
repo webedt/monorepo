@@ -10,11 +10,10 @@ import type { ChatSession } from '../db/schema.js';
 import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl } from '../utils/previewUrlHelper.js';
+import { getPreviewUrl, logger } from '@webedt/shared';
 import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
-import { logger } from '../utils/logger.js';
 
 const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
 

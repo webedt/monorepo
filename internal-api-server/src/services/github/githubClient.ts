@@ -6,7 +6,7 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../../utils/logger.js';
+import { logger } from '@webedt/shared';
 
 export interface GitHubPullOptions {
   repoUrl: string;

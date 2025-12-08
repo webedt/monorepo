@@ -4,10 +4,9 @@ import { execSync } from 'child_process';
 import { ExecuteRequest, SSEEvent, UserRequestContent } from './types';
 import { ProviderFactory } from './providers/ProviderFactory';
 import { Request, Response } from 'express';
-import { logger } from './utils/logger';
+import { logger, getEventEmoji } from '@webedt/shared';
 import { CredentialManager } from './utils/credentialManager';
 import { enrichEventWithRelativePaths } from './utils/filePathHelper';
-import { getEventEmoji } from './utils/emojiMapper';
 import { StorageClient } from './storage/storageClient';
 
 // Local workspace root for downloaded sessions

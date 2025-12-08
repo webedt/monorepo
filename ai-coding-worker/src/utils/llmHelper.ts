@@ -1,5 +1,5 @@
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
-import { logger } from './logger';
+import { logger } from '@webedt/shared';
 import { CredentialManager } from './credentialManager';
 
 /**

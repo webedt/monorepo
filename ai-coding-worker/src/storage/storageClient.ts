@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as tar from 'tar';
 import * as https from 'https';
 import * as http from 'http';
-import { logger } from '../utils/logger';
+import { logger } from '@webedt/shared';
 import { SessionMetadata, SSEEvent } from '../types';
 
 /**

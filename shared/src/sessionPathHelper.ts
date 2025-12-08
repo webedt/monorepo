@@ -3,7 +3,7 @@
  * Session path format: {owner}__{repo}__{branch} (no slashes allowed)
  *
  * IMPORTANT: Session paths must NOT contain "/" characters.
- * The storage-worker API validates this and will reject paths with slashes.
+ * The storage service validates this and will reject paths with slashes.
  */
 
 // Separator used between components (double underscore to avoid conflicts)
@@ -18,7 +18,7 @@ const SESSION_PATH_SEPARATOR = '__';
  */
 export function parseRepoUrl(repoUrl: string): { owner: string; repo: string } {
   // Remove .git suffix if present
-  let cleanUrl = repoUrl.replace(/\.git$/, '');
+  const cleanUrl = repoUrl.replace(/\.git$/, '');
 
   // Handle SSH format: git@github.com:owner/repo
   if (cleanUrl.includes('@')) {

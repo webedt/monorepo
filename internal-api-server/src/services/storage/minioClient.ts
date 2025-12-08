@@ -11,7 +11,7 @@ import {
   MINIO_ROOT_PASSWORD,
   MINIO_BUCKET
 } from '../../config/env.js';
-import { logger } from '../../utils/logger.js';
+import { logger } from '@webedt/shared';
 
 let minioClient: MinioClient | null = null;
 
