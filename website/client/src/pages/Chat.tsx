@@ -390,6 +390,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const chatInputRef = useRef<ChatInputRef>(null);
   const isNearBottomRef = useRef(true); // Track if user is near bottom for smart auto-scroll
   const previousSessionIdRef = useRef<string | undefined>(undefined); // Track session changes for initial scroll
+  const isInitialSessionLoadRef = useRef(false); // Track initial session load to skip scroll preservation
   const [lastRequest, setLastRequest] = useState<{
     input: string;
     selectedRepo: string;
@@ -930,13 +931,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Preserve scroll position when updating messages from database
     // This prevents the chat from jumping to top when queries are refetched after completion
+    // BUT skip this during initial session load - we want to scroll to bottom in that case
     const container = messagesContainerRef.current;
     const savedScrollTop = container?.scrollTop ?? 0;
+    const shouldPreserveScroll = !isInitialSessionLoadRef.current && savedScrollTop > 0;
 
     setMessages(allMessages);
 
-    // Restore scroll position after React re-renders
-    if (container && savedScrollTop > 0) {
+    // Restore scroll position after React re-renders (only if not initial load)
+    if (container && shouldPreserveScroll) {
       requestAnimationFrame(() => {
         container.scrollTop = savedScrollTop;
       });
@@ -1055,24 +1058,37 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Only trigger when sessionId changes to a valid session (not 'new')
     if (sessionId && sessionId !== 'new' && sessionId !== previousSessionIdRef.current) {
       previousSessionIdRef.current = sessionId;
+      // Mark that we're doing initial session load - this prevents scroll position preservation
+      // from fighting with our scroll-to-bottom behavior
+      isInitialSessionLoadRef.current = true;
+    } else if (!sessionId || sessionId === 'new') {
+      // Reset when navigating to new session page
+      previousSessionIdRef.current = undefined;
+      isInitialSessionLoadRef.current = false;
+    }
+  }, [sessionId]);
 
-      // Wait for messages to load, then scroll to bottom
-      // Use a small delay to ensure the DOM has updated with messages
+  // Scroll to bottom after messages load during initial session entry
+  // This is separate from the sessionId change detection to ensure messages are actually loaded
+  useEffect(() => {
+    if (isInitialSessionLoadRef.current && messages.length > 0) {
+      // Messages have loaded, scroll to bottom
       const scrollToBottom = () => {
         if (messagesEndRef.current) {
           messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
           // Reset isNearBottomRef since we're now at the bottom
           isNearBottomRef.current = true;
         }
+        // Clear the flag after scrolling - subsequent message updates won't trigger this
+        isInitialSessionLoadRef.current = false;
       };
 
-      // Try scrolling after a short delay to allow messages to render
-      setTimeout(scrollToBottom, 100);
-    } else if (!sessionId || sessionId === 'new') {
-      // Reset when navigating to new session page
-      previousSessionIdRef.current = undefined;
+      // Use requestAnimationFrame to ensure DOM has rendered, then scroll
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
     }
-  }, [sessionId, messages.length]); // Also depend on messages.length to scroll after messages load
+  }, [messages.length]);
 
   // Reset state when navigating to new chat (sessionId becomes undefined)
   useEffect(() => {
