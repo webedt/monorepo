@@ -271,13 +271,13 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
   // Track modified images for commit functionality
   const [modifiedImages, setModifiedImages] = useState<Set<string>>(new Set());
-  const [commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
+  const [_commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
 
   // PR-related state
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
-  const [prError, setPrError] = useState<string | null>(null);
-  const [prSuccess, setPrSuccess] = useState<string | null>(null);
-  const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
+  const [_prError, setPrError] = useState<string | null>(null);
+  const [_prSuccess, setPrSuccess] = useState<string | null>(null);
+  const [_autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
 
   // Get preferences from store
   const imagePrefs = useNewImagePreferencesStore();
@@ -838,7 +838,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
   }, [imageSession, selectedFile, isSavingImage, canvasHistory, historyIndex]);
 
   // Commit all modified images (marks them as committed)
-  const commitImageChanges = useCallback(async () => {
+  const _commitImageChanges = useCallback(async () => {
     if (!imageSession || modifiedImages.size === 0) return;
 
     setCommitStatus('committing');
