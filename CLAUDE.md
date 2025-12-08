@@ -371,6 +371,34 @@ docker stack rm {stack-name}
 
 ---
 
+## SSH Access for Docker Status
+
+To check Docker container status on the production server:
+
+```bash
+ssh ehub2023
+```
+
+**If `ehub2023` is not accessible**, ask the user for the SSH server hostname/alias.
+
+### Common Docker Commands (via SSH)
+
+```bash
+# List running containers
+docker ps
+
+# Check specific service status
+docker service ls
+
+# View container logs
+docker logs <container-id> -f
+
+# Check service logs
+docker service logs <service-name> -f
+```
+
+---
+
 ## Links After Tasks
 
 **CRITICAL:** After code changes, commits, or pushes, ALWAYS display:
