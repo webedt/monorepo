@@ -267,6 +267,10 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   const [isSavingImage, setIsSavingImage] = useState(false);
   const resolutionPickerRef = useRef<HTMLDivElement>(null);
 
+  // Track modified images for commit functionality
+  const [modifiedImages, setModifiedImages] = useState<Set<string>>(new Set());
+  const [commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
+
   // Get preferences from store
   const imagePrefs = useNewImagePreferencesStore();
 
@@ -791,6 +795,9 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       // Clear selection
       setSelection(null);
 
+      // Mark image as modified (uncommitted change)
+      setModifiedImages(prev => new Set(prev).add(selectedFile.path));
+
       console.log('Image saved successfully');
     } catch (error) {
       console.error('Failed to save image:', error);
@@ -799,6 +806,33 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       setIsSavingImage(false);
     }
   }, [imageSession, selectedFile, isSavingImage, canvasHistory, historyIndex]);
+
+  // Commit all modified images (marks them as committed)
+  const commitImageChanges = useCallback(async () => {
+    if (!imageSession || modifiedImages.size === 0) return;
+
+    setCommitStatus('committing');
+
+    try {
+      // Get list of modified image files
+      const modifiedPaths = Array.from(modifiedImages);
+
+      console.log(`Committing ${modifiedPaths.length} modified image(s):`, modifiedPaths);
+
+      // Clear the modified images set (mark as committed)
+      setModifiedImages(new Set());
+
+      setCommitStatus('committed');
+
+      // Reset status after 2 seconds
+      setTimeout(() => {
+        setCommitStatus(prev => prev === 'committed' ? 'idle' : prev);
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to commit image changes:', error);
+      setCommitStatus('error');
+    }
+  }, [imageSession, modifiedImages]);
 
   // Close resolution picker when clicking outside
   useEffect(() => {
@@ -1346,6 +1380,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
       if (node.type === 'file') {
         const isSelected = selectedFile?.path === node.path;
+        const isModified = modifiedImages.has(node.path);
         return (
           <div
             key={node.path}
@@ -1358,6 +1393,9 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
           >
             <span className="text-sm flex-shrink-0">{node.icon}</span>
             <span className="text-sm truncate flex-1">{node.name}</span>
+            {isModified && (
+              <span className="w-2 h-2 rounded-full bg-warning flex-shrink-0" title="Modified" />
+            )}
             {node.fileType && (
               <span className="text-xs text-base-content/40 group-hover:text-base-content/60">
                 {node.fileType === 'spritesheet' ? 'sheet' : node.fileType === 'animation' ? 'anim' : ''}
@@ -1428,13 +1466,48 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
         </div>
       </div>
 
-      {/* Branch info */}
+      {/* Branch info and commit controls */}
       {imageSession && (
         <div className="px-3 py-2 border-b border-base-300 bg-base-200">
-          <div className="text-xs text-base-content/70">Branch</div>
-          <div className="text-sm font-medium text-primary truncate" title={imageSession.branch || ''}>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs text-base-content/70">Branch</div>
+            {modifiedImages.size > 0 && (
+              <div className="badge badge-warning badge-xs" title={`${modifiedImages.size} image(s) with uncommitted changes`}>
+                {modifiedImages.size} modified
+              </div>
+            )}
+          </div>
+          <div className="text-sm font-medium text-primary truncate mb-2" title={imageSession.branch || ''}>
             {imageSession.branch || 'No branch'}
           </div>
+          {/* Commit Button */}
+          <button
+            onClick={commitImageChanges}
+            disabled={modifiedImages.size === 0 || commitStatus === 'committing'}
+            className="btn btn-xs btn-primary w-full gap-1"
+            title="Commit image changes"
+          >
+            {commitStatus === 'committing' ? (
+              <>
+                <span className="loading loading-spinner loading-xs"></span>
+                Committing...
+              </>
+            ) : commitStatus === 'committed' ? (
+              <>
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                Committed!
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+                Commit
+              </>
+            )}
+          </button>
         </div>
       )}
 
