@@ -80,10 +80,13 @@ export default function Settings() {
     setActiveTabState(tab);
 
     // Sync to URL in the background (uses replace to avoid polluting history)
-    const newParams = new URLSearchParams(searchParams);
-    newParams.set('tab', tab);
-    setSearchParams(newParams, { replace: true });
-  }, [searchParams, setSearchParams]);
+    // Use functional update pattern to avoid stale searchParams closure
+    setSearchParams((prevParams) => {
+      const newParams = new URLSearchParams(prevParams);
+      newParams.set('tab', tab);
+      return newParams;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   // Sync local state if URL changes externally (e.g., browser back/forward)
   useEffect(() => {
