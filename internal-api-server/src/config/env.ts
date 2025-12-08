@@ -37,6 +37,24 @@ export const MINIO_BUCKET = process.env.MINIO_BUCKET || 'sessions';
 // AI Worker configuration
 export const AI_WORKER_URL = process.env.AI_WORKER_URL || 'http://localhost:5001';
 export const AI_WORKER_TIMEOUT_MS = parseInt(process.env.AI_WORKER_TIMEOUT_MS || '600000', 10); // 10 minutes
+export const AI_WORKER_PORT = parseInt(process.env.AI_WORKER_PORT || '5000', 10);
+
+// Worker Coordinator configuration (replaces DNSRR with direct routing)
+export const USE_WORKER_COORDINATOR = process.env.USE_WORKER_COORDINATOR === 'true';
+export const DOCKER_SOCKET_PATH = process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock';
+export const WORKER_SWARM_SERVICE_NAME = process.env.WORKER_SWARM_SERVICE_NAME || 'ai-coding-worker';
+export const WORKER_COORDINATOR_REFRESH_INTERVAL_MS = parseInt(
+  process.env.WORKER_COORDINATOR_REFRESH_INTERVAL_MS || '5000', 10
+); // How often to refresh worker list (5 seconds)
+export const WORKER_STALE_BUSY_TIMEOUT_MS = parseInt(
+  process.env.WORKER_STALE_BUSY_TIMEOUT_MS || '600000', 10
+); // When to consider a busy worker stale (10 minutes)
+export const WORKER_NO_CAPACITY_RETRY_MS = parseInt(
+  process.env.WORKER_NO_CAPACITY_RETRY_MS || '1000', 10
+); // Wait between retries when no capacity (1 second)
+export const WORKER_NO_CAPACITY_MAX_RETRIES = parseInt(
+  process.env.WORKER_NO_CAPACITY_MAX_RETRIES || '10', 10
+); // Max retries when no workers available
 
 // Orphan session cleanup configuration
 export const ORPHAN_SESSION_TIMEOUT_MINUTES = parseInt(process.env.ORPHAN_SESSION_TIMEOUT_MINUTES || '30', 10);
@@ -89,6 +107,10 @@ export function logEnvConfig(): void {
   console.log(`  MINIO_PORT=${MINIO_PORT}`);
   console.log(`  MINIO_BUCKET=${MINIO_BUCKET}`);
   console.log(`  AI_WORKER_URL=${AI_WORKER_URL}`);
+  console.log(`  AI_WORKER_PORT=${AI_WORKER_PORT}`);
+  console.log(`  USE_WORKER_COORDINATOR=${USE_WORKER_COORDINATOR}`);
+  console.log(`  WORKER_SWARM_SERVICE_NAME=${WORKER_SWARM_SERVICE_NAME}`);
+  console.log(`  DOCKER_SOCKET_PATH=${DOCKER_SOCKET_PATH}`);
   console.log(`  MINIO_ROOT_USER=${redact(MINIO_ROOT_USER)}`);
   console.log(`  MINIO_ROOT_PASSWORD=${redact(MINIO_ROOT_PASSWORD)}`);
   console.log(`  SESSION_SECRET=${redact(SESSION_SECRET)}`);
