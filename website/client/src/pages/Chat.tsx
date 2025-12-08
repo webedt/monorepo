@@ -611,12 +611,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         setStreamUrl(reconnectStreamUrl);
       }
     } else if (session?.status === 'completed' || session?.status === 'error') {
-      // Only reset isExecuting if we don't have an active stream
-      // This prevents a race condition where the session status is stale (completed)
-      // but the user just submitted a new request (streamUrl is set)
-      if (isExecuting && !streamUrl) {
+      // Reset isExecuting when session is completed/errored
+      // Previously we checked `!streamUrl` to avoid race conditions, but this caused
+      // the processing indicator to get stuck if the stream ended without properly
+      // clearing state. Now we always clear isExecuting and also clear streamUrl
+      // to ensure consistent state cleanup.
+      if (isExecuting) {
         console.log('[Chat] Session completed, setting isExecuting to false');
         setIsExecuting(false);
+        setStreamUrl(null); // Also clear streamUrl to ensure consistent state
         setIsReconnecting(false); // Clear reconnection flag
         // Also clear the global worker store
         workerStore.stopExecution();
