@@ -457,10 +457,10 @@ export const adminApi = {
   getStats: () => fetchApi('/api/admin/stats'),
 };
 
-// Storage Worker API
-export const storageWorkerApi = {
+// Storage API (connects to internal-api-server storage routes)
+export const storageApi = {
   listSessions: async () => {
-    const response = await fetchApi('/api/storage-worker/sessions');
+    const response = await fetchApi('/api/storage/sessions');
     // Map sessionPath to sessionId for compatibility with frontend
     if (response.sessions) {
       response.sessions = response.sessions.map((session: any) => ({
@@ -474,7 +474,7 @@ export const storageWorkerApi = {
   },
 
   getSession: async (sessionId: string) => {
-    const response = await fetchApi(`/api/storage-worker/sessions/${sessionId}`);
+    const response = await fetchApi(`/api/storage/sessions/${sessionId}`);
     // Map sessionPath to sessionId for compatibility
     return {
       sessionId: response.sessionPath || sessionId,
@@ -486,7 +486,7 @@ export const storageWorkerApi = {
 
   sessionExists: async (sessionId: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/storage-worker/sessions/${sessionId}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionId}`, {
         method: 'HEAD',
         credentials: 'include',
       });
@@ -498,18 +498,18 @@ export const storageWorkerApi = {
 
   // List all files in a session
   listFiles: async (sessionPath: string): Promise<{ path: string; size: number; type: 'file' | 'directory' }[]> => {
-    const response = await fetchApi(`/api/storage-worker/sessions/${sessionPath}/files`);
+    const response = await fetchApi(`/api/storage/sessions/${sessionPath}/files`);
     return response.files || [];
   },
 
   // Get a file's raw URL (for images, etc.)
   getFileUrl: (sessionPath: string, filePath: string): string => {
-    return `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    return `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
   },
 
   // Get file content as blob
   getFileBlob: async (sessionPath: string, filePath: string): Promise<Blob | null> => {
-    const url = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    const url = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
     try {
       const response = await fetch(url, {
         credentials: 'include',
@@ -517,7 +517,7 @@ export const storageWorkerApi = {
       if (!response.ok) {
         // Log detailed error info
         const errorText = await response.text().catch(() => '');
-        console.log(`[StorageWorker] getFileBlob error:`, {
+        console.log(`[Storage] getFileBlob error:`, {
           status: response.status,
           url,
           sessionPath,
@@ -528,16 +528,16 @@ export const storageWorkerApi = {
       }
       return await response.blob();
     } catch (error) {
-      console.error(`[StorageWorker] getFileBlob exception:`, error);
+      console.error(`[Storage] getFileBlob exception:`, error);
       return null;
     }
   },
 
   // Get file content as text
   getFileText: async (sessionPath: string, filePath: string): Promise<string | null> => {
-    const url = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    const url = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
 
-    console.log(`[StorageWorker] getFileText request:`, {
+    console.log(`[Storage] getFileText request:`, {
       sessionPath,
       filePath,
       url,
@@ -549,7 +549,7 @@ export const storageWorkerApi = {
         credentials: 'include',
       });
 
-      console.log(`[StorageWorker] getFileText response:`, {
+      console.log(`[Storage] getFileText response:`, {
         status: response.status,
         ok: response.ok,
         url,
@@ -558,7 +558,7 @@ export const storageWorkerApi = {
       if (!response.ok) {
         // Try to get error details
         const errorText = await response.text().catch(() => '');
-        console.log(`[StorageWorker] getFileText error details:`, {
+        console.log(`[Storage] getFileText error details:`, {
           status: response.status,
           errorText: errorText.substring(0, 500),
         });
@@ -566,7 +566,7 @@ export const storageWorkerApi = {
       }
       return await response.text();
     } catch (error) {
-      console.error(`[StorageWorker] getFileText exception:`, error);
+      console.error(`[Storage] getFileText exception:`, error);
       return null;
     }
   },
@@ -576,9 +576,9 @@ export const storageWorkerApi = {
     const body = typeof content === 'string' ? content : content;
     const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
     const contentSize = typeof content === 'string' ? content.length : content.size;
-    const url = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`;
+    const url = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
 
-    console.log(`[StorageWorker] Writing file:`, {
+    console.log(`[Storage] Writing file:`, {
       sessionPath,
       filePath,
       contentType,
@@ -599,7 +599,7 @@ export const storageWorkerApi = {
 
       if (response.ok) {
         const data = await response.json().catch(() => ({}));
-        console.log(`[StorageWorker] Successfully wrote file:`, {
+        console.log(`[Storage] Successfully wrote file:`, {
           filePath,
           status: response.status,
           response: data,
@@ -618,7 +618,7 @@ export const storageWorkerApi = {
           }
         }
 
-        console.error(`[StorageWorker] Failed to write file:`, {
+        console.error(`[Storage] Failed to write file:`, {
           filePath,
           sessionPath,
           url,
@@ -630,47 +630,47 @@ export const storageWorkerApi = {
 
         // If 404, run diagnostics to understand why
         if (response.status === 404) {
-          console.log(`[StorageWorker] Running diagnostics for 404 error...`);
+          console.log(`[Storage] Running diagnostics for 404 error...`);
 
           // Check if session exists
           try {
-            const sessionCheckUrl = `${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}`;
+            const sessionCheckUrl = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}`;
             const sessionCheck = await fetch(sessionCheckUrl, {
               method: 'HEAD',
               credentials: 'include',
             });
-            console.log(`[StorageWorker] Session exists check:`, {
+            console.log(`[Storage] Session exists check:`, {
               url: sessionCheckUrl,
               exists: sessionCheck.ok,
               status: sessionCheck.status,
             });
           } catch (e) {
-            console.log(`[StorageWorker] Session exists check failed:`, e);
+            console.log(`[Storage] Session exists check failed:`, e);
           }
 
           // Check if we can list sessions at all (to verify API is reachable)
           try {
-            const listUrl = `${getApiBaseUrl()}/api/storage-worker/sessions`;
+            const listUrl = `${getApiBaseUrl()}/api/storage/sessions`;
             const listCheck = await fetch(listUrl, {
               method: 'GET',
               credentials: 'include',
             });
             const listData = await listCheck.json().catch(() => null);
-            console.log(`[StorageWorker] List sessions check:`, {
+            console.log(`[Storage] List sessions check:`, {
               url: listUrl,
               ok: listCheck.ok,
               status: listCheck.status,
               sessionCount: listData?.count ?? 'unknown',
             });
           } catch (e) {
-            console.log(`[StorageWorker] List sessions check failed:`, e);
+            console.log(`[Storage] List sessions check failed:`, e);
           }
         }
 
         return false;
       }
     } catch (error) {
-      console.error(`[StorageWorker] Network error writing file:`, {
+      console.error(`[Storage] Network error writing file:`, {
         filePath,
         sessionPath,
         url,
@@ -684,7 +684,7 @@ export const storageWorkerApi = {
   // Delete a file from a session
   deleteFile: async (sessionPath: string, filePath: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/storage-worker/sessions/${sessionPath}/files/${filePath}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -694,6 +694,9 @@ export const storageWorkerApi = {
     }
   },
 };
+
+// Backwards compatibility alias
+export const storageWorkerApi = storageApi;
 
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
