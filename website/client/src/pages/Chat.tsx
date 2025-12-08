@@ -1094,13 +1094,19 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       previousSessionIdRef.current = sessionId;
       // Mark that we're doing initial session load - this prevents scroll position preservation
       // from fighting with our scroll-to-bottom behavior
-      isInitialSessionLoadRef.current = true;
+      // IMPORTANT: Don't set this flag if we're currently executing a stream, because in that case
+      // we're just updating the URL from /session/new to /session/{id} - not entering a new session.
+      // Setting this flag during an active stream would cause scroll restoration to be skipped
+      // in the merge effect, resulting in the chat jumping to top when the stream completes.
+      if (!isExecuting) {
+        isInitialSessionLoadRef.current = true;
+      }
     } else if (!sessionId || sessionId === 'new') {
       // Reset when navigating to new session page
       previousSessionIdRef.current = undefined;
       isInitialSessionLoadRef.current = false;
     }
-  }, [sessionId]);
+  }, [sessionId, isExecuting]);
 
   // Scroll to bottom after messages load during initial session entry
   // This is separate from the sessionId change detection to ensure messages are actually loaded
@@ -1574,9 +1580,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         // This syncs the final state after SSE stream completes
         queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
         queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
+        // Also invalidate session-details to update status
+        queryClient.invalidateQueries({ queryKey: ['session-details', data.websiteSessionId] });
 
-        // Note: Scroll handling is now done in the messages merge effect (useEffect on eventsData/messagesData)
-        // which properly preserves scroll position or scrolls to bottom based on user's position
+        // Refetch events to ensure we have all stored events from the database
+        // This triggers the merge effect which handles scroll position restoration
+        refetchEvents();
+        console.log('[Chat] Stream completed, triggered events refetch for scroll restoration');
 
         // Navigate to the session URL if not already there
         if (!sessionId || sessionId !== data.websiteSessionId) {
