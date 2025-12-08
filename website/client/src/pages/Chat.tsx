@@ -94,7 +94,10 @@ function clearDraft(sessionId: string) {
 }
 
 // Helper to format source indicator
-function formatSourceLabel(source?: string): string {
+// Only shows source labels in verbose mode
+function formatSourceLabel(source?: string, verbosityLevel?: ChatVerbosityLevel): string {
+  // Only show source prefixes in verbose mode
+  if (verbosityLevel !== 'verbose') return '';
   if (!source) return '';
   const sourceMap: Record<string, string> = {
     'github-worker': '[github-worker]',
@@ -107,7 +110,7 @@ function formatSourceLabel(source?: string): string {
 }
 
 // Helper to convert raw SSE events from database to displayable messages
-function convertEventToMessage(event: DbEvent, sessionId: string): Message | null {
+function convertEventToMessage(event: DbEvent, sessionId: string, verbosityLevel?: ChatVerbosityLevel): Message | null {
   const eventType = event.eventType;
   const data = event.eventData;
 
@@ -209,8 +212,8 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
           if (toolMessages.length > 0) {
             content = toolMessages.join('\n');
             messageType = 'system';
-            // Add source label if present
-            const toolSourceLabel = formatSourceLabel(source);
+            // Add source label if present (only in verbose mode)
+            const toolSourceLabel = formatSourceLabel(source, verbosityLevel);
             const toolFinalContent = toolSourceLabel ? `${toolSourceLabel} ${content}` : content;
             return {
               id: event.id,
@@ -276,8 +279,8 @@ function convertEventToMessage(event: DbEvent, sessionId: string): Message | nul
     return null;
   }
 
-  // Add source label and event label if present
-  const sourceLabel = formatSourceLabel(source);
+  // Add source label and event label if present (source label only in verbose mode)
+  const sourceLabel = formatSourceLabel(source, verbosityLevel);
   let finalContent = content;
   if (sourceLabel || eventLabel) {
     const prefix = [sourceLabel, eventLabel].filter(Boolean).join(' ');
@@ -317,6 +320,8 @@ function shouldShowMessage(message: Message, verbosityLevel: ChatVerbosityLevel)
   const content = message.content;
 
   // Tool operation patterns (hide these at normal level)
+  // Note: Source prefixes (like [claude], [ai-coding-worker]) are only added in verbose mode,
+  // so we don't need to check for them here - they won't exist in normal mode messages
   const toolOperationPatterns = [
     /^📖 Reading:/,      // Read operations
     /^📝 Writing:/,      // Write operations (not session name)
@@ -327,17 +332,6 @@ function shouldShowMessage(message: Message, verbosityLevel: ChatVerbosityLevel)
     /^🌐 Fetching:/,     // Web fetches
     /^🔎 Searching web:/, // Web searches
     /^🤖 Launching agent:/, // Task/agent operations
-    /\[claude\]/,        // Claude SDK messages
-    /\[codex\]/,         // Codex SDK messages
-    /\[ai-coding-worker\].*📖/, // Sourced read operations
-    /\[ai-coding-worker\].*📝 Writing/, // Sourced write operations (not session)
-    /\[ai-coding-worker\].*✏️/, // Sourced edit operations
-    /\[ai-coding-worker\].*🔍/, // Sourced grep operations
-    /\[ai-coding-worker\].*📁/, // Sourced glob operations
-    /\[ai-coding-worker\].*⚡/, // Sourced bash operations
-    /\[ai-coding-worker\].*🌐/, // Sourced web fetch operations
-    /\[ai-coding-worker\].*🔎/, // Sourced web search operations
-    /\[ai-coding-worker\].*🤖 Launching/, // Sourced agent operations
   ];
 
   // Check if it matches a tool operation pattern
@@ -917,7 +911,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     console.log(`[Chat] Merging messages: sessionId=${sessionId}, rawMessagesCount=${messagesData?.data?.messages?.length || 0}, filteredDbMessagesCount=${dbMessages.length}, rawEventsCount=${dbEvents.length}`);
 
     const eventMessages = dbEvents
-      .map((event) => convertEventToMessage(event, sessionId))
+      .map((event) => convertEventToMessage(event, sessionId, user?.chatVerbosityLevel))
       .filter((msg): msg is Message => msg !== null);
 
     console.log(`[Chat] Converted events to messages: eventMessagesCount=${eventMessages.length}`);
@@ -944,7 +938,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         container.scrollTop = savedScrollTop;
       });
     }
-  }, [eventsData, messagesData, sessionId]);
+  }, [eventsData, messagesData, sessionId, user?.chatVerbosityLevel]);
 
   // Update locked state and repository settings when session data changes
   useEffect(() => {
