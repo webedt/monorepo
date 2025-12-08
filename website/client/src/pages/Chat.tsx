@@ -1082,9 +1082,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Scroll to bottom after messages load during initial session entry
   // This is separate from the sessionId change detection to ensure messages are actually loaded
+  // We wait for eventsLoading to be false to ensure all events have been fetched from the database
   useEffect(() => {
-    if (isInitialSessionLoadRef.current && messages.length > 0) {
-      // Messages have loaded, scroll to bottom
+    if (isInitialSessionLoadRef.current && messages.length > 0 && !eventsLoading) {
+      // Messages have loaded and events query is complete, scroll to bottom
       const scrollToBottom = () => {
         if (messagesEndRef.current) {
           messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
@@ -1100,7 +1101,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         scrollToBottom();
       });
     }
-  }, [messages.length]);
+  }, [messages.length, eventsLoading]);
 
   // Reset state when navigating to new chat (sessionId becomes undefined)
   useEffect(() => {
