@@ -2025,8 +2025,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         </button>
       )}
 
-      {/* Create PR button - show if no open PR exists and not merged */}
-      {!existingPr && !mergedPr && (
+      {/* Create PR button - show if no open PR exists, not merged, not executing, and auto PR is not in progress */}
+      {!existingPr && !mergedPr && !isExecuting && prLoading !== 'auto' && (
         <button
           onClick={handleCreatePR}
           className="btn btn-xs btn-primary"
@@ -2041,19 +2041,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         </button>
       )}
 
-      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged */}
-      {!mergedPr && (
+      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged, executing, or auto PR in progress */}
+      {!mergedPr && !isExecuting && prLoading !== 'auto' && (
         <button
           onClick={handleAutoPR}
           className="btn btn-xs btn-accent"
           disabled={prLoading !== null}
           title="Create PR, merge base branch, and merge PR in one click"
         >
-          {prLoading === 'auto' ? (
-            <span className="loading loading-spinner loading-xs"></span>
-          ) : (
-            'Auto PR'
-          )}
+          Auto PR
         </button>
       )}
     </>
