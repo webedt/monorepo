@@ -1136,7 +1136,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     onMessage: (event) => {
       // Log all events to see what we're receiving
       console.log('Received SSE event:', event);
-      console.log('Full event data structure:', JSON.stringify(event, null, 2));
 
       const { eventType, data } = event;
 
