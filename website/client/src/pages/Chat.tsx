@@ -956,10 +956,11 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Check if we just finished streaming - in that case, we should stay at the bottom
     // regardless of the scroll position calculation (which might be incorrect during transition)
+    // NOTE: We capture the value but DON'T clear the ref yet - we clear it inside the RAF
+    // to ensure that if the merge effect runs multiple times before RAF executes,
+    // each run will still see wasStreamingRef.current = true and scroll to bottom
     const wasStreaming = wasStreamingRef.current;
     if (wasStreaming) {
-      // Clear the flag now that we've processed it
-      wasStreamingRef.current = false;
       console.log('[Chat] Stream ended, will scroll to bottom');
     }
 
@@ -979,6 +980,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
           // Update isNearBottomRef since we're now at bottom
           isNearBottomRef.current = true;
+          // NOW clear the streaming flag, after the scroll has been applied
+          // This ensures that if the merge effect runs again before this RAF,
+          // it will still scroll to bottom
+          if (wasStreaming) {
+            wasStreamingRef.current = false;
+          }
         } else if (shouldPreserveScroll) {
           // User was scrolled up, preserve their position
           container.scrollTop = savedScrollTop;
@@ -1108,12 +1115,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Mark that we're doing initial session load - this prevents scroll position preservation
       // from fighting with our scroll-to-bottom behavior
       isInitialSessionLoadRef.current = true;
-      // Clear streaming flag from any previous session to avoid incorrect scroll behavior
-      wasStreamingRef.current = false;
+      // NOTE: We intentionally do NOT clear wasStreamingRef here!
+      // When navigating from /session/new to /session/{id} after stream completes,
+      // wasStreamingRef should remain true so the merge effect scrolls to bottom.
+      // The flag will be cleared after the merge effect's scroll happens.
     } else if (!sessionId || sessionId === 'new') {
       // Reset when navigating to new session page
       previousSessionIdRef.current = undefined;
       isInitialSessionLoadRef.current = false;
+      // Only clear streaming flag when starting a completely new session
       wasStreamingRef.current = false;
     }
   }, [sessionId]);
