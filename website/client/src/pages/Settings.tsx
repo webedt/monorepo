@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { githubApi, userApi, authApi } from '@/lib/api';
@@ -10,6 +10,9 @@ const DEFAULT_KEYWORDS = ['over', 'submit', 'enter', 'period'];
 
 // Tab definitions
 type SettingsTab = 'account' | 'connections' | 'ai' | 'preferences';
+
+// Valid tab IDs for validation
+const VALID_TABS: SettingsTab[] = ['account', 'connections', 'ai', 'preferences'];
 
 const TABS: { id: SettingsTab; label: string; icon: JSX.Element }[] = [
   {
@@ -56,11 +59,39 @@ export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // Get active tab from URL or default to 'account'
-  const activeTab = (searchParams.get('tab') as SettingsTab) || 'account';
+  // Get initial tab from URL or default to 'account'
+  const getInitialTab = (): SettingsTab => {
+    const urlTab = searchParams.get('tab');
+    if (urlTab && VALID_TABS.includes(urlTab as SettingsTab)) {
+      return urlTab as SettingsTab;
+    }
+    return 'account';
+  };
+
+  // Use local state for tab management to avoid URL-induced re-renders on mobile
+  const [activeTab, setActiveTabState] = useState<SettingsTab>(getInitialTab);
 
   // Get origin from URL params (where user came from - 'editor' or 'hub')
   const origin = searchParams.get('from') as 'editor' | 'hub' | null;
+
+  // Handle tab change - update local state immediately, then sync URL
+  const setActiveTab = useCallback((tab: SettingsTab) => {
+    // Update local state immediately for instant UI response
+    setActiveTabState(tab);
+
+    // Sync to URL in the background (uses replace to avoid polluting history)
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('tab', tab);
+    setSearchParams(newParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  // Sync local state if URL changes externally (e.g., browser back/forward)
+  useEffect(() => {
+    const urlTab = searchParams.get('tab');
+    if (urlTab && VALID_TABS.includes(urlTab as SettingsTab) && urlTab !== activeTab) {
+      setActiveTabState(urlTab as SettingsTab);
+    }
+  }, [searchParams, activeTab]);
 
   const [claudeAuthJson, setClaudeAuthJson] = useState('');
   const [claudeError, setClaudeError] = useState('');
@@ -84,13 +115,6 @@ export default function Settings() {
   // Browser notification state
   const { permission, isSupported, requestPermission } = useBrowserNotification();
   const [notificationPrefs, setNotificationPrefsState] = useState(getNotificationPrefs);
-
-  // Handle tab change
-  const setActiveTab = (tab: SettingsTab) => {
-    const newParams = new URLSearchParams(searchParams);
-    newParams.set('tab', tab);
-    setSearchParams(newParams);
-  };
 
   // Format token expiration time
   const formatTokenExpiration = (expiresAt: number) => {
@@ -1371,13 +1395,26 @@ export default function Settings() {
 
       <h1 className="text-3xl font-bold text-base-content mb-6">Settings</h1>
 
-      {/* Tabs */}
-      <div className="tabs tabs-boxed bg-base-100 mb-6 p-1">
+      {/* Tabs - using role="tablist" for better mobile accessibility */}
+      <div
+        role="tablist"
+        className="flex bg-base-100 rounded-lg mb-6 p-1 shadow-sm border border-base-300"
+      >
         {TABS.map((tab) => (
           <button
             key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`tab gap-2 flex-1 ${activeTab === tab.id ? 'tab-active' : ''}`}
+            className={`
+              flex-1 flex items-center justify-center gap-2 py-3 px-2
+              rounded-md text-sm font-medium transition-all duration-150
+              touch-manipulation select-none
+              ${activeTab === tab.id
+                ? 'bg-primary text-primary-content shadow-sm'
+                : 'text-base-content/70 hover:bg-base-200 active:bg-base-300'
+              }
+            `}
           >
             {tab.icon}
             <span className="hidden sm:inline">{tab.label}</span>
@@ -1385,8 +1422,10 @@ export default function Settings() {
         ))}
       </div>
 
-      {/* Tab Content */}
-      {renderTabContent()}
+      {/* Tab Content - wrapped in a container with min-height to prevent layout shifts */}
+      <div className="min-h-[50vh]" role="tabpanel" aria-label={`${activeTab} settings`}>
+        {renderTabContent()}
+      </div>
     </div>
   );
 }
