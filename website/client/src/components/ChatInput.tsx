@@ -507,16 +507,24 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           console.log('[Voice] Appending to input. Current:', currentInput.substring(0, 50), '... New:', newTranscript);
           setInput(appendedInput);
 
-          // Auto-submit if keyword was detected (keep recording active)
+          // Auto-submit if keyword was detected
           if (shouldAutoSubmit && appendedInput.trim()) {
+            // Check if user wants to stop listening after submission
+            // Use user prop directly to get current preference
+            const shouldStopListening = user?.stopListeningAfterSubmit ?? false;
+            if (shouldStopListening) {
+              // Stop recording before submitting
+              voiceStore.setKeepRecording(false);
+              console.log('[Voice] User preference: stopping recording after submit');
+            }
+
             // Trigger submit after a brief delay to ensure state is updated
-            // Note: We intentionally do NOT stop recording - user can continue speaking
             setTimeout(() => {
               // Find the submit button dynamically (not via formRef, which may be stale after navigation)
               // Look for the ChatInput form's submit button in the DOM
               const submitBtn = document.querySelector('form button[type="submit"]') as HTMLButtonElement;
               if (submitBtn && !submitBtn.disabled) {
-                console.log('[Voice] Clicking submit button (recording continues), text:', appendedInput);
+                console.log('[Voice] Clicking submit button, text:', appendedInput, 'stopListening:', shouldStopListening);
                 submitBtn.click();
               } else {
                 console.log('[Voice] No enabled submit button found, text may have been cleared');

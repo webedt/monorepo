@@ -270,6 +270,36 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
   }
 });
 
+// Update stop listening after submit preference
+router.post('/stop-listening-after-submit', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { stopAfterSubmit } = req.body;
+
+    // Validate boolean
+    if (typeof stopAfterSubmit !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        error: 'stopAfterSubmit must be a boolean',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ stopListeningAfterSubmit: stopAfterSubmit })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Stop listening after submit preference updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update stop listening after submit error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update stop listening after submit preference' });
+  }
+});
+
 // Update default landing page
 router.post('/default-landing-page', requireAuth, async (req: Request, res: Response) => {
   try {

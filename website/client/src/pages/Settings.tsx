@@ -269,6 +269,16 @@ export default function Settings() {
     },
   });
 
+  const updateStopListeningAfterSubmit = useMutation({
+    mutationFn: userApi.updateStopListeningAfterSubmit,
+    onSuccess: async () => {
+      await refreshUserSession();
+    },
+    onError: (error) => {
+      alert(`Failed to update stop listening preference: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
   const updateDefaultLandingPage = useMutation({
     mutationFn: userApi.updateDefaultLandingPage,
     onSuccess: async () => {
@@ -1094,6 +1104,30 @@ export default function Settings() {
                       {updateVoiceKeywords.isPending ? 'Saving...' : 'Save Keywords'}
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Stop Listening After Submit */}
+            <div className="card bg-base-100 shadow">
+              <div className="card-body">
+                <h2 className="card-title mb-2">Voice Recording Behavior</h2>
+                <div className="form-control">
+                  <label className="label cursor-pointer justify-start gap-4">
+                    <input
+                      type="checkbox"
+                      checked={user?.stopListeningAfterSubmit ?? false}
+                      onChange={(e) => updateStopListeningAfterSubmit.mutate(e.target.checked)}
+                      disabled={updateStopListeningAfterSubmit.isPending}
+                      className="checkbox checkbox-primary"
+                    />
+                    <div className="flex flex-col">
+                      <span className="label-text font-medium">Stop listening after voice submission</span>
+                      <span className="label-text-alt text-base-content/60">
+                        When enabled, the microphone will stop recording after your voice message is submitted
+                      </span>
+                    </div>
+                  </label>
                 </div>
               </div>
             </div>

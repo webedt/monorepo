@@ -24,6 +24,7 @@ export const users = pgTable('users', {
   preferredProvider: text('preferred_provider').default('claude').notNull(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
   voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),
+  stopListeningAfterSubmit: boolean('stop_listening_after_submit').default(false).notNull(),
   defaultLandingPage: text('default_landing_page').default('store').notNull(),
   preferredModel: text('preferred_model'),
   isAdmin: boolean('is_admin').default(false).notNull(),

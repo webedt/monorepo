@@ -10,6 +10,7 @@ export interface User {
   preferredProvider: AIProvider;          // User's preferred AI provider
   imageResizeMaxDimension: number;
   voiceCommandKeywords: string[];
+  stopListeningAfterSubmit: boolean;
   defaultLandingPage: 'store' | 'library' | 'community' | 'sessions';
   preferredModel?: string | null;
   isAdmin: boolean;

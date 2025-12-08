@@ -249,6 +249,12 @@ export const userApi = {
       body: { keywords },
     }),
 
+  updateStopListeningAfterSubmit: (stopAfterSubmit: boolean) =>
+    fetchApi('/api/user/stop-listening-after-submit', {
+      method: 'POST',
+      body: { stopAfterSubmit },
+    }),
+
   updateDefaultLandingPage: (landingPage: 'store' | 'library' | 'community' | 'sessions') =>
     fetchApi('/api/user/default-landing-page', {
       method: 'POST',
