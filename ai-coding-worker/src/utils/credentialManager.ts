@@ -185,6 +185,50 @@ export class CredentialManager {
   }
 
   /**
+   * Get credential path for Gemini
+   * @returns Absolute path to ~/.gemini/auth.json
+   */
+  static getGeminiCredentialPath(): string {
+    return path.join(os.homedir(), '.gemini', 'auth.json');
+  }
+
+  /**
+   * Write Gemini credentials
+   * @param authentication - Gemini API key or JSON structure
+   */
+  static writeGeminiCredentials(authentication: string): void {
+    const credentialPath = this.getGeminiCredentialPath();
+
+    // Parse authentication if it's JSON, otherwise treat as plain API key
+    let credentials: any;
+    let apiKey: string | undefined;
+
+    try {
+      const parsed = JSON.parse(authentication);
+      apiKey = parsed.apiKey || authentication;
+      credentials = {
+        apiKey: apiKey,
+        createdAt: new Date().toISOString()
+      };
+    } catch {
+      // Not JSON, treat as plain API key
+      apiKey = authentication;
+      credentials = {
+        apiKey: authentication,
+        createdAt: new Date().toISOString()
+      };
+    }
+
+    // Set GOOGLE_API_KEY environment variable
+    if (apiKey) {
+      process.env.GOOGLE_API_KEY = apiKey;
+      console.log('[CredentialManager] Set GOOGLE_API_KEY environment variable');
+    }
+
+    this.writeCredentialFile(credentialPath, credentials);
+  }
+
+  /**
    * Check if credential file exists
    * @param credentialPath - Path to check
    * @returns true if file exists

@@ -225,7 +225,18 @@ export const userApi = {
       method: 'DELETE',
     }),
 
-  updatePreferredProvider: (provider: 'claude' | 'codex') =>
+  updateGeminiAuth: (geminiAuth: { apiKey: string }) =>
+    fetchApi('/api/user/gemini-auth', {
+      method: 'POST',
+      body: { geminiAuth },
+    }),
+
+  removeGeminiAuth: () =>
+    fetchApi('/api/user/gemini-auth', {
+      method: 'DELETE',
+    }),
+
+  updatePreferredProvider: (provider: 'claude' | 'codex' | 'copilot' | 'gemini') =>
     fetchApi('/api/user/preferred-provider', {
       method: 'POST',
       body: { provider },
@@ -657,7 +668,7 @@ export const storageWorkerApi = {
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;
-  provider?: 'claude' | 'codex';
+  provider?: 'claude' | 'codex' | 'copilot' | 'gemini';
   github?: {
     repoUrl: string;
     branch: string;

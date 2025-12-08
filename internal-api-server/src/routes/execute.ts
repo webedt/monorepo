@@ -24,8 +24,8 @@ import { WORKSPACE_DIR, AI_WORKER_URL } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 
 // Define types locally (were previously in @webedt/shared)
-export type AIProvider = 'claude' | 'codex';
-export type ProviderAuth = ClaudeAuth | CodexAuth;
+export type AIProvider = 'claude' | 'codex' | 'copilot' | 'gemini';
+export type ProviderAuth = ClaudeAuth | CodexAuth | { apiKey: string };
 
 const router = Router();
 
@@ -152,7 +152,7 @@ const executeHandler = async (req: Request, res: Response) => {
     const userPreferredProvider = (user.preferredProvider as AIProvider) || 'claude';
     const selectedProvider: AIProvider = requestedProvider || userPreferredProvider;
 
-    // Validate authentication
+    // Validate authentication based on selected provider
     if (selectedProvider === 'codex') {
       if (!isValidCodexAuth(user.codexAuth)) {
         res.status(400).json({
@@ -161,7 +161,25 @@ const executeHandler = async (req: Request, res: Response) => {
         });
         return;
       }
+    } else if (selectedProvider === 'copilot') {
+      // GitHub Copilot requires GitHub authentication with proper scopes
+      if (!user.githubAccessToken) {
+        res.status(400).json({
+          success: false,
+          error: 'GitHub Copilot requires GitHub authentication. Please connect your GitHub account in Settings.'
+        });
+        return;
+      }
+    } else if (selectedProvider === 'gemini') {
+      if (!user.geminiAuth?.apiKey) {
+        res.status(400).json({
+          success: false,
+          error: 'Gemini authentication not configured. Please add your Gemini API key in Settings.'
+        });
+        return;
+      }
     } else {
+      // Default: Claude
       if (!user.claudeAuth) {
         res.status(400).json({
           success: false,
@@ -233,6 +251,7 @@ const executeHandler = async (req: Request, res: Response) => {
           repositoryName,
           baseBranch: branch,
           branch: null,
+          provider: selectedProvider,
           sessionPath: null,
           autoCommit: true,
           locked: false
@@ -296,6 +315,14 @@ const executeHandler = async (req: Request, res: Response) => {
           .where(eq(users.id, user.id));
       }
       providerAuth = refreshedAuth;
+    } else if (selectedProvider === 'copilot') {
+      // GitHub Copilot uses the GitHub access token
+      providerName = 'GithubCopilot';
+      providerAuth = { apiKey: user.githubAccessToken! };
+    } else if (selectedProvider === 'gemini') {
+      // Gemini uses the API key
+      providerName = 'Gemini';
+      providerAuth = { apiKey: user.geminiAuth!.apiKey };
     } else {
       let claudeAuth: ClaudeAuth = user.claudeAuth!;
       providerName = 'ClaudeAgentSDK';
@@ -731,7 +758,11 @@ const executeHandler = async (req: Request, res: Response) => {
                   ? 'claude-agent-sdk'
                   : providerName === 'Codex'
                     ? 'codex-sdk'
-                    : 'ai-worker';
+                    : providerName === 'GithubCopilot'
+                      ? 'github-copilot'
+                      : providerName === 'Gemini'
+                        ? 'gemini-sdk'
+                        : 'ai-worker';
 
                 // Don't forward the worker's completed event - we'll send our own
                 if (eventData.type !== 'completed') {

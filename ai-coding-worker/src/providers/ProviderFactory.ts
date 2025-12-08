@@ -1,6 +1,8 @@
 import { BaseProvider } from './BaseProvider';
 import { ClaudeCodeProvider } from './ClaudeCodeProvider';
 import { CodexProvider } from './CodexProvider';
+import { GithubCopilotProvider } from './GithubCopilotProvider';
+import { GeminiProvider } from './GeminiProvider';
 
 /**
  * Factory for creating coding assistant provider instances
@@ -30,11 +32,15 @@ export class ProviderFactory {
       case 'openai':
         return new CodexProvider(authentication, workspace, options?.model, isResuming);
 
-      // Future providers:
-      // case 'copilot':
-      //   return new CopilotProvider(accessToken, workspace);
-      // case 'aider':
-      //   return new AiderProvider(accessToken, workspace);
+      case 'copilot':
+      case 'github-copilot':
+      case 'githubcopilot':
+        return new GithubCopilotProvider(authentication, workspace, options?.model, isResuming);
+
+      case 'gemini':
+      case 'google':
+      case 'google-gemini':
+        return new GeminiProvider(authentication, workspace, options?.model, isResuming);
 
       default:
         throw new Error(
@@ -48,7 +54,12 @@ export class ProviderFactory {
    * Get list of supported providers
    */
   static getSupportedProviders(): string[] {
-    return ['claude-code', 'claude', 'claudeagentsdk', 'codex', 'cursor', 'codexsdk', 'openai'];
+    return [
+      'claude-code', 'claude', 'claudeagentsdk',
+      'codex', 'cursor', 'codexsdk', 'openai',
+      'copilot', 'github-copilot', 'githubcopilot',
+      'gemini', 'google', 'google-gemini'
+    ];
   }
 
   /**

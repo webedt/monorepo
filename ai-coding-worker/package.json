@@ -14,6 +14,7 @@
     "@webedt/shared": "file:../shared",
     "@anthropic-ai/claude-agent-sdk": "^0.1.55",
     "@anthropic-ai/sdk": "^0.71.0",
+    "@google/generative-ai": "^0.21.0",
     "@openai/codex-sdk": "^0.63.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",

@@ -118,6 +118,57 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
+// Update Gemini authentication (Google API Key)
+router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    let geminiAuth = req.body.geminiAuth || req.body;
+
+    // Validate Gemini auth structure - must have apiKey
+    if (!geminiAuth || !geminiAuth.apiKey) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid Gemini auth. Must include apiKey.',
+      });
+      return;
+    }
+
+    // Update user with Gemini auth
+    await db
+      .update(users)
+      .set({ geminiAuth })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Gemini authentication updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update Gemini auth error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update Gemini authentication' });
+  }
+});
+
+// Remove Gemini authentication
+router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    await db
+      .update(users)
+      .set({ geminiAuth: null })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Gemini authentication removed' },
+    });
+  } catch (error) {
+    console.error('Remove Gemini auth error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove Gemini authentication' });
+  }
+});
+
 // Update preferred AI provider
 router.post('/preferred-provider', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -125,11 +176,11 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
     const { provider } = req.body;
 
     // Validate provider is one of the valid options
-    const validProviders = ['claude', 'codex'];
+    const validProviders = ['claude', 'codex', 'copilot', 'gemini'];
     if (!validProviders.includes(provider)) {
       res.status(400).json({
         success: false,
-        error: 'Invalid provider. Must be one of: claude, codex',
+        error: 'Invalid provider. Must be one of: claude, codex, copilot, gemini',
       });
       return;
     }
