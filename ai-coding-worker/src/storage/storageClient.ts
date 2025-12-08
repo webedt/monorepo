@@ -234,8 +234,15 @@ export class StorageClient {
 
   /**
    * Upload session from local workspace to storage
+   * @param onProgress - Optional callback for progress events
    */
-  async uploadSession(sessionPath: string, localPath: string): Promise<void> {
+  async uploadSession(
+    sessionPath: string,
+    localPath: string,
+    onProgress?: (stage: string, message: string, data?: Record<string, unknown>) => void
+  ): Promise<void> {
+    const progress = onProgress || (() => {});
+
     if (!this.enabled) {
       logger.info('Storage worker disabled, skipping upload', {
         component: 'StorageClient',
@@ -250,6 +257,8 @@ export class StorageClient {
     const codexDir = path.join(homeDir, '.codex');
 
     try {
+      progress('upload_starting', 'Starting session upload...', { localPath });
+
       logger.info('Uploading session to storage', {
         component: 'StorageClient',
         sessionPath,
@@ -278,10 +287,19 @@ export class StorageClient {
         }
       }
 
+      // Count files being uploaded for progress reporting
+      const uploadFileCount = this.countFilesRecursive(tmpPackageDir);
+
+      progress('files_packaged', `Session files packaged for upload (${uploadFileCount} files)`, {
+        totalFileCount: uploadFileCount,
+        topLevelItems: sessionItems
+      });
+
       logger.info('Copied session contents for upload', {
         component: 'StorageClient',
         sessionPath,
-        items: sessionItems
+        items: sessionItems,
+        totalFileCount: uploadFileCount
       });
 
       // Copy ~/.claude if exists (merge into package)
@@ -313,6 +331,8 @@ export class StorageClient {
       }
 
       // Create tarball
+      progress('creating_tarball', 'Creating session tarball...', {});
+
       await tar.create(
         {
           gzip: true,
@@ -322,8 +342,17 @@ export class StorageClient {
         ['.']
       );
 
+      // Get tarball size for logging
+      const tarStats = fs.statSync(tarPath);
+      progress('tarball_created', `Session tarball created (${(tarStats.size / 1024 / 1024).toFixed(2)} MB)`, {
+        sizeBytes: tarStats.size,
+        sizeMB: (tarStats.size / 1024 / 1024).toFixed(2)
+      });
+
       // Upload to storage worker
       // Session path should not contain slashes (validated by storage-worker)
+      progress('uploading', 'Uploading session tarball to storage...', {});
+
       const url = `${this.baseUrl}/api/storage/sessions/${sessionPath}/upload`;
       await this.uploadFile(url, tarPath);
 
@@ -331,9 +360,16 @@ export class StorageClient {
       fs.unlinkSync(tarPath);
       fs.rmSync(tmpPackageDir, { recursive: true, force: true });
 
+      progress('upload_complete', `Session uploaded successfully (${uploadFileCount} files)`, {
+        totalFileCount: uploadFileCount,
+        sizeBytes: tarStats.size
+      });
+
       logger.info('Session uploaded successfully', {
         component: 'StorageClient',
-        sessionPath
+        sessionPath,
+        totalFileCount: uploadFileCount,
+        sizeBytes: tarStats.size
       });
     } catch (error) {
       logger.error('Failed to upload session', error, {
