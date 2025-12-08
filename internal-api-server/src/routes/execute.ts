@@ -20,9 +20,9 @@ import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../lib/codex
 import { StorageService } from '../services/storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../services/github/operations.js';
 import { logger, generateSessionPath, getEventEmoji } from '@webedt/shared';
-import { WORKSPACE_DIR, AI_WORKER_URL, USE_WORKER_COORDINATOR } from '../config/env.js';
+import { WORKSPACE_DIR } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
-import { workerCoordinator, WorkerAssignment } from '../services/workerCoordinator/workerCoordinator.js';
+import { workerCoordinator, WorkerAssignment, AcquireWorkerOptions } from '../services/workerCoordinator/workerCoordinator.js';
 
 // Define types locally (were previously in @webedt/shared)
 export type AIProvider = 'claude' | 'codex';
@@ -610,37 +610,45 @@ const executeHandler = async (req: Request, res: Response) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 600000); // 10 minutes
 
-      // Determine worker URL - use coordinator if enabled, otherwise fall back to DNSRR
+      // Acquire worker via coordinator (no fallback - fail visibly if coordinator can't find workers)
       let workerUrl: string;
       let workerAssignment: WorkerAssignment | null = null;
 
-      if (USE_WORKER_COORDINATOR) {
-        await sendEvent({
-          type: 'message',
-          message: 'Acquiring available worker...',
-          stage: 'acquiring_worker',
-          endpoint: '/execute'
-        });
+      await sendEvent({
+        type: 'message',
+        message: 'Acquiring available worker...',
+        stage: 'acquiring_worker',
+        endpoint: '/execute'
+      });
 
-        workerAssignment = await workerCoordinator.acquireWorker(chatSession.id);
-
-        if (!workerAssignment) {
-          throw new Error('No AI workers available. All workers are currently busy. Please try again shortly.');
+      // Create progress callback to send SSE events during worker acquisition
+      const acquireOptions: AcquireWorkerOptions = {
+        onProgress: (attempt, maxRetries, message) => {
+          sendEvent({
+            type: 'message',
+            message: message,
+            stage: 'acquiring_worker',
+            endpoint: '/execute',
+            data: { attempt, maxRetries }
+          });
         }
+      };
 
-        workerUrl = workerAssignment.url;
+      workerAssignment = await workerCoordinator.acquireWorker(chatSession.id, acquireOptions);
 
-        logger.info('Worker acquired via coordinator', {
-          component: 'ExecuteRoute',
-          sessionId: chatSession.id,
-          workerId: workerAssignment.worker.id,
-          containerId: workerAssignment.worker.containerId,
-          workerUrl
-        });
-      } else {
-        // Fall back to DNSRR routing
-        workerUrl = AI_WORKER_URL;
+      if (!workerAssignment) {
+        throw new Error('No AI workers available. Worker coordinator could not find any running workers in Docker Swarm. Please check that the ai-coding-worker service is running.');
       }
+
+      workerUrl = workerAssignment.url;
+
+      logger.info('Worker acquired via coordinator', {
+        component: 'ExecuteRoute',
+        sessionId: chatSession.id,
+        workerId: workerAssignment.worker.id,
+        containerId: workerAssignment.worker.containerId,
+        workerUrl
+      });
 
       logger.info('Calling AI worker for LLM execution', {
         component: 'ExecuteRoute',
@@ -648,8 +656,7 @@ const executeHandler = async (req: Request, res: Response) => {
         aiWorkerUrl: `${workerUrl}/execute`,
         workspacePath: aiWorkerPayload.workspacePath,
         provider: providerName,
-        payloadSize: JSON.stringify(aiWorkerPayload).length,
-        useCoordinator: USE_WORKER_COORDINATOR
+        payloadSize: JSON.stringify(aiWorkerPayload).length
       });
 
       try {
@@ -670,8 +677,7 @@ const executeHandler = async (req: Request, res: Response) => {
           sessionId: chatSession.id,
           status: aiResponse.status,
           ok: aiResponse.ok,
-          hasBody: !!aiResponse.body,
-          useCoordinator: USE_WORKER_COORDINATOR
+          hasBody: !!aiResponse.body
         });
 
         const workerContainerId = aiResponse.headers.get('X-Container-ID') ||
