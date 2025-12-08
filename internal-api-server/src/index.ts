@@ -194,8 +194,19 @@ app.use(
     res: express.Response,
     _next: express.NextFunction
   ) => {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : undefined;
+
     logger.error('Unhandled error:', err);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    console.error('[GlobalErrorHandler] Error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      path: req.path,
+      method: req.method
+    });
+
+    // Return more descriptive error message for debugging
+    res.status(500).json({ success: false, error: errorMessage || 'Internal server error' });
   }
 );
 

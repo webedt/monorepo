@@ -30,28 +30,35 @@ export async function authMiddleware(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  const sessionId = lucia.readSessionCookie(req.headers.cookie ?? '');
+  try {
+    const sessionId = lucia.readSessionCookie(req.headers.cookie ?? '');
 
-  if (!sessionId) {
-    req.user = null;
-    req.authSession = null;
+    if (!sessionId) {
+      req.user = null;
+      req.authSession = null;
+      next();
+      return;
+    }
+
+    const { session, user } = await lucia.validateSession(sessionId);
+
+    if (session && session.fresh) {
+      res.appendHeader('Set-Cookie', lucia.createSessionCookie(session.id).serialize());
+    }
+
+    if (!session) {
+      res.appendHeader('Set-Cookie', lucia.createBlankSessionCookie().serialize());
+    }
+
+    req.user = user;
+    req.authSession = session;
     next();
-    return;
+  } catch (error) {
+    // Pass async errors to Express error handler
+    // This is necessary because Express 4 doesn't automatically catch async errors
+    console.error('[AuthMiddleware] Error validating session:', error);
+    next(error);
   }
-
-  const { session, user } = await lucia.validateSession(sessionId);
-
-  if (session && session.fresh) {
-    res.appendHeader('Set-Cookie', lucia.createSessionCookie(session.id).serialize());
-  }
-
-  if (!session) {
-    res.appendHeader('Set-Cookie', lucia.createBlankSessionCookie().serialize());
-  }
-
-  req.user = user;
-  req.authSession = session;
-  next();
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
