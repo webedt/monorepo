@@ -837,33 +837,6 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
     }
   }, [imageSession, selectedFile, isSavingImage, canvasHistory, historyIndex]);
 
-  // Commit all modified images (marks them as committed)
-  const _commitImageChanges = useCallback(async () => {
-    if (!imageSession || modifiedImages.size === 0) return;
-
-    setCommitStatus('committing');
-
-    try {
-      // Get list of modified image files
-      const modifiedPaths = Array.from(modifiedImages);
-
-      console.log(`Committing ${modifiedPaths.length} modified image(s):`, modifiedPaths);
-
-      // Clear the modified images set (mark as committed)
-      setModifiedImages(new Set());
-
-      setCommitStatus('committed');
-
-      // Reset status after 2 seconds
-      setTimeout(() => {
-        setCommitStatus(prev => prev === 'committed' ? 'idle' : prev);
-      }, 2000);
-    } catch (error) {
-      console.error('Failed to commit image changes:', error);
-      setCommitStatus('error');
-    }
-  }, [imageSession, modifiedImages]);
-
   // PR Handler Functions
   const handleCreatePR = async () => {
     if (!imageSession?.owner || !imageSession?.repo || !imageSession?.branch || !imageSession?.baseBranch) {
