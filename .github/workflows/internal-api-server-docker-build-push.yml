@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "internal-api-server/**"
+      - "shared/**"
       - ".github/workflows/internal-api-server-docker-build-push.yml"
 
 env:
@@ -73,7 +74,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./internal-api-server
+          context: .
+          file: ./internal-api-server/Dockerfile
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

@@ -71,6 +71,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_COMMIT_SHA=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
+            BUILD_IMAGE_TAG=${{ github.ref_name }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
