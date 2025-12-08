@@ -66,7 +66,9 @@ export default function Settings() {
   const [claudeError, setClaudeError] = useState('');
   const [codexAuthJson, setCodexAuthJson] = useState('');
   const [codexError, setCodexError] = useState('');
-  const [preferredProvider, setPreferredProvider] = useState<'claude' | 'codex'>(user?.preferredProvider || 'claude');
+  const [geminiAuthJson, setGeminiAuthJson] = useState('');
+  const [geminiError, setGeminiError] = useState('');
+  const [preferredProvider, setPreferredProvider] = useState<'claude' | 'codex' | 'gemini'>(user?.preferredProvider as any || 'claude');
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [defaultLandingPage, setDefaultLandingPage] = useState<'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
@@ -230,6 +232,29 @@ export default function Settings() {
     },
   });
 
+  const saveGeminiAuth = useMutation({
+    mutationFn: userApi.updateGeminiAuth,
+    onSuccess: async () => {
+      await refreshUserSession();
+      setGeminiAuthJson('');
+      alert('Gemini OAuth authentication saved successfully');
+    },
+    onError: (error) => {
+      setGeminiError(error instanceof Error ? error.message : 'Failed to save Gemini auth');
+    },
+  });
+
+  const removeGeminiAuth = useMutation({
+    mutationFn: userApi.removeGeminiAuth,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Gemini authentication removed successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to remove Gemini authentication: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
   const updatePreferredProviderMutation = useMutation({
     mutationFn: userApi.updatePreferredProvider,
     onSuccess: async () => {
@@ -364,6 +389,26 @@ export default function Settings() {
       saveCodexAuth.mutate(parsed);
     } catch (error) {
       setCodexError('Invalid JSON format');
+    }
+  };
+
+  const handleGeminiAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGeminiError('');
+
+    try {
+      const parsed = JSON.parse(geminiAuthJson);
+      // Support both camelCase and snake_case (from Gemini CLI)
+      const accessToken = parsed.accessToken || parsed.access_token;
+      const refreshToken = parsed.refreshToken || parsed.refresh_token;
+
+      if (!accessToken || !refreshToken) {
+        setGeminiError('Must include accessToken/access_token and refreshToken/refresh_token. Paste the contents of ~/.gemini/oauth_creds.json');
+        return;
+      }
+      saveGeminiAuth.mutate(parsed);
+    } catch (error) {
+      setGeminiError('Invalid JSON format. Paste the contents of ~/.gemini/oauth_creds.json');
     }
   };
 
@@ -679,6 +724,108 @@ export default function Settings() {
                 )}
               </div>
             </div>
+
+            {/* Gemini Authentication (Google) */}
+            <div className="card bg-base-100 shadow">
+              <div className="card-body">
+                <h2 className="card-title">
+                  Google Gemini Authentication
+                </h2>
+
+                {user?.geminiAuth ? (
+                  <div className="space-y-4">
+                    <div className="alert alert-success">
+                      <svg
+                        className="h-5 w-5"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span className="text-sm">
+                        Gemini OAuth configured
+                      </span>
+                      <button
+                        onClick={() => removeGeminiAuth.mutate()}
+                        disabled={removeGeminiAuth.isPending}
+                        className="btn btn-sm btn-error"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs text-base-content/70">
+                        Auth Type: OAuth (Pro model access)
+                      </p>
+                      {user.geminiAuth.expiresAt && (
+                        <div className="text-xs">
+                          <span className="text-base-content/70">Access Token: </span>
+                          <span className={getExpirationStatus(user.geminiAuth.expiresAt).color}>
+                            {getExpirationStatus(user.geminiAuth.expiresAt).text}
+                          </span>
+                          <span className="text-base-content/70">
+                            {' '}
+                            (expires {formatTokenExpiration(user.geminiAuth.expiresAt)})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <p className="text-sm text-base-content/70">
+                      Gemini requires OAuth authentication for Pro model access. Run <code className="bg-base-200 px-1 rounded">gemini auth login</code> locally, then paste the contents of <code className="bg-base-200 px-1 rounded">~/.gemini/oauth_creds.json</code>.
+                    </p>
+
+                    <div className="alert alert-info">
+                      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                      <div className="text-sm">
+                        <p className="font-medium">How to get Gemini credentials:</p>
+                        <ol className="list-decimal list-inside mt-1 space-y-1">
+                          <li>Install Gemini CLI: <code className="bg-base-200 px-1 rounded">npm install -g @anthropic-ai/gemini-cli</code></li>
+                          <li>Run: <code className="bg-base-200 px-1 rounded">gemini auth login</code></li>
+                          <li>Complete Google OAuth in browser</li>
+                          <li>Copy contents of <code className="bg-base-200 px-1 rounded">~/.gemini/oauth_creds.json</code></li>
+                        </ol>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleGeminiAuthSubmit} className="space-y-4">
+                      <div>
+                        <label className="label">
+                          <span className="label-text">Gemini OAuth JSON (paste ~/.gemini/oauth_creds.json)</span>
+                        </label>
+                        <textarea
+                          value={geminiAuthJson}
+                          onChange={(e) => setGeminiAuthJson(e.target.value)}
+                          placeholder='{"access_token":"ya29.xxx","refresh_token":"1//xxx","token_type":"Bearer","expiry_date":1234567890000}'
+                          rows={6}
+                          className="textarea textarea-bordered w-full font-mono text-xs"
+                        />
+                        {geminiError && (
+                          <label className="label">
+                            <span className="label-text-alt text-error">{geminiError}</span>
+                          </label>
+                        )}
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                      >
+                        Save Gemini Credentials
+                      </button>
+                    </form>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         );
 
@@ -692,7 +839,7 @@ export default function Settings() {
 
                 <div className="space-y-6">
                   <p className="text-sm text-base-content/70 leading-relaxed">
-                    Choose your preferred AI provider for coding sessions. Claude (Anthropic) and Codex (OpenAI) are currently supported.
+                    Choose your preferred AI provider for coding sessions. Claude (Anthropic), Codex (OpenAI), and Gemini (Google) are supported.
                   </p>
 
                   <div className="divider my-4"></div>
@@ -703,11 +850,12 @@ export default function Settings() {
                     </div>
                     <select
                       value={preferredProvider}
-                      onChange={(e) => setPreferredProvider(e.target.value as 'claude' | 'codex')}
+                      onChange={(e) => setPreferredProvider(e.target.value as 'claude' | 'codex' | 'gemini')}
                       className="select select-bordered w-full max-w-md"
                     >
                       <option value="claude">Claude (Anthropic) - Default</option>
                       <option value="codex">Codex (OpenAI)</option>
+                      <option value="gemini">Gemini (Google)</option>
                     </select>
                     <div className="mt-2">
                       <span className="text-sm text-base-content/60">
@@ -717,8 +865,12 @@ export default function Settings() {
                         {preferredProvider === 'codex' && !user?.codexAuth && (
                           <span className="text-warning">⚠️ Codex credentials not configured</span>
                         )}
+                        {preferredProvider === 'gemini' && !user?.geminiAuth && (
+                          <span className="text-warning">⚠️ Gemini credentials not configured</span>
+                        )}
                         {((preferredProvider === 'claude' && user?.claudeAuth) ||
-                          (preferredProvider === 'codex' && user?.codexAuth)) && (
+                          (preferredProvider === 'codex' && user?.codexAuth) ||
+                          (preferredProvider === 'gemini' && user?.geminiAuth)) && (
                           <span className="text-success">✓ Credentials configured</span>
                         )}
                       </span>

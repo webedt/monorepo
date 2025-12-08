@@ -185,6 +185,88 @@ export class CredentialManager {
   }
 
   /**
+   * Get credential path for Gemini OAuth (used by Gemini CLI)
+   * @returns Absolute path to ~/.gemini/oauth_creds.json
+   */
+  static getGeminiOAuthCredentialPath(): string {
+    return path.join(os.homedir(), '.gemini', 'oauth_creds.json');
+  }
+
+  /**
+   * Get credential path for Gemini settings
+   * @returns Absolute path to ~/.gemini/settings.json
+   */
+  static getGeminiSettingsPath(): string {
+    return path.join(os.homedir(), '.gemini', 'settings.json');
+  }
+
+  /**
+   * Get credential path for Gemini env file
+   * @returns Absolute path to ~/.gemini/.env
+   */
+  static getGeminiEnvPath(): string {
+    return path.join(os.homedir(), '.gemini', '.env');
+  }
+
+  /**
+   * Write Gemini credentials
+   * OAuth only - writes to ~/.gemini/oauth_creds.json for Gemini CLI
+   *
+   * @param authentication - Gemini OAuth JSON structure
+   */
+  static writeGeminiCredentials(authentication: string): void {
+    let parsed: any;
+
+    try {
+      parsed = JSON.parse(authentication);
+    } catch {
+      throw new Error('Invalid Gemini credentials: must be valid JSON OAuth credentials');
+    }
+
+    // Support both camelCase and snake_case formats
+    const accessToken = parsed.accessToken || parsed.access_token;
+    const refreshToken = parsed.refreshToken || parsed.refresh_token;
+    const expiresAt = parsed.expiresAt || parsed.expiry_date;
+
+    if (!accessToken || !refreshToken) {
+      throw new Error('Invalid Gemini credentials: missing accessToken/access_token or refreshToken/refresh_token');
+    }
+
+    // Write to oauth_creds.json for Gemini CLI
+    const oauthCredentialPath = this.getGeminiOAuthCredentialPath();
+
+    // Format for Gemini CLI oauth_creds.json (uses snake_case)
+    const oauthCredentials = {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: parsed.tokenType || parsed.token_type || 'Bearer',
+      expiry_date: expiresAt || (Date.now() + 3600000), // Default 1 hour
+      scope: parsed.scope || 'openid https://www.googleapis.com/auth/userinfo.email'
+    };
+
+    this.writeCredentialFile(oauthCredentialPath, oauthCredentials);
+    console.log('[CredentialManager] Wrote Gemini OAuth credentials to:', oauthCredentialPath);
+
+    // Also create a basic settings.json if it doesn't exist
+    const settingsPath = this.getGeminiSettingsPath();
+    if (!fs.existsSync(settingsPath)) {
+      this.writeCredentialFile(settingsPath, {
+        selectedAuthType: 'oauth',
+        theme: 'system'
+      });
+      console.log('[CredentialManager] Created Gemini settings.json');
+    }
+  }
+
+  /**
+   * Check if Gemini has OAuth credentials
+   * @returns true if OAuth credentials file exists
+   */
+  static hasGeminiOAuthCredentials(): boolean {
+    return fs.existsSync(this.getGeminiOAuthCredentialPath());
+  }
+
+  /**
    * Check if credential file exists
    * @param credentialPath - Path to check
    * @returns true if file exists

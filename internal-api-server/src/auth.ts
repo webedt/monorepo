@@ -12,6 +12,19 @@ import { pool } from './db/index.js';
 import type { ClaudeAuth } from './lib/claudeAuth.js';
 import type { CodexAuth } from './lib/codexAuth.js';
 
+/**
+ * Gemini authentication - OAuth only (from ~/.gemini/oauth_creds.json)
+ * Users must authenticate locally with `gemini auth login` and paste their credentials
+ */
+export interface GeminiAuth {
+  // OAuth authentication (from Gemini CLI login)
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  tokenType?: string;
+  scope?: string;
+}
+
 const adapter = new NodePostgresAdapter(pool, {
   user: 'users',
   session: 'sessions',
@@ -48,6 +61,7 @@ export const lucia = new Lucia(adapter, {
       githubAccessToken: attributes.github_access_token,
       claudeAuth: safeParseJsonAuth(attributes.claude_auth),
       codexAuth: safeParseJsonAuth(attributes.codex_auth),
+      geminiAuth: safeParseJsonAuth(attributes.gemini_auth),
       preferredProvider: attributes.preferred_provider || 'claude',
       preferredModel: attributes.preferred_model,
       isAdmin: attributes.is_admin,
@@ -65,6 +79,7 @@ declare module 'lucia' {
       // Raw database columns (could be JSON objects or strings depending on driver)
       claude_auth: ClaudeAuth | string | null;
       codex_auth: CodexAuth | string | null;
+      gemini_auth: GeminiAuth | string | null;
       preferred_provider: string;
       preferred_model: string | null;
       is_admin: boolean;
@@ -79,6 +94,7 @@ declare module 'lucia' {
     githubAccessToken: string | null;
     claudeAuth: ClaudeAuth | null;
     codexAuth: CodexAuth | null;
+    geminiAuth: GeminiAuth | null;
     preferredProvider: string;
     preferredModel: string | null;
     isAdmin: boolean;
