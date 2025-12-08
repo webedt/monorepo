@@ -46,6 +46,10 @@ export interface WorkerAssignment {
   release: () => void;  // Call when job completes to mark worker free
 }
 
+export interface AcquireWorkerOptions {
+  onProgress?: (attempt: number, maxRetries: number, message: string) => void;
+}
+
 interface DockerTask {
   ID: string;
   Status: {
@@ -90,12 +94,29 @@ class WorkerCoordinator {
    * Get an available worker for a job
    * Returns null if no workers are available after retries
    */
-  async acquireWorker(jobId: string): Promise<WorkerAssignment | null> {
+  async acquireWorker(jobId: string, options?: AcquireWorkerOptions): Promise<WorkerAssignment | null> {
     const startTime = Date.now();
+    const { onProgress } = options || {};
 
     for (let attempt = 0; attempt <= WORKER_NO_CAPACITY_MAX_RETRIES; attempt++) {
       // Ensure worker list is fresh
-      await this.ensureFreshWorkerList();
+      try {
+        await this.ensureFreshWorkerList();
+      } catch (refreshError) {
+        logger.error('Failed to refresh worker list', refreshError, {
+          component: 'WorkerCoordinator',
+          jobId,
+          attempt: attempt + 1
+        });
+
+        // Notify about the error
+        if (onProgress) {
+          onProgress(attempt + 1, WORKER_NO_CAPACITY_MAX_RETRIES,
+            `Failed to query Docker for workers: ${refreshError instanceof Error ? refreshError.message : String(refreshError)}`);
+        }
+
+        // Continue to retry logic below
+      }
 
       // Check for stale busy workers
       this.handleStaleBusyWorkers();
@@ -129,6 +150,10 @@ class WorkerCoordinator {
 
       // No worker available
       if (attempt < WORKER_NO_CAPACITY_MAX_RETRIES) {
+        const message = this.workers.size === 0
+          ? 'No workers discovered in Docker Swarm'
+          : `All ${this.workers.size} workers busy`;
+
         logger.warn('No workers available, retrying', {
           component: 'WorkerCoordinator',
           jobId,
@@ -138,6 +163,15 @@ class WorkerCoordinator {
           totalWorkers: this.workers.size,
           busyWorkers: this.getBusyWorkerCount()
         });
+
+        // Notify progress
+        if (onProgress) {
+          onProgress(
+            attempt + 1,
+            WORKER_NO_CAPACITY_MAX_RETRIES,
+            `${message}, retrying (${attempt + 1}/${WORKER_NO_CAPACITY_MAX_RETRIES})...`
+          );
+        }
 
         await this.sleep(WORKER_NO_CAPACITY_RETRY_MS);
 
