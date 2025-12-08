@@ -283,6 +283,19 @@ Add, Update, Remove, Fix, Refactor, Enhance, Rename, Move, Extract, Merge, Impro
 
 ---
 
+## Pre-Commit Checklist
+
+**MANDATORY:** Before committing changes, run these commands in the project folder(s) you modified:
+
+```bash
+npm install        # Ensure dependencies are up to date
+npm run build      # Verify no build/compilation errors
+```
+
+This ensures there are no errors in the application before pushing to the repository.
+
+---
+
 ## File Management
 
 ### Storage Operations
