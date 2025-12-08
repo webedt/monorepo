@@ -4,6 +4,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { useEmbedded } from '@/contexts/EmbeddedContext';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
+import type { GitHubPullRequest } from '@/shared';
 import {
   useNewImagePreferencesStore,
   RESOLUTION_PRESETS,
@@ -208,9 +209,10 @@ const transformStorageFilesForImages = (
 // Props for split view support
 interface ImagesContentProps {
   sessionId?: string;
+  isEmbedded?: boolean;
 }
 
-export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps = {}) {
+export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: ImagesContentProps = {}) {
   const { sessionId: sessionIdParam } = useParams<{ sessionId?: string }>();
   const sessionId = sessionIdProp ?? sessionIdParam;
   const location = useLocation();
@@ -271,6 +273,12 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   const [modifiedImages, setModifiedImages] = useState<Set<string>>(new Set());
   const [commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
 
+  // PR-related state
+  const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
+  const [prError, setPrError] = useState<string | null>(null);
+  const [prSuccess, setPrSuccess] = useState<string | null>(null);
+  const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
+
   // Get preferences from store
   const imagePrefs = useNewImagePreferencesStore();
 
@@ -306,6 +314,28 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
   });
 
   const repos: GitHubRepo[] = reposData?.data || [];
+
+  // Query to check for existing PR
+  const { data: prData, refetch: refetchPr } = useQuery({
+    queryKey: ['pr', imageSession?.owner, imageSession?.repo, imageSession?.branch],
+    queryFn: async () => {
+      if (!imageSession?.owner || !imageSession?.repo || !imageSession?.branch) {
+        return null;
+      }
+      const response = await githubApi.getPulls(
+        imageSession.owner,
+        imageSession.repo,
+        imageSession.branch,
+        imageSession.baseBranch || undefined
+      );
+      return response.data as GitHubPullRequest[];
+    },
+    enabled: !!imageSession?.owner && !!imageSession?.repo && !!imageSession?.branch,
+    refetchOnWindowFocus: false,
+  });
+
+  const existingPr = prData?.find((pr: GitHubPullRequest) => pr.state === 'open');
+  const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged === true);
 
   // Create branch mutation
   const createBranchMutation = useMutation({
@@ -346,7 +376,7 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
 
     // Generate random ID for branch
     const randomId = Math.random().toString(36).substring(2, 10);
-    const branchName = `webedt/started-from-images-${randomId}`;
+    const branchName = `webedt/image-editor-${randomId}`;
 
     try {
       // Create the GitHub branch
@@ -833,6 +863,93 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
       setCommitStatus('error');
     }
   }, [imageSession, modifiedImages]);
+
+  // PR Handler Functions
+  const handleCreatePR = async () => {
+    if (!imageSession?.owner || !imageSession?.repo || !imageSession?.branch || !imageSession?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('create');
+    setPrError(null);
+    setPrSuccess(null);
+
+    try {
+      const response = await githubApi.createPull(
+        imageSession.owner,
+        imageSession.repo,
+        {
+          title: `Image changes from ${imageSession.branch}`,
+          head: imageSession.branch,
+          base: imageSession.baseBranch,
+        }
+      );
+      setPrSuccess(`PR #${response.data.number} created successfully!`);
+      refetchPr();
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to create PR';
+      setPrError(errorMsg);
+    } finally {
+      setPrLoading(null);
+    }
+  };
+
+  const handleViewPR = () => {
+    if (existingPr?.htmlUrl) {
+      window.open(existingPr.htmlUrl, '_blank');
+    }
+  };
+
+  const handleAutoPR = async () => {
+    if (!imageSession?.owner || !imageSession?.repo || !imageSession?.branch || !imageSession?.baseBranch) {
+      setPrError('Missing repository information');
+      return;
+    }
+
+    setPrLoading('auto');
+    setPrError(null);
+    setPrSuccess(null);
+    setAutoPrProgress('Starting Auto PR...');
+
+    try {
+      const response = await githubApi.autoPR(
+        imageSession.owner,
+        imageSession.repo,
+        imageSession.branch,
+        {
+          base: imageSession.baseBranch,
+          title: `Image changes from ${imageSession.branch}`,
+          sessionId: imageSession.sessionId,
+        }
+      );
+
+      const results = response.data;
+      setPrSuccess(`Auto PR completed! PR #${results.pr?.number} merged successfully.`);
+      setAutoPrProgress(null);
+      refetchPr();
+
+      // After successful auto PR, redirect to sessions list
+      setTimeout(() => {
+        navigate('/sessions');
+      }, 2000);
+    } catch (err: any) {
+      const errorMsg = err.message || 'Failed to complete Auto PR';
+
+      if (errorMsg.includes('conflict')) {
+        setPrError('Merge conflict detected. Please resolve conflicts manually.');
+      } else if (errorMsg.includes('Timeout')) {
+        setPrError(errorMsg);
+      } else {
+        setPrError(errorMsg);
+      }
+
+      setAutoPrProgress(null);
+      refetchPr();
+    } finally {
+      setPrLoading(null);
+    }
+  };
 
   // Close resolution picker when clicking outside
   useEffect(() => {
@@ -1465,51 +1582,6 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
           </button>
         </div>
       </div>
-
-      {/* Branch info and commit controls */}
-      {imageSession && (
-        <div className="px-3 py-2 border-b border-base-300 bg-base-200">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-xs text-base-content/70">Branch</div>
-            {modifiedImages.size > 0 && (
-              <div className="badge badge-warning badge-xs" title={`${modifiedImages.size} image(s) with uncommitted changes`}>
-                {modifiedImages.size} modified
-              </div>
-            )}
-          </div>
-          <div className="text-sm font-medium text-primary truncate mb-2" title={imageSession.branch || ''}>
-            {imageSession.branch || 'No branch'}
-          </div>
-          {/* Commit Button */}
-          <button
-            onClick={commitImageChanges}
-            disabled={modifiedImages.size === 0 || commitStatus === 'committing'}
-            className="btn btn-xs btn-primary w-full gap-1"
-            title="Commit image changes"
-          >
-            {commitStatus === 'committing' ? (
-              <>
-                <span className="loading loading-spinner loading-xs"></span>
-                Committing...
-              </>
-            ) : commitStatus === 'committed' ? (
-              <>
-                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-                Committed!
-              </>
-            ) : (
-              <>
-                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-                Commit
-              </>
-            )}
-          </button>
-        </div>
-      )}
 
       {/* Editor Mode Tabs with counts */}
       <div className="p-2 border-b border-base-300">
@@ -2482,11 +2554,11 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-base-content mb-2">Start Image Session</h1>
+          <h1 className="text-3xl font-bold text-base-content mb-2">New Image Session</h1>
           <p className="text-base-content/70">
             Select a repository to browse and edit images. A new branch will be created for your changes:
             <code className="ml-2 px-2 py-1 bg-base-200 rounded text-sm">
-              webedt/started-from-images-{'{id}'}
+              webedt/image-editor-{'{id}'}
             </code>
           </p>
         </div>
@@ -2884,11 +2956,95 @@ export function ImagesContent({ sessionId: sessionIdProp }: ImagesContentProps =
     );
   };
 
-  return (
+  // Create PR actions for the top bar (similar to Code.tsx)
+  const prActions = imageSession && imageSession.branch && imageSession.baseBranch && (
+    <>
+      {/* View PR button - show only if PR is open */}
+      {existingPr && (
+        <button
+          onClick={handleViewPR}
+          className="btn btn-xs btn-info"
+          title={`View open PR #${existingPr.number}`}
+        >
+          View PR #{existingPr.number}
+        </button>
+      )}
+
+      {/* PR Merged button - show when PR was already merged */}
+      {!existingPr && mergedPr && (
+        <button
+          onClick={() => window.open(mergedPr.htmlUrl, '_blank')}
+          className="btn btn-xs btn-success"
+          title={`PR #${mergedPr.number} was merged`}
+        >
+          PR #{mergedPr.number} Merged
+        </button>
+      )}
+
+      {/* Create PR button - show if no open PR exists and not merged */}
+      {!existingPr && !mergedPr && (
+        <button
+          onClick={handleCreatePR}
+          className="btn btn-xs btn-primary"
+          disabled={prLoading !== null}
+          title="Create a pull request"
+        >
+          {prLoading === 'create' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Create PR'
+          )}
+        </button>
+      )}
+
+      {/* Auto PR button - show even if PR exists (backend reuses it), hide when PR already merged */}
+      {!mergedPr && (
+        <button
+          onClick={handleAutoPR}
+          className="btn btn-xs btn-accent"
+          disabled={prLoading !== null}
+          title="Create PR, merge base branch, and merge PR in one click"
+        >
+          {prLoading === 'auto' ? (
+            <span className="loading loading-spinner loading-xs"></span>
+          ) : (
+            'Auto PR'
+          )}
+        </button>
+      )}
+    </>
+  );
+
+  // Construct the repository URL for SessionLayout
+  const selectedRepoUrl = imageSession ? `https://github.com/${imageSession.owner}/${imageSession.repo}.git` : undefined;
+
+  // Create a session-like object for SessionLayout if we have an imageSession
+  const sessionForLayout = imageSession && existingSessionData?.data ? existingSessionData.data : undefined;
+
+  const content = (
     <>
       {getMainView()}
       <NewImageModal />
     </>
+  );
+
+  // When embedded in split view, render without SessionLayout wrapper
+  if (isEmbedded) {
+    return content;
+  }
+
+  // Normal rendering with SessionLayout
+  return (
+    <SessionLayout
+      selectedRepo={selectedRepoUrl}
+      baseBranch={imageSession?.baseBranch}
+      branch={imageSession?.branch}
+      isLocked={!!imageSession}
+      prActions={prActions}
+      session={sessionForLayout}
+    >
+      {content}
+    </SessionLayout>
   );
 }
 
@@ -2901,18 +3057,5 @@ export default function Images({ isEmbedded: isEmbeddedProp = false }: ImagesPro
   const { isEmbedded: isEmbeddedContext } = useEmbedded();
   const isEmbedded = isEmbeddedProp || isEmbeddedContext;
 
-  // Wrap content conditionally - when embedded, skip SessionLayout wrapper
-  const Wrapper = isEmbedded ?
-    ({ children }: { children: React.ReactNode }) => <div className="h-full flex flex-col overflow-hidden bg-base-200">{children}</div> :
-    ({ children }: { children: React.ReactNode }) => (
-      <SessionLayout>
-        {children}
-      </SessionLayout>
-    );
-
-  return (
-    <Wrapper>
-      <ImagesContent />
-    </Wrapper>
-  );
+  return <ImagesContent isEmbedded={isEmbedded} />;
 }
