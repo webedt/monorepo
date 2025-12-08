@@ -1315,6 +1315,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
       if (data?.type === 'replay_end') {
         console.log('[Chat] Replay complete, now receiving live events');
+        // Refetch events from database to ensure we have all events
+        // This is critical because:
+        // 1. Events polling is disabled while isExecuting=true
+        // 2. Replayed events are skipped to avoid duplicates
+        // 3. But new events might have been generated between initial fetch and replay
+        // By refetching here, we get a complete snapshot of all events
+        refetchEvents();
         return;
       }
 
