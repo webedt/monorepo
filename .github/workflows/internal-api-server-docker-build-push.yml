@@ -105,7 +105,6 @@ jobs:
           MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
           MINIO_BUCKET: ${{ vars.MINIO_BUCKET || 'sessions' }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          AI_WORKER_URL: ${{ vars.AI_WORKER_URL || 'http://webedt-app-ai-coding-workers-gy4wew_ai-coding-worker:5000' }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://github.etdofresh.com,https://webedt.etdofresh.com' }}
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
@@ -134,7 +133,6 @@ jobs:
           MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
           MINIO_BUCKET=${MINIO_BUCKET}
           SESSION_SECRET=${SESSION_SECRET}
-          AI_WORKER_URL=${AI_WORKER_URL}
           ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
           GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
           GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
@@ -156,7 +154,6 @@ jobs:
           echo "  ✅ MINIO_ROOT_PASSWORD=***"
           echo "  ✅ MINIO_BUCKET=${MINIO_BUCKET}"
           echo "  ✅ SESSION_SECRET=***"
-          echo "  ✅ AI_WORKER_URL=${AI_WORKER_URL}"
           echo "  ✅ ALLOWED_ORIGINS=${ALLOWED_ORIGINS}"
           echo "  ✅ GITHUB_CLIENT_ID=***"
           echo "  ✅ GITHUB_CLIENT_SECRET=***"

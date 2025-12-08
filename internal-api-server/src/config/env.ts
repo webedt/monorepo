@@ -35,7 +35,6 @@ export const MINIO_ROOT_PASSWORD = process.env.MINIO_ROOT_PASSWORD || '';
 export const MINIO_BUCKET = process.env.MINIO_BUCKET || 'sessions';
 
 // AI Worker configuration
-export const AI_WORKER_URL = process.env.AI_WORKER_URL || 'http://localhost:5001';
 export const AI_WORKER_TIMEOUT_MS = parseInt(process.env.AI_WORKER_TIMEOUT_MS || '600000', 10); // 10 minutes
 export const AI_WORKER_PORT = parseInt(process.env.AI_WORKER_PORT || '5000', 10);
 
@@ -106,7 +105,6 @@ export function logEnvConfig(): void {
   console.log(`  MINIO_ENDPOINT=${MINIO_ENDPOINT}`);
   console.log(`  MINIO_PORT=${MINIO_PORT}`);
   console.log(`  MINIO_BUCKET=${MINIO_BUCKET}`);
-  console.log(`  AI_WORKER_URL=${AI_WORKER_URL}`);
   console.log(`  AI_WORKER_PORT=${AI_WORKER_PORT}`);
   console.log(`  USE_WORKER_COORDINATOR=${USE_WORKER_COORDINATOR}`);
   console.log(`  WORKER_SWARM_SERVICE_NAME=${WORKER_SWARM_SERVICE_NAME}`);

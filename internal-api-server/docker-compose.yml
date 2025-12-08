@@ -22,7 +22,6 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
 
       # AI Worker
-      AI_WORKER_URL: ${AI_WORKER_URL:-http://ai-coding-worker:5000}
       AI_WORKER_TIMEOUT_MS: ${AI_WORKER_TIMEOUT_MS:-600000}
       AI_WORKER_PORT: ${AI_WORKER_PORT:-5000}
 
