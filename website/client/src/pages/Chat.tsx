@@ -531,7 +531,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   });
 
   // Load user messages from messages table (user-submitted messages)
-  const { data: messagesData } = useQuery({
+  const { data: messagesData, isLoading: messagesLoading } = useQuery({
     queryKey: ['session-messages', sessionId],
     queryFn: () => {
       if (!sessionId || sessionId === 'new') {
@@ -1082,10 +1082,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Scroll to bottom after messages load during initial session entry
   // This is separate from the sessionId change detection to ensure messages are actually loaded
-  // We wait for eventsLoading to be false to ensure all events have been fetched from the database
+  // We wait for both messagesLoading and eventsLoading to be false to ensure all data has been fetched
   useEffect(() => {
-    if (isInitialSessionLoadRef.current && messages.length > 0 && !eventsLoading) {
-      // Messages have loaded and events query is complete, scroll to bottom
+    if (isInitialSessionLoadRef.current && messages.length > 0 && !eventsLoading && !messagesLoading) {
+      // Messages have loaded and both queries are complete, scroll to bottom
       const scrollToBottom = () => {
         if (messagesEndRef.current) {
           messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
@@ -1096,12 +1096,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         isInitialSessionLoadRef.current = false;
       };
 
-      // Use requestAnimationFrame to ensure DOM has rendered, then scroll
+      // Use double requestAnimationFrame to ensure DOM has fully rendered all messages
+      // First rAF waits for React to commit, second ensures layout is complete
       requestAnimationFrame(() => {
-        scrollToBottom();
+        requestAnimationFrame(() => {
+          scrollToBottom();
+        });
       });
     }
-  }, [messages.length, eventsLoading]);
+  }, [messages.length, eventsLoading, messagesLoading]);
 
   // Reset state when navigating to new chat (sessionId becomes undefined)
   useEffect(() => {
