@@ -924,7 +924,19 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     console.log(`[Chat] Final merged messages: totalCount=${allMessages.length}, dbMessagesCount=${dbMessages.length}, eventMessagesCount=${eventMessages.length}`);
 
+    // Preserve scroll position when updating messages from database
+    // This prevents the chat from jumping to top when queries are refetched after completion
+    const container = messagesContainerRef.current;
+    const savedScrollTop = container?.scrollTop ?? 0;
+
     setMessages(allMessages);
+
+    // Restore scroll position after React re-renders
+    if (container && savedScrollTop > 0) {
+      requestAnimationFrame(() => {
+        container.scrollTop = savedScrollTop;
+      });
+    }
   }, [eventsData, messagesData, sessionId]);
 
   // Update locked state and repository settings when session data changes
