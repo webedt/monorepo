@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sessionsApi, githubApi, API_BASE_URL } from '@/lib/api';
+import { sessionsApi, githubApi, getApiBaseUrl } from '@/lib/api';
 import type { GitHubPullRequest } from '@/shared';
 import { useEventSource } from '@/hooks/useEventSource';
 import { useBrowserNotification, getNotificationPrefs } from '@/hooks/useBrowserNotification';
@@ -633,7 +633,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     queryKey: ['currentSession', currentSessionId],
     queryFn: async () => {
       if (!currentSessionId) return null;
-      const response = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/sessions/${currentSessionId}`, {
         credentials: 'include',
       });
       if (!response.ok) throw new Error('Failed to fetch session');
@@ -1113,7 +1113,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Always use POST
       setStreamMethod('POST');
       setStreamBody(params);
-      setStreamUrl(`${API_BASE_URL}/api/execute`);
+      setStreamUrl(`${getApiBaseUrl()}/api/execute`);
 
       setIsExecuting(true);
 
@@ -1670,7 +1670,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Always use POST to allow reading error body in response
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${API_BASE_URL}/api/execute`);
+    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
 
     setInput('');
     setImages([]);
@@ -1726,7 +1726,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Always use POST
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${API_BASE_URL}/api/execute`);
+    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
   };
 
   // Handle interrupting current job
@@ -1735,7 +1735,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     try {
       // Send abort signal to server
-      await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/abort`, {
+      await fetch(`${getApiBaseUrl()}/api/sessions/${currentSessionId}/abort`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -1829,7 +1829,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
         setStreamMethod('POST');
         setStreamBody(requestParams);
-        setStreamUrl(`${API_BASE_URL}/api/execute`);
+        setStreamUrl(`${getApiBaseUrl()}/api/execute`);
       }, 500);
     }
   }, [isExecuting, messageQueue.length, currentSessionId, sessionId]);
