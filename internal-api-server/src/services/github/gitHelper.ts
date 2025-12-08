@@ -50,7 +50,23 @@ export class GitHelper {
    */
   async getStatus(): Promise<string> {
     try {
+      // Ensure safe.directory is configured before running git commands
+      await this.ensureSafeDirectory();
+
       const status = await this.git.status();
+
+      logger.info('Git getStatus() result', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        branch: status.current,
+        modified: status.modified,
+        notAdded: status.not_added,
+        deleted: status.deleted,
+        created: status.created,
+        staged: status.staged,
+        isClean: status.isClean()
+      });
+
       return `
 Branch: ${status.current}
 Changes not staged: ${status.not_added.length + status.modified.length + status.deleted.length}
@@ -70,7 +86,18 @@ New files: ${status.not_added.join(', ') || 'none'}
    */
   async getDiff(): Promise<string> {
     try {
+      // Ensure safe.directory is configured before running git commands
+      await this.ensureSafeDirectory();
+
       const diff = await this.git.diff();
+
+      logger.info('Git getDiff() result', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        diffLength: diff.length,
+        hasChanges: diff.length > 0
+      });
+
       return diff || 'No changes';
     } catch (error) {
       logger.error('Failed to get git diff', error, { component: 'GitHelper' });
@@ -82,35 +109,71 @@ New files: ${status.not_added.join(', ') || 'none'}
    * Check if there are changes to commit
    */
   async hasChanges(): Promise<boolean> {
+    // CRITICAL: Ensure safe.directory is configured FIRST before any git commands
+    // This is especially important after extracting files from a tarball
+    // where the directory ownership may differ from the current user
+    await this.ensureSafeDirectory();
+
     try {
       // Refresh git index before checking status
       // This is important after extracting files from a tarball
       // because git's index might be out of sync with the actual file contents
       try {
         await this.git.raw(['update-index', '--refresh']);
-      } catch {
-        // Ignore errors - this might fail if there are actual changes
+        logger.info('Git index refreshed successfully', {
+          component: 'GitHelper',
+          workspacePath: this.workspacePath
+        });
+      } catch (refreshError) {
+        // Log but don't fail - this might fail if there are actual changes
         // which is fine, we just want to refresh the index cache
+        logger.warn('Git update-index --refresh returned an error (may indicate changes)', {
+          component: 'GitHelper',
+          workspacePath: this.workspacePath,
+          error: refreshError instanceof Error ? refreshError.message : String(refreshError)
+        });
       }
 
       const status = await this.git.status();
 
-      logger.info('Git status check result', {
+      const hasChanges = !status.isClean();
+
+      logger.info('Git hasChanges() status check result', {
         component: 'GitHelper',
         workspacePath: this.workspacePath,
+        hasChanges,
         isClean: status.isClean(),
+        modifiedCount: status.modified.length,
         modified: status.modified,
+        notAddedCount: status.not_added.length,
         notAdded: status.not_added,
+        deletedCount: status.deleted.length,
         deleted: status.deleted,
+        createdCount: status.created.length,
         created: status.created,
+        renamedCount: status.renamed.length,
         renamed: status.renamed,
-        staged: status.staged
+        stagedCount: status.staged.length,
+        staged: status.staged,
+        conflictedCount: status.conflicted.length,
+        conflicted: status.conflicted
       });
 
-      return !status.isClean();
+      return hasChanges;
     } catch (error) {
-      logger.error('Failed to check for changes', error, { component: 'GitHelper' });
-      return false;
+      // CRITICAL: Do NOT silently return false on errors!
+      // This was hiding git errors like "dubious ownership" and making it look
+      // like there are no changes when in fact git couldn't even run properly.
+      logger.error('Failed to check for changes - this error should NOT be silent!', error, {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined
+      });
+
+      // Re-throw the error instead of returning false
+      // This ensures the caller knows something went wrong
+      throw error;
     }
   }
 
@@ -154,6 +217,9 @@ New files: ${status.not_added.join(', ') || 'none'}
    */
   async commitAll(message: string): Promise<string> {
     try {
+      // Ensure safe.directory is configured before running git commands
+      await this.ensureSafeDirectory();
+
       // Stage all changes
       await this.git.add('.');
 
@@ -185,6 +251,9 @@ New files: ${status.not_added.join(', ') || 'none'}
    */
   async push(remote: string = 'origin', branch?: string): Promise<void> {
     try {
+      // Ensure safe.directory is configured before running git commands
+      await this.ensureSafeDirectory();
+
       // Get current branch if not specified
       const currentBranch = branch || await this.getCurrentBranch();
 
@@ -211,6 +280,9 @@ New files: ${status.not_added.join(', ') || 'none'}
    */
   async getCurrentBranch(): Promise<string> {
     try {
+      // Ensure safe.directory is configured before running git commands
+      await this.ensureSafeDirectory();
+
       const status = await this.git.status();
       return status.current || 'unknown';
     } catch (error) {
