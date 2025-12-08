@@ -2,10 +2,13 @@
  * AI Worker Client
  * Client for making requests to the AI Coding Worker service
  * Used for one-off LLM queries (session titles, branch names, commit messages)
+ *
+ * Uses Worker Coordinator for direct routing to available Docker Swarm tasks.
  */
 
-import { AI_WORKER_URL } from '../../config/env.js';
 import { logger } from '@webedt/shared';
+import { workerCoordinator, WorkerAssignment } from '../workerCoordinator/workerCoordinator.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface QueryRequest {
   prompt: string;
@@ -24,11 +27,9 @@ export interface QueryResponse {
 }
 
 export class AIWorkerClient {
-  private baseUrl: string;
   private timeout: number;
 
-  constructor(baseUrl?: string, timeout?: number) {
-    this.baseUrl = baseUrl || AI_WORKER_URL;
+  constructor(timeout?: number) {
     this.timeout = timeout || 30000; // 30 seconds for one-off queries
   }
 
@@ -36,7 +37,28 @@ export class AIWorkerClient {
    * Run a one-off LLM query through the AI worker
    */
   async query(request: QueryRequest): Promise<string> {
-    const url = `${this.baseUrl}/query`;
+    // Generate a unique query ID for tracking
+    const queryId = `query-${uuidv4().substring(0, 8)}`;
+
+    // Acquire worker via coordinator (no fallback)
+    const workerAssignment = await workerCoordinator.acquireWorker(queryId);
+
+    if (!workerAssignment) {
+      throw new Error('No AI workers available for query. Worker coordinator could not find any running workers in Docker Swarm.');
+    }
+
+    const workerUrl = workerAssignment.url;
+
+    logger.info('Worker acquired for query via coordinator', {
+      component: 'AIWorkerClient',
+      queryId,
+      workerId: workerAssignment.worker.id,
+      containerId: workerAssignment.worker.containerId,
+      workerUrl,
+      queryType: request.queryType
+    });
+
+    const url = `${workerUrl}/query`;
 
     logger.info('Sending query to AI worker', {
       component: 'AIWorkerClient',
@@ -62,7 +84,14 @@ export class AIWorkerClient {
 
       if (!response.ok) {
         const errorBody = await response.json().catch(() => ({ message: 'Unknown error' })) as { message?: string; error?: string };
-        throw new Error(`AI worker query failed (${response.status}): ${errorBody.message || errorBody.error}`);
+        const errorMsg = `AI worker query failed (${response.status}): ${errorBody.message || errorBody.error}`;
+
+        // Mark worker as failed if using coordinator
+        if (workerAssignment) {
+          workerCoordinator.markWorkerFailed(workerAssignment.worker.id, queryId, errorMsg);
+        }
+
+        throw new Error(errorMsg);
       }
 
       const result = await response.json() as QueryResponse;
@@ -83,6 +112,8 @@ export class AIWorkerClient {
       clearTimeout(timeoutId);
 
       if (error instanceof Error && error.name === 'AbortError') {
+        // Mark worker as failed on timeout
+        workerCoordinator.markWorkerFailed(workerAssignment.worker.id, queryId, 'Request timeout');
         throw new Error('AI worker query timed out');
       }
 
@@ -92,6 +123,9 @@ export class AIWorkerClient {
       });
 
       throw error;
+    } finally {
+      // Release worker back to pool
+      workerAssignment.release();
     }
   }
 

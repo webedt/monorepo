@@ -20,8 +20,9 @@ import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../lib/codex
 import { StorageService } from '../services/storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../services/github/operations.js';
 import { logger, generateSessionPath, getEventEmoji } from '@webedt/shared';
-import { WORKSPACE_DIR, AI_WORKER_URL } from '../config/env.js';
+import { WORKSPACE_DIR } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
+import { workerCoordinator, WorkerAssignment, AcquireWorkerOptions } from '../services/workerCoordinator/workerCoordinator.js';
 
 // Define types locally (were previously in @webedt/shared)
 export type AIProvider = 'claude' | 'codex' | 'copilot' | 'gemini';
@@ -636,17 +637,57 @@ const executeHandler = async (req: Request, res: Response) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 600000); // 10 minutes
 
+      // Acquire worker via coordinator (no fallback - fail visibly if coordinator can't find workers)
+      let workerUrl: string;
+      let workerAssignment: WorkerAssignment | null = null;
+
+      await sendEvent({
+        type: 'message',
+        message: 'Acquiring available worker...',
+        stage: 'acquiring_worker',
+        endpoint: '/execute'
+      });
+
+      // Create progress callback to send SSE events during worker acquisition
+      const acquireOptions: AcquireWorkerOptions = {
+        onProgress: (attempt, maxRetries, message) => {
+          sendEvent({
+            type: 'message',
+            message: message,
+            stage: 'acquiring_worker',
+            endpoint: '/execute',
+            data: { attempt, maxRetries }
+          });
+        }
+      };
+
+      workerAssignment = await workerCoordinator.acquireWorker(chatSession.id, acquireOptions);
+
+      if (!workerAssignment) {
+        throw new Error('No AI workers available. Worker coordinator could not find any running workers in Docker Swarm. Please check that the ai-coding-worker service is running.');
+      }
+
+      workerUrl = workerAssignment.url;
+
+      logger.info('Worker acquired via coordinator', {
+        component: 'ExecuteRoute',
+        sessionId: chatSession.id,
+        workerId: workerAssignment.worker.id,
+        containerId: workerAssignment.worker.containerId,
+        workerUrl
+      });
+
       logger.info('Calling AI worker for LLM execution', {
         component: 'ExecuteRoute',
         sessionId: chatSession.id,
-        aiWorkerUrl: `${AI_WORKER_URL}/execute`,
+        aiWorkerUrl: `${workerUrl}/execute`,
         workspacePath: aiWorkerPayload.workspacePath,
         provider: providerName,
         payloadSize: JSON.stringify(aiWorkerPayload).length
       });
 
       try {
-        const aiResponse = await fetch(`${AI_WORKER_URL}/execute`, {
+        const aiResponse = await fetch(`${workerUrl}/execute`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -666,9 +707,11 @@ const executeHandler = async (req: Request, res: Response) => {
           hasBody: !!aiResponse.body
         });
 
-        const workerContainerId = aiResponse.headers.get('X-Container-ID') || 'unknown';
+        const workerContainerId = aiResponse.headers.get('X-Container-ID') ||
+          workerAssignment?.worker.containerId ||
+          'unknown';
         activeWorkerSessions.set(chatSession.id, {
-          workerUrl: AI_WORKER_URL,
+          workerUrl: workerUrl,
           containerId: workerContainerId
         });
 
@@ -809,9 +852,24 @@ const executeHandler = async (req: Request, res: Response) => {
 
       } catch (aiError) {
         clearTimeout(timeout);
+
+        // Mark worker as failed if using coordinator
+        if (workerAssignment) {
+          workerCoordinator.markWorkerFailed(
+            workerAssignment.worker.id,
+            chatSession.id,
+            aiError instanceof Error ? aiError.message : String(aiError)
+          );
+        }
+
         throw aiError;
       } finally {
         activeWorkerSessions.delete(chatSession.id);
+
+        // Release worker back to pool (successful completion)
+        if (workerAssignment) {
+          workerAssignment.release();
+        }
       }
 
       // ========================================================================

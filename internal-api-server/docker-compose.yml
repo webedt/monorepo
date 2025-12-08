@@ -22,8 +22,17 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
 
       # AI Worker
-      AI_WORKER_URL: ${AI_WORKER_URL:-http://ai-coding-worker:5000}
       AI_WORKER_TIMEOUT_MS: ${AI_WORKER_TIMEOUT_MS:-600000}
+      AI_WORKER_PORT: ${AI_WORKER_PORT:-5000}
+
+      # Worker Coordinator (replaces DNSRR with direct routing)
+      USE_WORKER_COORDINATOR: ${USE_WORKER_COORDINATOR:-true}
+      DOCKER_SOCKET_PATH: ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
+      WORKER_SWARM_SERVICE_NAME: ${WORKER_SWARM_SERVICE_NAME:-webedt-app-ai-coding-workers-gy4wew_ai-coding-worker}
+      WORKER_COORDINATOR_REFRESH_INTERVAL_MS: ${WORKER_COORDINATOR_REFRESH_INTERVAL_MS:-5000}
+      WORKER_STALE_BUSY_TIMEOUT_MS: ${WORKER_STALE_BUSY_TIMEOUT_MS:-600000}
+      WORKER_NO_CAPACITY_RETRY_MS: ${WORKER_NO_CAPACITY_RETRY_MS:-1000}
+      WORKER_NO_CAPACITY_MAX_RETRIES: ${WORKER_NO_CAPACITY_MAX_RETRIES:-10}
 
       # CORS
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
@@ -34,6 +43,10 @@ services:
 
       # OpenAI (for transcription)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+    # Mount Docker socket for Worker Coordinator
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
     networks:
       - dokploy-network
