@@ -49,6 +49,7 @@ const ALLOWED_API_ROUTES = [
   '/api/resume',         // Session replay
   '/api/transcribe',     // Audio transcription
   '/api/admin',          // Admin (requires admin auth anyway)
+  '/api/storage',        // Storage operations (file listing, read, write, delete)
 ];
 
 // Block internal-only routes explicitly
@@ -174,19 +175,6 @@ app.use('/api', (req, res, next) => {
 
   // Proxy the request
   next();
-}, createProxyMiddleware(apiProxyOptions));
-
-// Allow read-only storage file access (for viewing images, etc.)
-// GET /api/storage/sessions/:sessionPath/files/* is allowed
-app.use('/api/storage/sessions/:sessionPath/files', (req, res, next) => {
-  if (req.method === 'GET' || req.method === 'HEAD') {
-    next();
-  } else {
-    res.status(403).json({
-      error: 'Forbidden',
-      message: 'Only GET requests allowed for file access'
-    });
-  }
 }, createProxyMiddleware(apiProxyOptions));
 
 // Serve static files from the client build
