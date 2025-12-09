@@ -102,7 +102,8 @@ const getFileIcon = (filename: string, fileType?: ImageFileType): string => {
   return iconMap[ext || ''] || '🖼️';
 };
 
-// Helper to recursively remove empty folders from the tree
+// Helper to recursively remove empty folders from the tree (no longer used - keeping all folders)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const removeEmptyFolders = (nodes: FileNode[]): FileNode[] => {
   return nodes
     .map(node => {
@@ -249,8 +250,8 @@ const transformStorageFilesForImages = (
     }
   }
 
-  // Remove empty folders from the tree
-  return removeEmptyFolders(root.children || []);
+  // Return all folders (including empty ones) so users can navigate and create files in any folder
+  return root.children || [];
 };
 
 // Props for split view support
@@ -702,13 +703,32 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
     return `image-${counter}.${extension}`;
   }, [treeData, imageSession?.repo]);
 
+  // Helper to get the folder path from a file path or directory
+  const getTargetFolderPath = useCallback((): string => {
+    // If a directory is selected, use its path
+    if (selectedDirectory?.path) {
+      return selectedDirectory.path;
+    }
+    // If a file is selected, use its parent folder
+    if (selectedFile?.path) {
+      const parts = selectedFile.path.split('/');
+      if (parts.length > 1) {
+        return parts.slice(0, -1).join('/');
+      }
+      // File is in root
+      return '';
+    }
+    // Nothing selected, use root
+    return '';
+  }, [selectedDirectory, selectedFile]);
+
   // Open new image modal
   const openNewImageModal = useCallback((targetPath?: string) => {
-    const basePath = targetPath || selectedDirectory?.path || '';
+    const basePath = targetPath ?? getTargetFolderPath();
     const filename = generateNewImageFilename(basePath, imagePrefs.extension);
     setNewImageFilename(filename);
     setShowNewImageModal(true);
-  }, [selectedDirectory, imagePrefs.extension, generateNewImageFilename]);
+  }, [getTargetFolderPath, imagePrefs.extension, generateNewImageFilename]);
 
   // Handle creating new image
   const handleCreateNewImage = useCallback(async () => {
@@ -716,7 +736,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
     setIsCreatingImage(true);
 
-    const basePath = selectedDirectory?.path || '';
+    const basePath = getTargetFolderPath();
     const fullPath = basePath ? `${basePath}/${newImageFilename}` : newImageFilename;
 
     // Create a blank canvas with the specified dimensions
@@ -815,7 +835,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
     } finally {
       setIsCreatingImage(false);
     }
-  }, [imageSession, newImageFilename, selectedDirectory, imagePrefs, queryClient, expandedFolders, loadImage, isCreatingImage]);
+  }, [imageSession, newImageFilename, getTargetFolderPath, imagePrefs, queryClient, expandedFolders, loadImage, isCreatingImage]);
 
   // Handle saving the current image
   const handleSaveImage = useCallback(async () => {
@@ -2841,9 +2861,9 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
           <div className="form-control mb-4">
             <label className="label">
               <span className="label-text font-medium">File Name</span>
-              {selectedDirectory && (
+              {getTargetFolderPath() && (
                 <span className="label-text-alt text-base-content/50">
-                  in /{selectedDirectory.path}
+                  in /{getTargetFolderPath()}
                 </span>
               )}
             </label>

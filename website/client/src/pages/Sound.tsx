@@ -100,7 +100,8 @@ const getFileIcon = (filename: string, fileType?: SoundFileType): string => {
   return iconMap[ext || ''] || '🎵';
 };
 
-// Helper to recursively remove empty folders from the tree
+// Helper to recursively remove empty folders from the tree (no longer used - keeping all folders)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const removeEmptyFolders = (nodes: FileNode[]): FileNode[] => {
   return nodes
     .map(node => {
@@ -211,7 +212,8 @@ const transformStorageFilesForSound = (
     }
   }
 
-  return removeEmptyFolders(root.children || []);
+  // Return all folders (including empty ones) so users can navigate the full directory structure
+  return root.children || [];
 };
 
 // Format time as mm:ss.ms
