@@ -125,9 +125,15 @@ const removeEmptyFolders = (nodes: FileNode[]): FileNode[] => {
 // Storage files have path and type properties
 const transformStorageFilesForImages = (
   files: { path: string; size: number; type: 'file' | 'directory' }[],
-  filterMode: EditorMode | 'all'
+  filterMode: EditorMode | 'all',
+  repoName?: string
 ): FileNode[] => {
   const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Build the prefix to strip: workspace/ and optionally the repo name folder
+  // This prevents showing the root folder (e.g., "hello-world") when it's the repo itself
+  const prefixToStrip = repoName ? `workspace/${repoName}/` : 'workspace/';
+  const altPrefixToStrip = 'workspace/'; // Fallback for files directly in workspace/
 
   // Filter to only include files under workspace/ and strip the prefix
   // Also filter out .git directories and their contents
@@ -139,10 +145,24 @@ const transformStorageFilesForImages = (
       const parts = pathWithoutPrefix.split('/');
       return !parts.some(part => part === '.git');
     })
-    .map(f => ({
-      ...f,
-      path: f.path.replace(/^workspace\//, ''),
-    }));
+    .map(f => {
+      // Strip the full prefix (workspace/repoName/) if it matches, otherwise just workspace/
+      let newPath = f.path;
+      if (repoName && f.path.startsWith(prefixToStrip)) {
+        newPath = f.path.slice(prefixToStrip.length);
+      } else if (f.path.startsWith(altPrefixToStrip)) {
+        newPath = f.path.slice(altPrefixToStrip.length);
+        // If there's a repoName and the path starts with it, strip that too
+        if (repoName && (newPath === repoName || newPath.startsWith(repoName + '/'))) {
+          newPath = newPath === repoName ? '' : newPath.slice(repoName.length + 1);
+        }
+      }
+      return {
+        ...f,
+        path: newPath,
+      };
+    })
+    .filter(f => f.path !== ''); // Filter out empty paths (the repo root directory itself)
 
   // Sort items: directories first, then alphabetically
   const sortedItems = [...workspaceFiles].sort((a, b) => {
@@ -478,13 +498,14 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
   });
 
   // Transform and filter the file tree based on editor mode (storage-worker only)
+  // Pass the repo name to strip the root folder (e.g., "hello-world") from the tree
   const fileTree = useMemo(() => {
     if (!treeData) return [];
     if (treeData.source === 'storage' && treeData.files) {
-      return transformStorageFilesForImages(treeData.files, editorMode);
+      return transformStorageFilesForImages(treeData.files, editorMode, imageSession?.repo);
     }
     return [];
-  }, [treeData, editorMode]);
+  }, [treeData, editorMode, imageSession?.repo]);
 
   // Count files by type for display (storage-worker only)
   const fileCounts = useMemo(() => {
@@ -537,8 +558,14 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
         return;
       }
 
-      console.log('[loadImage] Fetching from storage-worker:', storageSessionId, `workspace/${path}`);
-      const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+      // Build storage path: workspace/<repoName>/<path>
+      // The path parameter has the repo name stripped for display, so we need to add it back
+      const storagePath = imageSession.repo
+        ? `workspace/${imageSession.repo}/${path}`
+        : `workspace/${path}`;
+
+      console.log('[loadImage] Fetching from storage-worker:', storageSessionId, storagePath);
+      const blob = await storageWorkerApi.getFileBlob(storageSessionId, storagePath);
 
       if (blob) {
         console.log('[loadImage] Got blob, size:', blob.size, 'type:', blob.type);
@@ -614,9 +641,12 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
     const counts = { images: 0, spritesheets: 0, animations: 0, folders: 0 };
     if (!treeData?.files) return counts;
 
-    // Files in storage have workspace/ prefix, so we need to account for that
-    const workspacePrefix = 'workspace/';
-    const fullDirPath = workspacePrefix + dirPath;
+    // Files in storage have workspace/<repoName>/ prefix, so we need to account for that
+    // The dirPath has the repo name stripped for display, so we need to add it back
+    const storagePrefix = imageSession?.repo
+      ? `workspace/${imageSession.repo}/`
+      : 'workspace/';
+    const fullDirPath = storagePrefix + dirPath;
 
     for (const item of treeData.files) {
       // Check if item is directly inside this directory
@@ -636,16 +666,19 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
       }
     }
     return counts;
-  }, [treeData]);
+  }, [treeData, imageSession?.repo]);
 
   // Generate unique filename for new image
   const generateNewImageFilename = useCallback((basePath: string, extension: string): string => {
     if (!treeData?.files) return `image.${extension}`;
 
     const existingFiles = new Set<string>();
-    // Files in storage have workspace/ prefix
-    const workspacePrefix = 'workspace/';
-    const prefix = basePath ? `${workspacePrefix}${basePath}/` : workspacePrefix;
+    // Files in storage have workspace/<repoName>/ prefix
+    // The basePath has the repo name stripped for display, so we need to add it back
+    const storagePrefix = imageSession?.repo
+      ? `workspace/${imageSession.repo}/`
+      : 'workspace/';
+    const prefix = basePath ? `${storagePrefix}${basePath}/` : storagePrefix;
 
     for (const item of treeData.files) {
       if (item.type === 'file' && item.path.startsWith(prefix)) {
@@ -667,7 +700,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
       counter++;
     }
     return `image-${counter}.${extension}`;
-  }, [treeData]);
+  }, [treeData, imageSession?.repo]);
 
   // Open new image modal
   const openNewImageModal = useCallback((targetPath?: string) => {
@@ -725,7 +758,11 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
       if (!storageSessionId) {
         throw new Error('No session ID available for storage operations');
       }
-      const storagePath = `workspace/${fullPath}`;
+      // Build storage path: workspace/<repoName>/<path>
+      // The fullPath has the repo name stripped for display, so we need to add it back
+      const storagePath = imageSession.repo
+        ? `workspace/${imageSession.repo}/${fullPath}`
+        : `workspace/${fullPath}`;
 
       // Convert base64 to Blob for storage-worker
       const byteCharacters = atob(base64Content);
@@ -833,7 +870,11 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
       if (!storageSessionId) {
         throw new Error('No session ID available for storage operations');
       }
-      const storagePath = `workspace/${selectedFile.path}`;
+      // Build storage path: workspace/<repoName>/<path>
+      // The selectedFile.path has the repo name stripped for display, so we need to add it back
+      const storagePath = imageSession.repo
+        ? `workspace/${imageSession.repo}/${selectedFile.path}`
+        : `workspace/${selectedFile.path}`;
 
       console.log('[Save] Saving to storage-worker...', {
         storageSessionId,
@@ -899,7 +940,12 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
       for (const path of modifiedFilesList) {
         // Get the current (modified) image from storage
-        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+        // Build storage path: workspace/<repoName>/<path>
+        // The path has the repo name stripped for display, so we need to add it back
+        const storagePath = imageSession.repo
+          ? `workspace/${imageSession.repo}/${path}`
+          : `workspace/${path}`;
+        const blob = await storageWorkerApi.getFileBlob(storageSessionId, storagePath);
         if (!blob) {
           console.warn(`[Images] Could not fetch image from storage: ${path}`);
           continue;
