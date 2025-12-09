@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
+import SyntaxHighlightedEditor from '@/components/SyntaxHighlightedEditor';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useEditorSessionStore } from '@/lib/store';
 import type { GitHubPullRequest } from '@/shared';
@@ -1082,15 +1083,15 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     debouncedSave(activeTabPath, nextContent);
   }, [activeTabPath, editHistory, historyIndex, debouncedSave]);
 
-  // Commit all pending changes (creates a commit message in the log)
+  // Commit all pending changes to GitHub
   const commitChanges = useCallback(async () => {
     if (!codeSession) return;
 
-    // Get list of modified files
-    const modifiedFiles: string[] = [];
+    // Get list of modified files with their content
+    const modifiedFiles: Array<{ path: string; content: string }> = [];
     pendingChanges.forEach((change, path) => {
       if (change.content !== change.originalContent) {
-        modifiedFiles.push(path);
+        modifiedFiles.push({ path, content: change.content });
       }
     });
 
@@ -1102,25 +1103,40 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     setCommitStatus('committing');
 
     try {
-      // First ensure all pending saves are complete
+      // First ensure all pending saves are complete (to storage-worker)
       debouncedSave.cancel();
 
-      // Save any unsaved files first
-      for (const path of modifiedFiles) {
+      // Save any unsaved files first to storage-worker
+      for (const { path, content } of modifiedFiles) {
         const change = pendingChanges.get(path);
         if (change) {
-          await saveFile(path, change.content, change.sha);
+          await saveFile(path, content, change.sha);
         }
       }
 
-      // Log the commit
-      const fileList = modifiedFiles.map(f => `\`${f}\``).join(', ');
-      await logCodeMessage(`💾 Committed changes to ${modifiedFiles.length} file(s): ${fileList}`, 'system');
+      // Now commit to GitHub
+      console.log('[Code] Committing to GitHub:', {
+        owner: codeSession.owner,
+        repo: codeSession.repo,
+        branch: codeSession.branch,
+        files: modifiedFiles.map(f => f.path)
+      });
+
+      const result = await githubApi.commit(codeSession.owner, codeSession.repo, {
+        branch: codeSession.branch,
+        files: modifiedFiles.map(f => ({ path: f.path, content: f.content }))
+      });
+
+      // Log the commit with the generated message
+      const fileList = modifiedFiles.map(f => `\`${f.path}\``).join(', ');
+      await logCodeMessage(`💾 Committed to GitHub: "${result.data.message}"\nFiles: ${fileList}\nCommit: ${result.data.commitSha.substring(0, 7)}`, 'system');
+
+      console.log('[Code] Commit successful:', result.data);
 
       // Update pending changes to mark as committed (new original = current)
       setPendingChanges(prev => {
         const next = new Map(prev);
-        modifiedFiles.forEach(path => {
+        modifiedFiles.forEach(({ path }) => {
           const change = next.get(path);
           if (change) {
             next.set(path, { ...change, originalContent: change.content });
@@ -1558,12 +1574,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     });
   };
 
-  // Line count for the editor (memoized to avoid recalculating on every render)
-  const lineCount = useMemo(() => {
-    if (!fileContent) return 0;
-    return fileContent.split('\n').length;
-  }, [fileContent]);
-
   // Code Editor JSX (not a component - just JSX to avoid remounting)
   const codeEditorContent = (
     <div className="flex h-full">
@@ -1741,43 +1751,24 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
               </div>
             </div>
           ) : fileContent !== null ? (
-            <div className="h-full flex flex-col">
-              <div className="flex-1 flex min-h-0">
-                {/* Line Numbers - using a single pre element for better performance */}
-                <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
-                  {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
-                </pre>
-
-                {/* Text Editor */}
-                <textarea
-                  ref={textareaRef}
-                  value={fileContent}
-                  onChange={(e) => {
+            <div className="h-full flex flex-col bg-base-200">
+              <SyntaxHighlightedEditor
+                content={fileContent}
+                filename={activeTabPath || ''}
+                onChange={handleContentChange}
+                onKeyDown={(e) => {
+                  // Handle Tab key for indentation
+                  if (e.key === 'Tab') {
+                    e.preventDefault();
                     const target = e.target as HTMLTextAreaElement;
-                    handleContentChange(target.value, target.selectionStart, target.selectionEnd);
-                  }}
-                  onKeyDown={(e) => {
-                    // Handle Tab key for indentation
-                    if (e.key === 'Tab') {
-                      e.preventDefault();
-                      const target = e.target as HTMLTextAreaElement;
-                      const start = target.selectionStart;
-                      const end = target.selectionEnd;
-                      const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
-                      handleContentChange(newValue, start + 2, start + 2);
-                    }
-                  }}
-                  className="flex-1 bg-base-200 text-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none"
-                  spellCheck={false}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  style={{
-                    tabSize: 2,
-                    MozTabSize: 2,
-                  }}
-                />
-              </div>
+                    const start = target.selectionStart;
+                    const end = target.selectionEnd;
+                    const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
+                    handleContentChange(newValue, start + 2, start + 2);
+                  }
+                }}
+                className="flex-1"
+              />
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-base-content/50">

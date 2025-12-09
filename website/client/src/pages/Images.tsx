@@ -297,7 +297,10 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
   const resolutionPickerRef = useRef<HTMLDivElement>(null);
 
   // Track modified images for commit functionality
+  // modifiedImages: Set of file paths that have been modified
+  // originalImages: Map of file path -> original base64 data URL (before modifications)
   const [modifiedImages, setModifiedImages] = useState<Set<string>>(new Set());
+  const [originalImages, setOriginalImages] = useState<Map<string, string>>(new Map());
   const [commitStatus, setCommitStatus] = useState<'idle' | 'committing' | 'committed' | 'error'>('idle');
 
   // PR-related state
@@ -518,6 +521,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
   // Load image from storage-worker when a file is selected
   // Always converts to data URL to avoid CORS issues with canvas
+  // Also stores the original image for before/after comparison on commit
   const loadImage = useCallback(async (path: string) => {
     if (!imageSession) return;
 
@@ -541,6 +545,17 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
         const dataUrl = await blobToDataUrl(blob);
         console.log('[loadImage] Converted to dataUrl, length:', dataUrl.length);
         setImageUrl(dataUrl);
+
+        // Store as original if not already stored (for before/after comparison on commit)
+        // Only store if this image hasn't been modified yet in this session
+        setOriginalImages(prev => {
+          if (!prev.has(path)) {
+            const next = new Map(prev);
+            next.set(path, dataUrl);
+            return next;
+          }
+          return prev;
+        });
       } else {
         console.error('[Images] Image not found in storage:', path);
       }
@@ -864,19 +879,80 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
     }
   }, [imageSession, selectedFile, isSavingImage, canvasHistory, historyIndex]);
 
-  // Mark all modified images as committed (changes are synced when creating PR)
+  // Commit all modified images to GitHub
   const commitChanges = useCallback(async () => {
     if (!imageSession || modifiedImages.size === 0) return;
 
     setCommitStatus('committing');
 
     try {
-      // Log the commit action
       const modifiedFilesList = Array.from(modifiedImages);
-      console.log(`Marking ${modifiedFilesList.length} image(s) as committed:`, modifiedFilesList);
+      console.log(`[Images] Committing ${modifiedFilesList.length} image(s) to GitHub:`, modifiedFilesList);
 
-      // Clear modified images list (they're already saved to storage-worker)
+      // Fetch the current content of each modified image from storage-worker
+      const storageSessionId = imageSession.sessionId;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
+
+      const imagesToCommit: Array<{ path: string; content: string; beforeContent?: string }> = [];
+
+      for (const path of modifiedFilesList) {
+        // Get the current (modified) image from storage
+        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+        if (!blob) {
+          console.warn(`[Images] Could not fetch image from storage: ${path}`);
+          continue;
+        }
+
+        // Convert blob to base64 data URL
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        // Get the original image (before modifications) if available
+        const originalDataUrl = originalImages.get(path);
+
+        imagesToCommit.push({
+          path,
+          content: dataUrl,
+          beforeContent: originalDataUrl
+        });
+      }
+
+      if (imagesToCommit.length === 0) {
+        console.warn('[Images] No images to commit');
+        setCommitStatus('idle');
+        return;
+      }
+
+      // Commit to GitHub
+      console.log('[Images] Committing to GitHub:', {
+        owner: imageSession.owner,
+        repo: imageSession.repo,
+        branch: imageSession.branch,
+        images: imagesToCommit.map(i => i.path)
+      });
+
+      const result = await githubApi.commit(imageSession.owner, imageSession.repo, {
+        branch: imageSession.branch,
+        images: imagesToCommit
+      });
+
+      console.log('[Images] Commit successful:', result.data);
+
+      // Clear modified images list and original images for committed files
       setModifiedImages(new Set());
+      setOriginalImages(prev => {
+        const next = new Map(prev);
+        // Remove the committed images from originals (they'll be re-captured on next edit)
+        modifiedFilesList.forEach(path => next.delete(path));
+        return next;
+      });
+
       setCommitStatus('committed');
 
       // Reset status after a short delay
@@ -884,12 +960,17 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
         setCommitStatus(prev => prev === 'committed' ? 'idle' : prev);
       }, 2000);
 
-      console.log('Changes marked as committed');
+      console.log('[Images] Changes committed to GitHub');
     } catch (error) {
       console.error('Failed to commit changes:', error);
       setCommitStatus('error');
+
+      // Reset error status after a delay
+      setTimeout(() => {
+        setCommitStatus(prev => prev === 'error' ? 'idle' : prev);
+      }, 3000);
     }
-  }, [imageSession, modifiedImages]);
+  }, [imageSession, modifiedImages, originalImages]);
 
   // PR Handler Functions
   const handleCreatePR = async () => {

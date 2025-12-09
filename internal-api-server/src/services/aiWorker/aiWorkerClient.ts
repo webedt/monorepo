@@ -239,4 +239,92 @@ Return ONLY the commit message:`;
 
     return commitMessage || 'Update files';
   }
+
+  /**
+   * Generate commit message from file changes (for code files)
+   */
+  async generateCommitMessageFromChanges(
+    modifiedFiles: string[],
+    provider: string,
+    authentication: string
+  ): Promise<string> {
+    const fileList = modifiedFiles.join('\n');
+    const prompt = `Generate a concise git commit message for the following modified files. Follow these rules:
+- Use imperative mood (e.g., "Add feature" not "Added feature")
+- Keep the summary line under 72 characters
+- Be specific about what changed based on the file names/paths
+- Only return the commit message text, nothing else - no explanations, no markdown
+
+Modified files:
+${fileList}
+
+Return ONLY the commit message:`;
+
+    const result = await this.query({
+      prompt,
+      codingAssistantProvider: provider,
+      codingAssistantAuthentication: authentication,
+      queryType: 'commit_message'
+    });
+
+    const commitMessage = result.trim();
+
+    logger.info('Generated commit message from file list via AI worker', {
+      component: 'AIWorkerClient',
+      commitMessage,
+      fileCount: modifiedFiles.length
+    });
+
+    return commitMessage || `Update ${modifiedFiles.length} file(s)`;
+  }
+
+  /**
+   * Generate commit message for image changes by comparing before/after images
+   */
+  async generateImageCommitMessage(
+    modifiedImages: Array<{
+      path: string;
+      beforeBase64?: string;  // Original image as base64 data URL
+      afterBase64: string;    // Modified image as base64 data URL
+    }>,
+    provider: string,
+    authentication: string
+  ): Promise<string> {
+    // Build a prompt that describes the images
+    // Note: The AI worker will need to handle vision models for actual image comparison
+    const imageDescriptions = modifiedImages.map(img => {
+      const isNew = !img.beforeBase64;
+      return `- ${img.path} (${isNew ? 'NEW' : 'MODIFIED'})`;
+    }).join('\n');
+
+    // For now, we'll create a text-based prompt.
+    // If vision capabilities are available, the AI worker can use them.
+    const prompt = `Generate a concise git commit message for the following image changes. Follow these rules:
+- Use imperative mood (e.g., "Add sprite" not "Added sprite")
+- Keep the summary line under 72 characters
+- Be specific about what changed based on the file names/paths
+- Only return the commit message text, nothing else - no explanations, no markdown
+
+Image changes:
+${imageDescriptions}
+
+Return ONLY the commit message:`;
+
+    const result = await this.query({
+      prompt,
+      codingAssistantProvider: provider,
+      codingAssistantAuthentication: authentication,
+      queryType: 'commit_message'
+    });
+
+    const commitMessage = result.trim();
+
+    logger.info('Generated image commit message via AI worker', {
+      component: 'AIWorkerClient',
+      commitMessage,
+      imageCount: modifiedImages.length
+    });
+
+    return commitMessage || `Update ${modifiedImages.length} image(s)`;
+  }
 }
