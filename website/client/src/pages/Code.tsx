@@ -1334,9 +1334,11 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           throw new Error('Failed to delete file from storage');
         }
       } else {
-        // For folders, we need to delete all files - this is more complex
-        // For now, throw an error as folder delete requires listing all files
-        throw new Error('Folder delete is not yet supported in storage-worker mode');
+        // Delete folder and all its contents
+        const result = await storageWorkerApi.deleteFolder(storageSessionId, storagePath);
+        if (!result.success) {
+          throw new Error('Failed to delete folder from storage');
+        }
       }
 
       // Refresh the file tree (use session-specific query key to avoid affecting other Code instances in split view)

@@ -284,4 +284,27 @@ router.delete('/sessions/:sessionPath/files/*', async (req: Request, res: Respon
   }
 });
 
+// Delete a folder (and all its contents) from a session
+router.delete('/sessions/:sessionPath/folders/*', async (req: Request, res: Response) => {
+  const { sessionPath } = req.params;
+  const folderPath = req.params[0];
+
+  if (!folderPath) {
+    res.status(400).json({ error: 'Folder path is required' });
+    return;
+  }
+
+  try {
+    const result = await storageService.deleteSessionFolder(sessionPath, folderPath);
+    if (!result.deleted) {
+      res.status(404).json({ error: 'Folder not found' });
+      return;
+    }
+    res.json({ success: true, path: folderPath, filesDeleted: result.filesDeleted });
+  } catch (error) {
+    logger.error('Error deleting folder', error as Error, { component: 'StorageRoutes' });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

@@ -625,6 +625,71 @@ class StorageServiceClass {
   }
 
   /**
+   * Delete a folder (and all its contents) from a session tarball
+   */
+  async deleteSessionFolder(sessionPath: string, folderPath: string): Promise<{ deleted: boolean; filesDeleted: number }> {
+    validateSessionPath(sessionPath);
+    const minio = getMinioClient();
+    const bucket = getBucket();
+    const objectName = `${sessionPath}/session.tar.gz`;
+    const tmpDir = path.join(os.tmpdir(), `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+    const tarPath = path.join(tmpDir, 'session.tar.gz');
+    const extractDir = path.join(tmpDir, 'extracted');
+
+    try {
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      await minio.fGetObject(bucket, objectName, tarPath);
+      await tar.extract({ file: tarPath, cwd: extractDir });
+
+      const normalizedFolderPath = folderPath.replace(/^\.?\//, '').replace(/\/$/, '');
+      const fullFolderPath = path.join(extractDir, normalizedFolderPath);
+
+      if (!fs.existsSync(fullFolderPath)) {
+        return { deleted: false, filesDeleted: 0 };
+      }
+
+      const stat = fs.statSync(fullFolderPath);
+      if (!stat.isDirectory()) {
+        return { deleted: false, filesDeleted: 0 };
+      }
+
+      // Count files before deletion
+      const filesDeleted = this.countFilesRecursive(fullFolderPath);
+
+      // Delete the folder and all its contents
+      fs.rmSync(fullFolderPath, { recursive: true, force: true });
+      fs.unlinkSync(tarPath);
+
+      await tar.create(
+        { gzip: true, file: tarPath, cwd: extractDir },
+        ['.']
+      );
+
+      await minio.fPutObject(bucket, objectName, tarPath);
+
+      logger.info(`Folder ${folderPath} deleted from session ${sessionPath}`, {
+        component: 'StorageService',
+        filesDeleted
+      });
+      return { deleted: true, filesDeleted };
+    } catch (err: unknown) {
+      const error = err as { code?: string };
+      if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
+        return { deleted: false, filesDeleted: 0 };
+      }
+      throw err;
+    } finally {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
    * Get MIME type based on file extension
    */
   private getMimeType(filePath: string): string {
