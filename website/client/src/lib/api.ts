@@ -714,6 +714,23 @@ export const storageApi = {
       return false;
     }
   },
+
+  // Delete a folder (and all its contents) from a session
+  deleteFolder: async (sessionPath: string, folderPath: string): Promise<{ success: boolean; filesDeleted?: number }> => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/folders/${folderPath}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return { success: true, filesDeleted: data.filesDeleted };
+      }
+      return { success: false };
+    } catch {
+      return { success: false };
+    }
+  },
 };
 
 // Backwards compatibility alias
