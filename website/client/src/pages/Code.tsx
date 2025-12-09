@@ -303,6 +303,10 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
 
+  // File selection state for multi-select
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+
   // Image preview state
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
@@ -744,11 +748,21 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   };
 
   // Handle click on file - uses timeout to distinguish single vs double click
-  const handleFileClick = (path: string, name: string) => {
+  // Also handles file selection for multi-select (ctrl+click, shift+click)
+  const handleFileClick = (path: string, name: string, event: React.MouseEvent) => {
+    // Handle selection (ctrl+click, shift+click, or regular click)
+    handleFileSelect(path, name, event);
+
     // Clear any pending single-click action
     if (clickTimeoutRef.current) {
       clearTimeout(clickTimeoutRef.current);
       clickTimeoutRef.current = null;
+    }
+
+    // Don't open file on ctrl/cmd+click or shift+click (only select)
+    const isModifierClick = event.ctrlKey || event.metaKey || event.shiftKey;
+    if (isModifierClick) {
+      return;
     }
 
     // Delay single-click action to allow double-click to cancel it
@@ -822,6 +836,67 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       return next;
     });
   };
+
+  // Helper to get all visible file paths in order (for shift-select range)
+  const getVisibleFilePaths = useCallback((nodes: TreeNode[]): string[] => {
+    const paths: string[] = [];
+    const traverse = (nodes: TreeNode[]) => {
+      for (const node of nodes) {
+        if (node.type === 'file') {
+          paths.push(node.path);
+        } else {
+          // Folder - only recurse if expanded
+          if (expandedFolders.has(node.path)) {
+            traverse(node.children);
+          }
+        }
+      }
+    };
+    traverse(nodes);
+    return paths;
+  }, [expandedFolders]);
+
+  // Handle file selection with multi-select support (ctrl+click, shift+click)
+  const handleFileSelect = useCallback((path: string, _name: string, event: React.MouseEvent) => {
+    const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+    const isShift = event.shiftKey;
+
+    if (isShift && lastSelectedPath) {
+      // Shift+click: select range from last selected to current
+      const visiblePaths = getVisibleFilePaths(fileTree);
+      const lastIndex = visiblePaths.indexOf(lastSelectedPath);
+      const currentIndex = visiblePaths.indexOf(path);
+
+      if (lastIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+        const rangePaths = visiblePaths.slice(start, end + 1);
+
+        setSelectedFiles(prev => {
+          const next = new Set(prev);
+          // Add all files in range to selection
+          rangePaths.forEach(p => next.add(p));
+          return next;
+        });
+      }
+    } else if (isCtrlOrCmd) {
+      // Ctrl/Cmd+click: toggle selection of clicked file
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        if (next.has(path)) {
+          next.delete(path);
+        } else {
+          next.add(path);
+        }
+        return next;
+      });
+      setLastSelectedPath(path);
+    } else {
+      // Regular click: select only this file (clear others)
+      setSelectedFiles(new Set([path]));
+      setLastSelectedPath(path);
+    }
+  }, [lastSelectedPath, getVisibleFilePaths, fileTree]);
 
   // Helper to log file operations as chat messages (saved to database like chat messages)
   // This creates proper messages that appear in the Chat view exactly like AI responses
@@ -1640,14 +1715,15 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
       if (node.type === 'file') {
         const isActive = activeTabPath === node.path;
+        const isSelected = selectedFiles.has(node.path);
         return (
           <div
             key={node.path}
-            onClick={() => handleFileClick(node.path, node.name)}
+            onClick={(e) => handleFileClick(node.path, node.name, e)}
             onDoubleClick={() => handleFileDoubleClick(node.path, node.name)}
             className={`group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
-              isActive ? 'bg-base-300' : ''
-            }`}
+              isSelected ? 'bg-primary/20' : ''
+            } ${isActive ? 'bg-base-300' : ''}`}
             style={{ paddingLeft }}
           >
             <span className="text-xs">{node.icon}</span>
