@@ -247,6 +247,7 @@ export const TAGLINES = [
   "Check yo edit before you wreck yo edit.",
   "Damn, it feels good to be an edita'.",
   "Hit me, baby, one more edit.",
+  "Edit me, baby, one more time.",
   "Edit what you want, what you really, really want.",
   "Don't go editing waterfalls.",
   "Quit playing games with my edits.",
