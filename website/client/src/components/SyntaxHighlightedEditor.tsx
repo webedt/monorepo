@@ -108,10 +108,10 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
       fontFamily: 'inherit',
       fontSize: 'inherit',
       lineHeight: 'inherit',
-      whiteSpace: 'pre',
-      wordWrap: 'normal',
-      overflowWrap: 'normal',
-      display: 'block',
+      whiteSpace: 'pre' as const,
+      wordWrap: 'normal' as const,
+      overflowWrap: 'normal' as const,
+      display: 'block' as const,
     },
   }), []);
 
