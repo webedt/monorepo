@@ -43,9 +43,9 @@ interface PendingChange {
 
 // File operation state for modals
 interface FileOperationState {
-  type: 'rename' | 'delete' | null;
+  type: 'rename' | 'delete' | 'create' | null;
   itemType: 'file' | 'folder' | null;
-  path: string;
+  path: string;  // For create, this is the parent folder path (empty string for root)
   name: string;
 }
 
@@ -1220,6 +1220,15 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     setOperationError(null);
   }, []);
 
+  // Open create modal for new file or folder
+  // parentPath is the folder path where the new item will be created (empty string for root)
+  const openCreateModal = useCallback((itemType: 'file' | 'folder', parentPath: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setFileOperation({ type: 'create', itemType, path: parentPath, name: '' });
+    setNewName('');
+    setOperationError(null);
+  }, []);
+
   // Close the modal
   const closeModal = useCallback(() => {
     setFileOperation({ type: null, itemType: null, path: '', name: '' });
@@ -1380,6 +1389,86 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setIsOperating(false);
     }
   }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logCodeMessage]);
+
+  // Handle create new file or folder
+  const handleCreate = useCallback(async () => {
+    if (!codeSession || !newName.trim()) {
+      closeModal();
+      return;
+    }
+
+    setIsOperating(true);
+    setOperationError(null);
+
+    try {
+      const storageSessionId = codeSession.sessionId;
+      const repoName = codeSession.repo;
+      if (!storageSessionId) {
+        throw new Error('No session ID available for storage operations');
+      }
+
+      // Build the new path: parent folder + new name
+      const relativePath = fileOperation.path
+        ? `${fileOperation.path}/${newName.trim()}`
+        : newName.trim();
+      const storagePath = repoName
+        ? `workspace/${repoName}/${relativePath}`
+        : `workspace/${relativePath}`;
+
+      if (fileOperation.itemType === 'file') {
+        // Create an empty file
+        const success = await storageWorkerApi.writeFile(storageSessionId, storagePath, '');
+        if (!success) {
+          throw new Error('Failed to create file in storage');
+        }
+
+        // Log the create operation
+        await logCodeMessage(`📄 Created new file: \`${relativePath}\``, 'system');
+
+        // Refresh the file tree
+        queryClient.invalidateQueries({ queryKey: ['file-tree', codeSession.sessionId] });
+
+        // If there's a parent folder, make sure it's expanded
+        if (fileOperation.path) {
+          setExpandedFolders(prev => new Set([...prev, fileOperation.path]));
+        }
+
+        // Open the new file in the editor
+        closeModal();
+        handleFileDoubleClick(relativePath, newName.trim());
+      } else {
+        // For folders, create a .gitkeep file to ensure the folder exists
+        const gitkeepPath = `${storagePath}/.gitkeep`;
+        const success = await storageWorkerApi.writeFile(storageSessionId, gitkeepPath, '');
+        if (!success) {
+          throw new Error('Failed to create folder in storage');
+        }
+
+        // Log the create operation
+        await logCodeMessage(`📁 Created new folder: \`${relativePath}\``, 'system');
+
+        // Refresh the file tree
+        queryClient.invalidateQueries({ queryKey: ['file-tree', codeSession.sessionId] });
+
+        // Expand the parent folder and the new folder
+        setExpandedFolders(prev => {
+          const newSet = new Set(prev);
+          if (fileOperation.path) {
+            newSet.add(fileOperation.path);
+          }
+          newSet.add(relativePath);
+          return newSet;
+        });
+
+        closeModal();
+      }
+    } catch (error: any) {
+      console.error('Create error:', error);
+      setOperationError(error.message || 'Failed to create');
+    } finally {
+      setIsOperating(false);
+    }
+  }, [codeSession, fileOperation, newName, closeModal, queryClient, logCodeMessage, handleFileDoubleClick]);
 
   // PR Handler Functions
   const handleCreatePR = async () => {
@@ -1557,6 +1646,24 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
             {/* Action buttons - visible on hover */}
             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
+                onClick={(e) => openCreateModal('file', node.path, e)}
+                className="p-1 hover:bg-base-200 rounded"
+                title="New file in folder"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </button>
+              <button
+                onClick={(e) => openCreateModal('folder', node.path, e)}
+                className="p-1 hover:bg-base-200 rounded"
+                title="New folder in folder"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                </svg>
+              </button>
+              <button
                 onClick={(e) => openRenameModal('folder', node.path, node.name, e)}
                 className="p-1 hover:bg-base-200 rounded"
                 title="Rename folder"
@@ -1603,7 +1710,25 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       <div className="w-64 bg-base-100 border-r border-base-300 overflow-y-auto flex-shrink-0">
         <div className="flex items-center justify-between px-3 py-2 border-b border-base-300">
           <span className="text-sm font-semibold uppercase tracking-wide">Explorer</span>
-          <div className="flex gap-1">
+          <div className="flex gap-0.5">
+            <button
+              onClick={(e) => openCreateModal('file', '', e)}
+              className="p-1 hover:bg-base-200 rounded"
+              title="New File"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => openCreateModal('folder', '', e)}
+              className="p-1 hover:bg-base-200 rounded"
+              title="New Folder"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+              </svg>
+            </button>
             <button
               onClick={() => queryClient.invalidateQueries({ queryKey: ['file-tree', codeSession?.sessionId] })}
               className="p-1 hover:bg-base-200 rounded"
@@ -2192,6 +2317,68 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                 </button>
               </div>
             </form>
+          </div>
+          <div className="modal-backdrop" onClick={closeModal}></div>
+        </div>
+      )}
+
+      {/* Create New File/Folder Modal */}
+      {fileOperation.type === 'create' && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg">
+              New {fileOperation.itemType === 'folder' ? 'Folder' : 'File'}
+            </h3>
+            <div className="py-4">
+              <label className="label">
+                <span className="label-text">
+                  {fileOperation.itemType === 'folder' ? 'Folder' : 'File'} name
+                </span>
+              </label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="input input-bordered w-full"
+                placeholder={fileOperation.itemType === 'folder' ? 'Enter folder name' : 'Enter file name (e.g., index.ts)'}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newName.trim()) handleCreate();
+                  if (e.key === 'Escape') closeModal();
+                }}
+              />
+              {fileOperation.path && (
+                <p className="mt-2 text-base-content/70 text-sm">
+                  Creating in: <code className="bg-base-200 px-1 rounded">{fileOperation.path}/</code>
+                </p>
+              )}
+              {operationError && (
+                <div className="mt-2 text-error text-sm">{operationError}</div>
+              )}
+            </div>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost"
+                onClick={closeModal}
+                disabled={isOperating}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleCreate}
+                disabled={isOperating || !newName.trim()}
+              >
+                {isOperating ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm"></span>
+                    Creating...
+                  </>
+                ) : (
+                  'Create'
+                )}
+              </button>
+            </div>
           </div>
           <div className="modal-backdrop" onClick={closeModal}></div>
         </div>
