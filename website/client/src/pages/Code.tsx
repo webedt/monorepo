@@ -327,11 +327,11 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   }, [existingSessionData]);
 
-  // Fetch user's GitHub repos (only when no existing session)
-  const { data: reposData, isLoading: isLoadingRepos, error: reposError } = useQuery({
+  // Fetch user's GitHub repos (only when no existing session, needed for quick-setup auto-init)
+  const { data: reposData, isLoading: isLoadingRepos } = useQuery({
     queryKey: ['github-repos'],
     queryFn: githubApi.getRepos,
-    enabled: !sessionId, // Only fetch repos if not viewing an existing session
+    enabled: !sessionId && !!preSelectedSettings?.repositoryUrl, // Only fetch repos for quick-setup flow
   });
 
   const repos: GitHubRepo[] = reposData?.data || [];
@@ -439,64 +439,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     const [owner, repoName] = repo.fullName.split('/');
     const baseBranch = selectedBranch || repo.defaultBranch;
-
-    // Generate random ID for branch
-    const randomId = Math.random().toString(36).substring(2, 10);
-    const branchName = `webedt/started-from-code-${randomId}`;
-
-    try {
-      // Create the GitHub branch
-      await createBranchMutation.mutateAsync({
-        owner,
-        repo: repoName,
-        branchName,
-        baseBranch,
-      });
-
-      // Create the database session for tracking
-      const sessionResponse = await sessionsApi.createCodeSession({
-        title: `Code: ${owner}/${repoName}`,
-        repositoryUrl: repo.cloneUrl,
-        repositoryOwner: owner,
-        repositoryName: repoName,
-        baseBranch,
-        branch: branchName,
-      });
-
-      const dbSessionId = sessionResponse.data.sessionId;
-
-      // Note: Server already creates an initial user message when creating the code session
-      // No need to log a duplicate session start event here
-
-      setCodeSession({
-        owner,
-        repo: repoName,
-        branch: branchName,
-        baseBranch,
-        sessionId: dbSessionId,
-      });
-      setIsFromExistingSession(false);
-
-      // Navigate to the session URL
-      navigate(`/session/${dbSessionId}/code`, { replace: true });
-
-      // Expand root folders by default
-      setExpandedFolders(new Set());
-    } catch (error: any) {
-      console.error('Failed to create branch:', error);
-      setInitError(error.message || 'Failed to create branch');
-    } finally {
-      setIsInitializing(false);
-    }
-  };
-
-  // Initialize Code session when repo is selected (from RepoSelector)
-  const initializeCodeSession = async (repo: GitHubRepo) => {
-    setIsInitializing(true);
-    setInitError(null);
-
-    const [owner, repoName] = repo.fullName.split('/');
-    const baseBranch = repo.defaultBranch;
 
     // Generate random ID for branch
     const randomId = Math.random().toString(36).substring(2, 10);
@@ -1788,141 +1730,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     </div>
   );
 
-  // Repository Selector View
-  const RepoSelector = () => {
-    // If we're auto-initializing from quick-setup, show a dedicated loading state
-    if (preSelectedSettings?.repositoryUrl && (isLoadingRepos || isInitializing)) {
-      return (
-        <div className="flex items-center justify-center h-[calc(100vh-200px)]">
-          <div className="text-center">
-            <span className="loading loading-spinner loading-lg text-primary"></span>
-            <p className="mt-4 text-lg text-base-content">Setting up your workspace...</p>
-            <p className="mt-2 text-sm text-base-content/70">Creating a new branch for your changes</p>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-base-content mb-2">Start Code Session</h1>
-        <p className="text-base-content/70">
-          Select a repository to start editing. A new branch will be created for your changes:
-          <code className="ml-2 px-2 py-1 bg-base-200 rounded text-sm">
-            webedt/started-from-code-{'{id}'}
-          </code>
-        </p>
-      </div>
-
-      {initError && (
-        <div className="alert alert-error mb-6">
-          <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>{initError}</span>
-          <button onClick={() => setInitError(null)} className="btn btn-sm btn-ghost">Dismiss</button>
-        </div>
-      )}
-
-      {isLoadingRepos && (
-        <div className="text-center py-12">
-          <span className="loading loading-spinner loading-lg text-primary"></span>
-          <p className="mt-2 text-base-content/70">Loading repositories...</p>
-        </div>
-      )}
-
-      {reposError && (
-        <div className="alert alert-error">
-          <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>
-            {reposError instanceof Error ? reposError.message : 'Failed to load repositories'}
-            {String(reposError).includes('GitHub not connected') && (
-              <span className="ml-2">
-                Please <a href="/settings" className="link link-primary">connect your GitHub account</a> first.
-              </span>
-            )}
-          </span>
-        </div>
-      )}
-
-      {!isLoadingRepos && !reposError && repos.length === 0 && (
-        <div className="text-center py-12">
-          <svg
-            className="mx-auto h-12 w-12 text-base-content/40"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-            />
-          </svg>
-          <h3 className="mt-2 text-sm font-medium text-base-content">No repositories</h3>
-          <p className="mt-1 text-sm text-base-content/70">
-            No repositories found. Make sure your GitHub account is connected.
-          </p>
-        </div>
-      )}
-
-      {!isLoadingRepos && !reposError && repos.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {repos.map((repo) => (
-            <div
-              key={repo.id}
-              onClick={() => !isInitializing && initializeCodeSession(repo)}
-              className={`p-4 bg-base-100 border border-base-300 rounded-lg hover:border-primary hover:shadow-md cursor-pointer transition-all ${
-                isInitializing ? 'opacity-50 cursor-wait' : ''
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-primary truncate">{repo.fullName}</span>
-                    {repo.private && (
-                      <span className="badge badge-xs badge-outline">Private</span>
-                    )}
-                  </div>
-                  {repo.description && (
-                    <p className="mt-1 text-sm text-base-content/70 line-clamp-2">
-                      {repo.description}
-                    </p>
-                  )}
-                  <div className="mt-2 text-xs text-base-content/50">
-                    Default branch: {repo.defaultBranch}
-                  </div>
-                </div>
-                <div className="ml-4 flex-shrink-0">
-                  {isInitializing ? (
-                    <span className="loading loading-spinner loading-sm"></span>
-                  ) : (
-                    <svg
-                      className="w-5 h-5 text-base-content/40"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-    );
-  };
-
   // Determine what content to show based on state
   const getMainContent = () => {
     // Show loading state when fetching existing session
@@ -1957,8 +1764,55 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
     }
 
+    // If we're auto-initializing from quick-setup, show a dedicated loading state
+    if (preSelectedSettings?.repositoryUrl && (isLoadingRepos || isInitializing)) {
+      return (
+        <div className="flex items-center justify-center h-[calc(100vh-200px)]">
+          <div className="text-center">
+            <span className="loading loading-spinner loading-lg text-primary"></span>
+            <p className="mt-4 text-lg text-base-content">Setting up your workspace...</p>
+            <p className="mt-2 text-sm text-base-content/70">Creating a new branch for your changes</p>
+          </div>
+        </div>
+      );
+    }
+
+    // Show error if quick-setup initialization failed
+    if (initError) {
+      return (
+        <div className="max-w-2xl mx-auto px-4 py-8">
+          <div className="alert alert-error mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{initError}</span>
+            <button onClick={() => setInitError(null)} className="btn btn-sm btn-ghost">Dismiss</button>
+          </div>
+          <div className="text-center">
+            <button onClick={() => navigate('/sessions')} className="btn btn-primary">
+              Go to Sessions
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // No session - redirect to sessions page
     if (!codeSession) {
-      return <RepoSelector />;
+      return (
+        <div className="flex items-center justify-center h-[calc(100vh-200px)]">
+          <div className="text-center">
+            <svg className="w-16 h-16 mx-auto mb-4 text-base-content/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            <h2 className="text-xl font-semibold text-base-content mb-2">No Code Session</h2>
+            <p className="text-base-content/70 mb-4">Start a new code session from the Sessions page or Quick Setup.</p>
+            <button onClick={() => navigate('/sessions')} className="btn btn-primary">
+              Go to Sessions
+            </button>
+          </div>
+        </div>
+      );
     }
 
     // Return the code session view
