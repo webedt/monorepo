@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { sessionsApi, githubApi } from '@/lib/api';
-import { useAuthStore, useSessionLastPageStore, useSessionsSidebarStore } from '@/lib/store';
+import { useAuthStore, useSessionLastPageStore, useSessionsSidebarStore, type SessionPageName } from '@/lib/store';
 import type { ChatSession, GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
 import type { ImageAttachment } from './ChatInput';
@@ -14,6 +14,27 @@ function getSessionUrl(sessionId: string, getLastPage: (id: string) => string): 
     return `/session/${sessionId}`;
   }
   return `/session/${sessionId}/${lastPage}`;
+}
+
+// Helper to get icon for a page type
+function getPageIcon(page: SessionPageName): React.ReactNode {
+  const iconClass = "w-3.5 h-3.5 text-base-content/50";
+  switch (page) {
+    case 'chat':
+      return <svg className={iconClass} fill="currentColor" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>;
+    case 'code':
+      return <svg className={iconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>;
+    case 'images':
+      return <svg className={iconClass} fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-3.5l-3-4 4-5 3 4 2-2.5 4 5H10z"/></svg>;
+    case 'sound':
+      return <svg className={iconClass} fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/></svg>;
+    case 'scene-editor':
+      return <svg className={iconClass} fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l-5.5 9h11L12 2zm0 3.84L13.93 9h-3.87L12 5.84zM17.5 13c-2.49 0-4.5 2.01-4.5 4.5s2.01 4.5 4.5 4.5 4.5-2.01 4.5-4.5-2.01-4.5-4.5-4.5zm0 7c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5zM3 21.5h8v-8H3v8zm2-6h4v4H5v-4z"/></svg>;
+    case 'preview':
+      return <svg className={iconClass} fill="currentColor" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>;
+    default:
+      return <svg className={iconClass} fill="currentColor" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>;
+  }
 }
 
 export default function SessionsSidebar() {
@@ -519,30 +540,35 @@ export default function SessionsSidebar() {
                       className="block px-3 py-2"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm truncate ${currentSessionId === session.id ? 'text-primary font-medium' : 'text-base-content'}`}>
-                            {truncateSessionName(session.userRequest, 40)}
-                          </p>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            {session.status === 'running' && (
-                              <span className="loading loading-spinner loading-xs text-info"></span>
-                            )}
-                            <span
-                              className={`badge badge-xs ${
-                                session.status === 'completed'
-                                  ? 'badge-success'
-                                  : session.status === 'running'
-                                  ? 'badge-info'
-                                  : session.status === 'error'
-                                  ? 'badge-error'
-                                  : 'badge-ghost'
-                              }`}
-                            >
-                              {session.status}
-                            </span>
-                            <span className="text-[10px] text-base-content/50">
-                              {new Date(session.createdAt).toLocaleDateString()}
-                            </span>
+                        <div className="flex items-start gap-1.5 flex-1 min-w-0">
+                          <span className="flex-shrink-0 mt-0.5" title={`Last page: ${getLastPage(session.id)}`}>
+                            {getPageIcon(getLastPage(session.id) as SessionPageName)}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm truncate ${currentSessionId === session.id ? 'text-primary font-medium' : 'text-base-content'}`}>
+                              {truncateSessionName(session.userRequest, 40)}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {session.status === 'running' && (
+                                <span className="loading loading-spinner loading-xs text-info"></span>
+                              )}
+                              <span
+                                className={`badge badge-xs ${
+                                  session.status === 'completed'
+                                    ? 'badge-success'
+                                    : session.status === 'running'
+                                    ? 'badge-info'
+                                    : session.status === 'error'
+                                    ? 'badge-error'
+                                    : 'badge-ghost'
+                                }`}
+                              >
+                                {session.status}
+                              </span>
+                              <span className="text-[10px] text-base-content/50">
+                                {new Date(session.createdAt).toLocaleDateString()}
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <button
