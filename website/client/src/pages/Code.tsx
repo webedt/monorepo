@@ -3,6 +3,7 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import SyntaxHighlightedEditor from '@/components/SyntaxHighlightedEditor';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useEditorSessionStore } from '@/lib/store';
 import type { GitHubPullRequest } from '@/shared';
@@ -109,6 +110,12 @@ const isAudioFile = (filename: string): boolean => {
   const ext = filename.split('.').pop()?.toLowerCase();
   const audioExtensions = ['wav', 'mp3', 'ogg', 'aac', 'flac', 'm4a', 'webm', 'aiff', 'aif'];
   return audioExtensions.includes(ext || '');
+};
+
+// Helper to check if a file is a markdown file based on extension
+const isMarkdownFile = (filename: string): boolean => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  return ['md', 'mdx', 'markdown'].includes(ext || '');
 };
 
 // Helper to get file icon based on extension
@@ -303,11 +310,18 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
 
+  // File selection state for multi-select
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+
   // Image preview state
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   // Audio preview state
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  // Markdown preview mode state
+  const [isMarkdownPreviewMode, setIsMarkdownPreviewMode] = useState(false);
 
   // Track pending click for single/double click distinction
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -528,6 +542,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     setImageUrl(null);
     setAudioUrl(null);
 
+    // Reset markdown preview mode when switching files
+    setIsMarkdownPreviewMode(false);
+
     // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
     const storageSessionId = codeSession.sessionId;
     const repoName = codeSession.repo;
@@ -744,11 +761,21 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   };
 
   // Handle click on file - uses timeout to distinguish single vs double click
-  const handleFileClick = (path: string, name: string) => {
+  // Also handles file selection for multi-select (ctrl+click, shift+click)
+  const handleFileClick = (path: string, name: string, event: React.MouseEvent) => {
+    // Handle selection (ctrl+click, shift+click, or regular click)
+    handleFileSelect(path, name, event);
+
     // Clear any pending single-click action
     if (clickTimeoutRef.current) {
       clearTimeout(clickTimeoutRef.current);
       clickTimeoutRef.current = null;
+    }
+
+    // Don't open file on ctrl/cmd+click or shift+click (only select)
+    const isModifierClick = event.ctrlKey || event.metaKey || event.shiftKey;
+    if (isModifierClick) {
+      return;
     }
 
     // Delay single-click action to allow double-click to cancel it
@@ -822,6 +849,67 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       return next;
     });
   };
+
+  // Helper to get all visible file paths in order (for shift-select range)
+  const getVisibleFilePaths = useCallback((nodes: TreeNode[]): string[] => {
+    const paths: string[] = [];
+    const traverse = (nodes: TreeNode[]) => {
+      for (const node of nodes) {
+        if (node.type === 'file') {
+          paths.push(node.path);
+        } else {
+          // Folder - only recurse if expanded
+          if (expandedFolders.has(node.path)) {
+            traverse(node.children);
+          }
+        }
+      }
+    };
+    traverse(nodes);
+    return paths;
+  }, [expandedFolders]);
+
+  // Handle file selection with multi-select support (ctrl+click, shift+click)
+  const handleFileSelect = useCallback((path: string, _name: string, event: React.MouseEvent) => {
+    const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+    const isShift = event.shiftKey;
+
+    if (isShift && lastSelectedPath) {
+      // Shift+click: select range from last selected to current
+      const visiblePaths = getVisibleFilePaths(fileTree);
+      const lastIndex = visiblePaths.indexOf(lastSelectedPath);
+      const currentIndex = visiblePaths.indexOf(path);
+
+      if (lastIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+        const rangePaths = visiblePaths.slice(start, end + 1);
+
+        setSelectedFiles(prev => {
+          const next = new Set(prev);
+          // Add all files in range to selection
+          rangePaths.forEach(p => next.add(p));
+          return next;
+        });
+      }
+    } else if (isCtrlOrCmd) {
+      // Ctrl/Cmd+click: toggle selection of clicked file
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        if (next.has(path)) {
+          next.delete(path);
+        } else {
+          next.add(path);
+        }
+        return next;
+      });
+      setLastSelectedPath(path);
+    } else {
+      // Regular click: select only this file (clear others)
+      setSelectedFiles(new Set([path]));
+      setLastSelectedPath(path);
+    }
+  }, [lastSelectedPath, getVisibleFilePaths, fileTree]);
 
   // Helper to log file operations as chat messages (saved to database like chat messages)
   // This creates proper messages that appear in the Chat view exactly like AI responses
@@ -1640,14 +1728,15 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
       if (node.type === 'file') {
         const isActive = activeTabPath === node.path;
+        const isSelected = selectedFiles.has(node.path);
         return (
           <div
             key={node.path}
-            onClick={() => handleFileClick(node.path, node.name)}
+            onClick={(e) => handleFileClick(node.path, node.name, e)}
             onDoubleClick={() => handleFileDoubleClick(node.path, node.name)}
             className={`group flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-base-300 ${
-              isActive ? 'bg-base-300' : ''
-            }`}
+              isSelected ? 'bg-primary/20' : ''
+            } ${isActive ? 'bg-base-300' : ''}`}
             style={{ paddingLeft }}
           >
             <span className="text-xs">{node.icon}</span>
@@ -1994,23 +2083,67 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
             </div>
           ) : fileContent !== null ? (
             <div className="h-full flex flex-col bg-base-200">
-              <SyntaxHighlightedEditor
-                content={fileContent}
-                filename={activeTabPath || ''}
-                onChange={handleContentChange}
-                onKeyDown={(e) => {
-                  // Handle Tab key for indentation
-                  if (e.key === 'Tab') {
-                    e.preventDefault();
-                    const target = e.target as HTMLTextAreaElement;
-                    const start = target.selectionStart;
-                    const end = target.selectionEnd;
-                    const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
-                    handleContentChange(newValue, start + 2, start + 2);
-                  }
-                }}
-                className="flex-1"
-              />
+              {/* Markdown Preview Toggle - only show for markdown files */}
+              {activeTabPath && isMarkdownFile(activeTabPath) && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-base-300 border-b border-base-content/10">
+                  <span className="text-xs text-base-content/60">Mode:</span>
+                  <div className="flex gap-1 bg-base-200 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setIsMarkdownPreviewMode(false)}
+                      className={`btn btn-xs ${!isMarkdownPreviewMode ? 'btn-primary' : 'btn-ghost'}`}
+                      title="Edit markdown"
+                    >
+                      <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setIsMarkdownPreviewMode(true)}
+                      className={`btn btn-xs ${isMarkdownPreviewMode ? 'btn-primary' : 'btn-ghost'}`}
+                      title="Preview markdown"
+                    >
+                      <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      Preview
+                    </button>
+                  </div>
+                  {isMarkdownPreviewMode && (
+                    <span className="text-xs text-base-content/50 ml-2">Double-click to edit</span>
+                  )}
+                </div>
+              )}
+
+              {/* Markdown Preview Mode */}
+              {activeTabPath && isMarkdownFile(activeTabPath) && isMarkdownPreviewMode ? (
+                <div
+                  className="flex-1 overflow-auto p-4 prose prose-sm max-w-none"
+                  onDoubleClick={() => setIsMarkdownPreviewMode(false)}
+                  title="Double-click to edit"
+                >
+                  <MarkdownRenderer content={fileContent} className="text-base-content" />
+                </div>
+              ) : (
+                <SyntaxHighlightedEditor
+                  content={fileContent}
+                  filename={activeTabPath || ''}
+                  onChange={handleContentChange}
+                  onKeyDown={(e) => {
+                    // Handle Tab key for indentation
+                    if (e.key === 'Tab') {
+                      e.preventDefault();
+                      const target = e.target as HTMLTextAreaElement;
+                      const start = target.selectionStart;
+                      const end = target.selectionEnd;
+                      const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
+                      handleContentChange(newValue, start + 2, start + 2);
+                    }
+                  }}
+                  className="flex-1"
+                />
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-base-content/50">
