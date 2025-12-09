@@ -1503,7 +1503,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
 
           if (hasImages && !hasFiles) {
             // Image-only commit
-            const imageChanges = images.map((img: { path: string; beforeContent?: string }) => ({
+            const imageChanges = images.map((img: { path: string; content: string; beforeContent?: string }) => ({
               path: img.path,
               beforeBase64: img.beforeContent,
               afterBase64: img.content
