@@ -39,6 +39,7 @@ interface PendingChange {
   content: string;
   originalContent: string;
   sha?: string;
+  deleted?: boolean;  // Track if file is marked for deletion
 }
 
 // File operation state for modals
@@ -1100,13 +1101,20 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Get list of modified files with their content
     const modifiedFiles: Array<{ path: string; content: string }> = [];
+    // Get list of deleted files
+    const deletedFiles: Array<{ path: string }> = [];
+
     pendingChanges.forEach((change, path) => {
-      if (change.content !== change.originalContent) {
+      if (change.deleted) {
+        // File is marked for deletion
+        deletedFiles.push({ path });
+      } else if (change.content !== change.originalContent) {
+        // File content has changed
         modifiedFiles.push({ path, content: change.content });
       }
     });
 
-    if (modifiedFiles.length === 0) {
+    if (modifiedFiles.length === 0 && deletedFiles.length === 0) {
       // No changes to commit
       return;
     }
@@ -1117,7 +1125,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       // First ensure all pending saves are complete (to storage-worker)
       debouncedSave.cancel();
 
-      // Save any unsaved files first to storage-worker
+      // Save any unsaved files first to storage-worker (skip deleted files)
       for (const { path, content } of modifiedFiles) {
         const change = pendingChanges.get(path);
         if (change) {
@@ -1130,28 +1138,37 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
         owner: codeSession.owner,
         repo: codeSession.repo,
         branch: codeSession.branch,
-        files: modifiedFiles.map(f => f.path)
+        files: modifiedFiles.map(f => f.path),
+        deletions: deletedFiles.map(f => f.path)
       });
 
       const result = await githubApi.commit(codeSession.owner, codeSession.repo, {
         branch: codeSession.branch,
-        files: modifiedFiles.map(f => ({ path: f.path, content: f.content }))
+        files: modifiedFiles.map(f => ({ path: f.path, content: f.content })),
+        deletions: deletedFiles.map(f => f.path)
       });
 
       // Log the commit with the generated message
-      const fileList = modifiedFiles.map(f => `\`${f.path}\``).join(', ');
+      const modifiedList = modifiedFiles.map(f => `\`${f.path}\``);
+      const deletedList = deletedFiles.map(f => `🗑️ \`${f.path}\``);
+      const fileList = [...modifiedList, ...deletedList].join(', ');
       await logCodeMessage(`💾 Committed to GitHub: "${result.data.message}"\nFiles: ${fileList}\nCommit: ${result.data.commitSha.substring(0, 7)}`, 'system');
 
       console.log('[Code] Commit successful:', result.data);
 
-      // Update pending changes to mark as committed (new original = current)
+      // Update pending changes to mark as committed
       setPendingChanges(prev => {
         const next = new Map(prev);
+        // Update modified files (new original = current)
         modifiedFiles.forEach(({ path }) => {
           const change = next.get(path);
           if (change) {
             next.set(path, { ...change, originalContent: change.content });
           }
+        });
+        // Remove deleted files from pending changes (they're now deleted from GitHub)
+        deletedFiles.forEach(({ path }) => {
+          next.delete(path);
         });
         return next;
       });
@@ -1194,11 +1211,12 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [commitChanges, handleUndo, handleRedo]);
 
-  // Count total modified files
+  // Count total modified files (including deletions)
   const modifiedFilesCount = useMemo(() => {
     let count = 0;
     pendingChanges.forEach((change) => {
-      if (change.content !== change.originalContent) {
+      // Count as modified if: content changed OR file is marked for deletion
+      if (change.deleted || change.content !== change.originalContent) {
         count++;
       }
     });
@@ -1307,6 +1325,27 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   }, [codeSession, fileOperation, newName, activeTabPath, closeModal, queryClient, logCodeMessage]);
 
+  // Helper to collect all file paths in a folder from the file tree
+  const collectFilesInFolder = useCallback((folderPath: string): string[] => {
+    const files: string[] = [];
+
+    const traverseTree = (nodes: TreeNode[]) => {
+      for (const node of nodes) {
+        if (node.type === 'file' && node.path.startsWith(folderPath + '/')) {
+          files.push(node.path);
+        } else if (node.type === 'folder') {
+          traverseTree(node.children);
+        }
+      }
+    };
+
+    if (fileTree) {
+      traverseTree(fileTree);
+    }
+
+    return files;
+  }, [fileTree]);
+
   // Handle delete operation
   const handleDelete = useCallback(async () => {
     if (!codeSession) {
@@ -1328,25 +1367,54 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Build the full storage path including repo name
       const storagePath = repoName ? `workspace/${repoName}/${fileOperation.path}` : `workspace/${fileOperation.path}`;
 
+      // Collect files to mark as deleted for the commit
+      const filesToDelete: string[] = [];
+
       if (fileOperation.itemType === 'file') {
+        // Delete from local storage
         const success = await storageWorkerApi.deleteFile(storageSessionId, storagePath);
         if (!success) {
           throw new Error('Failed to delete file from storage');
         }
+        // Mark single file for deletion
+        filesToDelete.push(fileOperation.path);
       } else {
-        // Delete folder and all its contents
+        // For folders, first collect all files in the folder before deleting
+        filesToDelete.push(...collectFilesInFolder(fileOperation.path));
+
+        // Delete folder and all its contents from local storage
         const result = await storageWorkerApi.deleteFolder(storageSessionId, storagePath);
         if (!result.success) {
           throw new Error('Failed to delete folder from storage');
         }
       }
 
+      // Mark files as deleted in pendingChanges (so they will be committed)
+      setPendingChanges(prev => {
+        const next = new Map(prev);
+        for (const filePath of filesToDelete) {
+          const existing = next.get(filePath);
+          if (existing) {
+            // Update existing entry to mark as deleted
+            next.set(filePath, { ...existing, deleted: true });
+          } else {
+            // Create new entry marked as deleted
+            next.set(filePath, {
+              content: '',
+              originalContent: '',
+              deleted: true
+            });
+          }
+        }
+        return next;
+      });
+
       // Refresh the file tree (use session-specific query key to avoid affecting other Code instances in split view)
       queryClient.invalidateQueries({ queryKey: ['file-tree', codeSession.sessionId] });
 
       // Log the delete operation as a chat message (persisted to database)
       const deleteIcon = fileOperation.itemType === 'file' ? '📄' : '📁';
-      const deleteMessage = `🗑️ Deleted ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\``;
+      const deleteMessage = `🗑️ Marked for deletion ${deleteIcon} ${fileOperation.itemType}: \`${fileOperation.path}\` (click Commit to apply)`;
       await logCodeMessage(deleteMessage, 'system');
 
       // If the deleted item was open in a tab, close it
@@ -1388,7 +1456,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     } finally {
       setIsOperating(false);
     }
-  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logCodeMessage]);
+  }, [codeSession, fileOperation, activeTabPath, closeModal, queryClient, loadFileContent, logCodeMessage, collectFilesInFolder]);
 
   // Handle create new file or folder
   const handleCreate = useCallback(async () => {
