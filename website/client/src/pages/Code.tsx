@@ -169,17 +169,36 @@ const getFileIcon = (filename: string): string => {
 };
 
 // Transform storage-worker file list to our TreeNode format
-const transformStorageFiles = (files: { path: string; size: number; type: 'file' | 'directory' }[]): TreeNode[] => {
+const transformStorageFiles = (files: { path: string; size: number; type: 'file' | 'directory' }[], repoName?: string): TreeNode[] => {
   const root: FolderNode = { name: 'root', path: '', type: 'folder', children: [] };
 
+  // Build the prefix to strip: workspace/ and optionally the repo name folder
+  // This removes the duplicate root folder when the repo folder matches the repo name
+  const prefixToStrip = repoName ? `workspace/${repoName}/` : 'workspace/';
+  const altPrefixToStrip = 'workspace/'; // Fallback for files not under repo folder
+
   // Filter out non-workspace files (like .session-metadata.json, .stream-events.jsonl)
-  // and extract paths from workspace/ prefix
+  // and extract paths from workspace/<repo>/ prefix
   const workspaceFiles = files
     .filter(f => f.path.startsWith('workspace/') && !f.path.includes('.session-metadata') && !f.path.includes('.stream-events'))
-    .map(f => ({
-      ...f,
-      path: f.path.replace(/^workspace\//, ''), // Remove workspace/ prefix
-    }))
+    .map(f => {
+      // Try to strip the full prefix (workspace/repoName/)
+      // If that doesn't match, fall back to just stripping workspace/
+      let newPath = f.path;
+      if (repoName && f.path.startsWith(prefixToStrip)) {
+        newPath = f.path.replace(prefixToStrip, '');
+      } else if (f.path.startsWith(altPrefixToStrip)) {
+        // For files directly under workspace/ or with different structure
+        newPath = f.path.replace(altPrefixToStrip, '');
+        // Also strip the repo name if it's the first path segment
+        if (repoName && newPath.startsWith(repoName + '/')) {
+          newPath = newPath.replace(repoName + '/', '');
+        } else if (repoName && newPath === repoName) {
+          newPath = ''; // The repo folder itself becomes empty
+        }
+      }
+      return { ...f, path: newPath };
+    })
     .filter(f => f.path && f.path !== ''); // Remove empty paths
 
   // Sort items: directories first, then alphabetically
@@ -403,10 +422,10 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Transform the files into our TreeNode format
   const fileTree = useMemo(() => {
     if (!storageFiles || storageFiles.length === 0) return [];
-    const tree = transformStorageFiles(storageFiles);
+    const tree = transformStorageFiles(storageFiles, codeSession?.repo);
     console.log('[Code] Transformed file tree:', tree.length, 'root items');
     return tree;
-  }, [storageFiles]);
+  }, [storageFiles, codeSession?.repo]);
 
   // Query to check for existing PR (for code sessions)
   const { data: prData, refetch: refetchPr } = useQuery({
@@ -510,18 +529,22 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
     const storageSessionId = codeSession.sessionId;
+    const repoName = codeSession.repo;
 
     if (!storageSessionId) {
       setFileContent(`// Error: No session ID available`);
       return;
     }
 
+    // Build the full storage path including repo name
+    const storagePath = repoName ? `workspace/${repoName}/${path}` : `workspace/${path}`;
+
     // Check if this is an image file
     if (isImageFile(path)) {
       setIsLoadingFile(true);
       setFileContent(null); // Clear text content for images
       try {
-        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+        const blob = await storageWorkerApi.getFileBlob(storageSessionId, storagePath);
         if (blob) {
           const url = URL.createObjectURL(blob);
           setImageUrl(url);
@@ -543,7 +566,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       setIsLoadingFile(true);
       setFileContent(null); // Clear text content for audio
       try {
-        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+        const blob = await storageWorkerApi.getFileBlob(storageSessionId, storagePath);
         if (blob) {
           const url = URL.createObjectURL(blob);
           setAudioUrl(url);
@@ -570,7 +593,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     setIsLoadingFile(true);
     try {
       console.log('[Code] Fetching file from storage-worker:', path);
-      const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${path}`);
+      const content = await storageWorkerApi.getFileText(storageSessionId, storagePath);
 
       if (content === null) {
         // File not found
@@ -842,7 +865,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     try {
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
       const storageSessionId = session.sessionId;
-      const storagePath = `workspace/${path}`;
+      const repoName = session.repo;
+      // Build the full storage path including repo name
+      const storagePath = repoName ? `workspace/${repoName}/${path}` : `workspace/${path}`;
 
       console.log(`[Code] Saving file to storage-worker:`, { storageSessionId, storagePath });
 
@@ -1220,16 +1245,21 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
       const storageSessionId = codeSession.sessionId;
+      const repoName = codeSession.repo;
       if (!storageSessionId) {
         throw new Error('No session ID available for storage operations');
       }
 
+      // Build the full storage paths including repo name
+      const oldStoragePath = repoName ? `workspace/${repoName}/${fileOperation.path}` : `workspace/${fileOperation.path}`;
+      const newStoragePath = repoName ? `workspace/${repoName}/${newPath}` : `workspace/${newPath}`;
+
       if (fileOperation.itemType === 'file') {
         // Rename file in storage-worker: read content, write to new path, delete old
-        const content = await storageWorkerApi.getFileText(storageSessionId, `workspace/${fileOperation.path}`);
+        const content = await storageWorkerApi.getFileText(storageSessionId, oldStoragePath);
         if (content !== null) {
-          await storageWorkerApi.writeFile(storageSessionId, `workspace/${newPath}`, content);
-          await storageWorkerApi.deleteFile(storageSessionId, `workspace/${fileOperation.path}`);
+          await storageWorkerApi.writeFile(storageSessionId, newStoragePath, content);
+          await storageWorkerApi.deleteFile(storageSessionId, oldStoragePath);
         } else {
           throw new Error('File not found in storage');
         }
@@ -1281,12 +1311,16 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     try {
       // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
       const storageSessionId = codeSession.sessionId;
+      const repoName = codeSession.repo;
       if (!storageSessionId) {
         throw new Error('No session ID available for storage operations');
       }
 
+      // Build the full storage path including repo name
+      const storagePath = repoName ? `workspace/${repoName}/${fileOperation.path}` : `workspace/${fileOperation.path}`;
+
       if (fileOperation.itemType === 'file') {
-        const success = await storageWorkerApi.deleteFile(storageSessionId, `workspace/${fileOperation.path}`);
+        const success = await storageWorkerApi.deleteFile(storageSessionId, storagePath);
         if (!success) {
           throw new Error('Failed to delete file from storage');
         }
