@@ -3,6 +3,7 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import SyntaxHighlightedEditor from '@/components/SyntaxHighlightedEditor';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useEditorSessionStore } from '@/lib/store';
 import type { GitHubPullRequest } from '@/shared';
@@ -109,6 +110,12 @@ const isAudioFile = (filename: string): boolean => {
   const ext = filename.split('.').pop()?.toLowerCase();
   const audioExtensions = ['wav', 'mp3', 'ogg', 'aac', 'flac', 'm4a', 'webm', 'aiff', 'aif'];
   return audioExtensions.includes(ext || '');
+};
+
+// Helper to check if a file is a markdown file based on extension
+const isMarkdownFile = (filename: string): boolean => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  return ['md', 'mdx', 'markdown'].includes(ext || '');
 };
 
 // Helper to get file icon based on extension
@@ -312,6 +319,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Audio preview state
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  // Markdown preview mode state
+  const [isMarkdownPreviewMode, setIsMarkdownPreviewMode] = useState(false);
 
   // Track pending click for single/double click distinction
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -531,6 +541,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Clear previous media URLs when loading a new file
     setImageUrl(null);
     setAudioUrl(null);
+
+    // Reset markdown preview mode when switching files
+    setIsMarkdownPreviewMode(false);
 
     // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
     const storageSessionId = codeSession.sessionId;
@@ -2070,23 +2083,67 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
             </div>
           ) : fileContent !== null ? (
             <div className="h-full flex flex-col bg-base-200">
-              <SyntaxHighlightedEditor
-                content={fileContent}
-                filename={activeTabPath || ''}
-                onChange={handleContentChange}
-                onKeyDown={(e) => {
-                  // Handle Tab key for indentation
-                  if (e.key === 'Tab') {
-                    e.preventDefault();
-                    const target = e.target as HTMLTextAreaElement;
-                    const start = target.selectionStart;
-                    const end = target.selectionEnd;
-                    const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
-                    handleContentChange(newValue, start + 2, start + 2);
-                  }
-                }}
-                className="flex-1"
-              />
+              {/* Markdown Preview Toggle - only show for markdown files */}
+              {activeTabPath && isMarkdownFile(activeTabPath) && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-base-300 border-b border-base-content/10">
+                  <span className="text-xs text-base-content/60">Mode:</span>
+                  <div className="flex gap-1 bg-base-200 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setIsMarkdownPreviewMode(false)}
+                      className={`btn btn-xs ${!isMarkdownPreviewMode ? 'btn-primary' : 'btn-ghost'}`}
+                      title="Edit markdown"
+                    >
+                      <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setIsMarkdownPreviewMode(true)}
+                      className={`btn btn-xs ${isMarkdownPreviewMode ? 'btn-primary' : 'btn-ghost'}`}
+                      title="Preview markdown"
+                    >
+                      <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      Preview
+                    </button>
+                  </div>
+                  {isMarkdownPreviewMode && (
+                    <span className="text-xs text-base-content/50 ml-2">Double-click to edit</span>
+                  )}
+                </div>
+              )}
+
+              {/* Markdown Preview Mode */}
+              {activeTabPath && isMarkdownFile(activeTabPath) && isMarkdownPreviewMode ? (
+                <div
+                  className="flex-1 overflow-auto p-4 prose prose-sm max-w-none"
+                  onDoubleClick={() => setIsMarkdownPreviewMode(false)}
+                  title="Double-click to edit"
+                >
+                  <MarkdownRenderer content={fileContent} className="text-base-content" />
+                </div>
+              ) : (
+                <SyntaxHighlightedEditor
+                  content={fileContent}
+                  filename={activeTabPath || ''}
+                  onChange={handleContentChange}
+                  onKeyDown={(e) => {
+                    // Handle Tab key for indentation
+                    if (e.key === 'Tab') {
+                      e.preventDefault();
+                      const target = e.target as HTMLTextAreaElement;
+                      const start = target.selectionStart;
+                      const end = target.selectionEnd;
+                      const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
+                      handleContentChange(newValue, start + 2, start + 2);
+                    }
+                  }}
+                  className="flex-1"
+                />
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-base-content/50">
