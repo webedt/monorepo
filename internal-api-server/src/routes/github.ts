@@ -1336,6 +1336,15 @@ router.delete('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request
 // Commit files to GitHub - used by Code and Images editors
 // This creates a commit directly via the GitHub API (no local git repo needed)
 router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res: Response) => {
+  // Log that we received the request (for debugging 404 issues)
+  logger.info('Commit endpoint hit', {
+    component: 'GitHub',
+    owner: req.params.owner,
+    repo: req.params.repo,
+    hasBody: !!req.body,
+    bodyKeys: req.body ? Object.keys(req.body) : []
+  });
+
   try {
     const authReq = req as AuthRequest;
     const { owner, repo } = req.params;
@@ -1600,6 +1609,27 @@ router.post('/disconnect', requireAuth, async (req: Request, res: Response) => {
     logger.error('GitHub disconnect error', error as Error, { component: 'GitHub' });
     res.status(500).json({ success: false, error: 'Failed to disconnect GitHub' });
   }
+});
+
+// Debug catch-all route - logs any request that doesn't match the above routes
+// This helps diagnose 404 issues
+router.all('*', (req: Request, res: Response) => {
+  logger.warn('GitHub router catch-all: unmatched route', {
+    component: 'GitHub',
+    method: req.method,
+    path: req.path,
+    originalUrl: req.originalUrl,
+    params: req.params
+  });
+  res.status(404).json({
+    success: false,
+    error: 'GitHub endpoint not found',
+    debug: {
+      method: req.method,
+      path: req.path,
+      originalUrl: req.originalUrl
+    }
+  });
 });
 
 export default router;
