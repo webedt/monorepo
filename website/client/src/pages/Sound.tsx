@@ -1166,52 +1166,6 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
     );
   }
 
-  // If no session, show repo picker
-  if (!soundSession) {
-    return (
-      <div className="h-full flex flex-col bg-[#1a1d2e] p-8">
-        <h2 className="text-2xl font-bold mb-6">Sound Editor</h2>
-        <p className="text-base-content/70 mb-4">Select a repository to start editing sound files:</p>
-
-        {isLoadingRepos && (
-          <div className="flex items-center gap-2">
-            <div className="loading loading-spinner loading-sm"></div>
-            <span>Loading repositories...</span>
-          </div>
-        )}
-
-        {repos.length > 0 && (
-          <div className="grid gap-2 max-w-md">
-            {repos.slice(0, 10).map(repo => (
-              <button
-                key={repo.id}
-                className="btn btn-ghost justify-start text-left"
-                onClick={() => initializeSoundSession(repo)}
-                disabled={isInitializing}
-              >
-                <span className="truncate">{repo.fullName}</span>
-                {repo.private && <span className="badge badge-sm">Private</span>}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {initError && (
-          <div className="alert alert-error mt-4 max-w-md">
-            <span>{initError}</span>
-          </div>
-        )}
-
-        {isInitializing && (
-          <div className="flex items-center gap-2 mt-4">
-            <div className="loading loading-spinner loading-sm"></div>
-            <span>Initializing session...</span>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col bg-[#1a1d2e]">
       {/* Top Toolbar */}

@@ -626,68 +626,6 @@ export function SceneEditorContent({ sessionId: sessionIdProp, isEmbedded: _isEm
     { id: 'more', icon: '⋮', label: 'More' },
   ];
 
-  // Repo selection screen (when no session)
-  if (!sceneSession && !sessionId) {
-    return (
-      <div className="h-full flex flex-col bg-base-200">
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="max-w-md w-full">
-            <div className="text-center mb-8">
-              <div className="text-6xl mb-4">🎬</div>
-              <h1 className="text-2xl font-bold mb-2">Scene Editor</h1>
-              <p className="text-base-content/70">
-                Select a repository to start editing scenes and 3D objects
-              </p>
-            </div>
-
-            {isLoadingRepos ? (
-              <div className="flex items-center justify-center py-8">
-                <span className="loading loading-spinner loading-lg"></span>
-              </div>
-            ) : repos.length === 0 ? (
-              <div className="alert alert-info">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <span>No repositories found. Connect your GitHub account first.</span>
-              </div>
-            ) : (
-              <div className="bg-base-100 rounded-lg p-4 shadow-lg">
-                <h2 className="font-semibold mb-3">Select Repository</h2>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {repos.map(repo => (
-                    <button
-                      key={repo.id}
-                      onClick={() => initializeSceneSession(repo)}
-                      disabled={isInitializing}
-                      className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-base-200 transition-colors text-left"
-                    >
-                      <svg className="w-5 h-5 flex-shrink-0 text-base-content/60" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm11 1H6v8l4-2 4 2V6z" clipRule="evenodd" />
-                      </svg>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">{repo.name}</div>
-                        <div className="text-xs text-base-content/60 truncate">{repo.fullName}</div>
-                      </div>
-                      {repo.private && (
-                        <span className="badge badge-sm">Private</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-                {initError && (
-                  <div className="alert alert-error mt-4">
-                    <span>{initError}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Loading existing session
   if (sessionId && isLoadingExistingSession) {
     return (
