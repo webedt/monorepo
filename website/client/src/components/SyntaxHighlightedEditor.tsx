@@ -154,6 +154,10 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
             MozTabSize: 2,
             // Use explicit color for caret visibility - 'currentColor' doesn't work with transparent text
             caretColor: isDarkMode ? '#abb2bf' : '#383a42',
+            // Prevent unwanted line wrapping (especially important for markdown tables with | characters)
+            whiteSpace: 'pre',
+            wordWrap: 'normal',
+            overflowWrap: 'normal',
           }}
         />
       </div>
