@@ -125,9 +125,15 @@ const removeEmptyFolders = (nodes: FileNode[]): FileNode[] => {
 // Storage files have path and type properties
 const transformStorageFilesForImages = (
   files: { path: string; size: number; type: 'file' | 'directory' }[],
-  filterMode: EditorMode | 'all'
+  filterMode: EditorMode | 'all',
+  repoName?: string
 ): FileNode[] => {
   const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
+
+  // Build the prefix to strip: workspace/ and optionally the repo name folder
+  // This prevents showing the root folder (e.g., "hello-world") when it's the repo itself
+  const prefixToStrip = repoName ? `workspace/${repoName}/` : 'workspace/';
+  const altPrefixToStrip = 'workspace/'; // Fallback for files directly in workspace/
 
   // Filter to only include files under workspace/ and strip the prefix
   // Also filter out .git directories and their contents
@@ -139,10 +145,24 @@ const transformStorageFilesForImages = (
       const parts = pathWithoutPrefix.split('/');
       return !parts.some(part => part === '.git');
     })
-    .map(f => ({
-      ...f,
-      path: f.path.replace(/^workspace\//, ''),
-    }));
+    .map(f => {
+      // Strip the full prefix (workspace/repoName/) if it matches, otherwise just workspace/
+      let newPath = f.path;
+      if (repoName && f.path.startsWith(prefixToStrip)) {
+        newPath = f.path.slice(prefixToStrip.length);
+      } else if (f.path.startsWith(altPrefixToStrip)) {
+        newPath = f.path.slice(altPrefixToStrip.length);
+        // If there's a repoName and the path starts with it, strip that too
+        if (repoName && (newPath === repoName || newPath.startsWith(repoName + '/'))) {
+          newPath = newPath === repoName ? '' : newPath.slice(repoName.length + 1);
+        }
+      }
+      return {
+        ...f,
+        path: newPath,
+      };
+    })
+    .filter(f => f.path !== ''); // Filter out empty paths (the repo root directory itself)
 
   // Sort items: directories first, then alphabetically
   const sortedItems = [...workspaceFiles].sort((a, b) => {
@@ -478,13 +498,14 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
   });
 
   // Transform and filter the file tree based on editor mode (storage-worker only)
+  // Pass the repo name to strip the root folder (e.g., "hello-world") from the tree
   const fileTree = useMemo(() => {
     if (!treeData) return [];
     if (treeData.source === 'storage' && treeData.files) {
-      return transformStorageFilesForImages(treeData.files, editorMode);
+      return transformStorageFilesForImages(treeData.files, editorMode, imageSession?.repo);
     }
     return [];
-  }, [treeData, editorMode]);
+  }, [treeData, editorMode, imageSession?.repo]);
 
   // Count files by type for display (storage-worker only)
   const fileCounts = useMemo(() => {
