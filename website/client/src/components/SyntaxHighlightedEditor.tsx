@@ -88,10 +88,13 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
     fontSize: '0.875rem',
     lineHeight: '1.5rem',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-    overflow: 'hidden',
+    overflow: 'visible',
     whiteSpace: 'pre',
     wordWrap: 'normal',
+    overflowWrap: 'normal',
     minHeight: '100%',
+    width: 'max-content',
+    minWidth: '100%',
   }), []);
 
   // Memoize codeTagProps to prevent unnecessary re-renders
@@ -127,11 +130,11 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
       </pre>
 
       {/* Editor Container with overlay */}
-      <div ref={containerRef} className="flex-1 relative overflow-hidden">
+      <div ref={containerRef} className="flex-1 relative overflow-auto">
         {/* Syntax highlighted layer (behind) */}
         <div
           ref={highlightRef}
-          className="absolute inset-0 overflow-hidden pointer-events-none"
+          className="absolute inset-0 overflow-auto pointer-events-none"
           aria-hidden="true"
         >
           {highlightedContent}
