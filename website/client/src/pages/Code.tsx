@@ -1082,15 +1082,15 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     debouncedSave(activeTabPath, nextContent);
   }, [activeTabPath, editHistory, historyIndex, debouncedSave]);
 
-  // Commit all pending changes (creates a commit message in the log)
+  // Commit all pending changes to GitHub
   const commitChanges = useCallback(async () => {
     if (!codeSession) return;
 
-    // Get list of modified files
-    const modifiedFiles: string[] = [];
+    // Get list of modified files with their content
+    const modifiedFiles: Array<{ path: string; content: string }> = [];
     pendingChanges.forEach((change, path) => {
       if (change.content !== change.originalContent) {
-        modifiedFiles.push(path);
+        modifiedFiles.push({ path, content: change.content });
       }
     });
 
@@ -1102,25 +1102,40 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     setCommitStatus('committing');
 
     try {
-      // First ensure all pending saves are complete
+      // First ensure all pending saves are complete (to storage-worker)
       debouncedSave.cancel();
 
-      // Save any unsaved files first
-      for (const path of modifiedFiles) {
+      // Save any unsaved files first to storage-worker
+      for (const { path, content } of modifiedFiles) {
         const change = pendingChanges.get(path);
         if (change) {
-          await saveFile(path, change.content, change.sha);
+          await saveFile(path, content, change.sha);
         }
       }
 
-      // Log the commit
-      const fileList = modifiedFiles.map(f => `\`${f}\``).join(', ');
-      await logCodeMessage(`💾 Committed changes to ${modifiedFiles.length} file(s): ${fileList}`, 'system');
+      // Now commit to GitHub
+      console.log('[Code] Committing to GitHub:', {
+        owner: codeSession.owner,
+        repo: codeSession.repo,
+        branch: codeSession.branch,
+        files: modifiedFiles.map(f => f.path)
+      });
+
+      const result = await githubApi.commit(codeSession.owner, codeSession.repo, {
+        branch: codeSession.branch,
+        files: modifiedFiles.map(f => ({ path: f.path, content: f.content }))
+      });
+
+      // Log the commit with the generated message
+      const fileList = modifiedFiles.map(f => `\`${f.path}\``).join(', ');
+      await logCodeMessage(`💾 Committed to GitHub: "${result.data.message}"\nFiles: ${fileList}\nCommit: ${result.data.commitSha.substring(0, 7)}`, 'system');
+
+      console.log('[Code] Commit successful:', result.data);
 
       // Update pending changes to mark as committed (new original = current)
       setPendingChanges(prev => {
         const next = new Map(prev);
-        modifiedFiles.forEach(path => {
+        modifiedFiles.forEach(({ path }) => {
           const change = next.get(path);
           if (change) {
             next.set(path, { ...change, originalContent: change.content });

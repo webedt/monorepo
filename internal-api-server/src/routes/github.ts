@@ -12,6 +12,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { GitHubOperations } from '../services/github/operations.js';
 import { StorageService } from '../services/storage/storageService.js';
+import { AIWorkerClient } from '../services/aiWorker/aiWorkerClient.js';
 
 const router = Router();
 
@@ -1329,6 +1330,255 @@ router.delete('/repos/:owner/:repo/contents/*', requireAuth, async (req: Request
     }
 
     res.status(500).json({ success: false, error: 'Failed to delete file' });
+  }
+});
+
+// Commit files to GitHub - used by Code and Images editors
+// This creates a commit directly via the GitHub API (no local git repo needed)
+router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { owner, repo } = req.params;
+    const {
+      branch,
+      files, // Array of { path, content, encoding? } for code files
+      images, // Array of { path, content, beforeContent? } for images (base64)
+      message // Optional custom message
+    } = req.body;
+
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({ success: false, error: 'GitHub not connected' });
+      return;
+    }
+
+    if (!branch) {
+      res.status(400).json({ success: false, error: 'Branch is required' });
+      return;
+    }
+
+    const hasFiles = files && Array.isArray(files) && files.length > 0;
+    const hasImages = images && Array.isArray(images) && images.length > 0;
+
+    if (!hasFiles && !hasImages) {
+      res.status(400).json({ success: false, error: 'No files or images to commit' });
+      return;
+    }
+
+    const octokit = new Octokit({ auth: authReq.user.githubAccessToken });
+
+    logger.info(`Starting commit for ${owner}/${repo}/${branch}`, {
+      component: 'GitHub',
+      fileCount: files?.length || 0,
+      imageCount: images?.length || 0
+    });
+
+    // Get the latest commit SHA for the branch
+    const { data: refData } = await octokit.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    });
+    const latestCommitSha = refData.object.sha;
+
+    // Get the tree SHA for the latest commit
+    const { data: commitData } = await octokit.git.getCommit({
+      owner,
+      repo,
+      commit_sha: latestCommitSha,
+    });
+    const baseTreeSha = commitData.tree.sha;
+
+    // Prepare tree entries for all files
+    const treeEntries: Array<{
+      path: string;
+      mode: '100644';
+      type: 'blob';
+      sha?: string;
+      content?: string;
+    }> = [];
+
+    // Process code files
+    if (hasFiles) {
+      for (const file of files) {
+        if (!file.path || file.content === undefined) continue;
+
+        // Create blob for the file content
+        const { data: blobData } = await octokit.git.createBlob({
+          owner,
+          repo,
+          content: file.encoding === 'base64' ? file.content : Buffer.from(file.content, 'utf-8').toString('base64'),
+          encoding: 'base64',
+        });
+
+        treeEntries.push({
+          path: file.path,
+          mode: '100644',
+          type: 'blob',
+          sha: blobData.sha,
+        });
+      }
+    }
+
+    // Process image files
+    if (hasImages) {
+      for (const image of images) {
+        if (!image.path || !image.content) continue;
+
+        // Extract base64 content (remove data URL prefix if present)
+        let base64Content = image.content;
+        if (base64Content.includes(',')) {
+          base64Content = base64Content.split(',')[1];
+        }
+
+        // Create blob for the image
+        const { data: blobData } = await octokit.git.createBlob({
+          owner,
+          repo,
+          content: base64Content,
+          encoding: 'base64',
+        });
+
+        treeEntries.push({
+          path: image.path,
+          mode: '100644',
+          type: 'blob',
+          sha: blobData.sha,
+        });
+      }
+    }
+
+    if (treeEntries.length === 0) {
+      res.status(400).json({ success: false, error: 'No valid files to commit' });
+      return;
+    }
+
+    // Create a new tree with the updated files
+    const { data: newTree } = await octokit.git.createTree({
+      owner,
+      repo,
+      base_tree: baseTreeSha,
+      tree: treeEntries,
+    });
+
+    // Generate commit message if not provided
+    let commitMessage = message;
+    if (!commitMessage) {
+      const allPaths = [
+        ...(files?.map((f: { path: string }) => f.path) || []),
+        ...(images?.map((i: { path: string }) => i.path) || [])
+      ];
+
+      // Try to generate a commit message using AI
+      try {
+        // Get user's preferred provider and auth from database
+        const userRecord = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, authReq.user!.id))
+          .limit(1);
+
+        const user = userRecord[0];
+        const provider = user?.preferredProvider;
+        let authentication: string | null = null;
+
+        if (provider === 'claude' && user?.claudeAuth) {
+          authentication = typeof user.claudeAuth === 'string' ? user.claudeAuth : JSON.stringify(user.claudeAuth);
+        } else if (provider === 'codex' && user?.codexAuth) {
+          authentication = typeof user.codexAuth === 'string' ? user.codexAuth : JSON.stringify(user.codexAuth);
+        } else if (provider === 'gemini' && user?.geminiAuth) {
+          authentication = typeof user.geminiAuth === 'string' ? user.geminiAuth : JSON.stringify(user.geminiAuth);
+        }
+
+        if (provider && authentication) {
+          const aiWorkerClient = new AIWorkerClient();
+
+          if (hasImages && !hasFiles) {
+            // Image-only commit
+            const imageChanges = images.map((img: { path: string; beforeContent?: string }) => ({
+              path: img.path,
+              beforeBase64: img.beforeContent,
+              afterBase64: img.content
+            }));
+            commitMessage = await aiWorkerClient.generateImageCommitMessage(imageChanges, provider, authentication);
+          } else {
+            // Code files or mixed
+            commitMessage = await aiWorkerClient.generateCommitMessageFromChanges(allPaths, provider, authentication);
+          }
+        }
+      } catch (aiError) {
+        logger.warn('Failed to generate AI commit message, using fallback', {
+          component: 'GitHub',
+          error: aiError instanceof Error ? aiError.message : String(aiError)
+        });
+      }
+
+      // Fallback message
+      if (!commitMessage) {
+        const totalFiles = (files?.length || 0) + (images?.length || 0);
+        commitMessage = `Update ${totalFiles} file(s)`;
+      }
+    }
+
+    // Create the commit
+    const { data: newCommit } = await octokit.git.createCommit({
+      owner,
+      repo,
+      message: commitMessage,
+      tree: newTree.sha,
+      parents: [latestCommitSha],
+    });
+
+    // Update the branch reference to point to the new commit
+    await octokit.git.updateRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+      sha: newCommit.sha,
+    });
+
+    logger.info(`Commit created successfully: ${newCommit.sha}`, {
+      component: 'GitHub',
+      owner,
+      repo,
+      branch,
+      commitSha: newCommit.sha,
+      message: commitMessage,
+      filesCommitted: treeEntries.length
+    });
+
+    res.json({
+      success: true,
+      data: {
+        commitSha: newCommit.sha,
+        message: commitMessage,
+        branch,
+        filesCommitted: treeEntries.length,
+        htmlUrl: `https://github.com/${owner}/${repo}/commit/${newCommit.sha}`
+      }
+    });
+
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    logger.error('GitHub commit error', error as Error, {
+      component: 'GitHub',
+      owner: req.params.owner,
+      repo: req.params.repo
+    });
+
+    if (err.status === 404) {
+      res.status(404).json({ success: false, error: 'Repository or branch not found' });
+      return;
+    }
+    if (err.status === 409) {
+      res.status(409).json({ success: false, error: 'Conflict - branch may have been modified. Please refresh and try again.' });
+      return;
+    }
+    if (err.status === 422) {
+      res.status(422).json({ success: false, error: 'Invalid file content or path' });
+      return;
+    }
+
+    res.status(500).json({ success: false, error: err.message || 'Failed to create commit' });
   }
 });
 
