@@ -103,6 +103,13 @@ const isImageFile = (filename: string): boolean => {
   return imageExtensions.includes(ext || '');
 };
 
+// Helper to check if a file is an audio file based on extension
+const isAudioFile = (filename: string): boolean => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const audioExtensions = ['wav', 'mp3', 'ogg', 'aac', 'flac', 'm4a', 'webm', 'aiff', 'aif'];
+  return audioExtensions.includes(ext || '');
+};
+
 // Helper to get file icon based on extension
 const getFileIcon = (filename: string): string => {
   const ext = filename.split('.').pop()?.toLowerCase();
@@ -278,6 +285,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Image preview state
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  // Audio preview state
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
   // Track pending click for single/double click distinction
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -494,8 +504,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   const loadFileContent = useCallback(async (path: string) => {
     if (!codeSession) return;
 
-    // Clear previous image URL when loading a new file
+    // Clear previous media URLs when loading a new file
     setImageUrl(null);
+    setAudioUrl(null);
 
     // Use the database session ID as the storage key (this is what the AI worker uses when uploading)
     const storageSessionId = codeSession.sessionId;
@@ -521,6 +532,28 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       } catch (error: any) {
         console.error('Failed to load image:', error);
         setFileContent(`// Error loading image: ${error.message}`);
+      } finally {
+        setIsLoadingFile(false);
+      }
+      return;
+    }
+
+    // Check if this is an audio file
+    if (isAudioFile(path)) {
+      setIsLoadingFile(true);
+      setFileContent(null); // Clear text content for audio
+      try {
+        const blob = await storageWorkerApi.getFileBlob(storageSessionId, `workspace/${path}`);
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          setAudioUrl(url);
+        } else {
+          console.error(`[Code] Audio file not found: ${path}`);
+          setFileContent(`// Error: Audio file not found in storage`);
+        }
+      } catch (error: any) {
+        console.error('Failed to load audio:', error);
+        setFileContent(`// Error loading audio: ${error.message}`);
       } finally {
         setIsLoadingFile(false);
       }
@@ -586,6 +619,16 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
     };
   }, [imageUrl]);
+
+  // Cleanup object URLs for audio when component unmounts or audio changes
+  useEffect(() => {
+    return () => {
+      // Revoke any blob URL to prevent memory leaks
+      if (audioUrl && audioUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
+  }, [audioUrl]);
 
   // Restore editor state (tabs, active tab, expanded folders, pending changes) from localStorage
   useEffect(() => {
@@ -727,6 +770,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           setActiveTabPath(null);
           setFileContent(null);
           setImageUrl(null); // Clear image preview when closing last tab
+          setAudioUrl(null); // Clear audio preview when closing last tab
         }
       }
 
@@ -1690,6 +1734,33 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                 <div className="absolute bottom-0 left-0 right-0 bg-base-300/80 backdrop-blur-sm text-base-content text-xs p-2 rounded-b-lg text-center">
                   {activeTabPath?.split('/').pop() || 'Image'} (read-only preview)
                 </div>
+              </div>
+            </div>
+          ) : audioUrl ? (
+            /* Audio Preview */
+            <div className="h-full flex items-center justify-center bg-base-200 p-4 overflow-auto">
+              <div className="bg-base-300 rounded-lg shadow-lg p-8 max-w-md w-full">
+                <div className="text-center mb-6">
+                  <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-primary/20 flex items-center justify-center">
+                    <svg className="w-10 h-10 text-primary" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-base-content">
+                    {activeTabPath?.split('/').pop() || 'Audio'}
+                  </h3>
+                  <p className="text-sm text-base-content/60 mt-1">Audio Preview</p>
+                </div>
+                <audio
+                  controls
+                  className="w-full"
+                  src={audioUrl}
+                >
+                  Your browser does not support the audio element.
+                </audio>
+                <p className="text-xs text-base-content/50 text-center mt-4">
+                  Read-only preview • Use the Sound editor for advanced editing
+                </p>
               </div>
             </div>
           ) : fileContent !== null ? (
