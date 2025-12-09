@@ -77,7 +77,12 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
   };
 
   // Count lines for line numbers - memoized to avoid recalculation on every render
-  const lineCount = useMemo(() => content.split('\n').length, [content]);
+  const lineCount = useMemo(() => {
+    const count = content.split('\n').length;
+    // Debug: log first 200 chars to see if content has unexpected newlines
+    console.log('[SyntaxHighlightedEditor] lineCount:', count, 'content preview:', JSON.stringify(content.substring(0, 200)));
+    return count;
+  }, [content]);
 
   // Custom style overrides for the syntax highlighter to match our editor
   // Memoized to prevent SyntaxHighlighter from re-rendering due to style object identity changes
