@@ -216,6 +216,27 @@ export const githubApi = {
       method: 'PUT',
       body: data,
     }),
+
+  // Commit multiple files at once (for Code and Images editors)
+  commit: (owner: string, repo: string, data: {
+    branch: string;
+    files?: Array<{ path: string; content: string; encoding?: string }>;
+    images?: Array<{ path: string; content: string; beforeContent?: string }>;
+    message?: string;
+  }) =>
+    fetchApi<{
+      success: boolean;
+      data: {
+        commitSha: string;
+        message: string;
+        branch: string;
+        filesCommitted: number;
+        htmlUrl: string;
+      };
+    }>(`/api/github/repos/${owner}/${repo}/commit`, {
+      method: 'POST',
+      body: data,
+    }),
 };
 
 // User API
