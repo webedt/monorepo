@@ -252,6 +252,7 @@ export const TAGLINES = [
   "Quit playing games with my edits.",
   "Mmmbop, edit ba doo dop.",
   "Killing me softly with his edit.",
+  "Editing me softly with his song.",
   "Because maybe, you're gonna be the one that edits me.",
   "Don't speak, I know just what you're editing.",
   "I get knocked down, but I just edit again.",

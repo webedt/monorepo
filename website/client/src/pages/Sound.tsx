@@ -240,8 +240,8 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
 
   // Sound session state
   const [soundSession, setSoundSession] = useState<SoundSession | null>(null);
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [initError, setInitError] = useState<string | null>(null);
+  const [_isInitializing, setIsInitializing] = useState(false);
+  const [_initError, setInitError] = useState<string | null>(null);
 
   // Editor state
   const [viewMode, setViewMode] = useState<ViewMode>('waveform');
@@ -313,7 +313,7 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
   }, [existingSessionData]);
 
   // Fetch user's GitHub repos (only when no existing session)
-  const { data: reposData, isLoading: isLoadingRepos } = useQuery({
+  const { data: reposData, isLoading: _isLoadingRepos } = useQuery({
     queryKey: ['github-repos'],
     queryFn: githubApi.getRepos,
     enabled: !sessionId && !soundSession,

@@ -229,8 +229,8 @@ export function SceneEditorContent({ sessionId: sessionIdProp, isEmbedded: _isEm
 
   // Scene session state
   const [sceneSession, setSceneSession] = useState<SceneSession | null>(null);
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [initError, setInitError] = useState<string | null>(null);
+  const [_isInitializing, setIsInitializing] = useState(false);
+  const [_initError, setInitError] = useState<string | null>(null);
 
   // Editor state
   const [editorMode, setEditorMode] = useState<EditorMode>('objects');
@@ -264,7 +264,7 @@ export function SceneEditorContent({ sessionId: sessionIdProp, isEmbedded: _isEm
   }, [existingSessionData]);
 
   // Fetch user's GitHub repos (only when no existing session)
-  const { data: reposData, isLoading: isLoadingRepos } = useQuery({
+  const { data: reposData, isLoading: _isLoadingRepos } = useQuery({
     queryKey: ['github-repos'],
     queryFn: githubApi.getRepos,
     enabled: !sessionId && !sceneSession,
