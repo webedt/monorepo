@@ -1352,6 +1352,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
       branch,
       files, // Array of { path, content, encoding? } for code files
       images, // Array of { path, content, beforeContent? } for images (base64)
+      deletions, // Array of file paths to delete
       message // Optional custom message
     } = req.body;
 
@@ -1367,9 +1368,10 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
 
     const hasFiles = files && Array.isArray(files) && files.length > 0;
     const hasImages = images && Array.isArray(images) && images.length > 0;
+    const hasDeletions = deletions && Array.isArray(deletions) && deletions.length > 0;
 
-    if (!hasFiles && !hasImages) {
-      res.status(400).json({ success: false, error: 'No files or images to commit' });
+    if (!hasFiles && !hasImages && !hasDeletions) {
+      res.status(400).json({ success: false, error: 'No files, images, or deletions to commit' });
       return;
     }
 
@@ -1378,7 +1380,8 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
     logger.info(`Starting commit for ${owner}/${repo}/${branch}`, {
       component: 'GitHub',
       fileCount: files?.length || 0,
-      imageCount: images?.length || 0
+      imageCount: images?.length || 0,
+      deletionCount: deletions?.length || 0
     });
 
     // Get the latest commit SHA for the branch
@@ -1398,11 +1401,12 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
     const baseTreeSha = commitData.tree.sha;
 
     // Prepare tree entries for all files
+    // sha: null means delete the file, sha: string means create/update
     const treeEntries: Array<{
       path: string;
       mode: '100644';
       type: 'blob';
-      sha?: string;
+      sha: string | null;
       content?: string;
     }> = [];
 
@@ -1456,6 +1460,21 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
       }
     }
 
+    // Process file deletions
+    if (hasDeletions) {
+      for (const filePath of deletions) {
+        if (!filePath || typeof filePath !== 'string') continue;
+
+        // Setting sha to null tells GitHub to delete this file from the tree
+        treeEntries.push({
+          path: filePath,
+          mode: '100644',
+          type: 'blob',
+          sha: null,
+        });
+      }
+    }
+
     if (treeEntries.length === 0) {
       res.status(400).json({ success: false, error: 'No valid files to commit' });
       return;
@@ -1476,6 +1495,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
         ...(files?.map((f: { path: string }) => f.path) || []),
         ...(images?.map((i: { path: string }) => i.path) || [])
       ];
+      const deletedPaths = deletions || [];
 
       // Try to generate a commit message using AI
       try {
@@ -1501,7 +1521,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
         if (provider && authentication) {
           const aiWorkerClient = new AIWorkerClient();
 
-          if (hasImages && !hasFiles) {
+          if (hasImages && !hasFiles && !hasDeletions) {
             // Image-only commit
             const imageChanges = images.map((img: { path: string; content: string; beforeContent?: string }) => ({
               path: img.path,
@@ -1510,8 +1530,9 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
             }));
             commitMessage = await aiWorkerClient.generateImageCommitMessage(imageChanges, provider, authentication);
           } else {
-            // Code files or mixed
-            commitMessage = await aiWorkerClient.generateCommitMessageFromChanges(allPaths, provider, authentication);
+            // Code files, deletions, or mixed - include deletion info in the message generation
+            const pathsWithDeletions = [...allPaths, ...deletedPaths.map((p: string) => `[deleted] ${p}`)];
+            commitMessage = await aiWorkerClient.generateCommitMessageFromChanges(pathsWithDeletions, provider, authentication);
           }
         }
       } catch (aiError) {
@@ -1523,8 +1544,16 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
 
       // Fallback message
       if (!commitMessage) {
-        const totalFiles = (files?.length || 0) + (images?.length || 0);
-        commitMessage = `Update ${totalFiles} file(s)`;
+        const updatedCount = (files?.length || 0) + (images?.length || 0);
+        const deletedCount = deletions?.length || 0;
+        const parts: string[] = [];
+        if (updatedCount > 0) {
+          parts.push(`Update ${updatedCount} file(s)`);
+        }
+        if (deletedCount > 0) {
+          parts.push(`Delete ${deletedCount} file(s)`);
+        }
+        commitMessage = parts.join(', ') || 'Update files';
       }
     }
 

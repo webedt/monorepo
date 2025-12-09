@@ -222,6 +222,7 @@ export const githubApi = {
     branch: string;
     files?: Array<{ path: string; content: string; encoding?: string }>;
     images?: Array<{ path: string; content: string; beforeContent?: string }>;
+    deletions?: string[];  // Array of file paths to delete
     message?: string;
   }) =>
     fetchApi<{
