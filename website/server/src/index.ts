@@ -97,7 +97,17 @@ const apiProxyOptions: Options = {
   // Cookie handling for session persistence
   cookieDomainRewrite: '',  // Remove domain restriction so cookies work across proxy
   // Preserve the full path including /api prefix
-  pathRewrite: (path, req) => '/api' + path,
+  // http-proxy-middleware v3 receives the full path in pathRewrite, so we need to handle both cases
+  pathRewrite: (path, req) => {
+    // Log the incoming path for debugging
+    console.log(`[Proxy pathRewrite] Received path: ${path}, req.url: ${req.url}`);
+
+    // If path already starts with /api, return as-is
+    // If not, prepend /api (this handles the case where Express strips the mount point)
+    const rewrittenPath = path.startsWith('/api') ? path : '/api' + path;
+    console.log(`[Proxy pathRewrite] Rewritten to: ${rewrittenPath}`);
+    return rewrittenPath;
+  },
   // Handle proxy errors
   on: {
     error: (err, req, res) => {
@@ -112,10 +122,8 @@ const apiProxyOptions: Options = {
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
-      // Log proxied requests in development
-      if (NODE_ENV === 'development') {
-        console.log(`[Proxy] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${req.url}`);
-      }
+      // Log proxied requests (always, for debugging)
+      console.log(`[Proxy proxyReq] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${proxyReq.path}`);
     },
     proxyRes: (proxyRes, req, res) => {
       // Rewrite cookie path based on the Referer to scope cookies to owner/repo/branch
