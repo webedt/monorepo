@@ -77,7 +77,12 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
   };
 
   // Count lines for line numbers - memoized to avoid recalculation on every render
-  const lineCount = useMemo(() => content.split('\n').length, [content]);
+  const lineCount = useMemo(() => {
+    const count = content.split('\n').length;
+    // Debug: log first 200 chars to see if content has unexpected newlines
+    console.log('[SyntaxHighlightedEditor] lineCount:', count, 'content preview:', JSON.stringify(content.substring(0, 200)));
+    return count;
+  }, [content]);
 
   // Custom style overrides for the syntax highlighter to match our editor
   // Memoized to prevent SyntaxHighlighter from re-rendering due to style object identity changes
@@ -88,10 +93,13 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
     fontSize: '0.875rem',
     lineHeight: '1.5rem',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-    overflow: 'hidden',
+    overflow: 'visible',
     whiteSpace: 'pre',
     wordWrap: 'normal',
+    overflowWrap: 'normal',
     minHeight: '100%',
+    width: 'max-content',
+    minWidth: '100%',
   }), []);
 
   // Memoize codeTagProps to prevent unnecessary re-renders
@@ -100,8 +108,30 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
       fontFamily: 'inherit',
       fontSize: 'inherit',
       lineHeight: 'inherit',
+      whiteSpace: 'pre' as const,
+      wordWrap: 'normal' as const,
+      overflowWrap: 'normal' as const,
+      display: 'block' as const,
     },
   }), []);
+
+  // Custom PreTag to ensure proper whitespace handling
+  const PreTag = useMemo(() => {
+    return ({ children, ...props }: any) => (
+      <pre
+        {...props}
+        style={{
+          ...props.style,
+          whiteSpace: 'pre',
+          wordWrap: 'normal',
+          overflowWrap: 'normal',
+          margin: 0,
+        }}
+      >
+        {children}
+      </pre>
+    );
+  }, []);
 
   // Memoize the syntax highlighter to prevent re-tokenization on every keystroke
   // Only re-render when content, language, or theme actually changes
@@ -111,13 +141,14 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
       style={isDarkMode ? oneDark : oneLight}
       customStyle={customStyle}
       codeTagProps={codeTagProps}
+      PreTag={PreTag}
       showLineNumbers={false}
       wrapLines={false}
       wrapLongLines={false}
     >
       {content || ' '}
     </SyntaxHighlighter>
-  ), [content, language, isDarkMode, customStyle, codeTagProps]);
+  ), [content, language, isDarkMode, customStyle, codeTagProps, PreTag]);
 
   return (
     <div className={`flex h-full min-h-0 ${className}`}>
@@ -127,14 +158,33 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
       </pre>
 
       {/* Editor Container with overlay */}
-      <div ref={containerRef} className="flex-1 relative overflow-hidden">
+      <div ref={containerRef} className="flex-1 relative overflow-auto">
         {/* Syntax highlighted layer (behind) */}
         <div
           ref={highlightRef}
-          className="absolute inset-0 overflow-hidden pointer-events-none"
+          className="absolute inset-0 overflow-auto pointer-events-none"
           aria-hidden="true"
+          style={{
+            // Ensure all child elements preserve whitespace and don't wrap
+            // This fixes issues with react-syntax-highlighter breaking markdown tables
+          }}
         >
-          {highlightedContent}
+          <style>{`
+            .syntax-highlight-container span {
+              white-space: pre !important;
+              word-wrap: normal !important;
+              overflow-wrap: normal !important;
+            }
+            .syntax-highlight-container code {
+              white-space: pre !important;
+              word-wrap: normal !important;
+              overflow-wrap: normal !important;
+              display: block !important;
+            }
+          `}</style>
+          <div className="syntax-highlight-container">
+            {highlightedContent}
+          </div>
         </div>
 
         {/* Textarea layer (on top, transparent text) */}
@@ -154,6 +204,10 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
             MozTabSize: 2,
             // Use explicit color for caret visibility - 'currentColor' doesn't work with transparent text
             caretColor: isDarkMode ? '#abb2bf' : '#383a42',
+            // Prevent unwanted line wrapping (especially important for markdown tables with | characters)
+            whiteSpace: 'pre',
+            wordWrap: 'normal',
+            overflowWrap: 'normal',
           }}
         />
       </div>
