@@ -20,8 +20,9 @@ if (!INTERNAL_API_URL) {
 }
 
 // CORS configuration
+// Note: github.etdofresh.com removed - previews now served from webedit.etdofresh.com/github/
 const ALLOWED_ORIGINS = NODE_ENV === 'production'
-  ? ['https://webedt.etdofresh.com', 'https://github.etdofresh.com']
+  ? ['https://webedit.etdofresh.com']
   : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:3001'];
 
 app.use(cors({

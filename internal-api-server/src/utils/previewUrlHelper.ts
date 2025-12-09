@@ -19,7 +19,7 @@ interface WebedtConfig {
  *
  * Priority:
  * 1. Check for .webedt file in repository root and use preview_url if exists
- * 2. Fall back to default: https://github.etdofresh.com/{owner}/{repo}/{branch}/
+ * 2. Fall back to default: https://webedit.etdofresh.com/github/{owner}/{repo}/{branch}/
  *
  * @param workspacePath - Path to the git repository workspace (optional)
  * @param owner - Repository owner
@@ -56,7 +56,7 @@ export async function getPreviewUrl(
     // Use default preview URL
     // Replace forward slashes in branch name with dashes for URL safety
     const safeBranch = branch.replace(/\//g, '-');
-    const defaultUrl = `https://github.etdofresh.com/${owner}/${repo}/${safeBranch}/`;
+    const defaultUrl = `https://webedit.etdofresh.com/github/${owner}/${repo}/${safeBranch}/`;
     console.log('[PreviewUrlHelper] Using default preview URL:', defaultUrl);
 
     return defaultUrl;
@@ -66,7 +66,7 @@ export async function getPreviewUrl(
     // Return default URL even on error
     // Replace forward slashes in branch name with dashes for URL safety
     const safeBranch = branch.replace(/\//g, '-');
-    return `https://github.etdofresh.com/${owner}/${repo}/${safeBranch}/`;
+    return `https://webedit.etdofresh.com/github/${owner}/${repo}/${safeBranch}/`;
   }
 }
 
