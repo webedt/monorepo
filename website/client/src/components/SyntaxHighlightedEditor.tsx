@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { getLanguageFromFilename } from '@/lib/utils';
@@ -19,8 +19,13 @@ interface SyntaxHighlightedEditorProps {
  * - A transparent textarea on top for editing
  *
  * This allows for proper editing behavior while showing syntax highlighting.
+ *
+ * Performance optimizations:
+ * - Component wrapped in memo() to prevent re-renders when props haven't changed
+ * - SyntaxHighlighter output memoized to avoid re-tokenization on every keystroke
+ * - Style objects memoized to prevent unnecessary re-renders
  */
-export function SyntaxHighlightedEditor({
+export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
   content,
   filename,
   onChange,
@@ -71,11 +76,12 @@ export function SyntaxHighlightedEditor({
     onChange(target.value, target.selectionStart, target.selectionEnd);
   };
 
-  // Count lines for line numbers
-  const lineCount = content.split('\n').length;
+  // Count lines for line numbers - memoized to avoid recalculation on every render
+  const lineCount = useMemo(() => content.split('\n').length, [content]);
 
   // Custom style overrides for the syntax highlighter to match our editor
-  const customStyle: React.CSSProperties = {
+  // Memoized to prevent SyntaxHighlighter from re-rendering due to style object identity changes
+  const customStyle = useMemo<React.CSSProperties>(() => ({
     margin: 0,
     padding: '1rem',
     background: 'transparent',
@@ -86,7 +92,32 @@ export function SyntaxHighlightedEditor({
     whiteSpace: 'pre',
     wordWrap: 'normal',
     minHeight: '100%',
-  };
+  }), []);
+
+  // Memoize codeTagProps to prevent unnecessary re-renders
+  const codeTagProps = useMemo(() => ({
+    style: {
+      fontFamily: 'inherit',
+      fontSize: 'inherit',
+      lineHeight: 'inherit',
+    },
+  }), []);
+
+  // Memoize the syntax highlighter to prevent re-tokenization on every keystroke
+  // Only re-render when content, language, or theme actually changes
+  const highlightedContent = useMemo(() => (
+    <SyntaxHighlighter
+      language={language}
+      style={isDarkMode ? oneDark : oneLight}
+      customStyle={customStyle}
+      codeTagProps={codeTagProps}
+      showLineNumbers={false}
+      wrapLines={false}
+      wrapLongLines={false}
+    >
+      {content || ' '}
+    </SyntaxHighlighter>
+  ), [content, language, isDarkMode, customStyle, codeTagProps]);
 
   return (
     <div className={`flex h-full min-h-0 ${className}`}>
@@ -103,23 +134,7 @@ export function SyntaxHighlightedEditor({
           className="absolute inset-0 overflow-hidden pointer-events-none"
           aria-hidden="true"
         >
-          <SyntaxHighlighter
-            language={language}
-            style={isDarkMode ? oneDark : oneLight}
-            customStyle={customStyle}
-            codeTagProps={{
-              style: {
-                fontFamily: 'inherit',
-                fontSize: 'inherit',
-                lineHeight: 'inherit',
-              },
-            }}
-            showLineNumbers={false}
-            wrapLines={false}
-            wrapLongLines={false}
-          >
-            {content || ' '}
-          </SyntaxHighlighter>
+          {highlightedContent}
         </div>
 
         {/* Textarea layer (on top, transparent text) */}
@@ -129,7 +144,7 @@ export function SyntaxHighlightedEditor({
           onChange={handleChange}
           onScroll={handleScroll}
           onKeyDown={onKeyDown}
-          className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-base-content font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none selection:bg-primary/30"
+          className="absolute inset-0 w-full h-full bg-transparent text-transparent font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none selection:bg-primary/30"
           spellCheck={false}
           autoComplete="off"
           autoCorrect="off"
@@ -137,12 +152,13 @@ export function SyntaxHighlightedEditor({
           style={{
             tabSize: 2,
             MozTabSize: 2,
-            caretColor: 'currentColor',
+            // Use explicit color for caret visibility - 'currentColor' doesn't work with transparent text
+            caretColor: isDarkMode ? '#abb2bf' : '#383a42',
           }}
         />
       </div>
     </div>
   );
-}
+});
 
 export default SyntaxHighlightedEditor;
