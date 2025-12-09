@@ -47,9 +47,9 @@ const extensionToLanguageMap: Record<string, string> = {
   xml: 'xml',
   csv: 'csv',
 
-  // Markup
-  md: 'markdown',
-  mdx: 'markdown',
+  // Markup - use 'text' for markdown to avoid Prism tokenizer breaking tables
+  md: 'text',
+  mdx: 'text',
 
   // Python
   py: 'python',
