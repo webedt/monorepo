@@ -797,3 +797,281 @@ export const useRecentReposStore = create<RecentReposState>((set, get) => ({
     return get().recentRepoUrls;
   },
 }));
+
+// ============================================================================
+// IMAGE EDITOR LAYERS STORE
+// ============================================================================
+// This store manages layers for the image editor, including:
+// - Layer list with order, visibility, opacity, blend mode
+// - Active layer selection
+// - Layer operations (add, remove, reorder, merge)
+// ============================================================================
+
+export interface ImageLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number; // 0-100
+  blendMode: 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten';
+  locked: boolean;
+  imageData?: string; // Base64 data URL of the layer content
+}
+
+interface ImageLayersState {
+  // Layers array (index 0 is bottom, last is top)
+  layers: ImageLayer[];
+  // Currently active layer ID
+  activeLayerId: string | null;
+
+  // Actions
+  addLayer: (name?: string, imageData?: string) => string;
+  removeLayer: (id: string) => void;
+  duplicateLayer: (id: string) => string | null;
+  setActiveLayer: (id: string | null) => void;
+  toggleLayerVisibility: (id: string) => void;
+  setLayerOpacity: (id: string, opacity: number) => void;
+  setLayerBlendMode: (id: string, blendMode: ImageLayer['blendMode']) => void;
+  setLayerLocked: (id: string, locked: boolean) => void;
+  renameLayer: (id: string, name: string) => void;
+  moveLayerUp: (id: string) => void;
+  moveLayerDown: (id: string) => void;
+  setLayerImageData: (id: string, imageData: string) => void;
+  clearLayers: () => void;
+  initializeBaseLayer: (imageData?: string) => void;
+}
+
+// Generate unique layer ID
+function generateLayerId(): string {
+  return `layer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+export const useImageLayersStore = create<ImageLayersState>((set, get) => ({
+  layers: [],
+  activeLayerId: null,
+
+  addLayer: (name?: string, imageData?: string) => {
+    const id = generateLayerId();
+    const layerCount = get().layers.length;
+    const layer: ImageLayer = {
+      id,
+      name: name || `Layer ${layerCount + 1}`,
+      visible: true,
+      opacity: 100,
+      blendMode: 'normal',
+      locked: false,
+      imageData,
+    };
+
+    set((state) => ({
+      layers: [...state.layers, layer],
+      activeLayerId: id, // Auto-select new layer
+    }));
+
+    return id;
+  },
+
+  removeLayer: (id: string) => {
+    set((state) => {
+      // Don't remove the last layer
+      if (state.layers.length <= 1) return state;
+
+      const newLayers = state.layers.filter((l) => l.id !== id);
+      let newActiveId = state.activeLayerId;
+
+      // If we removed the active layer, select another one
+      if (state.activeLayerId === id) {
+        const removedIndex = state.layers.findIndex((l) => l.id === id);
+        newActiveId = newLayers[Math.min(removedIndex, newLayers.length - 1)]?.id || null;
+      }
+
+      return {
+        layers: newLayers,
+        activeLayerId: newActiveId,
+      };
+    });
+  },
+
+  duplicateLayer: (id: string) => {
+    const state = get();
+    const layer = state.layers.find((l) => l.id === id);
+    if (!layer) return null;
+
+    const newId = generateLayerId();
+    const newLayer: ImageLayer = {
+      ...layer,
+      id: newId,
+      name: `${layer.name} (copy)`,
+      locked: false,
+    };
+
+    const index = state.layers.findIndex((l) => l.id === id);
+    set((state) => ({
+      layers: [
+        ...state.layers.slice(0, index + 1),
+        newLayer,
+        ...state.layers.slice(index + 1),
+      ],
+      activeLayerId: newId,
+    }));
+
+    return newId;
+  },
+
+  setActiveLayer: (id: string | null) => {
+    set({ activeLayerId: id });
+  },
+
+  toggleLayerVisibility: (id: string) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === id ? { ...l, visible: !l.visible } : l
+      ),
+    }));
+  },
+
+  setLayerOpacity: (id: string, opacity: number) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === id ? { ...l, opacity: Math.max(0, Math.min(100, opacity)) } : l
+      ),
+    }));
+  },
+
+  setLayerBlendMode: (id: string, blendMode: ImageLayer['blendMode']) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === id ? { ...l, blendMode } : l
+      ),
+    }));
+  },
+
+  setLayerLocked: (id: string, locked: boolean) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === id ? { ...l, locked } : l
+      ),
+    }));
+  },
+
+  renameLayer: (id: string, name: string) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === id ? { ...l, name } : l
+      ),
+    }));
+  },
+
+  moveLayerUp: (id: string) => {
+    set((state) => {
+      const index = state.layers.findIndex((l) => l.id === id);
+      if (index >= state.layers.length - 1) return state;
+
+      const newLayers = [...state.layers];
+      [newLayers[index], newLayers[index + 1]] = [newLayers[index + 1], newLayers[index]];
+      return { layers: newLayers };
+    });
+  },
+
+  moveLayerDown: (id: string) => {
+    set((state) => {
+      const index = state.layers.findIndex((l) => l.id === id);
+      if (index <= 0) return state;
+
+      const newLayers = [...state.layers];
+      [newLayers[index], newLayers[index - 1]] = [newLayers[index - 1], newLayers[index]];
+      return { layers: newLayers };
+    });
+  },
+
+  setLayerImageData: (id: string, imageData: string) => {
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === id ? { ...l, imageData } : l
+      ),
+    }));
+  },
+
+  clearLayers: () => {
+    set({ layers: [], activeLayerId: null });
+  },
+
+  initializeBaseLayer: (imageData?: string) => {
+    const state = get();
+    if (state.layers.length === 0) {
+      const id = generateLayerId();
+      const layer: ImageLayer = {
+        id,
+        name: 'Background',
+        visible: true,
+        opacity: 100,
+        blendMode: 'normal',
+        locked: false,
+        imageData,
+      };
+      set({ layers: [layer], activeLayerId: id });
+    }
+  },
+}));
+
+// ============================================================================
+// IMAGE AI PREFERENCES STORE
+// ============================================================================
+// Stores the user's local preferences for image AI, including:
+// - Last used provider and model (for quick switching in editor)
+// ============================================================================
+
+const IMAGE_AI_PREFS_STORAGE_KEY = 'imageAiPreferences';
+
+interface ImageAiPreferences {
+  provider: 'openrouter' | 'cometapi' | 'google';
+  model: string;
+}
+
+interface ImageAiPreferencesState extends ImageAiPreferences {
+  setProvider: (provider: 'openrouter' | 'cometapi' | 'google') => void;
+  setModel: (model: string) => void;
+}
+
+function loadImageAiPrefs(): ImageAiPreferences {
+  const defaults: ImageAiPreferences = {
+    provider: 'openrouter',
+    model: 'google/gemini-2.5-flash-image',
+  };
+
+  try {
+    const stored = localStorage.getItem(IMAGE_AI_PREFS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return { ...defaults, ...parsed };
+    }
+  } catch (e) {
+    console.warn('[ImageAiPrefs] Failed to load from localStorage:', e);
+  }
+  return defaults;
+}
+
+function saveImageAiPrefs(prefs: ImageAiPreferences) {
+  try {
+    localStorage.setItem(IMAGE_AI_PREFS_STORAGE_KEY, JSON.stringify(prefs));
+  } catch (e) {
+    console.warn('[ImageAiPrefs] Failed to save to localStorage:', e);
+  }
+}
+
+export const useImageAiPreferencesStore = create<ImageAiPreferencesState>((set, get) => {
+  const initialPrefs = loadImageAiPrefs();
+
+  return {
+    ...initialPrefs,
+
+    setProvider: (provider) => {
+      set({ provider });
+      saveImageAiPrefs({ ...get(), provider });
+    },
+
+    setModel: (model) => {
+      set({ model });
+      saveImageAiPrefs({ ...get(), model });
+    },
+  };
+});

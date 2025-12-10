@@ -335,6 +335,53 @@ export const userApi = {
       method: 'POST',
       body: { verbosityLevel },
     }),
+
+  // Image AI settings
+  updateImageAiKeys: (imageAiKeys: { openrouter?: string; cometapi?: string; google?: string }) =>
+    fetchApi('/api/user/image-ai-keys', {
+      method: 'POST',
+      body: { imageAiKeys },
+    }),
+
+  updateImageAiProvider: (provider: 'openrouter' | 'cometapi' | 'google') =>
+    fetchApi('/api/user/image-ai-provider', {
+      method: 'POST',
+      body: { provider },
+    }),
+
+  updateImageAiModel: (model: string) =>
+    fetchApi('/api/user/image-ai-model', {
+      method: 'POST',
+      body: { model },
+    }),
+};
+
+// Image Generation API
+export const imageGenApi = {
+  generate: (data: {
+    prompt: string;
+    imageData?: string;
+    selection?: { x: number; y: number; width: number; height: number };
+    provider?: 'openrouter' | 'cometapi' | 'google';
+    model?: string;
+  }) =>
+    fetchApi<{
+      success: boolean;
+      data?: { imageData: string; provider: string; model: string };
+      error?: string;
+    }>('/api/image-gen/generate', {
+      method: 'POST',
+      body: data,
+    }),
+
+  getModels: () =>
+    fetchApi<{
+      success: boolean;
+      data: {
+        models: Array<{ id: string; displayName: string; description: string; providers: string[] }>;
+        providers: Array<{ id: string; name: string; description: string }>;
+      };
+    }>('/api/image-gen/models'),
 };
 
 // Sessions API

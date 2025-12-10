@@ -461,4 +461,103 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
   }
 });
 
+// Update image AI API keys
+router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { imageAiKeys } = req.body;
+
+    // Validate structure
+    if (!imageAiKeys || typeof imageAiKeys !== 'object') {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid imageAiKeys. Must be an object with provider keys.',
+      });
+      return;
+    }
+
+    // Only allow known providers
+    const allowedProviders = ['openrouter', 'cometapi', 'google'];
+    const sanitizedKeys: Record<string, string> = {};
+    for (const [provider, key] of Object.entries(imageAiKeys)) {
+      if (allowedProviders.includes(provider) && typeof key === 'string') {
+        sanitizedKeys[provider] = key;
+      }
+    }
+
+    await db
+      .update(users)
+      .set({ imageAiKeys: sanitizedKeys })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Image AI keys updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update image AI keys error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update image AI keys' });
+  }
+});
+
+// Update image AI provider preference
+router.post('/image-ai-provider', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { provider } = req.body;
+
+    const validProviders = ['openrouter', 'cometapi', 'google'];
+    if (!validProviders.includes(provider)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid provider. Must be one of: openrouter, cometapi, google',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ imageAiProvider: provider })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Image AI provider updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update image AI provider error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update image AI provider' });
+  }
+});
+
+// Update image AI model preference
+router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { model } = req.body;
+
+    const validModels = ['google/gemini-2.5-flash-image', 'google/gemini-3-pro-image-preview'];
+    if (!validModels.includes(model)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid model. Must be one of: google/gemini-2.5-flash-image, google/gemini-3-pro-image-preview',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ imageAiModel: model })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Image AI model updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update image AI model error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update image AI model' });
+  }
+});
+
 export default router;
