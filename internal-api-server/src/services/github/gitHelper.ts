@@ -115,33 +115,66 @@ New files: ${status.not_added.join(', ') || 'none'}
     await this.ensureSafeDirectory();
 
     try {
-      // Refresh git index before checking status
-      // This is important after extracting files from a tarball
-      // because git's index might be out of sync with the actual file contents
+      // AGGRESSIVE INDEX REFRESH: After tarball extraction, git's index cache
+      // can be stale. We need to forcefully refresh it to detect changes.
+
+      // Step 1: Clear stat cache - forces git to re-read file stats
       try {
-        await this.git.raw(['update-index', '--refresh']);
-        logger.info('Git index refreshed successfully', {
+        await this.git.raw(['update-index', '--really-refresh']);
+        logger.info('Git index forcefully refreshed (--really-refresh)', {
           component: 'GitHelper',
           workspacePath: this.workspacePath
         });
       } catch (refreshError) {
-        // Log but don't fail - this might fail if there are actual changes
-        // which is fine, we just want to refresh the index cache
-        logger.warn('Git update-index --refresh returned an error (may indicate changes)', {
+        // This failing with exit code 1 actually indicates there ARE changes
+        logger.info('Git update-index --really-refresh indicated changes exist', {
           component: 'GitHelper',
           workspacePath: this.workspacePath,
           error: refreshError instanceof Error ? refreshError.message : String(refreshError)
         });
       }
 
+      // Step 2: Also try update-index -q --refresh for good measure
+      try {
+        await this.git.raw(['update-index', '-q', '--refresh']);
+      } catch {
+        // Ignore - changes may exist
+      }
+
+      // Step 3: Run raw git status --porcelain for the most reliable check
+      // This bypasses simple-git's parsing which might miss some edge cases
+      let rawStatusOutput = '';
+      try {
+        rawStatusOutput = await this.git.raw(['status', '--porcelain']);
+        logger.info('Raw git status --porcelain output', {
+          component: 'GitHelper',
+          workspacePath: this.workspacePath,
+          output: rawStatusOutput.substring(0, 1000),
+          outputLength: rawStatusOutput.length,
+          hasOutput: rawStatusOutput.trim().length > 0
+        });
+      } catch (rawStatusError) {
+        logger.warn('Raw git status failed', {
+          component: 'GitHelper',
+          workspacePath: this.workspacePath,
+          error: rawStatusError instanceof Error ? rawStatusError.message : String(rawStatusError)
+        });
+      }
+
+      // Step 4: Use simple-git status for structured data
       const status = await this.git.status();
 
-      const hasChanges = !status.isClean();
+      // Determine changes from both raw and structured status
+      const rawHasChanges = rawStatusOutput.trim().length > 0;
+      const structuredHasChanges = !status.isClean();
+      const hasChanges = rawHasChanges || structuredHasChanges;
 
       logger.info('Git hasChanges() status check result', {
         component: 'GitHelper',
         workspacePath: this.workspacePath,
         hasChanges,
+        rawHasChanges,
+        structuredHasChanges,
         isClean: status.isClean(),
         modifiedCount: status.modified.length,
         modified: status.modified,
