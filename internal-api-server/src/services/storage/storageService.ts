@@ -240,6 +240,75 @@ class StorageServiceClass {
   }
 
   /**
+   * Extract a session tarball Buffer to a directory path, EXCLUDING .git directories
+   * This is used when re-downloading a session after AI worker execution to detect
+   * file changes without overwriting the local git state (which would hide any
+   * commits made by the AI worker).
+   */
+  async extractSessionToPathExcludingGit(sessionData: Buffer, destinationPath: string): Promise<{ extractedCount: number; skippedGitFiles: number }> {
+    logger.info(`Extracting session to ${destinationPath} (excluding .git)...`, {
+      component: 'StorageService',
+      tarballSize: sessionData.length
+    });
+
+    if (!fs.existsSync(destinationPath)) {
+      fs.mkdirSync(destinationPath, { recursive: true });
+    }
+
+    const gunzip = createGunzip();
+    const readable = Readable.from(sessionData);
+
+    // Track what files are being extracted vs skipped
+    let extractedCount = 0;
+    let skippedGitFiles = 0;
+    const skippedPaths: string[] = [];
+
+    return new Promise((resolve, reject) => {
+      const extractStream = tar.extract({
+        cwd: destinationPath,
+        filter: (entryPath: string) => {
+          // Skip any path that contains .git
+          // This includes:
+          // - .git/
+          // - workspace/repo/.git/
+          // - workspace/repo/.git/objects/...
+          // - .gitignore (we DO want this - it's not inside .git)
+          const isGitInternal = entryPath.includes('/.git/') ||
+                                entryPath.includes('/.git') && entryPath.endsWith('.git') ||
+                                entryPath.startsWith('.git/') ||
+                                entryPath === '.git';
+
+          if (isGitInternal) {
+            skippedGitFiles++;
+            if (skippedPaths.length < 20) {
+              skippedPaths.push(entryPath);
+            }
+            return false; // Skip this entry
+          }
+
+          extractedCount++;
+          return true; // Extract this entry
+        }
+      });
+
+      readable.pipe(gunzip).pipe(extractStream);
+
+      extractStream.on('finish', () => {
+        logger.info(`Session extracted to ${destinationPath} (excluding .git)`, {
+          component: 'StorageService',
+          extractedCount,
+          skippedGitFiles,
+          skippedPathsSample: skippedPaths
+        });
+
+        resolve({ extractedCount, skippedGitFiles });
+      });
+      extractStream.on('error', reject);
+      gunzip.on('error', reject);
+    });
+  }
+
+  /**
    * Upload a session from a directory path (creates tarball and uploads)
    */
   async uploadSessionFromPath(sessionPath: string, sourcePath: string): Promise<void> {
