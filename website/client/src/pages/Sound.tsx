@@ -264,7 +264,7 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
 
   // Sound session state
   const [soundSession, setSoundSession] = useState<SoundSession | null>(null);
-  const [_isInitializing, setIsInitializing] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
   const [_initError, setInitError] = useState<string | null>(null);
 
   // Editor state
@@ -337,7 +337,7 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
   }, [existingSessionData]);
 
   // Fetch user's GitHub repos (only when no existing session)
-  const { data: reposData, isLoading: _isLoadingRepos } = useQuery({
+  const { data: reposData, isLoading: isLoadingRepos } = useQuery({
     queryKey: ['github-repos'],
     queryFn: githubApi.getRepos,
     enabled: !sessionId && !soundSession,
@@ -1198,6 +1198,19 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
         <div className="text-center">
           <div className="loading loading-spinner loading-lg text-primary mb-4"></div>
           <p className="text-base-content/70">Loading session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state for quick-setup initialization (when coming from quick-setup page)
+  if (preSelectedSettings?.repositoryUrl && (isLoadingRepos || isInitializing)) {
+    return (
+      <div className="h-full flex items-center justify-center bg-[#1a1d2e]">
+        <div className="text-center">
+          <div className="loading loading-spinner loading-lg text-primary mb-4"></div>
+          <p className="mt-4 text-lg text-base-content">Setting up your sound workspace...</p>
+          <p className="mt-2 text-sm text-base-content/70">Creating a new branch for your changes</p>
         </div>
       </div>
     );
