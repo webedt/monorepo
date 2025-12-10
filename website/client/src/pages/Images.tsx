@@ -1700,8 +1700,10 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
       const isExpanded = expandedFolders.has(node.path);
       const isSelectedDir = selectedDirectory?.path === node.path;
-      const fileCount = node.children?.filter(c => c.type === 'file').length || 0;
-      const folderCount = node.children?.filter(c => c.type === 'folder').length || 0;
+      // Exclude blank-named nodes from the count (same filter as renderFileTree)
+      const validChildren = node.children?.filter(c => c.name && c.name.trim() !== '') || [];
+      const fileCount = validChildren.filter(c => c.type === 'file').length;
+      const folderCount = validChildren.filter(c => c.type === 'folder').length;
       return (
         <div key={node.path}>
           <div
