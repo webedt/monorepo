@@ -1666,7 +1666,9 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
   // Render file tree recursively
   const renderFileTree = (nodes: FileNode[], level = 0): JSX.Element[] => {
-    return nodes.map((node) => {
+    // Filter out nodes with blank/empty names
+    const filteredNodes = nodes.filter(node => node.name && node.name.trim() !== '');
+    return filteredNodes.map((node) => {
       const paddingLeft = level * 16 + 8;
 
       if (node.type === 'file') {
