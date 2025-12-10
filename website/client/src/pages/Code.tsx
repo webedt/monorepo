@@ -763,6 +763,11 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Handle click on file - uses timeout to distinguish single vs double click
   // Also handles file selection for multi-select (ctrl+click, shift+click)
   const handleFileClick = (path: string, name: string, event: React.MouseEvent) => {
+    // Prevent browser default behaviors (text selection on shift+click, etc.)
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+    }
+
     // Handle selection (ctrl+click, shift+click, or regular click)
     handleFileSelect(path, name, event);
 
@@ -1898,7 +1903,15 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
           </div>
         </div>
 
-        <div className="py-2">
+        <div
+          className="py-2 select-none"
+          onMouseDown={(e) => {
+            // Prevent text selection when using modifier keys for multi-select
+            if (e.shiftKey || e.ctrlKey || e.metaKey) {
+              e.preventDefault();
+            }
+          }}
+        >
           {isLoadingTree ? (
             <div className="flex items-center justify-center py-8">
               <span className="loading loading-spinner loading-sm"></span>
