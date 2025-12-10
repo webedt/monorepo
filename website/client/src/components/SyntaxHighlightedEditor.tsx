@@ -35,6 +35,7 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const lineNumbersRef = useRef<HTMLPreElement>(null);
   const [isDarkMode, setIsDarkMode] = useState(true);
 
   // Detect theme from document
@@ -59,11 +60,21 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
     return () => observer.disconnect();
   }, []);
 
-  // Sync scroll between textarea and syntax highlighter
+  // Sync scroll between textarea, syntax highlighter, and line numbers
   const handleScroll = useCallback(() => {
-    if (textareaRef.current && highlightRef.current) {
-      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
-      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    if (textareaRef.current) {
+      const scrollTop = textareaRef.current.scrollTop;
+      const scrollLeft = textareaRef.current.scrollLeft;
+
+      if (highlightRef.current) {
+        highlightRef.current.scrollTop = scrollTop;
+        highlightRef.current.scrollLeft = scrollLeft;
+      }
+
+      // Sync line numbers vertical scroll
+      if (lineNumbersRef.current) {
+        lineNumbersRef.current.scrollTop = scrollTop;
+      }
     }
   }, []);
 
@@ -152,10 +163,20 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
 
   return (
     <div className={`flex h-full min-h-0 ${className}`}>
-      {/* Line Numbers */}
-      <pre className="bg-base-300/50 text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none overflow-hidden flex-shrink-0 text-right leading-6 m-0">
-        {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
-      </pre>
+      {/* Line Numbers - wrapper hides scrollbar, inner pre scrolls with content */}
+      <div className="bg-base-300/50 flex-shrink-0 overflow-hidden">
+        <pre
+          ref={lineNumbersRef}
+          className="line-numbers-scroll text-base-content/40 font-mono text-sm py-4 pr-2 pl-3 select-none text-right leading-6 m-0 overflow-y-scroll h-full"
+          style={{
+            // Hide scrollbar while keeping element scrollable
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
+          }}
+        >
+          {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
+        </pre>
+      </div>
 
       {/* Editor Container with overlay */}
       <div ref={containerRef} className="flex-1 relative overflow-auto">
@@ -180,6 +201,9 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
               word-wrap: normal !important;
               overflow-wrap: normal !important;
               display: block !important;
+            }
+            .line-numbers-scroll::-webkit-scrollbar {
+              display: none;
             }
           `}</style>
           <div className="syntax-highlight-container">
