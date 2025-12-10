@@ -330,6 +330,38 @@ export class StorageClient {
         await this.copyDirectory(codexDir, codexDestDir);
       }
 
+      // CRITICAL: Force filesystem sync before tarball creation
+      // This ensures all pending writes are flushed to disk
+      // Without this, files written by Claude may not be captured in the tarball
+      try {
+        const { execSync } = await import('child_process');
+        execSync('sync', { stdio: 'pipe' });
+        logger.info('Filesystem sync completed before tarball creation', {
+          component: 'StorageClient',
+          sessionPath,
+          tmpPackageDir
+        });
+      } catch (syncError) {
+        logger.warn('Filesystem sync failed (non-critical on some systems)', {
+          component: 'StorageClient',
+          sessionPath,
+          error: syncError instanceof Error ? syncError.message : String(syncError)
+        });
+      }
+
+      // Log what files are in the package directory before tarball creation
+      const packagedFileCount = this.countFilesRecursive(tmpPackageDir);
+      const workspaceDir = path.join(tmpPackageDir, 'workspace');
+      const workspaceContents = fs.existsSync(workspaceDir) ? fs.readdirSync(workspaceDir) : [];
+
+      logger.info('Package directory contents before tarball', {
+        component: 'StorageClient',
+        sessionPath,
+        packagedFileCount,
+        topLevelItems: fs.readdirSync(tmpPackageDir),
+        workspaceContents: workspaceContents.slice(0, 20)
+      });
+
       // Create tarball
       progress('creating_tarball', 'Creating session tarball...', {});
 

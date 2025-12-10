@@ -34,6 +34,7 @@ import storageRoutes from './routes/storage.js';
 import adminRoutes from './routes/admin.js';
 import transcribeRoutes from './routes/transcribe.js';
 import completionsRoutes from './routes/completions.js';
+import imageGenRoutes from './routes/imageGen.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events } from './db/index.js';
@@ -185,6 +186,7 @@ app.use('/api/storage', storageRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', transcribeRoutes);
 app.use('/api/completions', completionsRoutes);
+app.use('/api/image-gen', imageGenRoutes);
 
 // Note: Static file serving removed - handled by website-server facade
 

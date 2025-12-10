@@ -349,7 +349,69 @@ export class Orchestrator {
         }
       );
 
-      // Step 7: Upload session back to storage
+      // Step 7: Pre-upload diagnostics - check git status and ensure files are synced
+      // This helps debug issues where files appear to be written but don't show up in commits
+      if (fs.existsSync(localWorkspacePath)) {
+        try {
+          // Force filesystem sync to ensure all writes are flushed to disk
+          execSync('sync', { stdio: 'pipe' });
+
+          // Check if it's a git repo and log status
+          const gitDir = path.join(localWorkspacePath, '.git');
+          if (fs.existsSync(gitDir)) {
+            // Add to safe.directory to avoid ownership issues
+            try {
+              execSync(`git config --global --add safe.directory "${localWorkspacePath}"`, { stdio: 'pipe' });
+            } catch {
+              // Ignore - may already be added
+            }
+
+            const gitStatus = execSync('git status --porcelain', {
+              cwd: localWorkspacePath,
+              encoding: 'utf-8',
+              stdio: ['pipe', 'pipe', 'pipe']
+            });
+            const gitDiffStat = execSync('git diff --stat', {
+              cwd: localWorkspacePath,
+              encoding: 'utf-8',
+              stdio: ['pipe', 'pipe', 'pipe']
+            });
+
+            const changedFiles = gitStatus.trim().split('\n').filter(line => line.trim());
+
+            logger.info('Pre-upload git status check', {
+              component: 'Orchestrator',
+              websiteSessionId,
+              localWorkspacePath,
+              hasChanges: changedFiles.length > 0,
+              changedFileCount: changedFiles.length,
+              changedFiles: changedFiles.slice(0, 20), // First 20 for logging
+              gitDiffStat: gitDiffStat.substring(0, 500)
+            });
+
+            // Send git status to client for visibility
+            sendEvent({
+              type: 'message',
+              stage: 'pre_upload_git_check',
+              message: changedFiles.length > 0
+                ? `Git status: ${changedFiles.length} changed file(s) detected`
+                : 'Git status: No uncommitted changes detected',
+              data: {
+                changedFileCount: changedFiles.length,
+                changedFiles: changedFiles.slice(0, 10)
+              },
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (gitCheckError) {
+          logger.warn('Pre-upload git check failed (non-critical)', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            error: gitCheckError instanceof Error ? gitCheckError.message : String(gitCheckError)
+          });
+        }
+      }
+
       sendEvent({
         type: 'message',
         stage: 'uploading',
