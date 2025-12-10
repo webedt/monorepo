@@ -3,14 +3,18 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { useEmbedded } from '@/contexts/EmbeddedContext';
-import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
+import { githubApi, sessionsApi, storageWorkerApi, imageGenApi } from '@/lib/api';
 import type { GitHubPullRequest } from '@/shared';
 import {
   useNewImagePreferencesStore,
+  useImageLayersStore,
+  useImageAiPreferencesStore,
   RESOLUTION_PRESETS,
   type AspectRatioTab,
   type ImageExtension,
+  type ImageLayer,
 } from '@/lib/store';
+import { useAuth } from '@/contexts/AuthContext';
 
 type EditorMode = 'image' | 'spritesheet' | 'animation';
 type ViewMode = 'preview' | 'edit';
@@ -332,6 +336,18 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
   // Get preferences from store
   const imagePrefs = useNewImagePreferencesStore();
+
+  // Layers store
+  const layersStore = useImageLayersStore();
+
+  // AI preferences store (local preferences for quick switching)
+  const aiPrefs = useImageAiPreferencesStore();
+
+  // Auth context for user settings
+  const { user } = useAuth();
+
+  // AI generation state
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // Fetch existing session if sessionId is provided
   const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
@@ -1038,6 +1054,83 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
     }
   }, [imageSession, modifiedImages, originalImages]);
 
+  // AI Image Generation Handler
+  const handleAiGenerate = useCallback(async () => {
+    if (!aiPrompt.trim() || isGenerating) return;
+
+    setIsGenerating(true);
+    setAiError(null);
+
+    try {
+      // Get current canvas data if available (for image editing)
+      let currentImageData: string | undefined;
+      if (canvasRef.current && selectedFile) {
+        const canvas = canvasRef.current;
+        currentImageData = canvas.toDataURL('image/png');
+      }
+
+      // Get selection if any (for partial editing)
+      const currentSelection = selection || undefined;
+
+      // Call the AI generation API
+      const response = await imageGenApi.generate({
+        prompt: aiPrompt,
+        imageData: currentImageData,
+        selection: currentSelection,
+        provider: aiPrefs.provider,
+        model: aiPrefs.model,
+      });
+
+      if (response.success && response.data?.imageData) {
+        // Create a new layer with the generated image
+        const newLayerId = layersStore.addLayer(
+          `AI: ${aiPrompt.substring(0, 20)}${aiPrompt.length > 20 ? '...' : ''}`,
+          response.data.imageData
+        );
+
+        // If we have a canvas, load the new image onto it
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const img = new Image();
+            img.onload = () => {
+              // If there's a selection, draw only in that area
+              if (selection) {
+                ctx.drawImage(img, selection.x, selection.y, selection.width, selection.height);
+              } else {
+                // Otherwise replace the entire canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              }
+
+              // Save to history
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              setCanvasHistory(prev => [...prev.slice(0, historyIndex + 1), imageData]);
+              setHistoryIndex(prev => prev + 1);
+
+              // Mark as modified
+              if (selectedFile) {
+                setModifiedImages(prev => new Set(prev).add(selectedFile.path));
+              }
+            };
+            img.src = response.data.imageData;
+          }
+        }
+
+        // Clear the prompt after successful generation
+        setAiPrompt('');
+      } else {
+        setAiError(response.error || 'Failed to generate image');
+      }
+    } catch (error) {
+      console.error('[ImageGen] Error:', error);
+      setAiError(error instanceof Error ? error.message : 'Failed to generate image');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [aiPrompt, isGenerating, selection, selectedFile, aiPrefs.provider, aiPrefs.model, historyIndex, layersStore]);
+
   // PR Handler Functions
   const handleCreatePR = async () => {
     if (!imageSession?.owner || !imageSession?.repo || !imageSession?.branch || !imageSession?.baseBranch) {
@@ -1141,14 +1234,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
   const handleAiSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aiPrompt.trim() || isGenerating) return;
-
-    setIsGenerating(true);
-    // Simulate AI generation
-    setTimeout(() => {
-      setIsGenerating(false);
-      setAiPrompt('');
-    }, 2000);
+    await handleAiGenerate();
   };
 
   // Initialize canvas when entering edit mode with an image
@@ -1700,8 +1786,10 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
       const isExpanded = expandedFolders.has(node.path);
       const isSelectedDir = selectedDirectory?.path === node.path;
-      const fileCount = node.children?.filter(c => c.type === 'file').length || 0;
-      const folderCount = node.children?.filter(c => c.type === 'folder').length || 0;
+      // Exclude blank-named nodes from the count (same filter as renderFileTree)
+      const validChildren = node.children?.filter(c => c.name && c.name.trim() !== '') || [];
+      const fileCount = validChildren.filter(c => c.type === 'file').length;
+      const folderCount = validChildren.filter(c => c.type === 'folder').length;
       return (
         <div key={node.path}>
           <div
@@ -2313,6 +2401,140 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
                 </div>
               )}
 
+              {/* Layers Panel */}
+              <div className="pt-4 border-t border-base-300">
+                <div className="font-semibold text-base-content mb-3 flex items-center justify-between">
+                  Layers
+                  <button
+                    onClick={() => layersStore.addLayer()}
+                    className="btn btn-xs btn-ghost"
+                    title="Add new layer"
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {layersStore.layers.length === 0 ? (
+                    <div className="text-xs text-base-content/50 text-center py-2">
+                      No layers yet
+                    </div>
+                  ) : (
+                    // Render layers in reverse order (top layer first)
+                    [...layersStore.layers].reverse().map((layer) => (
+                      <div
+                        key={layer.id}
+                        onClick={() => layersStore.setActiveLayer(layer.id)}
+                        className={`flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-base-200 ${
+                          layersStore.activeLayerId === layer.id ? 'bg-base-200 ring-1 ring-primary' : ''
+                        }`}
+                      >
+                        {/* Visibility toggle */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); layersStore.toggleLayerVisibility(layer.id); }}
+                          className={`btn btn-xs btn-ghost btn-square ${!layer.visible ? 'opacity-50' : ''}`}
+                          title={layer.visible ? 'Hide layer' : 'Show layer'}
+                        >
+                          {layer.visible ? (
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                            </svg>
+                          ) : (
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/>
+                            </svg>
+                          )}
+                        </button>
+
+                        {/* Layer preview thumbnail */}
+                        <div className="w-8 h-8 bg-base-300 rounded border border-base-content/20 flex-shrink-0 overflow-hidden">
+                          {layer.imageData ? (
+                            <img src={layer.imageData} alt={layer.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-base-content/30">
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Layer name */}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs truncate">{layer.name}</div>
+                          <div className="text-xs text-base-content/50">
+                            {layer.opacity}% • {layer.blendMode}
+                          </div>
+                        </div>
+
+                        {/* Lock indicator */}
+                        {layer.locked && (
+                          <svg className="w-3 h-3 text-warning" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                          </svg>
+                        )}
+
+                        {/* Delete button (don't show for last layer) */}
+                        {layersStore.layers.length > 1 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); layersStore.removeLayer(layer.id); }}
+                            className="btn btn-xs btn-ghost btn-square text-error opacity-0 group-hover:opacity-100 hover:opacity-100"
+                            title="Delete layer"
+                          >
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Layer controls */}
+                {layersStore.activeLayerId && (
+                  <div className="mt-3 space-y-2">
+                    <div>
+                      <label className="text-xs text-base-content/70 mb-1 block">
+                        Opacity: {layersStore.layers.find(l => l.id === layersStore.activeLayerId)?.opacity || 100}%
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={layersStore.layers.find(l => l.id === layersStore.activeLayerId)?.opacity || 100}
+                        onChange={(e) => layersStore.setLayerOpacity(layersStore.activeLayerId!, parseInt(e.target.value))}
+                        className="range range-xs range-primary"
+                      />
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => layersStore.moveLayerUp(layersStore.activeLayerId!)}
+                        className="btn btn-xs btn-ghost flex-1"
+                        title="Move layer up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        onClick={() => layersStore.moveLayerDown(layersStore.activeLayerId!)}
+                        className="btn btn-xs btn-ghost flex-1"
+                        title="Move layer down"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        onClick={() => layersStore.duplicateLayer(layersStore.activeLayerId!)}
+                        className="btn btn-xs btn-ghost flex-1"
+                        title="Duplicate layer"
+                      >
+                        ⎘
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* History Info */}
               <div className="pt-4 border-t border-base-300">
                 <div className="font-semibold text-base-content mb-3">History</div>
@@ -2686,16 +2908,69 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
         </div>
 
         {/* AI Prompt Input */}
-        <div className="bg-base-100 border-t border-base-300 p-4 flex-shrink-0">
+        <div className="bg-base-100 border-t border-base-300 p-3 flex-shrink-0">
           <form onSubmit={handleAiSubmit} className="max-w-4xl mx-auto">
+            {/* Provider and Model Selection Row */}
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-1">
+                <select
+                  value={aiPrefs.provider}
+                  onChange={(e) => aiPrefs.setProvider(e.target.value as 'openrouter' | 'cometapi' | 'google')}
+                  className="select select-bordered select-xs text-xs"
+                  disabled={isGenerating}
+                >
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="cometapi">CometAPI</option>
+                  <option value="google">Google AI</option>
+                </select>
+                <select
+                  value={aiPrefs.model}
+                  onChange={(e) => aiPrefs.setModel(e.target.value)}
+                  className="select select-bordered select-xs text-xs"
+                  disabled={isGenerating}
+                >
+                  <option value="google/gemini-2.5-flash-image">Gemini 2.5 Flash Image</option>
+                  <option value="google/gemini-3-pro-image-preview">Gemini 3 Pro Image Preview</option>
+                </select>
+              </div>
+              {selection && (
+                <div className="badge badge-info badge-sm gap-1">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M3 3h2v2H3V3zm4 0h2v2H7V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm4 0h2v2h-2V3zm0 4h2v2h-2V7zM3 7h2v2H3V7zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm0 4h2v2H3v-2zm4 0h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm0-4h2v2h-2v-2zm0-4h2v2h-2v-2z"/>
+                  </svg>
+                  Selection: {Math.round(selection.width)}x{Math.round(selection.height)}
+                </div>
+              )}
+              {!selection && selectedFile && (
+                <div className="text-xs text-base-content/50">
+                  Editing entire image
+                </div>
+              )}
+            </div>
+
+            {/* AI Error Message */}
+            {aiError && (
+              <div className="alert alert-error alert-sm mb-2 py-2">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+                <span className="text-xs">{aiError}</span>
+                <button onClick={() => setAiError(null)} className="btn btn-xs btn-ghost">Dismiss</button>
+              </div>
+            )}
+
+            {/* Prompt Input */}
             <div className="relative">
               <textarea
                 ref={promptInputRef}
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="Describe changes... (e.g., 'Add glowing effect', 'Change to blue')"
+                placeholder={selection
+                  ? "Describe changes to the selection... (e.g., 'Add glowing effect', 'Make it blue')"
+                  : "Describe changes to the image... (e.g., 'Add a sunset background', 'Remove the text')"
+                }
                 rows={2}
-                className="textarea textarea-bordered w-full pr-24 resize-none text-sm"
+                className="textarea textarea-bordered w-full pr-16 resize-none text-sm"
                 disabled={isGenerating}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -2704,14 +2979,12 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
                   }
                 }}
               />
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                <div className="text-xs text-base-content/50 hidden sm:block">
-                  Gemini 2.5
-                </div>
+              <div className="absolute bottom-2 right-2 flex items-center gap-2">
                 <button
                   type="submit"
                   disabled={!aiPrompt.trim() || isGenerating}
                   className={`btn btn-circle btn-sm ${isGenerating ? 'btn-warning' : 'btn-primary'}`}
+                  title={isGenerating ? 'Generating...' : 'Generate (Enter)'}
                 >
                   {isGenerating ? (
                     <span className="loading loading-spinner loading-xs"></span>
@@ -2723,13 +2996,23 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
                 </button>
               </div>
             </div>
+            <div className="flex items-center justify-between mt-1 text-xs text-base-content/50">
+              <span>Press Enter to generate, Shift+Enter for new line</span>
+              <span>
+                {user?.imageAiKeys?.[aiPrefs.provider] ? (
+                  <span className="text-success">API key configured</span>
+                ) : (
+                  <a href="/settings" className="link link-warning">Configure API key in Settings</a>
+                )}
+              </span>
+            </div>
           </form>
         </div>
       </div>
     );
   // Only recreate when these specific values change - NOT isDrawing or other transient state
   // Event handlers are accessed via refs so they don't need to be in dependencies
-  }, [canvasDimensions, canvasZoom, selectedFile?.name, currentTool, brushSize, selection, imageUrl, isLoadingImage, aiPrompt, isGenerating, handleAiSubmit, handleUndo, handleRedo, historyIndex, canvasHistory.length, setCurrentTool]);
+  }, [canvasDimensions, canvasZoom, selectedFile?.name, currentTool, brushSize, selection, imageUrl, isLoadingImage, aiPrompt, isGenerating, aiError, aiPrefs.provider, aiPrefs.model, user?.imageAiKeys, handleAiSubmit, handleUndo, handleRedo, historyIndex, canvasHistory.length, setCurrentTool, modifiedImages.size, commitStatus, commitChanges]);
 
   // Main content based on state
   const renderMainContent = () => {
