@@ -120,22 +120,44 @@ const removeEmptyFolders = (nodes: FileNode[]): FileNode[] => {
 // Transform storage-worker files to our filtered TreeNode format for sound
 const transformStorageFilesForSound = (
   files: { path: string; size: number; type: 'file' | 'directory' }[],
-  filterMode: SoundFileType | 'all'
+  filterMode: SoundFileType | 'all',
+  repoName?: string
 ): FileNode[] => {
   const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
 
+  // Build the prefix to strip: workspace/ and optionally the repo name folder
+  // This prevents showing the root folder (e.g., "hello-world") when it's the repo itself
+  const prefixToStrip = repoName ? `workspace/${repoName}/` : 'workspace/';
+  const altPrefixToStrip = 'workspace/'; // Fallback for files directly in workspace/
+
   // Filter to only include files under workspace/ and strip the prefix
+  // Also filter out .git directories and their contents
   const workspaceFiles = files
     .filter(f => f.path.startsWith('workspace/'))
     .filter(f => {
+      // Exclude .git folder and anything inside it
       const pathWithoutPrefix = f.path.replace(/^workspace\//, '');
       const parts = pathWithoutPrefix.split('/');
       return !parts.some(part => part === '.git');
     })
-    .map(f => ({
-      ...f,
-      path: f.path.replace(/^workspace\//, ''),
-    }));
+    .map(f => {
+      // Strip the full prefix (workspace/repoName/) if it matches, otherwise just workspace/
+      let newPath = f.path;
+      if (repoName && f.path.startsWith(prefixToStrip)) {
+        newPath = f.path.slice(prefixToStrip.length);
+      } else if (f.path.startsWith(altPrefixToStrip)) {
+        newPath = f.path.slice(altPrefixToStrip.length);
+        // If there's a repoName and the path starts with it, strip that too
+        if (repoName && (newPath === repoName || newPath.startsWith(repoName + '/'))) {
+          newPath = newPath === repoName ? '' : newPath.slice(repoName.length + 1);
+        }
+      }
+      return {
+        ...f,
+        path: newPath,
+      };
+    })
+    .filter(f => f.path !== ''); // Filter out empty paths (the repo root directory itself)
 
   // Sort items: directories first, then alphabetically
   const sortedItems = [...workspaceFiles].sort((a, b) => {
@@ -371,6 +393,7 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
       });
 
       // Create a code session in the database
+      // Note: createCodeSession already clones the repo and uploads to storage
       const sessionResponse = await sessionsApi.createCodeSession({
         title: `Sound: ${repo.name}`,
         repositoryUrl: repo.cloneUrl,
@@ -380,21 +403,21 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
         branch: branchName,
       });
 
-      if (sessionResponse?.data?.id) {
-        // Initialize the repository
-        await sessionsApi.initializeRepository(sessionResponse.data.id);
+      const dbSessionId = sessionResponse.data.sessionId;
 
-        setSoundSession({
-          owner,
-          repo: repoName,
-          branch: branchName,
-          baseBranch,
-          sessionId: sessionResponse.data.id,
-        });
+      setSoundSession({
+        owner,
+        repo: repoName,
+        branch: branchName,
+        baseBranch,
+        sessionId: dbSessionId,
+      });
 
-        // Navigate to the session URL
-        navigate(`/session/${sessionResponse.data.id}/sound`, { replace: true });
-      }
+      // Navigate to the session URL
+      navigate(`/session/${dbSessionId}/sound`, { replace: true });
+
+      // Expand root folders by default
+      setExpandedFolders(new Set());
     } catch (error) {
       console.error('[Sound] Failed to initialize session:', error);
       setInitError(error instanceof Error ? error.message : 'Failed to initialize session');
@@ -424,10 +447,11 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
   });
 
   // Transform files to tree format
+  // Pass the repo name to strip the root folder (e.g., "hello-world") from the tree
   const fileTree = useMemo(() => {
     if (!storageFiles || storageFiles.length === 0) return [];
-    return transformStorageFilesForSound(storageFiles, filterMode);
-  }, [storageFiles, filterMode]);
+    return transformStorageFilesForSound(storageFiles, filterMode, soundSession?.repo);
+  }, [storageFiles, filterMode, soundSession?.repo]);
 
   // Initialize Web Audio API
   useEffect(() => {
@@ -467,8 +491,14 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
     setHasUnsavedChanges(false);
 
     try {
+      // Build storage path: workspace/<repoName>/<path>
+      // The path parameter has the repo name stripped for display, so we need to add it back
+      const storagePath = soundSession.repo
+        ? `workspace/${soundSession.repo}/${filePath}`
+        : `workspace/${filePath}`;
+
       // Get the file blob
-      const blob = await storageWorkerApi.getFileBlob(soundSession.sessionId, `workspace/${filePath}`);
+      const blob = await storageWorkerApi.getFileBlob(soundSession.sessionId, storagePath);
       if (!blob) {
         throw new Error('Failed to load audio file');
       }
@@ -1035,10 +1065,15 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
       // Convert AudioBuffer to WAV blob
       const wavBlob = audioBufferToWav(audioBuffer);
 
+      // Build storage path: workspace/<repoName>/<path>
+      const storagePath = soundSession.repo
+        ? `workspace/${soundSession.repo}/${selectedFile.path}`
+        : `workspace/${selectedFile.path}`;
+
       // Save to storage
       const success = await storageWorkerApi.writeFile(
         soundSession.sessionId,
-        `workspace/${selectedFile.path}`,
+        storagePath,
         wavBlob
       );
 
@@ -1053,7 +1088,7 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
     } finally {
       setIsSaving(false);
     }
-  }, [audioBuffer, selectedFile, soundSession?.sessionId, refetchFiles]);
+  }, [audioBuffer, selectedFile, soundSession?.sessionId, soundSession?.repo, refetchFiles]);
 
   // Toggle folder expansion
   const toggleFolder = useCallback((path: string) => {
