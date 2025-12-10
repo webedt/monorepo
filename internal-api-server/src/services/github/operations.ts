@@ -512,6 +512,45 @@ export class GitHubOperations {
         };
       }
 
+      // Pre-check: List actual files in workspace for debugging
+      // This helps identify if files are missing before git even runs
+      const listFilesRecursive = (dir: string, baseDir: string = dir, files: string[] = []): string[] => {
+        try {
+          const items = fs.readdirSync(dir);
+          for (const item of items) {
+            if (item === '.git' || item === 'node_modules') continue;
+            const fullPath = path.join(dir, item);
+            const relativePath = fullPath.replace(baseDir, '').replace(/^\//, '');
+            const stat = fs.statSync(fullPath);
+            if (stat.isDirectory()) {
+              listFilesRecursive(fullPath, baseDir, files);
+            } else {
+              files.push(relativePath);
+            }
+          }
+        } catch {
+          // Ignore errors
+        }
+        return files;
+      };
+
+      const allFiles = listFilesRecursive(workspacePath);
+      const recentFiles = allFiles
+        .map(f => ({ path: f, mtime: fs.statSync(path.join(workspacePath, f)).mtime }))
+        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+        .slice(0, 20);
+
+      logger.info('Workspace file inventory before git check', {
+        component: 'GitHubOperations',
+        sessionId,
+        workspacePath,
+        totalFileCount: allFiles.length,
+        recentlyModifiedFiles: recentFiles.map(f => ({
+          path: f.path,
+          mtime: f.mtime.toISOString()
+        }))
+      });
+
       // Check for changes
       const hasChanges = await gitHelper.hasChanges();
       const gitStatus = await gitHelper.getStatus();
@@ -519,6 +558,39 @@ export class GitHubOperations {
 
       // Get more detailed git info for debugging
       const gitDiff = await gitHelper.getDiff();
+
+      // Also run raw git commands for additional diagnostics
+      let rawGitStatusOutput = '';
+      let rawGitLsFilesOutput = '';
+      try {
+        const { execSync } = await import('child_process');
+
+        // Add safe.directory first
+        try {
+          execSync(`git config --global --add safe.directory "${workspacePath}"`, { stdio: 'pipe' });
+        } catch {
+          // Ignore
+        }
+
+        rawGitStatusOutput = execSync('git status --porcelain', {
+          cwd: workspacePath,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+
+        // Check for untracked files that git might have missed
+        rawGitLsFilesOutput = execSync('git ls-files --others --exclude-standard', {
+          cwd: workspacePath,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+      } catch (rawGitError) {
+        logger.warn('Raw git diagnostics failed', {
+          component: 'GitHubOperations',
+          sessionId,
+          error: rawGitError instanceof Error ? rawGitError.message : String(rawGitError)
+        });
+      }
 
       logger.info('Git status check for auto-commit', {
         component: 'GitHubOperations',
@@ -529,7 +601,10 @@ export class GitHubOperations {
         currentBranch,
         gitStatus,
         gitDiffLength: gitDiff.length,
-        gitDiffPreview: gitDiff.substring(0, 500)
+        gitDiffPreview: gitDiff.substring(0, 500),
+        rawGitStatusOutput: rawGitStatusOutput.substring(0, 500),
+        rawGitLsFilesOutput: rawGitLsFilesOutput.substring(0, 500),
+        untrackedFilesExist: rawGitLsFilesOutput.trim().length > 0
       });
 
       // Send analysis result to client
