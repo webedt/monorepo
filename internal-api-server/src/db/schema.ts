@@ -28,6 +28,15 @@ export const users = pgTable('users', {
     tokenType?: string;
     scope?: string;
   }>(),
+  // Image editing AI provider API keys
+  imageAiKeys: json('image_ai_keys').$type<{
+    openrouter?: string;
+    cometapi?: string;
+    google?: string;
+  }>(),
+  // Image editing AI preferences
+  imageAiProvider: text('image_ai_provider').default('openrouter'), // 'openrouter' | 'cometapi' | 'google'
+  imageAiModel: text('image_ai_model').default('google/gemini-2.5-flash-image'), // model identifier
   preferredProvider: text('preferred_provider').default('claude').notNull(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
   voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),

@@ -109,6 +109,15 @@ export default function Settings() {
   const [preferredModel, setPreferredModel] = useState(user?.preferredModel || '');
   const [chatVerbosity, setChatVerbosity] = useState<'minimal' | 'normal' | 'verbose'>(user?.chatVerbosityLevel || 'verbose');
 
+  // Image AI settings state
+  const [imageAiProvider, setImageAiProvider] = useState<'openrouter' | 'cometapi' | 'google'>(
+    (user?.imageAiProvider as 'openrouter' | 'cometapi' | 'google') || 'openrouter'
+  );
+  const [imageAiModel, setImageAiModel] = useState(user?.imageAiModel || 'google/gemini-2.5-flash-image');
+  const [imageAiKeys, setImageAiKeys] = useState<{ openrouter?: string; cometapi?: string; google?: string }>(
+    (user?.imageAiKeys as any) || {}
+  );
+
   // Voice command keywords state
   const [voiceKeywords, setVoiceKeywords] = useState<string[]>(user?.voiceCommandKeywords || []);
   const [newKeyword, setNewKeyword] = useState('');
@@ -373,6 +382,40 @@ export default function Settings() {
     },
     onError: (error) => {
       alert(`Failed to update chat verbosity: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  // Image AI mutations
+  const updateImageAiKeys = useMutation({
+    mutationFn: userApi.updateImageAiKeys,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Image AI keys updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update image AI keys: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const updateImageAiProvider = useMutation({
+    mutationFn: userApi.updateImageAiProvider,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Image AI provider updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update image AI provider: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const updateImageAiModel = useMutation({
+    mutationFn: userApi.updateImageAiModel,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Image AI model updated successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update image AI model: ${error instanceof Error ? error.message : 'Unknown error'}`);
     },
   });
 
@@ -964,6 +1007,155 @@ export default function Settings() {
                     >
                       {updatePreferredModel.isPending ? 'Saving...' : 'Save Setting'}
                     </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Image AI Settings */}
+            <div className="card bg-base-100 shadow">
+              <div className="card-body">
+                <h2 className="card-title mb-2">Image AI Settings</h2>
+
+                <div className="space-y-6">
+                  <p className="text-sm text-base-content/70 leading-relaxed">
+                    Configure AI providers and API keys for image editing. These settings are used in the Image Editor for AI-powered image generation and editing.
+                  </p>
+
+                  <div className="divider my-4"></div>
+
+                  {/* Provider Selection */}
+                  <div className="form-control w-full">
+                    <div className="mb-3">
+                      <span className="font-medium text-base text-base-content">Image AI Provider</span>
+                    </div>
+                    <select
+                      value={imageAiProvider}
+                      onChange={(e) => setImageAiProvider(e.target.value as 'openrouter' | 'cometapi' | 'google')}
+                      className="select select-bordered w-full max-w-md"
+                    >
+                      <option value="openrouter">OpenRouter - Access multiple AI models</option>
+                      <option value="cometapi">CometAPI - Alternative provider</option>
+                      <option value="google">Google AI - Direct Gemini access</option>
+                    </select>
+                    <div className="mt-2">
+                      <span className="text-sm text-base-content/60">
+                        {imageAiKeys[imageAiProvider] ? (
+                          <span className="text-success">✓ API key configured</span>
+                        ) : (
+                          <span className="text-warning">⚠️ No API key set for this provider</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Model Selection */}
+                  <div className="form-control w-full">
+                    <div className="mb-3">
+                      <span className="font-medium text-base text-base-content">Image AI Model</span>
+                    </div>
+                    <select
+                      value={imageAiModel}
+                      onChange={(e) => setImageAiModel(e.target.value)}
+                      className="select select-bordered w-full max-w-md"
+                    >
+                      <option value="google/gemini-2.5-flash-image">Gemini 2.5 Flash Image (Default)</option>
+                      <option value="google/gemini-3-pro-image-preview">Gemini 3 Pro Image Preview</option>
+                    </select>
+                  </div>
+
+                  <div className="flex justify-start pt-2 gap-2">
+                    <button
+                      onClick={() => {
+                        updateImageAiProvider.mutate(imageAiProvider);
+                      }}
+                      disabled={updateImageAiProvider.isPending || imageAiProvider === (user?.imageAiProvider || 'openrouter')}
+                      className="btn btn-primary min-w-[140px]"
+                    >
+                      {updateImageAiProvider.isPending ? 'Saving...' : 'Save Provider'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        updateImageAiModel.mutate(imageAiModel);
+                      }}
+                      disabled={updateImageAiModel.isPending || imageAiModel === (user?.imageAiModel || 'google/gemini-2.5-flash-image')}
+                      className="btn btn-primary min-w-[140px]"
+                    >
+                      {updateImageAiModel.isPending ? 'Saving...' : 'Save Model'}
+                    </button>
+                  </div>
+
+                  <div className="divider my-4"></div>
+
+                  {/* API Keys */}
+                  <div className="space-y-4">
+                    <div className="mb-3">
+                      <span className="font-medium text-base text-base-content">API Keys</span>
+                      <p className="text-sm text-base-content/60 mt-1">
+                        Enter your API keys for each provider. Keys are stored securely and never shared.
+                      </p>
+                    </div>
+
+                    {/* OpenRouter Key */}
+                    <div className="form-control w-full">
+                      <label className="label">
+                        <span className="label-text">OpenRouter API Key</span>
+                        <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="link link-primary text-xs">
+                          Get API key →
+                        </a>
+                      </label>
+                      <input
+                        type="password"
+                        value={imageAiKeys.openrouter || ''}
+                        onChange={(e) => setImageAiKeys({ ...imageAiKeys, openrouter: e.target.value })}
+                        placeholder="sk-or-..."
+                        className="input input-bordered w-full max-w-md font-mono text-sm"
+                      />
+                    </div>
+
+                    {/* CometAPI Key */}
+                    <div className="form-control w-full">
+                      <label className="label">
+                        <span className="label-text">CometAPI API Key</span>
+                        <a href="https://cometapi.com" target="_blank" rel="noopener noreferrer" className="link link-primary text-xs">
+                          Get API key →
+                        </a>
+                      </label>
+                      <input
+                        type="password"
+                        value={imageAiKeys.cometapi || ''}
+                        onChange={(e) => setImageAiKeys({ ...imageAiKeys, cometapi: e.target.value })}
+                        placeholder="Enter CometAPI key..."
+                        className="input input-bordered w-full max-w-md font-mono text-sm"
+                      />
+                    </div>
+
+                    {/* Google AI Key */}
+                    <div className="form-control w-full">
+                      <label className="label">
+                        <span className="label-text">Google AI API Key</span>
+                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="link link-primary text-xs">
+                          Get API key →
+                        </a>
+                      </label>
+                      <input
+                        type="password"
+                        value={imageAiKeys.google || ''}
+                        onChange={(e) => setImageAiKeys({ ...imageAiKeys, google: e.target.value })}
+                        placeholder="AIza..."
+                        className="input input-bordered w-full max-w-md font-mono text-sm"
+                      />
+                    </div>
+
+                    <div className="flex justify-start pt-2">
+                      <button
+                        onClick={() => updateImageAiKeys.mutate(imageAiKeys)}
+                        disabled={updateImageAiKeys.isPending}
+                        className="btn btn-primary min-w-[140px]"
+                      >
+                        {updateImageAiKeys.isPending ? 'Saving...' : 'Save API Keys'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
