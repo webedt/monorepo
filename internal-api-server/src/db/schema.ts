@@ -28,6 +28,11 @@ export const users = pgTable('users', {
     tokenType?: string;
     scope?: string;
   }>(),
+  // OpenRouter API key for code completions (autocomplete)
+  openrouterApiKey: text('openrouter_api_key'),
+  // Autocomplete settings
+  autocompleteEnabled: boolean('autocomplete_enabled').default(true).notNull(),
+  autocompleteModel: text('autocomplete_model').default('openai/gpt-oss-120b:cerebras'),
   preferredProvider: text('preferred_provider').default('claude').notNull(),
   imageResizeMaxDimension: integer('image_resize_max_dimension').default(1024).notNull(),
   voiceCommandKeywords: json('voice_command_keywords').$type<string[]>().default([]),

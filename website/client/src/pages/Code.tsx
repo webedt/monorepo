@@ -5,6 +5,7 @@ import SessionLayout from '@/components/SessionLayout';
 import SyntaxHighlightedEditor from '@/components/SyntaxHighlightedEditor';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
+import { useAutocomplete, getLanguageFromFilename } from '@/hooks/useAutocomplete';
 import { useEditorSessionStore } from '@/lib/store';
 import type { GitHubPullRequest } from '@/shared';
 
@@ -345,6 +346,62 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [newName, setNewName] = useState('');
   const [isOperating, setIsOperating] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+
+  // AI Autocomplete hook
+  const {
+    suggestion: autocompleteSuggestion,
+    isLoading: isAutocompleteLoading,
+    cursorPosition: autocompleteCursorPosition,
+    requestCompletion,
+    acceptSuggestion: acceptAutocompleteSuggestion,
+    clearSuggestion: clearAutocompleteSuggestion,
+  } = useAutocomplete({
+    enabled: true, // TODO: Make this configurable via user settings
+    debounceMs: 400,
+    minPrefixLength: 15,
+  });
+
+  // Handle accepting autocomplete suggestion
+  const handleAcceptAutocomplete = useCallback(() => {
+    const suggestion = acceptAutocompleteSuggestion();
+    if (suggestion && fileContent !== null && autocompleteCursorPosition !== null) {
+      // Insert the suggestion at cursor position
+      const before = fileContent.slice(0, autocompleteCursorPosition);
+      const after = fileContent.slice(autocompleteCursorPosition);
+      const newContent = before + suggestion + after;
+
+      // Update content and trigger change
+      setFileContent(newContent);
+
+      // Calculate new cursor position
+      const newCursorPos = autocompleteCursorPosition + suggestion.length;
+
+      // Trigger onChange to update pending changes
+      if (activeTabPath) {
+        setPendingChanges(prev => {
+          const existingChange = prev.get(activeTabPath);
+          if (existingChange) {
+            const newChanges = new Map(prev);
+            newChanges.set(activeTabPath, {
+              ...existingChange,
+              content: newContent,
+            });
+            return newChanges;
+          }
+          return prev;
+        });
+      }
+
+      // Focus textarea and set cursor position after React updates
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.selectionStart = newCursorPos;
+          textareaRef.current.selectionEnd = newCursorPos;
+        }
+      }, 0);
+    }
+  }, [acceptAutocompleteSuggestion, fileContent, autocompleteCursorPosition, activeTabPath]);
 
   // Fetch existing session if sessionId is provided
   const { data: existingSessionData, isLoading: isLoadingExistingSession } = useQuery({
@@ -1113,7 +1170,14 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Trigger debounced auto-save
     debouncedSave(activeTabPath, newContent);
-  }, [activeTabPath, debouncedSave, tabs, pinTab]);
+
+    // Request autocomplete if cursor position is available
+    const cursorPos = cursorStart ?? textareaRef.current?.selectionStart;
+    if (cursorPos !== undefined) {
+      const language = getLanguageFromFilename(activeTabPath);
+      requestCompletion(newContent, cursorPos, language, activeTabPath);
+    }
+  }, [activeTabPath, debouncedSave, tabs, pinTab, requestCompletion]);
 
   // Undo function
   const handleUndo = useCallback(() => {
@@ -2131,8 +2195,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                   filename={activeTabPath || ''}
                   onChange={handleContentChange}
                   onKeyDown={(e) => {
-                    // Handle Tab key for indentation
-                    if (e.key === 'Tab') {
+                    // If there's no autocomplete suggestion, Tab inserts indentation
+                    // (When there IS a suggestion, the editor component handles Tab to accept it)
+                    if (e.key === 'Tab' && !autocompleteSuggestion) {
                       e.preventDefault();
                       const target = e.target as HTMLTextAreaElement;
                       const start = target.selectionStart;
@@ -2140,8 +2205,21 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
                       const newValue = fileContent.substring(0, start) + '  ' + fileContent.substring(end);
                       handleContentChange(newValue, start + 2, start + 2);
                     }
+                    // Escape clears autocomplete suggestion
+                    if (e.key === 'Escape' && autocompleteSuggestion) {
+                      clearAutocompleteSuggestion();
+                    }
+                    // Arrow keys clear autocomplete (user is navigating)
+                    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                      clearAutocompleteSuggestion();
+                    }
                   }}
                   className="flex-1"
+                  // AI Autocomplete props
+                  ghostText={autocompleteSuggestion}
+                  ghostTextPosition={autocompleteCursorPosition}
+                  onAcceptGhostText={handleAcceptAutocomplete}
+                  isGhostTextLoading={isAutocompleteLoading}
                 />
               )}
             </div>

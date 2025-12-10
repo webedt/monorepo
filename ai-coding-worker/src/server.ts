@@ -3,6 +3,12 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { ExecuteRequest, APIError } from './types';
 import { Orchestrator } from './orchestrator';
+import {
+  OpenRouterCompletionProvider,
+  getCompletionWithCache,
+  CompletionRequest,
+  CompletionResponse,
+} from './providers/OpenRouterCompletionProvider';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -401,6 +407,113 @@ app.post('/abort', (req: Request, res: Response) => {
 });
 
 /**
+ * Code Completion endpoint - fast autocomplete using OpenRouter
+ *
+ * This is a lightweight, non-session endpoint for real-time code completions.
+ * Uses OpenRouter with Cerebras-hosted GPT-OSS-120B for ultra-fast inference.
+ *
+ * Unlike /execute, this does NOT:
+ * - Exit the worker after completion
+ * - Create/manage sessions
+ * - Access the filesystem
+ *
+ * Required fields:
+ * - prefix: Code before the cursor
+ * - language: Programming language
+ * - authentication: OpenRouter API key
+ *
+ * Optional fields:
+ * - suffix: Code after the cursor (for fill-in-the-middle)
+ * - filename: Current file name (for context)
+ * - maxTokens: Max tokens to generate (default: 150)
+ * - temperature: Sampling temperature (default: 0.2)
+ * - model: OpenRouter model (default: openai/gpt-oss-120b:cerebras)
+ */
+app.post('/completions', async (req: Request, res: Response) => {
+  console.log(`[Container ${containerId}] Received completion request`);
+  res.setHeader('X-Container-ID', containerId);
+
+  // Note: We allow completions even when worker is "busy" with /execute
+  // because completions are lightweight and stateless
+
+  const {
+    prefix,
+    suffix,
+    language,
+    filename,
+    cursorLine,
+    cursorColumn,
+    maxTokens = 150,
+    temperature = 0.2,
+    model,
+    authentication,
+  } = req.body;
+
+  // Validate required fields
+  if (!prefix || typeof prefix !== 'string') {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required field: prefix',
+      containerId,
+    });
+    return;
+  }
+
+  if (!language || typeof language !== 'string') {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required field: language',
+      containerId,
+    });
+    return;
+  }
+
+  if (!authentication || typeof authentication !== 'string') {
+    res.status(400).json({
+      error: 'invalid_request',
+      message: 'Missing required field: authentication (OpenRouter API key)',
+      containerId,
+    });
+    return;
+  }
+
+  try {
+    // Create the completion provider
+    const provider = new OpenRouterCompletionProvider(
+      authentication,
+      model || OpenRouterCompletionProvider.DEFAULT_MODEL
+    );
+
+    // Build the completion request
+    const completionRequest: CompletionRequest = {
+      prefix,
+      suffix: suffix || '',
+      language,
+      filename,
+      cursorLine,
+      cursorColumn,
+      maxTokens,
+      temperature,
+    };
+
+    // Get completion with caching
+    const result = await getCompletionWithCache(provider, completionRequest);
+
+    console.log(`[Container ${containerId}] Completion generated in ${result.latencyMs}ms (cached: ${result.cached})`);
+
+    res.json(result);
+  } catch (error) {
+    console.error(`[Container ${containerId}] Completion error:`, error);
+
+    res.status(500).json({
+      error: 'completion_failed',
+      message: error instanceof Error ? error.message : 'Failed to generate completion',
+      containerId,
+    });
+  }
+});
+
+/**
  * Shutdown endpoint - allows client to signal worker can exit immediately
  * Client calls this after receiving all SSE events to speed up worker recycling
  */
@@ -471,6 +584,7 @@ app.use((req: Request, res: Response) => {
       'GET  /status',
       'POST /execute',
       'POST /query',
+      'POST /completions',
       'POST /abort',
       'POST /shutdown'
     ],
@@ -494,6 +608,7 @@ app.listen(PORT, () => {
   console.log('  GET    /status                    - Worker status (idle/busy)');
   console.log('  POST   /execute                   - Execute LLM against workspace');
   console.log('  POST   /query                     - One-off LLM query (titles, commits, etc)');
+  console.log('  POST   /completions               - Fast code completions (autocomplete)');
   console.log('  POST   /abort                     - Abort current execution');
   console.log('  POST   /shutdown                  - Signal worker to shutdown');
   console.log('');
