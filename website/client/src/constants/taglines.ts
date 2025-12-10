@@ -143,7 +143,7 @@ export const TAGLINES = [
   "Hold my edit.",
   "Everything is a fine edit.",
   "This is the edit that never ends.",
-  "Friends don’t let friends skip edits.",
+  "Friends don’t let friends edit drunk.",
   "Friends don’t lie… they edit.",
   "I can edit this all day.",
   "That wasn’t flying, that was controlled editing.",
@@ -197,6 +197,7 @@ export const TAGLINES = [
   "You either respect the edit, or the edit corrects you.",
   "If you come at the edit, you best not miss.",
   "They see me rollin’, they edittin’.",
+  "They see me editin', they hatin'.",
   "All according to edit.",
   "Praise the sun, praise the edit.",
   "On your left… another edit.",
@@ -303,5 +304,5 @@ export const TAGLINES = [
   "Baby edit, doo doo doo doo doo doo.",
   "I am the edit, goo-goo g'joob.",
   "Rollin' with my e--dits.",
-  "These edits are making me thirsty",
+  "These edits are making me thirsty.",
 ];
