@@ -157,7 +157,12 @@ const transformStorageFilesForSound = (
         path: newPath,
       };
     })
-    .filter(f => f.path !== ''); // Filter out empty paths (the repo root directory itself)
+    .filter(f => f.path !== '') // Filter out empty paths (the repo root directory itself)
+    .filter(f => {
+      // Exclude blank-named folders and files (paths that have empty segments)
+      const parts = f.path.split('/');
+      return !parts.some(part => part === '');
+    });
 
   // Sort items: directories first, then alphabetically
   const sortedItems = [...workspaceFiles].sort((a, b) => {
@@ -182,8 +187,13 @@ const transformStorageFilesForSound = (
     const pathParts = item.path.split('/');
     let currentLevel = root;
 
+    // Skip items with blank-named segments
+    if (pathParts.some(part => part === '')) continue;
+
     for (let i = 0; i < pathParts.length; i++) {
       const part = pathParts[i];
+      // Skip blank-named folders
+      if (part === '') continue;
       const currentPath = pathParts.slice(0, i + 1).join('/');
       const isLastPart = i === pathParts.length - 1;
 
@@ -1150,13 +1160,40 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPlaying, play, pause, undo, redo, saveAudioFile, selection, deleteSelection]);
 
+  // Helper to count displayed items in a folder (excluding blank-named)
+  const countFolderItems = useCallback((node: FileNode): { files: number; folders: number } => {
+    if (!node.children) return { files: 0, folders: 0 };
+
+    let files = 0;
+    let folders = 0;
+
+    for (const child of node.children) {
+      // Skip blank-named items
+      if (child.name === '') continue;
+
+      if (child.type === 'file') {
+        files++;
+      } else {
+        folders++;
+      }
+    }
+
+    return { files, folders };
+  }, []);
+
   // Render file tree recursively
   const renderFileTree = (nodes: FileNode[], depth = 0): React.ReactNode => {
-    return nodes.map(node => {
+    // Filter out blank-named nodes
+    const filteredNodes = nodes.filter(node => node.name !== '');
+
+    return filteredNodes.map(node => {
       const isExpanded = expandedFolders.has(node.path);
       const isSelected = selectedFile?.path === node.path;
 
       if (node.type === 'folder') {
+        const { files, folders } = countFolderItems(node);
+        const totalItems = files + folders;
+
         return (
           <div key={node.path}>
             <div
@@ -1167,6 +1204,9 @@ export function SoundContent({ sessionId: sessionIdProp }: SoundContentProps = {
               <span className="text-xs">{isExpanded ? '▼' : '▶'}</span>
               <span className="text-sm">📁</span>
               <span className="text-sm truncate">{node.name}</span>
+              {totalItems > 0 && (
+                <span className="text-xs text-base-content/50 ml-1">({totalItems})</span>
+              )}
             </div>
             {isExpanded && node.children && (
               <div>{renderFileTree(node.children, depth + 1)}</div>
