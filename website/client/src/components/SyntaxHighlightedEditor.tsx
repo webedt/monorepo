@@ -9,6 +9,14 @@ interface SyntaxHighlightedEditorProps {
   onChange: (value: string, selectionStart: number, selectionEnd: number) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   className?: string;
+  /** Ghost text suggestion to display (AI autocomplete) */
+  ghostText?: string | null;
+  /** Cursor position where ghost text should appear */
+  ghostTextPosition?: number | null;
+  /** Callback when ghost text is accepted (e.g., Tab pressed) */
+  onAcceptGhostText?: () => void;
+  /** Whether ghost text is loading */
+  isGhostTextLoading?: boolean;
 }
 
 /**
@@ -31,6 +39,10 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
   onChange,
   onKeyDown,
   className = '',
+  ghostText,
+  ghostTextPosition,
+  onAcceptGhostText,
+  isGhostTextLoading,
 }: SyntaxHighlightedEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -86,6 +98,44 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
     const target = e.target;
     onChange(target.value, target.selectionStart, target.selectionEnd);
   };
+
+  // Handle keyboard events (Tab to accept ghost text)
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Tab to accept ghost text
+    if (e.key === 'Tab' && ghostText && onAcceptGhostText) {
+      e.preventDefault();
+      onAcceptGhostText();
+      return;
+    }
+
+    // Forward to parent handler
+    onKeyDown?.(e);
+  }, [ghostText, onAcceptGhostText, onKeyDown]);
+
+  // Calculate ghost text position for rendering
+  const ghostTextOverlay = useMemo(() => {
+    if (!ghostText || ghostTextPosition === null || ghostTextPosition === undefined) {
+      return null;
+    }
+
+    // Split content at cursor position
+    const beforeCursor = content.slice(0, ghostTextPosition);
+    const afterCursor = content.slice(ghostTextPosition);
+
+    // Calculate line and column
+    const lines = beforeCursor.split('\n');
+    const lineNumber = lines.length;
+    const column = lines[lines.length - 1].length;
+
+    // Create the ghost text display
+    // We'll render invisible text before the ghost to position it correctly
+    return {
+      lineNumber,
+      column,
+      prefix: beforeCursor,
+      suffix: afterCursor,
+    };
+  }, [ghostText, ghostTextPosition, content]);
 
   // Count lines for line numbers - memoized to avoid recalculation on every render
   const lineCount = useMemo(() => {
@@ -211,13 +261,55 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
           </div>
         </div>
 
+        {/* Ghost text overlay (AI autocomplete suggestion) */}
+        {ghostText && ghostTextOverlay && (
+          <div
+            className="absolute inset-0 overflow-hidden pointer-events-none font-mono text-sm p-4 leading-6"
+            aria-hidden="true"
+            style={{
+              whiteSpace: 'pre',
+              wordWrap: 'normal',
+              overflowWrap: 'normal',
+            }}
+          >
+            {/* Invisible prefix text to position the ghost text correctly */}
+            <span style={{ visibility: 'hidden' }}>
+              {ghostTextOverlay.prefix}
+            </span>
+            {/* Ghost text suggestion */}
+            <span
+              className="text-base-content/40 italic"
+              style={{
+                backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+              }}
+            >
+              {ghostText}
+            </span>
+          </div>
+        )}
+
+        {/* Loading indicator for ghost text */}
+        {isGhostTextLoading && (
+          <div className="absolute bottom-2 right-2 flex items-center gap-1 text-xs text-base-content/50 bg-base-300/80 px-2 py-1 rounded">
+            <span className="inline-block w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+            <span>Thinking...</span>
+          </div>
+        )}
+
+        {/* Tab hint when ghost text is shown */}
+        {ghostText && !isGhostTextLoading && (
+          <div className="absolute bottom-2 right-2 text-xs text-base-content/40 bg-base-300/80 px-2 py-1 rounded">
+            Press <kbd className="px-1 py-0.5 bg-base-200 rounded text-base-content/60">Tab</kbd> to accept
+          </div>
+        )}
+
         {/* Textarea layer (on top, transparent text) */}
         <textarea
           ref={textareaRef}
           value={content}
           onChange={handleChange}
           onScroll={handleScroll}
-          onKeyDown={onKeyDown}
+          onKeyDown={handleKeyDown}
           className="absolute inset-0 w-full h-full bg-transparent text-transparent font-mono text-sm p-4 resize-none focus:outline-none leading-6 overflow-auto border-none selection:bg-primary/30"
           spellCheck={false}
           autoComplete="off"

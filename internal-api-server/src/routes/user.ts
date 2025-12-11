@@ -461,6 +461,117 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
   }
 });
 
+// Update OpenRouter API key (for autocomplete)
+router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { apiKey } = req.body;
+
+    // Validate API key format (OpenRouter keys start with sk-or-)
+    if (!apiKey || typeof apiKey !== 'string') {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid API key. Must be a non-empty string.',
+      });
+      return;
+    }
+
+    if (!apiKey.startsWith('sk-or-')) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid OpenRouter API key format. Keys should start with "sk-or-".',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set({ openrouterApiKey: apiKey })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'OpenRouter API key updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update OpenRouter API key error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update OpenRouter API key' });
+  }
+});
+
+// Remove OpenRouter API key
+router.delete('/openrouter-api-key', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    await db
+      .update(users)
+      .set({ openrouterApiKey: null })
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'OpenRouter API key removed' },
+    });
+  } catch (error) {
+    console.error('Remove OpenRouter API key error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove OpenRouter API key' });
+  }
+});
+
+// Update autocomplete settings
+router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { enabled, model } = req.body;
+
+    const updates: { autocompleteEnabled?: boolean; autocompleteModel?: string } = {};
+
+    if (typeof enabled === 'boolean') {
+      updates.autocompleteEnabled = enabled;
+    }
+
+    if (model && typeof model === 'string') {
+      // Validate model is from allowed list
+      const validModels = [
+        'openai/gpt-oss-120b:cerebras',
+        'openai/gpt-oss-120b',
+        'deepseek/deepseek-coder',
+        'anthropic/claude-3-haiku',
+      ];
+      if (!validModels.includes(model)) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid model. Must be one of: ${validModels.join(', ')}`,
+        });
+        return;
+      }
+      updates.autocompleteModel = model;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'No valid settings to update',
+      });
+      return;
+    }
+
+    await db
+      .update(users)
+      .set(updates)
+      .where(eq(users.id, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: { message: 'Autocomplete settings updated successfully' },
+    });
+  } catch (error) {
+    console.error('Update autocomplete settings error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update autocomplete settings' });
+  }
+});
+
 // Update image AI API keys
 router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) => {
   try {
