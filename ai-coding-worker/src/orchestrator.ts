@@ -233,27 +233,46 @@ export class Orchestrator {
         timestamp: new Date().toISOString()
       });
 
-      // Add workspace to git's safe.directory to avoid "dubious ownership" errors
-      // This is necessary because the directory may be owned by a different user
-      // after extraction from the tarball
+      // Git isolation: Backup and remove .git directory to prevent AI from committing/pushing
+      // The .git directory will be restored after execution so the session maintains git history
+      const gitDirPath = path.join(localWorkspacePath, '.git');
+      const gitBackupPreExecPath = path.join(sessionRoot, '.git-backup-pre-execution');
+
       if (hasGitDir) {
         try {
-          execSync(`git config --global --add safe.directory "${localWorkspacePath}"`, {
-            stdio: 'pipe'
+          // Backup the original .git directory before AI execution
+          await this.copyDirectory(gitDirPath, gitBackupPreExecPath);
+          logger.info('Backed up .git directory before AI execution', {
+            component: 'Orchestrator',
+            websiteSessionId,
+            gitDirPath,
+            gitBackupPreExecPath
           });
-          logger.info('Added workspace to git safe.directory', {
+
+          // Remove .git directory to prevent AI from committing/pushing
+          fs.rmSync(gitDirPath, { recursive: true, force: true });
+          logger.info('Removed .git directory to prevent AI git operations', {
             component: 'Orchestrator',
             websiteSessionId,
             localWorkspacePath
           });
-        } catch (gitConfigError) {
-          logger.warn('Failed to add workspace to git safe.directory', {
+
+          sendEvent({
+            type: 'message',
+            stage: 'git_isolated',
+            message: 'Git directory backed up and removed for AI isolation',
+            data: {
+              gitBackupPath: gitBackupPreExecPath
+            },
+            timestamp: new Date().toISOString()
+          });
+        } catch (gitBackupError) {
+          logger.error('Failed to backup/remove .git directory', gitBackupError, {
             component: 'Orchestrator',
             websiteSessionId,
-            localWorkspacePath,
-            error: gitConfigError instanceof Error ? gitConfigError.message : String(gitConfigError)
+            localWorkspacePath
           });
-          // Continue anyway - git operations might still work
+          // Continue anyway - AI might still be able to use git but at least we tried
         }
       }
 
@@ -349,16 +368,30 @@ export class Orchestrator {
         }
       );
 
-      // Step 7: Pre-upload diagnostics - check git status and ensure files are synced
-      // This helps debug issues where files appear to be written but don't show up in commits
+      // Step 7: Post-execution git handling
+      // Restore the original .git directory for session continuity
       if (fs.existsSync(localWorkspacePath)) {
         try {
           // Force filesystem sync to ensure all writes are flushed to disk
           execSync('sync', { stdio: 'pipe' });
 
-          // Check if it's a git repo and log status
-          const gitDir = path.join(localWorkspacePath, '.git');
-          if (fs.existsSync(gitDir)) {
+          const postExecGitDir = path.join(localWorkspacePath, '.git');
+
+          // Restore the original .git directory from backup
+          if (fs.existsSync(gitBackupPreExecPath)) {
+            // Remove any .git that might exist (e.g., if AI created one)
+            if (fs.existsSync(postExecGitDir)) {
+              fs.rmSync(postExecGitDir, { recursive: true, force: true });
+            }
+
+            await this.copyDirectory(gitBackupPreExecPath, postExecGitDir);
+            logger.info('Restored original .git directory after AI execution', {
+              component: 'Orchestrator',
+              websiteSessionId,
+              gitBackupPreExecPath,
+              restoredTo: postExecGitDir
+            });
+
             // Add to safe.directory to avoid ownership issues
             try {
               execSync(`git config --global --add safe.directory "${localWorkspacePath}"`, { stdio: 'pipe' });
@@ -366,6 +399,7 @@ export class Orchestrator {
               // Ignore - may already be added
             }
 
+            // Check git status after restoration
             const gitStatus = execSync('git status --porcelain', {
               cwd: localWorkspacePath,
               encoding: 'utf-8',
@@ -379,7 +413,7 @@ export class Orchestrator {
 
             const changedFiles = gitStatus.trim().split('\n').filter(line => line.trim());
 
-            logger.info('Pre-upload git status check', {
+            logger.info('Pre-upload git status check (after .git restoration)', {
               component: 'Orchestrator',
               websiteSessionId,
               localWorkspacePath,
@@ -398,16 +432,17 @@ export class Orchestrator {
                 : 'Git status: No uncommitted changes detected',
               data: {
                 changedFileCount: changedFiles.length,
-                changedFiles: changedFiles.slice(0, 10)
+                changedFiles: changedFiles.slice(0, 10),
+                gitRestored: true
               },
               timestamp: new Date().toISOString()
             });
           }
-        } catch (gitCheckError) {
-          logger.warn('Pre-upload git check failed (non-critical)', {
+        } catch (gitRestoreError) {
+          logger.warn('Post-execution git handling failed (non-critical)', {
             component: 'Orchestrator',
             websiteSessionId,
-            error: gitCheckError instanceof Error ? gitCheckError.message : String(gitCheckError)
+            error: gitRestoreError instanceof Error ? gitRestoreError.message : String(gitRestoreError)
           });
         }
       }
@@ -666,6 +701,45 @@ export class Orchestrator {
           queryDir,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
         });
+      }
+    }
+  }
+
+  /**
+   * Recursively copy a directory
+   * Used for backing up and restoring .git directories
+   */
+  private async copyDirectory(src: string, dest: string): Promise<void> {
+    await fs.promises.mkdir(dest, { recursive: true });
+    const entries = await fs.promises.readdir(src, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+
+      if (entry.isDirectory()) {
+        await this.copyDirectory(srcPath, destPath);
+      } else {
+        // Remove existing destination file first to avoid permission issues
+        try {
+          await fs.promises.unlink(destPath);
+        } catch {
+          // File doesn't exist, that's fine
+        }
+
+        // Try copyFile first, fall back to read/write if permission denied
+        // (handles git pack files with restrictive permissions)
+        try {
+          await fs.promises.copyFile(srcPath, destPath);
+        } catch (err: any) {
+          if (err.code === 'EACCES') {
+            // Permission denied - read file contents and write to destination
+            const content = await fs.promises.readFile(srcPath);
+            await fs.promises.writeFile(destPath, content);
+          } else {
+            throw err;
+          }
+        }
       }
     }
   }
