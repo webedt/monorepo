@@ -9,6 +9,7 @@ import {
   useNewImagePreferencesStore,
   useImageLayersStore,
   useImageAiPreferencesStore,
+  useAuthStore,
   RESOLUTION_PRESETS,
   type AspectRatioTab,
   type ImageExtension,
@@ -342,7 +343,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
   const aiPrefs = useImageAiPreferencesStore();
 
   // Auth context for user settings
-  const { user } = useAuth();
+  const { user } = useAuthStore();
 
   // AI generation state
   const [aiError, setAiError] = useState<string | null>(null);
