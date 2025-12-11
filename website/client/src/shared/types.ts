@@ -1,6 +1,16 @@
 // Chat verbosity level type
 export type ChatVerbosityLevel = 'minimal' | 'normal' | 'verbose';
 
+// Image AI provider types
+export type ImageAiProvider = 'openrouter' | 'cometapi' | 'google';
+
+// Image AI keys type
+export interface ImageAiKeys {
+  openrouter?: string;
+  cometapi?: string;
+  google?: string;
+}
+
 // User types
 export interface User {
   id: string;
@@ -18,6 +28,9 @@ export interface User {
   defaultLandingPage: 'store' | 'library' | 'community' | 'sessions';
   preferredModel?: string | null;
   chatVerbosityLevel: ChatVerbosityLevel; // Controls how much detail to show in chat
+  imageAiProvider?: ImageAiProvider;      // User's preferred image AI provider
+  imageAiModel?: string;                  // User's preferred image AI model
+  imageAiKeys?: ImageAiKeys;              // API keys for image AI providers
   isAdmin: boolean;
   createdAt: Date;
 }

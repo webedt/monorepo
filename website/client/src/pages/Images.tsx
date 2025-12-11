@@ -12,9 +12,7 @@ import {
   RESOLUTION_PRESETS,
   type AspectRatioTab,
   type ImageExtension,
-  type ImageLayer,
 } from '@/lib/store';
-import { useAuth } from '@/contexts/AuthContext';
 
 type EditorMode = 'image' | 'spritesheet' | 'animation';
 type ViewMode = 'preview' | 'edit';
@@ -1083,7 +1081,7 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
 
       if (response.success && response.data?.imageData) {
         // Create a new layer with the generated image
-        const newLayerId = layersStore.addLayer(
+        layersStore.addLayer(
           `AI: ${aiPrompt.substring(0, 20)}${aiPrompt.length > 20 ? '...' : ''}`,
           response.data.imageData
         );
