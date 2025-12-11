@@ -369,41 +369,21 @@ export class Orchestrator {
       );
 
       // Step 7: Post-execution git handling
-      // - Capture any .git directory the AI might have created
-      // - Restore the original .git directory for session continuity
+      // Restore the original .git directory for session continuity
       if (fs.existsSync(localWorkspacePath)) {
         try {
           // Force filesystem sync to ensure all writes are flushed to disk
           execSync('sync', { stdio: 'pipe' });
 
           const postExecGitDir = path.join(localWorkspacePath, '.git');
-          const gitBackupPostExecPath = path.join(sessionRoot, '.git-backup-post-execution');
-
-          // Check if AI created a new .git directory (shouldn't happen, but capture it if it does)
-          if (fs.existsSync(postExecGitDir)) {
-            logger.warn('AI created a .git directory during execution - backing it up', {
-              component: 'Orchestrator',
-              websiteSessionId,
-              localWorkspacePath
-            });
-
-            // Backup the AI-created .git directory
-            await this.copyDirectory(postExecGitDir, gitBackupPostExecPath);
-            fs.rmSync(postExecGitDir, { recursive: true, force: true });
-
-            sendEvent({
-              type: 'message',
-              stage: 'git_ai_created_backup',
-              message: 'AI-created .git directory backed up and removed',
-              data: {
-                gitBackupPath: gitBackupPostExecPath
-              },
-              timestamp: new Date().toISOString()
-            });
-          }
 
           // Restore the original .git directory from backup
           if (fs.existsSync(gitBackupPreExecPath)) {
+            // Remove any .git that might exist (e.g., if AI created one)
+            if (fs.existsSync(postExecGitDir)) {
+              fs.rmSync(postExecGitDir, { recursive: true, force: true });
+            }
+
             await this.copyDirectory(gitBackupPreExecPath, postExecGitDir);
             logger.info('Restored original .git directory after AI execution', {
               component: 'Orchestrator',
