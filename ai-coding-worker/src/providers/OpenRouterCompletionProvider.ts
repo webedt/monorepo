@@ -129,7 +129,7 @@ export class OpenRouterCompletionProvider {
         throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
       }
 
-      const data: OpenRouterResponse = await response.json();
+      const data = await response.json() as OpenRouterResponse;
       const latencyMs = Date.now() - startTime;
 
       // Extract the completion from the response
