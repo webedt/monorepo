@@ -1,0 +1,125 @@
+import { runBuild, runTypeCheck, type BuildResult } from './build.js';
+import { runTests, type TestResult } from './tests.js';
+import { runHealthChecks, generatePreviewUrl, type HealthCheckResult } from './health.js';
+import { logger } from '../utils/logger.js';
+
+export { runBuild, runTypeCheck, type BuildResult } from './build.js';
+export { runTests, type TestResult } from './tests.js';
+export { runHealthChecks, generatePreviewUrl, type HealthCheckResult, type HealthCheck } from './health.js';
+
+export interface EvaluationResult {
+  success: boolean;
+  build?: BuildResult;
+  tests?: TestResult;
+  health?: HealthCheckResult;
+  duration: number;
+  summary: string;
+}
+
+export interface EvaluationOptions {
+  repoPath: string;
+  branchName: string;
+  config: {
+    requireBuild: boolean;
+    requireTests: boolean;
+    requireHealthCheck: boolean;
+    healthCheckUrls: string[];
+    previewUrlPattern: string;
+  };
+  repoInfo: {
+    owner: string;
+    repo: string;
+  };
+}
+
+export async function runEvaluation(options: EvaluationOptions): Promise<EvaluationResult> {
+  const startTime = Date.now();
+  const { repoPath, branchName, config, repoInfo } = options;
+
+  logger.header('Running Evaluation Pipeline');
+
+  const result: EvaluationResult = {
+    success: true,
+    duration: 0,
+    summary: '',
+  };
+
+  const summaryParts: string[] = [];
+
+  // Step 1: Build verification
+  if (config.requireBuild) {
+    logger.step(1, 3, 'Build verification');
+    result.build = await runBuild({ repoPath });
+
+    if (!result.build.success) {
+      result.success = false;
+      summaryParts.push(`❌ Build failed: ${result.build.error}`);
+    } else {
+      summaryParts.push(`✅ Build passed (${result.build.duration}ms)`);
+    }
+  } else {
+    summaryParts.push('⏭️ Build skipped');
+  }
+
+  // Step 2: Tests (only if build passed)
+  if (config.requireTests && result.success) {
+    logger.step(2, 3, 'Running tests');
+    result.tests = await runTests({ repoPath });
+
+    if (!result.tests.success) {
+      result.success = false;
+      summaryParts.push(`❌ Tests failed: ${result.tests.testsFailed}/${result.tests.testsRun} failed`);
+    } else {
+      summaryParts.push(`✅ Tests passed: ${result.tests.testsPassed}/${result.tests.testsRun}`);
+    }
+  } else if (!config.requireTests) {
+    summaryParts.push('⏭️ Tests skipped');
+  } else {
+    summaryParts.push('⏭️ Tests skipped (build failed)');
+  }
+
+  // Step 3: Health checks (only if tests passed)
+  if (config.requireHealthCheck && result.success) {
+    logger.step(3, 3, 'Health checks');
+
+    // Generate health check URLs
+    const urls = [...config.healthCheckUrls];
+
+    // Add preview URL if pattern is configured
+    if (config.previewUrlPattern) {
+      const previewUrl = generatePreviewUrl(config.previewUrlPattern, {
+        owner: repoInfo.owner,
+        repo: repoInfo.repo,
+        branch: branchName,
+      });
+      urls.push(previewUrl);
+    }
+
+    if (urls.length > 0) {
+      result.health = await runHealthChecks({ urls });
+
+      if (!result.health.success) {
+        result.success = false;
+        const failedCount = result.health.checks.filter((c) => !c.ok).length;
+        summaryParts.push(`❌ Health checks failed: ${failedCount}/${result.health.checks.length}`);
+      } else {
+        summaryParts.push(`✅ Health checks passed: ${result.health.checks.length}/${result.health.checks.length}`);
+      }
+    } else {
+      summaryParts.push('⏭️ Health checks skipped (no URLs configured)');
+    }
+  } else if (!config.requireHealthCheck) {
+    summaryParts.push('⏭️ Health checks skipped');
+  } else {
+    summaryParts.push('⏭️ Health checks skipped (previous step failed)');
+  }
+
+  result.duration = Date.now() - startTime;
+  result.summary = summaryParts.join('\n');
+
+  logger.divider();
+  logger.info(`Evaluation ${result.success ? 'PASSED' : 'FAILED'} in ${result.duration}ms`);
+  console.log(result.summary);
+
+  return result;
+}
