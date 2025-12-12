@@ -897,10 +897,9 @@ const executeHandler = async (req: Request, res: Response) => {
       // The AI worker uploads its modified workspace back to storage, so we need
       // to download it to get the latest files before doing commit checks
       //
-      // IMPORTANT: We extract EXCLUDING .git to preserve our local git state.
-      // This way, if the AI worker (or Claude) made commits internally, those
-      // commits won't overwrite our .git directory, and we can still detect
-      // the actual file changes by comparing against our original git state.
+      // We extract the FULL session INCLUDING .git from the tarball.
+      // The AI worker backs up .git before AI execution and restores it before uploading,
+      // so the tarball always has the correct git state needed for committing/pushing.
       await sendEvent({
         type: 'message',
         stage: 'downloading_session',
@@ -912,54 +911,24 @@ const executeHandler = async (req: Request, res: Response) => {
         // Download updated session data
         const updatedSessionData = await storageService.downloadSessionToBuffer(chatSession.id);
         if (updatedSessionData) {
-          // Check if we have a local .git directory to preserve
-          // If we do, extract excluding .git to preserve local git state
-          // If we don't, extract INCLUDING .git from the tarball (which the AI worker restored)
-          let hasLocalGit = false;
-          if (workspacePath && fs.existsSync(workspacePath)) {
-            const localGitDir = path.join(workspacePath, '.git');
-            hasLocalGit = fs.existsSync(localGitDir);
-          }
-
-          logger.info('Checking local .git status before extraction', {
-            component: 'ExecuteRoute',
-            sessionId: chatSession.id,
-            workspacePath,
-            hasLocalGit
-          });
-
+          // Extract the full session INCLUDING .git from the tarball
+          // The AI worker backs up .git before execution and restores it before uploading,
+          // so the tarball always has the correct git state for committing/pushing
           if (!fs.existsSync(sessionRoot)) {
             fs.mkdirSync(sessionRoot, { recursive: true });
           }
 
-          let extractResult: { extractedCount: number; skippedGitFiles?: number };
+          logger.info('Extracting full session from tarball (including .git)', {
+            component: 'ExecuteRoute',
+            sessionId: chatSession.id,
+            sessionRoot
+          });
 
-          if (hasLocalGit) {
-            // Preserve local .git by extracting without .git from tarball
-            logger.info('Local .git exists - extracting session excluding .git to preserve local state', {
-              component: 'ExecuteRoute',
-              sessionId: chatSession.id,
-              sessionRoot
-            });
-            extractResult = await storageService.extractSessionToPathExcludingGit(updatedSessionData, sessionRoot);
-          } else {
-            // No local .git - extract everything INCLUDING .git from tarball
-            // The AI worker should have restored .git before uploading
-            logger.info('No local .git - extracting full session including .git from tarball', {
-              component: 'ExecuteRoute',
-              sessionId: chatSession.id,
-              sessionRoot
-            });
-            await storageService.extractSessionToPath(updatedSessionData, sessionRoot);
-            extractResult = { extractedCount: -1 }; // -1 indicates full extraction
-          }
+          await storageService.extractSessionToPath(updatedSessionData, sessionRoot);
 
           logger.info('Session extracted', {
             component: 'ExecuteRoute',
-            sessionId: chatSession.id,
-            extractedCount: extractResult.extractedCount,
-            skippedGitFiles: extractResult.skippedGitFiles || 0,
-            preservedLocalGit: hasLocalGit
+            sessionId: chatSession.id
           });
 
           // Re-read metadata to get the correct workspace path after re-extraction
