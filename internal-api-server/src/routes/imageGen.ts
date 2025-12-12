@@ -200,7 +200,7 @@ async function generateWithGoogle(
       return { success: false, error: `Google API error: ${response.status} - ${errorText}` };
     }
 
-    const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ inline_data?: { mime_type?: string; data?: string } }> } }> };
+    const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ inline_data?: { mime_type?: string; data?: string }; text?: string }> } }> };
 
     // Extract image from response
     const candidates = data.candidates || [];
