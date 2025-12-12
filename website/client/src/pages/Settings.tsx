@@ -118,6 +118,11 @@ export default function Settings() {
     (user?.imageAiKeys as any) || {}
   );
 
+  // Autocomplete settings state
+  const [autocompleteEnabled, setAutocompleteEnabled] = useState(user?.autocompleteEnabled ?? true);
+  const [autocompleteModel, setAutocompleteModel] = useState(user?.autocompleteModel || 'openai/gpt-oss-120b:cerebras');
+  const [openrouterApiKey, setOpenrouterApiKey] = useState('');
+
   // Voice command keywords state
   const [voiceKeywords, setVoiceKeywords] = useState<string[]>(user?.voiceCommandKeywords || []);
   const [newKeyword, setNewKeyword] = useState('');
@@ -203,6 +208,15 @@ export default function Settings() {
   useEffect(() => {
     setStopListeningAfterSubmit(user?.stopListeningAfterSubmit ?? false);
   }, [user?.stopListeningAfterSubmit]);
+
+  // Sync autocomplete settings from user
+  useEffect(() => {
+    setAutocompleteEnabled(user?.autocompleteEnabled ?? true);
+  }, [user?.autocompleteEnabled]);
+
+  useEffect(() => {
+    setAutocompleteModel(user?.autocompleteModel || 'openai/gpt-oss-120b:cerebras');
+  }, [user?.autocompleteModel]);
 
   // Close keyword dropdown when clicking outside
   useEffect(() => {
@@ -416,6 +430,41 @@ export default function Settings() {
     },
     onError: (error) => {
       alert(`Failed to update image AI model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  // Autocomplete mutations
+  const updateOpenRouterApiKey = useMutation({
+    mutationFn: userApi.updateOpenRouterApiKey,
+    onSuccess: async () => {
+      await refreshUserSession();
+      setOpenrouterApiKey('');
+      alert('OpenRouter API key saved successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to save OpenRouter API key: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const removeOpenRouterApiKey = useMutation({
+    mutationFn: userApi.removeOpenRouterApiKey,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('OpenRouter API key removed successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to remove OpenRouter API key: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
+  const updateAutocompleteSettings = useMutation({
+    mutationFn: userApi.updateAutocompleteSettings,
+    onSuccess: async () => {
+      await refreshUserSession();
+      alert('Autocomplete settings saved successfully');
+    },
+    onError: (error) => {
+      alert(`Failed to update autocomplete settings: ${error instanceof Error ? error.message : 'Unknown error'}`);
     },
   });
 
@@ -1155,6 +1204,146 @@ export default function Settings() {
                       >
                         {updateImageAiKeys.isPending ? 'Saving...' : 'Save API Keys'}
                       </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Autocomplete Settings */}
+            <div className="card bg-base-100 shadow">
+              <div className="card-body">
+                <h2 className="card-title mb-2">Code Autocomplete Settings</h2>
+
+                <div className="space-y-6">
+                  <p className="text-sm text-base-content/70 leading-relaxed">
+                    Configure AI-powered code autocomplete. Get intelligent code suggestions as you type in the code editor. Uses OpenRouter to access fast AI models for real-time completions.
+                  </p>
+
+                  <div className="divider my-4"></div>
+
+                  {/* Enable/Disable Toggle */}
+                  <div className="form-control">
+                    <label className="label cursor-pointer justify-start gap-4">
+                      <input
+                        type="checkbox"
+                        checked={autocompleteEnabled}
+                        onChange={(e) => setAutocompleteEnabled(e.target.checked)}
+                        className="checkbox checkbox-primary"
+                      />
+                      <div>
+                        <span className="label-text font-medium">Enable code autocomplete</span>
+                        <p className="text-sm text-base-content/60">Show AI-generated code suggestions as ghost text while typing</p>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Model Selection */}
+                  <div className="form-control w-full">
+                    <div className="mb-3">
+                      <span className="font-medium text-base text-base-content">Autocomplete Model</span>
+                    </div>
+                    <select
+                      value={autocompleteModel}
+                      onChange={(e) => setAutocompleteModel(e.target.value)}
+                      className="select select-bordered w-full max-w-md"
+                      disabled={!autocompleteEnabled}
+                    >
+                      <option value="openai/gpt-oss-120b:cerebras">GPT-OSS 120B on Cerebras (Default - Fast)</option>
+                      <option value="deepseek/deepseek-coder">DeepSeek Coder</option>
+                      <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B Instruct</option>
+                      <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
+                    </select>
+                    <div className="mt-2">
+                      <span className="text-sm text-base-content/60">
+                        The Cerebras model is recommended for its ultra-fast inference (~280ms)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-start pt-2">
+                    <button
+                      onClick={() => updateAutocompleteSettings.mutate({ enabled: autocompleteEnabled, model: autocompleteModel })}
+                      disabled={updateAutocompleteSettings.isPending || (autocompleteEnabled === (user?.autocompleteEnabled ?? true) && autocompleteModel === (user?.autocompleteModel || 'openai/gpt-oss-120b:cerebras'))}
+                      className="btn btn-primary min-w-[140px]"
+                    >
+                      {updateAutocompleteSettings.isPending ? 'Saving...' : 'Save Settings'}
+                    </button>
+                  </div>
+
+                  <div className="divider my-4"></div>
+
+                  {/* OpenRouter API Key */}
+                  <div className="space-y-4">
+                    <div className="mb-3">
+                      <span className="font-medium text-base text-base-content">OpenRouter API Key for Autocomplete</span>
+                      <p className="text-sm text-base-content/60 mt-1">
+                        Required for autocomplete to work. Get a free API key from OpenRouter.
+                      </p>
+                    </div>
+
+                    {user?.openrouterApiKey ? (
+                      <div className="space-y-4">
+                        <div className="alert alert-success">
+                          <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          </svg>
+                          <span className="text-sm">OpenRouter API key configured for autocomplete</span>
+                          <button
+                            onClick={() => removeOpenRouterApiKey.mutate()}
+                            disabled={removeOpenRouterApiKey.isPending}
+                            className="btn btn-sm btn-error"
+                          >
+                            {removeOpenRouterApiKey.isPending ? 'Removing...' : 'Remove'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="form-control w-full">
+                        <label className="label">
+                          <span className="label-text">OpenRouter API Key</span>
+                          <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="link link-primary text-xs">
+                            Get API key →
+                          </a>
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="password"
+                            value={openrouterApiKey}
+                            onChange={(e) => setOpenrouterApiKey(e.target.value)}
+                            placeholder="sk-or-..."
+                            className="input input-bordered flex-1 max-w-md font-mono text-sm"
+                          />
+                          <button
+                            onClick={() => updateOpenRouterApiKey.mutate(openrouterApiKey)}
+                            disabled={updateOpenRouterApiKey.isPending || !openrouterApiKey.trim()}
+                            className="btn btn-primary"
+                          >
+                            {updateOpenRouterApiKey.isPending ? 'Saving...' : 'Save Key'}
+                          </button>
+                        </div>
+                        <label className="label">
+                          <span className="label-text-alt text-base-content/60">
+                            API key must start with "sk-or-"
+                          </span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Usage Info */}
+                  <div className="alert alert-info">
+                    <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    <div className="text-sm">
+                      <p className="font-medium">How to use autocomplete:</p>
+                      <ul className="list-disc list-inside mt-1 space-y-1">
+                        <li>Type code in the editor - suggestions appear as ghost text</li>
+                        <li>Press <kbd className="kbd kbd-sm">Tab</kbd> to accept the suggestion</li>
+                        <li>Press <kbd className="kbd kbd-sm">Esc</kbd> to dismiss</li>
+                        <li>Keep typing to get new suggestions</li>
+                      </ul>
                     </div>
                   </div>
                 </div>

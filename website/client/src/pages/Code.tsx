@@ -6,7 +6,7 @@ import SyntaxHighlightedEditor from '@/components/SyntaxHighlightedEditor';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useAutocomplete, getLanguageFromFilename } from '@/hooks/useAutocomplete';
-import { useEditorSessionStore } from '@/lib/store';
+import { useEditorSessionStore, useAuthStore } from '@/lib/store';
 import type { GitHubPullRequest } from '@/shared';
 
 // Debounce utility
@@ -288,6 +288,9 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   const { saveEditorState, getEditorState } = useEditorSessionStore();
   const hasRestoredState = useRef(false);
 
+  // User settings for autocomplete
+  const user = useAuthStore((state) => state.user);
+
   // Get pre-selected settings from navigation state (from QuickSessionSetup)
   const preSelectedSettings = (location.state as { preSelectedSettings?: PreSelectedSettings } | null)?.preSelectedSettings;
   const hasInitializedFromPreSelected = useRef(false);
@@ -356,7 +359,7 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     acceptSuggestion: acceptAutocompleteSuggestion,
     clearSuggestion: clearAutocompleteSuggestion,
   } = useAutocomplete({
-    enabled: true, // TODO: Make this configurable via user settings
+    enabled: user?.autocompleteEnabled ?? true,
     debounceMs: 400,
     minPrefixLength: 15,
   });

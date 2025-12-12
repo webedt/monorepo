@@ -31,6 +31,10 @@ export interface User {
   imageAiProvider?: ImageAiProvider;      // User's preferred image AI provider
   imageAiModel?: string;                  // User's preferred image AI model
   imageAiKeys?: ImageAiKeys;              // API keys for image AI providers
+  // Autocomplete settings
+  openrouterApiKey?: string | null;       // OpenRouter API key for autocomplete
+  autocompleteEnabled?: boolean;          // Whether autocomplete is enabled
+  autocompleteModel?: string;             // Preferred autocomplete model
   isAdmin: boolean;
   createdAt: Date;
 }
