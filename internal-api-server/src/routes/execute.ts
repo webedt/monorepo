@@ -978,6 +978,40 @@ const executeHandler = async (req: Request, res: Response) => {
             workspacePath = path.join(sessionRoot, 'workspace');
           }
 
+          // CRITICAL: Check if .git directory exists, if not, restore it from the tarball
+          // This handles the case where .git was removed for "AI isolation" or other reasons
+          if (workspacePath && fs.existsSync(workspacePath)) {
+            const gitDir = path.join(workspacePath, '.git');
+            if (!fs.existsSync(gitDir)) {
+              logger.warn('.git directory missing after extraction - restoring from tarball', {
+                component: 'ExecuteRoute',
+                sessionId: chatSession.id,
+                workspacePath,
+                gitDir
+              });
+
+              await sendEvent({
+                type: 'message',
+                stage: 'restoring_git',
+                message: 'Restoring git repository state...',
+                endpoint: '/execute'
+              });
+
+              // Re-download and extract ONLY .git directories from the original session
+              // We need to download again because we already consumed the buffer
+              const gitSessionData = await storageService.downloadSessionToBuffer(chatSession.id);
+              if (gitSessionData) {
+                const gitExtractResult = await storageService.extractGitOnlyFromSession(gitSessionData, sessionRoot);
+                logger.info('Restored .git directory from tarball', {
+                  component: 'ExecuteRoute',
+                  sessionId: chatSession.id,
+                  extractedGitFiles: gitExtractResult.extractedCount,
+                  gitDirExists: fs.existsSync(gitDir)
+                });
+              }
+            }
+          }
+
           logger.info('Re-downloaded session with AI worker changes (git state preserved)', {
             component: 'ExecuteRoute',
             sessionId: chatSession.id,
