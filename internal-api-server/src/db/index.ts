@@ -139,6 +139,24 @@ pool.query(`
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'chat_sessions' AND column_name = 'provider') THEN
         ALTER TABLE chat_sessions ADD COLUMN provider TEXT DEFAULT 'claude';
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'openrouter_api_key') THEN
+        ALTER TABLE users ADD COLUMN openrouter_api_key TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'autocomplete_enabled') THEN
+        ALTER TABLE users ADD COLUMN autocomplete_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'autocomplete_model') THEN
+        ALTER TABLE users ADD COLUMN autocomplete_model TEXT DEFAULT 'openai/gpt-oss-120b:cerebras';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'image_ai_keys') THEN
+        ALTER TABLE users ADD COLUMN image_ai_keys JSONB;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'image_ai_provider') THEN
+        ALTER TABLE users ADD COLUMN image_ai_provider TEXT DEFAULT 'openrouter';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'image_ai_model') THEN
+        ALTER TABLE users ADD COLUMN image_ai_model TEXT DEFAULT 'google/gemini-2.5-flash-image';
+      END IF;
     END $$;
   `);
 }).then(() => {
