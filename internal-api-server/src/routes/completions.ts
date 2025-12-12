@@ -218,7 +218,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string; message?: string };
         logger.error('[Completions] Worker error:', errorData);
 
         // Mark worker as failed
@@ -236,7 +236,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         return;
       }
 
-      const result = await response.json();
+      const result = await response.json() as { latencyMs?: number; cached?: boolean; suggestion?: string };
 
       logger.info('[Completions] Completion generated', {
         requestId,

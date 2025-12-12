@@ -113,7 +113,7 @@ async function generateWithOpenAICompatible(
       return { success: false, error: `API error: ${response.status} - ${errorText}` };
     }
 
-    const data = await response.json();
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
 
     // Extract image from response
     // The response format may vary depending on the model
@@ -200,7 +200,7 @@ async function generateWithGoogle(
       return { success: false, error: `Google API error: ${response.status} - ${errorText}` };
     }
 
-    const data = await response.json();
+    const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ inline_data?: { mime_type?: string; data?: string }; text?: string }> } }> };
 
     // Extract image from response
     const candidates = data.candidates || [];
@@ -217,7 +217,7 @@ async function generateWithGoogle(
 
     // Check for text response
     const textPart = candidates[0]?.content?.parts?.find((p: any) => p.text);
-    if (textPart) {
+    if (textPart?.text) {
       return { success: false, error: 'Model returned text instead of image: ' + textPart.text.substring(0, 200) };
     }
 
