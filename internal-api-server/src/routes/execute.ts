@@ -912,53 +912,54 @@ const executeHandler = async (req: Request, res: Response) => {
         // Download updated session data
         const updatedSessionData = await storageService.downloadSessionToBuffer(chatSession.id);
         if (updatedSessionData) {
-          // Clear everything EXCEPT .git directories to preserve git state
-          // This allows us to detect changes even if AI worker made commits
-          if (fs.existsSync(sessionRoot)) {
-            const clearDirectoryExceptGit = (dirPath: string) => {
-              const items = fs.readdirSync(dirPath);
-              for (const item of items) {
-                const itemPath = path.join(dirPath, item);
-                const stat = fs.statSync(itemPath);
-                if (stat.isDirectory()) {
-                  if (item === '.git') {
-                    // Skip .git directories - preserve them
-                    continue;
-                  }
-                  // Recursively clear subdirectories
-                  clearDirectoryExceptGit(itemPath);
-                  // Check if directory is now empty (excluding .git)
-                  const remaining = fs.readdirSync(itemPath);
-                  if (remaining.length === 0) {
-                    fs.rmdirSync(itemPath);
-                  }
-                } else {
-                  // Delete files
-                  fs.unlinkSync(itemPath);
-                }
-              }
-            };
+          // Check if we have a local .git directory to preserve
+          // If we do, extract excluding .git to preserve local git state
+          // If we don't, extract INCLUDING .git from the tarball (which the AI worker restored)
+          let hasLocalGit = false;
+          if (workspacePath && fs.existsSync(workspacePath)) {
+            const localGitDir = path.join(workspacePath, '.git');
+            hasLocalGit = fs.existsSync(localGitDir);
+          }
 
-            // Don't delete .git, just clear other files so we can overwrite them
-            // Actually, let's be smarter - just extract on top, overwriting files
-            logger.info('Preserving .git directories during re-extraction', {
+          logger.info('Checking local .git status before extraction', {
+            component: 'ExecuteRoute',
+            sessionId: chatSession.id,
+            workspacePath,
+            hasLocalGit
+          });
+
+          if (!fs.existsSync(sessionRoot)) {
+            fs.mkdirSync(sessionRoot, { recursive: true });
+          }
+
+          let extractResult: { extractedCount: number; skippedGitFiles?: number };
+
+          if (hasLocalGit) {
+            // Preserve local .git by extracting without .git from tarball
+            logger.info('Local .git exists - extracting session excluding .git to preserve local state', {
               component: 'ExecuteRoute',
               sessionId: chatSession.id,
               sessionRoot
             });
+            extractResult = await storageService.extractSessionToPathExcludingGit(updatedSessionData, sessionRoot);
           } else {
-            fs.mkdirSync(sessionRoot, { recursive: true });
+            // No local .git - extract everything INCLUDING .git from tarball
+            // The AI worker should have restored .git before uploading
+            logger.info('No local .git - extracting full session including .git from tarball', {
+              component: 'ExecuteRoute',
+              sessionId: chatSession.id,
+              sessionRoot
+            });
+            await storageService.extractSessionToPath(updatedSessionData, sessionRoot);
+            extractResult = { extractedCount: -1 }; // -1 indicates full extraction
           }
 
-          // Extract session EXCLUDING .git - this preserves our original git state
-          // so we can detect what files changed since the session started
-          const extractResult = await storageService.extractSessionToPathExcludingGit(updatedSessionData, sessionRoot);
-
-          logger.info('Session extracted (excluding .git)', {
+          logger.info('Session extracted', {
             component: 'ExecuteRoute',
             sessionId: chatSession.id,
             extractedCount: extractResult.extractedCount,
-            skippedGitFiles: extractResult.skippedGitFiles
+            skippedGitFiles: extractResult.skippedGitFiles || 0,
+            preservedLocalGit: hasLocalGit
           });
 
           // Re-read metadata to get the correct workspace path after re-extraction
@@ -976,40 +977,6 @@ const executeHandler = async (req: Request, res: Response) => {
             }
           } else {
             workspacePath = path.join(sessionRoot, 'workspace');
-          }
-
-          // CRITICAL: Check if .git directory exists, if not, restore it from the tarball
-          // This handles the case where .git was removed for "AI isolation" or other reasons
-          if (workspacePath && fs.existsSync(workspacePath)) {
-            const gitDir = path.join(workspacePath, '.git');
-            if (!fs.existsSync(gitDir)) {
-              logger.warn('.git directory missing after extraction - restoring from tarball', {
-                component: 'ExecuteRoute',
-                sessionId: chatSession.id,
-                workspacePath,
-                gitDir
-              });
-
-              await sendEvent({
-                type: 'message',
-                stage: 'restoring_git',
-                message: 'Restoring git repository state...',
-                endpoint: '/execute'
-              });
-
-              // Re-download and extract ONLY .git directories from the original session
-              // We need to download again because we already consumed the buffer
-              const gitSessionData = await storageService.downloadSessionToBuffer(chatSession.id);
-              if (gitSessionData) {
-                const gitExtractResult = await storageService.extractGitOnlyFromSession(gitSessionData, sessionRoot);
-                logger.info('Restored .git directory from tarball', {
-                  component: 'ExecuteRoute',
-                  sessionId: chatSession.id,
-                  extractedGitFiles: gitExtractResult.extractedCount,
-                  gitDirExists: fs.existsSync(gitDir)
-                });
-              }
-            }
           }
 
           logger.info('Re-downloaded session with AI worker changes (git state preserved)', {
