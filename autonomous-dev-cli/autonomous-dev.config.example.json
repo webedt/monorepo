@@ -1,0 +1,44 @@
+{
+  "repo": {
+    "owner": "webedt",
+    "name": "monorepo",
+    "baseBranch": "main"
+  },
+  "discovery": {
+    "tasksPerCycle": 5,
+    "maxOpenIssues": 10,
+    "excludePaths": [
+      "node_modules",
+      "dist",
+      ".git",
+      "coverage",
+      "*.lock"
+    ],
+    "issueLabel": "autonomous-dev"
+  },
+  "execution": {
+    "parallelWorkers": 4,
+    "timeoutMinutes": 30,
+    "workDir": "/tmp/autonomous-dev"
+  },
+  "evaluation": {
+    "requireBuild": true,
+    "requireTests": true,
+    "requireHealthCheck": true,
+    "requireSmokeTests": false,
+    "healthCheckUrls": [],
+    "smokeTestUrls": [],
+    "previewUrlPattern": "https://github.etdofresh.com/{owner}/{repo}/{branch}/"
+  },
+  "merge": {
+    "autoMerge": true,
+    "requireAllChecks": true,
+    "maxRetries": 3,
+    "conflictStrategy": "rebase",
+    "mergeMethod": "squash"
+  },
+  "daemon": {
+    "loopIntervalMs": 60000,
+    "pauseBetweenCycles": true
+  }
+}
