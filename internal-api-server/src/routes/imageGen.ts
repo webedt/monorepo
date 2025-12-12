@@ -217,7 +217,7 @@ async function generateWithGoogle(
 
     // Check for text response
     const textPart = candidates[0]?.content?.parts?.find((p: any) => p.text);
-    if (textPart) {
+    if (textPart?.text) {
       return { success: false, error: 'Model returned text instead of image: ' + textPart.text.substring(0, 200) };
     }
 
