@@ -897,10 +897,9 @@ const executeHandler = async (req: Request, res: Response) => {
       // The AI worker uploads its modified workspace back to storage, so we need
       // to download it to get the latest files before doing commit checks
       //
-      // IMPORTANT: We extract EXCLUDING .git to preserve our local git state.
-      // This way, if the AI worker (or Claude) made commits internally, those
-      // commits won't overwrite our .git directory, and we can still detect
-      // the actual file changes by comparing against our original git state.
+      // We extract the FULL session INCLUDING .git from the tarball.
+      // The AI worker backs up .git before AI execution and restores it before uploading,
+      // so the tarball always has the correct git state needed for committing/pushing.
       await sendEvent({
         type: 'message',
         stage: 'downloading_session',
@@ -912,53 +911,24 @@ const executeHandler = async (req: Request, res: Response) => {
         // Download updated session data
         const updatedSessionData = await storageService.downloadSessionToBuffer(chatSession.id);
         if (updatedSessionData) {
-          // Clear everything EXCEPT .git directories to preserve git state
-          // This allows us to detect changes even if AI worker made commits
-          if (fs.existsSync(sessionRoot)) {
-            const clearDirectoryExceptGit = (dirPath: string) => {
-              const items = fs.readdirSync(dirPath);
-              for (const item of items) {
-                const itemPath = path.join(dirPath, item);
-                const stat = fs.statSync(itemPath);
-                if (stat.isDirectory()) {
-                  if (item === '.git') {
-                    // Skip .git directories - preserve them
-                    continue;
-                  }
-                  // Recursively clear subdirectories
-                  clearDirectoryExceptGit(itemPath);
-                  // Check if directory is now empty (excluding .git)
-                  const remaining = fs.readdirSync(itemPath);
-                  if (remaining.length === 0) {
-                    fs.rmdirSync(itemPath);
-                  }
-                } else {
-                  // Delete files
-                  fs.unlinkSync(itemPath);
-                }
-              }
-            };
-
-            // Don't delete .git, just clear other files so we can overwrite them
-            // Actually, let's be smarter - just extract on top, overwriting files
-            logger.info('Preserving .git directories during re-extraction', {
-              component: 'ExecuteRoute',
-              sessionId: chatSession.id,
-              sessionRoot
-            });
-          } else {
+          // Extract the full session INCLUDING .git from the tarball
+          // The AI worker backs up .git before execution and restores it before uploading,
+          // so the tarball always has the correct git state for committing/pushing
+          if (!fs.existsSync(sessionRoot)) {
             fs.mkdirSync(sessionRoot, { recursive: true });
           }
 
-          // Extract session EXCLUDING .git - this preserves our original git state
-          // so we can detect what files changed since the session started
-          const extractResult = await storageService.extractSessionToPathExcludingGit(updatedSessionData, sessionRoot);
-
-          logger.info('Session extracted (excluding .git)', {
+          logger.info('Extracting full session from tarball (including .git)', {
             component: 'ExecuteRoute',
             sessionId: chatSession.id,
-            extractedCount: extractResult.extractedCount,
-            skippedGitFiles: extractResult.skippedGitFiles
+            sessionRoot
+          });
+
+          await storageService.extractSessionToPath(updatedSessionData, sessionRoot);
+
+          logger.info('Session extracted', {
+            component: 'ExecuteRoute',
+            sessionId: chatSession.id
           });
 
           // Re-read metadata to get the correct workspace path after re-extraction
