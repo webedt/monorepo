@@ -354,6 +354,24 @@ export const userApi = {
       method: 'POST',
       body: { model },
     }),
+
+  // Autocomplete settings (OpenRouter for code completion)
+  updateOpenRouterApiKey: (apiKey: string) =>
+    fetchApi('/api/user/openrouter-api-key', {
+      method: 'POST',
+      body: { apiKey },
+    }),
+
+  removeOpenRouterApiKey: () =>
+    fetchApi('/api/user/openrouter-api-key', {
+      method: 'DELETE',
+    }),
+
+  updateAutocompleteSettings: (settings: { enabled?: boolean; model?: string }) =>
+    fetchApi('/api/user/autocomplete-settings', {
+      method: 'POST',
+      body: settings,
+    }),
 };
 
 // Image Generation API
