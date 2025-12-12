@@ -32,6 +32,8 @@ export class Daemon {
   private isRunning: boolean = false;
   private cycleCount: number = 0;
   private options: DaemonOptions;
+  private userId: string | null = null;
+  private enableDatabaseLogging: boolean = false;
 
   constructor(options: DaemonOptions = {}) {
     this.options = options;
@@ -100,6 +102,11 @@ export class Daemon {
       const creds = await getUserCredentials(this.config.credentials.userEmail);
 
       if (creds) {
+        // Store userId for database logging
+        this.userId = creds.userId;
+        this.enableDatabaseLogging = true;
+        logger.info(`Database logging enabled for user: ${this.userId}`);
+
         if (creds.githubAccessToken) {
           this.config.credentials.githubToken = creds.githubAccessToken;
         }
@@ -248,6 +255,11 @@ export class Daemon {
           githubToken: this.config.credentials.githubToken!,
           claudeAuth: this.config.credentials.claudeAuth,
           timeoutMinutes: this.config.execution.timeoutMinutes,
+          // Database logging options
+          userId: this.userId || undefined,
+          repoOwner: this.config.repo.owner,
+          repoName: this.config.repo.name,
+          enableDatabaseLogging: this.enableDatabaseLogging,
         });
 
         const workerTasks: WorkerTask[] = issuesToWork.map((issue) => ({

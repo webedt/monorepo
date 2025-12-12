@@ -84,6 +84,11 @@ export class WorkerPool {
         githubToken: this.options.githubToken,
         claudeAuth: this.options.claudeAuth,
         timeoutMinutes: this.options.timeoutMinutes,
+        // Database logging options
+        userId: this.options.userId,
+        repoOwner: this.options.repoOwner,
+        repoName: this.options.repoName,
+        enableDatabaseLogging: this.options.enableDatabaseLogging,
       },
       workerId
     );

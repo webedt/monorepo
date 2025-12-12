@@ -19,6 +19,8 @@ export declare class Daemon {
     private isRunning;
     private cycleCount;
     private options;
+    private userId;
+    private enableDatabaseLogging;
     constructor(options?: DaemonOptions);
     start(): Promise<void>;
     stop(): Promise<void>;

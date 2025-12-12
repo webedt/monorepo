@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { logger } from '../utils/logger.js';
+import { createChatSession, updateChatSession, addMessage, addEvent, generateSessionPath, } from '../db/index.js';
 export class Worker {
     options;
     workerId;
@@ -19,31 +20,84 @@ export class Worker {
         this.log.info(`Starting task: ${issue.title}`);
         // Create workspace directory for this task
         const taskDir = join(this.options.workDir, `task-${issue.number}-${Date.now()}`);
+        // Create chat session if database logging is enabled
+        let chatSessionId;
+        if (this.options.enableDatabaseLogging && this.options.userId && this.options.repoOwner && this.options.repoName) {
+            try {
+                const session = await createChatSession({
+                    userId: this.options.userId,
+                    repositoryOwner: this.options.repoOwner,
+                    repositoryName: this.options.repoName,
+                    repositoryUrl: this.options.repoUrl,
+                    baseBranch: this.options.baseBranch,
+                    userRequest: `[Auto] Issue #${issue.number}: ${issue.title}\n\n${issue.body || 'No description'}`,
+                    provider: 'claude',
+                });
+                chatSessionId = session.id;
+                this.log.debug(`Created chat session: ${chatSessionId}`);
+                // Log initial user message
+                await addMessage(chatSessionId, 'user', `Implement GitHub Issue #${issue.number}: ${issue.title}\n\n${issue.body || 'No description provided.'}`);
+                await addEvent(chatSessionId, 'session_start', { type: 'session_start', message: 'Autonomous worker starting task' });
+            }
+            catch (error) {
+                this.log.warn(`Failed to create chat session: ${error.message}`);
+            }
+        }
         try {
             // Setup workspace
             await this.setupWorkspace(taskDir);
+            if (chatSessionId) {
+                await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'workspace', message: 'Created workspace directory' });
+            }
             // Clone repository
+            if (chatSessionId) {
+                await updateChatSession(chatSessionId, { status: 'running' });
+                await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'clone', message: 'Cloning repository...' });
+            }
             const repoDir = await this.cloneRepo(taskDir);
+            if (chatSessionId) {
+                await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'clone', message: 'Repository cloned successfully' });
+            }
             // Create and checkout branch
             await this.createBranch(repoDir, branchName);
+            if (chatSessionId) {
+                await updateChatSession(chatSessionId, { branch: branchName, sessionPath: generateSessionPath(this.options.repoOwner, this.options.repoName, branchName) });
+                await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'branch', message: `Created branch: ${branchName}` });
+            }
             // Write Claude credentials
             this.writeClaudeCredentials();
             // Execute task with Claude
-            await this.executeWithClaude(repoDir, issue);
+            if (chatSessionId) {
+                await addEvent(chatSessionId, 'claude_start', { type: 'claude_start', message: 'Starting Claude Agent SDK...' });
+            }
+            await this.executeWithClaude(repoDir, issue, chatSessionId);
             // Check if there are any changes
             const hasChanges = await this.hasChanges(repoDir);
             if (!hasChanges) {
                 this.log.warn('No changes made by Claude');
+                if (chatSessionId) {
+                    await addMessage(chatSessionId, 'system', 'No changes were made by Claude');
+                    await updateChatSession(chatSessionId, { status: 'completed', completedAt: new Date() });
+                }
                 return {
                     success: false,
                     issue,
                     branchName,
                     error: 'No changes were made',
                     duration: Date.now() - startTime,
+                    chatSessionId,
                 };
             }
             // Commit and push
+            if (chatSessionId) {
+                await addEvent(chatSessionId, 'commit_progress', { type: 'commit_progress', stage: 'committing', message: 'Committing changes...' });
+            }
             const commitSha = await this.commitAndPush(repoDir, issue, branchName);
+            if (chatSessionId) {
+                await addEvent(chatSessionId, 'commit_progress', { type: 'commit_progress', stage: 'pushed', message: `Pushed commit ${commitSha}`, data: { commitSha, branch: branchName } });
+                await addMessage(chatSessionId, 'assistant', `Successfully committed and pushed changes.\n\nCommit: ${commitSha}\nBranch: ${branchName}`);
+                await updateChatSession(chatSessionId, { status: 'completed', completedAt: new Date() });
+            }
             this.log.success(`Task completed: ${issue.title}`);
             return {
                 success: true,
@@ -51,16 +105,23 @@ export class Worker {
                 branchName,
                 commitSha,
                 duration: Date.now() - startTime,
+                chatSessionId,
             };
         }
         catch (error) {
             this.log.error(`Task failed: ${error.message}`);
+            if (chatSessionId) {
+                await addMessage(chatSessionId, 'error', `Task failed: ${error.message}`);
+                await addEvent(chatSessionId, 'error', { type: 'error', message: error.message, stack: error.stack });
+                await updateChatSession(chatSessionId, { status: 'error', completedAt: new Date() });
+            }
             return {
                 success: false,
                 issue,
                 branchName,
                 error: error.message,
                 duration: Date.now() - startTime,
+                chatSessionId,
             };
         }
         finally {
@@ -123,7 +184,7 @@ export class Worker {
         writeFileSync(credentialsPath, JSON.stringify(credentials), { mode: 0o600 });
         this.log.debug('Claude credentials written');
     }
-    async executeWithClaude(repoDir, issue) {
+    async executeWithClaude(repoDir, issue, chatSessionId) {
         this.log.info('Executing task with Claude Agent SDK...');
         const prompt = this.buildPrompt(issue);
         const timeoutMs = this.options.timeoutMinutes * 60 * 1000;
@@ -145,26 +206,75 @@ export class Worker {
                 },
             });
             let lastMessage;
+            let assistantTextBuffer = '';
             for await (const message of stream) {
                 lastMessage = message;
                 if (message.type === 'assistant') {
-                    // Log tool uses
+                    // Log tool uses and collect assistant text
                     if (message.message?.content) {
                         for (const block of message.message.content) {
                             if (block.type === 'tool_use') {
-                                this.log.debug(`Tool: ${block.name}`);
+                                const toolName = block.name;
+                                const toolInput = block.input;
+                                this.log.debug(`Tool: ${toolName}`);
+                                // Log tool use event to database
+                                if (chatSessionId) {
+                                    await addEvent(chatSessionId, 'tool_use', {
+                                        type: 'tool_use',
+                                        tool: toolName,
+                                        input: this.sanitizeToolInput(toolName, toolInput),
+                                    });
+                                }
+                            }
+                            else if (block.type === 'text') {
+                                assistantTextBuffer += block.text + '\n';
                             }
                         }
                     }
+                    // Periodically flush assistant text to database as messages
+                    if (chatSessionId && assistantTextBuffer.length > 500) {
+                        await addMessage(chatSessionId, 'assistant', assistantTextBuffer.trim());
+                        assistantTextBuffer = '';
+                    }
                 }
                 else if (message.type === 'result') {
-                    this.log.info(`Claude execution completed in ${message.duration_ms}ms`);
+                    const duration = message.duration_ms;
+                    this.log.info(`Claude execution completed in ${duration}ms`);
+                    // Log final assistant message and completion event
+                    if (chatSessionId) {
+                        if (assistantTextBuffer.trim()) {
+                            await addMessage(chatSessionId, 'assistant', assistantTextBuffer.trim());
+                        }
+                        await addEvent(chatSessionId, 'claude_complete', {
+                            type: 'claude_complete',
+                            message: `Claude completed in ${Math.round(duration / 1000)}s`,
+                            duration_ms: duration,
+                        });
+                    }
                 }
             }
         }
         finally {
             clearTimeout(timeoutId);
         }
+    }
+    sanitizeToolInput(toolName, input) {
+        // Truncate large inputs for logging
+        if (!input)
+            return input;
+        const sanitized = { ...input };
+        // Truncate file contents
+        if (sanitized.content && typeof sanitized.content === 'string' && sanitized.content.length > 500) {
+            sanitized.content = sanitized.content.slice(0, 500) + `... (${sanitized.content.length} chars total)`;
+        }
+        // Truncate new_string/old_string for Edit tools
+        if (sanitized.new_string && sanitized.new_string.length > 200) {
+            sanitized.new_string = sanitized.new_string.slice(0, 200) + '...';
+        }
+        if (sanitized.old_string && sanitized.old_string.length > 200) {
+            sanitized.old_string = sanitized.old_string.slice(0, 200) + '...';
+        }
+        return sanitized;
     }
     buildPrompt(issue) {
         return `You are an expert developer working on implementing a GitHub issue.

@@ -10,6 +10,10 @@ export interface WorkerOptions {
         expiresAt?: number;
     };
     timeoutMinutes: number;
+    userId?: string;
+    repoOwner?: string;
+    repoName?: string;
+    enableDatabaseLogging?: boolean;
 }
 export interface WorkerTask {
     issue: Issue;
@@ -22,6 +26,7 @@ export interface WorkerResult {
     commitSha?: string;
     error?: string;
     duration: number;
+    chatSessionId?: string;
 }
 export declare class Worker {
     private options;
@@ -35,6 +40,7 @@ export declare class Worker {
     private createBranch;
     private writeClaudeCredentials;
     private executeWithClaude;
+    private sanitizeToolInput;
     private buildPrompt;
     private hasChanges;
     private commitAndPush;
