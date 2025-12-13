@@ -23,6 +23,7 @@ import {
   createOperationContext,
   finalizeOperationContext,
   ClaudeExecutionLogger,
+  getStructuredFileLogger,
   type OperationMetadata,
 } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
@@ -509,6 +510,20 @@ export class Worker {
         operations: correlationSummary?.operationCount,
       });
 
+      // Write to structured file log if enabled
+      const structuredLogger = getStructuredFileLogger();
+      if (structuredLogger.isEnabled()) {
+        structuredLogger.writeTaskLog(
+          issue.number,
+          correlationId,
+          this.workerId,
+          true,
+          duration,
+          branchName,
+          commitSha
+        );
+      }
+
       return {
         success: true,
         issue,
@@ -663,6 +678,21 @@ export class Worker {
           errorCode: structuredError.code,
           canReprocess: structuredError.isRetryable,
         });
+      }
+
+      // Write to structured file log if enabled
+      const structuredLogger = getStructuredFileLogger();
+      if (structuredLogger.isEnabled()) {
+        structuredLogger.writeTaskLog(
+          issue.number,
+          correlationId,
+          this.workerId,
+          false,
+          duration,
+          branchName,
+          undefined,
+          `[${structuredError.code}] ${structuredError.message}`
+        );
       }
 
       return {

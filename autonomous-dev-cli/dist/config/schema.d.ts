@@ -165,16 +165,36 @@ export declare const ConfigSchema: z.ZodObject<{
         includeCorrelationId: z.ZodDefault<z.ZodBoolean>;
         /** Include timestamps in log entries (default: true) */
         includeTimestamp: z.ZodDefault<z.ZodBoolean>;
+        /** Enable structured JSON logging to file alongside console output (default: false) */
+        enableStructuredFileLogging: z.ZodDefault<z.ZodBoolean>;
+        /** Directory path for structured log files (default: './logs') */
+        structuredLogDir: z.ZodDefault<z.ZodString>;
+        /** Maximum size of each log file in bytes before rotation (default: 10MB) */
+        maxLogFileSizeBytes: z.ZodDefault<z.ZodNumber>;
+        /** Number of rotated log files to retain (default: 5) */
+        maxLogFiles: z.ZodDefault<z.ZodNumber>;
+        /** Include performance metrics in structured logs (default: true when structured logging enabled) */
+        includeMetrics: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         format: "pretty" | "json";
         level: "debug" | "info" | "warn" | "error";
         includeCorrelationId: boolean;
         includeTimestamp: boolean;
+        enableStructuredFileLogging: boolean;
+        structuredLogDir: string;
+        maxLogFileSizeBytes: number;
+        maxLogFiles: number;
+        includeMetrics: boolean;
     }, {
         format?: "pretty" | "json" | undefined;
         level?: "debug" | "info" | "warn" | "error" | undefined;
         includeCorrelationId?: boolean | undefined;
         includeTimestamp?: boolean | undefined;
+        enableStructuredFileLogging?: boolean | undefined;
+        structuredLogDir?: string | undefined;
+        maxLogFileSizeBytes?: number | undefined;
+        maxLogFiles?: number | undefined;
+        includeMetrics?: boolean | undefined;
     }>>;
     /**
      * Circuit Breaker Settings
@@ -305,6 +325,11 @@ export declare const ConfigSchema: z.ZodObject<{
         level: "debug" | "info" | "warn" | "error";
         includeCorrelationId: boolean;
         includeTimestamp: boolean;
+        enableStructuredFileLogging: boolean;
+        structuredLogDir: string;
+        maxLogFileSizeBytes: number;
+        maxLogFiles: number;
+        includeMetrics: boolean;
     };
     circuitBreaker: {
         failureThreshold: number;
@@ -378,6 +403,11 @@ export declare const ConfigSchema: z.ZodObject<{
         level?: "debug" | "info" | "warn" | "error" | undefined;
         includeCorrelationId?: boolean | undefined;
         includeTimestamp?: boolean | undefined;
+        enableStructuredFileLogging?: boolean | undefined;
+        structuredLogDir?: string | undefined;
+        maxLogFileSizeBytes?: number | undefined;
+        maxLogFiles?: number | undefined;
+        includeMetrics?: boolean | undefined;
     } | undefined;
     circuitBreaker?: {
         failureThreshold?: number | undefined;

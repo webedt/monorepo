@@ -174,6 +174,36 @@ const configFieldHelp: Record<string, { description: string; envVar?: string; su
     suggestion: 'Keep enabled unless external logging adds timestamps',
     example: 'true',
   },
+  'logging.enableStructuredFileLogging': {
+    description: 'Enable structured JSON logging to file alongside console output',
+    envVar: 'LOG_ENABLE_STRUCTURED_FILE',
+    suggestion: 'Enable for production environments to capture machine-readable logs',
+    example: 'true',
+  },
+  'logging.structuredLogDir': {
+    description: 'Directory path for structured log files',
+    envVar: 'LOG_STRUCTURED_DIR',
+    suggestion: 'Use a persistent directory for log retention',
+    example: './logs',
+  },
+  'logging.maxLogFileSizeBytes': {
+    description: 'Maximum size of each log file in bytes before rotation',
+    envVar: 'LOG_MAX_FILE_SIZE_BYTES',
+    suggestion: 'Default is 10MB, increase for high-volume environments',
+    example: '10485760',
+  },
+  'logging.maxLogFiles': {
+    description: 'Number of rotated log files to retain',
+    envVar: 'LOG_MAX_FILES',
+    suggestion: 'Keep enough files for debugging, default is 5',
+    example: '5',
+  },
+  'logging.includeMetrics': {
+    description: 'Include performance metrics in structured logs',
+    envVar: 'LOG_INCLUDE_METRICS',
+    suggestion: 'Keep enabled for observability',
+    example: 'true',
+  },
 };
 
 /**
@@ -544,6 +574,11 @@ export function loadConfig(configPath?: string): Config {
     level: (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error') || 'info',
     includeCorrelationId: process.env.LOG_INCLUDE_CORRELATION_ID !== 'false',
     includeTimestamp: process.env.LOG_INCLUDE_TIMESTAMP !== 'false',
+    enableStructuredFileLogging: process.env.LOG_ENABLE_STRUCTURED_FILE === 'true',
+    structuredLogDir: process.env.LOG_STRUCTURED_DIR || './logs',
+    maxLogFileSizeBytes: parseInt(process.env.LOG_MAX_FILE_SIZE_BYTES || String(10 * 1024 * 1024), 10),
+    maxLogFiles: parseInt(process.env.LOG_MAX_FILES || '5', 10),
+    includeMetrics: process.env.LOG_INCLUDE_METRICS !== 'false',
   };
 
   envConfig.credentials = {

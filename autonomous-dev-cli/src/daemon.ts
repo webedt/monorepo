@@ -28,9 +28,12 @@ import {
   endRequestLifecycle,
   startPhase,
   endPhase,
+  initStructuredFileLogging,
+  getStructuredFileLogger,
   type LogFormat,
   type OperationMetadata,
   type CorrelationContext,
+  type StructuredFileLogger,
 } from './utils/logger.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer, type MonitoringServer } from './utils/monitoring.js';
@@ -114,6 +117,9 @@ export class Daemon implements DaemonStateProvider {
   private recentErrors: { time: Date; type: string }[] = [];
   private daemonStatus: 'running' | 'stopped' | 'starting' | 'stopping' = 'stopped';
 
+  // Structured file logging
+  private structuredLogger: StructuredFileLogger | null = null;
+
   constructor(options: DaemonOptions = {}) {
     this.options = options;
     this.config = loadConfig(options.configPath);
@@ -124,6 +130,21 @@ export class Daemon implements DaemonStateProvider {
       logger.setLevel(this.config.logging.level);
       logger.setIncludeCorrelationId(this.config.logging.includeCorrelationId);
       logger.setIncludeTimestamp(this.config.logging.includeTimestamp);
+
+      // Initialize structured file logging if enabled
+      if (this.config.logging.enableStructuredFileLogging) {
+        this.structuredLogger = initStructuredFileLogging({
+          logDir: this.config.logging.structuredLogDir,
+          maxFileSizeBytes: this.config.logging.maxLogFileSizeBytes,
+          maxFiles: this.config.logging.maxLogFiles,
+          includeMetrics: this.config.logging.includeMetrics,
+        });
+        logger.info('Structured file logging enabled', {
+          logDir: this.config.logging.structuredLogDir,
+          maxFileSizeBytes: this.config.logging.maxLogFileSizeBytes,
+          maxFiles: this.config.logging.maxLogFiles,
+        });
+      }
     }
 
     // Override with verbose flag if set
@@ -143,6 +164,20 @@ export class Daemon implements DaemonStateProvider {
 
     this.daemonStatus = 'starting';
     this.startTime = new Date();
+
+    // Log daemon startup to structured file log
+    if (this.structuredLogger?.isEnabled()) {
+      this.structuredLogger.writeSystemLog('info', 'Daemon starting', {
+        startTime: this.startTime.toISOString(),
+        repository: `${this.config.repo.owner}/${this.config.repo.name}`,
+        config: {
+          parallelWorkers: this.config.execution.parallelWorkers,
+          timeoutMinutes: this.config.execution.timeoutMinutes,
+          tasksPerCycle: this.config.discovery.tasksPerCycle,
+          maxOpenIssues: this.config.discovery.maxOpenIssues,
+        },
+      });
+    }
 
     try {
       // Initialize
@@ -226,6 +261,21 @@ export class Daemon implements DaemonStateProvider {
         const memoryDelta = Math.round((cycleEndMemory - cycleStartMemory) * 100) / 100;
 
         this.logCycleResult(result);
+
+        // Write to structured file log if enabled
+        if (this.structuredLogger?.isEnabled()) {
+          this.structuredLogger.writeCycleLog(
+            this.cycleCount,
+            cycleCorrelationId,
+            result.success,
+            result.tasksDiscovered,
+            result.tasksCompleted,
+            result.tasksFailed,
+            result.prsMerged,
+            result.duration,
+            result.errors
+          );
+        }
 
         // Record cycle metrics
         metrics.recordCycleCompletion(
@@ -750,6 +800,17 @@ export class Daemon implements DaemonStateProvider {
 
   private async shutdown(): Promise<void> {
     logger.info('Shutting down...');
+
+    // Log daemon shutdown to structured file log with final metrics summary
+    if (this.structuredLogger?.isEnabled()) {
+      const uptime = Date.now() - this.startTime.getTime();
+      this.structuredLogger.writeSystemLog('info', 'Daemon shutting down', {
+        shutdownTime: new Date().toISOString(),
+        uptimeMs: uptime,
+        totalCycles: this.cycleCount,
+        finalMetrics: this.structuredLogger.getMetricsSummary(),
+      });
+    }
 
     // Update health status
     metrics.updateHealthStatus(false);

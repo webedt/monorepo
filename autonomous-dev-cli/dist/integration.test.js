@@ -247,9 +247,10 @@ ${task.affectedPaths.map((p) => `- \`${p}\``).join('\n')}
         });
         it('should add failure comment on worker error', async () => {
             const github = createMockGitHub();
+            const errorMessage = 'Clone failed: network error';
             const workerResult = createMockWorkerResult({
                 success: false,
-                error: 'Clone failed: network error',
+                error: errorMessage,
             });
             const comment = `⚠️ Autonomous implementation failed:\n\n\`\`\`\n${workerResult.error}\n\`\`\``;
             await github.issues.addComment(workerResult.issue.number, comment);
@@ -257,10 +258,11 @@ ${task.affectedPaths.map((p) => `- \`${p}\``).join('\n')}
         });
         it('should handle PR creation with graceful degradation', async () => {
             const github = createMockGitHub();
-            github.pulls.createPRWithFallback = mock.fn(async () => ({
+            const mockCreatePRWithFallback = mock.fn(async () => ({
                 value: null,
                 degraded: true,
             }));
+            github.pulls.createPRWithFallback = mockCreatePRWithFallback;
             const result = await github.pulls.createPRWithFallback({
                 title: 'Test PR',
                 body: 'Test body',
@@ -292,7 +294,7 @@ ${task.affectedPaths.map((p) => `- \`${p}\``).join('\n')}
         });
         it('should handle merge conflicts', async () => {
             const resolver = createMockConflictResolver({
-                attemptMerge: mock.fn(async () => ({
+                attemptMerge: mock.fn(async (_branchName, _prNumber) => ({
                     success: false,
                     merged: false,
                     error: 'Conflicts require manual resolution',
@@ -301,7 +303,7 @@ ${task.affectedPaths.map((p) => `- \`${p}\``).join('\n')}
             });
             const result = await resolver.attemptMerge('feature-branch', 1);
             assert.strictEqual(result.success, false);
-            assert.ok(result.error.includes('conflict'));
+            assert.ok(result.error?.includes('conflict'));
         });
         it('should respect autoMerge configuration', () => {
             const config = { merge: { autoMerge: false } };

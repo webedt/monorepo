@@ -120,6 +120,187 @@ export interface CorrelationContext {
     startTime?: number;
 }
 /**
+ * Configuration for structured file logging
+ */
+export interface StructuredFileLoggerConfig {
+    /** Directory path for log files */
+    logDir: string;
+    /** Maximum file size in bytes before rotation (default: 10MB) */
+    maxFileSizeBytes: number;
+    /** Number of rotated files to keep (default: 5) */
+    maxFiles: number;
+    /** Include performance metrics in logs (default: true) */
+    includeMetrics: boolean;
+}
+/**
+ * Aggregated metrics for tracking operational statistics
+ */
+export interface AggregatedMetrics {
+    /** Total number of cycles executed */
+    totalCycles: number;
+    /** Successful cycles count */
+    successfulCycles: number;
+    /** Failed cycles count */
+    failedCycles: number;
+    /** Total tasks discovered */
+    totalTasksDiscovered: number;
+    /** Total tasks completed */
+    totalTasksCompleted: number;
+    /** Total tasks failed */
+    totalTasksFailed: number;
+    /** Total errors recorded */
+    totalErrors: number;
+    /** Total PRs merged */
+    totalPRsMerged: number;
+    /** Array of cycle durations for average calculation */
+    cycleDurations: number[];
+    /** Timestamp when tracking started */
+    startTime: number;
+    /** Last cycle timestamp */
+    lastCycleTime?: number;
+    /** Error counts by error code */
+    errorsByCode: Record<string, number>;
+    /** Success rate percentage (0-100) */
+    successRate: number;
+    /** Average cycle duration in ms */
+    avgCycleDurationMs: number;
+    /** Cycles per hour rate */
+    cyclesPerHour: number;
+}
+/**
+ * Structured log entry with extended fields for file logging
+ */
+export interface ExtendedLogEntry extends StructuredLogEntry {
+    /** Operation type for categorization */
+    operationType?: 'cycle' | 'task' | 'discovery' | 'evaluation' | 'merge' | 'api' | 'system';
+    /** Duration of operation in ms */
+    durationMs?: number;
+    /** Issue number if applicable */
+    issueNumber?: number;
+    /** Memory usage at time of log */
+    memoryUsageMB?: number;
+    /** Performance metrics snapshot */
+    metrics?: Partial<AggregatedMetrics>;
+}
+/**
+ * Aggregated metrics tracker for observability
+ */
+export declare class MetricsAggregator {
+    private metrics;
+    constructor();
+    private createInitialMetrics;
+    /**
+     * Record a cycle completion
+     */
+    recordCycle(success: boolean, durationMs: number, tasksDiscovered: number, tasksCompleted: number, tasksFailed: number, prsMerged: number): void;
+    /**
+     * Record an error occurrence
+     */
+    recordError(errorCode: string): void;
+    /**
+     * Recalculate derived metrics
+     */
+    private recalculateRates;
+    /**
+     * Get current aggregated metrics
+     */
+    getMetrics(): AggregatedMetrics;
+    /**
+     * Get a summary suitable for logging
+     */
+    getMetricsSummary(): Record<string, any>;
+    /**
+     * Reset metrics (useful for testing)
+     */
+    reset(): void;
+}
+/**
+ * Structured file logger that writes JSON logs to files with rotation
+ */
+export declare class StructuredFileLogger {
+    private config;
+    private currentLogFile;
+    private metricsAggregator;
+    private enabled;
+    constructor(config?: Partial<StructuredFileLoggerConfig>);
+    /**
+     * Enable structured file logging
+     */
+    enable(): void;
+    /**
+     * Disable structured file logging
+     */
+    disable(): void;
+    /**
+     * Check if structured file logging is enabled
+     */
+    isEnabled(): boolean;
+    /**
+     * Get the metrics aggregator for recording metrics
+     */
+    getMetricsAggregator(): MetricsAggregator;
+    /**
+     * Get current log file path
+     */
+    private getLogFilePath;
+    /**
+     * Ensure log directory exists
+     */
+    private ensureLogDirectory;
+    /**
+     * Check if log rotation is needed
+     */
+    private needsRotation;
+    /**
+     * Rotate log files
+     */
+    private rotateLogFiles;
+    /**
+     * Write a structured log entry to file
+     */
+    writeLog(entry: ExtendedLogEntry): void;
+    /**
+     * Write a cycle completion log with all metrics
+     */
+    writeCycleLog(cycleNumber: number, correlationId: string, success: boolean, tasksDiscovered: number, tasksCompleted: number, tasksFailed: number, prsMerged: number, durationMs: number, errors: string[]): void;
+    /**
+     * Write a task completion log
+     */
+    writeTaskLog(issueNumber: number, correlationId: string, workerId: string, success: boolean, durationMs: number, branchName?: string, commitSha?: string, error?: string): void;
+    /**
+     * Write a discovery log
+     */
+    writeDiscoveryLog(correlationId: string, cycleNumber: number, tasksFound: number, durationMs: number, existingIssues: number): void;
+    /**
+     * Write an API call log
+     */
+    writeApiLog(service: 'github' | 'claude', endpoint: string, correlationId: string, success: boolean, durationMs: number, statusCode?: number, error?: string): void;
+    /**
+     * Write a system event log
+     */
+    writeSystemLog(level: LogLevel, message: string, meta?: Record<string, any>): void;
+    /**
+     * Get list of log files in the log directory
+     */
+    getLogFiles(): string[];
+    /**
+     * Get current metrics summary
+     */
+    getMetricsSummary(): Record<string, any>;
+}
+/**
+ * Get or create the global structured file logger
+ */
+export declare function getStructuredFileLogger(): StructuredFileLogger;
+/**
+ * Initialize structured file logging with config
+ */
+export declare function initStructuredFileLogging(config: Partial<StructuredFileLoggerConfig>): StructuredFileLogger;
+/**
+ * Get the metrics aggregator from the structured logger
+ */
+export declare function getMetricsAggregator(): MetricsAggregator;
+/**
  * Generate a new correlation ID
  */
 export declare function generateCorrelationId(): string;

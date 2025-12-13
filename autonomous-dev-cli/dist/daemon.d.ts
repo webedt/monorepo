@@ -51,6 +51,7 @@ export declare class Daemon implements DaemonStateProvider {
     private errorsByType;
     private recentErrors;
     private daemonStatus;
+    private structuredLogger;
     constructor(options?: DaemonOptions);
     start(): Promise<void>;
     /**

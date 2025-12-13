@@ -117,11 +117,13 @@ export declare class Worker {
      */
     private extractRepoName;
     /**
-     * Get error context for debugging
+     * Get enhanced error context with execution state for debugging
      */
     private getErrorContext;
     /**
-     * Wrap an error with execution context
+     * Wrap an error with execution context using typed executor errors.
+     * Classifies the error based on its characteristics and returns
+     * an appropriate typed error with recovery strategy.
      */
     private wrapExecutionError;
     execute(task: WorkerTask): Promise<WorkerResult>;
@@ -152,11 +154,13 @@ export declare class Worker {
      */
     private handleRetryDelay;
     /**
-     * Extract error code from an error
+     * Extract error code from an error using type-based classification.
+     * Classifies errors based on their type hierarchy rather than string matching.
      */
     private extractErrorCode;
     /**
-     * Determine if a Claude error is retryable
+     * Determine if a Claude error is retryable using type-based classification.
+     * Uses recovery strategy from typed errors when available.
      */
     private isClaudeErrorRetryable;
     private sanitizeToolInput;

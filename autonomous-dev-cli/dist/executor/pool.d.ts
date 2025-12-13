@@ -1,6 +1,7 @@
 import { type WorkerOptions, type WorkerTask, type WorkerResult } from './worker.js';
 import { getDeadLetterQueue, type DeadLetterEntry } from '../utils/dead-letter-queue.js';
 import { type CircuitBreakerHealth } from '../utils/circuit-breaker.js';
+import { getErrorAggregator, type RecoveryStrategy } from '../errors/executor-errors.js';
 /** Task priority levels - higher value = higher priority */
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 /** Task category for classification */
@@ -65,6 +66,13 @@ export interface DegradationStatus {
     startedAt?: Date;
     /** Suggested recovery actions */
     recoveryActions: string[];
+    /** Error statistics for pattern analysis */
+    errorStats?: {
+        totalErrors: number;
+        byRecoveryStrategy: Record<RecoveryStrategy, number>;
+        mostCommonErrorCode?: string;
+        retriesExhausted: number;
+    };
 }
 export interface PoolTask extends WorkerTask {
     id: string;
@@ -131,7 +139,7 @@ export declare class WorkerPool {
      */
     private stopDegradationMonitor;
     /**
-     * Check and update degradation status
+     * Check and update degradation status with error aggregation statistics
      */
     private checkDegradationStatus;
     /**
@@ -154,6 +162,37 @@ export declare class WorkerPool {
      * Get reprocessable tasks from dead letter queue
      */
     getReprocessableTasks(): DeadLetterEntry[];
+    /**
+     * Get error aggregation summary for pattern analysis.
+     * Provides insight into error patterns across the pool.
+     */
+    getErrorAggregationSummary(): {
+        totalErrors: number;
+        bySeverity: Record<import("../utils/errors.js").ErrorSeverity, number>;
+        byCode: Record<string, number>;
+        retryStats: ReturnType<import("../errors/executor-errors.js").ErrorAggregator["getRetryStats"]>;
+        mostCommon: ReturnType<import("../errors/executor-errors.js").ErrorAggregator["getMostCommonErrors"]>;
+        timeSpan: {
+            start?: Date;
+            end?: Date;
+        };
+    };
+    /**
+     * Get recent errors within a time window for debugging.
+     * @param windowMs Time window in milliseconds (default: 5 minutes)
+     */
+    getRecentErrors(windowMs?: number): {
+        code: import("../utils/errors.js").ErrorCode;
+        message: string;
+        severity: import("../utils/errors.js").ErrorSeverity;
+        isRetryable: boolean;
+        recoveryStrategy: RecoveryStrategy;
+        timestamp: string;
+    }[];
+    /**
+     * Clear error aggregation data (useful after recovery or for testing)
+     */
+    clearErrorAggregation(): void;
     /**
      * Calculate priority score for a task
      */
@@ -192,6 +231,7 @@ export declare class WorkerPool {
         taskGroups: number;
         degradationStatus: DegradationStatus;
         dlqStats: ReturnType<typeof getDeadLetterQueue>['getStats'] extends () => infer R ? R : never;
+        errorAggregation: ReturnType<typeof getErrorAggregator>['getSummary'] extends () => infer R ? R : never;
     };
     /**
      * Get the current scaling configuration
