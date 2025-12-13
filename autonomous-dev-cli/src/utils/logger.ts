@@ -4,6 +4,14 @@ import { randomUUID } from 'crypto';
 import { memoryUsage } from 'process';
 import { existsSync, mkdirSync, appendFileSync, statSync, renameSync, readdirSync, unlinkSync } from 'fs';
 import { join, basename } from 'path';
+import {
+  getProgressManager,
+  createProgressBar,
+  formatDuration,
+  formatETA,
+  type CyclePhase,
+  type ProgressManager,
+} from './progress.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -1597,6 +1605,146 @@ class Logger {
     } else {
       console.log(`${chalk.cyan(`[${step}/${total}]`)} ${message}`);
     }
+  }
+
+  /**
+   * Show a progress bar for batch operations
+   */
+  progressBar(current: number, total: number, label: string, etaMs?: number): void {
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', label);
+      entry.meta = { current, total, progress: total > 0 ? Math.round((current / total) * 100) : 0, etaMs };
+      console.log(this.formatJson(entry));
+    } else {
+      const bar = createProgressBar(current, { total, width: 25 });
+      let output = `${label}: ${bar}`;
+      if (etaMs !== undefined && etaMs > 0) {
+        output += ` ${chalk.gray(`ETA: ${formatETA(etaMs)}`)}`;
+      }
+      // Use carriage return to update in place
+      process.stdout.write(`\r${output}`);
+      if (current >= total) {
+        process.stdout.write('\n');
+      }
+    }
+  }
+
+  /**
+   * Clear the current progress line
+   */
+  clearProgress(): void {
+    if (this.format !== 'json') {
+      process.stdout.write('\r\x1b[K'); // Clear line
+    }
+  }
+
+  /**
+   * Log cycle phase change with visual indicator
+   */
+  cyclePhase(phase: CyclePhase, step: number, total: number): void {
+    const phaseLabels: Record<CyclePhase, string> = {
+      'fetch-issues': 'Fetching existing issues',
+      'discover-tasks': 'Discovering new tasks',
+      'execute-tasks': 'Executing tasks',
+      'evaluate': 'Running evaluation pipeline',
+      'create-prs': 'Creating pull requests',
+      'merge-prs': 'Merging pull requests',
+      'waiting': 'Waiting for next cycle',
+    };
+
+    const phaseIcons: Record<CyclePhase, string> = {
+      'fetch-issues': '📋',
+      'discover-tasks': '🔍',
+      'execute-tasks': '⚙️',
+      'evaluate': '🧪',
+      'create-prs': '📝',
+      'merge-prs': '🔀',
+      'waiting': '⏳',
+    };
+
+    const label = phaseLabels[phase];
+    const icon = phaseIcons[phase];
+
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', label);
+      entry.meta = { phase, step, total };
+      console.log(this.formatJson(entry));
+    } else {
+      console.log(`${icon} ${chalk.cyan(`[${step}/${total}]`)} ${label}`);
+    }
+  }
+
+  /**
+   * Log worker execution progress
+   */
+  workerProgress(
+    workerId: string,
+    issueNumber: number,
+    status: 'starting' | 'running' | 'completed' | 'failed',
+    progress?: number,
+    message?: string
+  ): void {
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', `Worker ${workerId}: ${status}`);
+      entry.meta = { workerId, issueNumber, status, progress, message };
+      entry.workerId = workerId;
+      console.log(this.formatJson(entry));
+    } else {
+      const statusIcons: Record<string, string> = {
+        starting: chalk.blue('→'),
+        running: chalk.yellow('⚡'),
+        completed: chalk.green('✓'),
+        failed: chalk.red('✗'),
+      };
+
+      const icon = statusIcons[status] || '•';
+      let output = `  ${icon} ${chalk.gray(`[${workerId}]`)} Issue #${issueNumber}`;
+
+      if (progress !== undefined && status === 'running') {
+        const bar = createProgressBar(progress, { total: 100, width: 15, showPercentage: true, showCount: false });
+        output += ` ${bar}`;
+      }
+
+      if (message) {
+        output += ` ${chalk.gray(message)}`;
+      }
+
+      console.log(output);
+    }
+  }
+
+  /**
+   * Log estimated time remaining
+   */
+  estimatedTime(label: string, etaMs: number): void {
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', label);
+      entry.meta = { etaMs, etaFormatted: formatETA(etaMs) };
+      console.log(this.formatJson(entry));
+    } else {
+      console.log(`${chalk.gray('⏱')} ${label}: ${chalk.yellow(formatETA(etaMs))}`);
+    }
+  }
+
+  /**
+   * Log waiting state with countdown
+   */
+  waitingCountdown(remainingMs: number): void {
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', 'Waiting for next cycle');
+      entry.meta = { remainingMs, remainingFormatted: formatDuration(remainingMs) };
+      console.log(this.formatJson(entry));
+    } else {
+      const remaining = formatDuration(remainingMs);
+      process.stdout.write(`\r${chalk.gray('⏳')} Waiting for next cycle... ${chalk.yellow(remaining)}  `);
+    }
+  }
+
+  /**
+   * Get the progress manager for advanced progress tracking
+   */
+  getProgressManager(): ProgressManager {
+    return getProgressManager(this.format === 'json');
   }
 
   divider(): void {
