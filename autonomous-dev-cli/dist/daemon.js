@@ -1,6 +1,7 @@
 import { loadConfig } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
+import { validateEmail, validateWorkDir, validateRepoInfo, validateEnvironmentVariables, } from './utils/validation.js';
 import { discoverTasks, createDeduplicator, getParallelSafeTasks, initPersistentCache, } from './discovery/index.js';
 import { createPreviewSession, runInteractivePreview, PreviewSessionManager, } from './preview/index.js';
 import { createWorkerPool } from './executor/index.js';
@@ -741,10 +742,52 @@ export class Daemon {
     }
     async initialize() {
         logger.info('Initializing...');
+        // Validate environment variables at startup
+        const envResult = validateEnvironmentVariables();
+        if (!envResult.isValid) {
+            logger.warn('Environment variable validation found issues:');
+            for (const { envVar, error } of envResult.errors) {
+                logger.warn(`  ${envVar}: ${error.message}`);
+            }
+        }
+        if (envResult.warnings.length > 0) {
+            for (const { envVar, message } of envResult.warnings) {
+                logger.warn(`  ${envVar}: ${message}`);
+            }
+        }
+        // Validate repository configuration
+        const repoResult = validateRepoInfo(this.config.repo.owner, this.config.repo.name);
+        if (!repoResult.valid) {
+            throw new ConfigError(ErrorCode.CONFIG_VALIDATION_FAILED, repoResult.error?.message || 'Invalid repository configuration', {
+                field: 'repo',
+                context: this.getErrorContext('initialize'),
+                recoveryActions: repoResult.error?.recoveryActions || [],
+            });
+        }
+        // Validate workDir for path traversal
+        const workDirResult = validateWorkDir(this.config.execution.workDir);
+        if (!workDirResult.valid) {
+            throw new ConfigError(ErrorCode.CONFIG_VALIDATION_FAILED, workDirResult.error?.message || 'Invalid working directory', {
+                field: 'execution.workDir',
+                value: this.config.execution.workDir,
+                context: this.getErrorContext('initialize'),
+                recoveryActions: workDirResult.error?.recoveryActions || [],
+            });
+        }
         // Set repository identifier for metrics
         this.repository = `${this.config.repo.owner}/${this.config.repo.name}`;
         // Load credentials from database if configured
         if (this.config.credentials.databaseUrl && this.config.credentials.userEmail) {
+            // Validate email format before database query to prevent injection
+            const emailResult = validateEmail(this.config.credentials.userEmail);
+            if (!emailResult.valid) {
+                throw new ConfigError(ErrorCode.CONFIG_VALIDATION_FAILED, emailResult.error?.message || 'Invalid email format', {
+                    field: 'credentials.userEmail',
+                    value: this.config.credentials.userEmail,
+                    context: this.getErrorContext('initialize'),
+                    recoveryActions: emailResult.error?.recoveryActions || [],
+                });
+            }
             logger.info('Loading credentials from database...');
             await initDatabase(this.config.credentials.databaseUrl);
             const creds = await getUserCredentials(this.config.credentials.userEmail);

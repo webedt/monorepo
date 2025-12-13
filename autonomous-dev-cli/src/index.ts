@@ -22,7 +22,11 @@ import {
   validateGitHubToken,
   validateClaudeAuth,
   validateRepoInfo,
+  validateEmail,
+  validateWorkDir,
+  validateEnvironmentVariables,
   displayValidationError,
+  displayEnvValidationErrors,
   createMissingCredentialMessage,
   NUMERIC_RANGES,
 } from './utils/validation.js';
@@ -397,8 +401,15 @@ program
     try {
       const config = loadConfig(options.config);
 
-      // Load credentials
+      // Load credentials from database if configured
       if (config.credentials.databaseUrl && config.credentials.userEmail) {
+        // Validate email format before database query to prevent injection
+        const emailResult = validateEmail(config.credentials.userEmail);
+        if (!emailResult.valid) {
+          displayValidationError(emailResult);
+          process.exit(1);
+        }
+
         await initDatabase(config.credentials.databaseUrl);
         const creds = await getUserCredentials(config.credentials.userEmail);
         if (creds) {
@@ -559,8 +570,15 @@ program
         process.exit(1);
       }
 
-      // Load credentials
+      // Load credentials from database if configured
       if (config.credentials.databaseUrl && config.credentials.userEmail) {
+        // Validate email format before database query to prevent injection
+        const emailResult = validateEmail(config.credentials.userEmail);
+        if (!emailResult.valid) {
+          displayValidationError(emailResult);
+          process.exit(1);
+        }
+
         await initDatabase(config.credentials.databaseUrl);
         const creds = await getUserCredentials(config.credentials.userEmail);
         if (creds?.githubAccessToken) {

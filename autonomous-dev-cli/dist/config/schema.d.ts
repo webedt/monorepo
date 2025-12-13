@@ -81,8 +81,8 @@ export declare const ConfigSchema: z.ZodObject<{
         ttlMinutes: z.ZodDefault<z.ZodNumber>;
         /** Maximum total cache size in megabytes (10-1000, default: 100) */
         maxSizeMB: z.ZodDefault<z.ZodNumber>;
-        /** Directory for persistent cache storage (default: .autonomous-dev-cache) */
-        cacheDir: z.ZodDefault<z.ZodString>;
+        /** Directory for persistent cache storage - validated for path traversal (default: .autonomous-dev-cache) */
+        cacheDir: z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>;
         /** Enable persistent file-based caching across restarts (default: true) */
         persistToDisk: z.ZodDefault<z.ZodBoolean>;
         /** Use git commit hash for cache invalidation (default: true) */
@@ -121,8 +121,8 @@ export declare const ConfigSchema: z.ZodObject<{
         parallelWorkers: z.ZodDefault<z.ZodNumber>;
         /** Task timeout in minutes (5-120, default: 30) */
         timeoutMinutes: z.ZodDefault<z.ZodNumber>;
-        /** Working directory for task execution */
-        workDir: z.ZodDefault<z.ZodString>;
+        /** Working directory for task execution - validated for path traversal */
+        workDir: z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>;
     }, "strip", z.ZodTypeAny, {
         parallelWorkers: number;
         timeoutMinutes: number;
@@ -291,8 +291,8 @@ export declare const ConfigSchema: z.ZodObject<{
         includeTimestamp: z.ZodDefault<z.ZodBoolean>;
         /** Enable structured JSON logging to file alongside console output (default: false) */
         enableStructuredFileLogging: z.ZodDefault<z.ZodBoolean>;
-        /** Directory path for structured log files (default: './logs') */
-        structuredLogDir: z.ZodDefault<z.ZodString>;
+        /** Directory path for structured log files - validated for path traversal (default: './logs') */
+        structuredLogDir: z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>;
         /** Maximum size of each log file in bytes before rotation (default: 10MB) */
         maxLogFileSizeBytes: z.ZodDefault<z.ZodNumber>;
         /** Number of rotated log files to retain (default: 5) */
@@ -372,8 +372,8 @@ export declare const ConfigSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         /** Webhook URL for sending alerts (optional) */
         webhookUrl: z.ZodOptional<z.ZodString>;
-        /** File path for alert logs (optional) */
-        alertLogPath: z.ZodOptional<z.ZodString>;
+        /** File path for alert logs - validated for path traversal (optional) */
+        alertLogPath: z.ZodOptional<z.ZodEffects<z.ZodString, string, string>>;
         /** Minimum interval between repeated alerts in milliseconds (default: 60000 = 1 minute) */
         cooldownMs: z.ZodDefault<z.ZodNumber>;
         /** Maximum alerts per minute for rate limiting (default: 30) */
