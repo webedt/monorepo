@@ -1,5 +1,9 @@
 FROM node:20-slim
 
+# Build arguments for versioning
+ARG BUILD_DATE
+ARG BUILD_ID
+
 # Install git and tmux
 RUN apt-get update && apt-get install -y git tmux && rm -rf /var/lib/apt/lists/*
 
@@ -25,6 +29,9 @@ COPY bin ./bin
 
 # Build TypeScript
 RUN npm run build
+
+# Write build info to a JSON file
+RUN echo "{\"buildDate\":\"${BUILD_DATE:-unknown}\",\"buildId\":\"${BUILD_ID:-unknown}\"}" > /app/build-info.json
 
 # Change ownership to worker user
 RUN chown -R worker:worker /app

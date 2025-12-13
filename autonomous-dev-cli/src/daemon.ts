@@ -1,6 +1,7 @@
 import { loadConfig, type Config } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub, type GitHub, type Issue, type ServiceHealth } from './github/index.js';
+import { formatBuildInfo } from './utils/buildInfo.js';
 import { simpleGit } from 'simple-git';
 import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'fs';
 import {
@@ -237,6 +238,8 @@ export class Daemon implements DaemonStateProvider {
 
   async start(): Promise<void> {
     logger.header('Autonomous Dev CLI');
+    console.log(`Build: ${formatBuildInfo()}`);
+    console.log();
     logger.info('Starting daemon...');
 
     // Register signal handlers for graceful shutdown
