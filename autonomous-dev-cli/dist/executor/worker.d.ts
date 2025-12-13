@@ -1,3 +1,4 @@
+import { type CircuitBreakerConfig } from '../utils/circuit-breaker.js';
 import { type Issue } from '../github/issues.js';
 export interface WorkerOptions {
     workDir: string;
@@ -19,6 +20,7 @@ export interface WorkerOptions {
         paths?: string[];
     };
     useShallowClone?: boolean;
+    circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
 }
 export interface WorkerTask {
     issue: Issue;
@@ -38,7 +40,12 @@ export declare class Worker {
     private workerId;
     private log;
     private repository;
+    private circuitBreaker;
     constructor(options: WorkerOptions, workerId: string);
+    /**
+     * Get the circuit breaker health status
+     */
+    getCircuitBreakerHealth(): import("../utils/circuit-breaker.js").CircuitBreakerHealth;
     /**
      * Extract repository name from URL for metrics labeling
      */

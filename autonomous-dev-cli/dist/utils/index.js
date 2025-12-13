@@ -25,4 +25,6 @@ extractHttpStatus, extractNetworkErrorCode, extractRetryAfterMs,
 createClaudeErrorFromResponse, } from './retry.js';
 // Re-export metrics utilities
 export { metrics, Counter, Gauge, Histogram, } from './metrics.js';
+// Re-export circuit breaker utilities
+export { CircuitBreaker, DEFAULT_CIRCUIT_BREAKER_CONFIG, getClaudeCircuitBreaker, getClaudeSDKCircuitBreaker, resetAllCircuitBreakers, getAllCircuitBreakerHealth, } from './circuit-breaker.js';
 //# sourceMappingURL=index.js.map

@@ -1,5 +1,6 @@
 import { type AnalyzerConfig } from './analyzer.js';
 import { type Issue } from '../github/issues.js';
+import { type CircuitBreakerConfig } from '../utils/circuit-breaker.js';
 /** Task priority levels aligned with worker pool prioritization */
 export type DiscoveredTaskPriority = 'critical' | 'high' | 'medium' | 'low';
 /** Task category for classification - aligned with worker pool */
@@ -27,6 +28,7 @@ export interface TaskGeneratorOptions {
     existingIssues: Issue[];
     repoContext?: string;
     analyzerConfig?: AnalyzerConfig;
+    circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
 }
 export declare class TaskGenerator {
     private claudeAuth;
@@ -36,7 +38,12 @@ export declare class TaskGenerator {
     private existingIssues;
     private repoContext;
     private analyzerConfig;
+    private circuitBreaker;
     constructor(options: TaskGeneratorOptions);
+    /**
+     * Get the circuit breaker health status
+     */
+    getCircuitBreakerHealth(): import("../utils/circuit-breaker.js").CircuitBreakerHealth;
     generateTasks(): Promise<DiscoveredTask[]>;
     private buildPrompt;
     private callClaude;
