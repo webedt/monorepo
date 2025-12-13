@@ -560,7 +560,7 @@ describe('JSON Column Types', () => {
       };
 
       assert.ok(imageAiKeys.openrouter);
-      assert.strictEqual(imageAiKeys.cometapi, undefined);
+      assert.strictEqual((imageAiKeys as Record<string, unknown>).cometapi, undefined);
     });
   });
 
