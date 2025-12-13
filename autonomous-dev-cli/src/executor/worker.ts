@@ -115,7 +115,8 @@ export class Worker {
           await updateChatSession(chatSessionId, { branch: branchName, sessionPath: generateSessionPath(this.options.repoOwner!, this.options.repoName!, branchName) });
           await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'branch', message: `Created branch: ${branchName}` });
         } catch (dbError: any) {
-          this.log.warn(`Failed to update session in DB: ${dbError.message}`);
+          const errorMessage = dbError?.message || dbError?.code || String(dbError);
+          this.log.warn(`Failed to update session in DB: ${errorMessage}`);
         }
       }
 

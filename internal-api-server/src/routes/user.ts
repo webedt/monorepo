@@ -8,6 +8,8 @@ import { db, users } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { shouldRefreshToken, refreshClaudeToken, type ClaudeAuth } from '../lib/claudeAuth.js';
+import { logger } from '@webedt/shared';
 
 const router = Router();
 
@@ -64,6 +66,137 @@ router.delete('/claude-auth', requireAuth, async (req: Request, res: Response) =
   } catch (error) {
     console.error('Remove Claude auth error:', error);
     res.status(500).json({ success: false, error: 'Failed to remove Claude authentication' });
+  }
+});
+
+// Refresh Claude OAuth token and update in database
+router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    // Get current Claude auth from user
+    const [user] = await db
+      .select({ claudeAuth: users.claudeAuth })
+      .from(users)
+      .where(eq(users.id, authReq.user!.id))
+      .limit(1);
+
+    if (!user?.claudeAuth) {
+      res.status(400).json({
+        success: false,
+        error: 'No Claude authentication found for user',
+      });
+      return;
+    }
+
+    const claudeAuth = user.claudeAuth as ClaudeAuth;
+
+    // Check if refresh is needed
+    if (!shouldRefreshToken(claudeAuth)) {
+      logger.info('Token still valid, no refresh needed', { component: 'UserRoutes' });
+      res.json({
+        success: true,
+        data: {
+          message: 'Token still valid',
+          claudeAuth,
+          refreshed: false,
+        },
+      });
+      return;
+    }
+
+    // Refresh the token
+    logger.info('Refreshing Claude OAuth token', { component: 'UserRoutes', userId: authReq.user!.id });
+    const newClaudeAuth = await refreshClaudeToken(claudeAuth);
+
+    // Update in database
+    await db
+      .update(users)
+      .set({ claudeAuth: newClaudeAuth })
+      .where(eq(users.id, authReq.user!.id));
+
+    logger.info('Claude OAuth token refreshed and saved', {
+      component: 'UserRoutes',
+      userId: authReq.user!.id,
+      newExpiration: new Date(newClaudeAuth.expiresAt).toISOString(),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Token refreshed successfully',
+        claudeAuth: newClaudeAuth,
+        refreshed: true,
+      },
+    });
+  } catch (error: any) {
+    logger.error('Failed to refresh Claude token', error, { component: 'UserRoutes' });
+    res.status(500).json({
+      success: false,
+      error: `Failed to refresh Claude token: ${error.message}`,
+    });
+  }
+});
+
+// Get Claude credentials with auto-refresh (for autonomous workers)
+// This endpoint refreshes the token if needed and returns valid credentials
+router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    // Get current Claude auth from user
+    const [user] = await db
+      .select({ claudeAuth: users.claudeAuth })
+      .from(users)
+      .where(eq(users.id, authReq.user!.id))
+      .limit(1);
+
+    if (!user?.claudeAuth) {
+      res.status(400).json({
+        success: false,
+        error: 'No Claude authentication found for user',
+      });
+      return;
+    }
+
+    let claudeAuth = user.claudeAuth as ClaudeAuth;
+    let wasRefreshed = false;
+
+    // Auto-refresh if needed
+    if (shouldRefreshToken(claudeAuth)) {
+      logger.info('Token expiring soon, auto-refreshing', { component: 'UserRoutes', userId: authReq.user!.id });
+      try {
+        claudeAuth = await refreshClaudeToken(claudeAuth);
+        wasRefreshed = true;
+
+        // Update in database
+        await db
+          .update(users)
+          .set({ claudeAuth })
+          .where(eq(users.id, authReq.user!.id));
+
+        logger.info('Token auto-refreshed and saved', { component: 'UserRoutes' });
+      } catch (refreshError: any) {
+        logger.error('Auto-refresh failed', refreshError, { component: 'UserRoutes' });
+        // Return current token anyway, let the caller handle the error
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        claudeAuth,
+        refreshed: wasRefreshed,
+        expiresAt: claudeAuth.expiresAt,
+        expiresIn: Math.max(0, claudeAuth.expiresAt - Date.now()),
+      },
+    });
+  } catch (error: any) {
+    logger.error('Failed to get Claude credentials', error, { component: 'UserRoutes' });
+    res.status(500).json({
+      success: false,
+      error: `Failed to get Claude credentials: ${error.message}`,
+    });
   }
 });
 

@@ -29,11 +29,25 @@ export interface TaskGeneratorOptions {
 }
 
 /**
+ * Check if OAuth token is expired or about to expire
+ */
+function isTokenExpired(expiresAt?: number, bufferMs: number = 60000): boolean {
+  if (!expiresAt) return false; // No expiry means we'll try and see
+  return Date.now() >= (expiresAt - bufferMs);
+}
+
+/**
  * Write Claude credentials to ~/.claude/.credentials.json for SDK usage
  */
 function ensureClaudeCredentials(claudeAuth: { accessToken: string; refreshToken: string; expiresAt?: number }): void {
   const claudeDir = path.join(os.homedir(), '.claude');
   const credentialPath = path.join(claudeDir, '.credentials.json');
+
+  // Check if token is expired
+  if (isTokenExpired(claudeAuth.expiresAt)) {
+    const expiresAtDate = claudeAuth.expiresAt ? new Date(claudeAuth.expiresAt).toISOString() : 'unknown';
+    logger.warn(`Claude OAuth token may be expired (expiresAt: ${expiresAtDate}). The SDK should attempt to refresh it.`);
+  }
 
   // Create directory if it doesn't exist
   if (!fs.existsSync(claudeDir)) {
@@ -241,9 +255,23 @@ Return ONLY the JSON array, no other text.`;
 
       const totalTime = Math.round((Date.now() - startTime) / 1000);
       logger.info(`Claude SDK query complete in ${totalTime}s (${messageCount} messages)`);
-    } catch (error) {
-      logger.error('Claude SDK error', { error });
-      throw new Error(`Claude SDK error: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
+      const isAuthError = errorMessage.includes('401') ||
+                          errorMessage.includes('authentication') ||
+                          errorMessage.includes('OAuth') ||
+                          errorMessage.includes('token');
+
+      if (isAuthError) {
+        logger.error('Claude OAuth authentication failed. Token may be expired and refresh failed.', {
+          error: errorMessage,
+          hint: 'User may need to re-authenticate with Claude'
+        });
+        throw new Error(`Claude OAuth authentication failed: ${errorMessage}. User may need to re-authenticate.`);
+      }
+
+      logger.error('Claude SDK error', { error: errorMessage });
+      throw new Error(`Claude SDK error: ${errorMessage}`);
     }
 
     if (!content) {

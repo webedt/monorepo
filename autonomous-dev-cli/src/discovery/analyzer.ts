@@ -123,6 +123,12 @@ export class CodebaseAnalyzer {
     const entries: DirectoryEntry[] = [];
 
     try {
+      // Check if directory exists first
+      if (!existsSync(dirPath)) {
+        logger.warn(`Directory does not exist: ${dirPath}`);
+        return entries;
+      }
+
       const items = readdirSync(dirPath);
 
       for (const item of items) {
@@ -159,8 +165,9 @@ export class CodebaseAnalyzer {
           // Skip files we can't access
         }
       }
-    } catch (error) {
-      logger.warn(`Failed to scan directory: ${dirPath}`, { error });
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.code || String(error);
+      logger.warn(`Failed to scan directory: ${dirPath}`, { error: errorMessage });
     }
 
     return entries;

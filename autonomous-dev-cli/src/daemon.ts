@@ -1,5 +1,5 @@
 import { loadConfig, type Config } from './config/index.js';
-import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
+import { initDatabase, getUserCredentials, closeDatabase, ensureValidClaudeToken } from './db/index.js';
 import { createGitHub, type GitHub, type Issue } from './github/index.js';
 import { discoverTasks, type DiscoveredTask } from './discovery/index.js';
 import { createWorkerPool, type WorkerTask, type PoolResult } from './executor/index.js';
@@ -171,6 +171,30 @@ export class Daemon {
     try {
       if (!this.github || !this.config.credentials.claudeAuth) {
         throw new Error('Not initialized');
+      }
+
+      // Refresh Claude token if needed before starting cycle
+      if (this.userId && this.config.credentials.claudeAuth) {
+        try {
+          const refreshedAuth = await ensureValidClaudeToken(
+            this.userId,
+            this.config.credentials.claudeAuth as {
+              accessToken: string;
+              refreshToken: string;
+              expiresAt: number;
+            }
+          );
+          // Update config with refreshed credentials
+          this.config.credentials.claudeAuth = {
+            accessToken: refreshedAuth.accessToken,
+            refreshToken: refreshedAuth.refreshToken,
+            expiresAt: refreshedAuth.expiresAt,
+          };
+        } catch (refreshError: any) {
+          errors.push(`Token refresh failed: ${refreshError.message}`);
+          logger.error('Failed to refresh Claude token before cycle', { error: refreshError.message });
+          // Continue anyway - the token might still work
+        }
       }
 
       // STEP 1: Get existing issues

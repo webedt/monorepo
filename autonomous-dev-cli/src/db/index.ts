@@ -287,7 +287,7 @@ export async function updateChatSession(
     logger.debug(`Updated chat session: ${sessionId}`, { updates });
   } catch (error: any) {
     // Handle unique constraint violations gracefully
-    if (error.code === '23505') {
+    if (error?.code === '23505') {
       logger.warn(`Duplicate session_path, skipping update: ${updates.sessionPath}`);
       // Update without session_path
       const { sessionPath, ...otherUpdates } = updates;
@@ -298,7 +298,21 @@ export async function updateChatSession(
           .where(eq(chatSessions.id, sessionId));
       }
     } else {
-      throw error;
+      // Provide detailed error for debugging
+      const errorDetails = {
+        message: error?.message || 'Unknown error',
+        code: error?.code,
+        detail: error?.detail,
+        constraint: error?.constraint,
+      };
+      logger.error(`Failed to update chat session ${sessionId}`, errorDetails);
+
+      // Create a more informative error
+      const errorMessage = error?.message || error?.detail || `Database error (code: ${error?.code || 'unknown'})`;
+      const enrichedError = new Error(errorMessage);
+      (enrichedError as any).code = error?.code;
+      (enrichedError as any).detail = error?.detail;
+      throw enrichedError;
     }
   }
 }
@@ -370,4 +384,104 @@ export async function addEvent(
 // Helper to generate session path (matches internal-api-server format)
 export function generateSessionPath(owner: string, repo: string, branch: string): string {
   return `${owner}__${repo}__${branch.replace(/\//g, '-')}`;
+}
+
+// ============================================================================
+// Claude OAuth Token Refresh
+// ============================================================================
+
+const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+// Refresh 10 minutes before expiration
+const TOKEN_BUFFER_TIME = 10 * 60 * 1000;
+
+interface ClaudeAuth {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  scopes?: string[];
+  subscriptionType?: string;
+  rateLimitTier?: string;
+}
+
+/**
+ * Check if a Claude access token needs to be refreshed
+ */
+export function shouldRefreshClaudeToken(claudeAuth: ClaudeAuth): boolean {
+  const now = Date.now();
+  const timeUntilExpiry = claudeAuth.expiresAt - now;
+  return timeUntilExpiry <= TOKEN_BUFFER_TIME;
+}
+
+/**
+ * Refresh Claude OAuth token using the refresh token
+ */
+async function refreshClaudeToken(claudeAuth: ClaudeAuth): Promise<ClaudeAuth> {
+  logger.info('Refreshing Claude OAuth token...');
+
+  const response = await fetch(CLAUDE_OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      grant_type: 'refresh_token',
+      refresh_token: claudeAuth.refreshToken,
+      client_id: CLAUDE_OAUTH_CLIENT_ID,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error('Token refresh failed', { status: response.status, error: errorText });
+    throw new Error(`Failed to refresh token: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json() as { access_token: string; refresh_token: string; expires_in: number };
+  const newExpiresAt = Date.now() + data.expires_in * 1000;
+
+  logger.info('Claude OAuth token refreshed successfully', {
+    newExpiration: new Date(newExpiresAt).toISOString(),
+  });
+
+  return {
+    ...claudeAuth,
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: newExpiresAt,
+  };
+}
+
+/**
+ * Ensure Claude auth token is valid, refresh if needed, and update in database
+ * Returns the valid auth object (either original or refreshed)
+ */
+export async function ensureValidClaudeToken(
+  userId: string,
+  claudeAuth: ClaudeAuth
+): Promise<ClaudeAuth> {
+  if (!shouldRefreshClaudeToken(claudeAuth)) {
+    logger.debug('Claude token still valid, no refresh needed');
+    return claudeAuth;
+  }
+
+  const timeUntilExpiry = claudeAuth.expiresAt - Date.now();
+  logger.info(`Claude token expires in ${Math.round(timeUntilExpiry / 60000)} minutes, refreshing...`);
+
+  try {
+    const newClaudeAuth = await refreshClaudeToken(claudeAuth);
+
+    // Update in database
+    const database = getDb();
+    await database
+      .update(users)
+      .set({ claudeAuth: newClaudeAuth })
+      .where(eq(users.id, userId));
+
+    logger.info('Claude token refreshed and saved to database');
+    return newClaudeAuth;
+  } catch (error: any) {
+    logger.error('Failed to refresh Claude token', { error: error.message });
+    throw error;
+  }
 }
