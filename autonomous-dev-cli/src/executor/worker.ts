@@ -37,6 +37,19 @@ import {
   type RecoveryAction,
 } from '../utils/errors.js';
 import {
+  ExecutorError,
+  NetworkExecutorError,
+  TimeoutExecutorError,
+  GitExecutorError,
+  ClaudeExecutorError,
+  WorkspaceExecutorError,
+  createExecutorError,
+  getErrorAggregator,
+  type TaskExecutionState,
+  type ExecutionPhase,
+  type ExecutorErrorContext,
+} from '../errors/executor-errors.js';
+import {
   CircuitBreaker,
   getClaudeSDKCircuitBreaker,
   type CircuitBreakerConfig,
@@ -246,9 +259,13 @@ export class Worker {
   }
 
   /**
-   * Get error context for debugging
+   * Get enhanced error context with execution state for debugging
    */
-  private getErrorContext(operation: string, task?: WorkerTask): ErrorContext {
+  private getErrorContext(
+    operation: string,
+    task?: WorkerTask,
+    executionState?: Partial<TaskExecutionState>
+  ): ExecutorErrorContext {
     return {
       operation,
       component: 'Worker',
@@ -258,27 +275,60 @@ export class Worker {
       timeoutMinutes: this.options.timeoutMinutes,
       issueNumber: task?.issue.number,
       branchName: task?.branchName,
+      circuitBreakerState: this.circuitBreaker.getState(),
+      executionState: executionState ? {
+        taskId: `task-${task?.issue.number}`,
+        issueNumber: task?.issue.number,
+        branchName: task?.branchName,
+        workerId: this.workerId,
+        ...executionState,
+      } : undefined,
     };
   }
 
   /**
-   * Wrap an error with execution context
+   * Wrap an error with execution context using typed executor errors.
+   * Classifies the error based on its characteristics and returns
+   * an appropriate typed error with recovery strategy.
    */
   private wrapExecutionError(
     error: any,
     code: ErrorCode,
     message: string,
-    task?: WorkerTask
-  ): ExecutionError {
+    task?: WorkerTask,
+    executionState?: Partial<TaskExecutionState>
+  ): ExecutorError | ExecutionError {
+    // If already a typed executor error, return as-is
+    if (error instanceof ExecutorError) {
+      // Add to error aggregator for pattern analysis
+      getErrorAggregator().addError(error, {
+        taskId: `task-${task?.issue.number}`,
+        workerId: this.workerId,
+      });
+      return error;
+    }
+
     if (error instanceof StructuredError) {
+      // Add to error aggregator for pattern analysis
+      getErrorAggregator().addError(error, {
+        taskId: `task-${task?.issue.number}`,
+        workerId: this.workerId,
+      });
       return error as ExecutionError;
     }
-    return new ExecutionError(code, message, {
-      issueNumber: task?.issue.number,
-      branchName: task?.branchName,
-      context: this.getErrorContext('execute', task),
-      cause: error,
+
+    const context = this.getErrorContext('execute', task, executionState);
+
+    // Create typed executor error based on error characteristics
+    const typedError = createExecutorError(error, context);
+
+    // Add to error aggregator for pattern analysis
+    getErrorAggregator().addError(typedError, {
+      taskId: `task-${task?.issue.number}`,
+      workerId: this.workerId,
     });
+
+    return typedError;
   }
 
   async execute(task: WorkerTask): Promise<WorkerResult> {
@@ -468,12 +518,24 @@ export class Worker {
         chatSessionId,
       };
     } catch (error: any) {
-      // Wrap the error with structured context
+      // Track execution state at time of failure
+      const executionState: Partial<TaskExecutionState> = {
+        taskId: `task-${issue.number}`,
+        issueNumber: issue.number,
+        branchName,
+        workerId: this.workerId,
+        durationMs: Date.now() - startTime,
+        memoryUsageMB: getMemoryUsageMB(),
+        requiresCleanup: true,
+      };
+
+      // Wrap the error with structured context using typed executor errors
       const structuredError = this.wrapExecutionError(
         error,
         ErrorCode.INTERNAL_ERROR,
         `Task execution failed: ${error.message}`,
-        task
+        task,
+        executionState
       );
 
       const duration = Date.now() - startTime;
@@ -483,7 +545,11 @@ export class Worker {
       // Record error in correlation tracking
       metrics.recordCorrelationError(correlationId);
 
-      // Record error metrics
+      // Record error metrics with recovery strategy information
+      const recoveryStrategy = structuredError instanceof ExecutorError
+        ? structuredError.recoveryStrategy.strategy
+        : (structuredError.isRetryable ? 'retry' : 'escalate');
+
       metrics.recordError({
         repository: this.repository,
         taskType: 'issue',
@@ -495,6 +561,7 @@ export class Worker {
         isRetryable: structuredError.isRetryable,
         component: 'Worker',
         operation: 'execute',
+        recoveryStrategy,
       });
 
       // Record Claude API error if applicable
@@ -775,16 +842,19 @@ export class Worker {
         },
       }
     ).catch((error) => {
-      throw new ExecutionError(
-        ErrorCode.EXEC_CLONE_FAILED,
+      // Use typed GitExecutorError for clone failures
+      throw new GitExecutorError(
         `Failed to clone repository: ${error.message}`,
         {
+          operation: 'clone',
           context: {
             repoUrl: this.options.repoUrl,
             baseBranch: this.options.baseBranch,
-            taskDir,
-            sparseCheckout: sparseConfig?.enabled,
-            wasTimeout: error instanceof TimeoutError,
+            operation: 'repository_clone',
+          },
+          executionState: {
+            phase: 'repository_clone',
+            workerId: this.workerId,
           },
           cause: error,
         }
@@ -975,33 +1045,37 @@ export class Worker {
     executionLogger.logFullHistory('warn');
 
     const summary = executionLogger.getSummary();
-    const finalError = new ClaudeError(
-      ErrorCode.CLAUDE_API_ERROR,
+
+    // Use typed ClaudeExecutorError for final failure after retries exhausted
+    const finalError = new ClaudeExecutorError(
       `Claude execution failed after ${summary.totalAttempts} attempts: ${lastError?.message || 'Unknown error'}`,
       {
+        claudeErrorType: 'api',
+        toolsUsed: summary.totalToolUses,
+        turnsCompleted: summary.totalTurns,
         context: {
+          operation: 'claude_execution',
           issueNumber: issue.number,
-          totalAttempts: summary.totalAttempts,
-          totalDurationMs: summary.totalDurationMs,
-          totalToolUses: summary.totalToolUses,
-          totalTurns: summary.totalTurns,
-          lastErrorCode: summary.lastError?.code,
+        },
+        executionState: {
+          phase: 'claude_execution',
+          issueNumber: issue.number,
+          toolsUsed: summary.totalToolUses,
+          durationMs: summary.totalDurationMs,
+          retryAttempt: summary.totalAttempts,
+          maxRetries: maxRetries,
+          workerId: this.workerId,
+        },
+        recoveryStrategy: {
+          strategy: 'escalate',
+          escalateAfterRetries: true,
+          manualInstructions: [
+            'Check Claude API status at https://status.anthropic.com',
+            'Review issue description for clarity and completeness',
+            'Task will be added to dead letter queue for manual review',
+          ],
         },
         cause: lastError,
-        recoveryActions: [
-          {
-            description: 'Check Claude API status at https://status.anthropic.com',
-            automatic: false,
-          },
-          {
-            description: 'Review issue description for clarity and completeness',
-            automatic: false,
-          },
-          {
-            description: 'Task will be added to dead letter queue for manual review',
-            automatic: true,
-          },
-        ],
       }
     );
 
@@ -1186,31 +1260,24 @@ export class Worker {
 
       // Check if this was a timeout (using both tracking methods for reliability)
       if (timeoutTriggered || isTimedOut()) {
-        const timeoutError = new ClaudeError(
-          ErrorCode.CLAUDE_TIMEOUT,
+        // Use typed ClaudeExecutorError for timeout failures
+        const timeoutError = new ClaudeExecutorError(
           `Claude execution timed out after ${Math.round(timeoutMs / 1000)} seconds (5-minute limit). The task may be too complex or Claude may be experiencing delays.`,
           {
+            claudeErrorType: 'timeout',
+            toolsUsed: toolUseCount,
+            turnsCompleted: turnCount,
             context: {
+              operation: 'claude_execution',
               issueNumber: issue.number,
-              timeoutMs,
-              toolUseCount,
-              turnCount,
-              durationMs: duration,
             },
-            recoveryActions: [
-              {
-                description: 'Retry with exponential backoff',
-                automatic: true,
-              },
-              {
-                description: 'Break down the task into smaller issues',
-                automatic: false,
-              },
-              {
-                description: 'Increase timeout configuration if tasks are consistently timing out',
-                automatic: false,
-              },
-            ],
+            executionState: {
+              phase: 'claude_execution',
+              issueNumber: issue.number,
+              toolsUsed: toolUseCount,
+              durationMs: duration,
+              workerId: this.workerId,
+            },
           }
         );
 
@@ -1302,14 +1369,28 @@ export class Worker {
   }
 
   /**
-   * Extract error code from an error
+   * Extract error code from an error using type-based classification.
+   * Classifies errors based on their type hierarchy rather than string matching.
    */
   private extractErrorCode(error: Error): string {
+    // First check for typed executor errors
+    if (error instanceof ClaudeExecutorError) {
+      return error.code;
+    }
+    if (error instanceof NetworkExecutorError) {
+      return error.code;
+    }
+    if (error instanceof TimeoutExecutorError) {
+      return ErrorCode.CLAUDE_TIMEOUT;
+    }
+    if (error instanceof ExecutorError) {
+      return error.code;
+    }
     if (error instanceof StructuredError) {
       return error.code;
     }
 
-    // Check for common error patterns
+    // Fall back to pattern matching for untyped errors
     const message = error.message.toLowerCase();
     if (message.includes('timeout') || message.includes('abort')) {
       return ErrorCode.CLAUDE_TIMEOUT;
@@ -1328,16 +1409,27 @@ export class Worker {
   }
 
   /**
-   * Determine if a Claude error is retryable
+   * Determine if a Claude error is retryable using type-based classification.
+   * Uses recovery strategy from typed errors when available.
    */
   private isClaudeErrorRetryable(error: Error): boolean {
+    // First check for typed executor errors with recovery strategy
+    if (error instanceof ExecutorError) {
+      // Use the recovery strategy to determine retryability
+      const strategy = error.recoveryStrategy;
+      if (strategy.strategy === 'retry' && (strategy.maxRetries ?? 0) > 0) {
+        return true;
+      }
+      return error.isRetryable;
+    }
+
     if (error instanceof StructuredError) {
       return error.isRetryable;
     }
 
     const message = error.message.toLowerCase();
 
-    // Retryable errors
+    // Retryable error patterns (fallback for untyped errors)
     if (
       message.includes('timeout') ||
       message.includes('rate limit') ||
@@ -1353,7 +1445,7 @@ export class Worker {
       return true;
     }
 
-    // Non-retryable errors
+    // Non-retryable error patterns
     if (
       message.includes('auth') ||
       message.includes('unauthorized') ||
@@ -1447,13 +1539,22 @@ Implements #${issue.number}
       const commitResult = await git.commit(commitMessage);
       commitSha = commitResult.commit;
     } catch (error: any) {
-      throw new ExecutionError(
-        ErrorCode.EXEC_COMMIT_FAILED,
+      // Use typed GitExecutorError for commit failures
+      throw new GitExecutorError(
         `Failed to commit changes: ${error.message}`,
         {
-          issueNumber: issue.number,
-          branchName,
-          context: { repoDir },
+          operation: 'commit',
+          context: {
+            operation: 'commit',
+            issueNumber: issue.number,
+            branchName,
+          },
+          executionState: {
+            phase: 'commit',
+            issueNumber: issue.number,
+            branchName,
+            workerId: this.workerId,
+          },
           cause: error,
         }
       );
@@ -1517,15 +1618,22 @@ Implements #${issue.number}
         },
       }
     ).catch((error) => {
-      throw new ExecutionError(
-        ErrorCode.EXEC_PUSH_FAILED,
+      // Use typed GitExecutorError for push failures
+      throw new GitExecutorError(
         `Failed to push changes: ${error.message}`,
         {
-          issueNumber: issue.number,
-          branchName,
+          operation: 'push',
           context: {
-            repoDir,
+            operation: 'push',
+            issueNumber: issue.number,
+            branchName,
+          },
+          executionState: {
+            phase: 'push',
+            issueNumber: issue.number,
+            branchName,
             commitSha,
+            workerId: this.workerId,
           },
           cause: error,
         }

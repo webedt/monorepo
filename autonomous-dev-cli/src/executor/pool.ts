@@ -9,6 +9,12 @@ import {
   getAllCircuitBreakerHealth,
   type CircuitBreakerHealth,
 } from '../utils/circuit-breaker.js';
+import {
+  ExecutorError,
+  getErrorAggregator,
+  type RecoveryStrategy,
+} from '../errors/executor-errors.js';
+import { StructuredError } from '../utils/errors.js';
 import * as os from 'os';
 
 /** Task priority levels - higher value = higher priority */
@@ -108,6 +114,13 @@ export interface DegradationStatus {
   startedAt?: Date;
   /** Suggested recovery actions */
   recoveryActions: string[];
+  /** Error statistics for pattern analysis */
+  errorStats?: {
+    totalErrors: number;
+    byRecoveryStrategy: Record<RecoveryStrategy, number>;
+    mostCommonErrorCode?: string;
+    retriesExhausted: number;
+  };
 }
 
 export interface PoolTask extends WorkerTask {
@@ -315,7 +328,7 @@ export class WorkerPool {
   }
 
   /**
-   * Check and update degradation status
+   * Check and update degradation status with error aggregation statistics
    */
   private checkDegradationStatus(): void {
     const circuitBreakers = getAllCircuitBreakerHealth();
@@ -341,6 +354,30 @@ export class WorkerPool {
       recoveryActions.push('Review recent error logs for patterns');
     }
 
+    // Get error aggregation statistics for pattern analysis
+    const errorAggregator = getErrorAggregator();
+    const recentErrors = errorAggregator.getErrorsInWindow(60000); // Last minute
+    const retryStats = errorAggregator.getRetryStats();
+    const mostCommon = errorAggregator.getMostCommonErrors(1);
+
+    // Add error-based recovery actions
+    if (retryStats.totalNonRetryable > 5) {
+      affectedServices.push('error-threshold-exceeded');
+      recoveryActions.push('Multiple non-retryable errors detected - review configuration');
+    }
+
+    if (mostCommon.length > 0 && mostCommon[0].count > 10) {
+      recoveryActions.push(`Most common error: ${mostCommon[0].code} (${mostCommon[0].count} occurrences)`);
+    }
+
+    // Update error statistics
+    this.degradationStatus.errorStats = {
+      totalErrors: recentErrors.length,
+      byRecoveryStrategy: retryStats.byStrategy,
+      mostCommonErrorCode: mostCommon.length > 0 ? mostCommon[0].code : undefined,
+      retriesExhausted: retryStats.totalNonRetryable,
+    };
+
     // Update degradation status
     const wasDegraded = this.degradationStatus.isDegraded;
     this.degradationStatus.isDegraded = affectedServices.length > 0;
@@ -355,6 +392,7 @@ export class WorkerPool {
           affectedServices,
           circuitBreakers,
           consecutiveFailures: this.consecutiveFailures,
+          errorStats: this.degradationStatus.errorStats,
         });
       }
     } else if (wasDegraded) {
@@ -362,6 +400,7 @@ export class WorkerPool {
         recoveryDuration: this.degradationStatus.startedAt
           ? Date.now() - this.degradationStatus.startedAt.getTime()
           : 0,
+        errorStats: this.degradationStatus.errorStats,
       });
       this.degradationStatus.startedAt = undefined;
       this.degradationStatus.reason = undefined;
@@ -417,6 +456,42 @@ export class WorkerPool {
   getReprocessableTasks(): DeadLetterEntry[] {
     const dlq = getDeadLetterQueue({}, this.options.workDir);
     return dlq.getReprocessableEntries();
+  }
+
+  /**
+   * Get error aggregation summary for pattern analysis.
+   * Provides insight into error patterns across the pool.
+   */
+  getErrorAggregationSummary() {
+    const aggregator = getErrorAggregator();
+    return aggregator.getSummary();
+  }
+
+  /**
+   * Get recent errors within a time window for debugging.
+   * @param windowMs Time window in milliseconds (default: 5 minutes)
+   */
+  getRecentErrors(windowMs: number = 5 * 60 * 1000) {
+    const aggregator = getErrorAggregator();
+    return aggregator.getErrorsInWindow(windowMs).map(error => ({
+      code: error.code,
+      message: error.message,
+      severity: error.severity,
+      isRetryable: error.isRetryable,
+      recoveryStrategy: error instanceof ExecutorError
+        ? error.recoveryStrategy.strategy
+        : (error.isRetryable ? 'retry' : 'escalate'),
+      timestamp: error.timestamp,
+    }));
+  }
+
+  /**
+   * Clear error aggregation data (useful after recovery or for testing)
+   */
+  clearErrorAggregation(): void {
+    const aggregator = getErrorAggregator();
+    aggregator.clear();
+    logger.info('Error aggregation data cleared');
   }
 
   /**
@@ -781,6 +856,7 @@ export class WorkerPool {
     taskGroups: number;
     degradationStatus: DegradationStatus;
     dlqStats: ReturnType<typeof getDeadLetterQueue>['getStats'] extends () => infer R ? R : never;
+    errorAggregation: ReturnType<typeof getErrorAggregator>['getSummary'] extends () => infer R ? R : never;
   } {
     const groupIds = new Set(this.taskQueue.map(t => t.groupId).filter(Boolean));
     return {
@@ -794,6 +870,7 @@ export class WorkerPool {
       taskGroups: groupIds.size,
       degradationStatus: this.getDegradationStatus(),
       dlqStats: this.getDeadLetterQueueStats(),
+      errorAggregation: this.getErrorAggregationSummary(),
     };
   }
 
