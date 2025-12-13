@@ -10,6 +10,7 @@ import {
   endPhase,
   recordPhaseOperation,
   recordPhaseError,
+  isDebugModeEnabled,
   type RequestPhase,
 } from '../utils/logger.js';
 import { ClaudeError, ErrorCode } from '../utils/errors.js';

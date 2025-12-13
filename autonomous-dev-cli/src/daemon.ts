@@ -40,6 +40,8 @@ import {
   endPhase,
   initStructuredFileLogging,
   getStructuredFileLogger,
+  setDebugMode,
+  isDebugModeEnabled,
   type LogFormat,
   type OperationMetadata,
   type CorrelationContext,
@@ -159,6 +161,28 @@ export class Daemon implements DaemonStateProvider {
       logger.setIncludeCorrelationId(this.config.logging.includeCorrelationId);
       logger.setIncludeTimestamp(this.config.logging.includeTimestamp);
 
+      // Initialize debug mode from configuration
+      // Debug mode can be enabled via config, env vars, or verbose flag
+      const debugModeEnabled = this.config.logging.debugMode ||
+        process.env.DEBUG_MODE === 'true' ||
+        process.env.AUTONOMOUS_DEV_DEBUG === 'true' ||
+        options.verbose === true;
+
+      setDebugMode({
+        enabled: debugModeEnabled,
+        logClaudeInteractions: this.config.logging.logClaudeInteractions || debugModeEnabled,
+        logApiDetails: this.config.logging.logApiDetails || debugModeEnabled,
+      });
+
+      if (debugModeEnabled) {
+        logger.info('Debug mode enabled', {
+          debugMode: debugModeEnabled,
+          logClaudeInteractions: this.config.logging.logClaudeInteractions || debugModeEnabled,
+          logApiDetails: this.config.logging.logApiDetails || debugModeEnabled,
+          source: options.verbose ? 'verbose-flag' : (process.env.DEBUG_MODE || process.env.AUTONOMOUS_DEV_DEBUG ? 'environment' : 'config'),
+        });
+      }
+
       // Initialize structured file logging if enabled
       if (this.config.logging.enableStructuredFileLogging) {
         this.structuredLogger = initStructuredFileLogging({
@@ -175,9 +199,10 @@ export class Daemon implements DaemonStateProvider {
       }
     }
 
-    // Override with verbose flag if set
+    // Override with verbose flag if set (also enables debug mode)
     if (options.verbose) {
       logger.setLevel('debug');
+      setDebugMode({ enabled: true, logClaudeInteractions: true, logApiDetails: true });
     }
 
     // Override log format if explicitly set in options

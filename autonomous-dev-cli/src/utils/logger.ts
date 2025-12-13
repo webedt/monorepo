@@ -22,6 +22,71 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export const DEFAULT_TIMING_THRESHOLD_MS = 100;
 
 /**
+ * Debug mode configuration for enhanced logging
+ */
+export interface DebugModeConfig {
+  /** Master debug mode toggle */
+  enabled: boolean;
+  /** Log detailed Claude SDK interactions (tool use, responses, timing) */
+  logClaudeInteractions: boolean;
+  /** Log GitHub API request/response details including headers */
+  logApiDetails: boolean;
+}
+
+/**
+ * Global debug mode state
+ */
+let globalDebugMode: DebugModeConfig = {
+  enabled: false,
+  logClaudeInteractions: false,
+  logApiDetails: false,
+};
+
+/**
+ * Check if debug mode is enabled (via config or environment variable)
+ */
+export function isDebugModeEnabled(): boolean {
+  // Check environment variables for debug mode override
+  if (process.env.DEBUG_MODE === 'true' || process.env.AUTONOMOUS_DEV_DEBUG === 'true') {
+    return true;
+  }
+  return globalDebugMode.enabled;
+}
+
+/**
+ * Check if Claude interaction logging is enabled
+ */
+export function isClaudeLoggingEnabled(): boolean {
+  return isDebugModeEnabled() || globalDebugMode.logClaudeInteractions;
+}
+
+/**
+ * Check if API detail logging is enabled
+ */
+export function isApiLoggingEnabled(): boolean {
+  return isDebugModeEnabled() || globalDebugMode.logApiDetails;
+}
+
+/**
+ * Set the global debug mode configuration
+ */
+export function setDebugMode(config: Partial<DebugModeConfig>): void {
+  globalDebugMode = { ...globalDebugMode, ...config };
+
+  // When debug mode is enabled, automatically set log level to debug
+  if (config.enabled && logger) {
+    logger.setLevel('debug');
+  }
+}
+
+/**
+ * Get the current debug mode configuration
+ */
+export function getDebugModeConfig(): DebugModeConfig {
+  return { ...globalDebugMode };
+}
+
+/**
  * Request lifecycle phase for tracking request flow
  */
 export type RequestPhase = 'discovery' | 'execution' | 'evaluation' | 'github' | 'claude';
@@ -2104,6 +2169,257 @@ class Logger {
         correlationStr
       );
     }
+  }
+
+  /**
+   * Log Claude SDK tool invocation (debug mode)
+   * Only logs when debug mode or Claude interaction logging is enabled
+   */
+  claudeToolUse(
+    toolName: string,
+    input: Record<string, unknown>,
+    metadata?: {
+      correlationId?: string;
+      workerId?: string;
+      issueNumber?: number;
+      attemptNumber?: number;
+      turnCount?: number;
+      toolCount?: number;
+    }
+  ): void {
+    if (!isClaudeLoggingEnabled()) return;
+
+    const message = `Claude tool: ${toolName}`;
+    const sanitizedInput = this.sanitizeInput(input);
+
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('debug', message);
+      entry.meta = {
+        type: 'claude_tool_use',
+        tool: toolName,
+        input: sanitizedInput,
+        ...metadata,
+      };
+      console.log(this.formatJson(entry));
+    } else {
+      const timestamp = this.includeTimestamp ? new Date().toISOString() : '';
+      const correlationId = metadata?.correlationId || this.getEffectiveCorrelationId();
+      const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+      const contextStr = metadata?.workerId ? chalk.gray(` [${metadata.workerId}]`) : '';
+
+      const timestampStr = timestamp ? `${chalk.gray(timestamp)} ` : '';
+      console.log(
+        `${timestampStr}${chalk.cyan('🔧')} ${chalk.bold('Claude')} ${toolName}${contextStr}${correlationStr}`
+      );
+      // Log truncated input in debug
+      const inputStr = JSON.stringify(sanitizedInput);
+      if (inputStr.length > 200) {
+        console.log(chalk.gray(`  Input: ${inputStr.slice(0, 200)}...`));
+      } else if (inputStr !== '{}') {
+        console.log(chalk.gray(`  Input: ${inputStr}`));
+      }
+    }
+  }
+
+  /**
+   * Log Claude SDK tool result (debug mode)
+   * Only logs when debug mode or Claude interaction logging is enabled
+   */
+  claudeToolResult(
+    toolName: string,
+    success: boolean,
+    durationMs?: number,
+    output?: string,
+    metadata?: {
+      correlationId?: string;
+      workerId?: string;
+    }
+  ): void {
+    if (!isClaudeLoggingEnabled()) return;
+
+    const statusStr = success ? 'success' : 'failed';
+    const message = `Claude tool result: ${toolName} ${statusStr}`;
+
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('debug', message);
+      entry.meta = {
+        type: 'claude_tool_result',
+        tool: toolName,
+        success,
+        durationMs,
+        outputLength: output?.length,
+        ...metadata,
+      };
+      console.log(this.formatJson(entry));
+    } else {
+      const timestamp = this.includeTimestamp ? new Date().toISOString() : '';
+      const icon = success ? chalk.green('✓') : chalk.red('✗');
+      const durationStr = durationMs ? chalk.gray(` (${durationMs}ms)`) : '';
+      const correlationId = metadata?.correlationId || this.getEffectiveCorrelationId();
+      const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+
+      const timestampStr = timestamp ? `${chalk.gray(timestamp)} ` : '';
+      console.log(
+        `${timestampStr}${icon} ${chalk.bold('Claude')} ${toolName} ${statusStr}${durationStr}${correlationStr}`
+      );
+    }
+  }
+
+  /**
+   * Log GitHub API request details (debug mode)
+   * Only logs when debug mode or API detail logging is enabled
+   */
+  githubApiRequest(
+    method: string,
+    endpoint: string,
+    metadata?: {
+      correlationId?: string;
+      requestId?: string;
+      headers?: Record<string, string>;
+      body?: Record<string, unknown>;
+    }
+  ): void {
+    if (!isApiLoggingEnabled()) return;
+
+    const message = `GitHub API: ${method} ${endpoint}`;
+
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('debug', message);
+      entry.meta = {
+        type: 'github_api_request',
+        method,
+        endpoint,
+        ...metadata,
+        body: metadata?.body ? this.sanitizeInput(metadata.body) : undefined,
+      };
+      console.log(this.formatJson(entry));
+    } else {
+      const timestamp = this.includeTimestamp ? new Date().toISOString() : '';
+      const correlationId = metadata?.correlationId || this.getEffectiveCorrelationId();
+      const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+
+      const timestampStr = timestamp ? `${chalk.gray(timestamp)} ` : '';
+      console.log(
+        `${timestampStr}${chalk.blue('→')} ${chalk.bold('GitHub')} ${method} ${endpoint}${correlationStr}`
+      );
+    }
+  }
+
+  /**
+   * Log GitHub API response details (debug mode)
+   * Only logs when debug mode or API detail logging is enabled
+   */
+  githubApiResponse(
+    method: string,
+    endpoint: string,
+    statusCode: number,
+    durationMs: number,
+    metadata?: {
+      correlationId?: string;
+      requestId?: string;
+      rateLimitRemaining?: number;
+      rateLimitReset?: Date;
+      responseSize?: number;
+    }
+  ): void {
+    if (!isApiLoggingEnabled()) return;
+
+    const success = statusCode >= 200 && statusCode < 300;
+    const message = `GitHub API: ${method} ${endpoint} ${statusCode}`;
+
+    if (this.format === 'json') {
+      const entry = this.createLogEntry(success ? 'debug' : 'warn', message);
+      entry.meta = {
+        type: 'github_api_response',
+        method,
+        endpoint,
+        statusCode,
+        durationMs,
+        success,
+        ...metadata,
+        rateLimitReset: metadata?.rateLimitReset?.toISOString(),
+      };
+      const output = success ? console.log : console.warn;
+      output(this.formatJson(entry));
+    } else {
+      const timestamp = this.includeTimestamp ? new Date().toISOString() : '';
+      const icon = success ? chalk.green('←') : chalk.red('←');
+      const statusColor = success ? chalk.green : chalk.red;
+      const correlationId = metadata?.correlationId || this.getEffectiveCorrelationId();
+      const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+      const rateLimitStr = metadata?.rateLimitRemaining !== undefined
+        ? chalk.gray(` [rate: ${metadata.rateLimitRemaining}]`)
+        : '';
+
+      const timestampStr = timestamp ? `${chalk.gray(timestamp)} ` : '';
+      const output = success ? console.log : console.warn;
+      output(
+        `${timestampStr}${icon} ${chalk.bold('GitHub')} ${method} ${endpoint} ${statusColor(`[${statusCode}]`)} ${chalk.gray(`${durationMs}ms`)}${rateLimitStr}${correlationStr}`
+      );
+    }
+  }
+
+  /**
+   * Log internal state snapshot for debugging decision points
+   * Only logs when debug mode is enabled
+   */
+  debugState(
+    component: string,
+    label: string,
+    state: Record<string, unknown>
+  ): void {
+    if (!isDebugModeEnabled()) return;
+
+    const message = `${component}: ${label}`;
+
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('debug', message);
+      entry.meta = {
+        type: 'debug_state',
+        component,
+        label,
+        state,
+      };
+      console.log(this.formatJson(entry));
+    } else {
+      const timestamp = this.includeTimestamp ? new Date().toISOString() : '';
+      const correlationId = this.getEffectiveCorrelationId();
+      const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+
+      const timestampStr = timestamp ? `${chalk.gray(timestamp)} ` : '';
+      console.log(
+        `${timestampStr}${chalk.magenta('🔍')} ${chalk.bold(`[${component}]`)} ${label}${correlationStr}`
+      );
+      console.log(chalk.gray(`  State: ${JSON.stringify(state, null, 2).split('\n').join('\n  ')}`));
+    }
+  }
+
+  /**
+   * Sanitize input for logging (truncate long strings, remove sensitive data)
+   */
+  private sanitizeInput(input: Record<string, unknown>): Record<string, unknown> {
+    if (!input) return input;
+
+    const sanitized: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(input)) {
+      // Skip sensitive keys
+      if (['token', 'password', 'secret', 'apiKey', 'accessToken', 'refreshToken'].includes(key)) {
+        sanitized[key] = '[REDACTED]';
+        continue;
+      }
+
+      // Truncate long strings
+      if (typeof value === 'string' && value.length > 500) {
+        sanitized[key] = value.slice(0, 500) + `... (${value.length} chars total)`;
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        sanitized[key] = this.sanitizeInput(value as Record<string, unknown>);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+
+    return sanitized;
   }
 
   /**
