@@ -24,7 +24,7 @@ export const ConfigSchema = z.object({
 
   // Execution
   execution: z.object({
-    parallelWorkers: z.number().min(1).max(10).default(4),
+    parallelWorkers: z.number().min(1).max(10).default(3),
     timeoutMinutes: z.number().min(5).max(120).default(30),
     workDir: z.string().default('/tmp/autonomous-dev'),
   }),
@@ -78,7 +78,7 @@ export const defaultConfig: Partial<Config> = {
     issueLabel: 'autonomous-dev',
   },
   execution: {
-    parallelWorkers: 4,
+    parallelWorkers: 3,
     timeoutMinutes: 30,
     workDir: '/tmp/autonomous-dev',
   },

@@ -4,10 +4,12 @@ import { logger } from '../utils/logger.js';
 export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
   maxWorkers: number;
   workDir: string;
+  maxRetries?: number;
 }
 
 export interface PoolTask extends WorkerTask {
   id: string;
+  retryCount: number;
 }
 
 export interface PoolResult extends WorkerResult {
@@ -33,9 +35,11 @@ export class WorkerPool {
     this.taskQueue = tasks.map((task, index) => ({
       ...task,
       id: `task-${index + 1}`,
+      retryCount: 0,
     }));
 
-    logger.info(`Executing ${tasks.length} tasks with up to ${this.options.maxWorkers} workers`);
+    const maxRetries = this.options.maxRetries ?? 2;
+    logger.info(`Executing ${tasks.length} tasks with up to ${this.options.maxWorkers} workers (max ${maxRetries} retries)`);
 
     // Start initial workers
     while (this.activeWorkers.size < this.options.maxWorkers && this.taskQueue.length > 0) {
@@ -93,22 +97,65 @@ export class WorkerPool {
       workerId
     );
 
-    const promise = worker.execute(task).then((result) => {
-      this.results.push({
-        ...result,
-        taskId: task.id,
-      });
+    const maxRetries = this.options.maxRetries ?? 2;
 
-      if (result.success) {
-        logger.success(`${task.id} completed: ${task.issue.title}`);
+    const promise = worker.execute(task).then((result) => {
+      // Check if we should retry on failure
+      const isRetryableError = !result.success && this.isRetryableError(result.error);
+
+      if (!result.success && isRetryableError && task.retryCount < maxRetries) {
+        // Retry the task
+        task.retryCount++;
+        logger.warn(`${task.id} failed (attempt ${task.retryCount}/${maxRetries + 1}), retrying: ${result.error}`);
+
+        // Add back to queue with delay
+        setTimeout(() => {
+          if (this.isRunning) {
+            this.taskQueue.push(task);
+            // If we have capacity, start it immediately
+            if (this.activeWorkers.size < this.options.maxWorkers) {
+              this.startNextTask();
+            }
+          }
+        }, 5000); // 5 second delay before retry
       } else {
-        logger.failure(`${task.id} failed: ${result.error}`);
+        // Final result (success or non-retryable failure or max retries reached)
+        this.results.push({
+          ...result,
+          taskId: task.id,
+        });
+
+        if (result.success) {
+          logger.success(`${task.id} completed: ${task.issue.title}`);
+        } else {
+          const retryInfo = task.retryCount > 0 ? ` (after ${task.retryCount} retries)` : '';
+          logger.failure(`${task.id} failed${retryInfo}: ${result.error}`);
+        }
       }
 
       return result;
     });
 
     this.activeWorkers.set(task.id, promise);
+  }
+
+  private isRetryableError(error?: string): boolean {
+    if (!error) return false;
+    // Retry on SIGKILL (likely OOM), connection errors, and timeouts
+    const retryablePatterns = [
+      'SIGKILL',
+      'SIGTERM',
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'ECONNREFUSED',
+      'socket hang up',
+      'network error',
+      'rate limit',
+      'timeout',
+    ];
+    return retryablePatterns.some(pattern =>
+      error.toLowerCase().includes(pattern.toLowerCase())
+    );
   }
 
   stop(): void {

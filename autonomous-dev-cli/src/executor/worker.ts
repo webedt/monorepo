@@ -263,7 +263,13 @@ export class Worker {
 
     const timeoutMs = this.options.timeoutMinutes * 60 * 1000;
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+    const timeoutId = setTimeout(() => {
+      this.log.warn(`Task timeout after ${this.options.timeoutMinutes} minutes`);
+      abortController.abort();
+    }, timeoutMs);
+
+    const startTime = Date.now();
+    let messageCount = 0;
 
     try {
       const stream = query({
@@ -281,11 +287,12 @@ export class Worker {
         },
       });
 
-      let lastMessage: SDKMessage | undefined;
       let assistantTextBuffer = '';
 
       for await (const message of stream) {
-        lastMessage = message;
+        messageCount++;
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
         if (message.type === 'assistant') {
           // Log tool uses and collect assistant text
           if (message.message?.content) {
@@ -293,7 +300,8 @@ export class Worker {
               if (block.type === 'tool_use') {
                 const toolName = (block as any).name;
                 const toolInput = (block as any).input;
-                this.log.debug(`Tool: ${toolName}`);
+                // Show tool usage in logs
+                this.log.info(`[${elapsed}s] 🔧 ${toolName}`);
 
                 // Log tool use event to database
                 if (chatSessionId) {
@@ -304,7 +312,11 @@ export class Worker {
                   });
                 }
               } else if (block.type === 'text') {
-                assistantTextBuffer += (block as any).text + '\n';
+                const text = (block as any).text;
+                assistantTextBuffer += text + '\n';
+                // Show preview of Claude's thinking
+                const preview = text.slice(0, 100).replace(/\n/g, ' ');
+                this.log.info(`[${elapsed}s] 🤖 ${preview}${text.length > 100 ? '...' : ''}`);
               }
             }
           }
@@ -316,7 +328,7 @@ export class Worker {
           }
         } else if (message.type === 'result') {
           const duration = (message as any).duration_ms;
-          this.log.info(`Claude execution completed in ${duration}ms`);
+          this.log.info(`[${elapsed}s] ✅ Claude completed in ${Math.round(duration / 1000)}s (${messageCount} messages)`);
 
           // Log final assistant message and completion event
           if (chatSessionId) {
@@ -331,6 +343,10 @@ export class Worker {
           }
         }
       }
+    } catch (error: any) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      this.log.error(`[${elapsed}s] ❌ Claude SDK error: ${error.message}`);
+      throw error;
     } finally {
       clearTimeout(timeoutId);
     }
