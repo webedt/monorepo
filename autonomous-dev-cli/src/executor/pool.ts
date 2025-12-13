@@ -1161,10 +1161,11 @@ export class WorkerPool extends EventEmitter {
       timeoutMs,
     });
 
-    // Stop accepting new tasks and scaling
+    // Stop accepting new tasks and all monitors
     this.isRunning = false;
     this.stopScalingMonitor();
     this.stopDegradationMonitor();
+    this.stopMemoryMonitor();
 
     // Wait for active workers to complete (with timeout)
     if (this.activeWorkers.size > 0) {

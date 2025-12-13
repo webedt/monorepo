@@ -264,7 +264,7 @@ export declare class CodebaseAnalyzer {
     /**
      * Find TODO comments in a specific list of files (for incremental analysis)
      * This is more efficient than scanning the entire codebase when only
-     * a few files have changed.
+     * a few files have changed. Uses parallel processing with concurrency limit.
      */
     private findTodoCommentsInFiles;
     /**

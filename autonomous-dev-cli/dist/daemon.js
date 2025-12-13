@@ -6,13 +6,13 @@ import { createPreviewSession, runInteractivePreview, PreviewSessionManager, } f
 import { createWorkerPool } from './executor/index.js';
 import { runEvaluation } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
-import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, startRequestLifecycle, endRequestLifecycle, initStructuredFileLogging, } from './utils/logger.js';
+import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, startRequestLifecycle, endRequestLifecycle, initStructuredFileLogging, setDebugMode, } from './utils/logger.js';
 import { getProgressManager, } from './utils/progress.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
 import { createHealthServer, } from './monitoring/index.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
-import { mkdirSync, existsSync } from 'fs';
+import { mkdirSync, existsSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 export class Daemon {
     config;
@@ -46,6 +46,10 @@ export class Daemon {
     structuredLogger = null;
     // Progress tracking
     progressManager;
+    // Graceful shutdown state
+    isShuttingDown = false;
+    shutdownTimeoutMs = 60000; // Default 60 second timeout
+    signalHandlersRegistered = false;
     constructor(options = {}) {
         this.options = options;
         this.config = loadConfig(options.configPath);
@@ -57,6 +61,25 @@ export class Daemon {
             logger.setLevel(this.config.logging.level);
             logger.setIncludeCorrelationId(this.config.logging.includeCorrelationId);
             logger.setIncludeTimestamp(this.config.logging.includeTimestamp);
+            // Initialize debug mode from configuration
+            // Debug mode can be enabled via config, env vars, or verbose flag
+            const debugModeEnabled = this.config.logging.debugMode ||
+                process.env.DEBUG_MODE === 'true' ||
+                process.env.AUTONOMOUS_DEV_DEBUG === 'true' ||
+                options.verbose === true;
+            setDebugMode({
+                enabled: debugModeEnabled,
+                logClaudeInteractions: this.config.logging.logClaudeInteractions || debugModeEnabled,
+                logApiDetails: this.config.logging.logApiDetails || debugModeEnabled,
+            });
+            if (debugModeEnabled) {
+                logger.info('Debug mode enabled', {
+                    debugMode: debugModeEnabled,
+                    logClaudeInteractions: this.config.logging.logClaudeInteractions || debugModeEnabled,
+                    logApiDetails: this.config.logging.logApiDetails || debugModeEnabled,
+                    source: options.verbose ? 'verbose-flag' : (process.env.DEBUG_MODE || process.env.AUTONOMOUS_DEV_DEBUG ? 'environment' : 'config'),
+                });
+            }
             // Initialize structured file logging if enabled
             if (this.config.logging.enableStructuredFileLogging) {
                 this.structuredLogger = initStructuredFileLogging({
@@ -72,9 +95,10 @@ export class Daemon {
                 });
             }
         }
-        // Override with verbose flag if set
+        // Override with verbose flag if set (also enables debug mode)
         if (options.verbose) {
             logger.setLevel('debug');
+            setDebugMode({ enabled: true, logClaudeInteractions: true, logApiDetails: true });
         }
         // Override log format if explicitly set in options
         if (options.logFormat) {
@@ -84,6 +108,8 @@ export class Daemon {
     async start() {
         logger.header('Autonomous Dev CLI');
         logger.info('Starting daemon...');
+        // Register signal handlers for graceful shutdown
+        this.registerSignalHandlers();
         this.daemonStatus = 'starting';
         this.startTime = new Date();
         // Log daemon startup to structured file log
@@ -263,6 +289,201 @@ export class Daemon {
         this.daemonStatus = 'stopping';
         this.isRunning = false;
         metrics.updateHealthStatus(false);
+    }
+    /**
+     * Register process signal handlers for graceful shutdown
+     */
+    registerSignalHandlers() {
+        if (this.signalHandlersRegistered) {
+            return;
+        }
+        const handleShutdownSignal = async (signal) => {
+            if (this.isShuttingDown) {
+                logger.warn(`Received ${signal} during shutdown, forcing exit...`);
+                process.exit(1);
+            }
+            logger.info(`Received ${signal}, initiating graceful shutdown...`);
+            this.isShuttingDown = true;
+            this.isRunning = false;
+            this.daemonStatus = 'stopping';
+            try {
+                await this.gracefulShutdown();
+                logger.info('Graceful shutdown completed successfully');
+                process.exit(0);
+            }
+            catch (error) {
+                logger.error(`Shutdown error: ${error.message}`);
+                process.exit(1);
+            }
+        };
+        process.on('SIGINT', () => handleShutdownSignal('SIGINT'));
+        process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'));
+        process.on('SIGHUP', () => handleShutdownSignal('SIGHUP'));
+        this.signalHandlersRegistered = true;
+        logger.debug('Signal handlers registered for graceful shutdown');
+    }
+    /**
+     * Perform graceful shutdown with cleanup of all resources
+     * - Cancels running worker tasks gracefully
+     * - Cleans up temporary directories in workDir
+     * - Ensures database connections are properly closed
+     * - Waits for in-progress GitHub operations to complete
+     * - Applies shutdown timeout to prevent hanging
+     */
+    async gracefulShutdown() {
+        logger.info('Starting graceful shutdown sequence...');
+        const shutdownStart = Date.now();
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+                reject(new Error(`Shutdown timeout exceeded (${this.shutdownTimeoutMs}ms)`));
+            }, this.shutdownTimeoutMs);
+        });
+        try {
+            // Run shutdown with timeout
+            await Promise.race([
+                this.performShutdownSteps(),
+                timeoutPromise,
+            ]);
+            const duration = Date.now() - shutdownStart;
+            logger.info(`Graceful shutdown completed in ${duration}ms`);
+        }
+        catch (error) {
+            const duration = Date.now() - shutdownStart;
+            if (error.message.includes('Shutdown timeout')) {
+                logger.error(`Shutdown timeout after ${duration}ms, forcing cleanup...`);
+                // Force cleanup even on timeout
+                await this.forceCleanup();
+            }
+            else {
+                logger.error(`Shutdown error after ${duration}ms: ${error.message}`);
+                throw error;
+            }
+        }
+    }
+    /**
+     * Execute all shutdown steps in sequence
+     */
+    async performShutdownSteps() {
+        // Step 1: Stop worker pool gracefully (wait for active workers)
+        if (this.currentWorkerPool) {
+            logger.info('Stopping worker pool and waiting for active workers...');
+            try {
+                const remainingTasks = await this.currentWorkerPool.gracefulShutdown(Math.floor(this.shutdownTimeoutMs * 0.7) // Use 70% of timeout for workers
+                );
+                if (remainingTasks.length > 0) {
+                    logger.warn(`${remainingTasks.length} tasks were not completed during shutdown`);
+                }
+                this.currentWorkerPool = null;
+                logger.info('Worker pool shutdown complete');
+            }
+            catch (error) {
+                logger.error(`Worker pool shutdown error: ${error.message}`);
+                // Continue with other cleanup even if worker pool fails
+            }
+        }
+        // Step 2: Clean up temporary work directories
+        await this.cleanupWorkDirectories();
+        // Step 3: Run the standard shutdown (monitoring, health server, database)
+        await this.shutdown();
+    }
+    /**
+     * Force cleanup when graceful shutdown times out
+     */
+    async forceCleanup() {
+        logger.warn('Performing forced cleanup...');
+        // Force stop worker pool without waiting
+        if (this.currentWorkerPool) {
+            this.currentWorkerPool.stop();
+            this.currentWorkerPool = null;
+        }
+        // Clean up work directories
+        try {
+            await this.cleanupWorkDirectories();
+        }
+        catch (error) {
+            logger.error(`Work directory cleanup error: ${error.message}`);
+        }
+        // Force close database
+        try {
+            await closeDatabase();
+        }
+        catch (error) {
+            logger.error(`Database close error: ${error.message}`);
+        }
+        // Stop servers
+        if (this.healthServer) {
+            try {
+                await this.healthServer.stop();
+            }
+            catch (error) {
+                logger.error(`Health server stop error: ${error.message}`);
+            }
+        }
+        if (this.monitoringServer) {
+            try {
+                await this.monitoringServer.stop();
+            }
+            catch (error) {
+                logger.error(`Monitoring server stop error: ${error.message}`);
+            }
+        }
+        logger.warn('Forced cleanup completed');
+    }
+    /**
+     * Clean up temporary work directories created during task execution
+     */
+    async cleanupWorkDirectories() {
+        const workDir = this.config.execution.workDir;
+        if (!existsSync(workDir)) {
+            logger.debug('Work directory does not exist, skipping cleanup');
+            return;
+        }
+        logger.info(`Cleaning up temporary directories in ${workDir}...`);
+        try {
+            const entries = readdirSync(workDir, { withFileTypes: true });
+            let cleanedCount = 0;
+            let errorCount = 0;
+            for (const entry of entries) {
+                // Clean up task directories (task-*) and analysis directory
+                if (entry.isDirectory() && (entry.name.startsWith('task-') || entry.name === 'analysis')) {
+                    const dirPath = join(workDir, entry.name);
+                    try {
+                        rmSync(dirPath, { recursive: true, force: true });
+                        cleanedCount++;
+                        logger.debug(`Cleaned up directory: ${dirPath}`);
+                    }
+                    catch (error) {
+                        errorCount++;
+                        logger.warn(`Failed to clean up directory ${dirPath}: ${error.message}`);
+                    }
+                }
+                // Clean up old queue persistence files
+                if (entry.isDirectory() && entry.name === 'queue-persist') {
+                    const persistDir = join(workDir, entry.name);
+                    try {
+                        const persistFiles = readdirSync(persistDir);
+                        for (const file of persistFiles) {
+                            if (file.startsWith('queue-') && file.endsWith('.json')) {
+                                const filePath = join(persistDir, file);
+                                rmSync(filePath, { force: true });
+                                logger.debug(`Cleaned up persist file: ${filePath}`);
+                            }
+                        }
+                        cleanedCount++;
+                    }
+                    catch (error) {
+                        errorCount++;
+                        logger.warn(`Failed to clean up persist directory: ${error.message}`);
+                    }
+                }
+            }
+            if (cleanedCount > 0 || errorCount > 0) {
+                logger.info(`Work directory cleanup: ${cleanedCount} directories cleaned, ${errorCount} errors`);
+            }
+        }
+        catch (error) {
+            logger.error(`Failed to read work directory for cleanup: ${error.message}`);
+        }
     }
     /**
      * Get the current correlation ID from the global context
@@ -694,13 +915,37 @@ export class Daemon {
         this.daemonStatus = 'stopped';
         // Stop health server
         if (this.healthServer) {
-            await this.healthServer.stop();
+            try {
+                await this.healthServer.stop();
+                logger.debug('Health server stopped');
+            }
+            catch (error) {
+                logger.warn(`Failed to stop health server: ${error.message}`);
+            }
+            this.healthServer = null;
         }
         // Stop monitoring server
         if (this.monitoringServer) {
-            await this.monitoringServer.stop();
+            try {
+                await this.monitoringServer.stop();
+                logger.debug('Monitoring server stopped');
+            }
+            catch (error) {
+                logger.warn(`Failed to stop monitoring server: ${error.message}`);
+            }
+            this.monitoringServer = null;
         }
-        await closeDatabase();
+        // Close database connections with timeout
+        try {
+            await closeDatabase({
+                timeoutMs: 10000, // 10 second timeout for database close
+                force: this.isShuttingDown, // Force close during signal-triggered shutdown
+            });
+        }
+        catch (error) {
+            logger.error(`Failed to close database: ${error.message}`);
+            // Don't throw - we want to complete shutdown even if database close fails
+        }
         logger.info('Shutdown complete');
     }
     async runCycle() {

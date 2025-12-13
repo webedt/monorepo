@@ -1,5 +1,7 @@
 import { Octokit } from '@octokit/rest';
 import { type RetryConfig, type ErrorContext } from '../utils/errors.js';
+import { GitHubRateLimiter, type RateLimiterConfig, type RateLimitStatus } from '../utils/rateLimiter.js';
+import { GitHubCache, type GitHubCacheConfig, type CacheKeyType } from '../utils/githubCache.js';
 export interface GitHubClientOptions {
     token: string;
     owner: string;
@@ -10,6 +12,14 @@ export interface GitHubClientOptions {
     requestTimeoutMs?: number;
     /** Configuration for rate limit handling */
     rateLimitConfig?: Partial<RateLimitConfig>;
+    /** Configuration for the enhanced rate limiter */
+    rateLimiterConfig?: Partial<RateLimiterConfig>;
+    /** Configuration for GitHub API caching */
+    cacheConfig?: Partial<GitHubCacheConfig>;
+    /** Whether this is a GitHub Enterprise instance (enables stricter rate limiting) */
+    isEnterprise?: boolean;
+    /** Custom base URL for GitHub Enterprise instances */
+    baseUrl?: string;
 }
 /**
  * Configuration options for rate limit handling
@@ -94,6 +104,9 @@ export declare class GitHubClient {
     private requestQueue;
     private isProcessingQueue;
     private queueProcessorInterval;
+    private rateLimiter;
+    private cache;
+    private isEnterprise;
     private log;
     constructor(options: GitHubClientOptions);
     get client(): Octokit;
@@ -113,6 +126,36 @@ export declare class GitHubClient {
         isProcessing: boolean;
         config: RateLimitConfig;
     };
+    /**
+     * Get the enhanced rate limiter instance
+     */
+    getRateLimiter(): GitHubRateLimiter;
+    /**
+     * Get the enhanced rate limit status from the rate limiter
+     */
+    getEnhancedRateLimitStatus(): RateLimitStatus;
+    /**
+     * Get the cache instance
+     */
+    getCache(): GitHubCache;
+    /**
+     * Get cache statistics
+     */
+    getCacheStats(): import("../utils/githubCache.js").GitHubCacheStats;
+    /**
+     * Invalidate all cached data for this repository
+     */
+    invalidateCache(): number;
+    /**
+     * Invalidate cached data of a specific type
+     */
+    invalidateCacheType(type: CacheKeyType): number;
+    /**
+     * Get a cached value or fetch it
+     */
+    getCachedOrFetch<T>(type: CacheKeyType, key: string, fetcher: () => Promise<T>, options?: {
+        customTtlMs?: number;
+    }): Promise<T>;
     /**
      * Clear the request queue (e.g., on shutdown)
      */
@@ -211,7 +254,7 @@ export declare class GitHubClient {
         name: string;
     }>;
     /**
-     * Get repository info
+     * Get repository info (cached)
      */
     getRepo(): Promise<{
         defaultBranch: string;

@@ -374,12 +374,86 @@ export function checkPoolHealth(): boolean {
   return true;
 }
 
-export async function closeDatabase(): Promise<void> {
-  if (pool) {
-    await pool.end();
+/**
+ * Options for closing the database connection
+ */
+export interface CloseDatabaseOptions {
+  /** Timeout in milliseconds for closing connections (default: 10000) */
+  timeoutMs?: number;
+  /** Force close even if connections are active (default: false) */
+  force?: boolean;
+}
+
+/**
+ * Close database connections gracefully with timeout handling.
+ * Ensures all connections are properly drained before closing.
+ */
+export async function closeDatabase(options: CloseDatabaseOptions = {}): Promise<void> {
+  const { timeoutMs = 10000, force = false } = options;
+
+  if (!pool) {
+    logger.debug('Database connection already closed');
+    return;
+  }
+
+  // Flush any pending activity updates before closing
+  try {
+    await flushActivityUpdates();
+  } catch (error: any) {
+    logger.warn(`Failed to flush activity updates: ${error.message}`);
+  }
+
+  const stats = getPoolStats();
+  logger.info('Closing database connections...', {
+    totalConnections: stats.totalCount,
+    idleConnections: stats.idleCount,
+    waitingClients: stats.waitingCount,
+  });
+
+  // Create timeout promise
+  const timeoutPromise = new Promise<void>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Database close timeout exceeded (${timeoutMs}ms)`));
+    }, timeoutMs);
+  });
+
+  try {
+    // Wait for pool to drain or timeout
+    await Promise.race([
+      pool.end(),
+      timeoutPromise,
+    ]);
+
     pool = null;
     db = null;
-    logger.info('Database connection closed');
+    logger.info('Database connection closed gracefully');
+  } catch (error: any) {
+    if (error.message.includes('timeout')) {
+      logger.warn(`Database close timed out after ${timeoutMs}ms`);
+
+      if (force) {
+        logger.warn('Forcing database connection close...');
+        // Force close by directly destroying all clients
+        try {
+          // The pool.end() should be called regardless to cleanup
+          if (pool) {
+            pool.end().catch(() => {
+              // Ignore errors on force close
+            });
+          }
+        } catch {
+          // Ignore errors during force close
+        }
+        pool = null;
+        db = null;
+        logger.warn('Database connection forcefully closed');
+      } else {
+        throw error;
+      }
+    } else {
+      logger.error(`Database close error: ${error.message}`);
+      throw error;
+    }
   }
 }
 

@@ -25,6 +25,8 @@ export interface IssueManager {
     listOpenIssues(label?: string): Promise<Issue[]>;
     listOpenIssuesWithFallback(label?: string, fallback?: Issue[]): Promise<DegradedResult<Issue[]>>;
     getIssue(number: number): Promise<Issue | null>;
+    /** Get multiple issues in a batch (reduces API calls) */
+    getIssuesBatch(numbers: number[]): Promise<Map<number, Issue | null>>;
     createIssue(options: CreateIssueOptions): Promise<Issue>;
     addLabels(issueNumber: number, labels: string[]): Promise<void>;
     addLabelsWithFallback(issueNumber: number, labels: string[]): Promise<DegradedResult<void>>;
@@ -34,6 +36,10 @@ export interface IssueManager {
     addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<void>>;
     getServiceHealth(): ServiceHealth;
     isAvailable(): boolean;
+    /** Invalidate cached issue data */
+    invalidateCache(): void;
+    /** Invalidate a specific issue from cache */
+    invalidateIssue(number: number): void;
 }
 export declare function createIssueManager(client: GitHubClient): IssueManager;
 //# sourceMappingURL=issues.d.ts.map
