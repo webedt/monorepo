@@ -137,6 +137,70 @@ export declare const ConfigSchema: z.ZodObject<{
         mergeMethod?: "rebase" | "merge" | "squash" | undefined;
     }>;
     /**
+     * Pull Request Management Settings
+     * Configure advanced PR handling for autonomous workflows.
+     */
+    pullRequest: z.ZodDefault<z.ZodObject<{
+        /** Create PRs as drafts initially, then convert to ready when complete (default: false) */
+        useDraftPRs: z.ZodDefault<z.ZodBoolean>;
+        /** Automatically assign reviewers from CODEOWNERS file (default: true) */
+        autoAssignReviewers: z.ZodDefault<z.ZodBoolean>;
+        /** Use PR template from .github/pull_request_template.md if available (default: true) */
+        usePRTemplate: z.ZodDefault<z.ZodBoolean>;
+        /** Generate AI-powered PR descriptions summarizing changes (default: true) */
+        generateDescription: z.ZodDefault<z.ZodBoolean>;
+        /** Add category-based labels to PRs (feature/bugfix/etc.) (default: true) */
+        addCategoryLabels: z.ZodDefault<z.ZodBoolean>;
+        /** Add priority-based labels to PRs (default: false) */
+        addPriorityLabels: z.ZodDefault<z.ZodBoolean>;
+        /** Default priority level for PRs: 'low', 'medium', 'high', 'critical' */
+        defaultPriority: z.ZodDefault<z.ZodEnum<["low", "medium", "high", "critical"]>>;
+        /** Check branch protection rules before attempting merge (default: true) */
+        checkBranchProtection: z.ZodDefault<z.ZodBoolean>;
+        /** Additional labels to add to all PRs created by the CLI */
+        additionalLabels: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** Default reviewers to request (in addition to CODEOWNERS) */
+        defaultReviewers: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** Maximum number of reviewers to request (default: 5) */
+        maxReviewers: z.ZodDefault<z.ZodNumber>;
+        /** Include linked issue in PR description (default: true) */
+        linkIssue: z.ZodDefault<z.ZodBoolean>;
+        /** Include changed files list in PR description (default: true) */
+        includeChangedFiles: z.ZodDefault<z.ZodBoolean>;
+        /** Maximum number of changed files to list in description (default: 10) */
+        maxChangedFilesInDescription: z.ZodDefault<z.ZodNumber>;
+    }, "strip", z.ZodTypeAny, {
+        useDraftPRs: boolean;
+        autoAssignReviewers: boolean;
+        usePRTemplate: boolean;
+        generateDescription: boolean;
+        addCategoryLabels: boolean;
+        addPriorityLabels: boolean;
+        defaultPriority: "low" | "medium" | "high" | "critical";
+        checkBranchProtection: boolean;
+        additionalLabels: string[];
+        defaultReviewers: string[];
+        maxReviewers: number;
+        linkIssue: boolean;
+        includeChangedFiles: boolean;
+        maxChangedFilesInDescription: number;
+    }, {
+        useDraftPRs?: boolean | undefined;
+        autoAssignReviewers?: boolean | undefined;
+        usePRTemplate?: boolean | undefined;
+        generateDescription?: boolean | undefined;
+        addCategoryLabels?: boolean | undefined;
+        addPriorityLabels?: boolean | undefined;
+        defaultPriority?: "low" | "medium" | "high" | "critical" | undefined;
+        checkBranchProtection?: boolean | undefined;
+        additionalLabels?: string[] | undefined;
+        defaultReviewers?: string[] | undefined;
+        maxReviewers?: number | undefined;
+        linkIssue?: boolean | undefined;
+        includeChangedFiles?: boolean | undefined;
+        maxChangedFilesInDescription?: number | undefined;
+    }>>;
+    /**
      * Daemon Settings
      * Control the continuous daemon mode.
      */
@@ -316,6 +380,22 @@ export declare const ConfigSchema: z.ZodObject<{
         conflictStrategy: "rebase" | "merge" | "manual";
         mergeMethod: "rebase" | "merge" | "squash";
     };
+    pullRequest: {
+        useDraftPRs: boolean;
+        autoAssignReviewers: boolean;
+        usePRTemplate: boolean;
+        generateDescription: boolean;
+        addCategoryLabels: boolean;
+        addPriorityLabels: boolean;
+        defaultPriority: "low" | "medium" | "high" | "critical";
+        checkBranchProtection: boolean;
+        additionalLabels: string[];
+        defaultReviewers: string[];
+        maxReviewers: number;
+        linkIssue: boolean;
+        includeChangedFiles: boolean;
+        maxChangedFilesInDescription: number;
+    };
     daemon: {
         loopIntervalMs: number;
         pauseBetweenCycles: boolean;
@@ -398,6 +478,22 @@ export declare const ConfigSchema: z.ZodObject<{
         databaseUrl?: string | undefined;
         userEmail?: string | undefined;
     };
+    pullRequest?: {
+        useDraftPRs?: boolean | undefined;
+        autoAssignReviewers?: boolean | undefined;
+        usePRTemplate?: boolean | undefined;
+        generateDescription?: boolean | undefined;
+        addCategoryLabels?: boolean | undefined;
+        addPriorityLabels?: boolean | undefined;
+        defaultPriority?: "low" | "medium" | "high" | "critical" | undefined;
+        checkBranchProtection?: boolean | undefined;
+        additionalLabels?: string[] | undefined;
+        defaultReviewers?: string[] | undefined;
+        maxReviewers?: number | undefined;
+        linkIssue?: boolean | undefined;
+        includeChangedFiles?: boolean | undefined;
+        maxChangedFilesInDescription?: number | undefined;
+    } | undefined;
     logging?: {
         format?: "pretty" | "json" | undefined;
         level?: "debug" | "info" | "warn" | "error" | undefined;

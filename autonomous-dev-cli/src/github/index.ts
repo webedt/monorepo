@@ -7,8 +7,28 @@ export {
   type ServiceHealth,
 } from './client.js';
 export { createIssueManager, type IssueManager, type Issue, type CreateIssueOptions } from './issues.js';
-export { createBranchManager, type BranchManager, type Branch } from './branches.js';
-export { createPRManager, type PRManager, type PullRequest, type CreatePROptions, type MergeResult } from './pulls.js';
+export {
+  createBranchManager,
+  type BranchManager,
+  type Branch,
+  type BranchProtectionRules,
+  type BranchProtectionCompliance,
+  type MergeReadinessOptions,
+  type MergeReadiness,
+} from './branches.js';
+export {
+  createPRManager,
+  type PRManager,
+  type PullRequest,
+  type CreatePROptions,
+  type EnhancedPROptions,
+  type MergeResult,
+  type TaskCategory,
+  type PriorityLevel,
+  type CodeOwnerEntry,
+  type BranchProtectionStatus,
+  type PRDescriptionOptions,
+} from './pulls.js';
 
 import { GitHubClient, createGitHubClient, type GitHubClientOptions } from './client.js';
 import { createIssueManager, type IssueManager } from './issues.js';

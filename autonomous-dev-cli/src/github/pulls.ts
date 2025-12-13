@@ -17,6 +17,53 @@ export interface PullRequest {
   mergeable: boolean | null;
   merged: boolean;
   draft: boolean;
+  labels: string[];
+  reviewers: string[];
+}
+
+/**
+ * Task category for PR labeling
+ */
+export type TaskCategory = 'feature' | 'bugfix' | 'refactor' | 'docs' | 'test' | 'chore' | 'security' | 'performance';
+
+/**
+ * Priority level for PR labeling
+ */
+export type PriorityLevel = 'critical' | 'high' | 'medium' | 'low';
+
+/**
+ * CODEOWNERS entry representing a path pattern and its owners
+ */
+export interface CodeOwnerEntry {
+  pattern: string;
+  owners: string[];
+}
+
+/**
+ * Branch protection rule status
+ */
+export interface BranchProtectionStatus {
+  isProtected: boolean;
+  requiresReviews: boolean;
+  requiredReviewCount: number;
+  requiresStatusChecks: boolean;
+  requiredStatusChecks: string[];
+  requiresSignedCommits: boolean;
+  allowsForcePush: boolean;
+  allowsDeletion: boolean;
+  errors: string[];
+}
+
+/**
+ * PR description generation options
+ */
+export interface PRDescriptionOptions {
+  issueNumber?: number;
+  issueTitle?: string;
+  issueBody?: string;
+  changedFiles?: string[];
+  category?: TaskCategory;
+  summary?: string;
 }
 
 export interface CreatePROptions {
@@ -25,6 +72,27 @@ export interface CreatePROptions {
   head: string; // Branch name
   base: string; // Base branch (e.g., 'main')
   draft?: boolean;
+  labels?: string[];
+  reviewers?: string[];
+  category?: TaskCategory;
+  priority?: PriorityLevel;
+  issueNumber?: number;
+}
+
+/**
+ * Enhanced PR options for autonomous workflows
+ */
+export interface EnhancedPROptions extends CreatePROptions {
+  /** Automatically assign reviewers from CODEOWNERS */
+  autoAssignReviewers?: boolean;
+  /** Changed file paths for reviewer matching */
+  changedFiles?: string[];
+  /** Use PR template from repository */
+  useTemplate?: boolean;
+  /** Generate AI description summary */
+  generateDescription?: boolean;
+  /** Implementation summary for description generation */
+  implementationSummary?: string;
 }
 
 export interface MergeResult {
@@ -48,6 +116,8 @@ export interface PRManager {
   findPRForBranch(branchName: string, base?: string): Promise<PullRequest | null>;
   createPR(options: CreatePROptions): Promise<PullRequest>;
   createPRWithFallback(options: CreatePROptions): Promise<DegradedResult<PullRequest | null>>;
+  /** Create a PR with enhanced options for autonomous workflows */
+  createEnhancedPR(options: EnhancedPROptions): Promise<PullRequest>;
   mergePR(number: number, method?: 'merge' | 'squash' | 'rebase'): Promise<MergeResult>;
   mergePRWithFallback(number: number, method?: 'merge' | 'squash' | 'rebase'): Promise<DegradedResult<MergeResult>>;
   closePR(number: number): Promise<void>;
@@ -56,6 +126,28 @@ export interface PRManager {
   getChecksStatus(ref: string): Promise<{ state: string; statuses: Array<{ context: string; state: string }> }>;
   getServiceHealth(): ServiceHealth;
   isAvailable(): boolean;
+  /** Convert a draft PR to ready for review */
+  convertDraftToReady(number: number): Promise<boolean>;
+  /** Update PR with new title, body, or labels */
+  updatePR(number: number, updates: { title?: string; body?: string; labels?: string[] }): Promise<PullRequest>;
+  /** Add labels to a PR */
+  addLabels(number: number, labels: string[]): Promise<void>;
+  /** Request reviewers for a PR */
+  requestReviewers(number: number, reviewers: string[]): Promise<void>;
+  /** Get CODEOWNERS file content and parse it */
+  getCodeOwners(): Promise<CodeOwnerEntry[]>;
+  /** Find reviewers for given file paths based on CODEOWNERS */
+  findReviewersForFiles(files: string[]): Promise<string[]>;
+  /** Get PR template from repository */
+  getPRTemplate(): Promise<string | null>;
+  /** Get branch protection rules */
+  getBranchProtection(branch: string): Promise<BranchProtectionStatus>;
+  /** Check if merge is allowed based on branch protection rules */
+  canMerge(number: number): Promise<{ allowed: boolean; reasons: string[] }>;
+  /** Generate PR description from issue and changes */
+  generatePRDescription(options: PRDescriptionOptions): string;
+  /** Get labels for a task category and priority */
+  getCategoryLabels(category?: TaskCategory, priority?: PriorityLevel): string[];
 }
 
 export function createPRManager(client: GitHubClient): PRManager {
@@ -73,7 +165,99 @@ export function createPRManager(client: GitHubClient): PRManager {
     mergeable: data.mergeable,
     merged: data.merged,
     draft: data.draft,
+    labels: data.labels?.map((l: any) => (typeof l === 'string' ? l : l.name || '')) ?? [],
+    reviewers: data.requested_reviewers?.map((r: any) => r.login) ?? [],
   });
+
+  /**
+   * Parse CODEOWNERS file content into structured entries
+   */
+  const parseCodeOwners = (content: string): CodeOwnerEntry[] => {
+    const entries: CodeOwnerEntry[] = [];
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // Skip empty lines and comments
+      if (!trimmed || trimmed.startsWith('#')) {
+        continue;
+      }
+
+      // Parse pattern and owners (format: pattern @owner1 @owner2)
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 2) {
+        const pattern = parts[0];
+        const owners = parts.slice(1)
+          .filter(p => p.startsWith('@'))
+          .map(p => p.replace('@', ''));
+
+        if (owners.length > 0) {
+          entries.push({ pattern, owners });
+        }
+      }
+    }
+
+    return entries;
+  };
+
+  /**
+   * Match a file path against a CODEOWNERS pattern
+   */
+  const matchCodeOwnersPattern = (filePath: string, pattern: string): boolean => {
+    // Normalize paths
+    const normalizedFile = filePath.startsWith('/') ? filePath : `/${filePath}`;
+    const normalizedPattern = pattern.startsWith('/') ? pattern : `/${pattern}`;
+
+    // Handle glob patterns
+    if (normalizedPattern.includes('*')) {
+      // Convert glob to regex
+      const regexPattern = normalizedPattern
+        .replace(/\*\*/g, '{{DOUBLE_STAR}}')
+        .replace(/\*/g, '[^/]*')
+        .replace(/{{DOUBLE_STAR}}/g, '.*')
+        .replace(/\//g, '\\/');
+
+      const regex = new RegExp(`^${regexPattern}`);
+      return regex.test(normalizedFile);
+    }
+
+    // Exact match or directory match
+    if (normalizedPattern.endsWith('/')) {
+      return normalizedFile.startsWith(normalizedPattern);
+    }
+
+    return normalizedFile === normalizedPattern || normalizedFile.startsWith(`${normalizedPattern}/`);
+  };
+
+  /**
+   * Get category label prefix based on task type
+   */
+  const getCategoryLabelPrefix = (category: TaskCategory): string => {
+    const prefixes: Record<TaskCategory, string> = {
+      feature: 'type: feature',
+      bugfix: 'type: bug',
+      refactor: 'type: refactor',
+      docs: 'type: docs',
+      test: 'type: test',
+      chore: 'type: chore',
+      security: 'type: security',
+      performance: 'type: performance',
+    };
+    return prefixes[category];
+  };
+
+  /**
+   * Get priority label based on level
+   */
+  const getPriorityLabel = (priority: PriorityLevel): string => {
+    const labels: Record<PriorityLevel, string> = {
+      critical: 'priority: critical',
+      high: 'priority: high',
+      medium: 'priority: medium',
+      low: 'priority: low',
+    };
+    return labels[priority];
+  };
 
   /**
    * Wrap error with structured error handling
@@ -414,6 +598,490 @@ export function createPRManager(client: GitHubClient): PRManager {
       } catch (error) {
         handleError(error, 'get checks status', { ref });
       }
+    },
+
+    async createEnhancedPR(options: EnhancedPROptions): Promise<PullRequest> {
+      // Build labels from category and priority
+      const labels = [...(options.labels || [])];
+      if (options.category) {
+        labels.push(getCategoryLabelPrefix(options.category));
+      }
+      if (options.priority) {
+        labels.push(getPriorityLabel(options.priority));
+      }
+
+      // Get reviewers from CODEOWNERS if auto-assign is enabled
+      let reviewers = options.reviewers || [];
+      if (options.autoAssignReviewers && options.changedFiles?.length) {
+        try {
+          const codeOwnersReviewers = await this.findReviewersForFiles(options.changedFiles);
+          reviewers = [...new Set([...reviewers, ...codeOwnersReviewers])];
+          logger.debug('Auto-assigned reviewers from CODEOWNERS', { reviewers, changedFiles: options.changedFiles });
+        } catch (error) {
+          logger.warn('Failed to get reviewers from CODEOWNERS', { error: (error as Error).message });
+        }
+      }
+
+      // Load and apply PR template if requested
+      let body = options.body;
+      if (options.useTemplate) {
+        try {
+          const template = await this.getPRTemplate();
+          if (template) {
+            body = this.generatePRDescription({
+              issueNumber: options.issueNumber,
+              issueTitle: options.title,
+              changedFiles: options.changedFiles,
+              category: options.category,
+              summary: options.implementationSummary || options.body,
+            });
+            logger.debug('Applied PR template', { hasTemplate: true });
+          }
+        } catch (error) {
+          logger.warn('Failed to load PR template', { error: (error as Error).message });
+        }
+      } else if (options.generateDescription) {
+        // Generate description without template
+        body = this.generatePRDescription({
+          issueNumber: options.issueNumber,
+          issueTitle: options.title,
+          changedFiles: options.changedFiles,
+          category: options.category,
+          summary: options.implementationSummary || options.body,
+        });
+      }
+
+      // Create the PR (start as draft if specified)
+      const pr = await this.createPR({
+        ...options,
+        body,
+        draft: options.draft ?? false,
+      });
+
+      // Add labels if any
+      if (labels.length > 0) {
+        try {
+          await this.addLabels(pr.number, labels);
+          logger.debug(`Added labels to PR #${pr.number}`, { labels });
+        } catch (error) {
+          logger.warn(`Failed to add labels to PR #${pr.number}`, { error: (error as Error).message });
+        }
+      }
+
+      // Request reviewers if any
+      if (reviewers.length > 0) {
+        try {
+          await this.requestReviewers(pr.number, reviewers);
+          logger.debug(`Requested reviewers for PR #${pr.number}`, { reviewers });
+        } catch (error) {
+          logger.warn(`Failed to request reviewers for PR #${pr.number}`, { error: (error as Error).message });
+        }
+      }
+
+      // Fetch updated PR with labels and reviewers
+      const updatedPR = await this.getPR(pr.number);
+      return updatedPR || pr;
+    },
+
+    async convertDraftToReady(number: number): Promise<boolean> {
+      try {
+        // Get the PR node ID for GraphQL mutation
+        const { data: prData } = await octokit.pulls.get({
+          owner,
+          repo,
+          pull_number: number,
+        });
+        const nodeId = prData.node_id;
+
+        // Use GraphQL mutation to convert draft to ready
+        // Note: REST API doesn't support this directly
+        await octokit.graphql(`
+          mutation($pullRequestId: ID!) {
+            markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+              pullRequest {
+                id
+                isDraft
+              }
+            }
+          }
+        `, {
+          pullRequestId: nodeId,
+        });
+
+        logger.info(`Converted PR #${number} from draft to ready for review`);
+        return true;
+      } catch (error: any) {
+        if (error.message?.includes('not a draft')) {
+          logger.debug(`PR #${number} is already ready for review`);
+          return true;
+        }
+        logger.error(`Failed to convert PR #${number} to ready`, { error: error.message });
+        return false;
+      }
+    },
+
+    async updatePR(number: number, updates: { title?: string; body?: string; labels?: string[] }): Promise<PullRequest> {
+      try {
+        const updateParams: any = {
+          owner,
+          repo,
+          pull_number: number,
+        };
+
+        if (updates.title !== undefined) {
+          updateParams.title = updates.title;
+        }
+        if (updates.body !== undefined) {
+          updateParams.body = updates.body;
+        }
+
+        const { data } = await octokit.pulls.update(updateParams);
+
+        // Handle labels separately via issues API
+        if (updates.labels !== undefined) {
+          await octokit.issues.setLabels({
+            owner,
+            repo,
+            issue_number: number,
+            labels: updates.labels,
+          });
+        }
+
+        logger.info(`Updated PR #${number}`);
+        return mapPR(data);
+      } catch (error) {
+        handleError(error, 'update PR', { prNumber: number, updates });
+      }
+    },
+
+    async addLabels(number: number, labels: string[]): Promise<void> {
+      try {
+        await octokit.issues.addLabels({
+          owner,
+          repo,
+          issue_number: number,
+          labels,
+        });
+        logger.debug(`Added labels to PR #${number}`, { labels });
+      } catch (error) {
+        handleError(error, 'add labels to PR', { prNumber: number, labels });
+      }
+    },
+
+    async requestReviewers(number: number, reviewers: string[]): Promise<void> {
+      if (reviewers.length === 0) return;
+
+      try {
+        await octokit.pulls.requestReviewers({
+          owner,
+          repo,
+          pull_number: number,
+          reviewers,
+        });
+        logger.debug(`Requested reviewers for PR #${number}`, { reviewers });
+      } catch (error: any) {
+        // Some reviewers might be invalid (not collaborators), log but don't fail
+        if (error.status === 422) {
+          logger.warn(`Some reviewers could not be assigned to PR #${number}`, {
+            reviewers,
+            error: error.message,
+          });
+          return;
+        }
+        handleError(error, 'request reviewers', { prNumber: number, reviewers });
+      }
+    },
+
+    async getCodeOwners(): Promise<CodeOwnerEntry[]> {
+      // Try multiple possible locations for CODEOWNERS
+      const locations = [
+        'CODEOWNERS',
+        '.github/CODEOWNERS',
+        'docs/CODEOWNERS',
+      ];
+
+      for (const path of locations) {
+        try {
+          const { data } = await octokit.repos.getContent({
+            owner,
+            repo,
+            path,
+          });
+
+          if ('content' in data && data.content) {
+            const content = Buffer.from(data.content, 'base64').toString('utf-8');
+            const entries = parseCodeOwners(content);
+            logger.debug(`Loaded CODEOWNERS from ${path}`, { entryCount: entries.length });
+            return entries;
+          }
+        } catch (error: any) {
+          if (error.status !== 404) {
+            logger.debug(`Error checking ${path} for CODEOWNERS`, { error: error.message });
+          }
+        }
+      }
+
+      logger.debug('No CODEOWNERS file found in repository');
+      return [];
+    },
+
+    async findReviewersForFiles(files: string[]): Promise<string[]> {
+      const codeOwners = await this.getCodeOwners();
+      if (codeOwners.length === 0) {
+        return [];
+      }
+
+      const reviewerSet = new Set<string>();
+
+      for (const file of files) {
+        // Find the most specific matching pattern (last match wins in CODEOWNERS)
+        let matchedOwners: string[] = [];
+
+        for (const entry of codeOwners) {
+          if (matchCodeOwnersPattern(file, entry.pattern)) {
+            matchedOwners = entry.owners;
+          }
+        }
+
+        for (const owner of matchedOwners) {
+          // Skip team entries (contain /)
+          if (!owner.includes('/')) {
+            reviewerSet.add(owner);
+          }
+        }
+      }
+
+      return Array.from(reviewerSet);
+    },
+
+    async getPRTemplate(): Promise<string | null> {
+      // Try multiple possible locations for PR template
+      const locations = [
+        '.github/pull_request_template.md',
+        '.github/PULL_REQUEST_TEMPLATE.md',
+        'pull_request_template.md',
+        'PULL_REQUEST_TEMPLATE.md',
+        '.github/PULL_REQUEST_TEMPLATE/default.md',
+      ];
+
+      for (const path of locations) {
+        try {
+          const { data } = await octokit.repos.getContent({
+            owner,
+            repo,
+            path,
+          });
+
+          if ('content' in data && data.content) {
+            const content = Buffer.from(data.content, 'base64').toString('utf-8');
+            logger.debug(`Loaded PR template from ${path}`);
+            return content;
+          }
+        } catch (error: any) {
+          if (error.status !== 404) {
+            logger.debug(`Error checking ${path} for PR template`, { error: error.message });
+          }
+        }
+      }
+
+      logger.debug('No PR template found in repository');
+      return null;
+    },
+
+    async getBranchProtection(branch: string): Promise<BranchProtectionStatus> {
+      const status: BranchProtectionStatus = {
+        isProtected: false,
+        requiresReviews: false,
+        requiredReviewCount: 0,
+        requiresStatusChecks: false,
+        requiredStatusChecks: [],
+        requiresSignedCommits: false,
+        allowsForcePush: false,
+        allowsDeletion: false,
+        errors: [],
+      };
+
+      try {
+        const { data } = await octokit.repos.getBranchProtection({
+          owner,
+          repo,
+          branch,
+        });
+
+        status.isProtected = true;
+
+        // Check required reviews
+        if (data.required_pull_request_reviews) {
+          status.requiresReviews = true;
+          status.requiredReviewCount = data.required_pull_request_reviews.required_approving_review_count || 1;
+        }
+
+        // Check required status checks
+        if (data.required_status_checks) {
+          status.requiresStatusChecks = true;
+          status.requiredStatusChecks = data.required_status_checks.contexts || [];
+        }
+
+        // Check signed commits requirement
+        if (data.required_signatures) {
+          status.requiresSignedCommits = true;
+        }
+
+        // Check force push and deletion rules
+        status.allowsForcePush = data.allow_force_pushes?.enabled ?? false;
+        status.allowsDeletion = data.allow_deletions?.enabled ?? false;
+
+        logger.debug(`Retrieved branch protection for ${branch}`, status);
+      } catch (error: any) {
+        if (error.status === 404) {
+          // Branch is not protected or doesn't have protection rules
+          logger.debug(`No branch protection found for ${branch}`);
+        } else {
+          status.errors.push(`Failed to get branch protection: ${error.message}`);
+          logger.warn(`Error getting branch protection for ${branch}`, { error: error.message });
+        }
+      }
+
+      return status;
+    },
+
+    async canMerge(number: number): Promise<{ allowed: boolean; reasons: string[] }> {
+      const reasons: string[] = [];
+
+      try {
+        const pr = await this.getPR(number);
+        if (!pr) {
+          return { allowed: false, reasons: ['PR not found'] };
+        }
+
+        // Check if PR is a draft
+        if (pr.draft) {
+          reasons.push('PR is still in draft status');
+        }
+
+        // Check mergeability
+        if (pr.mergeable === false) {
+          reasons.push('PR has merge conflicts');
+        } else if (pr.mergeable === null) {
+          reasons.push('Mergeability is still being computed');
+        }
+
+        // Get branch protection rules
+        const protection = await this.getBranchProtection(pr.base.ref);
+
+        if (protection.isProtected) {
+          // Check status checks
+          if (protection.requiresStatusChecks && protection.requiredStatusChecks.length > 0) {
+            const checksStatus = await this.getChecksStatus(pr.head.sha);
+            if (checksStatus.state !== 'success') {
+              const pendingChecks = protection.requiredStatusChecks.filter(
+                check => !checksStatus.statuses.some(s => s.context === check && s.state === 'success')
+              );
+              if (pendingChecks.length > 0) {
+                reasons.push(`Required status checks not passed: ${pendingChecks.join(', ')}`);
+              }
+            }
+          }
+
+          // Check required reviews (we can't easily check this via API without more calls)
+          if (protection.requiresReviews) {
+            reasons.push(`Requires ${protection.requiredReviewCount} approving review(s)`);
+          }
+        }
+
+        // Add protection errors if any
+        reasons.push(...protection.errors);
+
+        return {
+          allowed: reasons.length === 0,
+          reasons,
+        };
+      } catch (error: any) {
+        return {
+          allowed: false,
+          reasons: [`Error checking merge status: ${error.message}`],
+        };
+      }
+    },
+
+    generatePRDescription(options: PRDescriptionOptions): string {
+      const sections: string[] = [];
+
+      // Summary section
+      sections.push('## Summary');
+      if (options.summary) {
+        sections.push(options.summary);
+      } else if (options.issueTitle) {
+        sections.push(`This PR implements: ${options.issueTitle}`);
+      } else {
+        sections.push('<!-- Add a brief description of the changes -->');
+      }
+      sections.push('');
+
+      // Linked issue
+      if (options.issueNumber) {
+        sections.push('## Related Issue');
+        sections.push(`Closes #${options.issueNumber}`);
+        sections.push('');
+      }
+
+      // Category badge
+      if (options.category) {
+        sections.push('## Type of Change');
+        const categoryLabels: Record<TaskCategory, string> = {
+          feature: '✨ New Feature',
+          bugfix: '🐛 Bug Fix',
+          refactor: '♻️ Refactor',
+          docs: '📚 Documentation',
+          test: '🧪 Tests',
+          chore: '🔧 Chore',
+          security: '🔒 Security',
+          performance: '⚡ Performance',
+        };
+        sections.push(`- ${categoryLabels[options.category]}`);
+        sections.push('');
+      }
+
+      // Changed files summary
+      if (options.changedFiles && options.changedFiles.length > 0) {
+        sections.push('## Changed Files');
+        const maxFilesToShow = 10;
+        const filesToShow = options.changedFiles.slice(0, maxFilesToShow);
+        for (const file of filesToShow) {
+          sections.push(`- \`${file}\``);
+        }
+        if (options.changedFiles.length > maxFilesToShow) {
+          sections.push(`- ... and ${options.changedFiles.length - maxFilesToShow} more files`);
+        }
+        sections.push('');
+      }
+
+      // Test plan section
+      sections.push('## Test Plan');
+      sections.push('- [ ] Tests pass locally');
+      sections.push('- [ ] Build succeeds');
+      sections.push('- [ ] Code has been reviewed');
+      sections.push('');
+
+      // Footer
+      sections.push('---');
+      sections.push('🤖 Generated by [Autonomous Dev CLI](https://github.com/autonomous-dev/cli)');
+
+      return sections.join('\n');
+    },
+
+    getCategoryLabels(category?: TaskCategory, priority?: PriorityLevel): string[] {
+      const labels: string[] = [];
+
+      if (category) {
+        labels.push(getCategoryLabelPrefix(category));
+      }
+
+      if (priority) {
+        labels.push(getPriorityLabel(priority));
+      }
+
+      return labels;
     },
   };
 }

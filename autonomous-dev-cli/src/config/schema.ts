@@ -135,6 +135,41 @@ export const ConfigSchema = z.object({
   }).describe('Pull request merge settings'),
 
   /**
+   * Pull Request Management Settings
+   * Configure advanced PR handling for autonomous workflows.
+   */
+  pullRequest: z.object({
+    /** Create PRs as drafts initially, then convert to ready when complete (default: false) */
+    useDraftPRs: z.boolean().default(false),
+    /** Automatically assign reviewers from CODEOWNERS file (default: true) */
+    autoAssignReviewers: z.boolean().default(true),
+    /** Use PR template from .github/pull_request_template.md if available (default: true) */
+    usePRTemplate: z.boolean().default(true),
+    /** Generate AI-powered PR descriptions summarizing changes (default: true) */
+    generateDescription: z.boolean().default(true),
+    /** Add category-based labels to PRs (feature/bugfix/etc.) (default: true) */
+    addCategoryLabels: z.boolean().default(true),
+    /** Add priority-based labels to PRs (default: false) */
+    addPriorityLabels: z.boolean().default(false),
+    /** Default priority level for PRs: 'low', 'medium', 'high', 'critical' */
+    defaultPriority: z.enum(['low', 'medium', 'high', 'critical']).default('medium'),
+    /** Check branch protection rules before attempting merge (default: true) */
+    checkBranchProtection: z.boolean().default(true),
+    /** Additional labels to add to all PRs created by the CLI */
+    additionalLabels: z.array(z.string()).default(['autonomous-dev']),
+    /** Default reviewers to request (in addition to CODEOWNERS) */
+    defaultReviewers: z.array(z.string()).default([]),
+    /** Maximum number of reviewers to request (default: 5) */
+    maxReviewers: z.number().min(1).max(15).default(5),
+    /** Include linked issue in PR description (default: true) */
+    linkIssue: z.boolean().default(true),
+    /** Include changed files list in PR description (default: true) */
+    includeChangedFiles: z.boolean().default(true),
+    /** Maximum number of changed files to list in description (default: 10) */
+    maxChangedFilesInDescription: z.number().min(1).max(50).default(10),
+  }).describe('Pull request management settings').default({}),
+
+  /**
    * Daemon Settings
    * Control the continuous daemon mode.
    */
@@ -287,6 +322,22 @@ export const defaultConfig: Partial<Config> = {
     maxRetries: 3,
     conflictStrategy: 'rebase',
     mergeMethod: 'squash',
+  },
+  pullRequest: {
+    useDraftPRs: false,
+    autoAssignReviewers: true,
+    usePRTemplate: true,
+    generateDescription: true,
+    addCategoryLabels: true,
+    addPriorityLabels: false,
+    defaultPriority: 'medium',
+    checkBranchProtection: true,
+    additionalLabels: ['autonomous-dev'],
+    defaultReviewers: [],
+    maxReviewers: 5,
+    linkIssue: true,
+    includeChangedFiles: true,
+    maxChangedFilesInDescription: 10,
   },
   daemon: {
     loopIntervalMs: 60000,
