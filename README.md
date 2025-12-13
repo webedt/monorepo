@@ -329,6 +329,18 @@ Work on each project independently in its own directory. The monorepo structure 
 
 For detailed documentation on each project, see the [docs/](./docs/) directory or the links below:
 
+### Core Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Documentation Hub](./docs/README.md) | Central hub with quick links to all documentation |
+| [Architecture Guide](./docs/architecture.md) | System design, component relationships, and the 5-phase daemon cycle |
+| [Configuration Guide](./docs/configuration.md) | Complete reference for all configuration options |
+| [API Reference](./docs/api-reference.md) | CLI commands, module APIs, and HTTP endpoints |
+| [Troubleshooting Guide](./docs/troubleshooting.md) | Common issues, error messages, and solutions |
+
+### Project Documentation
+
 | Project | Documentation |
 |---------|---------------|
 | **Autonomous Dev CLI** | [README](./autonomous-dev-cli/README.md) \| [Quick Start](./autonomous-dev-cli/docs/quick-start.md) \| [Configuration](./autonomous-dev-cli/docs/configuration.md) |
