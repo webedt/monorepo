@@ -1,6 +1,8 @@
 import { Worker } from './worker.js';
 import { logger } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
+import { getDeadLetterQueue, } from '../utils/dead-letter-queue.js';
+import { getAllCircuitBreakerHealth, } from '../utils/circuit-breaker.js';
 import * as os from 'os';
 /** Priority weights for sorting tasks */
 const PRIORITY_WEIGHTS = {
@@ -38,6 +40,16 @@ export class WorkerPool {
     scaleCheckInterval = null;
     workerTaskMap = new Map(); // Maps worker ID to assigned task
     taskGroupWorkers = new Map(); // Maps group ID to preferred worker ID
+    // Graceful degradation state
+    degradationStatus = {
+        isDegraded: false,
+        affectedServices: [],
+        circuitBreakers: {},
+        recoveryActions: [],
+    };
+    degradationCheckInterval = null;
+    consecutiveFailures = 0;
+    failureThreshold = 5; // Number of consecutive failures before degradation
     /** Default scaling configuration */
     static DEFAULT_SCALING_CONFIG = {
         minWorkers: 1,
@@ -163,6 +175,122 @@ export class WorkerPool {
         }
     }
     /**
+     * Start degradation monitoring
+     */
+    startDegradationMonitor() {
+        if (!this.options.enableGracefulDegradation || this.degradationCheckInterval) {
+            return;
+        }
+        this.degradationCheckInterval = setInterval(() => {
+            this.checkDegradationStatus();
+        }, 5000); // Check every 5 seconds
+    }
+    /**
+     * Stop degradation monitoring
+     */
+    stopDegradationMonitor() {
+        if (this.degradationCheckInterval) {
+            clearInterval(this.degradationCheckInterval);
+            this.degradationCheckInterval = null;
+        }
+    }
+    /**
+     * Check and update degradation status
+     */
+    checkDegradationStatus() {
+        const circuitBreakers = getAllCircuitBreakerHealth();
+        const affectedServices = [];
+        const recoveryActions = [];
+        // Check circuit breaker states
+        for (const [name, health] of Object.entries(circuitBreakers)) {
+            this.degradationStatus.circuitBreakers[name] = health;
+            if (health.state === 'open') {
+                affectedServices.push(name);
+                recoveryActions.push(`Wait for ${name} circuit breaker timeout to reset`);
+            }
+            else if (health.state === 'half_open') {
+                affectedServices.push(`${name} (recovering)`);
+            }
+        }
+        // Check consecutive failures
+        if (this.consecutiveFailures >= this.failureThreshold) {
+            affectedServices.push('worker-execution');
+            recoveryActions.push('Check system resources and external service availability');
+            recoveryActions.push('Review recent error logs for patterns');
+        }
+        // Update degradation status
+        const wasDegraded = this.degradationStatus.isDegraded;
+        this.degradationStatus.isDegraded = affectedServices.length > 0;
+        this.degradationStatus.affectedServices = affectedServices;
+        this.degradationStatus.recoveryActions = recoveryActions;
+        if (this.degradationStatus.isDegraded) {
+            this.degradationStatus.reason = `Services affected: ${affectedServices.join(', ')}`;
+            if (!wasDegraded) {
+                this.degradationStatus.startedAt = new Date();
+                logger.warn('Worker pool entering degraded mode', {
+                    affectedServices,
+                    circuitBreakers,
+                    consecutiveFailures: this.consecutiveFailures,
+                });
+            }
+        }
+        else if (wasDegraded) {
+            logger.info('Worker pool recovered from degraded mode', {
+                recoveryDuration: this.degradationStatus.startedAt
+                    ? Date.now() - this.degradationStatus.startedAt.getTime()
+                    : 0,
+            });
+            this.degradationStatus.startedAt = undefined;
+            this.degradationStatus.reason = undefined;
+        }
+    }
+    /**
+     * Record a task result and update failure tracking
+     */
+    recordTaskResult(success) {
+        if (success) {
+            this.consecutiveFailures = 0;
+        }
+        else {
+            this.consecutiveFailures++;
+            // Check if we should enter degraded mode
+            if (this.consecutiveFailures >= this.failureThreshold) {
+                this.checkDegradationStatus();
+            }
+        }
+    }
+    /**
+     * Get current degradation status
+     */
+    getDegradationStatus() {
+        return { ...this.degradationStatus };
+    }
+    /**
+     * Check if the pool can accept new tasks
+     */
+    canAcceptTasks() {
+        // In degraded mode, we can still accept tasks but with reduced capacity
+        if (this.degradationStatus.isDegraded) {
+            // Only accept if we have workers available and queue isn't full
+            return this.taskQueue.length < this.scalingConfig.maxWorkers * 2;
+        }
+        return true;
+    }
+    /**
+     * Get dead letter queue stats
+     */
+    getDeadLetterQueueStats() {
+        const dlq = getDeadLetterQueue({}, this.options.workDir);
+        return dlq.getStats();
+    }
+    /**
+     * Get reprocessable tasks from dead letter queue
+     */
+    getReprocessableTasks() {
+        const dlq = getDeadLetterQueue({}, this.options.workDir);
+        return dlq.getReprocessableEntries();
+    }
+    /**
      * Calculate priority score for a task
      */
     calculatePriorityScore(task) {
@@ -286,6 +414,8 @@ export class WorkerPool {
         this.updateMetrics();
         // Start dynamic scaling monitor if enabled
         this.startScalingMonitor();
+        // Start graceful degradation monitor if enabled
+        this.startDegradationMonitor();
         // Start initial workers
         while (this.activeWorkers.size < effectiveWorkerLimit && this.taskQueue.length > 0) {
             this.startNextTask();
@@ -316,12 +446,16 @@ export class WorkerPool {
         }
         // Stop dynamic scaling monitor
         this.stopScalingMonitor();
+        // Stop degradation monitor
+        this.stopDegradationMonitor();
         const succeeded = this.results.filter(r => r.success).length;
         const failed = this.results.filter(r => !r.success).length;
         logger.info(`All tasks completed: ${succeeded}/${this.results.length} succeeded`, {
             succeeded,
             failed,
             total: this.results.length,
+            degradationOccurred: this.degradationStatus.isDegraded || this.consecutiveFailures > 0,
+            dlqStats: this.getDeadLetterQueueStats(),
         });
         // Reset pool metrics
         metrics.updateWorkerPoolStatus(0, 0);
@@ -416,6 +550,8 @@ export class WorkerPool {
                 ...result,
                 taskId: task.id,
             });
+            // Track result for graceful degradation
+            this.recordTaskResult(result.success);
             if (result.success) {
                 logger.success(`${task.id} completed: ${task.issue.title}`);
                 logger.debug(`Task completion details`, {
@@ -432,6 +568,8 @@ export class WorkerPool {
                     priority: task.metadata?.priority,
                     groupId: task.groupId,
                     duration: result.duration,
+                    consecutiveFailures: this.consecutiveFailures,
+                    isDegraded: this.degradationStatus.isDegraded,
                 });
             }
             return result;
@@ -441,6 +579,7 @@ export class WorkerPool {
     stop() {
         this.isRunning = false;
         this.stopScalingMonitor();
+        this.stopDegradationMonitor();
         logger.warn('Worker pool stop requested');
     }
     getStatus() {
@@ -454,6 +593,8 @@ export class WorkerPool {
             currentWorkerLimit: this.currentWorkerLimit,
             systemResources: this.getSystemResources(),
             taskGroups: groupIds.size,
+            degradationStatus: this.getDegradationStatus(),
+            dlqStats: this.getDeadLetterQueueStats(),
         };
     }
     /**

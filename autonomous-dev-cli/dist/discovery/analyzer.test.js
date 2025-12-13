@@ -57,24 +57,24 @@ describe('CodebaseAnalyzer', () => {
         });
     });
     describe('validateDirectoryPath', () => {
-        it('should return valid for existing directory', () => {
+        it('should return valid for existing directory', async () => {
             const analyzer = new CodebaseAnalyzer(testDir);
-            const result = analyzer.validateDirectoryPath(testDir);
+            const result = await analyzer.validateDirectoryPath(testDir);
             assert.strictEqual(result.valid, true);
             assert.strictEqual(result.error, undefined);
         });
-        it('should return error for non-existent path', () => {
+        it('should return error for non-existent path', async () => {
             const analyzer = new CodebaseAnalyzer(testDir);
-            const result = analyzer.validateDirectoryPath('/nonexistent/path');
+            const result = await analyzer.validateDirectoryPath('/nonexistent/path');
             assert.strictEqual(result.valid, false);
             assert.ok(result.error instanceof AnalyzerError);
             assert.strictEqual(result.error?.code, ErrorCode.ANALYZER_PATH_NOT_FOUND);
         });
-        it('should return error for file path instead of directory', () => {
+        it('should return error for file path instead of directory', async () => {
             const filePath = join(testDir, 'test-file.txt');
             writeFileSync(filePath, 'content');
             const analyzer = new CodebaseAnalyzer(testDir);
-            const result = analyzer.validateDirectoryPath(filePath);
+            const result = await analyzer.validateDirectoryPath(filePath);
             assert.strictEqual(result.valid, false);
             assert.ok(result.error instanceof AnalyzerError);
             assert.strictEqual(result.error?.code, ErrorCode.ANALYZER_PATH_NOT_DIRECTORY);

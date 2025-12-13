@@ -21,3 +21,14 @@ export {
   type DiscoveredTaskComplexity,
   type TaskGeneratorOptions,
 } from './generator.js';
+export {
+  TaskDeduplicator,
+  createDeduplicator,
+  hasConflictingTasks,
+  getParallelSafeTasks,
+  groupTasksByConflict,
+  type SimilarityResult,
+  type ConflictPrediction,
+  type DeduplicatedTask,
+  type DeduplicatorOptions,
+} from './deduplicator.js';
