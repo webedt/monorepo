@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { config as loadEnv } from 'dotenv';
-import { ConfigSchema, defaultConfig, type Config } from './schema.js';
+import { ConfigSchema, defaultConfig, validateNoCredentialsInConfig, type Config } from './schema.js';
 import { logger } from '../utils/logger.js';
 import { ZodError, ZodIssue } from 'zod';
 import {
@@ -531,6 +531,20 @@ export function loadConfig(configPath?: string): Config {
     deepMerge(defaultConfig as Config, fileConfig),
     envConfig
   );
+
+  // Check for credentials in config file (security warning)
+  if (fileConfig && Object.keys(fileConfig).length > 0) {
+    const credentialWarnings = validateNoCredentialsInConfig(fileConfig);
+    if (credentialWarnings.length > 0) {
+      logger.warn('Security Warning: Potential credentials detected in config file');
+      for (const warning of credentialWarnings) {
+        logger.warn(`  ${warning}`);
+      }
+      console.log('\nSECURITY BEST PRACTICE:');
+      console.log('  Credentials should be set via environment variables, not config files.');
+      console.log('  This prevents accidental exposure in version control or logs.\n');
+    }
+  }
 
   // Validate
   const result = ConfigSchema.safeParse(mergedConfig);
