@@ -245,11 +245,47 @@ export function initBuildCache(options?: { maxEntries?: number; ttlMs?: number }
 // Package.json Cache for async loading
 // ============================================================================
 
+/**
+ * Workspace configuration can be:
+ * - An array of glob patterns (npm/yarn workspaces)
+ * - An object with packages array (yarn workspaces extended format)
+ * - An object with packages and nohoist arrays (yarn workspaces)
+ */
+interface WorkspacesConfig {
+  packages?: string[];
+  nohoist?: string[];
+}
+
 interface PackageJson {
   name?: string;
+  type?: 'module' | 'commonjs';
   scripts?: Record<string, string>;
-  workspaces?: string[];
+  workspaces?: string[] | WorkspacesConfig;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   [key: string]: unknown;
+}
+
+/**
+ * Error class for package.json parsing and validation errors
+ */
+export class PackageJsonError extends Error {
+  public readonly filePath: string;
+  public readonly errorType: 'not_found' | 'malformed_json' | 'invalid_structure' | 'read_error';
+  public readonly cause?: Error;
+
+  constructor(
+    message: string,
+    filePath: string,
+    errorType: 'not_found' | 'malformed_json' | 'invalid_structure' | 'read_error',
+    cause?: Error
+  ) {
+    super(message);
+    this.name = 'PackageJsonError';
+    this.filePath = filePath;
+    this.errorType = errorType;
+    this.cause = cause;
+  }
 }
 
 interface PackageJsonCacheEntry {
@@ -261,10 +297,50 @@ const packageJsonCache = new Map<string, PackageJsonCacheEntry>();
 const PACKAGE_JSON_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 
 /**
- * Asynchronously load and parse a package.json file with caching.
- * Returns null if the file doesn't exist or contains malformed JSON.
+ * Validates basic package.json structure
  */
-async function loadPackageJson(filePath: string): Promise<PackageJson | null> {
+function validatePackageJsonStructure(data: unknown, filePath: string): data is PackageJson {
+  if (data === null || typeof data !== 'object') {
+    logger.warn(`Invalid package.json structure in ${filePath}: expected object, got ${typeof data}`);
+    return false;
+  }
+
+  const pkg = data as Record<string, unknown>;
+
+  // Validate scripts if present
+  if (pkg.scripts !== undefined && (typeof pkg.scripts !== 'object' || pkg.scripts === null)) {
+    logger.warn(`Invalid scripts field in ${filePath}: expected object`);
+    return false;
+  }
+
+  // Validate workspaces if present
+  if (pkg.workspaces !== undefined) {
+    if (!Array.isArray(pkg.workspaces) && (typeof pkg.workspaces !== 'object' || pkg.workspaces === null)) {
+      logger.warn(`Invalid workspaces field in ${filePath}: expected array or object`);
+      return false;
+    }
+  }
+
+  // Validate type field if present
+  if (pkg.type !== undefined && pkg.type !== 'module' && pkg.type !== 'commonjs') {
+    logger.warn(`Invalid type field in ${filePath}: expected 'module' or 'commonjs', got '${pkg.type}'`);
+    // Don't fail validation, just warn - some packages have non-standard values
+  }
+
+  return true;
+}
+
+/**
+ * Asynchronously load and parse a package.json file using ES module compatible approach.
+ * Uses dynamic import() for ES module compatibility while falling back to fs.readFile
+ * for environments where import() of JSON is not supported.
+ *
+ * Returns null if the file doesn't exist or contains malformed JSON.
+ * Throws PackageJsonError for recoverable errors that callers may want to handle.
+ */
+async function loadPackageJson(filePath: string, options: { throwOnError?: boolean } = {}): Promise<PackageJson | null> {
+  const { throwOnError = false } = options;
+
   // Check cache first
   const cached = packageJsonCache.get(filePath);
   if (cached && Date.now() - cached.timestamp < PACKAGE_JSON_CACHE_TTL_MS) {
@@ -273,26 +349,82 @@ async function loadPackageJson(filePath: string): Promise<PackageJson | null> {
 
   // Check if file exists
   if (!existsSync(filePath)) {
+    if (throwOnError) {
+      throw new PackageJsonError(
+        `Package.json not found: ${filePath}`,
+        filePath,
+        'not_found'
+      );
+    }
     return null;
   }
 
   try {
+    // Use fs.readFile for ES module compatibility
+    // Note: dynamic import() of JSON requires experimental flags in Node.js
+    // and has inconsistent support across environments
     const content = await readFile(filePath, 'utf-8');
-    const data = JSON.parse(content) as PackageJson;
+
+    // Handle empty files
+    if (!content.trim()) {
+      const error = new PackageJsonError(
+        `Empty package.json file: ${filePath}`,
+        filePath,
+        'malformed_json'
+      );
+      if (throwOnError) throw error;
+      logger.warn(error.message);
+      return null;
+    }
+
+    let data: unknown;
+    try {
+      data = JSON.parse(content);
+    } catch (parseError) {
+      const error = new PackageJsonError(
+        `Malformed JSON in ${filePath}: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+        filePath,
+        'malformed_json',
+        parseError instanceof Error ? parseError : undefined
+      );
+      if (throwOnError) throw error;
+      logger.warn(error.message);
+      return null;
+    }
+
+    // Validate structure
+    if (!validatePackageJsonStructure(data, filePath)) {
+      const error = new PackageJsonError(
+        `Invalid package.json structure in ${filePath}`,
+        filePath,
+        'invalid_structure'
+      );
+      if (throwOnError) throw error;
+      return null;
+    }
 
     // Cache the result
     packageJsonCache.set(filePath, {
-      data,
+      data: data as PackageJson,
       timestamp: Date.now(),
     });
 
-    return data;
+    return data as PackageJson;
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      logger.warn(`Malformed JSON in ${filePath}: ${error.message}`);
-    } else {
-      logger.debug(`Failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    // Re-throw PackageJsonError
+    if (error instanceof PackageJsonError) {
+      throw error;
     }
+
+    const pkgError = new PackageJsonError(
+      `Failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      filePath,
+      'read_error',
+      error instanceof Error ? error : undefined
+    );
+
+    if (throwOnError) throw pkgError;
+    logger.debug(pkgError.message);
     return null;
   }
 }
@@ -482,6 +614,109 @@ interface BuildCommand {
   cwd: string;
 }
 
+/**
+ * Result of workspace detection
+ */
+interface WorkspaceDetectionResult {
+  hasWorkspaces: boolean;
+  workspacePatterns: string[];
+  format: 'array' | 'object' | 'none';
+}
+
+/**
+ * Detects and normalizes workspace configuration from package.json.
+ * Supports both ESM (array) and CJS/Yarn (object with packages) formats:
+ *
+ * ESM/npm format:
+ *   "workspaces": ["packages/star", "apps/star"]
+ *
+ * Yarn/CJS object format:
+ *   "workspaces": { "packages": ["packages/star"], "nohoist": ["star-star/react-native"] }
+ *
+ * (Note: 'star' represents glob asterisk patterns in the above examples)
+ *
+ * @param pkg - The parsed package.json object
+ * @returns Normalized workspace detection result
+ */
+function detectWorkspaces(pkg: PackageJson | null): WorkspaceDetectionResult {
+  const noWorkspaces: WorkspaceDetectionResult = {
+    hasWorkspaces: false,
+    workspacePatterns: [],
+    format: 'none',
+  };
+
+  if (!pkg || pkg.workspaces === undefined) {
+    return noWorkspaces;
+  }
+
+  const workspaces = pkg.workspaces;
+
+  // Handle array format (ESM/npm workspaces)
+  if (Array.isArray(workspaces)) {
+    const validPatterns = workspaces.filter(
+      (pattern): pattern is string => typeof pattern === 'string' && pattern.trim().length > 0
+    );
+
+    if (validPatterns.length === 0) {
+      logger.debug('Workspaces array is empty or contains no valid patterns');
+      return noWorkspaces;
+    }
+
+    return {
+      hasWorkspaces: true,
+      workspacePatterns: validPatterns,
+      format: 'array',
+    };
+  }
+
+  // Handle object format (Yarn workspaces extended)
+  if (typeof workspaces === 'object' && workspaces !== null) {
+    const wsConfig = workspaces as WorkspacesConfig;
+
+    // Check for packages array in object format
+    if (Array.isArray(wsConfig.packages)) {
+      const validPatterns = wsConfig.packages.filter(
+        (pattern): pattern is string => typeof pattern === 'string' && pattern.trim().length > 0
+      );
+
+      if (validPatterns.length === 0) {
+        logger.debug('Workspaces.packages array is empty or contains no valid patterns');
+        return noWorkspaces;
+      }
+
+      return {
+        hasWorkspaces: true,
+        workspacePatterns: validPatterns,
+        format: 'object',
+      };
+    }
+
+    logger.debug('Workspaces object does not contain valid packages array');
+    return noWorkspaces;
+  }
+
+  logger.warn(`Unexpected workspaces format: ${typeof workspaces}`);
+  return noWorkspaces;
+}
+
+/**
+ * Checks if a project has monorepo indicators beyond just workspaces.
+ * This helps validate workspace detection and identify monorepo tooling.
+ */
+function detectMonorepoTooling(repoPath: string): {
+  hasTurbo: boolean;
+  hasNx: boolean;
+  hasLerna: boolean;
+  hasPnpmWorkspace: boolean;
+} {
+  return {
+    hasTurbo: existsSync(join(repoPath, 'turbo.json')),
+    hasNx: existsSync(join(repoPath, 'nx.json')),
+    hasLerna: existsSync(join(repoPath, 'lerna.json')),
+    hasPnpmWorkspace: existsSync(join(repoPath, 'pnpm-workspace.yaml')),
+  };
+}
+
 async function determineBuildCommands(repoPath: string, packages: string[]): Promise<BuildCommand[]> {
   const commands: BuildCommand[] = [];
 
@@ -490,10 +725,26 @@ async function determineBuildCommands(repoPath: string, packages: string[]): Pro
   const pkg = await loadPackageJson(rootPackageJson);
 
   if (pkg) {
-    // Check if it's a monorepo with workspaces
-    const hasWorkspaces = pkg.workspaces && pkg.workspaces.length > 0;
+    // Detect workspace configuration with support for both ESM and CJS formats
+    const workspaceInfo = detectWorkspaces(pkg);
+    const monorepoTooling = detectMonorepoTooling(repoPath);
 
-    if (hasWorkspaces && pkg.scripts?.build) {
+    // Check if it's a monorepo (has workspaces or monorepo tooling)
+    const isMonorepo = workspaceInfo.hasWorkspaces ||
+      monorepoTooling.hasTurbo ||
+      monorepoTooling.hasNx ||
+      monorepoTooling.hasLerna ||
+      monorepoTooling.hasPnpmWorkspace;
+
+    if (isMonorepo) {
+      logger.debug('Detected monorepo configuration', {
+        workspaceFormat: workspaceInfo.format,
+        workspacePatterns: workspaceInfo.workspacePatterns,
+        tooling: monorepoTooling,
+      });
+    }
+
+    if (isMonorepo && pkg.scripts?.build) {
       // Monorepo with root build script (e.g., turbo, nx, lerna)
       commands.push({
         command: 'npm run build',
@@ -521,19 +772,34 @@ async function determineBuildCommands(repoPath: string, packages: string[]): Pro
     for (const pkgPath of packages) {
       const fullPath = join(repoPath, pkgPath);
       const pkgJsonPath = join(fullPath, 'package.json');
-      const subPkg = await loadPackageJson(pkgJsonPath);
 
-      if (subPkg?.scripts?.build) {
-        commands.push({
-          command: 'npm run build',
-          cwd: fullPath,
-        });
+      try {
+        const subPkg = await loadPackageJson(pkgJsonPath);
+
+        if (subPkg?.scripts?.build) {
+          commands.push({
+            command: 'npm run build',
+            cwd: fullPath,
+          });
+        }
+      } catch (error) {
+        // Log but continue with other packages
+        if (error instanceof PackageJsonError) {
+          logger.warn(`Skipping package at ${pkgPath}: ${error.message}`);
+        } else {
+          logger.warn(`Failed to load package.json at ${pkgPath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
   }
 
   return commands;
 }
+
+/**
+ * Export workspace detection for testing and external use
+ */
+export { detectWorkspaces, detectMonorepoTooling, type WorkspaceDetectionResult };
 
 // Type-check only (faster than full build)
 export async function runTypeCheck(repoPath: string): Promise<BuildResult> {
