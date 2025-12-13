@@ -1,8 +1,26 @@
 import { z } from 'zod';
+/**
+ * Configuration Schema for Autonomous Dev CLI
+ *
+ * This schema defines all configuration options available for the CLI.
+ * Configuration can be provided via:
+ *   1. JSON config file (autonomous-dev.config.json)
+ *   2. Environment variables
+ *   3. Default values
+ *
+ * Priority: Environment variables > Config file > Defaults
+ */
 export declare const ConfigSchema: z.ZodObject<{
+    /**
+     * Target Repository Settings
+     * Configure the GitHub repository that autonomous-dev will work with.
+     */
     repo: z.ZodObject<{
+        /** GitHub username or organization that owns the repository (required) */
         owner: z.ZodString;
+        /** Repository name (required) */
         name: z.ZodString;
+        /** Base branch for pull requests (default: 'main') */
         baseBranch: z.ZodDefault<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         owner: string;
@@ -13,10 +31,18 @@ export declare const ConfigSchema: z.ZodObject<{
         name: string;
         baseBranch?: string | undefined;
     }>;
+    /**
+     * Task Discovery Settings
+     * Control how tasks are discovered and managed.
+     */
     discovery: z.ZodObject<{
+        /** Number of tasks to discover per cycle (1-10, default: 5) */
         tasksPerCycle: z.ZodDefault<z.ZodNumber>;
+        /** Maximum open issues before pausing discovery (min: 1, default: 10) */
         maxOpenIssues: z.ZodDefault<z.ZodNumber>;
+        /** File paths/patterns to exclude from analysis */
         excludePaths: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** Label applied to auto-created GitHub issues */
         issueLabel: z.ZodDefault<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         tasksPerCycle: number;
@@ -29,9 +55,16 @@ export declare const ConfigSchema: z.ZodObject<{
         excludePaths?: string[] | undefined;
         issueLabel?: string | undefined;
     }>;
+    /**
+     * Execution Settings
+     * Control how tasks are executed.
+     */
     execution: z.ZodObject<{
+        /** Number of parallel workers (1-10, default: 4) */
         parallelWorkers: z.ZodDefault<z.ZodNumber>;
+        /** Task timeout in minutes (5-120, default: 30) */
         timeoutMinutes: z.ZodDefault<z.ZodNumber>;
+        /** Working directory for task execution */
         workDir: z.ZodDefault<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         parallelWorkers: number;
@@ -42,13 +75,24 @@ export declare const ConfigSchema: z.ZodObject<{
         timeoutMinutes?: number | undefined;
         workDir?: string | undefined;
     }>;
+    /**
+     * Evaluation Settings
+     * Control quality checks before merging.
+     */
     evaluation: z.ZodObject<{
+        /** Require build to pass before merging (default: true) */
         requireBuild: z.ZodDefault<z.ZodBoolean>;
+        /** Require tests to pass before merging (default: true) */
         requireTests: z.ZodDefault<z.ZodBoolean>;
+        /** Require health checks to pass (default: true) */
         requireHealthCheck: z.ZodDefault<z.ZodBoolean>;
+        /** Require smoke tests to pass (default: false) */
         requireSmokeTests: z.ZodDefault<z.ZodBoolean>;
+        /** URLs to check for health (array of URLs) */
         healthCheckUrls: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** URLs for smoke tests (array of URLs) */
         smokeTestUrls: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** URL pattern for preview deployments. Use {owner}, {repo}, {branch} placeholders */
         previewUrlPattern: z.ZodDefault<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         requireBuild: boolean;
@@ -67,27 +111,42 @@ export declare const ConfigSchema: z.ZodObject<{
         smokeTestUrls?: string[] | undefined;
         previewUrlPattern?: string | undefined;
     }>;
+    /**
+     * Auto-merge Settings
+     * Control how pull requests are merged.
+     */
     merge: z.ZodObject<{
+        /** Automatically merge PRs that pass all checks (default: true) */
         autoMerge: z.ZodDefault<z.ZodBoolean>;
+        /** Require all status checks to pass before merging (default: true) */
         requireAllChecks: z.ZodDefault<z.ZodBoolean>;
+        /** Maximum merge retry attempts (1-5, default: 3) */
         maxRetries: z.ZodDefault<z.ZodNumber>;
+        /** Strategy for handling merge conflicts: 'rebase', 'merge', or 'manual' */
         conflictStrategy: z.ZodDefault<z.ZodEnum<["rebase", "merge", "manual"]>>;
+        /** Git merge method: 'merge', 'squash', or 'rebase' */
         mergeMethod: z.ZodDefault<z.ZodEnum<["merge", "squash", "rebase"]>>;
     }, "strip", z.ZodTypeAny, {
         autoMerge: boolean;
         requireAllChecks: boolean;
         maxRetries: number;
-        conflictStrategy: "merge" | "rebase" | "manual";
-        mergeMethod: "merge" | "rebase" | "squash";
+        conflictStrategy: "rebase" | "merge" | "manual";
+        mergeMethod: "rebase" | "merge" | "squash";
     }, {
         autoMerge?: boolean | undefined;
         requireAllChecks?: boolean | undefined;
         maxRetries?: number | undefined;
-        conflictStrategy?: "merge" | "rebase" | "manual" | undefined;
-        mergeMethod?: "merge" | "rebase" | "squash" | undefined;
+        conflictStrategy?: "rebase" | "merge" | "manual" | undefined;
+        mergeMethod?: "rebase" | "merge" | "squash" | undefined;
     }>;
+    /**
+     * Daemon Settings
+     * Control the continuous daemon mode.
+     */
     daemon: z.ZodObject<{
+        /** Interval between daemon cycles in milliseconds (min: 0, default: 60000 = 1 minute) */
         loopIntervalMs: z.ZodDefault<z.ZodNumber>;
+        /** Pause between development cycles (default: true) */
         pauseBetweenCycles: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         loopIntervalMs: number;
@@ -96,11 +155,20 @@ export declare const ConfigSchema: z.ZodObject<{
         loopIntervalMs?: number | undefined;
         pauseBetweenCycles?: boolean | undefined;
     }>;
+    /**
+     * Credentials
+     * Authentication credentials (typically set via environment variables).
+     */
     credentials: z.ZodObject<{
+        /** GitHub personal access token (env: GITHUB_TOKEN) */
         githubToken: z.ZodOptional<z.ZodString>;
+        /** Claude API authentication */
         claudeAuth: z.ZodOptional<z.ZodObject<{
+            /** Claude access token (env: CLAUDE_ACCESS_TOKEN) */
             accessToken: z.ZodString;
+            /** Claude refresh token (env: CLAUDE_REFRESH_TOKEN) */
             refreshToken: z.ZodString;
+            /** Token expiration timestamp */
             expiresAt: z.ZodOptional<z.ZodNumber>;
         }, "strip", z.ZodTypeAny, {
             accessToken: string;
@@ -111,7 +179,9 @@ export declare const ConfigSchema: z.ZodObject<{
             refreshToken: string;
             expiresAt?: number | undefined;
         }>>;
+        /** Database URL for credential storage (env: DATABASE_URL) */
         databaseUrl: z.ZodOptional<z.ZodString>;
+        /** User email for credential lookup (env: USER_EMAIL) */
         userEmail: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         githubToken?: string | undefined;
@@ -162,8 +232,8 @@ export declare const ConfigSchema: z.ZodObject<{
         autoMerge: boolean;
         requireAllChecks: boolean;
         maxRetries: number;
-        conflictStrategy: "merge" | "rebase" | "manual";
-        mergeMethod: "merge" | "rebase" | "squash";
+        conflictStrategy: "rebase" | "merge" | "manual";
+        mergeMethod: "rebase" | "merge" | "squash";
     };
     daemon: {
         loopIntervalMs: number;
@@ -209,8 +279,8 @@ export declare const ConfigSchema: z.ZodObject<{
         autoMerge?: boolean | undefined;
         requireAllChecks?: boolean | undefined;
         maxRetries?: number | undefined;
-        conflictStrategy?: "merge" | "rebase" | "manual" | undefined;
-        mergeMethod?: "merge" | "rebase" | "squash" | undefined;
+        conflictStrategy?: "rebase" | "merge" | "manual" | undefined;
+        mergeMethod?: "rebase" | "merge" | "squash" | undefined;
     };
     daemon: {
         loopIntervalMs?: number | undefined;

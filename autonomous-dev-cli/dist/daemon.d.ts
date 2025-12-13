@@ -23,6 +23,14 @@ export declare class Daemon {
     private enableDatabaseLogging;
     constructor(options?: DaemonOptions);
     start(): Promise<void>;
+    /**
+     * Wrap any error as a StructuredError with daemon-specific context
+     */
+    private wrapDaemonError;
+    /**
+     * Get current error context for debugging
+     */
+    private getErrorContext;
     stop(): Promise<void>;
     private initialize;
     private shutdown;

@@ -4,6 +4,15 @@ import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { logger } from '../utils/logger.js';
+import {
+  StructuredError,
+  ExecutionError,
+  ClaudeError,
+  ErrorCode,
+  wrapError,
+  withRetry,
+  type ErrorContext,
+} from '../utils/errors.js';
 import { type Issue } from '../github/issues.js';
 import {
   createChatSession,
@@ -56,6 +65,42 @@ export class Worker {
     this.options = options;
     this.workerId = workerId;
     this.log = logger.child(`Worker-${workerId}`);
+  }
+
+  /**
+   * Get error context for debugging
+   */
+  private getErrorContext(operation: string, task?: WorkerTask): ErrorContext {
+    return {
+      operation,
+      component: 'Worker',
+      workerId: this.workerId,
+      repoUrl: this.options.repoUrl,
+      baseBranch: this.options.baseBranch,
+      timeoutMinutes: this.options.timeoutMinutes,
+      issueNumber: task?.issue.number,
+      branchName: task?.branchName,
+    };
+  }
+
+  /**
+   * Wrap an error with execution context
+   */
+  private wrapExecutionError(
+    error: any,
+    code: ErrorCode,
+    message: string,
+    task?: WorkerTask
+  ): ExecutionError {
+    if (error instanceof StructuredError) {
+      return error as ExecutionError;
+    }
+    return new ExecutionError(code, message, {
+      issueNumber: task?.issue.number,
+      branchName: task?.branchName,
+      context: this.getErrorContext('execute', task),
+      cause: error,
+    });
   }
 
   async execute(task: WorkerTask): Promise<WorkerResult> {
@@ -164,11 +209,31 @@ export class Worker {
         chatSessionId,
       };
     } catch (error: any) {
-      this.log.error(`Task failed: ${error.message}`);
+      // Wrap the error with structured context
+      const structuredError = this.wrapExecutionError(
+        error,
+        ErrorCode.INTERNAL_ERROR,
+        `Task execution failed: ${error.message}`,
+        task
+      );
+
+      this.log.structuredError(structuredError, {
+        context: this.getErrorContext('execute', task),
+        includeStack: true,
+        includeRecovery: true,
+      });
 
       if (chatSessionId) {
-        await addMessage(chatSessionId, 'error', `Task failed: ${error.message}`);
-        await addEvent(chatSessionId, 'error', { type: 'error', message: error.message, stack: error.stack });
+        await addMessage(chatSessionId, 'error', `Task failed: [${structuredError.code}] ${structuredError.message}`);
+        await addEvent(chatSessionId, 'error', {
+          type: 'error',
+          code: structuredError.code,
+          message: structuredError.message,
+          severity: structuredError.severity,
+          isRetryable: structuredError.isRetryable,
+          recoveryActions: structuredError.getRecoverySuggestions(),
+          stack: structuredError.stack,
+        });
         await updateChatSession(chatSessionId, { status: 'error', completedAt: new Date() });
       }
 
@@ -176,7 +241,7 @@ export class Worker {
         success: false,
         issue,
         branchName,
-        error: error.message,
+        error: `[${structuredError.code}] ${structuredError.message}`,
         duration: Date.now() - startTime,
         chatSessionId,
       };
@@ -214,18 +279,53 @@ export class Worker {
       `https://${this.options.githubToken}@github.com`
     );
 
-    const git = simpleGit(taskDir);
-    await git.clone(urlWithAuth, 'repo', ['--depth', '1', '--branch', this.options.baseBranch]);
+    // Clone with retry for transient network failures
+    return withRetry(
+      async () => {
+        const git = simpleGit(taskDir);
+        await git.clone(urlWithAuth, 'repo', ['--depth', '1', '--branch', this.options.baseBranch]);
 
-    const repoDir = join(taskDir, 'repo');
+        const repoDir = join(taskDir, 'repo');
 
-    // Configure git identity
-    const repoGit = simpleGit(repoDir);
-    await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
-    await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
+        // Configure git identity
+        const repoGit = simpleGit(repoDir);
+        await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
+        await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
 
-    this.log.debug('Repository cloned');
-    return repoDir;
+        this.log.debug('Repository cloned');
+        return repoDir;
+      },
+      {
+        config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
+        onRetry: (error, attempt, delay) => {
+          this.log.warn(`Clone retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
+        },
+        shouldRetry: (error) => {
+          // Retry network-related errors
+          const message = error.message.toLowerCase();
+          return (
+            message.includes('network') ||
+            message.includes('timeout') ||
+            message.includes('connection') ||
+            message.includes('enotfound') ||
+            message.includes('etimedout')
+          );
+        },
+      }
+    ).catch((error) => {
+      throw new ExecutionError(
+        ErrorCode.EXEC_CLONE_FAILED,
+        `Failed to clone repository: ${error.message}`,
+        {
+          context: {
+            repoUrl: this.options.repoUrl,
+            baseBranch: this.options.baseBranch,
+            taskDir,
+          },
+          cause: error,
+        }
+      );
+    });
   }
 
   private async createBranch(repoDir: string, branchName: string): Promise<void> {
@@ -407,11 +507,58 @@ Implements #${issue.number}
 🤖 Generated by Autonomous Dev CLI`;
 
     // Commit
-    const commitResult = await git.commit(commitMessage);
-    const commitSha = commitResult.commit;
+    let commitSha: string;
+    try {
+      const commitResult = await git.commit(commitMessage);
+      commitSha = commitResult.commit;
+    } catch (error: any) {
+      throw new ExecutionError(
+        ErrorCode.EXEC_COMMIT_FAILED,
+        `Failed to commit changes: ${error.message}`,
+        {
+          issueNumber: issue.number,
+          branchName,
+          context: { repoDir },
+          cause: error,
+        }
+      );
+    }
 
-    // Push (with auth token in remote URL)
-    await git.push(['-u', 'origin', branchName]);
+    // Push with retry for transient failures
+    await withRetry(
+      async () => {
+        await git.push(['-u', 'origin', branchName]);
+      },
+      {
+        config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
+        onRetry: (error, attempt, delay) => {
+          this.log.warn(`Push retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
+        },
+        shouldRetry: (error) => {
+          const message = error.message.toLowerCase();
+          return (
+            message.includes('network') ||
+            message.includes('timeout') ||
+            message.includes('connection') ||
+            message.includes('could not read from remote')
+          );
+        },
+      }
+    ).catch((error) => {
+      throw new ExecutionError(
+        ErrorCode.EXEC_PUSH_FAILED,
+        `Failed to push changes: ${error.message}`,
+        {
+          issueNumber: issue.number,
+          branchName,
+          context: {
+            repoDir,
+            commitSha,
+          },
+          cause: error,
+        }
+      );
+    });
 
     this.log.info(`Pushed commit ${commitSha} to ${branchName}`);
     return commitSha;

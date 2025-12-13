@@ -33,6 +33,14 @@ export declare class Worker {
     private workerId;
     private log;
     constructor(options: WorkerOptions, workerId: string);
+    /**
+     * Get error context for debugging
+     */
+    private getErrorContext;
+    /**
+     * Wrap an error with execution context
+     */
+    private wrapExecutionError;
     execute(task: WorkerTask): Promise<WorkerResult>;
     private setupWorkspace;
     private cleanupWorkspace;

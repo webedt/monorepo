@@ -1,24 +1,63 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { createDaemon } from './daemon.js';
-import { loadConfig } from './config/index.js';
+import { loadConfig, getConfigHelp } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
 import { logger } from './utils/logger.js';
 import chalk from 'chalk';
+import * as readline from 'readline';
+import { writeFileSync, existsSync } from 'fs';
 const program = new Command();
+// Helper to format examples section
+function formatExamples(examples) {
+    return '\n\nExamples:\n' + examples.map(ex => `  $ ${ex}`).join('\n');
+}
+// Helper to format additional info
+function formatAdditionalInfo(info) {
+    return '\n\n' + info;
+}
 program
     .name('autonomous-dev')
-    .description('Autonomous development CLI for continuous website improvement')
+    .description('Autonomous development CLI for continuous website improvement.\n\n' +
+    'This tool automates the discovery, implementation, and deployment of\n' +
+    'development tasks using AI-powered analysis and GitHub integration.\n\n' +
+    'Quick Start:\n' +
+    '  1. Run "autonomous-dev init" to create a configuration file\n' +
+    '  2. Set up credentials (GitHub token, Claude auth)\n' +
+    '  3. Run "autonomous-dev discover" to find tasks\n' +
+    '  4. Run "autonomous-dev start" to begin autonomous development\n\n' +
+    'For more information on a specific command, run:\n' +
+    '  autonomous-dev <command> --help')
     .version('0.1.0');
 // Start command - run continuous daemon
 program
     .command('start')
-    .description('Start the autonomous development daemon (continuous mode)')
-    .option('-c, --config <path>', 'Path to config file')
-    .option('-v, --verbose', 'Enable verbose logging')
-    .option('--dry-run', 'Discover tasks but do not execute or create issues')
+    .description('Start the autonomous development daemon in continuous mode.\n\n' +
+    'The daemon will continuously:\n' +
+    '  1. Discover new development tasks using AI analysis\n' +
+    '  2. Create GitHub issues for discovered tasks\n' +
+    '  3. Implement tasks in isolated branches\n' +
+    '  4. Run build, tests, and health checks\n' +
+    '  5. Create and auto-merge pull requests\n\n' +
+    'The loop interval and behavior can be configured via config file.' +
+    formatExamples([
+        'autonomous-dev start',
+        'autonomous-dev start --verbose',
+        'autonomous-dev start --config ./my-config.json',
+        'autonomous-dev start --dry-run  # Preview without making changes',
+    ]) +
+    formatAdditionalInfo('Environment Variables:\n' +
+        '  GITHUB_TOKEN         GitHub personal access token\n' +
+        '  CLAUDE_ACCESS_TOKEN  Claude API access token\n' +
+        '  DATABASE_URL         Database connection URL (optional)\n\n' +
+        'Signals:\n' +
+        '  SIGINT (Ctrl+C)      Graceful shutdown after current cycle\n' +
+        '  SIGTERM              Graceful shutdown after current cycle'))
+    .option('-c, --config <path>', 'Path to configuration file (JSON format)')
+    .option('-v, --verbose', 'Enable verbose/debug logging output')
+    .option('--dry-run', 'Discover tasks but do not execute or create issues (safe preview mode)')
     .action(async (options) => {
     const daemon = createDaemon({
         configPath: options.config,
@@ -47,10 +86,31 @@ program
 // Run command - run single cycle
 program
     .command('run')
-    .description('Run a single development cycle and exit')
-    .option('-c, --config <path>', 'Path to config file')
-    .option('-v, --verbose', 'Enable verbose logging')
-    .option('--dry-run', 'Discover tasks but do not execute or create issues')
+    .description('Run a single development cycle and exit.\n\n' +
+    'Unlike "start", this command runs exactly one cycle and exits.\n' +
+    'Useful for CI/CD pipelines, cron jobs, or manual one-off runs.\n\n' +
+    'Each cycle performs:\n' +
+    '  1. Task discovery (if below max open issues)\n' +
+    '  2. Issue creation on GitHub\n' +
+    '  3. Task implementation\n' +
+    '  4. Build and test validation\n' +
+    '  5. Pull request creation' +
+    formatExamples([
+        'autonomous-dev run',
+        'autonomous-dev run --verbose',
+        'autonomous-dev run --dry-run  # Safe preview mode',
+        'autonomous-dev run -c production.json',
+    ]) +
+    formatAdditionalInfo('Use Cases:\n' +
+        '  • Scheduled runs via cron: 0 */4 * * * autonomous-dev run\n' +
+        '  • CI/CD integration for nightly improvements\n' +
+        '  • Manual triggering for controlled development\n\n' +
+        'Exit Codes:\n' +
+        '  0  Cycle completed successfully\n' +
+        '  1  Cycle failed (check logs for details)'))
+    .option('-c, --config <path>', 'Path to configuration file (JSON format)')
+    .option('-v, --verbose', 'Enable verbose/debug logging output')
+    .option('--dry-run', 'Discover tasks but do not execute or create issues (safe preview mode)')
     .action(async (options) => {
     const daemon = createDaemon({
         configPath: options.config,
@@ -69,11 +129,37 @@ program
 // Discover command - only discover tasks
 program
     .command('discover')
-    .description('Discover tasks without executing them')
-    .option('-c, --config <path>', 'Path to config file')
-    .option('-v, --verbose', 'Enable verbose logging')
-    .option('-n, --count <number>', 'Number of tasks to discover', '5')
-    .option('--create-issues', 'Create GitHub issues for discovered tasks')
+    .description('Discover development tasks without executing them.\n\n' +
+    'Uses AI-powered analysis to identify potential improvements,\n' +
+    'bug fixes, and feature enhancements in your codebase.\n\n' +
+    'Task categories include:\n' +
+    '  • bug-fix      - Bug fixes and error corrections\n' +
+    '  • feature      - New feature implementations\n' +
+    '  • enhancement  - Improvements to existing features\n' +
+    '  • refactor     - Code quality improvements\n' +
+    '  • docs         - Documentation updates\n' +
+    '  • test         - Test coverage improvements' +
+    formatExamples([
+        'autonomous-dev discover',
+        'autonomous-dev discover -n 10  # Find 10 tasks',
+        'autonomous-dev discover --create-issues  # Create GitHub issues',
+        'autonomous-dev discover -v --count 3',
+    ]) +
+    formatAdditionalInfo('Output Information:\n' +
+        '  Each task displays:\n' +
+        '  • Title and description\n' +
+        '  • Priority level (high/medium/low)\n' +
+        '  • Category (bug-fix, feature, etc.)\n' +
+        '  • Estimated complexity\n' +
+        '  • Affected file paths\n\n' +
+        'Issue Labels (when --create-issues is used):\n' +
+        '  • autonomous-dev (or custom label from config)\n' +
+        '  • priority:<level>\n' +
+        '  • type:<category>'))
+    .option('-c, --config <path>', 'Path to configuration file (JSON format)')
+    .option('-v, --verbose', 'Enable verbose/debug logging output')
+    .option('-n, --count <number>', 'Number of tasks to discover (default: 5, max: 10)', '5')
+    .option('--create-issues', 'Create GitHub issues for discovered tasks automatically')
     .action(async (options) => {
     if (options.verbose) {
         logger.setLevel('debug');
@@ -162,8 +248,25 @@ program
 // Status command - show current status
 program
     .command('status')
-    .description('Show current status of autonomous development')
-    .option('-c, --config <path>', 'Path to config file')
+    .description('Show current status of autonomous development.\n\n' +
+    'Displays a summary of the current state including:\n' +
+    '  • Repository information\n' +
+    '  • Open issues count and status\n' +
+    '  • Active pull requests\n' +
+    '  • Pending tasks ready for implementation' +
+    formatExamples([
+        'autonomous-dev status',
+        'autonomous-dev status -c ./production.json',
+    ]) +
+    formatAdditionalInfo('Status Indicators:\n' +
+        '  ✓ (green)   PR is mergeable\n' +
+        '  ✗ (red)     PR has conflicts or failed checks\n' +
+        '  ? (yellow)  Merge status pending/unknown\n\n' +
+        'Issue Categories:\n' +
+        '  • Total open    - All issues with autonomous-dev label\n' +
+        '  • In progress   - Issues currently being worked on\n' +
+        '  • Pending       - Issues awaiting implementation'))
+    .option('-c, --config <path>', 'Path to configuration file (JSON format)')
     .action(async (options) => {
     try {
         const config = loadConfig(options.config);
@@ -232,9 +335,29 @@ program
 // Config command - show/validate config
 program
     .command('config')
-    .description('Show or validate configuration')
-    .option('-c, --config <path>', 'Path to config file')
-    .option('--validate', 'Only validate, do not show')
+    .description('Show or validate configuration.\n\n' +
+    'Displays the current configuration with all settings merged\n' +
+    'from defaults, config file, and environment variables.\n\n' +
+    'Configuration precedence (highest to lowest):\n' +
+    '  1. Environment variables\n' +
+    '  2. Config file\n' +
+    '  3. Default values' +
+    formatExamples([
+        'autonomous-dev config',
+        'autonomous-dev config --validate  # Validate without display',
+        'autonomous-dev config -c ./custom.json',
+    ]) +
+    formatAdditionalInfo('Config File Locations (searched in order):\n' +
+        '  • ./autonomous-dev.config.json\n' +
+        '  • ./autonomous-dev.json\n' +
+        '  • ./.autonomous-dev.json\n\n' +
+        'Credential Status:\n' +
+        '  ✓ configured  - Credential is set and valid\n' +
+        '  ✗ missing     - Required credential is not set\n' +
+        '  not used      - Optional credential not configured\n\n' +
+        'Run "autonomous-dev init" to create a new config file interactively.'))
+    .option('-c, --config <path>', 'Path to configuration file (JSON format)')
+    .option('--validate', 'Only validate configuration, do not show details')
     .action(async (options) => {
     try {
         const config = loadConfig(options.config);
@@ -278,6 +401,188 @@ program
         logger.error('Configuration error', { error: error.message });
         process.exit(1);
     }
+});
+// Init command - interactive setup wizard
+program
+    .command('init')
+    .description('Initialize a new configuration file interactively.\n\n' +
+    'This wizard will guide you through setting up autonomous-dev\n' +
+    'for your project with sensible defaults and customization options.' +
+    formatExamples([
+        'autonomous-dev init',
+        'autonomous-dev init --force  # Overwrite existing config',
+    ]) +
+    formatAdditionalInfo('The wizard will help you configure:\n' +
+        '  • Repository settings (owner, name, branch)\n' +
+        '  • Discovery preferences (tasks per cycle, limits)\n' +
+        '  • Execution settings (workers, timeouts)\n' +
+        '  • Evaluation requirements (build, tests)\n' +
+        '  • Merge behavior (auto-merge, method)\n\n' +
+        'After completion:\n' +
+        '  1. Set GITHUB_TOKEN environment variable\n' +
+        '  2. Set CLAUDE_ACCESS_TOKEN environment variable\n' +
+        '  3. Run "autonomous-dev config --validate" to verify\n' +
+        '  4. Run "autonomous-dev discover" to test'))
+    .option('--force', 'Overwrite existing configuration file')
+    .option('-o, --output <path>', 'Output path for config file', './autonomous-dev.config.json')
+    .action(async (options) => {
+    const configPath = options.output;
+    // Check for existing config
+    if (existsSync(configPath) && !options.force) {
+        logger.error(`Configuration file already exists at ${configPath}`);
+        logger.info('Use --force to overwrite or -o to specify a different path');
+        process.exit(1);
+    }
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+    const question = (prompt) => {
+        return new Promise((resolve) => {
+            rl.question(prompt, (answer) => resolve(answer.trim()));
+        });
+    };
+    const questionWithDefault = async (prompt, defaultValue) => {
+        const answer = await question(`${prompt} [${defaultValue}]: `);
+        return answer || defaultValue;
+    };
+    const questionYesNo = async (prompt, defaultValue) => {
+        const defaultStr = defaultValue ? 'Y/n' : 'y/N';
+        const answer = await question(`${prompt} [${defaultStr}]: `);
+        if (!answer)
+            return defaultValue;
+        return answer.toLowerCase().startsWith('y');
+    };
+    try {
+        console.log();
+        logger.header('Autonomous Dev Setup Wizard');
+        console.log();
+        console.log(chalk.gray('This wizard will help you create a configuration file.'));
+        console.log(chalk.gray('Press Enter to accept default values shown in [brackets].'));
+        console.log();
+        // Repository settings
+        console.log(chalk.bold.cyan('Repository Settings'));
+        console.log(chalk.gray('─'.repeat(40)));
+        const repoOwner = await question('GitHub repository owner (username or org): ');
+        if (!repoOwner) {
+            logger.error('Repository owner is required');
+            rl.close();
+            process.exit(1);
+        }
+        const repoName = await question('Repository name: ');
+        if (!repoName) {
+            logger.error('Repository name is required');
+            rl.close();
+            process.exit(1);
+        }
+        const baseBranch = await questionWithDefault('Base branch', 'main');
+        console.log();
+        // Discovery settings
+        console.log(chalk.bold.cyan('Discovery Settings'));
+        console.log(chalk.gray('─'.repeat(40)));
+        const tasksPerCycle = parseInt(await questionWithDefault('Tasks to discover per cycle (1-10)', '5'), 10);
+        const maxOpenIssues = parseInt(await questionWithDefault('Maximum open issues before pausing', '10'), 10);
+        const issueLabel = await questionWithDefault('Label for auto-created issues', 'autonomous-dev');
+        console.log();
+        // Execution settings
+        console.log(chalk.bold.cyan('Execution Settings'));
+        console.log(chalk.gray('─'.repeat(40)));
+        const parallelWorkers = parseInt(await questionWithDefault('Parallel workers (1-10)', '4'), 10);
+        const timeoutMinutes = parseInt(await questionWithDefault('Task timeout in minutes', '30'), 10);
+        console.log();
+        // Evaluation settings
+        console.log(chalk.bold.cyan('Evaluation Settings'));
+        console.log(chalk.gray('─'.repeat(40)));
+        const requireBuild = await questionYesNo('Require build to pass?', true);
+        const requireTests = await questionYesNo('Require tests to pass?', true);
+        const requireHealthCheck = await questionYesNo('Require health checks?', false);
+        console.log();
+        // Merge settings
+        console.log(chalk.bold.cyan('Merge Settings'));
+        console.log(chalk.gray('─'.repeat(40)));
+        const autoMerge = await questionYesNo('Enable auto-merge for passing PRs?', true);
+        const mergeMethodAnswer = await questionWithDefault('Merge method (merge/squash/rebase)', 'squash');
+        const mergeMethod = ['merge', 'squash', 'rebase'].includes(mergeMethodAnswer) ? mergeMethodAnswer : 'squash';
+        console.log();
+        rl.close();
+        // Build config object
+        const config = {
+            repo: {
+                owner: repoOwner,
+                name: repoName,
+                baseBranch,
+            },
+            discovery: {
+                tasksPerCycle: Math.min(10, Math.max(1, tasksPerCycle)),
+                maxOpenIssues: Math.max(1, maxOpenIssues),
+                excludePaths: ['node_modules', 'dist', '.git', 'coverage', '*.lock'],
+                issueLabel,
+            },
+            execution: {
+                parallelWorkers: Math.min(10, Math.max(1, parallelWorkers)),
+                timeoutMinutes: Math.min(120, Math.max(5, timeoutMinutes)),
+                workDir: '/tmp/autonomous-dev',
+            },
+            evaluation: {
+                requireBuild,
+                requireTests,
+                requireHealthCheck,
+                requireSmokeTests: false,
+                healthCheckUrls: [],
+                smokeTestUrls: [],
+            },
+            merge: {
+                autoMerge,
+                requireAllChecks: true,
+                maxRetries: 3,
+                conflictStrategy: 'rebase',
+                mergeMethod,
+            },
+            daemon: {
+                loopIntervalMs: 60000,
+                pauseBetweenCycles: true,
+            },
+            credentials: {},
+        };
+        // Write config file
+        writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+        console.log();
+        logger.success(`Configuration saved to ${configPath}`);
+        console.log();
+        // Next steps
+        console.log(chalk.bold.green('Next Steps:'));
+        console.log();
+        console.log('  1. Set up credentials as environment variables:');
+        console.log(chalk.gray('     export GITHUB_TOKEN="your-github-token"'));
+        console.log(chalk.gray('     export CLAUDE_ACCESS_TOKEN="your-claude-token"'));
+        console.log();
+        console.log('  2. Validate your configuration:');
+        console.log(chalk.gray('     autonomous-dev config --validate'));
+        console.log();
+        console.log('  3. Test task discovery:');
+        console.log(chalk.gray('     autonomous-dev discover --dry-run'));
+        console.log();
+        console.log('  4. Start autonomous development:');
+        console.log(chalk.gray('     autonomous-dev start'));
+        console.log();
+    }
+    catch (error) {
+        rl.close();
+        logger.error('Setup failed', { error: error.message });
+        process.exit(1);
+    }
+});
+// Help command - show detailed help for configuration
+program
+    .command('help-config')
+    .description('Show detailed help for configuration options.\n\n' +
+    'Displays comprehensive documentation for all configuration\n' +
+    'settings, environment variables, and their defaults.')
+    .action(async () => {
+    console.log();
+    logger.header('Configuration Reference');
+    console.log();
+    console.log(getConfigHelp());
 });
 // Parse and run
 program.parse();
