@@ -9,8 +9,7 @@ import { logger } from './utils/logger.js';
 import { validateConfigPath, validateNumericParam, validatePort, validateHost, validateRepoInfo, displayValidationError, createMissingCredentialMessage, NUMERIC_RANGES, } from './utils/validation.js';
 import { StructuredError } from './utils/errors.js';
 import chalk from 'chalk';
-import * as readline from 'readline';
-import { writeFileSync, existsSync } from 'fs';
+import { runConfigWizard, validateConfiguration, displayValidationResults, generateExampleConfig, } from './utils/configWizard.js';
 const program = new Command();
 /**
  * Global error handler for CLI commands
@@ -788,219 +787,123 @@ program
     formatExamples([
         'autonomous-dev init',
         'autonomous-dev init --force  # Overwrite existing config',
+        'autonomous-dev init --example  # Generate example config only',
+        'autonomous-dev init --skip-credentials  # Skip credential validation',
     ]) +
     formatAdditionalInfo('The wizard will help you configure:\n' +
         '  • Repository settings (owner, name, branch)\n' +
         '  • Discovery preferences (tasks per cycle, limits)\n' +
         '  • Execution settings (workers, timeouts)\n' +
         '  • Evaluation requirements (build, tests)\n' +
-        '  • Merge behavior (auto-merge, method)\n\n' +
+        '  • Merge behavior (auto-merge, method)\n' +
+        '  • Credential setup with validation\n\n' +
         'After completion:\n' +
         '  1. Set GITHUB_TOKEN environment variable\n' +
         '  2. Set CLAUDE_ACCESS_TOKEN environment variable\n' +
-        '  3. Run "autonomous-dev config --validate" to verify\n' +
+        '  3. Run "autonomous-dev validate" to verify setup\n' +
         '  4. Run "autonomous-dev discover" to test'))
     .option('--force', 'Overwrite existing configuration file')
     .option('-o, --output <path>', 'Output path for config file', './autonomous-dev.config.json')
+    .option('--example', 'Generate an example configuration file without running wizard')
+    .option('--skip-credentials', 'Skip credential validation during wizard')
     .action(async (options) => {
-    const configPath = options.output;
-    // Check for existing config
-    if (existsSync(configPath) && !options.force) {
-        logger.error(`Configuration file already exists at ${configPath}`);
-        logger.info('Use --force to overwrite or -o to specify a different path');
-        process.exit(1);
-    }
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-    const question = (prompt) => {
-        return new Promise((resolve) => {
-            rl.question(prompt, (answer) => resolve(answer.trim()));
-        });
-    };
-    const questionWithDefault = async (prompt, defaultValue) => {
-        const answer = await question(`${prompt} [${defaultValue}]: `);
-        return answer || defaultValue;
-    };
-    const questionYesNo = async (prompt, defaultValue) => {
-        const defaultStr = defaultValue ? 'Y/n' : 'y/N';
-        const answer = await question(`${prompt} [${defaultStr}]: `);
-        if (!answer)
-            return defaultValue;
-        return answer.toLowerCase().startsWith('y');
-    };
     try {
-        console.log();
-        logger.header('Autonomous Dev Setup Wizard');
-        console.log();
-        console.log(chalk.gray('This wizard will help you create a configuration file.'));
-        console.log(chalk.gray('Press Enter to accept default values shown in [brackets].'));
-        console.log();
-        // Repository settings
-        console.log(chalk.bold.cyan('Repository Settings'));
-        console.log(chalk.gray('─'.repeat(40)));
-        let repoOwner = '';
-        let repoName = '';
-        // Validate repository owner
-        while (!repoOwner) {
-            repoOwner = await question('GitHub repository owner (username or org): ');
-            if (!repoOwner) {
-                console.error(chalk.red('  Repository owner is required'));
-                continue;
-            }
-            const ownerResult = validateRepoInfo(repoOwner, 'placeholder');
-            if (!ownerResult.valid && ownerResult.error?.message.includes('owner')) {
-                console.error(chalk.red(`  ${ownerResult.error.message}`));
-                console.error(chalk.gray('  Owner should contain only alphanumeric characters and hyphens'));
-                repoOwner = '';
-            }
+        // If --example flag is set, just generate example config
+        if (options.example) {
+            const examplePath = options.output.replace('.json', '.example.json');
+            generateExampleConfig(examplePath);
+            console.log();
+            console.log(chalk.gray('To use this example:'));
+            console.log(chalk.gray(`  1. Copy ${examplePath} to autonomous-dev.config.json`));
+            console.log(chalk.gray('  2. Edit the values to match your repository'));
+            console.log(chalk.gray('  3. Run "autonomous-dev validate" to verify'));
+            console.log();
+            return;
         }
-        // Validate repository name
-        while (!repoName) {
-            repoName = await question('Repository name: ');
-            if (!repoName) {
-                console.error(chalk.red('  Repository name is required'));
-                continue;
-            }
-            const nameResult = validateRepoInfo(repoOwner, repoName);
-            if (!nameResult.valid && nameResult.error?.message.includes('name')) {
-                console.error(chalk.red(`  ${nameResult.error.message}`));
-                console.error(chalk.gray('  Name should contain only alphanumeric characters, dots, underscores, and hyphens'));
-                repoName = '';
-            }
+        // Run the interactive wizard
+        const result = await runConfigWizard({
+            outputPath: options.output,
+            force: options.force,
+            skipCredentialValidation: options.skipCredentials,
+        });
+        if (!result) {
+            process.exit(1);
         }
-        const baseBranch = await questionWithDefault('Base branch', 'main');
-        console.log();
-        // Discovery settings
-        console.log(chalk.bold.cyan('Discovery Settings'));
-        console.log(chalk.gray('─'.repeat(40)));
-        // Validate tasks per cycle with range enforcement
-        let tasksPerCycle = NUMERIC_RANGES.taskCount.default;
-        const tasksInput = await questionWithDefault('Tasks to discover per cycle (1-10)', '5');
-        const tasksResult = validateNumericParam(tasksInput, 'tasksPerCycle', NUMERIC_RANGES.taskCount);
-        if (tasksResult.valid && tasksResult.parsedValue) {
-            tasksPerCycle = tasksResult.parsedValue;
-        }
-        else if (!tasksResult.valid) {
-            console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.taskCount.default}`));
-        }
-        // Validate max open issues
-        let maxOpenIssues = NUMERIC_RANGES.maxOpenIssues.default;
-        const maxIssuesInput = await questionWithDefault('Maximum open issues before pausing (1-100)', '10');
-        const maxIssuesResult = validateNumericParam(maxIssuesInput, 'maxOpenIssues', NUMERIC_RANGES.maxOpenIssues);
-        if (maxIssuesResult.valid && maxIssuesResult.parsedValue) {
-            maxOpenIssues = maxIssuesResult.parsedValue;
-        }
-        else if (!maxIssuesResult.valid) {
-            console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.maxOpenIssues.default}`));
-        }
-        const issueLabel = await questionWithDefault('Label for auto-created issues', 'autonomous-dev');
-        console.log();
-        // Execution settings
-        console.log(chalk.bold.cyan('Execution Settings'));
-        console.log(chalk.gray('─'.repeat(40)));
-        // Validate parallel workers with range enforcement
-        let parallelWorkers = NUMERIC_RANGES.workerCount.default;
-        const workersInput = await questionWithDefault('Parallel workers (1-10)', '4');
-        const workersResult = validateNumericParam(workersInput, 'parallelWorkers', NUMERIC_RANGES.workerCount);
-        if (workersResult.valid && workersResult.parsedValue) {
-            parallelWorkers = workersResult.parsedValue;
-        }
-        else if (!workersResult.valid) {
-            console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.workerCount.default}`));
-        }
-        // Validate timeout minutes
-        let timeoutMinutes = NUMERIC_RANGES.timeoutMinutes.default;
-        const timeoutInput = await questionWithDefault('Task timeout in minutes (5-120)', '30');
-        const timeoutResult = validateNumericParam(timeoutInput, 'timeoutMinutes', NUMERIC_RANGES.timeoutMinutes);
-        if (timeoutResult.valid && timeoutResult.parsedValue) {
-            timeoutMinutes = timeoutResult.parsedValue;
-        }
-        else if (!timeoutResult.valid) {
-            console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.timeoutMinutes.default}`));
-        }
-        console.log();
-        // Evaluation settings
-        console.log(chalk.bold.cyan('Evaluation Settings'));
-        console.log(chalk.gray('─'.repeat(40)));
-        const requireBuild = await questionYesNo('Require build to pass?', true);
-        const requireTests = await questionYesNo('Require tests to pass?', true);
-        const requireHealthCheck = await questionYesNo('Require health checks?', false);
-        console.log();
-        // Merge settings
-        console.log(chalk.bold.cyan('Merge Settings'));
-        console.log(chalk.gray('─'.repeat(40)));
-        const autoMerge = await questionYesNo('Enable auto-merge for passing PRs?', true);
-        const mergeMethodAnswer = await questionWithDefault('Merge method (merge/squash/rebase)', 'squash');
-        const mergeMethod = ['merge', 'squash', 'rebase'].includes(mergeMethodAnswer) ? mergeMethodAnswer : 'squash';
-        console.log();
-        rl.close();
-        // Build config object (values already validated)
-        const config = {
-            version: CURRENT_CONFIG_VERSION,
-            repo: {
-                owner: repoOwner,
-                name: repoName,
-                baseBranch,
-            },
-            discovery: {
-                tasksPerCycle,
-                maxOpenIssues,
-                excludePaths: ['node_modules', 'dist', '.git', 'coverage', '*.lock'],
-                issueLabel,
-            },
-            execution: {
-                parallelWorkers,
-                timeoutMinutes,
-                workDir: '/tmp/autonomous-dev',
-            },
-            evaluation: {
-                requireBuild,
-                requireTests,
-                requireHealthCheck,
-                requireSmokeTests: false,
-                healthCheckUrls: [],
-                smokeTestUrls: [],
-            },
-            merge: {
-                autoMerge,
-                requireAllChecks: true,
-                maxRetries: 3,
-                conflictStrategy: 'rebase',
-                mergeMethod,
-            },
-            daemon: {
-                loopIntervalMs: 60000,
-                pauseBetweenCycles: true,
-            },
-            credentials: {},
-        };
-        // Write config file
-        writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-        console.log();
-        logger.success(`Configuration saved to ${configPath}`);
-        console.log();
-        // Next steps
-        console.log(chalk.bold.green('Next Steps:'));
-        console.log();
-        console.log('  1. Set up credentials as environment variables:');
-        console.log(chalk.gray('     export GITHUB_TOKEN="your-github-token"'));
-        console.log(chalk.gray('     export CLAUDE_ACCESS_TOKEN="your-claude-token"'));
-        console.log();
-        console.log('  2. Validate your configuration:');
-        console.log(chalk.gray('     autonomous-dev config --validate'));
-        console.log();
-        console.log('  3. Test task discovery:');
-        console.log(chalk.gray('     autonomous-dev discover --dry-run'));
-        console.log();
-        console.log('  4. Start autonomous development:');
-        console.log(chalk.gray('     autonomous-dev start'));
-        console.log();
     }
     catch (error) {
-        rl.close();
+        if (error instanceof Error && error.message === 'Configuration cancelled by user') {
+            process.exit(0);
+        }
         handleCommandError(error, 'init');
+    }
+});
+// Validate command - validate configuration with detailed feedback
+program
+    .command('validate')
+    .description('Validate your configuration and credentials setup.\n\n' +
+    'Performs comprehensive validation of your autonomous-dev setup:\n' +
+    '  • Checks configuration file exists and is valid JSON\n' +
+    '  • Validates all required settings are present\n' +
+    '  • Verifies credentials are configured correctly\n' +
+    '  • Provides specific error messages with solutions\n' +
+    '  • Suggests next steps to complete setup' +
+    formatExamples([
+        'autonomous-dev validate',
+        'autonomous-dev validate -c ./production.json',
+        'autonomous-dev validate --verbose',
+    ]) +
+    formatAdditionalInfo('Exit Codes:\n' +
+        '  0  Configuration is valid and complete\n' +
+        '  1  Configuration has errors that must be fixed\n\n' +
+        'Common Issues:\n' +
+        '  • Missing configuration file: Run "autonomous-dev init"\n' +
+        '  • Missing credentials: Set GITHUB_TOKEN and CLAUDE_ACCESS_TOKEN\n' +
+        '  • Invalid JSON: Check for syntax errors in config file\n' +
+        '  • Outdated version: Run "autonomous-dev config --upgrade"'))
+    .option('-c, --config <path>', 'Path to configuration file to validate')
+    .option('-v, --verbose', 'Show detailed validation information')
+    .action(async (options) => {
+    try {
+        // Validate config path if provided
+        if (options.config) {
+            const configResult = validateConfigPath(options.config);
+            if (!configResult.valid) {
+                displayValidationError(configResult);
+                process.exit(1);
+            }
+        }
+        logger.header('Configuration Validation');
+        console.log();
+        // Run comprehensive validation
+        const result = await validateConfiguration(options.config);
+        // Display results
+        displayValidationResults(result);
+        // In verbose mode, also load and display config details
+        if (options.verbose && result.valid) {
+            try {
+                const config = loadConfig(options.config);
+                console.log(chalk.bold('Configuration Details:'));
+                console.log(chalk.gray('─'.repeat(40)));
+                console.log(`  Repository: ${config.repo.owner}/${config.repo.name}`);
+                console.log(`  Base Branch: ${config.repo.baseBranch}`);
+                console.log(`  Tasks/Cycle: ${config.discovery.tasksPerCycle}`);
+                console.log(`  Max Issues: ${config.discovery.maxOpenIssues}`);
+                console.log(`  Workers: ${config.execution.parallelWorkers}`);
+                console.log(`  Timeout: ${config.execution.timeoutMinutes} minutes`);
+                console.log(`  Auto-merge: ${config.merge.autoMerge ? 'enabled' : 'disabled'}`);
+                console.log();
+            }
+            catch {
+                // Config loading failed, but we already showed validation results
+            }
+        }
+        // Exit with appropriate code
+        if (!result.valid) {
+            process.exit(1);
+        }
+    }
+    catch (error) {
+        handleCommandError(error, 'validate');
     }
 });
 // Help command - show detailed help for configuration
