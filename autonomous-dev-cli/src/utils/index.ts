@@ -199,3 +199,28 @@ export {
   logCachePerformanceSummary,
   type CacheOperation,
 } from './cache.js';
+
+// Re-export GitHub-specific cache utilities
+export {
+  GitHubCache,
+  createGitHubCache,
+  getSharedGitHubCache,
+  resetSharedGitHubCache,
+  type GitHubCacheConfig,
+  type CacheKeyType,
+  type ConditionalHeaders,
+  type GitHubCacheStats,
+  DEFAULT_GITHUB_CACHE_CONFIG,
+} from './githubCache.js';
+
+// Re-export rate limiter utilities
+export {
+  GitHubRateLimiter,
+  createRateLimiter,
+  createEnterpriseRateLimiter,
+  type RateLimitResource,
+  type RateLimitStatus,
+  type RateLimiterConfig,
+  DEFAULT_RATE_LIMITER_CONFIG,
+  ENTERPRISE_RATE_LIMITER_CONFIG,
+} from './rateLimiter.js';

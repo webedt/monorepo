@@ -30,6 +30,19 @@ import {
   getTimeoutFromEnv,
   TimeoutError,
 } from '../utils/timeout.js';
+import {
+  GitHubRateLimiter,
+  createRateLimiter,
+  createEnterpriseRateLimiter,
+  type RateLimiterConfig,
+  type RateLimitStatus,
+} from '../utils/rateLimiter.js';
+import {
+  GitHubCache,
+  createGitHubCache,
+  type GitHubCacheConfig,
+  type CacheKeyType,
+} from '../utils/githubCache.js';
 
 export interface GitHubClientOptions {
   token: string;
@@ -41,6 +54,14 @@ export interface GitHubClientOptions {
   requestTimeoutMs?: number;
   /** Configuration for rate limit handling */
   rateLimitConfig?: Partial<RateLimitConfig>;
+  /** Configuration for the enhanced rate limiter */
+  rateLimiterConfig?: Partial<RateLimiterConfig>;
+  /** Configuration for GitHub API caching */
+  cacheConfig?: Partial<GitHubCacheConfig>;
+  /** Whether this is a GitHub Enterprise instance (enables stricter rate limiting) */
+  isEnterprise?: boolean;
+  /** Custom base URL for GitHub Enterprise instances */
+  baseUrl?: string;
 }
 
 /**
@@ -178,24 +199,54 @@ export class GitHubClient {
   private isProcessingQueue: boolean = false;
   private queueProcessorInterval: ReturnType<typeof setInterval> | null = null;
 
+  // Enhanced rate limiter and cache
+  private rateLimiter: GitHubRateLimiter;
+  private cache: GitHubCache;
+  private isEnterprise: boolean;
+
   private log = logger.child('GitHubClient');
 
   constructor(options: GitHubClientOptions) {
-    this.octokit = new Octokit({ auth: options.token });
+    // Support custom base URL for GitHub Enterprise
+    const octokitOptions: any = { auth: options.token };
+    if (options.baseUrl) {
+      octokitOptions.baseUrl = options.baseUrl;
+    }
+    this.octokit = new Octokit(octokitOptions);
+
     this.owner = options.owner;
     this.repo = options.repo;
     this.retryConfig = { ...DEFAULT_GITHUB_RETRY_CONFIG, ...options.retryConfig };
     this.circuitBreakerConfig = { ...DEFAULT_CIRCUIT_BREAKER_CONFIG, ...options.circuitBreakerConfig };
     this.rateLimitConfig = { ...DEFAULT_RATE_LIMIT_CONFIG, ...options.rateLimitConfig };
+    this.isEnterprise = options.isEnterprise ?? false;
+
     // Configure request timeout from options or environment variable or default
     this.requestTimeoutMs = options.requestTimeoutMs
       ?? getTimeoutFromEnv('GITHUB_API', DEFAULT_TIMEOUTS.GITHUB_API);
 
+    // Initialize enhanced rate limiter (use enterprise config for stricter limits)
+    this.rateLimiter = this.isEnterprise
+      ? createEnterpriseRateLimiter()
+      : createRateLimiter(options.rateLimiterConfig);
+
+    // Initialize cache
+    this.cache = createGitHubCache(options.cacheConfig);
+
     // Add hook to capture rate limit headers from all responses
     this.octokit.hook.after('request', (response) => {
       if (response.headers) {
-        this.updateRateLimitFromHeaders(response.headers as Record<string, any>);
+        const headers = response.headers as Record<string, any>;
+        this.updateRateLimitFromHeaders(headers);
+        // Also update the enhanced rate limiter
+        this.rateLimiter.updateFromHeaders(headers);
       }
+    });
+
+    // Add hook to handle errors and update rate limiter
+    this.octokit.hook.error('request', (error) => {
+      this.rateLimiter.updateFromError(error);
+      throw error;
     });
 
     this.log.debug('GitHubClient initialized', {
@@ -203,6 +254,8 @@ export class GitHubClient {
       repo: this.repo,
       retryConfig: this.retryConfig,
       rateLimitConfig: this.rateLimitConfig,
+      isEnterprise: this.isEnterprise,
+      hasCustomBaseUrl: !!options.baseUrl,
     });
   }
 
@@ -257,6 +310,68 @@ export class GitHubClient {
       isProcessing: this.isProcessingQueue,
       config: { ...this.rateLimitConfig },
     };
+  }
+
+  /**
+   * Get the enhanced rate limiter instance
+   */
+  getRateLimiter(): GitHubRateLimiter {
+    return this.rateLimiter;
+  }
+
+  /**
+   * Get the enhanced rate limit status from the rate limiter
+   */
+  getEnhancedRateLimitStatus(): RateLimitStatus {
+    return this.rateLimiter.getStatus();
+  }
+
+  /**
+   * Get the cache instance
+   */
+  getCache(): GitHubCache {
+    return this.cache;
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getCacheStats() {
+    return this.cache.getStats();
+  }
+
+  /**
+   * Invalidate all cached data for this repository
+   */
+  invalidateCache(): number {
+    return this.cache.invalidateRepo(this.owner, this.repo);
+  }
+
+  /**
+   * Invalidate cached data of a specific type
+   */
+  invalidateCacheType(type: CacheKeyType): number {
+    return this.cache.invalidateType(type, this.owner, this.repo);
+  }
+
+  /**
+   * Get a cached value or fetch it
+   */
+  async getCachedOrFetch<T>(
+    type: CacheKeyType,
+    key: string,
+    fetcher: () => Promise<T>,
+    options?: { customTtlMs?: number }
+  ): Promise<T> {
+    const cacheKey = this.cache.generateKey(type, this.owner, this.repo, key);
+    const cached = this.cache.get<T>(cacheKey, type);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const result = await fetcher();
+    this.cache.set(cacheKey, type, result, { customTtlMs: options?.customTtlMs });
+    return result;
   }
 
   /**
@@ -977,28 +1092,30 @@ export class GitHubClient {
   }
 
   /**
-   * Get repository info
+   * Get repository info (cached)
    */
   async getRepo(): Promise<{
     defaultBranch: string;
     fullName: string;
     private: boolean;
   }> {
-    return this.executeWithRetry(
-      async () => {
-        const { data } = await this.octokit.repos.get({
-          owner: this.owner,
-          repo: this.repo,
-        });
-        return {
-          defaultBranch: data.default_branch,
-          fullName: data.full_name,
-          private: data.private,
-        };
-      },
-      `GET /repos/${this.owner}/${this.repo}`,
-      { operation: 'getRepo' }
-    );
+    return this.getCachedOrFetch('repo-info', 'info', async () => {
+      return this.executeWithRetry(
+        async () => {
+          const { data } = await this.octokit.repos.get({
+            owner: this.owner,
+            repo: this.repo,
+          });
+          return {
+            defaultBranch: data.default_branch,
+            fullName: data.full_name,
+            private: data.private,
+          };
+        },
+        `GET /repos/${this.owner}/${this.repo}`,
+        { operation: 'getRepo' }
+      );
+    });
   }
 
   /**
