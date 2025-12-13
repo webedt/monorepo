@@ -94,9 +94,9 @@ import {
 import { loadSpecContext, type SpecContext } from '../discovery/spec-reader.js';
 
 /**
- * Default timeout for Claude execution (5 minutes as per issue requirements)
+ * Default timeout for Claude execution (30 minutes for complex tasks)
  */
-const DEFAULT_CLAUDE_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_CLAUDE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Maximum number of recent tool calls to track for error context
@@ -459,8 +459,11 @@ export class Worker {
     // Get or create the Claude SDK circuit breaker with optional config overrides
     this.circuitBreaker = getClaudeSDKCircuitBreaker(options.circuitBreakerConfig);
     // Initialize Claude retry configuration
+    // Use timeoutMinutes from options, falling back to default
+    const timeoutMs = options.timeoutMinutes ? options.timeoutMinutes * 60 * 1000 : DEFAULT_CLAUDE_TIMEOUT_MS;
     this.claudeRetryConfig = {
       ...DEFAULT_CLAUDE_RETRY_CONFIG,
+      timeoutMs,
       ...options.claudeRetryConfig,
     };
   }
@@ -1537,6 +1540,15 @@ export class Worker {
                 // Record in execution tracker for error context
                 executionTracker.recordToolCall(toolName, toolInput as Record<string, unknown>);
 
+                // Log progress every 10 tool uses to show activity
+                if (toolUseCount % 10 === 0 || toolUseCount <= 3) {
+                  const elapsed = Math.round((Date.now() - attemptStartTime) / 1000);
+                  this.log.info(`Claude progress: ${toolUseCount} tools, ${turnCount} turns (${elapsed}s)`, {
+                    issueNumber: issue.number,
+                    workerId: this.workerId,
+                  });
+                }
+
                 // Enhanced debug logging for Claude tool use
                 this.log.claudeToolUse(toolName, toolInput as Record<string, unknown>, {
                   correlationId,
@@ -1646,7 +1658,7 @@ export class Worker {
       if (timeoutTriggered || isTimedOut()) {
         // Use typed ClaudeExecutorError for timeout failures with comprehensive context
         const timeoutError = new ClaudeExecutorError(
-          `Claude execution timed out after ${Math.round(timeoutMs / 1000)} seconds (5-minute limit). The task may be too complex or Claude may be experiencing delays.`,
+          `Claude execution timed out after ${Math.round(timeoutMs / 1000)} seconds (${Math.round(timeoutMs / 60000)}-minute limit). The task may be too complex or Claude may be experiencing delays.`,
           {
             claudeErrorType: 'timeout',
             toolsUsed: toolUseCount,
