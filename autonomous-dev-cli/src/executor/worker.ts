@@ -722,9 +722,23 @@ export class Worker {
                 prNumber: pullRequest.number,
                 mergeSha: mergeResult.sha,
               });
+
+              // Close the issue after successful merge (GitHub only auto-closes on merge to default branch)
+              try {
+                await this.closeIssue(issue.number, pullRequest.number, pullRequest.mergeSha || undefined);
+                taskLog.success(`Issue #${issue.number} closed`, { issueNumber: issue.number });
+                if (chatSessionId) {
+                  await addEvent(chatSessionId, 'issue_progress', { type: 'issue_progress', stage: 'closed', message: `Issue #${issue.number} closed`, data: { issueNumber: issue.number } });
+                }
+              } catch (closeError: unknown) {
+                taskLog.warn(`Failed to close issue #${issue.number}: ${getErrorMessage(closeError)}`, {
+                  issueNumber: issue.number,
+                });
+              }
+
               if (chatSessionId) {
                 await addEvent(chatSessionId, 'merge_progress', { type: 'merge_progress', stage: 'merged', message: `PR #${pullRequest.number} merged!`, data: { prNumber: pullRequest.number, mergeSha: mergeResult.sha } });
-                await addMessage(chatSessionId, 'assistant', `Successfully completed task!\n\nCommit: ${commitSha}\nBranch: ${branchName}\nPR: #${pullRequest.number} - ${pullRequest.htmlUrl}\n\n✅ PR was auto-merged to ${this.options.baseBranch}`);
+                await addMessage(chatSessionId, 'assistant', `Successfully completed task!\n\nCommit: ${commitSha}\nBranch: ${branchName}\nPR: #${pullRequest.number} - ${pullRequest.htmlUrl}\n\n✅ PR was auto-merged to ${this.options.baseBranch}\n✅ Issue #${issue.number} closed`);
               }
             } else {
               taskLog.info(`PR #${pullRequest.number} not merged: ${mergeResult.error}`, {
@@ -2290,5 +2304,46 @@ Implements #${issue.number}
     }
 
     return result;
+  }
+
+  /**
+   * Close an issue after successful PR merge.
+   * Adds a comment linking to the PR and merge commit.
+   */
+  private async closeIssue(issueNumber: number, prNumber: number, mergeSha?: string): Promise<void> {
+    // Extract owner and repo from repoUrl
+    const repoMatch = this.options.repoUrl.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+    if (!repoMatch) {
+      throw new Error(`Cannot parse repository URL: ${this.options.repoUrl}`);
+    }
+    const [, owner, repo] = repoMatch;
+
+    this.log.info('Closing issue', {
+      owner,
+      repo,
+      issueNumber,
+      prNumber,
+      mergeSha,
+    });
+
+    // Create GitHub client
+    const github = createGitHub({
+      owner,
+      repo,
+      token: this.options.githubToken,
+    });
+
+    // Close the issue with a comment referencing the PR
+    const comment = mergeSha
+      ? `Closed by PR #${prNumber} (merged in ${mergeSha.substring(0, 7)})`
+      : `Closed by PR #${prNumber}`;
+
+    await github.issues.closeIssue(issueNumber, comment);
+
+    this.log.info(`Closed issue #${issueNumber}`, {
+      issueNumber,
+      prNumber,
+      mergeSha,
+    });
   }
 }
