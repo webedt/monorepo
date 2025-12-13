@@ -1,11 +1,52 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
+import { SecureCredentialManager } from './secureCredentialManager';
 
 /**
  * Utility for managing provider credential files
+ *
+ * Security enhancements:
+ * - Creates directories and files with restricted permissions (700/600)
+ * - Supports session-isolated credential directories
+ * - Validates credentials don't leak into logs
+ * - Uses atomic writes to prevent partial credential files
+ * - Integrates with SecureCredentialManager for encryption support
  */
 export class CredentialManager {
+  // Session-specific home directory for credential isolation
+  private static sessionHomeDir: string | null = null;
+
+  /**
+   * Set a session-specific home directory for credential isolation
+   * All credential operations will use this directory instead of the real home
+   */
+  static setSessionHome(sessionDir: string): void {
+    this.sessionHomeDir = sessionDir;
+    // Ensure the directory exists with secure permissions
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    }
+    fs.chmodSync(sessionDir, 0o700);
+    console.log(`[CredentialManager] Session home set to: ${SecureCredentialManager.redactPath(sessionDir)}`);
+  }
+
+  /**
+   * Clear the session-specific home directory
+   */
+  static clearSessionHome(): void {
+    this.sessionHomeDir = null;
+    console.log('[CredentialManager] Session home cleared, using default home directory');
+  }
+
+  /**
+   * Get the effective home directory (session-specific or real)
+   */
+  static getEffectiveHome(): string {
+    return this.sessionHomeDir || os.homedir();
+  }
+
   /**
    * Write credentials to a file with secure permissions
    * @param credentialPath - Absolute path to credential file
@@ -13,23 +54,31 @@ export class CredentialManager {
    */
   static writeCredentialFile(credentialPath: string, credentials: any): void {
     try {
-      // Ensure directory exists
+      // Ensure directory exists with secure permissions
       const dir = path.dirname(credentialPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       }
+      // Enforce secure permissions on directory
+      fs.chmodSync(dir, 0o700);
 
-      // Write credentials as JSON
+      // Write credentials atomically (write to temp file, then rename)
+      const tempPath = `${credentialPath}.tmp.${crypto.randomBytes(8).toString('hex')}`;
       fs.writeFileSync(
-        credentialPath,
+        tempPath,
         JSON.stringify(credentials, null, 2),
         { mode: 0o600 }
       );
+      fs.renameSync(tempPath, credentialPath);
 
-      console.log(`[CredentialManager] Credentials written to: ${credentialPath}`);
+      // Enforce secure permissions on file
+      fs.chmodSync(credentialPath, 0o600);
+
+      // Log with redacted path to avoid leaking sensitive directory info
+      console.log(`[CredentialManager] Credentials written to: ${SecureCredentialManager.redactPath(credentialPath)}`);
     } catch (error) {
       throw new Error(
-        `Failed to write credentials to ${credentialPath}: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to write credentials: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -56,18 +105,20 @@ export class CredentialManager {
 
   /**
    * Get credential path for Claude Agent SDK
-   * @returns Absolute path to ~/.claude/.credentials.json
+   * Uses session-specific home if set for credential isolation
+   * @returns Absolute path to ~/.claude/.credentials.json (or session equivalent)
    */
   static getClaudeCredentialPath(): string {
-    return path.join(os.homedir(), '.claude', '.credentials.json');
+    return path.join(this.getEffectiveHome(), '.claude', '.credentials.json');
   }
 
   /**
    * Get credential path for Codex SDK
-   * @returns Absolute path to ~/.codex/auth.json
+   * Uses session-specific home if set for credential isolation
+   * @returns Absolute path to ~/.codex/auth.json (or session equivalent)
    */
   static getCodexCredentialPath(): string {
-    return path.join(os.homedir(), '.codex', 'auth.json');
+    return path.join(this.getEffectiveHome(), '.codex', 'auth.json');
   }
 
   /**
@@ -186,26 +237,57 @@ export class CredentialManager {
 
   /**
    * Get credential path for Gemini OAuth (used by Gemini CLI)
-   * @returns Absolute path to ~/.gemini/oauth_creds.json
+   * Uses session-specific home if set for credential isolation
+   * @returns Absolute path to ~/.gemini/oauth_creds.json (or session equivalent)
    */
   static getGeminiOAuthCredentialPath(): string {
-    return path.join(os.homedir(), '.gemini', 'oauth_creds.json');
+    return path.join(this.getEffectiveHome(), '.gemini', 'oauth_creds.json');
   }
 
   /**
    * Get credential path for Gemini settings
-   * @returns Absolute path to ~/.gemini/settings.json
+   * Uses session-specific home if set for credential isolation
+   * @returns Absolute path to ~/.gemini/settings.json (or session equivalent)
    */
   static getGeminiSettingsPath(): string {
-    return path.join(os.homedir(), '.gemini', 'settings.json');
+    return path.join(this.getEffectiveHome(), '.gemini', 'settings.json');
   }
 
   /**
    * Get credential path for Gemini env file
-   * @returns Absolute path to ~/.gemini/.env
+   * Uses session-specific home if set for credential isolation
+   * @returns Absolute path to ~/.gemini/.env (or session equivalent)
    */
   static getGeminiEnvPath(): string {
-    return path.join(os.homedir(), '.gemini', '.env');
+    return path.join(this.getEffectiveHome(), '.gemini', '.env');
+  }
+
+  /**
+   * Get credential path for GitHub CLI config
+   * Uses session-specific home if set for credential isolation
+   * @returns Absolute path to ~/.config/gh/hosts.yml (or session equivalent)
+   */
+  static getGitHubConfigPath(): string {
+    return path.join(this.getEffectiveHome(), '.config', 'gh', 'hosts.yml');
+  }
+
+  /**
+   * Cleanup session credentials when session ends
+   * Securely deletes all credential files in the session directory
+   */
+  static cleanupSessionCredentials(): void {
+    if (!this.sessionHomeDir) {
+      return;
+    }
+
+    try {
+      SecureCredentialManager.secureDeleteDirectory(this.sessionHomeDir);
+      this.sessionHomeDir = null;
+      console.log('[CredentialManager] Session credentials cleaned up');
+    } catch (error) {
+      console.warn('[CredentialManager] Failed to cleanup session credentials:',
+        error instanceof Error ? error.message : String(error));
+    }
   }
 
   /**

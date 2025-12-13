@@ -1,6 +1,7 @@
 import { query, type Options, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { BaseProvider, ProviderOptions, ProviderStreamEvent } from './BaseProvider';
 import { CredentialManager } from '../utils/credentialManager';
+import { SecureCredentialManager } from '../utils/secureCredentialManager';
 import { UserRequestContent, ImageBlock, TextBlock } from '../types';
 import type { MessageParam } from '@anthropic-ai/sdk/resources';
 
@@ -36,6 +37,10 @@ export class ClaudeCodeProvider extends BaseProvider {
     const workspaceFiles = fs.existsSync(queryOptions.cwd!)
       ? fs.readdirSync(queryOptions.cwd!)
       : [];
+
+    // Log memory usage before starting Claude SDK
+    const memUsage = process.memoryUsage();
+    console.log(`[ClaudeCodeProvider] Memory before Claude: RSS=${Math.round(memUsage.rss / 1024 / 1024)}MB, Heap=${Math.round(memUsage.heapUsed / 1024 / 1024)}/${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`);
 
     console.log('[ClaudeCodeProvider] Starting execution with options:', {
       model: queryOptions.model,
@@ -138,6 +143,8 @@ export class ClaudeCodeProvider extends BaseProvider {
         });
       }
 
+      const memAfter = process.memoryUsage();
+      console.log(`[ClaudeCodeProvider] Memory after Claude: RSS=${Math.round(memAfter.rss / 1024 / 1024)}MB, Heap=${Math.round(memAfter.heapUsed / 1024 / 1024)}/${Math.round(memAfter.heapTotal / 1024 / 1024)}MB`);
       console.log('[ClaudeCodeProvider] Execution completed successfully');
     } catch (error) {
       // Check if this was an abort

@@ -12,7 +12,12 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "db:check": "tsx src/scripts/db-check.ts",
+    "db:backup": "tsx src/scripts/db-backup.ts",
+    "db:validate": "tsx src/scripts/db-validate.ts",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts"
   },
   "keywords": [
     "webedt",
@@ -39,7 +44,7 @@
     "form-data": "^4.0.1",
     "lucia": "^3.2.2",
     "minio": "^8.0.2",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.0.2",
     "node-fetch": "^2.7.0",
     "pg": "^8.13.1",
     "simple-git": "^3.19.1",
@@ -52,7 +57,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.0",
-    "@types/multer": "^1.4.12",
+    "@types/multer": "^2.0.0",
     "@types/node": "^22.10.2",
     "@types/node-fetch": "^2.6.11",
     "@types/pg": "^8.11.10",

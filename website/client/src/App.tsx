@@ -8,6 +8,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import Dashboard from '@/pages/Dashboard';
+import Store from '@/pages/Store';
 import Library from '@/pages/Library';
 import Community from '@/pages/Community';
 import Sessions from '@/pages/Sessions';
@@ -41,6 +42,7 @@ function DefaultRoute() {
 
   // Map landing page values to routes
   const landingPageRoutes: Record<string, string> = {
+    dashboard: '/dashboard',
     store: '/store',
     library: '/library',
     community: '/community',
@@ -92,7 +94,7 @@ function App() {
 
     // Check if we're in a path-based deployment (3+ path segments)
     const pathSegments = pathname.split('/').filter(Boolean);
-    if (pathSegments.length >= 3 && !['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin', 'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community', 'item', 'github', 'store', 'quick-setup'].includes(pathSegments[0])) {
+    if (pathSegments.length >= 3 && !['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin', 'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community', 'item', 'github', 'store', 'quick-setup', 'dashboard'].includes(pathSegments[0])) {
       // Check for monorepo pattern: /owner/repo/website/branch/
       if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
         return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
@@ -131,10 +133,18 @@ function App() {
               }
             />
             <Route
-              path="/store"
+              path="/dashboard"
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/store"
+              element={
+                <ProtectedRoute>
+                  <Store />
                 </ProtectedRoute>
               }
             />

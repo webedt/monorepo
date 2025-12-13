@@ -1,5 +1,6 @@
 import { BaseProvider, ProviderOptions, ProviderStreamEvent } from './BaseProvider';
 import { CredentialManager } from '../utils/credentialManager';
+import { SecureCredentialManager } from '../utils/secureCredentialManager';
 import { UserRequestContent, TextBlock } from '../types';
 
 // Dynamic import for ESM-only @openai/codex-sdk package

@@ -1,35 +1,123 @@
-import { CodebaseAnalyzer, type CodebaseAnalysis } from './analyzer.js';
+import { CodebaseAnalyzer, type CodebaseAnalysis, type AnalyzerConfig } from './analyzer.js';
 import { type Issue } from '../github/issues.js';
-import { logger } from '../utils/logger.js';
+import {
+  logger,
+  getCorrelationId,
+  timeOperation,
+  createOperationContext,
+  finalizeOperationContext,
+  startPhase,
+  endPhase,
+  recordPhaseOperation,
+  recordPhaseError,
+  isDebugModeEnabled,
+  type RequestPhase,
+} from '../utils/logger.js';
+import { ClaudeError, ErrorCode } from '../utils/errors.js';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { homedir } from 'os';
+import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { metrics } from '../utils/metrics.js';
+import {
+  extractRetryAfterMs,
+  extractHttpStatus,
+  isClaudeErrorRetryable,
+} from '../utils/retry.js';
+import {
+  CircuitBreaker,
+  getClaudeCircuitBreaker,
+  type CircuitBreakerConfig,
+} from '../utils/circuit-breaker.js';
+import {
+  loadSpecContext,
+  formatSpecContextForPrompt,
+  type SpecContext,
+  type NextTask,
+  type PriorityTier,
+} from './spec-reader.js';
+
+/** Task priority levels aligned with worker pool prioritization */
+export type DiscoveredTaskPriority = 'critical' | 'high' | 'medium' | 'low';
+
+/** Task category for classification - aligned with worker pool */
+export type DiscoveredTaskCategory = 'security' | 'bugfix' | 'feature' | 'refactor' | 'docs' | 'test' | 'chore';
+
+/** Task complexity - affects timeout and resource allocation */
+export type DiscoveredTaskComplexity = 'simple' | 'moderate' | 'complex';
 
 export interface DiscoveredTask {
   title: string;
   description: string;
-  priority: 'high' | 'medium' | 'low';
-  category: 'feature' | 'bugfix' | 'refactor' | 'docs' | 'test' | 'chore';
-  estimatedComplexity: 'simple' | 'moderate' | 'complex';
+  priority: DiscoveredTaskPriority;
+  category: DiscoveredTaskCategory;
+  estimatedComplexity: DiscoveredTaskComplexity;
   affectedPaths: string[];
+  /** Optional estimated duration in minutes for better scheduling */
+  estimatedDurationMinutes?: number;
+  /** Related issue numbers for dependency awareness (populated by deduplicator) */
+  relatedIssues?: number[];
 }
+
+/**
+ * Token refresh callback type for Claude authentication
+ */
+export type TokenRefreshCallback = (
+  refreshToken: string
+) => Promise<{ accessToken: string; refreshToken: string; expiresAt?: number }>;
 
 export interface TaskGeneratorOptions {
   claudeAuth: {
     accessToken: string;
     refreshToken: string;
+    expiresAt?: number;
   };
   repoPath: string;
   excludePaths: string[];
   tasksPerCycle: number;
   existingIssues: Issue[];
   repoContext?: string; // Optional context about what the repo does
+  analyzerConfig?: AnalyzerConfig; // Optional analyzer configuration (maxDepth, maxFiles)
+  circuitBreakerConfig?: Partial<CircuitBreakerConfig>; // Optional circuit breaker configuration
+  /** Enable fallback task generation when Claude fails (default: true) */
+  enableFallbackGeneration?: boolean;
+  /** Callback to refresh Claude tokens on 401/403 auth failures */
+  onTokenRefresh?: TokenRefreshCallback;
+  /** Enable spec-driven task discovery from SPEC.md and STATUS.md (default: true if files exist) */
+  enableSpecDriven?: boolean;
+  /** Pre-loaded spec context (optional - will load from repoPath if not provided) */
+  specContext?: SpecContext;
+}
+
+/**
+ * Result of task generation with status information
+ */
+export interface TaskGenerationResult {
+  tasks: DiscoveredTask[];
+  success: boolean;
+  usedFallback: boolean;
+  error?: {
+    code: string;
+    message: string;
+    isRetryable: boolean;
+  };
+  duration: number;
 }
 
 export class TaskGenerator {
-  private claudeAuth: { accessToken: string; refreshToken: string };
+  private claudeAuth: { accessToken: string; refreshToken: string; expiresAt?: number };
   private repoPath: string;
   private excludePaths: string[];
   private tasksPerCycle: number;
   private existingIssues: Issue[];
   private repoContext: string;
+  private analyzerConfig: AnalyzerConfig;
+  private circuitBreaker: CircuitBreaker;
+  private enableFallbackGeneration: boolean;
+  private onTokenRefresh?: TokenRefreshCallback;
+  private tokenRefreshAttempted: boolean = false;
+  private enableSpecDriven: boolean;
+  private specContext: SpecContext | null = null;
 
   constructor(options: TaskGeneratorOptions) {
     this.claudeAuth = options.claudeAuth;
@@ -38,32 +126,398 @@ export class TaskGenerator {
     this.tasksPerCycle = options.tasksPerCycle;
     this.existingIssues = options.existingIssues;
     this.repoContext = options.repoContext || '';
+    this.analyzerConfig = options.analyzerConfig || {};
+    // Get or create the Claude API circuit breaker with optional config overrides
+    this.circuitBreaker = getClaudeCircuitBreaker(options.circuitBreakerConfig);
+    // Enable fallback generation by default
+    this.enableFallbackGeneration = options.enableFallbackGeneration !== false;
+    // Store token refresh callback for auth failure recovery
+    this.onTokenRefresh = options.onTokenRefresh;
+    // Spec-driven mode: enabled by default, will check for SPEC.md/STATUS.md
+    this.enableSpecDriven = options.enableSpecDriven !== false;
+    // Use provided spec context or load from repo
+    this.specContext = options.specContext || null;
+  }
+
+  /**
+   * Attempt to refresh Claude tokens when authentication fails.
+   * Returns true if refresh was successful, false otherwise.
+   */
+  private async attemptTokenRefresh(): Promise<boolean> {
+    // Only attempt refresh once per request cycle to prevent infinite loops
+    if (this.tokenRefreshAttempted || !this.onTokenRefresh) {
+      return false;
+    }
+
+    this.tokenRefreshAttempted = true;
+
+    try {
+      logger.info('Attempting to refresh Claude tokens after auth failure');
+
+      const newTokens = await this.onTokenRefresh(this.claudeAuth.refreshToken);
+
+      // Update the stored tokens
+      this.claudeAuth = {
+        accessToken: newTokens.accessToken,
+        refreshToken: newTokens.refreshToken,
+        expiresAt: newTokens.expiresAt,
+      };
+
+      logger.info('Claude tokens refreshed successfully');
+      return true;
+    } catch (refreshError) {
+      logger.error('Failed to refresh Claude tokens', {
+        error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Reset the token refresh attempt flag for a new request cycle.
+   */
+  resetTokenRefreshState(): void {
+    this.tokenRefreshAttempted = false;
+  }
+
+  /**
+   * Check if tokens are about to expire and proactively refresh.
+   * Returns true if tokens are valid or were successfully refreshed.
+   */
+  async validateAndRefreshTokensIfNeeded(): Promise<boolean> {
+    // Check if we have expiration info and token is about to expire (within 5 minutes)
+    if (this.claudeAuth.expiresAt) {
+      const now = Date.now();
+      const expiresIn = this.claudeAuth.expiresAt - now;
+
+      if (expiresIn < 5 * 60 * 1000) {
+        logger.info('Claude token expiring soon, proactively refreshing', {
+          expiresIn: Math.round(expiresIn / 1000),
+        });
+        return this.attemptTokenRefresh();
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Get the circuit breaker health status
+   */
+  getCircuitBreakerHealth() {
+    return this.circuitBreaker.getHealth();
   }
 
   async generateTasks(): Promise<DiscoveredTask[]> {
-    logger.info('Generating tasks with Claude...');
+    const result = await this.generateTasksWithFallback();
+    return result.tasks;
+  }
 
-    // First, analyze the codebase
-    const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths);
-    const analysis = await analyzer.analyze();
-    const summary = analyzer.generateSummary(analysis);
+  /**
+   * Generate tasks with detailed result information including fallback status
+   */
+  async generateTasksWithFallback(): Promise<TaskGenerationResult> {
+    const correlationId = getCorrelationId();
+    const startTime = Date.now();
 
-    // Format existing issues to avoid duplicates
-    const existingIssuesList = this.existingIssues
-      .map((i) => `- #${i.number}: ${i.title}`)
-      .join('\n') || 'None';
+    // Try to load spec context if spec-driven mode is enabled
+    if (this.enableSpecDriven && !this.specContext) {
+      this.specContext = loadSpecContext(this.repoPath, this.tasksPerCycle);
+    }
 
-    // Build the prompt
-    const prompt = this.buildPrompt(summary, existingIssuesList, analysis);
+    const isSpecDriven = this.enableSpecDriven && this.specContext !== null;
 
-    // Call Claude API
-    const tasks = await this.callClaude(prompt);
+    // Start discovery phase tracking
+    if (correlationId) {
+      startPhase(correlationId, 'discovery', {
+        repoPath: this.repoPath,
+        existingIssueCount: this.existingIssues.length,
+        tasksPerCycle: this.tasksPerCycle,
+        fallbackEnabled: this.enableFallbackGeneration,
+        specDriven: isSpecDriven,
+      });
+    }
 
-    logger.info(`Generated ${tasks.length} tasks`);
-    return tasks;
+    // Create operation context for structured logging
+    const operationContext = createOperationContext('TaskGenerator', 'generateTasks', {
+      repoPath: this.repoPath,
+      excludePathCount: this.excludePaths.length,
+      existingIssueCount: this.existingIssues.length,
+      specDriven: isSpecDriven,
+    });
+
+    logger.info(`Generating tasks with Claude (${isSpecDriven ? 'spec-driven' : 'code-analysis'} mode)...`, {
+      correlationId,
+      repoPath: this.repoPath,
+      existingIssueCount: this.existingIssues.length,
+      fallbackEnabled: this.enableFallbackGeneration,
+      specDriven: isSpecDriven,
+      specTasksAvailable: this.specContext?.nextTasks.length ?? 0,
+    });
+
+    let analysis: CodebaseAnalysis | undefined;
+
+    try {
+      // First, analyze the codebase with timing
+      if (correlationId) {
+        recordPhaseOperation(correlationId, 'discovery', 'analyzeCodebase');
+      }
+
+      const { result: analysisResult, duration: analysisDuration } = await timeOperation(
+        async () => {
+          const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths, this.analyzerConfig);
+          return analyzer.analyze();
+        },
+        {
+          operationName: 'analyzeCodebase',
+          component: 'TaskGenerator',
+          phase: 'discovery',
+        }
+      );
+
+      analysis = analysisResult;
+
+      logger.debug('Codebase analysis complete', {
+        duration: analysisDuration,
+        fileCount: analysis.fileCount,
+        correlationId,
+      });
+
+      const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths, this.analyzerConfig);
+      const summary = analyzer.generateSummary(analysis);
+
+      // Format existing issues to avoid duplicates
+      const existingIssuesList = this.existingIssues
+        .map((i) => `- #${i.number}: ${i.title}`)
+        .join('\n') || 'None';
+
+      // Build the prompt (spec-driven or code-analysis based)
+      const prompt = isSpecDriven
+        ? this.buildSpecDrivenPrompt(summary, existingIssuesList, analysis)
+        : this.buildPrompt(summary, existingIssuesList, analysis);
+
+      // Call Claude API with timing
+      if (correlationId) {
+        recordPhaseOperation(correlationId, 'discovery', 'callClaudeAPI');
+      }
+
+      const { result: tasks, duration: claudeDuration } = await timeOperation(
+        () => this.callClaude(prompt),
+        {
+          operationName: 'callClaudeAPI',
+          component: 'TaskGenerator',
+          phase: 'discovery',
+        }
+      );
+
+      const totalDuration = Date.now() - startTime;
+
+      // End discovery phase successfully
+      if (correlationId) {
+        endPhase(correlationId, 'discovery', true, {
+          tasksGenerated: tasks.length,
+          analysisDuration,
+          claudeDuration,
+          totalDuration,
+          usedFallback: false,
+        });
+      }
+
+      // Log operation completion with metrics
+      const operationMetadata = finalizeOperationContext(operationContext, true, {
+        tasksGenerated: tasks.length,
+        analysisDuration,
+        claudeDuration,
+        fileCount: analysis.fileCount,
+      });
+      logger.operationComplete('TaskGenerator', 'generateTasks', true, operationMetadata);
+
+      // Record discovery metrics
+      metrics.recordDiscovery(tasks.length, totalDuration, false, {
+        repository: this.repoPath.split('/').slice(-2).join('/'),
+      });
+
+      logger.info(`Generated ${tasks.length} tasks`, {
+        correlationId,
+        duration: totalDuration,
+        analysisDuration,
+        claudeDuration,
+        usedFallback: false,
+      });
+
+      return {
+        tasks,
+        success: true,
+        usedFallback: false,
+        duration: totalDuration,
+      };
+    } catch (error) {
+      const totalDuration = Date.now() - startTime;
+      const errorCode = error instanceof ClaudeError ? error.code : 'UNKNOWN';
+      const isRetryable = error instanceof ClaudeError ? error.isRetryable : true;
+
+      // Record error in phase tracking
+      if (correlationId) {
+        recordPhaseError(correlationId, 'discovery', errorCode);
+      }
+
+      logger.warn('Claude task generation failed', {
+        correlationId,
+        errorCode,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        fallbackEnabled: this.enableFallbackGeneration,
+        duration: totalDuration,
+      });
+
+      // Try fallback generation if enabled
+      if (this.enableFallbackGeneration && analysis) {
+        logger.info('Attempting fallback task generation from codebase analysis', {
+          correlationId,
+        });
+
+        try {
+          const fallbackTasks = this.generateFallbackTasks(analysis);
+
+          if (correlationId) {
+            endPhase(correlationId, 'discovery', true, {
+              tasksGenerated: fallbackTasks.length,
+              duration: totalDuration,
+              usedFallback: true,
+              originalError: errorCode,
+            });
+          }
+
+          const operationMetadata = finalizeOperationContext(operationContext, true, {
+            tasksGenerated: fallbackTasks.length,
+            usedFallback: true,
+            originalError: errorCode,
+          });
+          logger.operationComplete('TaskGenerator', 'generateTasks', true, operationMetadata);
+
+          // Record discovery metrics (with fallback flag)
+          metrics.recordDiscovery(fallbackTasks.length, totalDuration, true, {
+            repository: this.repoPath.split('/').slice(-2).join('/'),
+          });
+
+          logger.info(`Generated ${fallbackTasks.length} fallback tasks`, {
+            correlationId,
+            duration: totalDuration,
+            usedFallback: true,
+          });
+
+          return {
+            tasks: fallbackTasks,
+            success: true,
+            usedFallback: true,
+            error: {
+              code: errorCode,
+              message: error instanceof Error ? error.message : String(error),
+              isRetryable,
+            },
+            duration: totalDuration,
+          };
+        } catch (fallbackError) {
+          logger.error('Fallback task generation also failed', {
+            correlationId,
+            error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          });
+        }
+      }
+
+      // End phase as failed
+      if (correlationId) {
+        endPhase(correlationId, 'discovery', false, {
+          errorCode,
+          duration: totalDuration,
+        });
+      }
+
+      // Log operation failure
+      const operationMetadata = finalizeOperationContext(operationContext, false, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      logger.operationComplete('TaskGenerator', 'generateTasks', false, operationMetadata);
+
+      // Return empty result with error info instead of throwing
+      return {
+        tasks: [],
+        success: false,
+        usedFallback: false,
+        error: {
+          code: errorCode,
+          message: error instanceof Error ? error.message : String(error),
+          isRetryable,
+        },
+        duration: totalDuration,
+      };
+    }
+  }
+
+  /**
+   * Generate fallback tasks when Claude is unavailable.
+   * Returns generic improvement suggestions since we no longer scan for TODO comments.
+   */
+  private generateFallbackTasks(_analysis: CodebaseAnalysis): DiscoveredTask[] {
+    const tasks: DiscoveredTask[] = [];
+    const existingTitles = new Set(this.existingIssues.map(i => i.title.toLowerCase()));
+
+    // Generate generic improvement suggestions
+    const genericTasks: DiscoveredTask[] = [
+      {
+        title: 'Review and update documentation',
+        description: 'Review existing documentation for accuracy and completeness. Update outdated information and add missing documentation where needed.',
+        priority: 'low',
+        category: 'docs',
+        estimatedComplexity: 'simple',
+        affectedPaths: ['README.md', 'docs/'],
+        estimatedDurationMinutes: 60,
+      },
+      {
+        title: 'Run security audit on dependencies',
+        description: 'Run `npm audit` or equivalent to check for security vulnerabilities in dependencies. Update any packages with known security issues.',
+        priority: 'high',
+        category: 'security',
+        estimatedComplexity: 'simple',
+        affectedPaths: ['package.json', 'package-lock.json'],
+        estimatedDurationMinutes: 30,
+      },
+    ];
+
+    for (const genericTask of genericTasks) {
+      if (tasks.length >= this.tasksPerCycle) break;
+      if (!existingTitles.has(genericTask.title.toLowerCase())) {
+        tasks.push(genericTask);
+      }
+    }
+
+    logger.debug(`Generated ${tasks.length} fallback tasks`);
+
+    return tasks.slice(0, this.tasksPerCycle);
   }
 
   private buildPrompt(codebaseSummary: string, existingIssues: string, analysis: CodebaseAnalysis): string {
+    // Build git analysis section if available
+    let gitAnalysisSection = '';
+    if (analysis.gitAnalysis) {
+      const { summary, fileChangeStats, dependencyGraph } = analysis.gitAnalysis;
+
+      gitAnalysisSection = `
+## Recent Development Activity
+
+### Change Frequency Analysis (Last ${summary.totalCommits} commits)
+**Most Frequently Changed Files (Hotspots):**
+${fileChangeStats.slice(0, 10).map(s => `- ${s.file} (${s.changeCount} changes, impact: ${s.impactScore.toFixed(1)})`).join('\n')}
+
+**Key Contributors:** ${summary.topContributors.slice(0, 5).join(', ')}
+
+### Dependency Impact Analysis
+**High-Impact Files (Many Dependents):**
+${dependencyGraph.hotspots.slice(0, 5).map(f => `- ${f}`).join('\n')}
+
+**Note:** Changes to high-impact files affect many other parts of the codebase. Consider this when prioritizing tasks.
+`;
+    }
+
     return `You are an expert software developer analyzing a codebase to identify the next set of improvements.
 
 ## Repository Context
@@ -71,7 +525,7 @@ ${this.repoContext || 'This is a web application project.'}
 
 ## Current Codebase Analysis
 ${codebaseSummary}
-
+${gitAnalysisSection}
 ## Existing Open Issues (DO NOT DUPLICATE)
 ${existingIssues}
 
@@ -82,19 +536,22 @@ Identify exactly ${this.tasksPerCycle} actionable improvements for this codebase
 2. **Clear Scope** - Tasks that can be completed independently in a single PR
 3. **Testable** - Changes where success can be verified
 4. **Incremental** - Build on existing patterns, don't require major rewrites
+5. **Active Development Areas** - Prioritize improvements to frequently changed files (see hotspots above)
 
 ### Categories to consider:
-- **feature**: New functionality users will notice
+- **security**: Security vulnerabilities, auth issues, data protection
 - **bugfix**: Fix existing broken behavior
+- **feature**: New functionality users will notice
 - **refactor**: Improve code quality without changing behavior
 - **docs**: Improve documentation
 - **test**: Add or improve tests
 - **chore**: Maintenance tasks (dependencies, configs)
 
 ### Priorities:
-- **high**: Critical issues, user-facing bugs, security
+- **critical**: Security vulnerabilities, data loss risks, production blockers
+- **high**: User-facing bugs, important regressions
 - **medium**: Important improvements, new features
-- **low**: Nice-to-have, cleanup
+- **low**: Nice-to-have, cleanup, minor improvements
 
 ### Complexity:
 - **simple**: < 1 hour, few files
@@ -109,10 +566,11 @@ Return a JSON array of tasks. Each task should have:
   - Why it's important
   - Acceptance criteria
   - Any relevant file paths or code references
-- priority: "high" | "medium" | "low"
-- category: "feature" | "bugfix" | "refactor" | "docs" | "test" | "chore"
+- priority: "critical" | "high" | "medium" | "low"
+- category: "security" | "bugfix" | "feature" | "refactor" | "docs" | "test" | "chore"
 - estimatedComplexity: "simple" | "moderate" | "complex"
 - affectedPaths: Array of file/directory paths that will likely be modified
+- estimatedDurationMinutes: Optional number estimating how long the task will take
 
 Example:
 \`\`\`json
@@ -123,7 +581,8 @@ Example:
     "priority": "medium",
     "category": "feature",
     "estimatedComplexity": "simple",
-    "affectedPaths": ["src/components/dashboard/", "src/styles/loading.css"]
+    "affectedPaths": ["src/components/dashboard/", "src/styles/loading.css"],
+    "estimatedDurationMinutes": 30
   }
 ]
 \`\`\`
@@ -137,72 +596,399 @@ Remember:
 Return ONLY the JSON array, no other text.`;
   }
 
-  private async callClaude(prompt: string): Promise<DiscoveredTask[]> {
-    // Use direct API with OAuth tokens
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.claudeAuth.accessToken,
-        'anthropic-version': '2023-06-01',
+  /**
+   * Build a spec-driven prompt that uses SPEC.md and STATUS.md to guide task generation.
+   * This prioritizes implementing features from the roadmap based on priority tiers.
+   */
+  private buildSpecDrivenPrompt(codebaseSummary: string, existingIssues: string, analysis: CodebaseAnalysis): string {
+    if (!this.specContext) {
+      // Fall back to standard prompt if no spec context
+      return this.buildPrompt(codebaseSummary, existingIssues, analysis);
+    }
+
+    const { spec, status, nextTasks } = this.specContext;
+
+    // Build the priority tasks section
+    const priorityTasksSection = nextTasks.map((task, idx) => {
+      const statusLabel = task.currentStatus === 'not_started' ? '❌ Not Started' :
+                         task.currentStatus === 'partial' ? '🟡 Partial' : '✅ Complete';
+      return `
+### ${idx + 1}. ${task.feature} (${task.priority})
+**Spec Section:** ${task.specSection}
+**Current Status:** ${statusLabel}
+${task.existingFiles.length > 0 ? `**Existing Files:** ${task.existingFiles.join(', ')}` : ''}
+${task.notes ? `**Notes:** ${task.notes}` : ''}
+
+**From SPEC.md:**
+${task.specContent.slice(0, 1500)}${task.specContent.length > 1500 ? '...' : ''}
+`;
+    }).join('\n');
+
+    // Build git analysis section if available
+    let gitAnalysisSection = '';
+    if (analysis.gitAnalysis) {
+      const { summary, fileChangeStats } = analysis.gitAnalysis;
+      gitAnalysisSection = `
+## Recent Development Activity (Last ${summary.totalCommits} commits)
+**Frequently Changed Files:**
+${fileChangeStats.slice(0, 5).map(s => `- ${s.file} (${s.changeCount} changes)`).join('\n')}
+`;
+    }
+
+    return `You are an expert software developer implementing features from a project specification.
+
+## Project Overview
+${spec.overview.slice(0, 800)}
+
+## Current Implementation Status
+This project tracks implementation progress in STATUS.md with priority tiers:
+- **P0 (Core MVP):** Essential features for a functional platform
+- **P1 (Important):** Build after core MVP is stable
+- **P2 (Nice to Have):** Enhance the platform experience
+- **P3 (Future):** Long-term vision features
+
+## Priority Features to Implement
+The following features need implementation, in priority order:
+${priorityTasksSection}
+
+## Codebase Structure
+${codebaseSummary}
+${gitAnalysisSection}
+
+## Existing Open Issues (DO NOT DUPLICATE)
+${existingIssues}
+
+## Your Task
+Generate exactly ${this.tasksPerCycle} implementation tasks based on the SPEC requirements above.
+
+**IMPORTANT GUIDELINES:**
+1. **Follow the Priority Order** - Generate tasks for P0 features first, then P1, etc.
+2. **Match Spec Requirements** - Tasks should directly implement features described in SPEC.md
+3. **Build Incrementally** - Break large features into smaller, independently mergeable PRs
+4. **Follow Existing Patterns** - Reference existing implementation files when extending features
+5. **Verify Your Work** - Each task MUST include running \`npm install && npm run build\` to verify the code compiles
+
+**For Partial Features (🟡):**
+- Review existing files before adding new functionality
+- Extend existing components rather than creating new ones
+- Ensure backward compatibility
+
+**For Not Started Features (❌):**
+- Follow patterns from similar existing features
+- Create minimal working implementation first
+- Reference the SPEC section for acceptance criteria
+
+### Categories:
+- **feature**: New functionality from the spec
+- **bugfix**: Fix broken behavior
+- **refactor**: Improve existing code
+- **docs**: Update documentation
+- **test**: Add tests
+- **chore**: Maintenance tasks
+
+### Priorities (map from spec tiers):
+- **critical**: P0 features essential for MVP
+- **high**: P1 important features
+- **medium**: P2 nice-to-have features
+- **low**: P3 future features, cleanup
+
+### Complexity:
+- **simple**: Single file, < 1 hour
+- **moderate**: Multiple files, 1-4 hours
+- **complex**: Architectural changes, 4+ hours
+
+## Output Format
+Return a JSON array of tasks:
+\`\`\`json
+[
+  {
+    "title": "Implement [Feature Name] from SPEC Section X.X",
+    "description": "## Overview\\n[What needs to be done]\\n\\n## From SPEC.md\\n[Relevant spec requirements]\\n\\n## Implementation Plan\\n1. [Step 1]\\n2. [Step 2]\\n\\n## Acceptance Criteria\\n- [Criterion 1]\\n- [Criterion 2]\\n\\n## Verification\\n- Run \`npm install && npm run build\` to verify compilation\\n- [Other verification steps]",
+    "priority": "critical|high|medium|low",
+    "category": "feature|bugfix|refactor|docs|test|chore",
+    "estimatedComplexity": "simple|moderate|complex",
+    "affectedPaths": ["path/to/file1.ts", "path/to/file2.tsx"],
+    "estimatedDurationMinutes": 60
+  }
+]
+\`\`\`
+
+**IMPORTANT:**
+- Each task description MUST mention running \`npm install && npm run build\` for verification
+- DO NOT duplicate existing open issues
+- Be specific about file paths based on the codebase structure
+- Include relevant SPEC requirements in the description
+
+Return ONLY the JSON array, no other text.`;
+  }
+
+  /**
+   * Get the loaded spec context (if available)
+   */
+  getSpecContext(): SpecContext | null {
+    return this.specContext;
+  }
+
+  /**
+   * Write Claude OAuth credentials to ~/.claude/.credentials.json for SDK
+   */
+  private writeClaudeCredentials(): void {
+    const claudeDir = join(homedir(), '.claude');
+    const credentialsPath = join(claudeDir, '.credentials.json');
+
+    if (!existsSync(claudeDir)) {
+      mkdirSync(claudeDir, { recursive: true });
+    }
+
+    const credentials = {
+      claudeAiOauth: {
+        accessToken: this.claudeAuth.accessToken,
+        refreshToken: this.claudeAuth.refreshToken,
+        expiresAt: this.claudeAuth.expiresAt || Date.now() + 3600000,
+        scopes: ['user:inference', 'user:profile'],
+        subscriptionType: 'max',
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      }),
+    };
+
+    writeFileSync(credentialsPath, JSON.stringify(credentials), { mode: 0o600 });
+    logger.debug('Claude credentials written for SDK');
+  }
+
+  private async callClaude(prompt: string): Promise<DiscoveredTask[]> {
+    // Reset token refresh state for this new API call cycle
+    this.resetTokenRefreshState();
+
+    // Proactively refresh tokens if they're about to expire
+    await this.validateAndRefreshTokensIfNeeded();
+
+    // Write credentials for SDK to use
+    this.writeClaudeCredentials();
+
+    // Use circuit breaker with exponential backoff for resilience
+    return this.circuitBreaker.executeWithRetry(
+      async () => {
+        try {
+          // Use Claude Agent SDK instead of direct API calls
+          // The SDK reads credentials from ~/.claude/.credentials.json
+          const stream = query({
+            prompt: prompt + '\n\nIMPORTANT: Respond with ONLY valid JSON, no markdown code blocks or other formatting.',
+            options: {
+              model: 'claude-sonnet-4-20250514',
+              cwd: this.repoPath,
+              maxTurns: 1, // Single turn for task discovery
+              allowedTools: [], // No tools needed for task discovery
+            },
+          });
+
+          let responseContent = '';
+
+          // Collect response from stream
+          for await (const message of stream) {
+            if (message.type === 'assistant') {
+              const assistantMessage = message.message;
+              if (assistantMessage?.content && Array.isArray(assistantMessage.content)) {
+                for (const item of assistantMessage.content) {
+                  if (item.type === 'text' && item.text) {
+                    responseContent += item.text;
+                  }
+                }
+              }
+            }
+
+            // Handle result messages for errors
+            if (message.type === 'result' && message.is_error) {
+              const errorMsg = (message as any).error_message || (message as any).result || 'Unknown SDK error';
+              throw new ClaudeError(
+                ErrorCode.CLAUDE_API_ERROR,
+                `Claude SDK error: ${errorMsg}`,
+                { context: { sdkResult: message } }
+              );
+            }
+          }
+
+          if (!responseContent) {
+            throw new ClaudeError(
+              ErrorCode.CLAUDE_API_ERROR,
+              'Claude SDK returned empty response',
+              { context: { prompt: prompt.slice(0, 200) } }
+            );
+          }
+
+          // Parse JSON from response
+          return this.parseClaudeResponse(responseContent);
+        } catch (error) {
+          // Convert SDK errors to ClaudeError for consistent handling
+          if (error instanceof ClaudeError) {
+            throw error;
+          }
+
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          // Check for auth-related errors
+          if (errorMessage.includes('authentication') || errorMessage.includes('401') || errorMessage.includes('403')) {
+            const refreshed = await this.attemptTokenRefresh();
+            if (refreshed) {
+              // Re-write credentials after refresh
+              this.writeClaudeCredentials();
+              throw new ClaudeError(
+                ErrorCode.CLAUDE_AUTH_FAILED,
+                `Claude SDK authentication failed, tokens refreshed - retrying`,
+                { context: { tokensRefreshed: true } }
+              );
+            }
+            throw new ClaudeError(
+              ErrorCode.CLAUDE_AUTH_FAILED,
+              `Claude SDK authentication failed: ${errorMessage}`,
+              { context: { originalError: errorMessage } }
+            );
+          }
+
+          throw new ClaudeError(
+            ErrorCode.CLAUDE_API_ERROR,
+            `Claude SDK error: ${errorMessage}`,
+            { context: { originalError: errorMessage } }
+          );
+        }
+      },
+      {
+        maxRetries: 3,
+        operationName: 'Claude SDK call (discovery)',
+        context: {
+          component: 'TaskGenerator',
+          operation: 'generateTasks',
+        },
+        shouldRetry: (error) => {
+          // Allow retry if tokens were just refreshed
+          if (error instanceof ClaudeError && error.context?.tokensRefreshed) {
+            return true;
+          }
+          return isClaudeErrorRetryable(error);
+        },
+        onRetry: (error, attempt, delay) => {
+          const statusCode = extractHttpStatus(error);
+          logger.warn(`Claude SDK retry (attempt ${attempt})`, {
+            error: error.message,
+            statusCode,
+            retryInMs: Math.round(delay),
+            circuitState: this.circuitBreaker.getState(),
+            tokensRefreshed: error instanceof ClaudeError ? error.context?.tokensRefreshed : false,
+          });
+        },
+      }
+    );
+  }
+
+  /**
+   * Create a structured error from Claude API response
+   */
+  private createApiError(statusCode: number, errorText: string, headers: Headers): ClaudeError {
+    let code: ErrorCode;
+    let message: string;
+
+    switch (statusCode) {
+      case 401:
+        code = ErrorCode.CLAUDE_AUTH_FAILED;
+        message = `Claude API authentication failed: ${errorText}`;
+        break;
+      case 403:
+        code = ErrorCode.CLAUDE_AUTH_FAILED;
+        message = `Claude API access denied: ${errorText}`;
+        break;
+      case 429:
+        code = ErrorCode.CLAUDE_RATE_LIMITED;
+        message = `Claude API rate limited: ${errorText}`;
+        break;
+      case 408:
+      case 504:
+        code = ErrorCode.CLAUDE_TIMEOUT;
+        message = `Claude API request timed out: ${errorText}`;
+        break;
+      case 500:
+      case 502:
+      case 503:
+        code = ErrorCode.CLAUDE_API_ERROR;
+        message = `Claude API server error (${statusCode}): ${errorText}`;
+        break;
+      default:
+        code = ErrorCode.CLAUDE_API_ERROR;
+        message = `Claude API error (${statusCode}): ${errorText}`;
+    }
+
+    // Extract Retry-After header if present
+    const retryAfter = headers.get('retry-after') || headers.get('Retry-After');
+
+    return new ClaudeError(code, message, {
+      context: {
+        statusCode,
+        errorText,
+        retryAfter,
+      },
+    });
+  }
+
+  /**
+   * Parse and validate Claude response JSON
+   */
+  private parseClaudeResponse(content: string): DiscoveredTask[] {
+    // Find JSON array in response (in case there's extra text)
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      logger.error('No JSON array found in Claude response', { content });
+      throw new ClaudeError(
+        ErrorCode.CLAUDE_INVALID_RESPONSE,
+        'No JSON array found in Claude response',
+        {
+          context: { contentLength: content.length },
+        }
+      );
+    }
+
+    let tasks: DiscoveredTask[];
+    try {
+      tasks = JSON.parse(jsonMatch[0]) as DiscoveredTask[];
+    } catch (parseError) {
+      logger.error('Failed to parse Claude response JSON', { error: parseError, content });
+      throw new ClaudeError(
+        ErrorCode.CLAUDE_INVALID_RESPONSE,
+        'Failed to parse task suggestions from Claude',
+        {
+          context: { parseError: String(parseError) },
+          cause: parseError instanceof Error ? parseError : undefined,
+        }
+      );
+    }
+
+    // Validate tasks
+    const validTasks = tasks.filter((task) => {
+      const isValid = (
+        typeof task.title === 'string' &&
+        typeof task.description === 'string' &&
+        ['critical', 'high', 'medium', 'low'].includes(task.priority) &&
+        ['security', 'bugfix', 'feature', 'refactor', 'docs', 'test', 'chore'].includes(task.category) &&
+        ['simple', 'moderate', 'complex'].includes(task.estimatedComplexity) &&
+        Array.isArray(task.affectedPaths) &&
+        (task.estimatedDurationMinutes === undefined || typeof task.estimatedDurationMinutes === 'number')
+      );
+      return isValid;
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      logger.error('Claude API error', { status: response.status, error });
-      throw new Error(`Claude API error: ${response.status} - ${error}`);
+    if (validTasks.length !== tasks.length) {
+      logger.warn(`Filtered out ${tasks.length - validTasks.length} invalid tasks`);
     }
 
-    const data = await response.json() as { content: Array<{ text?: string }> };
-    const content = data.content[0]?.text || '';
-
-    // Parse JSON from response
-    try {
-      // Find JSON array in response (in case there's extra text)
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        logger.error('No JSON array found in Claude response', { content });
-        throw new Error('No JSON array found in response');
-      }
-
-      const tasks = JSON.parse(jsonMatch[0]) as DiscoveredTask[];
-
-      // Validate tasks
-      const validTasks = tasks.filter((task) => {
-        return (
-          typeof task.title === 'string' &&
-          typeof task.description === 'string' &&
-          ['high', 'medium', 'low'].includes(task.priority) &&
-          ['feature', 'bugfix', 'refactor', 'docs', 'test', 'chore'].includes(task.category) &&
-          ['simple', 'moderate', 'complex'].includes(task.estimatedComplexity) &&
-          Array.isArray(task.affectedPaths)
-        );
-      });
-
-      if (validTasks.length !== tasks.length) {
-        logger.warn(`Filtered out ${tasks.length - validTasks.length} invalid tasks`);
-      }
-
-      return validTasks.slice(0, this.tasksPerCycle);
-    } catch (error) {
-      logger.error('Failed to parse Claude response', { error, content });
-      throw new Error('Failed to parse task suggestions from Claude');
-    }
+    return validTasks.slice(0, this.tasksPerCycle);
   }
 }
 
 export async function discoverTasks(options: TaskGeneratorOptions): Promise<DiscoveredTask[]> {
   const generator = new TaskGenerator(options);
   return generator.generateTasks();
+}
+
+/**
+ * Discover tasks with detailed result including fallback status
+ */
+export async function discoverTasksWithFallback(options: TaskGeneratorOptions): Promise<TaskGenerationResult> {
+  const generator = new TaskGenerator(options);
+  return generator.generateTasksWithFallback();
 }
