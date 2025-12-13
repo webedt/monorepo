@@ -14,6 +14,11 @@ export interface WorkerOptions {
     repoOwner?: string;
     repoName?: string;
     enableDatabaseLogging?: boolean;
+    sparseCheckout?: {
+        enabled: boolean;
+        paths?: string[];
+    };
+    useShallowClone?: boolean;
 }
 export interface WorkerTask {
     issue: Issue;

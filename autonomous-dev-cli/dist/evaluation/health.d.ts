@@ -16,6 +16,8 @@ export interface HealthCheckOptions {
     expectedStatus?: number;
     retries?: number;
     retryDelay?: number;
+    concurrency?: number;
+    parallel?: boolean;
 }
 export declare function runHealthChecks(options: HealthCheckOptions): Promise<HealthCheckResult>;
 export declare function generatePreviewUrl(pattern: string, params: {

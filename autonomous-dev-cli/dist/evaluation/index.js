@@ -3,7 +3,7 @@ import { runTests } from './tests.js';
 import { runHealthChecks, generatePreviewUrl } from './health.js';
 import { logger } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-export { runBuild, runTypeCheck } from './build.js';
+export { runBuild, runTypeCheck, BuildCache, getBuildCache, initBuildCache } from './build.js';
 export { runTests } from './tests.js';
 export { runHealthChecks, generatePreviewUrl } from './health.js';
 export async function runEvaluation(options) {

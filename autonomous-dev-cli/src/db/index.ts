@@ -1,11 +1,24 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'crypto';
 
 const { Pool } = pg;
+
+// ============================================================================
+// Connection Pool Configuration
+// ============================================================================
+
+export interface PoolConfig {
+  max?: number; // Maximum number of clients in the pool (default: 20)
+  min?: number; // Minimum number of clients in the pool (default: 2)
+  idleTimeoutMillis?: number; // How long a client can sit idle (default: 30000)
+  connectionTimeoutMillis?: number; // How long to wait for connection (default: 5000)
+  acquireTimeoutMillis?: number; // How long to wait for acquire (default: 10000)
+  statementTimeout?: number; // Query timeout in ms (default: 30000)
+}
 
 // ============================================================================
 // Schema (matching internal-api-server)
@@ -157,25 +170,71 @@ export interface EventData {
 
 let pool: pg.Pool | null = null;
 let db: ReturnType<typeof drizzle> | null = null;
+let poolConfig: PoolConfig = {};
+let poolStats = {
+  totalConnections: 0,
+  idleConnections: 0,
+  waitingClients: 0,
+  queryCount: 0,
+  lastQueryTime: 0,
+};
 
-export async function initDatabase(databaseUrl: string): Promise<void> {
+/**
+ * Initialize database with optimized connection pool settings
+ * Supports configuration for concurrent worker scenarios
+ */
+export async function initDatabase(databaseUrl: string, config: PoolConfig = {}): Promise<void> {
   if (pool) {
     return;
   }
 
+  poolConfig = config;
+
+  // Calculate optimal pool size based on expected concurrent workers
+  const maxConnections = config.max ?? 20; // Higher default for concurrent workers
+  const minConnections = config.min ?? 2;
+
   pool = new Pool({
     connectionString: databaseUrl,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
+    max: maxConnections,
+    min: minConnections,
+    idleTimeoutMillis: config.idleTimeoutMillis ?? 30000,
+    connectionTimeoutMillis: config.connectionTimeoutMillis ?? 5000,
     ssl: databaseUrl.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
+    // Additional optimizations
+    application_name: 'autonomous-dev-cli',
+    statement_timeout: config.statementTimeout ?? 30000,
+    query_timeout: config.statementTimeout ?? 30000,
+  });
+
+  // Set up pool event handlers for monitoring
+  pool.on('connect', () => {
+    poolStats.totalConnections++;
+    logger.debug('Pool: new client connected', { total: poolStats.totalConnections });
+  });
+
+  pool.on('acquire', () => {
+    logger.debug('Pool: client acquired');
+  });
+
+  pool.on('remove', () => {
+    poolStats.totalConnections--;
+    logger.debug('Pool: client removed', { total: poolStats.totalConnections });
+  });
+
+  pool.on('error', (err) => {
+    logger.error('Pool: unexpected error', { error: err.message });
   });
 
   db = drizzle(pool, { schema: { users, chatSessions, messages, events } });
 
   try {
     await pool.query('SELECT 1');
-    logger.info('Database connection established');
+    logger.info('Database connection established', {
+      maxConnections,
+      minConnections,
+      idleTimeout: config.idleTimeoutMillis ?? 30000,
+    });
   } catch (error) {
     logger.error('Failed to connect to database', { error });
     throw error;
@@ -187,6 +246,53 @@ export function getDb() {
     throw new Error('Database not initialized. Call initDatabase first.');
   }
   return db;
+}
+
+/**
+ * Get current pool status for monitoring
+ */
+export function getPoolStats(): {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+  maxConnections: number;
+} {
+  if (!pool) {
+    return { totalCount: 0, idleCount: 0, waitingCount: 0, maxConnections: 0 };
+  }
+
+  return {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+    maxConnections: poolConfig.max ?? 20,
+  };
+}
+
+/**
+ * Check pool health and log warnings if connections are exhausted
+ */
+export function checkPoolHealth(): boolean {
+  const stats = getPoolStats();
+
+  if (stats.waitingCount > 0) {
+    logger.warn('Database pool has waiting clients', {
+      waiting: stats.waitingCount,
+      total: stats.totalCount,
+      max: stats.maxConnections,
+    });
+    return false;
+  }
+
+  if (stats.totalCount >= stats.maxConnections * 0.9) {
+    logger.warn('Database pool near capacity', {
+      total: stats.totalCount,
+      max: stats.maxConnections,
+    });
+    return false;
+  }
+
+  return true;
 }
 
 export async function closeDatabase(): Promise<void> {
@@ -353,4 +459,147 @@ export async function addEvent(
 // Helper to generate session path (matches internal-api-server format)
 export function generateSessionPath(owner: string, repo: string, branch: string): string {
   return `${owner}__${repo}__${branch.replace(/\//g, '-')}`;
+}
+
+// ============================================================================
+// Batch Operations for Improved Performance
+// ============================================================================
+
+/**
+ * Add multiple messages in a single batch operation
+ * More efficient than individual inserts for high-volume scenarios
+ */
+export async function addMessagesBatch(
+  chatSessionId: string,
+  msgs: Array<{ type: 'user' | 'assistant' | 'system' | 'error'; content: string }>
+): Promise<Message[]> {
+  if (msgs.length === 0) return [];
+
+  const database = getDb();
+
+  const values = msgs.map((msg) => ({
+    chatSessionId,
+    type: msg.type,
+    content: msg.content,
+  }));
+
+  const insertedMessages = await database
+    .insert(messages)
+    .values(values)
+    .returning();
+
+  logger.debug(`Batch inserted ${insertedMessages.length} messages`);
+  return insertedMessages;
+}
+
+/**
+ * Add multiple events in a single batch operation
+ */
+export async function addEventsBatch(
+  chatSessionId: string,
+  evts: Array<{ eventType: string; eventData: EventData }>
+): Promise<DbEvent[]> {
+  if (evts.length === 0) return [];
+
+  const database = getDb();
+
+  const values = evts.map((evt) => ({
+    chatSessionId,
+    eventType: evt.eventType,
+    eventData: evt.eventData,
+  }));
+
+  const insertedEvents = await database
+    .insert(events)
+    .values(values)
+    .returning();
+
+  // Update worker last activity once for the batch
+  await database
+    .update(chatSessions)
+    .set({ workerLastActivity: new Date() })
+    .where(eq(chatSessions.id, chatSessionId));
+
+  logger.debug(`Batch inserted ${insertedEvents.length} events`);
+  return insertedEvents;
+}
+
+/**
+ * Optimized addEvent that batches worker activity updates
+ * Uses a debounce mechanism to avoid excessive updates
+ */
+const activityUpdateTimers = new Map<string, NodeJS.Timeout>();
+const ACTIVITY_UPDATE_DEBOUNCE_MS = 5000; // Only update activity every 5 seconds
+
+export async function addEventOptimized(
+  chatSessionId: string,
+  eventType: string,
+  eventData: EventData
+): Promise<DbEvent> {
+  const database = getDb();
+
+  const [event] = await database
+    .insert(events)
+    .values({
+      chatSessionId,
+      eventType,
+      eventData,
+    })
+    .returning();
+
+  // Debounce worker activity updates to reduce database load
+  if (!activityUpdateTimers.has(chatSessionId)) {
+    const timer = setTimeout(async () => {
+      try {
+        await database
+          .update(chatSessions)
+          .set({ workerLastActivity: new Date() })
+          .where(eq(chatSessions.id, chatSessionId));
+      } catch (err) {
+        logger.warn('Failed to update worker activity', { chatSessionId, error: err });
+      }
+      activityUpdateTimers.delete(chatSessionId);
+    }, ACTIVITY_UPDATE_DEBOUNCE_MS);
+
+    activityUpdateTimers.set(chatSessionId, timer);
+  }
+
+  return event;
+}
+
+/**
+ * Flush pending activity updates (call before closing session)
+ */
+export async function flushActivityUpdates(chatSessionId?: string): Promise<void> {
+  const database = getDb();
+
+  if (chatSessionId) {
+    const timer = activityUpdateTimers.get(chatSessionId);
+    if (timer) {
+      clearTimeout(timer);
+      activityUpdateTimers.delete(chatSessionId);
+      await database
+        .update(chatSessions)
+        .set({ workerLastActivity: new Date() })
+        .where(eq(chatSessions.id, chatSessionId));
+    }
+  } else {
+    // Flush all pending updates
+    const entries: Array<[string, NodeJS.Timeout]> = [];
+    activityUpdateTimers.forEach((timer, sessionId) => {
+      entries.push([sessionId, timer]);
+    });
+    for (const [sessionId, timer] of entries) {
+      clearTimeout(timer);
+      try {
+        await database
+          .update(chatSessions)
+          .set({ workerLastActivity: new Date() })
+          .where(eq(chatSessions.id, sessionId));
+      } catch (err) {
+        logger.warn('Failed to flush activity update', { sessionId, error: err });
+      }
+    }
+    activityUpdateTimers.clear();
+  }
 }

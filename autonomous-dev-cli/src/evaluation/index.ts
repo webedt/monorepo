@@ -4,9 +4,9 @@ import { runHealthChecks, generatePreviewUrl, type HealthCheckResult } from './h
 import { logger } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 
-export { runBuild, runTypeCheck, type BuildResult } from './build.js';
+export { runBuild, runTypeCheck, BuildCache, getBuildCache, initBuildCache, type BuildResult, type BuildOptions } from './build.js';
 export { runTests, type TestResult } from './tests.js';
-export { runHealthChecks, generatePreviewUrl, type HealthCheckResult, type HealthCheck } from './health.js';
+export { runHealthChecks, generatePreviewUrl, type HealthCheckResult, type HealthCheck, type HealthCheckOptions } from './health.js';
 
 export interface EvaluationResult {
   success: boolean;

@@ -1,7 +1,187 @@
 import { readFileSync, readdirSync, statSync, existsSync, accessSync, constants } from 'fs';
 import { join, relative, extname, isAbsolute, resolve } from 'path';
+import { createHash } from 'crypto';
 import { logger } from '../utils/logger.js';
 import { AnalyzerError, ErrorCode } from '../utils/errors.js';
+
+// ============================================================================
+// Analysis Cache
+// ============================================================================
+
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  contentHash: string;
+}
+
+interface CacheStats {
+  hits: number;
+  misses: number;
+  invalidations: number;
+}
+
+export class AnalysisCache {
+  private cache: Map<string, CacheEntry<CodebaseAnalysis>> = new Map();
+  private stats: CacheStats = { hits: 0, misses: 0, invalidations: 0 };
+  private maxEntries: number;
+  private ttlMs: number;
+
+  constructor(options: { maxEntries?: number; ttlMs?: number } = {}) {
+    this.maxEntries = options.maxEntries ?? 100;
+    this.ttlMs = options.ttlMs ?? 5 * 60 * 1000; // 5 minutes default
+  }
+
+  /**
+   * Generate a cache key from repository path and config
+   */
+  generateKey(repoPath: string, excludePaths: string[], config: AnalyzerConfig): string {
+    const keyData = JSON.stringify({ repoPath, excludePaths, config });
+    return createHash('md5').update(keyData).digest('hex');
+  }
+
+  /**
+   * Generate a content hash based on file modification times
+   * This allows for invalidation when files change
+   */
+  generateContentHash(repoPath: string, maxSamples: number = 50): string {
+    const hashData: string[] = [];
+    let sampleCount = 0;
+
+    const collectSamples = (dirPath: string, depth: number = 0) => {
+      if (depth > 3 || sampleCount >= maxSamples) return;
+
+      try {
+        const items = readdirSync(dirPath);
+        for (const item of items) {
+          if (sampleCount >= maxSamples) break;
+          if (['node_modules', '.git', 'dist', 'build', '.next'].includes(item)) continue;
+
+          const fullPath = join(dirPath, item);
+          try {
+            const stat = statSync(fullPath);
+            if (stat.isFile()) {
+              hashData.push(`${fullPath}:${stat.mtimeMs}`);
+              sampleCount++;
+            } else if (stat.isDirectory()) {
+              collectSamples(fullPath, depth + 1);
+            }
+          } catch {
+            // Skip inaccessible files
+          }
+        }
+      } catch {
+        // Skip inaccessible directories
+      }
+    };
+
+    collectSamples(repoPath);
+    return createHash('md5').update(hashData.join('|')).digest('hex');
+  }
+
+  /**
+   * Get cached analysis if valid
+   */
+  get(key: string, currentContentHash: string): CodebaseAnalysis | null {
+    const entry = this.cache.get(key);
+
+    if (!entry) {
+      this.stats.misses++;
+      return null;
+    }
+
+    // Check TTL
+    if (Date.now() - entry.timestamp > this.ttlMs) {
+      this.cache.delete(key);
+      this.stats.invalidations++;
+      this.stats.misses++;
+      logger.debug('Cache entry expired', { key });
+      return null;
+    }
+
+    // Check content hash (invalidate if files changed)
+    if (entry.contentHash !== currentContentHash) {
+      this.cache.delete(key);
+      this.stats.invalidations++;
+      this.stats.misses++;
+      logger.debug('Cache invalidated due to file changes', { key });
+      return null;
+    }
+
+    this.stats.hits++;
+    logger.debug('Cache hit', { key });
+    return entry.data;
+  }
+
+  /**
+   * Store analysis in cache
+   */
+  set(key: string, data: CodebaseAnalysis, contentHash: string): void {
+    // Enforce max entries with LRU eviction
+    if (this.cache.size >= this.maxEntries) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey) {
+        this.cache.delete(oldestKey);
+      }
+    }
+
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      contentHash,
+    });
+    logger.debug('Cached analysis', { key });
+  }
+
+  /**
+   * Clear all cache entries
+   */
+  clear(): void {
+    this.cache.clear();
+    logger.debug('Cache cleared');
+  }
+
+  /**
+   * Invalidate entries for a specific repository
+   */
+  invalidate(repoPath: string): void {
+    const keysToDelete: string[] = [];
+    this.cache.forEach((entry, key) => {
+      keysToDelete.push(key);
+    });
+    for (const key of keysToDelete) {
+      this.cache.delete(key);
+      this.stats.invalidations++;
+    }
+    logger.debug('Invalidated cache for repo', { repoPath });
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getStats(): CacheStats & { size: number; hitRate: number } {
+    const total = this.stats.hits + this.stats.misses;
+    return {
+      ...this.stats,
+      size: this.cache.size,
+      hitRate: total > 0 ? this.stats.hits / total : 0,
+    };
+  }
+}
+
+// Global cache instance
+let globalCache: AnalysisCache | null = null;
+
+export function getAnalysisCache(): AnalysisCache {
+  if (!globalCache) {
+    globalCache = new AnalysisCache();
+  }
+  return globalCache;
+}
+
+export function initAnalysisCache(options?: { maxEntries?: number; ttlMs?: number }): AnalysisCache {
+  globalCache = new AnalysisCache(options);
+  return globalCache;
+}
 
 export interface CodebaseAnalysis {
   structure: DirectoryEntry[];
@@ -39,6 +219,8 @@ export interface PackageInfo {
 export interface AnalyzerConfig {
   maxDepth?: number;
   maxFiles?: number;
+  enableCache?: boolean; // Enable caching of analysis results (default: true)
+  cache?: AnalysisCache; // Custom cache instance
 }
 
 /**
@@ -130,11 +312,15 @@ export class CodebaseAnalyzer {
   private maxFiles: number;
   private fileCount: number = 0;
   private validationErrors: AnalyzerError[] = [];
+  private enableCache: boolean;
+  private cache: AnalysisCache;
+  private config: AnalyzerConfig;
 
   constructor(repoPath: string, excludePaths: string[] = [], config: AnalyzerConfig = {}) {
     // Normalize and resolve the path
     this.repoPath = isAbsolute(repoPath) ? repoPath : resolve(repoPath);
     this.excludePaths = excludePaths;
+    this.config = config;
 
     // Apply bounds to configuration
     this.maxDepth = this.clampValue(
@@ -147,6 +333,10 @@ export class CodebaseAnalyzer {
       MIN_MAX_FILES,
       MAX_MAX_FILES
     );
+
+    // Cache configuration
+    this.enableCache = config.enableCache !== false; // Default true
+    this.cache = config.cache ?? getAnalysisCache();
   }
 
   /**
@@ -371,6 +561,21 @@ export class CodebaseAnalyzer {
       throw validationResult.error;
     }
 
+    // Check cache if enabled
+    if (this.enableCache) {
+      const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
+      const contentHash = this.cache.generateContentHash(this.repoPath);
+
+      const cached = this.cache.get(cacheKey, contentHash);
+      if (cached) {
+        logger.info('Using cached codebase analysis', {
+          path: this.repoPath,
+          stats: this.cache.getStats(),
+        });
+        return cached;
+      }
+    }
+
     // Reset file count for this analysis
     this.fileCount = 0;
     this.validationErrors = [];
@@ -395,7 +600,7 @@ export class CodebaseAnalyzer {
       logger.warn(`Encountered ${this.validationErrors.length} validation issues during analysis`);
     }
 
-    return {
+    const result: CodebaseAnalysis = {
       structure,
       fileCount,
       todoComments,
@@ -403,6 +608,15 @@ export class CodebaseAnalyzer {
       packages,
       configFiles,
     };
+
+    // Store in cache if enabled
+    if (this.enableCache) {
+      const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
+      const contentHash = this.cache.generateContentHash(this.repoPath);
+      this.cache.set(cacheKey, result, contentHash);
+    }
+
+    return result;
   }
 
   /**

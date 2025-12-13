@@ -1,4 +1,56 @@
 import { AnalyzerError } from '../utils/errors.js';
+interface CacheStats {
+    hits: number;
+    misses: number;
+    invalidations: number;
+}
+export declare class AnalysisCache {
+    private cache;
+    private stats;
+    private maxEntries;
+    private ttlMs;
+    constructor(options?: {
+        maxEntries?: number;
+        ttlMs?: number;
+    });
+    /**
+     * Generate a cache key from repository path and config
+     */
+    generateKey(repoPath: string, excludePaths: string[], config: AnalyzerConfig): string;
+    /**
+     * Generate a content hash based on file modification times
+     * This allows for invalidation when files change
+     */
+    generateContentHash(repoPath: string, maxSamples?: number): string;
+    /**
+     * Get cached analysis if valid
+     */
+    get(key: string, currentContentHash: string): CodebaseAnalysis | null;
+    /**
+     * Store analysis in cache
+     */
+    set(key: string, data: CodebaseAnalysis, contentHash: string): void;
+    /**
+     * Clear all cache entries
+     */
+    clear(): void;
+    /**
+     * Invalidate entries for a specific repository
+     */
+    invalidate(repoPath: string): void;
+    /**
+     * Get cache statistics
+     */
+    getStats(): CacheStats & {
+        size: number;
+        hitRate: number;
+    };
+}
+export declare function getAnalysisCache(): AnalysisCache;
+export declare function initAnalysisCache(options?: {
+    maxEntries?: number;
+    ttlMs?: number;
+}): AnalysisCache;
 export interface CodebaseAnalysis {
     structure: DirectoryEntry[];
     fileCount: number;
@@ -31,6 +83,8 @@ export interface PackageInfo {
 export interface AnalyzerConfig {
     maxDepth?: number;
     maxFiles?: number;
+    enableCache?: boolean;
+    cache?: AnalysisCache;
 }
 /**
  * Result type for validation operations
@@ -46,6 +100,9 @@ export declare class CodebaseAnalyzer {
     private maxFiles;
     private fileCount;
     private validationErrors;
+    private enableCache;
+    private cache;
+    private config;
     constructor(repoPath: string, excludePaths?: string[], config?: AnalyzerConfig);
     /**
      * Clamp a value between min and max bounds
@@ -83,4 +140,5 @@ export declare class CodebaseAnalyzer {
     private findConfigFiles;
     generateSummary(analysis: CodebaseAnalysis): string;
 }
+export {};
 //# sourceMappingURL=analyzer.d.ts.map

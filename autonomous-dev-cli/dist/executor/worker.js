@@ -264,16 +264,48 @@ export class Worker {
         this.log.info('Cloning repository...');
         // Add token to URL for authentication
         const urlWithAuth = this.options.repoUrl.replace('https://github.com', `https://${this.options.githubToken}@github.com`);
+        const useShallow = this.options.useShallowClone !== false; // Default true
+        const sparseConfig = this.options.sparseCheckout;
         // Clone with retry for transient network failures
         return withRetry(async () => {
             const git = simpleGit(taskDir);
-            await git.clone(urlWithAuth, 'repo', ['--depth', '1', '--branch', this.options.baseBranch]);
             const repoDir = join(taskDir, 'repo');
+            // Use sparse checkout for targeted cloning (faster for large repos)
+            if (sparseConfig?.enabled) {
+                this.log.info('Using sparse checkout for optimized cloning');
+                // Initialize empty repo
+                mkdirSync(repoDir, { recursive: true });
+                const repoGit = simpleGit(repoDir);
+                await repoGit.init();
+                await repoGit.addRemote('origin', urlWithAuth);
+                // Enable sparse checkout
+                await repoGit.raw(['config', 'core.sparseCheckout', 'true']);
+                // Write sparse checkout patterns
+                const sparseCheckoutPath = join(repoDir, '.git', 'info', 'sparse-checkout');
+                const patterns = sparseConfig.paths?.length
+                    ? sparseConfig.paths
+                    : ['/*', '!/node_modules']; // Default: all except node_modules
+                writeFileSync(sparseCheckoutPath, patterns.join('\n'));
+                // Fetch and checkout with optional shallow clone
+                const fetchArgs = useShallow
+                    ? ['fetch', '--depth', '1', 'origin', this.options.baseBranch]
+                    : ['fetch', 'origin', this.options.baseBranch];
+                await repoGit.raw(fetchArgs);
+                await repoGit.raw(['checkout', this.options.baseBranch]);
+                this.log.debug('Repository cloned with sparse checkout');
+            }
+            else {
+                // Standard clone (shallow by default)
+                const cloneArgs = useShallow
+                    ? ['--depth', '1', '--branch', this.options.baseBranch]
+                    : ['--branch', this.options.baseBranch];
+                await git.clone(urlWithAuth, 'repo', cloneArgs);
+                this.log.debug('Repository cloned');
+            }
             // Configure git identity
             const repoGit = simpleGit(repoDir);
             await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
             await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
-            this.log.debug('Repository cloned');
             return repoDir;
         }, {
             config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
@@ -295,6 +327,7 @@ export class Worker {
                     repoUrl: this.options.repoUrl,
                     baseBranch: this.options.baseBranch,
                     taskDir,
+                    sparseCheckout: sparseConfig?.enabled,
                 },
                 cause: error,
             });

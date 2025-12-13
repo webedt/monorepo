@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger.js';
 export async function runHealthChecks(options) {
-    const { urls, timeout = 10000, expectedStatus = 200, retries = 2, retryDelay = 1000, } = options;
+    const { urls, timeout = 10000, expectedStatus = 200, retries = 2, retryDelay = 1000, concurrency = 5, parallel = true, } = options;
     const startTime = Date.now();
     if (urls.length === 0) {
         logger.info('No health check URLs configured, skipping');
@@ -10,11 +10,24 @@ export async function runHealthChecks(options) {
             duration: 0,
         };
     }
-    logger.info(`Running health checks for ${urls.length} URL(s)...`);
+    const checkOptions = { timeout, expectedStatus, retries, retryDelay };
+    if (parallel) {
+        logger.info(`Running ${urls.length} health check(s) in parallel (concurrency: ${concurrency})...`);
+        return runParallelHealthChecks(urls, checkOptions, concurrency, startTime);
+    }
+    else {
+        logger.info(`Running ${urls.length} health check(s) sequentially...`);
+        return runSequentialHealthChecks(urls, checkOptions, startTime);
+    }
+}
+/**
+ * Run health checks sequentially (original behavior)
+ */
+async function runSequentialHealthChecks(urls, options, startTime) {
     const checks = [];
     let allPassed = true;
     for (const url of urls) {
-        const check = await checkUrl(url, { timeout, expectedStatus, retries, retryDelay });
+        const check = await checkUrl(url, options);
         checks.push(check);
         if (check.ok) {
             logger.success(`Health check passed: ${url} (${check.status}, ${check.responseTime}ms)`);
@@ -22,6 +35,44 @@ export async function runHealthChecks(options) {
         else {
             logger.failure(`Health check failed: ${url} - ${check.error || `Status ${check.status}`}`);
             allPassed = false;
+        }
+    }
+    return {
+        success: allPassed,
+        checks,
+        duration: Date.now() - startTime,
+    };
+}
+/**
+ * Run health checks in parallel with configurable concurrency
+ * Uses a worker pool pattern to limit concurrent requests
+ */
+async function runParallelHealthChecks(urls, options, concurrency, startTime) {
+    const checks = [];
+    let allPassed = true;
+    // Process URLs in batches based on concurrency limit
+    const batches = [];
+    for (let i = 0; i < urls.length; i += concurrency) {
+        batches.push(urls.slice(i, i + concurrency));
+    }
+    for (const batch of batches) {
+        // Run batch of checks concurrently
+        const batchPromises = batch.map(async (url) => {
+            const check = await checkUrl(url, options);
+            if (check.ok) {
+                logger.success(`Health check passed: ${url} (${check.status}, ${check.responseTime}ms)`);
+            }
+            else {
+                logger.failure(`Health check failed: ${url} - ${check.error || `Status ${check.status}`}`);
+            }
+            return check;
+        });
+        const batchResults = await Promise.all(batchPromises);
+        for (const check of batchResults) {
+            checks.push(check);
+            if (!check.ok) {
+                allPassed = false;
+            }
         }
     }
     return {
