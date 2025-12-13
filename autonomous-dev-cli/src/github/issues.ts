@@ -116,7 +116,7 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           { operation: 'listOpenIssues', label }
         );
       } catch (error) {
-        handleError(error, 'list issues', { label });
+        return handleError(error, 'list issues', { label });
       }
     },
 
@@ -177,7 +177,7 @@ export function createIssueManager(client: GitHubClient): IssueManager {
         if (error.status === 404) {
           return null;
         }
-        handleError(error, 'get issue', { issueNumber: number });
+        return handleError(error, 'get issue', { issueNumber: number });
       }
     },
 
@@ -200,7 +200,7 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           { operation: 'createIssue', title: options.title }
         );
       } catch (error) {
-        handleError(error, 'create issue', { title: options.title });
+        return handleError(error, 'create issue', { title: options.title });
       }
     },
 
