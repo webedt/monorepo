@@ -1,59 +1,247 @@
 import { Octokit } from '@octokit/rest';
 import { logger } from '../utils/logger.js';
-import { GitHubError, createGitHubErrorFromResponse, withRetry, StructuredError, } from '../utils/errors.js';
+import { GitHubError, ErrorCode, createGitHubErrorFromResponse, withRetry, StructuredError, } from '../utils/errors.js';
 const DEFAULT_GITHUB_RETRY_CONFIG = {
     maxRetries: 3,
     baseDelayMs: 1000,
     maxDelayMs: 60000,
     backoffMultiplier: 2,
 };
+const DEFAULT_CIRCUIT_BREAKER_CONFIG = {
+    failureThreshold: 5,
+    successThreshold: 3,
+    resetTimeoutMs: 30000,
+    halfOpenMaxAttempts: 3,
+};
 export class GitHubClient {
     octokit;
     owner;
     repo;
     retryConfig;
+    circuitBreakerConfig;
+    // Circuit breaker state
+    circuitState = 'closed';
+    consecutiveFailures = 0;
+    consecutiveSuccesses = 0;
+    lastFailureTime;
+    lastSuccessTime;
+    lastErrorMessage;
+    halfOpenAttempts = 0;
+    // Rate limit tracking
+    rateLimitRemaining;
+    rateLimitResetAt;
     constructor(options) {
         this.octokit = new Octokit({ auth: options.token });
         this.owner = options.owner;
         this.repo = options.repo;
         this.retryConfig = { ...DEFAULT_GITHUB_RETRY_CONFIG, ...options.retryConfig };
+        this.circuitBreakerConfig = { ...DEFAULT_CIRCUIT_BREAKER_CONFIG, ...options.circuitBreakerConfig };
     }
     get client() {
         return this.octokit;
     }
     /**
+     * Get the current service health status
+     */
+    getServiceHealth() {
+        let status = 'healthy';
+        if (this.circuitState === 'open') {
+            status = 'unavailable';
+        }
+        else if (this.circuitState === 'half-open' || this.consecutiveFailures > 0) {
+            status = 'degraded';
+        }
+        return {
+            status,
+            circuitState: this.circuitState,
+            consecutiveFailures: this.consecutiveFailures,
+            consecutiveSuccesses: this.consecutiveSuccesses,
+            lastFailure: this.lastFailureTime,
+            lastSuccess: this.lastSuccessTime,
+            lastError: this.lastErrorMessage,
+            rateLimitRemaining: this.rateLimitRemaining,
+            rateLimitResetAt: this.rateLimitResetAt,
+        };
+    }
+    /**
+     * Check if the circuit breaker allows requests
+     */
+    canMakeRequest() {
+        if (this.circuitState === 'closed') {
+            return true;
+        }
+        if (this.circuitState === 'open') {
+            // Check if enough time has passed to try half-open
+            const timeSinceFailure = this.lastFailureTime
+                ? Date.now() - this.lastFailureTime.getTime()
+                : Infinity;
+            if (timeSinceFailure >= this.circuitBreakerConfig.resetTimeoutMs) {
+                this.circuitState = 'half-open';
+                this.halfOpenAttempts = 0;
+                logger.info('Circuit breaker transitioning to half-open state', {
+                    component: 'GitHubClient',
+                    timeSinceLastFailure: timeSinceFailure,
+                });
+                return true;
+            }
+            return false;
+        }
+        // Half-open state: allow limited attempts
+        return this.halfOpenAttempts < this.circuitBreakerConfig.halfOpenMaxAttempts;
+    }
+    /**
+     * Record a successful request
+     */
+    recordSuccess() {
+        this.consecutiveFailures = 0;
+        this.consecutiveSuccesses++;
+        this.lastSuccessTime = new Date();
+        if (this.circuitState === 'half-open') {
+            if (this.consecutiveSuccesses >= this.circuitBreakerConfig.successThreshold) {
+                this.circuitState = 'closed';
+                logger.info('Circuit breaker closed after successful recovery', {
+                    component: 'GitHubClient',
+                    consecutiveSuccesses: this.consecutiveSuccesses,
+                });
+            }
+        }
+    }
+    /**
+     * Record a failed request
+     */
+    recordFailure(error) {
+        this.consecutiveSuccesses = 0;
+        this.consecutiveFailures++;
+        this.lastFailureTime = new Date();
+        this.lastErrorMessage = error.message;
+        if (this.circuitState === 'half-open') {
+            this.halfOpenAttempts++;
+            if (this.halfOpenAttempts >= this.circuitBreakerConfig.halfOpenMaxAttempts) {
+                this.circuitState = 'open';
+                logger.warn('Circuit breaker reopened after half-open failures', {
+                    component: 'GitHubClient',
+                    halfOpenAttempts: this.halfOpenAttempts,
+                });
+            }
+        }
+        else if (this.consecutiveFailures >= this.circuitBreakerConfig.failureThreshold) {
+            this.circuitState = 'open';
+            logger.warn('Circuit breaker opened due to consecutive failures', {
+                component: 'GitHubClient',
+                consecutiveFailures: this.consecutiveFailures,
+                lastError: error.message,
+            });
+        }
+    }
+    /**
+     * Check if an error is due to rate limiting and update rate limit state
+     */
+    updateRateLimitState(error) {
+        const statusCode = error.status ?? error.response?.status;
+        if (statusCode === 429 || error.message?.toLowerCase().includes('rate limit')) {
+            const resetHeader = error.response?.headers?.['x-ratelimit-reset'];
+            if (resetHeader) {
+                this.rateLimitResetAt = new Date(parseInt(resetHeader) * 1000);
+                this.rateLimitRemaining = 0;
+            }
+        }
+    }
+    /**
      * Execute a GitHub API request with automatic retry for transient failures
+     * Integrates with circuit breaker for graceful degradation
      */
     async executeWithRetry(operation, endpoint, context) {
-        return withRetry(operation, {
-            config: this.retryConfig,
-            onRetry: (error, attempt, delay) => {
-                logger.warn(`GitHub API retry (attempt ${attempt}): ${endpoint}`, {
-                    error: error.message,
-                    retryInMs: delay,
-                });
-            },
-            shouldRetry: (error) => {
-                // Check if it's a StructuredError with retry flag
-                if (error instanceof StructuredError) {
-                    return error.isRetryable;
-                }
-                // Check for common retryable HTTP status codes
-                const statusCode = error.status ?? error.response?.status;
-                if (statusCode === 429)
-                    return true; // Rate limited
-                if (statusCode >= 500)
-                    return true; // Server errors
-                // Network errors
-                const code = error.code;
-                if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
-                    return true;
-                }
-                return false;
-            },
-        }).catch((error) => {
+        // Check circuit breaker state
+        if (!this.canMakeRequest()) {
+            const error = new GitHubError(ErrorCode.GITHUB_API_ERROR, `GitHub API unavailable (circuit breaker open). Will retry after ${this.circuitBreakerConfig.resetTimeoutMs / 1000}s`, {
+                statusCode: 503,
+                endpoint,
+                context: {
+                    ...context,
+                    circuitState: this.circuitState,
+                    lastFailure: this.lastFailureTime?.toISOString(),
+                },
+            });
+            logger.warn('GitHub API request blocked by circuit breaker', {
+                endpoint,
+                circuitState: this.circuitState,
+                lastFailure: this.lastFailureTime?.toISOString(),
+            });
+            throw error;
+        }
+        try {
+            const result = await withRetry(operation, {
+                config: this.retryConfig,
+                onRetry: (error, attempt, delay) => {
+                    this.updateRateLimitState(error);
+                    logger.warn(`GitHub API retry (attempt ${attempt}): ${endpoint}`, {
+                        error: error.message,
+                        retryInMs: delay,
+                        circuitState: this.circuitState,
+                    });
+                },
+                shouldRetry: (error) => {
+                    // Check if it's a StructuredError with retry flag
+                    if (error instanceof StructuredError) {
+                        return error.isRetryable;
+                    }
+                    // Check for common retryable HTTP status codes
+                    const statusCode = error.status ?? error.response?.status;
+                    if (statusCode === 429)
+                        return true; // Rate limited
+                    if (statusCode >= 500)
+                        return true; // Server errors
+                    // Network errors
+                    const code = error.code;
+                    if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
+                        return true;
+                    }
+                    return false;
+                },
+            });
+            // Success - record it
+            this.recordSuccess();
+            return result;
+        }
+        catch (error) {
+            // Failure - record it and update rate limit state
+            this.updateRateLimitState(error);
+            this.recordFailure(error);
             throw this.handleError(error, endpoint, context);
-        });
+        }
+    }
+    /**
+     * Execute a GitHub API request with graceful degradation support.
+     * Returns the fallback value if the circuit breaker is open or all retries fail.
+     */
+    async executeWithFallback(operation, fallback, endpoint, context) {
+        try {
+            const value = await this.executeWithRetry(operation, endpoint, context);
+            return { value, degraded: false };
+        }
+        catch (error) {
+            logger.warn(`GitHub API degraded - using fallback for ${endpoint}`, {
+                error: error.message,
+                circuitState: this.circuitState,
+            });
+            return { value: fallback, degraded: true };
+        }
+    }
+    /**
+     * Check if the GitHub API is currently available
+     */
+    isAvailable() {
+        return this.circuitState !== 'open';
+    }
+    /**
+     * Reset the circuit breaker state (for testing or manual recovery)
+     */
+    resetCircuitBreaker() {
+        this.circuitState = 'closed';
+        this.consecutiveFailures = 0;
+        this.consecutiveSuccesses = 0;
+        this.halfOpenAttempts = 0;
+        logger.info('Circuit breaker manually reset', { component: 'GitHubClient' });
     }
     /**
      * Convert an error to a structured GitHubError

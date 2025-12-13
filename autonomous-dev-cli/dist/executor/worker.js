@@ -1,11 +1,12 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { simpleGit } from 'simple-git';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdirSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { logger, generateCorrelationId } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import { StructuredError, ExecutionError, ErrorCode, withRetry, } from '../utils/errors.js';
+import { cleanupWorkspace as performCleanup } from '../utils/cleanup.js';
 import { createChatSession, updateChatSession, addMessage, addEvent, generateSessionPath, } from '../db/index.js';
 export class Worker {
     options;
@@ -238,27 +239,51 @@ export class Worker {
             };
         }
         finally {
-            // Cleanup workspace
-            this.cleanupWorkspace(taskDir);
+            // Cleanup workspace with verification and retry logic
+            await this.cleanupWorkspace(taskDir);
         }
     }
     async setupWorkspace(taskDir) {
+        // Clean up any existing directory first with proper cleanup
         if (existsSync(taskDir)) {
-            rmSync(taskDir, { recursive: true, force: true });
+            const result = await performCleanup(taskDir, {
+                maxRetries: 2,
+                timeoutMs: 10000,
+                enableDeferredCleanup: false,
+            }, this.log);
+            if (!result.success) {
+                this.log.warn(`Pre-cleanup of existing workspace failed: ${taskDir}`, {
+                    error: result.error,
+                    strategy: result.strategy,
+                });
+            }
         }
         mkdirSync(taskDir, { recursive: true });
         this.log.debug(`Created workspace: ${taskDir}`);
     }
-    cleanupWorkspace(taskDir) {
-        try {
-            if (existsSync(taskDir)) {
-                rmSync(taskDir, { recursive: true, force: true });
-                this.log.debug(`Cleaned up workspace: ${taskDir}`);
-            }
+    async cleanupWorkspace(taskDir) {
+        const result = await performCleanup(taskDir, {
+            maxRetries: 3,
+            retryDelayMs: 500,
+            timeoutMs: 30000,
+            enableDeferredCleanup: true,
+        }, this.log);
+        if (result.success) {
+            this.log.debug(`Cleaned up workspace: ${taskDir}`, {
+                duration: result.duration,
+                retries: result.retries,
+                strategy: result.strategy,
+            });
         }
-        catch (error) {
-            this.log.warn(`Failed to cleanup workspace: ${taskDir}`);
+        else {
+            this.log.warn(`Workspace cleanup failed, added to deferred queue: ${taskDir}`, {
+                error: result.error,
+                duration: result.duration,
+                retries: result.retries,
+                strategy: result.strategy,
+            });
         }
+        return result;
     }
     async cloneRepo(taskDir) {
         this.log.info('Cloning repository...');

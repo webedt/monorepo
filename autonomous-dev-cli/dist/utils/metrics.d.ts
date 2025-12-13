@@ -113,6 +113,13 @@ declare class MetricsRegistry {
     readonly claudeApiCallsTotal: Counter;
     readonly claudeApiErrorsTotal: Counter;
     readonly claudeToolUsageTotal: Counter;
+    readonly cleanupOperationsTotal: Counter;
+    readonly cleanupFailuresTotal: Counter;
+    readonly cleanupDurationMs: Histogram;
+    readonly cleanupBytesFreed: Counter;
+    readonly orphanedWorkspacesFound: Counter;
+    readonly orphanedWorkspacesCleaned: Counter;
+    readonly deferredCleanupQueueSize: Gauge;
     private startTime;
     /**
      * Record a task completion

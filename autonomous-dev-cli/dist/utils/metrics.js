@@ -187,6 +187,14 @@ class MetricsRegistry {
     claudeApiCallsTotal = new Counter('autonomous_dev_claude_api_calls_total', 'Total number of Claude API calls');
     claudeApiErrorsTotal = new Counter('autonomous_dev_claude_api_errors_total', 'Total number of Claude API errors');
     claudeToolUsageTotal = new Counter('autonomous_dev_claude_tool_usage_total', 'Total number of tool uses by Claude');
+    // Cleanup metrics
+    cleanupOperationsTotal = new Counter('autonomous_dev_cleanup_operations_total', 'Total number of workspace cleanup operations by status and strategy');
+    cleanupFailuresTotal = new Counter('autonomous_dev_cleanup_failures_total', 'Total number of cleanup failures by reason');
+    cleanupDurationMs = new Histogram('autonomous_dev_cleanup_duration_ms', 'Cleanup operation duration in milliseconds', [100, 500, 1000, 2000, 5000, 10000, 30000]);
+    cleanupBytesFreed = new Counter('autonomous_dev_cleanup_bytes_freed_total', 'Total bytes freed by cleanup operations');
+    orphanedWorkspacesFound = new Counter('autonomous_dev_orphaned_workspaces_found_total', 'Total number of orphaned workspaces found on startup');
+    orphanedWorkspacesCleaned = new Counter('autonomous_dev_orphaned_workspaces_cleaned_total', 'Total number of orphaned workspaces successfully cleaned');
+    deferredCleanupQueueSize = new Gauge('autonomous_dev_deferred_cleanup_queue_size', 'Current number of directories in the deferred cleanup queue');
     startTime = Date.now();
     /**
      * Record a task completion
@@ -305,6 +313,13 @@ class MetricsRegistry {
             this.claudeApiCallsTotal,
             this.claudeApiErrorsTotal,
             this.claudeToolUsageTotal,
+            this.cleanupOperationsTotal,
+            this.cleanupFailuresTotal,
+            this.cleanupDurationMs,
+            this.cleanupBytesFreed,
+            this.orphanedWorkspacesFound,
+            this.orphanedWorkspacesCleaned,
+            this.deferredCleanupQueueSize,
         ];
         for (const collector of allCollectors) {
             const metrics = collector.getMetrics();
@@ -383,6 +398,13 @@ class MetricsRegistry {
             this.claudeApiCallsTotal,
             this.claudeApiErrorsTotal,
             this.claudeToolUsageTotal,
+            this.cleanupOperationsTotal,
+            this.cleanupFailuresTotal,
+            this.cleanupDurationMs,
+            this.cleanupBytesFreed,
+            this.orphanedWorkspacesFound,
+            this.orphanedWorkspacesCleaned,
+            this.deferredCleanupQueueSize,
         ];
         const result = {};
         for (const collector of allCollectors) {

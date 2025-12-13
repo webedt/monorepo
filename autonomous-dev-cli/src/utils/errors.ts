@@ -52,6 +52,12 @@ export enum ErrorCode {
   EXEC_PUSH_FAILED = 'EXEC_PUSH_FAILED',
   EXEC_TIMEOUT = 'EXEC_TIMEOUT',
 
+  // Cleanup errors (5100-5199)
+  CLEANUP_FAILED = 'CLEANUP_FAILED',
+  CLEANUP_TIMEOUT = 'CLEANUP_TIMEOUT',
+  CLEANUP_PERMISSION_DENIED = 'CLEANUP_PERMISSION_DENIED',
+  CLEANUP_FILE_LOCKED = 'CLEANUP_FILE_LOCKED',
+
   // Analyzer errors (6000-6999)
   ANALYZER_PATH_NOT_FOUND = 'ANALYZER_PATH_NOT_FOUND',
   ANALYZER_PATH_NOT_READABLE = 'ANALYZER_PATH_NOT_READABLE',
@@ -179,6 +185,8 @@ export class StructuredError extends Error {
       ErrorCode.EXEC_PUSH_FAILED,
       ErrorCode.SERVICE_DEGRADED,
       ErrorCode.CIRCUIT_BREAKER_OPEN,
+      ErrorCode.CLEANUP_FAILED,
+      ErrorCode.CLEANUP_FILE_LOCKED,
     ];
     return retryableCodes.includes(code);
   }

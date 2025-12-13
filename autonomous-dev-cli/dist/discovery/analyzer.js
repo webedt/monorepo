@@ -117,9 +117,11 @@ export class AnalysisCache {
      * Invalidate entries for a specific repository
      */
     invalidate(repoPath) {
-        for (const [key, entry] of this.cache.entries()) {
-            // Keys contain the repo path hash, but we can check via stored data
-            // For simplicity, clear entries that might be related
+        const keysToDelete = [];
+        this.cache.forEach((entry, key) => {
+            keysToDelete.push(key);
+        });
+        for (const key of keysToDelete) {
             this.cache.delete(key);
             this.stats.invalidations++;
         }

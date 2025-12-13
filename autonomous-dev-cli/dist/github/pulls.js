@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { createGitHubErrorFromResponse, } from '../utils/errors.js';
 export function createPRManager(client) {
     const octokit = client.client;
     const { owner, repo } = client;
@@ -14,7 +15,25 @@ export function createPRManager(client) {
         merged: data.merged,
         draft: data.draft,
     });
+    /**
+     * Wrap error with structured error handling
+     */
+    const handleError = (error, operation, context) => {
+        const structuredError = createGitHubErrorFromResponse(error, operation, {
+            owner,
+            repo,
+            ...context,
+        });
+        logger.error(`Failed to ${operation}`, { error: structuredError.message, ...context });
+        throw structuredError;
+    };
     return {
+        getServiceHealth() {
+            return client.getServiceHealth();
+        },
+        isAvailable() {
+            return client.isAvailable();
+        },
         async listOpenPRs() {
             try {
                 const { data } = await octokit.pulls.list({
@@ -26,9 +45,25 @@ export function createPRManager(client) {
                 return data.map(mapPR);
             }
             catch (error) {
-                logger.error('Failed to list PRs', { error });
-                throw error;
+                handleError(error, 'list PRs');
             }
+        },
+        async listOpenPRsWithFallback(fallback = []) {
+            const result = await client.executeWithFallback(async () => {
+                const { data } = await octokit.pulls.list({
+                    owner,
+                    repo,
+                    state: 'open',
+                    per_page: 100,
+                });
+                return data.map(mapPR);
+            }, fallback, `GET /repos/${owner}/${repo}/pulls`, { operation: 'listOpenPRs' });
+            if (result.degraded) {
+                logger.warn('PR list fetch degraded - using fallback', {
+                    fallbackCount: fallback.length,
+                });
+            }
+            return result;
         },
         async getPR(number) {
             try {
@@ -43,7 +78,7 @@ export function createPRManager(client) {
                 if (error.status === 404) {
                     return null;
                 }
-                throw error;
+                handleError(error, 'get PR', { prNumber: number });
             }
         },
         async findPRForBranch(branchName, base) {
@@ -64,8 +99,7 @@ export function createPRManager(client) {
                 return mapPR(data[0]);
             }
             catch (error) {
-                logger.error('Failed to find PR for branch', { error, branchName });
-                throw error;
+                handleError(error, 'find PR for branch', { branchName, base });
             }
         },
         async createPR(options) {
@@ -96,9 +130,36 @@ export function createPRManager(client) {
                         return existing;
                     }
                 }
-                logger.error('Failed to create PR', { error, head: options.head });
-                throw error;
+                handleError(error, 'create PR', { head: options.head, base: options.base });
             }
+        },
+        async createPRWithFallback(options) {
+            const result = await client.executeWithFallback(async () => {
+                // Check if PR already exists
+                const existing = await this.findPRForBranch(options.head, options.base);
+                if (existing) {
+                    logger.info(`PR already exists for branch '${options.head}': #${existing.number}`);
+                    return existing;
+                }
+                const { data } = await octokit.pulls.create({
+                    owner,
+                    repo,
+                    title: options.title,
+                    body: options.body,
+                    head: options.head,
+                    base: options.base,
+                    draft: options.draft,
+                });
+                logger.info(`Created PR #${data.number}: ${data.title}`);
+                return mapPR(data);
+            }, null, `POST /repos/${owner}/${repo}/pulls`, { operation: 'createPR', head: options.head });
+            if (result.degraded) {
+                logger.warn('PR creation degraded - operation skipped', {
+                    head: options.head,
+                    base: options.base,
+                });
+            }
+            return result;
         },
         async mergePR(number, method = 'squash') {
             try {
@@ -116,13 +177,41 @@ export function createPRManager(client) {
                 };
             }
             catch (error) {
-                logger.error('Failed to merge PR', { error, number, method });
+                logger.error('Failed to merge PR', { error: error.message, number, method });
                 return {
                     merged: false,
                     sha: null,
                     message: error.message || 'Merge failed',
                 };
             }
+        },
+        async mergePRWithFallback(number, method = 'squash') {
+            const failedResult = {
+                merged: false,
+                sha: null,
+                message: 'Merge skipped due to service degradation',
+            };
+            const result = await client.executeWithFallback(async () => {
+                const { data } = await octokit.pulls.merge({
+                    owner,
+                    repo,
+                    pull_number: number,
+                    merge_method: method,
+                });
+                logger.info(`Merged PR #${number} via ${method}`);
+                return {
+                    merged: data.merged,
+                    sha: data.sha,
+                    message: data.message,
+                };
+            }, failedResult, `PUT /repos/${owner}/${repo}/pulls/${number}/merge`, { operation: 'mergePR', prNumber: number, method });
+            if (result.degraded) {
+                logger.warn('PR merge degraded - operation skipped', {
+                    prNumber: number,
+                    method,
+                });
+            }
+            return result;
         },
         async closePR(number) {
             try {
@@ -135,8 +224,7 @@ export function createPRManager(client) {
                 logger.info(`Closed PR #${number}`);
             }
             catch (error) {
-                logger.error('Failed to close PR', { error, number });
-                throw error;
+                handleError(error, 'close PR', { prNumber: number });
             }
         },
         async updatePRFromBase(number) {
@@ -168,8 +256,7 @@ export function createPRManager(client) {
                     logger.warn(`PR #${number} has merge conflicts`);
                     return false;
                 }
-                logger.error('Failed to update PR from base', { error, number });
-                throw error;
+                handleError(error, 'update PR from base', { prNumber: number });
             }
         },
         async waitForMergeable(number, maxAttempts = 30) {
@@ -208,8 +295,7 @@ export function createPRManager(client) {
                 };
             }
             catch (error) {
-                logger.error('Failed to get checks status', { error, ref });
-                throw error;
+                handleError(error, 'get checks status', { ref });
             }
         },
     };

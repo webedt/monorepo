@@ -102,6 +102,18 @@ declare class Logger {
     failure(message: string): void;
     step(step: number, total: number, message: string): void;
     divider(): void;
+    /**
+     * Log service degradation event
+     */
+    degraded(service: string, message: string, meta?: object): void;
+    /**
+     * Log service recovery event
+     */
+    recovered(service: string, message: string, meta?: object): void;
+    /**
+     * Log service health status
+     */
+    serviceStatus(service: string, status: 'healthy' | 'degraded' | 'unavailable', details?: object): void;
     header(title: string): void;
     /**
      * Create a child logger with a prefix and optionally inherit correlation ID

@@ -23,6 +23,11 @@ import {
   wrapError,
   type ErrorContext,
 } from './utils/errors.js';
+import {
+  cleanupOrphanedWorkspaces,
+  processDeferredCleanup,
+  getCleanupStatus,
+} from './utils/cleanup.js';
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -307,6 +312,17 @@ export class Daemon {
       message: this.isRunning ? `Running cycle ${this.cycleCount}` : 'Daemon not running',
     }));
 
+    this.monitoringServer.registerHealthCheck(async () => {
+      const cleanupStatus = getCleanupStatus();
+      // Fail if deferred queue is growing too large (more than 20 items indicates persistent cleanup issues)
+      const status = cleanupStatus.deferredQueueSize > 20 ? 'fail' : 'pass';
+      return {
+        name: 'cleanup',
+        status,
+        message: `Deferred cleanup queue: ${cleanupStatus.deferredQueueSize} items, ${cleanupStatus.operationCount} total operations`,
+      };
+    });
+
     await this.monitoringServer.start();
   }
 
@@ -418,7 +434,79 @@ export class Daemon {
       mkdirSync(this.config.execution.workDir, { recursive: true });
     }
 
+    // Clean up orphaned workspaces from previous runs
+    await this.cleanupOrphanedWorkspacesOnStartup();
+
     logger.success('Initialization complete');
+  }
+
+  /**
+   * Clean up orphaned workspaces from previous daemon runs
+   */
+  private async cleanupOrphanedWorkspacesOnStartup(): Promise<void> {
+    logger.info('Checking for orphaned workspaces from previous runs...');
+
+    try {
+      const result = await cleanupOrphanedWorkspaces(
+        this.config.execution.workDir,
+        {
+          maxRetries: 3,
+          retryDelayMs: 500,
+          timeoutMs: 30000,
+          enableDeferredCleanup: true,
+        }
+      );
+
+      if (result.found > 0) {
+        logger.info(`Orphaned workspace cleanup complete`, {
+          found: result.found,
+          cleaned: result.cleaned,
+          failed: result.failed,
+          totalSizeBytes: result.totalSize,
+        });
+
+        if (result.failed > 0) {
+          logger.warn(`${result.failed} orphaned workspaces could not be cleaned, will retry later`);
+        }
+      } else {
+        logger.debug('No orphaned workspaces found');
+      }
+    } catch (error) {
+      logger.warn(`Orphaned workspace cleanup failed: ${(error as Error).message}`);
+      // Continue startup even if cleanup fails
+    }
+  }
+
+  /**
+   * Process deferred cleanup items from the queue
+   */
+  private async processDeferredCleanupItems(): Promise<void> {
+    const cleanupStatus = getCleanupStatus();
+
+    if (cleanupStatus.deferredQueueSize === 0) {
+      return;
+    }
+
+    logger.debug(`Processing ${cleanupStatus.deferredQueueSize} deferred cleanup items`);
+
+    try {
+      const result = await processDeferredCleanup({
+        maxRetries: 2,
+        retryDelayMs: 500,
+        timeoutMs: 15000,
+        enableDeferredCleanup: false,
+      });
+
+      if (result.processed > 0) {
+        logger.info(`Deferred cleanup: ${result.succeeded}/${result.processed} succeeded`, {
+          processed: result.processed,
+          succeeded: result.succeeded,
+          failed: result.failed,
+        });
+      }
+    } catch (error) {
+      logger.warn(`Deferred cleanup processing failed: ${(error as Error).message}`);
+    }
   }
 
   private async shutdown(): Promise<void> {
@@ -726,8 +814,15 @@ export class Daemon {
         }
       }
 
+      // Process any deferred cleanup items at end of cycle
+      await this.processDeferredCleanupItems();
+
       // Update service health at end of cycle
       const finalHealth = this.updateServiceHealth();
+
+      // Update deferred cleanup queue size metric
+      const cleanupStatus = getCleanupStatus();
+      metrics.deferredCleanupQueueSize.set({}, cleanupStatus.deferredQueueSize);
 
       return {
         success: errors.length === 0,

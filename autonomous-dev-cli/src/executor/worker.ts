@@ -14,6 +14,7 @@ import {
   withRetry,
   type ErrorContext,
 } from '../utils/errors.js';
+import { cleanupWorkspace as performCleanup, type CleanupResult } from '../utils/cleanup.js';
 import { type Issue } from '../github/issues.js';
 import {
   createChatSession,
@@ -332,28 +333,56 @@ export class Worker {
         chatSessionId,
       };
     } finally {
-      // Cleanup workspace
-      this.cleanupWorkspace(taskDir);
+      // Cleanup workspace with verification and retry logic
+      await this.cleanupWorkspace(taskDir);
     }
   }
 
   private async setupWorkspace(taskDir: string): Promise<void> {
+    // Clean up any existing directory first with proper cleanup
     if (existsSync(taskDir)) {
-      rmSync(taskDir, { recursive: true, force: true });
+      const result = await performCleanup(taskDir, {
+        maxRetries: 2,
+        timeoutMs: 10000,
+        enableDeferredCleanup: false,
+      }, this.log);
+
+      if (!result.success) {
+        this.log.warn(`Pre-cleanup of existing workspace failed: ${taskDir}`, {
+          error: result.error,
+          strategy: result.strategy,
+        });
+      }
     }
+
     mkdirSync(taskDir, { recursive: true });
     this.log.debug(`Created workspace: ${taskDir}`);
   }
 
-  private cleanupWorkspace(taskDir: string): void {
-    try {
-      if (existsSync(taskDir)) {
-        rmSync(taskDir, { recursive: true, force: true });
-        this.log.debug(`Cleaned up workspace: ${taskDir}`);
-      }
-    } catch (error) {
-      this.log.warn(`Failed to cleanup workspace: ${taskDir}`);
+  private async cleanupWorkspace(taskDir: string): Promise<CleanupResult> {
+    const result = await performCleanup(taskDir, {
+      maxRetries: 3,
+      retryDelayMs: 500,
+      timeoutMs: 30000,
+      enableDeferredCleanup: true,
+    }, this.log);
+
+    if (result.success) {
+      this.log.debug(`Cleaned up workspace: ${taskDir}`, {
+        duration: result.duration,
+        retries: result.retries,
+        strategy: result.strategy,
+      });
+    } else {
+      this.log.warn(`Workspace cleanup failed, added to deferred queue: ${taskDir}`, {
+        error: result.error,
+        duration: result.duration,
+        retries: result.retries,
+        strategy: result.strategy,
+      });
     }
+
+    return result;
   }
 
   private async cloneRepo(taskDir: string): Promise<string> {

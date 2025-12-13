@@ -1,4 +1,4 @@
-export { GitHubClient, createGitHubClient, type GitHubClientOptions } from './client.js';
+export { GitHubClient, createGitHubClient, type GitHubClientOptions, type CircuitBreakerConfig, type CircuitState, type ServiceHealth, } from './client.js';
 export { createIssueManager, type IssueManager, type Issue, type CreateIssueOptions } from './issues.js';
 export { createBranchManager, type BranchManager, type Branch } from './branches.js';
 export { createPRManager, type PRManager, type PullRequest, type CreatePROptions, type MergeResult } from './pulls.js';

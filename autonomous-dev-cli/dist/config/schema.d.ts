@@ -1,15 +1,4 @@
 import { z } from 'zod';
-/**
- * Configuration Schema for Autonomous Dev CLI
- *
- * This schema defines all configuration options available for the CLI.
- * Configuration can be provided via:
- *   1. JSON config file (autonomous-dev.config.json)
- *   2. Environment variables
- *   3. Default values
- *
- * Priority: Environment variables > Config file > Defaults
- */
 export declare const ConfigSchema: z.ZodObject<{
     /**
      * Target Repository Settings
@@ -165,17 +154,23 @@ export declare const ConfigSchema: z.ZodObject<{
     }>;
     /**
      * Credentials
-     * Authentication credentials (typically set via environment variables).
+     * Authentication credentials (MUST be set via environment variables, NOT config files).
+     *
+     * SECURITY WARNING: Never store credentials in config files.
+     * Use environment variables exclusively:
+     *   - GITHUB_TOKEN for GitHub authentication
+     *   - CLAUDE_ACCESS_TOKEN and CLAUDE_REFRESH_TOKEN for Claude
+     *   - DATABASE_URL for database connections
      */
     credentials: z.ZodObject<{
-        /** GitHub personal access token (env: GITHUB_TOKEN) */
-        githubToken: z.ZodOptional<z.ZodString>;
+        /** GitHub personal access token (env: GITHUB_TOKEN) - DO NOT set in config file */
+        githubToken: z.ZodOptional<z.ZodEffects<z.ZodString, string, string>>;
         /** Claude API authentication */
         claudeAuth: z.ZodOptional<z.ZodObject<{
-            /** Claude access token (env: CLAUDE_ACCESS_TOKEN) */
-            accessToken: z.ZodString;
-            /** Claude refresh token (env: CLAUDE_REFRESH_TOKEN) */
-            refreshToken: z.ZodString;
+            /** Claude access token (env: CLAUDE_ACCESS_TOKEN) - DO NOT set in config file */
+            accessToken: z.ZodEffects<z.ZodString, string, string>;
+            /** Claude refresh token (env: CLAUDE_REFRESH_TOKEN) - DO NOT set in config file */
+            refreshToken: z.ZodEffects<z.ZodString, string, string>;
             /** Token expiration timestamp */
             expiresAt: z.ZodOptional<z.ZodNumber>;
         }, "strip", z.ZodTypeAny, {
@@ -187,8 +182,8 @@ export declare const ConfigSchema: z.ZodObject<{
             refreshToken: string;
             expiresAt?: number | undefined;
         }>>;
-        /** Database URL for credential storage (env: DATABASE_URL) */
-        databaseUrl: z.ZodOptional<z.ZodString>;
+        /** Database URL for credential storage (env: DATABASE_URL) - DO NOT set in config file */
+        databaseUrl: z.ZodOptional<z.ZodEffects<z.ZodString, string, string>>;
         /** User email for credential lookup (env: USER_EMAIL) */
         userEmail: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
@@ -310,5 +305,10 @@ export declare const ConfigSchema: z.ZodObject<{
     };
 }>;
 export type Config = z.infer<typeof ConfigSchema>;
+/**
+ * Validate that a config object doesn't contain embedded credentials
+ * Returns an array of warning messages for any potential credential leaks
+ */
+export declare function validateNoCredentialsInConfig(config: Partial<Config>): string[];
 export declare const defaultConfig: Partial<Config>;
 //# sourceMappingURL=schema.d.ts.map
