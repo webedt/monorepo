@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { loadConfig, getConfigHelp } from './index.js';
 import { ConfigError, ErrorCode } from '../utils/errors.js';
+import { validateNoCredentialsInConfig, ConfigSchema, defaultConfig } from './schema.js';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -472,6 +473,251 @@ describe('Config Schema', () => {
         assert.strictEqual(loadedConfig.discovery.tasksPerCycle, 5);
         assert.strictEqual(loadedConfig.execution.parallelWorkers, 4);
         assert.strictEqual(loadedConfig.merge.mergeMethod, 'squash');
+    });
+});
+describe('Credential Validation', () => {
+    describe('validateNoCredentialsInConfig', () => {
+        it('should detect Anthropic API keys (sk-ant-)', () => {
+            const config = {
+                credentials: {
+                    claudeAuth: {
+                        accessToken: 'sk-ant-abcdefghijklmnop1234567890',
+                        refreshToken: '',
+                    },
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.ok(warnings.length > 0);
+            assert.ok(warnings.some(w => w.includes('Potential credential detected')));
+        });
+        it('should detect GitHub personal access tokens (ghp_)', () => {
+            const config = {
+                credentials: {
+                    githubToken: 'ghp_abcdefghijklmnopqrstuvwxyz1234567890',
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.ok(warnings.length > 0);
+            assert.ok(warnings.some(w => w.includes('Potential credential detected')));
+        });
+        it('should detect GitHub OAuth tokens (gho_)', () => {
+            const config = {
+                credentials: {
+                    githubToken: 'gho_abcdefghijklmnopqrstuvwxyz1234567890',
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.ok(warnings.length > 0);
+        });
+        it('should detect GitHub PATs (github_pat_)', () => {
+            const config = {
+                credentials: {
+                    githubToken: 'github_pat_abcdefghijklmnopqrstuvwxyz12345',
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.ok(warnings.length > 0);
+        });
+        it('should detect Bearer tokens', () => {
+            const config = {
+                credentials: {
+                    githubToken: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.ok(warnings.length > 0);
+        });
+        it('should detect Basic auth tokens', () => {
+            const config = {
+                credentials: {
+                    githubToken: 'Basic dXNlcm5hbWU6cGFzc3dvcmQ=',
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.ok(warnings.length > 0);
+        });
+        it('should not flag short strings', () => {
+            const config = {
+                repo: {
+                    owner: 'myuser',
+                    name: 'myrepo',
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.strictEqual(warnings.length, 0);
+        });
+        it('should not flag normal configuration values', () => {
+            const config = {
+                repo: {
+                    owner: 'organization-name',
+                    name: 'repository-name',
+                    baseBranch: 'main',
+                },
+                execution: {
+                    workDir: '/tmp/autonomous-dev',
+                },
+                discovery: {
+                    issueLabel: 'autonomous-dev',
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            assert.strictEqual(warnings.length, 0);
+        });
+        it('should check nested objects recursively', () => {
+            const config = {
+                credentials: {
+                    claudeAuth: {
+                        accessToken: 'sk-ant-verylongsecrettokenstring12345',
+                        refreshToken: 'ghp_anothersecrettokenthatisalsoverylongstring',
+                    },
+                },
+            };
+            const warnings = validateNoCredentialsInConfig(config);
+            // Should detect both credential patterns
+            assert.ok(warnings.length >= 2);
+        });
+        it('should return empty array for empty config', () => {
+            const warnings = validateNoCredentialsInConfig({});
+            assert.strictEqual(warnings.length, 0);
+        });
+    });
+    describe('ConfigSchema credential validation', () => {
+        const validBaseConfig = {
+            repo: { owner: 'test', name: 'repo', baseBranch: 'main' },
+            discovery: {
+                tasksPerCycle: 5,
+                maxOpenIssues: 10,
+                excludePaths: ['node_modules'],
+                issueLabel: 'test',
+                maxDepth: 10,
+                maxFiles: 10000,
+            },
+            execution: {
+                parallelWorkers: 4,
+                timeoutMinutes: 30,
+                workDir: '/tmp/test',
+            },
+            evaluation: {
+                requireBuild: true,
+                requireTests: true,
+                requireHealthCheck: false,
+                requireSmokeTests: false,
+                healthCheckUrls: [],
+                smokeTestUrls: [],
+                previewUrlPattern: '',
+            },
+            merge: {
+                autoMerge: true,
+                requireAllChecks: true,
+                maxRetries: 3,
+                conflictStrategy: 'rebase',
+                mergeMethod: 'squash',
+            },
+            daemon: {
+                loopIntervalMs: 60000,
+                pauseBetweenCycles: true,
+            },
+            logging: {
+                format: 'pretty',
+                level: 'info',
+                includeCorrelationId: true,
+                includeTimestamp: true,
+            },
+            circuitBreaker: {
+                failureThreshold: 5,
+                resetTimeoutMs: 60000,
+                baseDelayMs: 100,
+                maxDelayMs: 30000,
+                successThreshold: 1,
+                enabled: true,
+            },
+            credentials: {},
+        };
+        it('should reject credentials in config file strings via Zod refinement', () => {
+            const result = ConfigSchema.safeParse({
+                ...validBaseConfig,
+                credentials: {
+                    githubToken: 'ghp_abcdefghijklmnopqrstuvwxyz1234567890',
+                },
+            });
+            assert.strictEqual(result.success, false);
+            if (!result.success) {
+                const errorMessages = result.error.errors.map(e => e.message);
+                assert.ok(errorMessages.some(m => m.includes('environment variables')));
+            }
+        });
+        it('should accept empty credential strings', () => {
+            const result = ConfigSchema.safeParse({
+                ...validBaseConfig,
+                credentials: {
+                    githubToken: '',
+                },
+            });
+            assert.strictEqual(result.success, true);
+        });
+        it('should accept undefined credentials', () => {
+            const result = ConfigSchema.safeParse({
+                ...validBaseConfig,
+                credentials: {},
+            });
+            assert.strictEqual(result.success, true);
+        });
+        it('should accept valid short tokens that are not credential patterns', () => {
+            const result = ConfigSchema.safeParse({
+                ...validBaseConfig,
+                credentials: {
+                    githubToken: 'short',
+                },
+            });
+            assert.strictEqual(result.success, true);
+        });
+    });
+});
+describe('Default Config', () => {
+    it('should have sensible discovery defaults', () => {
+        assert.strictEqual(defaultConfig.discovery?.tasksPerCycle, 5);
+        assert.strictEqual(defaultConfig.discovery?.maxOpenIssues, 10);
+        assert.strictEqual(defaultConfig.discovery?.maxDepth, 10);
+        assert.strictEqual(defaultConfig.discovery?.maxFiles, 10000);
+        assert.ok(Array.isArray(defaultConfig.discovery?.excludePaths));
+        assert.ok(defaultConfig.discovery?.excludePaths?.includes('node_modules'));
+        assert.ok(defaultConfig.discovery?.excludePaths?.includes('dist'));
+    });
+    it('should have sensible execution defaults', () => {
+        assert.strictEqual(defaultConfig.execution?.parallelWorkers, 4);
+        assert.strictEqual(defaultConfig.execution?.timeoutMinutes, 30);
+        assert.strictEqual(defaultConfig.execution?.workDir, '/tmp/autonomous-dev');
+    });
+    it('should have sensible merge defaults', () => {
+        assert.strictEqual(defaultConfig.merge?.autoMerge, true);
+        assert.strictEqual(defaultConfig.merge?.requireAllChecks, true);
+        assert.strictEqual(defaultConfig.merge?.maxRetries, 3);
+        assert.strictEqual(defaultConfig.merge?.conflictStrategy, 'rebase');
+        assert.strictEqual(defaultConfig.merge?.mergeMethod, 'squash');
+    });
+    it('should have sensible evaluation defaults', () => {
+        assert.strictEqual(defaultConfig.evaluation?.requireBuild, true);
+        assert.strictEqual(defaultConfig.evaluation?.requireTests, true);
+        assert.strictEqual(defaultConfig.evaluation?.requireHealthCheck, true);
+        assert.strictEqual(defaultConfig.evaluation?.requireSmokeTests, false);
+    });
+    it('should have sensible logging defaults', () => {
+        assert.strictEqual(defaultConfig.logging?.format, 'pretty');
+        assert.strictEqual(defaultConfig.logging?.level, 'info');
+        assert.strictEqual(defaultConfig.logging?.includeCorrelationId, true);
+        assert.strictEqual(defaultConfig.logging?.includeTimestamp, true);
+    });
+    it('should have sensible circuit breaker defaults', () => {
+        assert.strictEqual(defaultConfig.circuitBreaker?.failureThreshold, 5);
+        assert.strictEqual(defaultConfig.circuitBreaker?.resetTimeoutMs, 60000);
+        assert.strictEqual(defaultConfig.circuitBreaker?.baseDelayMs, 100);
+        assert.strictEqual(defaultConfig.circuitBreaker?.maxDelayMs, 30000);
+        assert.strictEqual(defaultConfig.circuitBreaker?.successThreshold, 1);
+        assert.strictEqual(defaultConfig.circuitBreaker?.enabled, true);
+    });
+    it('should have sensible daemon defaults', () => {
+        assert.strictEqual(defaultConfig.daemon?.loopIntervalMs, 60000);
+        assert.strictEqual(defaultConfig.daemon?.pauseBetweenCycles, true);
     });
 });
 //# sourceMappingURL=index.test.js.map
