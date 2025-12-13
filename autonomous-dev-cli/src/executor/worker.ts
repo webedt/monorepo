@@ -169,6 +169,9 @@ export interface WorkerOptions {
   repoOwner?: string;
   repoName?: string;
   enableDatabaseLogging?: boolean;
+  // Correlation tracking
+  cycleCorrelationId?: string;
+  cycleNumber?: number;
   // Performance options
   sparseCheckout?: {
     enabled: boolean;

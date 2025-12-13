@@ -419,9 +419,9 @@ export class Daemon implements DaemonStateProvider {
   }
 
   /**
-   * Get the current service health status
+   * Get the current internal service health status
    */
-  getServiceHealth(): DaemonServiceHealth {
+  getInternalServiceHealth(): DaemonServiceHealth {
     return this.serviceHealth;
   }
 
@@ -869,7 +869,7 @@ export class Daemon implements DaemonStateProvider {
       metrics.recordCorrelationOperation(this.getCurrentCorrelationId(), 'fetch_issues');
 
       const { result: issueResult, duration: issueFetchDuration } = await timeOperation(
-        () => this.github.issues.listOpenIssuesWithFallback(
+        () => this.github!.issues.listOpenIssuesWithFallback(
           this.config.discovery.issueLabel,
           this.lastKnownIssues  // Use cached issues as fallback
         ),
