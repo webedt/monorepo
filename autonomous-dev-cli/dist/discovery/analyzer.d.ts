@@ -1,4 +1,5 @@
 import { AnalyzerError } from '../utils/errors.js';
+import { type CachePerformanceMetrics } from '../utils/cache.js';
 import { PersistentAnalysisCache, type CacheConfig, type CacheStats as PersistentCacheStats } from './cache.js';
 interface CacheStats {
     hits: number;
@@ -192,6 +193,7 @@ export declare class CodebaseAnalyzer {
     private enablePersistentCache;
     private persistentCache;
     private persistentCacheInitialized;
+    private configHash;
     constructor(repoPath: string, excludePaths?: string[], config?: AnalyzerConfig);
     /**
      * Initialize the persistent cache if not already done
@@ -211,6 +213,18 @@ export declare class CodebaseAnalyzer {
         };
         persistent: PersistentCacheStats | null;
     };
+    /**
+     * Get cache performance metrics for monitoring and reporting
+     */
+    getCachePerformanceMetrics(): CachePerformanceMetrics;
+    /**
+     * Log cache performance summary for debugging and monitoring
+     */
+    logCachePerformance(): void;
+    /**
+     * Get the configuration hash used for cache invalidation
+     */
+    getConfigHash(): string;
     /**
      * Report progress to the callback if registered
      */
@@ -247,6 +261,12 @@ export declare class CodebaseAnalyzer {
     private scanDirectory;
     private countFiles;
     private findTodoComments;
+    /**
+     * Find TODO comments in a specific list of files (for incremental analysis)
+     * This is more efficient than scanning the entire codebase when only
+     * a few files have changed.
+     */
+    private findTodoCommentsInFiles;
     /**
      * Scan a file using streaming (readline) for memory-efficient TODO detection
      */

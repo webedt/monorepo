@@ -116,13 +116,15 @@ export function createPRManager(client) {
         },
         async listOpenPRs() {
             try {
-                const { data } = await octokit.pulls.list({
-                    owner,
-                    repo,
-                    state: 'open',
-                    per_page: 100,
-                });
-                return data.map(mapPR);
+                return await client.execute(async () => {
+                    const { data } = await octokit.pulls.list({
+                        owner,
+                        repo,
+                        state: 'open',
+                        per_page: 100,
+                    });
+                    return data.map(mapPR);
+                }, `GET /repos/${owner}/${repo}/pulls`, { operation: 'listOpenPRs' });
             }
             catch (error) {
                 handleError(error, 'list PRs');
@@ -147,12 +149,14 @@ export function createPRManager(client) {
         },
         async getPR(number) {
             try {
-                const { data } = await octokit.pulls.get({
-                    owner,
-                    repo,
-                    pull_number: number,
-                });
-                return mapPR(data);
+                return await client.execute(async () => {
+                    const { data } = await octokit.pulls.get({
+                        owner,
+                        repo,
+                        pull_number: number,
+                    });
+                    return mapPR(data);
+                }, `GET /repos/${owner}/${repo}/pulls/${number}`, { operation: 'getPR', prNumber: number });
             }
             catch (error) {
                 if (error.status === 404) {
@@ -163,20 +167,22 @@ export function createPRManager(client) {
         },
         async findPRForBranch(branchName, base) {
             try {
-                const params = {
-                    owner,
-                    repo,
-                    head: `${owner}:${branchName}`,
-                    state: 'open',
-                };
-                if (base) {
-                    params.base = base;
-                }
-                const { data } = await octokit.pulls.list(params);
-                if (data.length === 0) {
-                    return null;
-                }
-                return mapPR(data[0]);
+                return await client.execute(async () => {
+                    const params = {
+                        owner,
+                        repo,
+                        head: `${owner}:${branchName}`,
+                        state: 'open',
+                    };
+                    if (base) {
+                        params.base = base;
+                    }
+                    const { data } = await octokit.pulls.list(params);
+                    if (data.length === 0) {
+                        return null;
+                    }
+                    return mapPR(data[0]);
+                }, `GET /repos/${owner}/${repo}/pulls`, { operation: 'findPRForBranch', branchName, base });
             }
             catch (error) {
                 handleError(error, 'find PR for branch', { branchName, base });
@@ -190,17 +196,19 @@ export function createPRManager(client) {
                     logger.info(`PR already exists for branch '${options.head}': #${existing.number}`);
                     return existing;
                 }
-                const { data } = await octokit.pulls.create({
-                    owner,
-                    repo,
-                    title: options.title,
-                    body: options.body,
-                    head: options.head,
-                    base: options.base,
-                    draft: options.draft,
-                });
-                logger.info(`Created PR #${data.number}: ${data.title}`);
-                return mapPR(data);
+                return await client.execute(async () => {
+                    const { data } = await octokit.pulls.create({
+                        owner,
+                        repo,
+                        title: options.title,
+                        body: options.body,
+                        head: options.head,
+                        base: options.base,
+                        draft: options.draft,
+                    });
+                    logger.info(`Created PR #${data.number}: ${data.title}`);
+                    return mapPR(data);
+                }, `POST /repos/${owner}/${repo}/pulls`, { operation: 'createPR', head: options.head, base: options.base });
             }
             catch (error) {
                 // Handle case where PR already exists
@@ -243,18 +251,20 @@ export function createPRManager(client) {
         },
         async mergePR(number, method = 'squash') {
             try {
-                const { data } = await octokit.pulls.merge({
-                    owner,
-                    repo,
-                    pull_number: number,
-                    merge_method: method,
-                });
-                logger.info(`Merged PR #${number} via ${method}`);
-                return {
-                    merged: data.merged,
-                    sha: data.sha,
-                    message: data.message,
-                };
+                return await client.execute(async () => {
+                    const { data } = await octokit.pulls.merge({
+                        owner,
+                        repo,
+                        pull_number: number,
+                        merge_method: method,
+                    });
+                    logger.info(`Merged PR #${number} via ${method}`);
+                    return {
+                        merged: data.merged,
+                        sha: data.sha,
+                        message: data.message,
+                    };
+                }, `PUT /repos/${owner}/${repo}/pulls/${number}/merge`, { operation: 'mergePR', prNumber: number, method });
             }
             catch (error) {
                 logger.error('Failed to merge PR', { error: error.message, number, method });
@@ -295,13 +305,15 @@ export function createPRManager(client) {
         },
         async closePR(number) {
             try {
-                await octokit.pulls.update({
-                    owner,
-                    repo,
-                    pull_number: number,
-                    state: 'closed',
-                });
-                logger.info(`Closed PR #${number}`);
+                await client.execute(async () => {
+                    await octokit.pulls.update({
+                        owner,
+                        repo,
+                        pull_number: number,
+                        state: 'closed',
+                    });
+                    logger.info(`Closed PR #${number}`);
+                }, `PATCH /repos/${owner}/${repo}/pulls/${number}`, { operation: 'closePR', prNumber: number });
             }
             catch (error) {
                 handleError(error, 'close PR', { prNumber: number });
@@ -314,16 +326,18 @@ export function createPRManager(client) {
                     logger.error('PR not found', { number });
                     return false;
                 }
-                // Merge base branch into the PR branch
-                await octokit.repos.merge({
-                    owner,
-                    repo,
-                    base: pr.head.ref,
-                    head: pr.base.ref,
-                    commit_message: `Merge ${pr.base.ref} into ${pr.head.ref}`,
-                });
-                logger.info(`Updated PR #${number} with changes from ${pr.base.ref}`);
-                return true;
+                return await client.execute(async () => {
+                    // Merge base branch into the PR branch
+                    await octokit.repos.merge({
+                        owner,
+                        repo,
+                        base: pr.head.ref,
+                        head: pr.base.ref,
+                        commit_message: `Merge ${pr.base.ref} into ${pr.head.ref}`,
+                    });
+                    logger.info(`Updated PR #${number} with changes from ${pr.base.ref}`);
+                    return true;
+                }, `POST /repos/${owner}/${repo}/merges`, { operation: 'updatePRFromBase', prNumber: number });
             }
             catch (error) {
                 if (error.status === 204) {
@@ -361,18 +375,20 @@ export function createPRManager(client) {
         },
         async getChecksStatus(ref) {
             try {
-                const { data } = await octokit.repos.getCombinedStatusForRef({
-                    owner,
-                    repo,
-                    ref,
-                });
-                return {
-                    state: data.state,
-                    statuses: data.statuses.map((s) => ({
-                        context: s.context,
-                        state: s.state,
-                    })),
-                };
+                return await client.execute(async () => {
+                    const { data } = await octokit.repos.getCombinedStatusForRef({
+                        owner,
+                        repo,
+                        ref,
+                    });
+                    return {
+                        state: data.state,
+                        statuses: data.statuses.map((s) => ({
+                            context: s.context,
+                            state: s.state,
+                        })),
+                    };
+                }, `GET /repos/${owner}/${repo}/commits/${ref}/status`, { operation: 'getChecksStatus', ref });
             }
             catch (error) {
                 handleError(error, 'get checks status', { ref });
@@ -461,29 +477,31 @@ export function createPRManager(client) {
         },
         async convertDraftToReady(number) {
             try {
-                // Get the PR node ID for GraphQL mutation
-                const { data: prData } = await octokit.pulls.get({
-                    owner,
-                    repo,
-                    pull_number: number,
-                });
-                const nodeId = prData.node_id;
-                // Use GraphQL mutation to convert draft to ready
-                // Note: REST API doesn't support this directly
-                await octokit.graphql(`
-          mutation($pullRequestId: ID!) {
-            markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
-              pullRequest {
-                id
-                isDraft
+                return await client.execute(async () => {
+                    // Get the PR node ID for GraphQL mutation
+                    const { data: prData } = await octokit.pulls.get({
+                        owner,
+                        repo,
+                        pull_number: number,
+                    });
+                    const nodeId = prData.node_id;
+                    // Use GraphQL mutation to convert draft to ready
+                    // Note: REST API doesn't support this directly
+                    await octokit.graphql(`
+              mutation($pullRequestId: ID!) {
+                markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                  pullRequest {
+                    id
+                    isDraft
+                  }
+                }
               }
-            }
-          }
-        `, {
-                    pullRequestId: nodeId,
-                });
-                logger.info(`Converted PR #${number} from draft to ready for review`);
-                return true;
+            `, {
+                        pullRequestId: nodeId,
+                    });
+                    logger.info(`Converted PR #${number} from draft to ready for review`);
+                    return true;
+                }, `POST /graphql markPullRequestReadyForReview`, { operation: 'convertDraftToReady', prNumber: number });
             }
             catch (error) {
                 if (error.message?.includes('not a draft')) {
@@ -496,29 +514,31 @@ export function createPRManager(client) {
         },
         async updatePR(number, updates) {
             try {
-                const updateParams = {
-                    owner,
-                    repo,
-                    pull_number: number,
-                };
-                if (updates.title !== undefined) {
-                    updateParams.title = updates.title;
-                }
-                if (updates.body !== undefined) {
-                    updateParams.body = updates.body;
-                }
-                const { data } = await octokit.pulls.update(updateParams);
-                // Handle labels separately via issues API
-                if (updates.labels !== undefined) {
-                    await octokit.issues.setLabels({
+                return await client.execute(async () => {
+                    const updateParams = {
                         owner,
                         repo,
-                        issue_number: number,
-                        labels: updates.labels,
-                    });
-                }
-                logger.info(`Updated PR #${number}`);
-                return mapPR(data);
+                        pull_number: number,
+                    };
+                    if (updates.title !== undefined) {
+                        updateParams.title = updates.title;
+                    }
+                    if (updates.body !== undefined) {
+                        updateParams.body = updates.body;
+                    }
+                    const { data } = await octokit.pulls.update(updateParams);
+                    // Handle labels separately via issues API
+                    if (updates.labels !== undefined) {
+                        await octokit.issues.setLabels({
+                            owner,
+                            repo,
+                            issue_number: number,
+                            labels: updates.labels,
+                        });
+                    }
+                    logger.info(`Updated PR #${number}`);
+                    return mapPR(data);
+                }, `PATCH /repos/${owner}/${repo}/pulls/${number}`, { operation: 'updatePR', prNumber: number });
             }
             catch (error) {
                 handleError(error, 'update PR', { prNumber: number, updates });
@@ -526,13 +546,15 @@ export function createPRManager(client) {
         },
         async addLabels(number, labels) {
             try {
-                await octokit.issues.addLabels({
-                    owner,
-                    repo,
-                    issue_number: number,
-                    labels,
-                });
-                logger.debug(`Added labels to PR #${number}`, { labels });
+                await client.execute(async () => {
+                    await octokit.issues.addLabels({
+                        owner,
+                        repo,
+                        issue_number: number,
+                        labels,
+                    });
+                    logger.debug(`Added labels to PR #${number}`, { labels });
+                }, `POST /repos/${owner}/${repo}/issues/${number}/labels`, { operation: 'addLabels', prNumber: number, labels });
             }
             catch (error) {
                 handleError(error, 'add labels to PR', { prNumber: number, labels });
@@ -542,13 +564,15 @@ export function createPRManager(client) {
             if (reviewers.length === 0)
                 return;
             try {
-                await octokit.pulls.requestReviewers({
-                    owner,
-                    repo,
-                    pull_number: number,
-                    reviewers,
-                });
-                logger.debug(`Requested reviewers for PR #${number}`, { reviewers });
+                await client.execute(async () => {
+                    await octokit.pulls.requestReviewers({
+                        owner,
+                        repo,
+                        pull_number: number,
+                        reviewers,
+                    });
+                    logger.debug(`Requested reviewers for PR #${number}`, { reviewers });
+                }, `POST /repos/${owner}/${repo}/pulls/${number}/requested_reviewers`, { operation: 'requestReviewers', prNumber: number, reviewers });
             }
             catch (error) {
                 // Some reviewers might be invalid (not collaborators), log but don't fail

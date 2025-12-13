@@ -49,4 +49,20 @@ export {
 validateConfigPath, validateNumericParam, validateRepoInfo, validateGitHubToken, validateClaudeAuth, validatePort, validateHost, validateCLIOptions, 
 // Display utilities
 displayValidationError, formatCredentialSetupInstructions, createMissingCredentialMessage, NUMERIC_RANGES, } from './validation.js';
+// Re-export cache utilities
+export { 
+// Cache key generation
+generateCacheKey, generateShortCacheKey, 
+// File modification tracking
+collectFileModifications, generateContentHashFromModifications, 
+// Git-based change detection
+getGitChangeInfo, haveFilesChangedSinceCommit, 
+// Cache performance metrics
+calculateHitRate, formatCacheMetrics, formatBytes, 
+// Configuration-based invalidation
+generateConfigHash, hasConfigChanged, 
+// Cache cleanup utilities
+getEntriesToCleanup, 
+// Cache debug logging
+logCacheOperation, logCachePerformanceSummary, } from './cache.js';
 //# sourceMappingURL=index.js.map
