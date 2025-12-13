@@ -5,7 +5,6 @@ export {
   initAnalysisCache,
   type CodebaseAnalysis,
   type DirectoryEntry,
-  type TodoComment,
   type PackageInfo,
   type AnalyzerConfig,
   type ValidationResult,

@@ -20,7 +20,7 @@ import {
   getCorrelationId,
 } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-import type { CodebaseAnalysis, TodoComment, PackageInfo, DirectoryEntry } from './analyzer.js';
+import type { CodebaseAnalysis, PackageInfo, DirectoryEntry } from './analyzer.js';
 
 // ============================================================================
 // Cache Configuration Types
@@ -81,7 +81,6 @@ export interface CachedFileInfo {
  */
 export interface FileCacheEntry {
   fileInfo: CachedFileInfo;
-  todos: TodoComment[];
   lastAnalyzed: number;
 }
 
@@ -470,11 +469,6 @@ export class PersistentAnalysisCache {
       lastAccessTime: Date.now(),
     };
 
-    // Build file cache for incremental updates
-    if (this.config.enableIncrementalAnalysis && data.todoComments) {
-      await this.buildFileCache(entry, repoPath, data.todoComments);
-    }
-
     this.cache.set(key, entry);
     this.updateStats();
 
@@ -492,79 +486,15 @@ export class PersistentAnalysisCache {
   }
 
   /**
-   * Build file-level cache for incremental analysis
-   */
-  private async buildFileCache(
-    entry: RepoCacheEntry,
-    repoPath: string,
-    todos: TodoComment[]
-  ): Promise<void> {
-    const fileMap = new Map<string, TodoComment[]>();
-
-    // Group TODOs by file
-    for (const todo of todos) {
-      if (!fileMap.has(todo.file)) {
-        fileMap.set(todo.file, []);
-      }
-      fileMap.get(todo.file)!.push(todo);
-    }
-
-    // Build file cache entries
-    for (const [filePath, fileTodos] of fileMap) {
-      try {
-        const fullPath = join(repoPath, filePath);
-        const fileStat = await stat(fullPath);
-        const content = await readFile(fullPath, 'utf-8');
-        const contentHash = createHash('md5').update(content).digest('hex');
-
-        entry.fileCache.set(filePath, {
-          fileInfo: {
-            path: filePath,
-            mtimeMs: fileStat.mtimeMs,
-            size: fileStat.size,
-            contentHash,
-          },
-          todos: fileTodos,
-          lastAnalyzed: Date.now(),
-        });
-      } catch {
-        // Skip files that can't be accessed
-      }
-    }
-  }
-
-  /**
    * Update analysis with incremental changes for specific files
    */
   async updateIncremental(
     key: string,
-    changedFiles: string[],
+    _changedFiles: string[],
     updatedData: Partial<CodebaseAnalysis>
   ): Promise<void> {
     const entry = this.cache.get(key);
     if (!entry) return;
-
-    // Update the cached data with new information
-    if (updatedData.todoComments) {
-      // Remove TODOs from changed files
-      entry.data.todoComments = entry.data.todoComments.filter(
-        todo => !changedFiles.includes(todo.file)
-      );
-      // Add new TODOs
-      entry.data.todoComments.push(...updatedData.todoComments);
-
-      // Update file cache
-      for (const file of changedFiles) {
-        const fileTodos = updatedData.todoComments.filter(t => t.file === file);
-        if (fileTodos.length > 0 || entry.fileCache.has(file)) {
-          // Remove or update
-          if (fileTodos.length === 0) {
-            entry.fileCache.delete(file);
-          }
-          // File cache will be updated on next set
-        }
-      }
-    }
 
     if (updatedData.packages) {
       entry.data.packages = updatedData.packages;
@@ -593,7 +523,6 @@ export class PersistentAnalysisCache {
 
     logger.debug('Incremental cache update', {
       key,
-      changedFiles: changedFiles.length,
     });
   }
 

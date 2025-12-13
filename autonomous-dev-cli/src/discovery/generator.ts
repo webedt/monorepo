@@ -1,4 +1,4 @@
-import { CodebaseAnalyzer, type CodebaseAnalysis, type AnalyzerConfig, type TodoComment } from './analyzer.js';
+import { CodebaseAnalyzer, type CodebaseAnalysis, type AnalyzerConfig } from './analyzer.js';
 import { type Issue } from '../github/issues.js';
 import {
   logger,
@@ -276,7 +276,6 @@ export class TaskGenerator {
       logger.debug('Codebase analysis complete', {
         duration: analysisDuration,
         fileCount: analysis.fileCount,
-        todoCount: analysis.todoComments.length,
         correlationId,
       });
 
@@ -451,111 +450,43 @@ export class TaskGenerator {
   }
 
   /**
-   * Generate fallback tasks from codebase analysis when Claude is unavailable.
-   * Creates basic tasks from TODO comments, FIXME items, and other signals.
+   * Generate fallback tasks when Claude is unavailable.
+   * Returns generic improvement suggestions since we no longer scan for TODO comments.
    */
-  private generateFallbackTasks(analysis: CodebaseAnalysis): DiscoveredTask[] {
+  private generateFallbackTasks(_analysis: CodebaseAnalysis): DiscoveredTask[] {
     const tasks: DiscoveredTask[] = [];
     const existingTitles = new Set(this.existingIssues.map(i => i.title.toLowerCase()));
 
-    // Prioritize FIXME comments as they usually indicate bugs
-    const fixmeComments = analysis.todoComments.filter(t => t.type === 'FIXME');
-    const todoComments = analysis.todoComments.filter(t => t.type === 'TODO');
-    const otherComments = analysis.todoComments.filter(t => !['FIXME', 'TODO'].includes(t.type));
-
-    // Generate tasks from FIXME comments (higher priority)
-    for (const fixme of fixmeComments.slice(0, Math.ceil(this.tasksPerCycle / 2))) {
-      const title = `Fix: ${fixme.text.slice(0, 80)}${fixme.text.length > 80 ? '...' : ''}`;
-
-      if (existingTitles.has(title.toLowerCase())) continue;
-
-      tasks.push({
-        title,
-        description: `Found FIXME comment in ${fixme.file} at line ${fixme.line}:\n\n\`\`\`\n${fixme.text}\n\`\`\`\n\nThis indicates a known issue that needs to be fixed.`,
-        priority: 'medium',
-        category: 'bugfix',
-        estimatedComplexity: 'moderate',
-        affectedPaths: [fixme.file],
-        estimatedDurationMinutes: 45,
-      });
-
-      if (tasks.length >= this.tasksPerCycle) break;
-    }
-
-    // Generate tasks from TODO comments
-    for (const todo of todoComments.slice(0, this.tasksPerCycle * 2)) {
-      if (tasks.length >= this.tasksPerCycle) break;
-
-      const title = `Address TODO: ${todo.text.slice(0, 80)}${todo.text.length > 80 ? '...' : ''}`;
-
-      if (existingTitles.has(title.toLowerCase())) continue;
-
-      tasks.push({
-        title,
-        description: `Found TODO comment in ${todo.file} at line ${todo.line}:\n\n\`\`\`\n${todo.text}\n\`\`\`\n\nPlease review and address this TODO item.`,
+    // Generate generic improvement suggestions
+    const genericTasks: DiscoveredTask[] = [
+      {
+        title: 'Review and update documentation',
+        description: 'Review existing documentation for accuracy and completeness. Update outdated information and add missing documentation where needed.',
         priority: 'low',
-        category: 'chore',
+        category: 'docs',
         estimatedComplexity: 'simple',
-        affectedPaths: [todo.file],
+        affectedPaths: ['README.md', 'docs/'],
+        estimatedDurationMinutes: 60,
+      },
+      {
+        title: 'Run security audit on dependencies',
+        description: 'Run `npm audit` or equivalent to check for security vulnerabilities in dependencies. Update any packages with known security issues.',
+        priority: 'high',
+        category: 'security',
+        estimatedComplexity: 'simple',
+        affectedPaths: ['package.json', 'package-lock.json'],
         estimatedDurationMinutes: 30,
-      });
-    }
+      },
+    ];
 
-    // Generate tasks from HACK/XXX comments (if we need more tasks)
-    for (const other of otherComments.slice(0, this.tasksPerCycle - tasks.length)) {
+    for (const genericTask of genericTasks) {
       if (tasks.length >= this.tasksPerCycle) break;
-
-      const title = `Review ${other.type}: ${other.text.slice(0, 70)}${other.text.length > 70 ? '...' : ''}`;
-
-      if (existingTitles.has(title.toLowerCase())) continue;
-
-      tasks.push({
-        title,
-        description: `Found ${other.type} comment in ${other.file} at line ${other.line}:\n\n\`\`\`\n${other.text}\n\`\`\`\n\nThis indicates code that needs review or cleanup.`,
-        priority: 'low',
-        category: 'refactor',
-        estimatedComplexity: 'simple',
-        affectedPaths: [other.file],
-        estimatedDurationMinutes: 30,
-      });
-    }
-
-    // If still not enough tasks, generate generic improvement suggestions
-    if (tasks.length < Math.min(2, this.tasksPerCycle)) {
-      const genericTasks: DiscoveredTask[] = [
-        {
-          title: 'Review and update documentation',
-          description: 'Review existing documentation for accuracy and completeness. Update outdated information and add missing documentation where needed.',
-          priority: 'low',
-          category: 'docs',
-          estimatedComplexity: 'simple',
-          affectedPaths: ['README.md', 'docs/'],
-          estimatedDurationMinutes: 60,
-        },
-        {
-          title: 'Run security audit on dependencies',
-          description: 'Run `npm audit` or equivalent to check for security vulnerabilities in dependencies. Update any packages with known security issues.',
-          priority: 'high',
-          category: 'security',
-          estimatedComplexity: 'simple',
-          affectedPaths: ['package.json', 'package-lock.json'],
-          estimatedDurationMinutes: 30,
-        },
-      ];
-
-      for (const genericTask of genericTasks) {
-        if (tasks.length >= this.tasksPerCycle) break;
-        if (!existingTitles.has(genericTask.title.toLowerCase())) {
-          tasks.push(genericTask);
-        }
+      if (!existingTitles.has(genericTask.title.toLowerCase())) {
+        tasks.push(genericTask);
       }
     }
 
-    logger.debug(`Generated ${tasks.length} fallback tasks`, {
-      fromFixmes: Math.min(fixmeComments.length, tasks.filter(t => t.category === 'bugfix').length),
-      fromTodos: Math.min(todoComments.length, tasks.filter(t => t.category === 'chore').length),
-      fromOther: Math.min(otherComments.length, tasks.filter(t => t.category === 'refactor').length),
-    });
+    logger.debug(`Generated ${tasks.length} fallback tasks`);
 
     return tasks.slice(0, this.tasksPerCycle);
   }
