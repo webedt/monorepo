@@ -4,7 +4,7 @@ import { simpleGit } from 'simple-git';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, ClaudeExecutionLogger, getStructuredFileLogger, } from '../utils/logger.js';
+import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, ClaudeExecutionLogger, getStructuredFileLogger, isClaudeLoggingEnabled, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import { StructuredError, ClaudeError, ErrorCode, } from '../utils/errors.js';
 import { ExecutorError, NetworkExecutorError, TimeoutExecutorError, GitExecutorError, ClaudeExecutorError, createExecutorError, getErrorAggregator, } from '../errors/executor-errors.js';
@@ -768,6 +768,17 @@ export class Worker {
     async executeSingleClaudeAttempt(repoDir, issue, timeoutMs, chatSessionId, executionLogger) {
         const attemptStartTime = Date.now();
         const startMemory = getMemoryUsageMB();
+        const correlationId = generateCorrelationId();
+        // Log internal state snapshot for debugging
+        this.log.debugState('ClaudeExecution', 'Starting execution attempt', {
+            issueNumber: issue.number,
+            repoDir,
+            timeoutMs,
+            startMemory,
+            workerId: this.workerId,
+            circuitBreakerState: this.circuitBreaker.getState(),
+            claudeRetryConfig: this.claudeRetryConfig,
+        });
         const prompt = this.buildPrompt(issue);
         // Use createTimedAbortController for proper cleanup management
         // This ensures the timeout is always cleared even if an error occurs
@@ -819,10 +830,21 @@ export class Worker {
                                 if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
                                     hasWriteOperations = true;
                                 }
-                                this.log.debug(`Tool: ${toolName}`, {
-                                    toolCount: toolUseCount,
+                                // Enhanced debug logging for Claude tool use
+                                this.log.claudeToolUse(toolName, toolInput, {
+                                    correlationId,
+                                    workerId: this.workerId,
+                                    issueNumber: issue.number,
                                     turnCount,
+                                    toolCount: toolUseCount,
                                 });
+                                // Also log at debug level for standard logging
+                                if (!isClaudeLoggingEnabled()) {
+                                    this.log.debug(`Tool: ${toolName}`, {
+                                        toolCount: toolUseCount,
+                                        turnCount,
+                                    });
+                                }
                                 metrics.recordToolUsage(toolName, {
                                     repository: this.repository,
                                     workerId: this.workerId,

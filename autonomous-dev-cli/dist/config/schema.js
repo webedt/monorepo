@@ -249,6 +249,31 @@ export const ConfigSchema = z.object({
         rotationInterval: z.enum(['hourly', 'daily', 'weekly']).default('daily'),
         /** Maximum age of log files in days before cleanup (default: 30) */
         maxLogAgeDays: z.number().min(1).max(365).default(30),
+        /**
+         * Enable debug mode for detailed troubleshooting.
+         * When enabled, logs additional information including:
+         * - Claude SDK tool invocations and responses
+         * - GitHub API request/response details
+         * - Internal state snapshots at decision points
+         * - Timing data for all operations
+         * Can also be enabled via DEBUG_MODE or AUTONOMOUS_DEV_DEBUG environment variables.
+         * (default: false)
+         */
+        debugMode: z.boolean().default(false),
+        /**
+         * Log Claude SDK interactions in detail (tool use, responses, timing).
+         * Useful for debugging Claude execution issues.
+         * Automatically enabled when debugMode is true.
+         * (default: false)
+         */
+        logClaudeInteractions: z.boolean().default(false),
+        /**
+         * Log GitHub API request/response details including headers and timing.
+         * Useful for debugging GitHub integration issues.
+         * Automatically enabled when debugMode is true.
+         * (default: false)
+         */
+        logApiDetails: z.boolean().default(false),
     }).describe('Logging configuration').default({}),
     /**
      * Alerting Settings
@@ -445,6 +470,9 @@ export const defaultConfig = {
         rotationPolicy: 'size',
         rotationInterval: 'daily',
         maxLogAgeDays: 30,
+        debugMode: false,
+        logClaudeInteractions: false,
+        logApiDetails: false,
     },
     alerting: {
         enabled: true,

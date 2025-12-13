@@ -36,26 +36,29 @@ export function createIssueManager(client) {
             return client.isAvailable();
         },
         async listOpenIssues(label) {
-            const params = {
-                owner,
-                repo,
-                state: 'open',
-                per_page: 100,
-            };
-            if (label) {
-                params.labels = label;
-            }
-            try {
-                return await client.execute(async () => {
-                    const { data } = await octokit.issues.listForRepo(params);
-                    // Filter out pull requests (GitHub API returns PRs as issues)
-                    const issues = data.filter((item) => !item.pull_request);
-                    return issues.map(mapIssue);
-                }, `GET /repos/${owner}/${repo}/issues`, { operation: 'listOpenIssues', label });
-            }
-            catch (error) {
-                return handleError(error, 'list issues', { label });
-            }
+            const cacheKey = `list-open-${label ?? 'all'}`;
+            return client.getCachedOrFetch('issue-list', cacheKey, async () => {
+                const params = {
+                    owner,
+                    repo,
+                    state: 'open',
+                    per_page: 100,
+                };
+                if (label) {
+                    params.labels = label;
+                }
+                try {
+                    return await client.execute(async () => {
+                        const { data } = await octokit.issues.listForRepo(params);
+                        // Filter out pull requests (GitHub API returns PRs as issues)
+                        const issues = data.filter((item) => !item.pull_request);
+                        return issues.map(mapIssue);
+                    }, `GET /repos/${owner}/${repo}/issues`, { operation: 'listOpenIssues', label });
+                }
+                catch (error) {
+                    return handleError(error, 'list issues', { label });
+                }
+            });
         },
         async listOpenIssuesWithFallback(label, fallback = []) {
             const params = {
@@ -81,15 +84,18 @@ export function createIssueManager(client) {
             return result;
         },
         async getIssue(number) {
+            const cacheKey = `issue-${number}`;
             try {
-                return await client.execute(async () => {
-                    const { data } = await octokit.issues.get({
-                        owner,
-                        repo,
-                        issue_number: number,
-                    });
-                    return mapIssue(data);
-                }, `GET /repos/${owner}/${repo}/issues/${number}`, { operation: 'getIssue', issueNumber: number });
+                return await client.getCachedOrFetch('issue', cacheKey, async () => {
+                    return await client.execute(async () => {
+                        const { data } = await octokit.issues.get({
+                            owner,
+                            repo,
+                            issue_number: number,
+                        });
+                        return mapIssue(data);
+                    }, `GET /repos/${owner}/${repo}/issues/${number}`, { operation: 'getIssue', issueNumber: number });
+                });
             }
             catch (error) {
                 if (error.status === 404) {
@@ -97,6 +103,48 @@ export function createIssueManager(client) {
                 }
                 return handleError(error, 'get issue', { issueNumber: number });
             }
+        },
+        async getIssuesBatch(numbers) {
+            const results = new Map();
+            const uncached = [];
+            const cache = client.getCache();
+            // Check cache first
+            for (const num of numbers) {
+                const cacheKey = cache.generateKey('issue', owner, repo, `issue-${num}`);
+                const cached = cache.get(cacheKey, 'issue');
+                if (cached !== undefined) {
+                    results.set(num, cached);
+                }
+                else {
+                    uncached.push(num);
+                }
+            }
+            // Fetch uncached issues in parallel (batched)
+            if (uncached.length > 0) {
+                const batchSize = 10; // Process in batches of 10
+                for (let i = 0; i < uncached.length; i += batchSize) {
+                    const batch = uncached.slice(i, i + batchSize);
+                    const batchResults = await Promise.all(batch.map(async (num) => {
+                        try {
+                            const issue = await this.getIssue(num);
+                            return { num, issue };
+                        }
+                        catch (error) {
+                            logger.warn(`Failed to fetch issue #${num}`, { error: error.message });
+                            return { num, issue: null };
+                        }
+                    }));
+                    for (const { num, issue } of batchResults) {
+                        results.set(num, issue);
+                    }
+                }
+            }
+            logger.debug('Batch fetched issues', {
+                requested: numbers.length,
+                cached: numbers.length - uncached.length,
+                fetched: uncached.length,
+            });
+            return results;
         },
         async createIssue(options) {
             try {
@@ -220,6 +268,19 @@ export function createIssueManager(client) {
                 logger.warn('Add comment degraded - operation skipped', { issueNumber });
             }
             return result;
+        },
+        invalidateCache() {
+            client.invalidateCacheType('issue');
+            client.invalidateCacheType('issue-list');
+            logger.debug('Invalidated issue cache');
+        },
+        invalidateIssue(number) {
+            const cache = client.getCache();
+            const cacheKey = cache.generateKey('issue', owner, repo, `issue-${number}`);
+            cache.invalidate(cacheKey);
+            // Also invalidate the list cache since it may contain stale data
+            client.invalidateCacheType('issue-list');
+            logger.debug(`Invalidated cache for issue #${number}`);
         },
     };
 }

@@ -1,11 +1,12 @@
 import { Worker } from './worker.js';
-import { logger } from '../utils/logger.js';
+import { logger, getMemoryUsageMB } from '../utils/logger.js';
 import { getProgressManager, formatDuration, ETACalculator, } from '../utils/progress.js';
 import { metrics } from '../utils/metrics.js';
 import { getDeadLetterQueue, } from '../utils/dead-letter-queue.js';
 import { getAllCircuitBreakerHealth, } from '../utils/circuit-breaker.js';
 import { ExecutorError, getErrorAggregator, } from '../errors/executor-errors.js';
 import * as os from 'os';
+import { EventEmitter } from 'events';
 /** Priority weights for sorting tasks */
 const PRIORITY_WEIGHTS = {
     critical: 100,
@@ -29,7 +30,7 @@ const COMPLEXITY_TIMEOUT_MULTIPLIER = {
     moderate: 1.0,
     complex: 2.0,
 };
-export class WorkerPool {
+export class WorkerPool extends EventEmitter {
     options;
     activeWorkers = new Map();
     taskQueue = [];
@@ -63,6 +64,26 @@ export class WorkerPool {
     degradationCheckInterval = null;
     consecutiveFailures = 0;
     failureThreshold = 5; // Number of consecutive failures before degradation
+    // Event-based worker completion tracking (replaces Promise.race pattern)
+    completionQueue = [];
+    completionResolver = null;
+    // Enhanced metrics tracking
+    poolStartTime = 0;
+    peakConcurrency = 0;
+    peakMemoryUsageMB = 0;
+    totalTaskDurationMs = 0;
+    completedTaskCount = 0;
+    failedTaskCount = 0;
+    // Memory monitoring
+    memoryConfig;
+    memoryCheckInterval = null;
+    lastMemoryCleanup = 0;
+    // Concurrency control
+    concurrencyConfig;
+    lastScaleUpTime = 0;
+    lastScaleDownTime = 0;
+    recentSuccessRate = 1.0;
+    adaptiveConcurrencyLimit = 0;
     /** Default scaling configuration */
     static DEFAULT_SCALING_CONFIG = {
         minWorkers: 1,
@@ -80,7 +101,25 @@ export class WorkerPool {
         queueWarningThreshold: 80,
         enablePersistence: true,
     };
+    /** Default memory configuration */
+    static DEFAULT_MEMORY_CONFIG = {
+        cleanupThresholdMB: Math.round(os.totalmem() / (1024 * 1024) * 0.8),
+        checkIntervalMs: 30000,
+        enableAutoCleanup: true,
+        forceGC: false,
+    };
+    /** Default concurrency configuration */
+    static DEFAULT_CONCURRENCY_CONFIG = {
+        minConcurrency: 1,
+        maxConcurrency: os.cpus().length,
+        targetConcurrency: Math.max(1, Math.floor(os.cpus().length / 2)),
+        scaleUpDelayMs: 5000,
+        scaleDownDelayMs: 10000,
+        enableAdaptiveConcurrency: true,
+        successRateThreshold: 0.7,
+    };
     constructor(options) {
+        super(); // Initialize EventEmitter
         this.options = options;
         this.repository = this.extractRepoName(options.repoUrl);
         // Initialize progress manager
@@ -96,8 +135,14 @@ export class WorkerPool {
             ...WorkerPool.DEFAULT_QUEUE_CONFIG,
             ...options.queueConfig,
         };
+        // Initialize memory configuration
+        this.memoryConfig = {
+            ...WorkerPool.DEFAULT_MEMORY_CONFIG,
+        };
         // Compute initial worker limit based on system resources
         this.currentWorkerLimit = this.computeOptimalWorkerCount();
+        // Initialize pool start time for metrics
+        this.poolStartTime = Date.now();
         logger.info(`Worker pool initialized`, {
             maxWorkers: options.maxWorkers,
             initialWorkerLimit: this.currentWorkerLimit,
@@ -202,6 +247,168 @@ export class WorkerPool {
         if (this.scaleCheckInterval) {
             clearInterval(this.scaleCheckInterval);
             this.scaleCheckInterval = null;
+        }
+    }
+    /**
+     * Start memory monitoring for automatic cleanup
+     */
+    startMemoryMonitor() {
+        if (!this.memoryConfig.enableAutoCleanup || this.memoryCheckInterval) {
+            return;
+        }
+        this.memoryCheckInterval = setInterval(() => {
+            this.checkMemoryUsage();
+        }, this.memoryConfig.checkIntervalMs);
+        logger.debug('Memory monitor started', {
+            cleanupThresholdMB: this.memoryConfig.cleanupThresholdMB,
+            checkIntervalMs: this.memoryConfig.checkIntervalMs,
+        });
+    }
+    /**
+     * Stop memory monitoring
+     */
+    stopMemoryMonitor() {
+        if (this.memoryCheckInterval) {
+            clearInterval(this.memoryCheckInterval);
+            this.memoryCheckInterval = null;
+        }
+    }
+    /**
+     * Check memory usage and trigger cleanup if needed
+     */
+    checkMemoryUsage() {
+        const currentMemoryMB = getMemoryUsageMB();
+        // Track peak memory usage
+        if (currentMemoryMB > this.peakMemoryUsageMB) {
+            this.peakMemoryUsageMB = currentMemoryMB;
+        }
+        // Update metrics
+        metrics.updateMemoryUsage(currentMemoryMB);
+        if (currentMemoryMB > this.memoryConfig.cleanupThresholdMB) {
+            this.performMemoryCleanup(currentMemoryMB);
+        }
+    }
+    /**
+     * Perform memory cleanup operations
+     */
+    performMemoryCleanup(currentMemoryMB) {
+        const timeSinceLastCleanup = Date.now() - this.lastMemoryCleanup;
+        // Avoid cleanup too frequently (min 10 seconds between cleanups)
+        if (timeSinceLastCleanup < 10000) {
+            return;
+        }
+        logger.info('Performing memory cleanup', {
+            currentMemoryMB,
+            thresholdMB: this.memoryConfig.cleanupThresholdMB,
+            activeWorkers: this.activeWorkers.size,
+        });
+        // Clear old overflow events (keep last 100)
+        if (this.overflowEvents.length > 100) {
+            this.overflowEvents = this.overflowEvents.slice(-100);
+        }
+        // Trim execution history if it exceeds limit
+        if (this.executionHistory.length > this.maxHistoryEntries) {
+            this.executionHistory = this.executionHistory.slice(-this.maxHistoryEntries);
+        }
+        // Clear completed results if we have too many
+        if (this.results.length > 1000) {
+            this.results = this.results.slice(-1000);
+        }
+        // Force garbage collection if enabled and available
+        if (this.memoryConfig.forceGC && global.gc) {
+            try {
+                global.gc();
+                logger.debug('Forced garbage collection completed');
+            }
+            catch (error) {
+                logger.warn('Failed to force garbage collection', { error });
+            }
+        }
+        this.lastMemoryCleanup = Date.now();
+        const afterCleanupMB = getMemoryUsageMB();
+        logger.info('Memory cleanup completed', {
+            beforeMB: currentMemoryMB,
+            afterMB: afterCleanupMB,
+            freedMB: Math.round((currentMemoryMB - afterCleanupMB) * 100) / 100,
+        });
+    }
+    /**
+     * Signal that a worker has completed (event-based tracking)
+     * This replaces the O(n) Promise.race() pattern with O(1) event-based completion
+     */
+    signalWorkerCompletion(event) {
+        // Emit event for external listeners
+        this.emit('workerComplete', event);
+        // If there's a pending resolver, resolve immediately (O(1) completion detection)
+        if (this.completionResolver) {
+            const resolver = this.completionResolver;
+            this.completionResolver = null;
+            resolver(event);
+        }
+        else {
+            // Queue for later consumption
+            this.completionQueue.push(event);
+        }
+    }
+    /**
+     * Wait for the next worker completion using event-based tracking
+     * This is O(1) complexity compared to O(n) Promise.race()
+     */
+    waitForWorkerCompletion() {
+        // Check if we already have a completed event queued
+        if (this.completionQueue.length > 0) {
+            return Promise.resolve(this.completionQueue.shift());
+        }
+        // Wait for the next completion event
+        return new Promise((resolve) => {
+            this.completionResolver = resolve;
+        });
+    }
+    /**
+     * Get comprehensive worker pool metrics
+     */
+    getPoolMetrics() {
+        const currentMemoryMB = getMemoryUsageMB();
+        const uptimeMs = Date.now() - this.poolStartTime;
+        const totalProcessed = this.completedTaskCount + this.failedTaskCount;
+        const avgDuration = totalProcessed > 0 ? this.totalTaskDurationMs / totalProcessed : 0;
+        const successRate = totalProcessed > 0 ? (this.completedTaskCount / totalProcessed) * 100 : 0;
+        // Calculate tasks per minute
+        const uptimeMinutes = uptimeMs / 60000;
+        const tasksPerMinute = uptimeMinutes > 0 ? totalProcessed / uptimeMinutes : 0;
+        // Calculate utilization
+        const utilizationPercent = this.options.maxWorkers > 0
+            ? (this.activeWorkers.size / this.options.maxWorkers) * 100
+            : 0;
+        return {
+            activeWorkers: this.activeWorkers.size,
+            queuedTasks: this.taskQueue.length,
+            completedTasks: this.completedTaskCount,
+            failedTasks: this.failedTaskCount,
+            totalProcessed,
+            successRate: Math.round(successRate * 100) / 100,
+            avgTaskDurationMs: Math.round(avgDuration),
+            peakConcurrency: this.peakConcurrency,
+            memoryUsageMB: Math.round(currentMemoryMB * 100) / 100,
+            peakMemoryUsageMB: Math.round(this.peakMemoryUsageMB * 100) / 100,
+            currentWorkerLimit: this.currentWorkerLimit,
+            maxWorkers: this.options.maxWorkers,
+            utilizationPercent: Math.round(utilizationPercent * 100) / 100,
+            uptimeMs,
+            tasksPerMinute: Math.round(tasksPerMinute * 100) / 100,
+        };
+    }
+    /**
+     * Update peak concurrency tracking
+     */
+    updatePeakConcurrency() {
+        if (this.activeWorkers.size > this.peakConcurrency) {
+            this.peakConcurrency = this.activeWorkers.size;
+            // Also track memory at peak
+            const currentMemory = getMemoryUsageMB();
+            if (currentMemory > this.peakMemoryUsageMB) {
+                this.peakMemoryUsageMB = currentMemory;
+            }
         }
     }
     /**
@@ -579,10 +786,11 @@ export class WorkerPool {
             queuedTasks: this.taskQueue.length,
             timeoutMs,
         });
-        // Stop accepting new tasks and scaling
+        // Stop accepting new tasks and all monitors
         this.isRunning = false;
         this.stopScalingMonitor();
         this.stopDegradationMonitor();
+        this.stopMemoryMonitor();
         // Wait for active workers to complete (with timeout)
         if (this.activeWorkers.size > 0) {
             const startTime = Date.now();
@@ -896,48 +1104,63 @@ export class WorkerPool {
         });
         // Update initial metrics
         this.updateMetrics();
+        // Reset metrics tracking for this execution batch
+        this.completedTaskCount = 0;
+        this.failedTaskCount = 0;
+        this.totalTaskDurationMs = 0;
+        this.peakConcurrency = 0;
+        this.peakMemoryUsageMB = getMemoryUsageMB();
+        this.completionQueue = [];
+        this.completionResolver = null;
         // Start dynamic scaling monitor if enabled
         this.startScalingMonitor();
         // Start graceful degradation monitor if enabled
         this.startDegradationMonitor();
+        // Start memory monitor for automatic cleanup
+        this.startMemoryMonitor();
         // Start initial workers
         while (this.activeWorkers.size < effectiveWorkerLimit && this.taskQueue.length > 0) {
             this.startNextTask();
+            this.updatePeakConcurrency();
         }
-        // Wait for all tasks to complete (respecting shutdown)
+        // Wait for all tasks to complete using event-based tracking (O(1) complexity)
+        // This replaces the inefficient Promise.race() pattern which was O(n)
         while ((this.activeWorkers.size > 0 || this.taskQueue.length > 0) && !this.isShuttingDown) {
             if (this.activeWorkers.size > 0) {
-                // Wait for any worker to complete
-                const completedPromises = Array.from(this.activeWorkers.entries());
-                const [completedId] = await Promise.race(completedPromises.map(async ([id, promise]) => {
-                    await promise;
-                    return [id];
-                }));
+                // Wait for next worker completion using event-based tracking (O(1))
+                const completionEvent = await this.waitForWorkerCompletion();
                 // Get the completed task's group for worker affinity
-                const completedTask = this.workerTaskMap.get(completedId);
-                const completedGroupId = completedTask?.groupId;
+                const completedGroupId = completionEvent.groupId;
                 // Clean up worker tracking
-                this.activeWorkers.delete(completedId);
-                this.workerTaskMap.delete(completedId);
+                this.activeWorkers.delete(completionEvent.taskId);
+                this.workerTaskMap.delete(completionEvent.taskId);
                 // Update metrics after worker completion
                 this.updateMetrics();
                 // Start next task if available and not shutting down
                 if (this.taskQueue.length > 0 && this.isRunning && !this.isShuttingDown) {
                     // Use worker affinity: try to assign same-group tasks to same worker
                     this.startNextTask(completedGroupId);
+                    this.updatePeakConcurrency();
                 }
             }
         }
-        // Stop dynamic scaling monitor
+        // Stop all monitors
         this.stopScalingMonitor();
-        // Stop degradation monitor
         this.stopDegradationMonitor();
+        this.stopMemoryMonitor();
         const succeeded = this.results.filter(r => r.success).length;
         const failed = this.results.filter(r => !r.success).length;
+        // Get final pool metrics
+        const finalMetrics = this.getPoolMetrics();
         logger.info(`All tasks completed: ${succeeded}/${this.results.length} succeeded`, {
             succeeded,
             failed,
             total: this.results.length,
+            successRate: `${finalMetrics.successRate}%`,
+            avgDurationMs: finalMetrics.avgTaskDurationMs,
+            peakConcurrency: finalMetrics.peakConcurrency,
+            peakMemoryMB: finalMetrics.peakMemoryUsageMB,
+            tasksPerMinute: finalMetrics.tasksPerMinute,
             degradationOccurred: this.degradationStatus.isDegraded || this.consecutiveFailures > 0,
             dlqStats: this.getDeadLetterQueueStats(),
         });
@@ -1046,6 +1269,16 @@ export class WorkerPool {
             });
             // Track result for graceful degradation
             this.recordTaskResult(result.success);
+            // Update metrics tracking
+            if (result.success) {
+                this.completedTaskCount++;
+            }
+            else {
+                this.failedTaskCount++;
+            }
+            if (result.duration) {
+                this.totalTaskDurationMs += result.duration;
+            }
             // Record in execution history
             if (result.success) {
                 this.recordExecutionHistory(task, 'completed', workerId);
@@ -1073,6 +1306,7 @@ export class WorkerPool {
                     isRetryable: !result.error.includes('AUTH') && !result.error.includes('PERMISSION'),
                 } : undefined;
                 this.recordExecutionHistory(task, 'failed', workerId, errorInfo);
+                this.progressManager.completeWorker(workerId, false);
                 logger.failure(`${task.id} failed: ${result.error}`);
                 logger.debug(`Task failure details`, {
                     taskId: task.id,
@@ -1084,6 +1318,16 @@ export class WorkerPool {
                     isDegraded: this.degradationStatus.isDegraded,
                 });
             }
+            // Signal completion using event-based tracking (O(1) complexity)
+            // This replaces the old Promise.race() pattern
+            this.signalWorkerCompletion({
+                taskId: task.id,
+                workerId,
+                success: result.success,
+                duration: result.duration,
+                groupId: task.groupId,
+                result,
+            });
             return result;
         });
         this.activeWorkers.set(task.id, promise);
@@ -1092,9 +1336,11 @@ export class WorkerPool {
         this.isRunning = false;
         this.stopScalingMonitor();
         this.stopDegradationMonitor();
+        this.stopMemoryMonitor();
         logger.warn('Worker pool stop requested', {
             activeWorkers: this.activeWorkers.size,
             queuedTasks: this.taskQueue.length,
+            poolMetrics: this.getPoolMetrics(),
         });
     }
     /**

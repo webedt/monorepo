@@ -59,6 +59,9 @@ export declare class Daemon implements DaemonStateProvider {
     private daemonStatus;
     private structuredLogger;
     private progressManager;
+    private isShuttingDown;
+    private shutdownTimeoutMs;
+    private signalHandlersRegistered;
     constructor(options?: DaemonOptions);
     start(): Promise<void>;
     /**
@@ -70,6 +73,31 @@ export declare class Daemon implements DaemonStateProvider {
      */
     private getErrorContext;
     stop(): Promise<void>;
+    /**
+     * Register process signal handlers for graceful shutdown
+     */
+    private registerSignalHandlers;
+    /**
+     * Perform graceful shutdown with cleanup of all resources
+     * - Cancels running worker tasks gracefully
+     * - Cleans up temporary directories in workDir
+     * - Ensures database connections are properly closed
+     * - Waits for in-progress GitHub operations to complete
+     * - Applies shutdown timeout to prevent hanging
+     */
+    private gracefulShutdown;
+    /**
+     * Execute all shutdown steps in sequence
+     */
+    private performShutdownSteps;
+    /**
+     * Force cleanup when graceful shutdown times out
+     */
+    private forceCleanup;
+    /**
+     * Clean up temporary work directories created during task execution
+     */
+    private cleanupWorkDirectories;
     /**
      * Get the current correlation ID from the global context
      */

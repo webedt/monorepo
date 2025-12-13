@@ -305,6 +305,31 @@ export declare const ConfigSchema: z.ZodObject<{
         rotationInterval: z.ZodDefault<z.ZodEnum<["hourly", "daily", "weekly"]>>;
         /** Maximum age of log files in days before cleanup (default: 30) */
         maxLogAgeDays: z.ZodDefault<z.ZodNumber>;
+        /**
+         * Enable debug mode for detailed troubleshooting.
+         * When enabled, logs additional information including:
+         * - Claude SDK tool invocations and responses
+         * - GitHub API request/response details
+         * - Internal state snapshots at decision points
+         * - Timing data for all operations
+         * Can also be enabled via DEBUG_MODE or AUTONOMOUS_DEV_DEBUG environment variables.
+         * (default: false)
+         */
+        debugMode: z.ZodDefault<z.ZodBoolean>;
+        /**
+         * Log Claude SDK interactions in detail (tool use, responses, timing).
+         * Useful for debugging Claude execution issues.
+         * Automatically enabled when debugMode is true.
+         * (default: false)
+         */
+        logClaudeInteractions: z.ZodDefault<z.ZodBoolean>;
+        /**
+         * Log GitHub API request/response details including headers and timing.
+         * Useful for debugging GitHub integration issues.
+         * Automatically enabled when debugMode is true.
+         * (default: false)
+         */
+        logApiDetails: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         format: "pretty" | "json";
         level: "debug" | "info" | "warn" | "error";
@@ -318,6 +343,9 @@ export declare const ConfigSchema: z.ZodObject<{
         rotationPolicy: "size" | "time" | "both";
         rotationInterval: "hourly" | "daily" | "weekly";
         maxLogAgeDays: number;
+        debugMode: boolean;
+        logClaudeInteractions: boolean;
+        logApiDetails: boolean;
     }, {
         format?: "pretty" | "json" | undefined;
         level?: "debug" | "info" | "warn" | "error" | undefined;
@@ -331,6 +359,9 @@ export declare const ConfigSchema: z.ZodObject<{
         rotationPolicy?: "size" | "time" | "both" | undefined;
         rotationInterval?: "hourly" | "daily" | "weekly" | undefined;
         maxLogAgeDays?: number | undefined;
+        debugMode?: boolean | undefined;
+        logClaudeInteractions?: boolean | undefined;
+        logApiDetails?: boolean | undefined;
     }>>;
     /**
      * Alerting Settings
@@ -565,6 +596,9 @@ export declare const ConfigSchema: z.ZodObject<{
         rotationPolicy: "size" | "time" | "both";
         rotationInterval: "hourly" | "daily" | "weekly";
         maxLogAgeDays: number;
+        debugMode: boolean;
+        logClaudeInteractions: boolean;
+        logApiDetails: boolean;
     };
     alerting: {
         enabled: boolean;
@@ -691,6 +725,9 @@ export declare const ConfigSchema: z.ZodObject<{
         rotationPolicy?: "size" | "time" | "both" | undefined;
         rotationInterval?: "hourly" | "daily" | "weekly" | undefined;
         maxLogAgeDays?: number | undefined;
+        debugMode?: boolean | undefined;
+        logClaudeInteractions?: boolean | undefined;
+        logApiDetails?: boolean | undefined;
     } | undefined;
     alerting?: {
         enabled?: boolean | undefined;

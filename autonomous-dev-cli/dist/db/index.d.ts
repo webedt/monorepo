@@ -1520,7 +1520,20 @@ export declare function getPoolStats(): {
  * Check pool health and log warnings if connections are exhausted
  */
 export declare function checkPoolHealth(): boolean;
-export declare function closeDatabase(): Promise<void>;
+/**
+ * Options for closing the database connection
+ */
+export interface CloseDatabaseOptions {
+    /** Timeout in milliseconds for closing connections (default: 10000) */
+    timeoutMs?: number;
+    /** Force close even if connections are active (default: false) */
+    force?: boolean;
+}
+/**
+ * Close database connections gracefully with timeout handling.
+ * Ensures all connections are properly drained before closing.
+ */
+export declare function closeDatabase(options?: CloseDatabaseOptions): Promise<void>;
 /**
  * Get the configured database query timeout from environment or defaults
  */

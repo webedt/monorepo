@@ -7,6 +7,37 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  */
 export declare const DEFAULT_TIMING_THRESHOLD_MS = 100;
 /**
+ * Debug mode configuration for enhanced logging
+ */
+export interface DebugModeConfig {
+    /** Master debug mode toggle */
+    enabled: boolean;
+    /** Log detailed Claude SDK interactions (tool use, responses, timing) */
+    logClaudeInteractions: boolean;
+    /** Log GitHub API request/response details including headers */
+    logApiDetails: boolean;
+}
+/**
+ * Check if debug mode is enabled (via config or environment variable)
+ */
+export declare function isDebugModeEnabled(): boolean;
+/**
+ * Check if Claude interaction logging is enabled
+ */
+export declare function isClaudeLoggingEnabled(): boolean;
+/**
+ * Check if API detail logging is enabled
+ */
+export declare function isApiLoggingEnabled(): boolean;
+/**
+ * Set the global debug mode configuration
+ */
+export declare function setDebugMode(config: Partial<DebugModeConfig>): void;
+/**
+ * Get the current debug mode configuration
+ */
+export declare function getDebugModeConfig(): DebugModeConfig;
+/**
  * Request lifecycle phase for tracking request flow
  */
 export type RequestPhase = 'discovery' | 'execution' | 'evaluation' | 'github' | 'claude';
@@ -68,6 +99,16 @@ export interface PerformanceMetrics {
     memoryDeltaMB: number;
     timestamp: string;
 }
+/**
+ * Get detailed memory usage statistics
+ */
+export declare function getDetailedMemoryUsage(): {
+    heapUsedMB: number;
+    heapTotalMB: number;
+    externalMB: number;
+    rssMB: number;
+    arrayBuffersMB: number;
+};
 export type LogFormat = 'pretty' | 'json';
 interface LoggerOptions {
     level: LogLevel;
@@ -408,10 +449,6 @@ export declare function endRequestLifecycle(correlationId: string, success: bool
  */
 export declare function getRequestLifecycle(correlationId: string): RequestLifecycle | undefined;
 /**
- * Get current memory usage in megabytes
- */
-export declare function getMemoryUsageMB(): number;
-/**
  * Get detailed memory statistics
  */
 export declare function getMemoryStats(): {
@@ -602,6 +639,56 @@ declare class Logger {
      * Log memory usage snapshot
      */
     memorySnapshot(component: string, context?: string): void;
+    /**
+     * Log Claude SDK tool invocation (debug mode)
+     * Only logs when debug mode or Claude interaction logging is enabled
+     */
+    claudeToolUse(toolName: string, input: Record<string, unknown>, metadata?: {
+        correlationId?: string;
+        workerId?: string;
+        issueNumber?: number;
+        attemptNumber?: number;
+        turnCount?: number;
+        toolCount?: number;
+    }): void;
+    /**
+     * Log Claude SDK tool result (debug mode)
+     * Only logs when debug mode or Claude interaction logging is enabled
+     */
+    claudeToolResult(toolName: string, success: boolean, durationMs?: number, output?: string, metadata?: {
+        correlationId?: string;
+        workerId?: string;
+    }): void;
+    /**
+     * Log GitHub API request details (debug mode)
+     * Only logs when debug mode or API detail logging is enabled
+     */
+    githubApiRequest(method: string, endpoint: string, metadata?: {
+        correlationId?: string;
+        requestId?: string;
+        headers?: Record<string, string>;
+        body?: Record<string, unknown>;
+    }): void;
+    /**
+     * Log GitHub API response details (debug mode)
+     * Only logs when debug mode or API detail logging is enabled
+     */
+    githubApiResponse(method: string, endpoint: string, statusCode: number, durationMs: number, metadata?: {
+        correlationId?: string;
+        requestId?: string;
+        rateLimitRemaining?: number;
+        rateLimitReset?: Date;
+        responseSize?: number;
+    }): void;
+    /**
+     * Log internal state snapshot for debugging decision points
+     * Only logs when debug mode is enabled
+     */
+    debugState(component: string, label: string, state: Record<string, unknown>): void;
+    /**
+     * Sanitize input for logging (truncate long strings, remove sensitive data)
+     */
+    private sanitizeInput;
     /**
      * Log performance metrics for a batch of operations
      */
