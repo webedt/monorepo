@@ -105,7 +105,13 @@ export default function Layout() {
   // Store mode navigation items
   const storeNavItems: NavItem[] = [
     {
-      to: '/',
+      to: '/dashboard',
+      label: 'Dashboard',
+      icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>,
+      isActive: location.pathname === '/dashboard'
+    },
+    {
+      to: '/store',
       label: 'Store',
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/></svg>,
       isActive: location.pathname === '/' || location.pathname === '/store'
@@ -357,9 +363,18 @@ export default function Layout() {
                       )}
                     </div>
 
+                    {/* Dashboard link */}
+                    <Link
+                      to="/dashboard"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
+                    >
+                      📊 Dashboard
+                    </Link>
+
                     {/* Store link */}
                     <Link
-                      to="/"
+                      to="/store"
                       onClick={() => setUserMenuOpen(false)}
                       className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
                     >
