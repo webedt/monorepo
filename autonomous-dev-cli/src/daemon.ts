@@ -1,6 +1,8 @@
 import { loadConfig, type Config } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub, type GitHub, type Issue, type ServiceHealth } from './github/index.js';
+import { simpleGit } from 'simple-git';
+import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'fs';
 import {
   validateEmail,
   validateWorkDir,
@@ -86,7 +88,6 @@ import {
   isClaudeExecutorError,
   type ClaudeExecutionContext,
 } from './errors/executor-errors.js';
-import { mkdirSync, existsSync, writeFileSync, readFileSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 import chalk from 'chalk';
 
@@ -1463,17 +1464,47 @@ export class Daemon implements DaemonStateProvider {
         logger.cyclePhase('discover-tasks', 2, 6);
         this.progressManager.setPhase('discover-tasks', 2);
 
-        // Clone repo for analysis
+        // Clone target repo for analysis (shallow clone for speed)
         const analysisDir = join(this.config.execution.workDir, 'analysis');
-        // For now, we'll analyze the current directory if it's the target repo
-        // In production, this would clone the repo first
-        // NOTE: Spec context (SPEC.md/STATUS.md) is loaded by each worker from the cloned repo
-        // since the daemon's working directory may not contain the target repository files
+        const repoUrl = `https://github.com/${this.config.repo.owner}/${this.config.repo.name}`;
+        // Inject GitHub token for authenticated clone (required for private repos)
+        const authRepoUrl = this.config.credentials.githubToken
+          ? repoUrl.replace('https://github.com/', `https://${this.config.credentials.githubToken}@github.com/`)
+          : repoUrl;
+        let repoPath = analysisDir;
+
+        try {
+          // Clean up previous analysis directory if it exists
+          if (existsSync(analysisDir)) {
+            rmSync(analysisDir, { recursive: true, force: true });
+          }
+          mkdirSync(analysisDir, { recursive: true });
+
+          logger.info('Cloning repository for analysis...', {
+            repoUrl, // Log without token for security
+            branch: this.config.repo.baseBranch,
+            targetDir: analysisDir,
+          });
+
+          const git = simpleGit();
+          await git.clone(authRepoUrl, analysisDir, [
+            '--depth', '1',
+            '--branch', this.config.repo.baseBranch,
+            '--single-branch',
+          ]);
+
+          logger.info('Repository cloned successfully for analysis');
+        } catch (cloneError) {
+          logger.warn('Failed to clone repository for analysis, falling back to local directory', {
+            error: cloneError instanceof Error ? cloneError.message : String(cloneError),
+          });
+          repoPath = process.cwd();
+        }
 
         try {
           const rawTasks = await discoverTasks({
             claudeAuth: this.config.credentials.claudeAuth,
-            repoPath: process.cwd(), // Analyze current directory
+            repoPath, // Use cloned repo or fallback to cwd
             excludePaths: this.config.discovery.excludePaths,
             tasksPerCycle: Math.min(this.config.discovery.tasksPerCycle, availableSlots),
             existingIssues,
