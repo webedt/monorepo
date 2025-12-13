@@ -16,6 +16,12 @@ export interface DaemonOptions {
     singleCycle?: boolean;
     logFormat?: LogFormat;
     monitoringPort?: number;
+    /** Enable preview mode - tasks require approval before execution */
+    previewMode?: boolean;
+    /** Auto-approve all discovered tasks (for CI/CD automation) */
+    autoApprove?: boolean;
+    /** Path to load pre-approved tasks from a batch file */
+    approvedTasksFile?: string;
 }
 export interface CycleResult {
     success: boolean;
