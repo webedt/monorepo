@@ -278,12 +278,29 @@ export async function updateChatSession(
 ): Promise<void> {
   const database = getDb();
 
-  await database
-    .update(chatSessions)
-    .set(updates)
-    .where(eq(chatSessions.id, sessionId));
+  try {
+    await database
+      .update(chatSessions)
+      .set(updates)
+      .where(eq(chatSessions.id, sessionId));
 
-  logger.debug(`Updated chat session: ${sessionId}`, { updates });
+    logger.debug(`Updated chat session: ${sessionId}`, { updates });
+  } catch (error: any) {
+    // Handle unique constraint violations gracefully
+    if (error.code === '23505') {
+      logger.warn(`Duplicate session_path, skipping update: ${updates.sessionPath}`);
+      // Update without session_path
+      const { sessionPath, ...otherUpdates } = updates;
+      if (Object.keys(otherUpdates).length > 0) {
+        await database
+          .update(chatSessions)
+          .set(otherUpdates)
+          .where(eq(chatSessions.id, sessionId));
+      }
+    } else {
+      throw error;
+    }
+  }
 }
 
 export async function getChatSession(sessionId: string): Promise<ChatSession | null> {

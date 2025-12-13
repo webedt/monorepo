@@ -111,8 +111,12 @@ export class Worker {
       // Create and checkout branch
       await this.createBranch(repoDir, branchName);
       if (chatSessionId) {
-        await updateChatSession(chatSessionId, { branch: branchName, sessionPath: generateSessionPath(this.options.repoOwner!, this.options.repoName!, branchName) });
-        await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'branch', message: `Created branch: ${branchName}` });
+        try {
+          await updateChatSession(chatSessionId, { branch: branchName, sessionPath: generateSessionPath(this.options.repoOwner!, this.options.repoName!, branchName) });
+          await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'branch', message: `Created branch: ${branchName}` });
+        } catch (dbError: any) {
+          this.log.warn(`Failed to update session in DB: ${dbError.message}`);
+        }
       }
 
       // Write Claude credentials
