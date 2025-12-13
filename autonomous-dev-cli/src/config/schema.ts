@@ -10,7 +10,34 @@ import { z } from 'zod';
  *   3. Default values
  *
  * Priority: Environment variables > Config file > Defaults
+ *
+ * SECURITY: Credentials should NEVER be stored in config files.
+ * Use environment variables exclusively for production credentials.
  */
+
+/**
+ * Patterns that indicate potential credentials that should not be in config files
+ */
+const CREDENTIAL_PATTERNS = [
+  /^sk-ant-/i,           // Anthropic API keys
+  /^ghp_/i,              // GitHub personal access tokens
+  /^gho_/i,              // GitHub OAuth tokens
+  /^github_pat_/i,       // GitHub PATs
+  /^sk-[a-zA-Z0-9]{20,}$/i,  // OpenAI-style keys
+  /^Bearer\s+/i,         // Bearer tokens
+  /^Basic\s+/i,          // Basic auth
+];
+
+/**
+ * Custom refinement to reject credentials in config values
+ */
+const noCredentialString = z.string().refine(
+  (val) => {
+    if (!val || val.length < 10) return true;
+    return !CREDENTIAL_PATTERNS.some(pattern => pattern.test(val));
+  },
+  { message: 'Credentials should not be stored in config files. Use environment variables instead.' }
+);
 export const ConfigSchema = z.object({
   /**
    * Target Repository Settings
@@ -120,28 +147,57 @@ export const ConfigSchema = z.object({
 
   /**
    * Credentials
-   * Authentication credentials (typically set via environment variables).
+   * Authentication credentials (MUST be set via environment variables, NOT config files).
+   *
+   * SECURITY WARNING: Never store credentials in config files.
+   * Use environment variables exclusively:
+   *   - GITHUB_TOKEN for GitHub authentication
+   *   - CLAUDE_ACCESS_TOKEN and CLAUDE_REFRESH_TOKEN for Claude
+   *   - DATABASE_URL for database connections
    */
   credentials: z.object({
-    /** GitHub personal access token (env: GITHUB_TOKEN) */
-    githubToken: z.string().optional(),
+    /** GitHub personal access token (env: GITHUB_TOKEN) - DO NOT set in config file */
+    githubToken: noCredentialString.optional(),
     /** Claude API authentication */
     claudeAuth: z.object({
-      /** Claude access token (env: CLAUDE_ACCESS_TOKEN) */
-      accessToken: z.string(),
-      /** Claude refresh token (env: CLAUDE_REFRESH_TOKEN) */
-      refreshToken: z.string(),
+      /** Claude access token (env: CLAUDE_ACCESS_TOKEN) - DO NOT set in config file */
+      accessToken: noCredentialString,
+      /** Claude refresh token (env: CLAUDE_REFRESH_TOKEN) - DO NOT set in config file */
+      refreshToken: noCredentialString,
       /** Token expiration timestamp */
       expiresAt: z.number().optional(),
     }).optional(),
-    /** Database URL for credential storage (env: DATABASE_URL) */
-    databaseUrl: z.string().optional(),
+    /** Database URL for credential storage (env: DATABASE_URL) - DO NOT set in config file */
+    databaseUrl: noCredentialString.optional(),
     /** User email for credential lookup (env: USER_EMAIL) */
     userEmail: z.string().email('Invalid email format').optional(),
-  }).describe('Authentication credentials'),
+  }).describe('Authentication credentials - USE ENVIRONMENT VARIABLES ONLY'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+
+/**
+ * Validate that a config object doesn't contain embedded credentials
+ * Returns an array of warning messages for any potential credential leaks
+ */
+export function validateNoCredentialsInConfig(config: Partial<Config>): string[] {
+  const warnings: string[] = [];
+
+  const checkValue = (value: unknown, path: string): void => {
+    if (typeof value === 'string' && value.length >= 10) {
+      if (CREDENTIAL_PATTERNS.some(pattern => pattern.test(value))) {
+        warnings.push(`${path}: Potential credential detected. Use environment variables instead.`);
+      }
+    } else if (typeof value === 'object' && value !== null) {
+      for (const [key, val] of Object.entries(value)) {
+        checkValue(val, `${path}.${key}`);
+      }
+    }
+  };
+
+  checkValue(config, 'config');
+  return warnings;
+}
 
 export const defaultConfig: Partial<Config> = {
   discovery: {

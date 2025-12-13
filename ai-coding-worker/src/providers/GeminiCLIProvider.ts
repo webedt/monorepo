@@ -3,6 +3,7 @@ import * as readline from 'readline';
 import { BaseProvider, ProviderOptions, ProviderStreamEvent } from './BaseProvider';
 import { UserRequestContent, TextBlock, ImageBlock } from '../types';
 import { CredentialManager } from '../utils/credentialManager';
+import { SecureCredentialManager } from '../utils/secureCredentialManager';
 
 /**
  * Gemini CLI provider implementation
@@ -142,12 +143,15 @@ export class GeminiCLIProvider extends BaseProvider {
     onEvent: (event: ProviderStreamEvent) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      // Use session-specific home for credential isolation
+      const effectiveHome = CredentialManager.getEffectiveHome();
+
       const process = spawn(this.geminiPath, args, {
         cwd: this.workspace,
         env: {
           ...global.process.env,
-          // Ensure HOME is set for credential lookup
-          HOME: global.process.env.HOME || '/root'
+          // Use session-specific home for credential isolation
+          HOME: effectiveHome
         },
         stdio: ['ignore', 'pipe', 'pipe']
       });

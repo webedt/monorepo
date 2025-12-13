@@ -1,6 +1,7 @@
 import { query, type Options, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { BaseProvider, ProviderOptions, ProviderStreamEvent } from './BaseProvider';
 import { CredentialManager } from '../utils/credentialManager';
+import { SecureCredentialManager } from '../utils/secureCredentialManager';
 import { UserRequestContent, ImageBlock, TextBlock } from '../types';
 import type { MessageParam } from '@anthropic-ai/sdk/resources';
 
