@@ -139,8 +139,24 @@ export class CodebaseAnalyzer {
         const fullPath = join(dirPath, item);
         const relativePath = relative(this.repoPath, fullPath);
 
-        // Check exclude paths
-        if (this.excludePaths.some((p) => relativePath.startsWith(p) || relativePath.match(p))) {
+        // Check exclude paths (supports simple glob patterns like *.lock)
+        if (this.excludePaths.some((p) => {
+          // Check if it's a simple prefix match
+          if (relativePath.startsWith(p)) return true;
+          // Convert glob pattern to regex safely
+          try {
+            // Convert glob wildcards to regex: * -> .*, ? -> .
+            const regexPattern = p
+              .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars except * and ?
+              .replace(/\*/g, '.*')
+              .replace(/\?/g, '.');
+            return new RegExp(`^${regexPattern}$`).test(relativePath) ||
+                   new RegExp(`^${regexPattern}$`).test(item);
+          } catch {
+            // If regex fails, just do string comparison
+            return relativePath === p || item === p;
+          }
+        })) {
           continue;
         }
 
