@@ -237,7 +237,53 @@ export const ConfigSchema = z.object({
     maxLogFiles: z.number().min(1).max(100).default(5),
     /** Include performance metrics in structured logs (default: true when structured logging enabled) */
     includeMetrics: z.boolean().default(true),
+    /** Log rotation policy: 'size' for size-based, 'time' for time-based, 'both' for combined */
+    rotationPolicy: z.enum(['size', 'time', 'both']).default('size'),
+    /** Time-based rotation interval: 'hourly', 'daily', or 'weekly' */
+    rotationInterval: z.enum(['hourly', 'daily', 'weekly']).default('daily'),
+    /** Maximum age of log files in days before cleanup (default: 30) */
+    maxLogAgeDays: z.number().min(1).max(365).default(30),
   }).describe('Logging configuration').default({}),
+
+  /**
+   * Alerting Settings
+   * Configure alerting hooks for critical failures and monitoring.
+   */
+  alerting: z.object({
+    /** Enable alerting system (default: true) */
+    enabled: z.boolean().default(true),
+    /** Webhook URL for sending alerts (optional) */
+    webhookUrl: z.string().url().optional(),
+    /** File path for alert logs (optional) */
+    alertLogPath: z.string().optional(),
+    /** Minimum interval between repeated alerts in milliseconds (default: 60000 = 1 minute) */
+    cooldownMs: z.number().min(1000).max(3600000).default(60000),
+    /** Maximum alerts per minute for rate limiting (default: 30) */
+    maxAlertsPerMinute: z.number().min(1).max(100).default(30),
+    /** Enable console output for alerts (default: true) */
+    consoleOutput: z.boolean().default(true),
+    /** Minimum severity for webhook notifications: 'info', 'warning', 'error', 'critical' */
+    webhookMinSeverity: z.enum(['info', 'warning', 'error', 'critical']).default('error'),
+  }).describe('Alerting configuration').default({}),
+
+  /**
+   * Metrics Settings
+   * Configure metrics collection and dashboard integration.
+   */
+  metrics: z.object({
+    /** Enable performance regression detection (default: true) */
+    enableRegressionDetection: z.boolean().default(true),
+    /** Percentage threshold for regression detection (default: 20) */
+    regressionThresholdPercent: z.number().min(5).max(100).default(20),
+    /** Enable task complexity distribution tracking (default: true) */
+    enableComplexityTracking: z.boolean().default(true),
+    /** Number of samples for baseline calculation (default: 100) */
+    baselineSampleSize: z.number().min(10).max(1000).default(100),
+    /** Enable dashboard metrics endpoint (default: true) */
+    enableDashboard: z.boolean().default(true),
+    /** HTTP port for metrics endpoint (default: 9090) */
+    metricsPort: z.number().min(1024).max(65535).default(9090),
+  }).describe('Metrics configuration').default({}),
 
   /**
    * Circuit Breaker Settings
@@ -398,6 +444,24 @@ export const defaultConfig: Partial<Config> = {
     maxLogFileSizeBytes: 10 * 1024 * 1024,
     maxLogFiles: 5,
     includeMetrics: true,
+    rotationPolicy: 'size',
+    rotationInterval: 'daily',
+    maxLogAgeDays: 30,
+  },
+  alerting: {
+    enabled: true,
+    cooldownMs: 60000,
+    maxAlertsPerMinute: 30,
+    consoleOutput: true,
+    webhookMinSeverity: 'error',
+  },
+  metrics: {
+    enableRegressionDetection: true,
+    regressionThresholdPercent: 20,
+    enableComplexityTracking: true,
+    baselineSampleSize: 100,
+    enableDashboard: true,
+    metricsPort: 9090,
   },
   circuitBreaker: {
     failureThreshold: 5,

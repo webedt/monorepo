@@ -144,6 +144,16 @@ export interface CorrelationContext {
 }
 
 /**
+ * Log rotation policy type
+ */
+export type LogRotationPolicy = 'size' | 'time' | 'both';
+
+/**
+ * Time-based rotation interval
+ */
+export type LogRotationInterval = 'hourly' | 'daily' | 'weekly';
+
+/**
  * Configuration for structured file logging
  */
 export interface StructuredFileLoggerConfig {
@@ -155,6 +165,14 @@ export interface StructuredFileLoggerConfig {
   maxFiles: number;
   /** Include performance metrics in logs (default: true) */
   includeMetrics: boolean;
+  /** Log rotation policy: 'size', 'time', or 'both' (default: 'size') */
+  rotationPolicy: LogRotationPolicy;
+  /** Time-based rotation interval (default: 'daily') */
+  rotationInterval: LogRotationInterval;
+  /** Maximum age of log files in days for cleanup (default: 30) */
+  maxAgeDays: number;
+  /** Enable compression of rotated files (default: false) */
+  compressRotated: boolean;
 }
 
 /**
@@ -357,6 +375,8 @@ export class StructuredFileLogger {
   private currentLogFile: string;
   private metricsAggregator: MetricsAggregator;
   private enabled: boolean = false;
+  private lastRotationTime: Date;
+  private rotationCheckInterval: NodeJS.Timeout | null = null;
 
   constructor(config: Partial<StructuredFileLoggerConfig> = {}) {
     this.config = {
@@ -364,9 +384,14 @@ export class StructuredFileLogger {
       maxFileSizeBytes: config.maxFileSizeBytes || 10 * 1024 * 1024,
       maxFiles: config.maxFiles || 5,
       includeMetrics: config.includeMetrics !== false,
+      rotationPolicy: config.rotationPolicy || 'size',
+      rotationInterval: config.rotationInterval || 'daily',
+      maxAgeDays: config.maxAgeDays || 30,
+      compressRotated: config.compressRotated || false,
     };
     this.currentLogFile = this.getLogFilePath();
     this.metricsAggregator = new MetricsAggregator();
+    this.lastRotationTime = new Date();
   }
 
   /**
@@ -375,6 +400,8 @@ export class StructuredFileLogger {
   enable(): void {
     this.ensureLogDirectory();
     this.enabled = true;
+    this.startRotationCheck();
+    this.cleanupOldLogFiles();
   }
 
   /**
@@ -382,6 +409,85 @@ export class StructuredFileLogger {
    */
   disable(): void {
     this.enabled = false;
+    this.stopRotationCheck();
+  }
+
+  /**
+   * Start periodic rotation check for time-based rotation
+   */
+  private startRotationCheck(): void {
+    if (this.rotationCheckInterval) return;
+
+    // Check every minute for time-based rotation
+    if (this.config.rotationPolicy === 'time' || this.config.rotationPolicy === 'both') {
+      this.rotationCheckInterval = setInterval(() => {
+        if (this.needsTimeBasedRotation()) {
+          this.rotateLogFiles();
+          this.lastRotationTime = new Date();
+        }
+      }, 60000); // Check every minute
+    }
+  }
+
+  /**
+   * Stop periodic rotation check
+   */
+  private stopRotationCheck(): void {
+    if (this.rotationCheckInterval) {
+      clearInterval(this.rotationCheckInterval);
+      this.rotationCheckInterval = null;
+    }
+  }
+
+  /**
+   * Check if time-based rotation is needed
+   */
+  private needsTimeBasedRotation(): boolean {
+    const now = new Date();
+    const lastRotation = this.lastRotationTime;
+
+    switch (this.config.rotationInterval) {
+      case 'hourly':
+        return now.getHours() !== lastRotation.getHours() ||
+               now.getDate() !== lastRotation.getDate();
+      case 'daily':
+        return now.getDate() !== lastRotation.getDate() ||
+               now.getMonth() !== lastRotation.getMonth();
+      case 'weekly':
+        const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+        return (now.getTime() - lastRotation.getTime()) >= msPerWeek;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Cleanup log files older than maxAgeDays
+   */
+  private cleanupOldLogFiles(): void {
+    if (this.config.maxAgeDays <= 0) return;
+
+    try {
+      const files = readdirSync(this.config.logDir);
+      const now = Date.now();
+      const maxAgeMs = this.config.maxAgeDays * 24 * 60 * 60 * 1000;
+
+      for (const file of files) {
+        if (!file.startsWith('autonomous-dev')) continue;
+
+        const filePath = join(this.config.logDir, file);
+        try {
+          const stats = statSync(filePath);
+          if (now - stats.mtime.getTime() > maxAgeMs) {
+            unlinkSync(filePath);
+          }
+        } catch {
+          // Ignore errors for individual files
+        }
+      }
+    } catch {
+      // Silently fail if directory doesn't exist yet
+    }
   }
 
   /**
@@ -415,18 +521,34 @@ export class StructuredFileLogger {
   }
 
   /**
-   * Check if log rotation is needed
+   * Check if log rotation is needed based on rotation policy
    */
   private needsRotation(): boolean {
     if (!existsSync(this.currentLogFile)) {
       return false;
     }
-    try {
-      const stats = statSync(this.currentLogFile);
-      return stats.size >= this.config.maxFileSizeBytes;
-    } catch {
-      return false;
+
+    // Check size-based rotation
+    const needsSizeRotation = this.config.rotationPolicy === 'size' || this.config.rotationPolicy === 'both';
+    if (needsSizeRotation) {
+      try {
+        const stats = statSync(this.currentLogFile);
+        if (stats.size >= this.config.maxFileSizeBytes) {
+          return true;
+        }
+      } catch {
+        return false;
+      }
     }
+
+    // Check time-based rotation (already handled by interval, but check on write as well)
+    const needsTimeRotation = this.config.rotationPolicy === 'time' || this.config.rotationPolicy === 'both';
+    if (needsTimeRotation && this.needsTimeBasedRotation()) {
+      this.lastRotationTime = new Date();
+      return true;
+    }
+
+    return false;
   }
 
   /**
