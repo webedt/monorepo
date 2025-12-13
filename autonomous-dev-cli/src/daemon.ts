@@ -1691,6 +1691,13 @@ export class Daemon implements DaemonStateProvider {
           // Correlation context for request tracing
           cycleCorrelationId: this.getCurrentCorrelationId(),
           cycleNumber: this.cycleCount,
+          // Merge configuration for auto-PR and auto-merge after task completion
+          mergeConfig: {
+            autoMerge: this.config.merge.autoMerge,
+            maxRetries: this.config.merge.maxRetries,
+            conflictStrategy: this.config.merge.conflictStrategy,
+            mergeMethod: this.config.merge.mergeMethod,
+          },
         });
 
         const workerTasks: WorkerTask[] = issuesToWork.map((issue) => ({

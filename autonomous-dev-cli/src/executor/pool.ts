@@ -1725,6 +1725,8 @@ export class WorkerPool extends EventEmitter {
         enableDatabaseLogging: this.options.enableDatabaseLogging,
         // Retry configuration
         retryConfig: this.options.retryConfig,
+        // Merge configuration for auto-merge after PR creation
+        mergeConfig: this.options.mergeConfig,
       },
       workerId
     );

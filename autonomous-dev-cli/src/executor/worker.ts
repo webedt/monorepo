@@ -81,6 +81,8 @@ import {
   type RetryAttempt,
 } from '../utils/dead-letter-queue.js';
 import { type Issue } from '../github/issues.js';
+import { createGitHub } from '../github/index.js';
+import { createConflictResolver, type MergeAttemptResult } from '../conflicts/resolver.js';
 import {
   createChatSession,
   updateChatSession,
@@ -390,6 +392,17 @@ export interface WorkerOptions {
     /** Additional implementation notes */
     notes?: string;
   };
+  // Merge configuration for auto-merge after PR creation
+  mergeConfig?: {
+    /** Automatically merge PRs after creation (default: true) */
+    autoMerge?: boolean;
+    /** Maximum merge retry attempts (default: 3) */
+    maxRetries?: number;
+    /** Strategy for handling merge conflicts: 'rebase', 'merge', 'manual', or 'ai' */
+    conflictStrategy?: 'rebase' | 'merge' | 'manual' | 'ai';
+    /** Git merge method: 'merge', 'squash', or 'rebase' */
+    mergeMethod?: 'merge' | 'squash' | 'rebase';
+  };
 }
 
 /**
@@ -418,6 +431,12 @@ export interface WorkerResult {
   issue: Issue;
   branchName: string;
   commitSha?: string;
+  pullRequest?: {
+    number: number;
+    htmlUrl: string;
+    merged?: boolean;
+    mergeSha?: string;
+  };
   error?: string;
   duration: number;
   chatSessionId?: string;
@@ -667,7 +686,82 @@ export class Worker {
       const commitSha = await this.commitAndPush(repoDir, issue, branchName);
       if (chatSessionId) {
         await addEvent(chatSessionId, 'commit_progress', { type: 'commit_progress', stage: 'pushed', message: `Pushed commit ${commitSha}`, data: { commitSha, branch: branchName } });
-        await addMessage(chatSessionId, 'assistant', `Successfully committed and pushed changes.\n\nCommit: ${commitSha}\nBranch: ${branchName}`);
+      }
+
+      // Create Pull Request to base branch
+      let pullRequest: { number: number; htmlUrl: string; merged?: boolean; mergeSha?: string } | undefined;
+      try {
+        if (chatSessionId) {
+          await addEvent(chatSessionId, 'pr_progress', { type: 'pr_progress', stage: 'creating', message: 'Creating pull request...' });
+        }
+        pullRequest = await this.createPullRequest(issue, branchName);
+        taskLog.info(`Created PR #${pullRequest.number}`, {
+          prNumber: pullRequest.number,
+          htmlUrl: pullRequest.htmlUrl,
+          branchName,
+        });
+        if (chatSessionId) {
+          await addEvent(chatSessionId, 'pr_progress', { type: 'pr_progress', stage: 'created', message: `Created PR #${pullRequest.number}`, data: { prNumber: pullRequest.number, htmlUrl: pullRequest.htmlUrl } });
+        }
+
+        // Attempt auto-merge if enabled
+        const mergeConfig = this.options.mergeConfig;
+        if (mergeConfig?.autoMerge !== false) {
+          try {
+            if (chatSessionId) {
+              await addEvent(chatSessionId, 'merge_progress', { type: 'merge_progress', stage: 'merging', message: 'Attempting auto-merge...' });
+            }
+            const mergeResult = await this.attemptAutoMerge(issue, branchName, pullRequest.number);
+            if (mergeResult.merged) {
+              pullRequest.merged = true;
+              pullRequest.mergeSha = mergeResult.sha;
+              taskLog.success(`PR #${pullRequest.number} auto-merged successfully`, {
+                prNumber: pullRequest.number,
+                mergeSha: mergeResult.sha,
+              });
+              if (chatSessionId) {
+                await addEvent(chatSessionId, 'merge_progress', { type: 'merge_progress', stage: 'merged', message: `PR #${pullRequest.number} merged!`, data: { prNumber: pullRequest.number, mergeSha: mergeResult.sha } });
+                await addMessage(chatSessionId, 'assistant', `Successfully completed task!\n\nCommit: ${commitSha}\nBranch: ${branchName}\nPR: #${pullRequest.number} - ${pullRequest.htmlUrl}\n\n✅ PR was auto-merged to ${this.options.baseBranch}`);
+              }
+            } else {
+              taskLog.info(`PR #${pullRequest.number} not merged: ${mergeResult.error}`, {
+                prNumber: pullRequest.number,
+                attempts: mergeResult.attempts,
+              });
+              if (chatSessionId) {
+                await addEvent(chatSessionId, 'merge_progress', { type: 'merge_progress', stage: 'pending', message: `PR created but not merged: ${mergeResult.error}` });
+                await addMessage(chatSessionId, 'assistant', `Successfully committed, pushed, and created pull request.\n\nCommit: ${commitSha}\nBranch: ${branchName}\nPR: #${pullRequest.number} - ${pullRequest.htmlUrl}\n\nNote: Auto-merge was attempted but not completed: ${mergeResult.error}`);
+              }
+            }
+          } catch (mergeError: unknown) {
+            taskLog.warn(`Auto-merge failed: ${getErrorMessage(mergeError)}`, {
+              prNumber: pullRequest.number,
+              issueNumber: issue.number,
+            });
+            if (chatSessionId) {
+              await addEvent(chatSessionId, 'merge_progress', { type: 'merge_progress', stage: 'failed', message: `Auto-merge failed: ${getErrorMessage(mergeError)}` });
+              await addMessage(chatSessionId, 'assistant', `Successfully committed, pushed, and created pull request.\n\nCommit: ${commitSha}\nBranch: ${branchName}\nPR: #${pullRequest.number} - ${pullRequest.htmlUrl}\n\nNote: Auto-merge failed - manual review may be needed.`);
+            }
+          }
+        } else {
+          // Auto-merge disabled
+          if (chatSessionId) {
+            await addMessage(chatSessionId, 'assistant', `Successfully committed, pushed, and created pull request.\n\nCommit: ${commitSha}\nBranch: ${branchName}\nPR: #${pullRequest.number} - ${pullRequest.htmlUrl}`);
+          }
+        }
+      } catch (prError: unknown) {
+        // PR creation failure is not fatal - log and continue
+        taskLog.warn(`Failed to create PR: ${getErrorMessage(prError)}`, {
+          issueNumber: issue.number,
+          branchName,
+        });
+        if (chatSessionId) {
+          await addEvent(chatSessionId, 'pr_progress', { type: 'pr_progress', stage: 'failed', message: `PR creation failed: ${getErrorMessage(prError)}` });
+          await addMessage(chatSessionId, 'assistant', `Successfully committed and pushed changes.\n\nCommit: ${commitSha}\nBranch: ${branchName}\n\nNote: PR creation failed - you may need to create the PR manually.`);
+        }
+      }
+
+      if (chatSessionId) {
         await updateChatSession(chatSessionId, { status: 'completed', completedAt: new Date() });
       }
 
@@ -731,6 +825,7 @@ export class Worker {
         issue,
         branchName,
         commitSha,
+        pullRequest,
         duration,
         chatSessionId,
       };
@@ -2048,5 +2143,140 @@ Implements #${issue.number}
 
     this.log.info(`Pushed commit ${commitSha} to ${branchName}`);
     return commitSha;
+  }
+
+  /**
+   * Create a pull request for the completed task.
+   * Creates a PR from the feature branch back to the base branch (typically 'dev').
+   */
+  private async createPullRequest(issue: Issue, branchName: string): Promise<{ number: number; htmlUrl: string }> {
+    // Extract owner and repo from repoUrl
+    const repoMatch = this.options.repoUrl.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+    if (!repoMatch) {
+      throw new Error(`Cannot parse repository URL: ${this.options.repoUrl}`);
+    }
+    const [, owner, repo] = repoMatch;
+
+    this.log.info('Creating pull request', {
+      owner,
+      repo,
+      head: branchName,
+      base: this.options.baseBranch,
+      issueNumber: issue.number,
+    });
+
+    // Create GitHub client
+    const github = createGitHub({
+      owner,
+      repo,
+      token: this.options.githubToken,
+    });
+
+    // Generate PR title and body
+    const prTitle = issue.title;
+    const prBody = github.pulls.generatePRDescription({
+      issueNumber: issue.number,
+      issueTitle: issue.title,
+      issueBody: issue.body || undefined,
+      summary: `This PR implements the changes for issue #${issue.number}.`,
+    });
+
+    // Create the PR
+    const pr = await github.pulls.createPR({
+      title: prTitle,
+      body: prBody,
+      head: branchName,
+      base: this.options.baseBranch,
+      draft: false,
+      issueNumber: issue.number,
+    });
+
+    this.log.info(`Created PR #${pr.number}`, {
+      prNumber: pr.number,
+      htmlUrl: pr.htmlUrl,
+      head: branchName,
+      base: this.options.baseBranch,
+    });
+
+    return {
+      number: pr.number,
+      htmlUrl: pr.htmlUrl,
+    };
+  }
+
+  /**
+   * Attempt to auto-merge a PR using the ConflictResolver.
+   * This will:
+   * 1. Wait for the PR to become mergeable
+   * 2. Merge base branch into feature branch if needed (to resolve conflicts)
+   * 3. Merge the PR
+   * 4. Delete the feature branch
+   */
+  private async attemptAutoMerge(
+    issue: Issue,
+    branchName: string,
+    prNumber: number
+  ): Promise<MergeAttemptResult> {
+    // Extract owner and repo from repoUrl
+    const repoMatch = this.options.repoUrl.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+    if (!repoMatch) {
+      throw new Error(`Cannot parse repository URL: ${this.options.repoUrl}`);
+    }
+    const [, owner, repo] = repoMatch;
+
+    const mergeConfig = this.options.mergeConfig || {};
+
+    this.log.info('Attempting auto-merge', {
+      owner,
+      repo,
+      prNumber,
+      branchName,
+      strategy: mergeConfig.conflictStrategy || 'rebase',
+      method: mergeConfig.mergeMethod || 'squash',
+    });
+
+    // Create GitHub client
+    const github = createGitHub({
+      owner,
+      repo,
+      token: this.options.githubToken,
+    });
+
+    // Create conflict resolver
+    const resolver = createConflictResolver({
+      prManager: github.pulls,
+      branchManager: github.branches,
+      maxRetries: mergeConfig.maxRetries || 3,
+      strategy: mergeConfig.conflictStrategy || 'rebase',
+      mergeMethod: mergeConfig.mergeMethod || 'squash',
+      owner,
+      repo,
+      baseBranch: this.options.baseBranch,
+      // For AI conflict resolution (if strategy is 'ai')
+      githubToken: this.options.githubToken,
+      claudeAuth: this.options.claudeAuth,
+      workDir: this.options.workDir,
+    });
+
+    // Attempt to merge
+    const result = await resolver.attemptMerge(branchName, prNumber);
+
+    if (result.merged) {
+      this.log.success(`PR #${prNumber} merged to ${this.options.baseBranch}`, {
+        prNumber,
+        branchName,
+        sha: result.sha,
+        attempts: result.attempts,
+      });
+    } else {
+      this.log.info(`PR #${prNumber} merge pending`, {
+        prNumber,
+        branchName,
+        error: result.error,
+        attempts: result.attempts,
+      });
+    }
+
+    return result;
   }
 }
