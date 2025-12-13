@@ -1,17 +1,44 @@
 import chalk from 'chalk';
 import { StructuredError, type ErrorContext, formatError } from './errors.js';
+import { randomUUID } from 'crypto';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export type LogFormat = 'pretty' | 'json';
 
 interface LoggerOptions {
   level: LogLevel;
   prefix?: string;
+  format?: LogFormat;
+  correlationId?: string;
 }
 
 interface ErrorLogOptions {
   context?: ErrorContext;
   includeStack?: boolean;
   includeRecovery?: boolean;
+}
+
+/**
+ * Structured JSON log entry schema for consistent logging
+ */
+export interface StructuredLogEntry {
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+  correlationId?: string;
+  component?: string;
+  meta?: Record<string, any>;
+  error?: {
+    code?: string;
+    message: string;
+    severity?: string;
+    isRetryable?: boolean;
+    stack?: string;
+    cause?: string;
+    context?: Record<string, any>;
+    recoveryActions?: Array<{ description: string; automatic: boolean }>;
+  };
 }
 
 const levelPriority: Record<LogLevel, number> = {
@@ -35,30 +62,114 @@ const levelIcons: Record<LogLevel, string> = {
   error: '❌',
 };
 
+// Global correlation ID for request tracing across components
+let globalCorrelationId: string | undefined;
+
+/**
+ * Generate a new correlation ID
+ */
+export function generateCorrelationId(): string {
+  return randomUUID();
+}
+
+/**
+ * Set the global correlation ID for the current execution context
+ */
+export function setCorrelationId(id: string): void {
+  globalCorrelationId = id;
+}
+
+/**
+ * Get the current global correlation ID
+ */
+export function getCorrelationId(): string | undefined {
+  return globalCorrelationId;
+}
+
+/**
+ * Clear the global correlation ID
+ */
+export function clearCorrelationId(): void {
+  globalCorrelationId = undefined;
+}
+
 class Logger {
   private level: LogLevel;
   private prefix: string;
+  private format: LogFormat;
+  private correlationId?: string;
 
   constructor(options: LoggerOptions = { level: 'info' }) {
     this.level = options.level;
     this.prefix = options.prefix || '';
+    this.format = options.format || 'pretty';
+    this.correlationId = options.correlationId;
   }
 
   setLevel(level: LogLevel): void {
     this.level = level;
   }
 
+  setFormat(format: LogFormat): void {
+    this.format = format;
+  }
+
+  /**
+   * Set the correlation ID for this logger instance
+   */
+  setCorrelationId(id: string): void {
+    this.correlationId = id;
+  }
+
+  /**
+   * Get the effective correlation ID (instance or global)
+   */
+  private getEffectiveCorrelationId(): string | undefined {
+    return this.correlationId || globalCorrelationId;
+  }
+
   private shouldLog(level: LogLevel): boolean {
     return levelPriority[level] >= levelPriority[this.level];
   }
 
-  private formatMessage(level: LogLevel, message: string, meta?: object): string {
+  /**
+   * Create a structured log entry
+   */
+  private createLogEntry(level: LogLevel, message: string, meta?: object): StructuredLogEntry {
+    const entry: StructuredLogEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+    };
+
+    const correlationId = this.getEffectiveCorrelationId();
+    if (correlationId) {
+      entry.correlationId = correlationId;
+    }
+
+    if (this.prefix) {
+      entry.component = this.prefix;
+    }
+
+    if (meta && Object.keys(meta).length > 0) {
+      entry.meta = meta as Record<string, any>;
+    }
+
+    return entry;
+  }
+
+  /**
+   * Format a log entry as pretty output for terminal
+   */
+  private formatPretty(level: LogLevel, message: string, meta?: object): string {
     const timestamp = new Date().toISOString();
     const icon = levelIcons[level];
     const colorFn = levelColors[level];
     const prefix = this.prefix ? `[${this.prefix}] ` : '';
+    const correlationId = this.getEffectiveCorrelationId();
+    const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
 
-    let formatted = `${chalk.gray(timestamp)} ${icon} ${colorFn(level.toUpperCase().padEnd(5))} ${prefix}${message}`;
+    let formatted = `${chalk.gray(timestamp)} ${icon} ${colorFn(level.toUpperCase().padEnd(5))} ${prefix}${message}${correlationStr}`;
 
     if (meta && Object.keys(meta).length > 0) {
       formatted += ` ${chalk.gray(JSON.stringify(meta))}`;
@@ -67,27 +178,48 @@ class Logger {
     return formatted;
   }
 
+  /**
+   * Format a log entry as JSON
+   */
+  private formatJson(entry: StructuredLogEntry): string {
+    return JSON.stringify(entry);
+  }
+
+  /**
+   * Write a log entry to output
+   */
+  private writeLog(level: LogLevel, message: string, meta?: object): void {
+    if (this.format === 'json') {
+      const entry = this.createLogEntry(level, message, meta);
+      const output = level === 'error' ? console.error : console.log;
+      output(this.formatJson(entry));
+    } else {
+      const output = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+      output(this.formatPretty(level, message, meta));
+    }
+  }
+
   debug(message: string, meta?: object): void {
     if (this.shouldLog('debug')) {
-      console.log(this.formatMessage('debug', message, meta));
+      this.writeLog('debug', message, meta);
     }
   }
 
   info(message: string, meta?: object): void {
     if (this.shouldLog('info')) {
-      console.log(this.formatMessage('info', message, meta));
+      this.writeLog('info', message, meta);
     }
   }
 
   warn(message: string, meta?: object): void {
     if (this.shouldLog('warn')) {
-      console.warn(this.formatMessage('warn', message, meta));
+      this.writeLog('warn', message, meta);
     }
   }
 
   error(message: string, meta?: object): void {
     if (this.shouldLog('error')) {
-      console.error(this.formatMessage('error', message, meta));
+      this.writeLog('error', message, meta);
     }
   }
 
@@ -102,10 +234,38 @@ class Logger {
     // Merge additional context if provided
     const mergedContext = context ? { ...error.context, ...context } : error.context;
 
-    // Build comprehensive log output
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('error', error.message);
+      entry.error = {
+        code: error.code,
+        message: error.message,
+        severity: error.severity,
+        isRetryable: error.isRetryable,
+        context: mergedContext,
+      };
+
+      if (includeStack && error.stack) {
+        entry.error.stack = error.stack;
+      }
+
+      if (includeRecovery && error.recoveryActions.length > 0) {
+        entry.error.recoveryActions = error.recoveryActions;
+      }
+
+      if (error.cause) {
+        entry.error.cause = error.cause.message;
+      }
+
+      console.error(this.formatJson(entry));
+      return;
+    }
+
+    // Pretty format
     const timestamp = new Date().toISOString();
     const prefix = this.prefix ? `[${this.prefix}] ` : '';
     const severityColor = this.getSeverityColor(error.severity);
+    const correlationId = this.getEffectiveCorrelationId();
+    const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
 
     console.error();
     console.error(
@@ -114,7 +274,8 @@ class Logger {
       levelColors.error('ERROR'),
       prefix,
       chalk.bold(`[${error.code}]`),
-      error.message
+      error.message,
+      correlationStr
     );
     console.error(chalk.gray('  Severity:'), severityColor(error.severity));
     console.error(chalk.gray('  Retryable:'), error.isRetryable ? chalk.green('yes') : chalk.red('no'));
@@ -172,9 +333,22 @@ class Logger {
     if (error instanceof StructuredError) {
       this.structuredError(error, { context, includeStack: true, includeRecovery: true });
     } else {
-      // Convert regular error to structured format for consistent logging
+      if (this.format === 'json') {
+        const entry = this.createLogEntry('error', message);
+        entry.error = {
+          message: error.message,
+          stack: error.stack,
+          context,
+        };
+        console.error(this.formatJson(entry));
+        return;
+      }
+
+      // Pretty format
       const timestamp = new Date().toISOString();
       const prefix = this.prefix ? `[${this.prefix}] ` : '';
+      const correlationId = this.getEffectiveCorrelationId();
+      const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
 
       console.error();
       console.error(
@@ -182,7 +356,8 @@ class Logger {
         levelIcons.error,
         levelColors.error('ERROR'),
         prefix,
-        message
+        message,
+        correlationStr
       );
       console.error(chalk.gray('  Error:'), error.message);
 
@@ -223,33 +398,86 @@ class Logger {
     }
   }
 
-  // Special formatted outputs
+  // Special formatted outputs (only in pretty mode)
   success(message: string): void {
-    console.log(`${chalk.green('✓')} ${message}`);
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', message);
+      entry.meta = { status: 'success' };
+      console.log(this.formatJson(entry));
+    } else {
+      console.log(`${chalk.green('✓')} ${message}`);
+    }
   }
 
   failure(message: string): void {
-    console.log(`${chalk.red('✗')} ${message}`);
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('error', message);
+      entry.meta = { status: 'failure' };
+      console.log(this.formatJson(entry));
+    } else {
+      console.log(`${chalk.red('✗')} ${message}`);
+    }
   }
 
   step(step: number, total: number, message: string): void {
-    console.log(`${chalk.cyan(`[${step}/${total}]`)} ${message}`);
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', message);
+      entry.meta = { step, total };
+      console.log(this.formatJson(entry));
+    } else {
+      console.log(`${chalk.cyan(`[${step}/${total}]`)} ${message}`);
+    }
   }
 
   divider(): void {
-    console.log(chalk.gray('─'.repeat(60)));
+    if (this.format !== 'json') {
+      console.log(chalk.gray('─'.repeat(60)));
+    }
   }
 
   header(title: string): void {
-    console.log();
-    console.log(chalk.bold.cyan(`═══ ${title} ${'═'.repeat(Math.max(0, 50 - title.length))}`));
-    console.log();
+    if (this.format === 'json') {
+      const entry = this.createLogEntry('info', title);
+      entry.meta = { type: 'header' };
+      console.log(this.formatJson(entry));
+    } else {
+      console.log();
+      console.log(chalk.bold.cyan(`═══ ${title} ${'═'.repeat(Math.max(0, 50 - title.length))}`));
+      console.log();
+    }
   }
 
-  // Create a child logger with a prefix
+  /**
+   * Create a child logger with a prefix and optionally inherit correlation ID
+   */
   child(prefix: string): Logger {
-    const child = new Logger({ level: this.level, prefix });
+    const child = new Logger({
+      level: this.level,
+      prefix,
+      format: this.format,
+      correlationId: this.correlationId,
+    });
     return child;
+  }
+
+  /**
+   * Create a child logger with a specific correlation ID for request tracing
+   */
+  withCorrelationId(correlationId: string): Logger {
+    const child = new Logger({
+      level: this.level,
+      prefix: this.prefix,
+      format: this.format,
+      correlationId,
+    });
+    return child;
+  }
+
+  /**
+   * Get the current log entry as a structured object (for testing/inspection)
+   */
+  getLogEntry(level: LogLevel, message: string, meta?: object): StructuredLogEntry {
+    return this.createLogEntry(level, message, meta);
   }
 }
 
