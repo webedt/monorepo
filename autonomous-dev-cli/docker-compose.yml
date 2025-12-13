@@ -15,7 +15,7 @@ services:
       # Target repository (can also be set via config file)
       REPO_OWNER: ${REPO_OWNER:-}
       REPO_NAME: ${REPO_NAME:-}
-      REPO_BASE_BRANCH: ${REPO_BASE_BRANCH:-main}
+      REPO_BASE_BRANCH: ${REPO_BASE_BRANCH:-dev}
 
       # Execution settings
       PARALLEL_WORKERS: ${PARALLEL_WORKERS:-4}
