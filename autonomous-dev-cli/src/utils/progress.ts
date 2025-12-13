@@ -66,6 +66,16 @@ export interface WorkerProgressState {
 }
 
 /**
+ * Phase timing information for breakdown
+ */
+export interface PhaseTimingInfo {
+  phase: CyclePhase;
+  startTime: number;
+  endTime?: number;
+  duration?: number;
+}
+
+/**
  * Cycle progress state
  */
 export interface CycleProgressState {
@@ -80,6 +90,36 @@ export interface CycleProgressState {
   tasksFailed: number;
   prsMerged: number;
   workers: Map<string, WorkerProgressState>;
+  /** Timing breakdown by phase */
+  phaseTimings: PhaseTimingInfo[];
+}
+
+/**
+ * Cycle summary for display and JSON output
+ */
+export interface CycleSummary {
+  cycleNumber: number;
+  success: boolean;
+  totalDuration: number;
+  phaseBreakdown: Array<{
+    phase: CyclePhase;
+    duration: number;
+    percentage: number;
+  }>;
+  tasks: {
+    discovered: number;
+    completed: number;
+    failed: number;
+    successRate: number;
+  };
+  prs: {
+    merged: number;
+  };
+  workers: {
+    total: number;
+    completed: number;
+    failed: number;
+  };
 }
 
 /**
@@ -217,6 +257,7 @@ export class ProgressManager {
       tasksFailed: 0,
       prsMerged: 0,
       workers: new Map(),
+      phaseTimings: [],
     };
 
     if (!this.isJsonMode) {
@@ -230,15 +271,30 @@ export class ProgressManager {
   setPhase(phase: CyclePhase, stepNumber: number): void {
     if (!this.state) return;
 
-    // Record duration of previous phase for ETA calculation
+    const now = Date.now();
+
+    // Record duration of previous phase for ETA calculation and timing breakdown
     if (this.state.phaseStartTime) {
-      const phaseDuration = Date.now() - this.state.phaseStartTime;
+      const phaseDuration = now - this.state.phaseStartTime;
       this.phaseETAs.get(this.state.phase)?.addSample(phaseDuration);
+
+      // Update the timing for the previous phase
+      const lastTiming = this.state.phaseTimings.find(t => t.phase === this.state!.phase && !t.endTime);
+      if (lastTiming) {
+        lastTiming.endTime = now;
+        lastTiming.duration = phaseDuration;
+      }
     }
 
     this.state.phase = phase;
     this.state.stepNumber = stepNumber;
-    this.state.phaseStartTime = Date.now();
+    this.state.phaseStartTime = now;
+
+    // Add timing entry for the new phase
+    this.state.phaseTimings.push({
+      phase,
+      startTime: now,
+    });
 
     const description = PHASE_DESCRIPTIONS[phase];
     const icon = PHASE_ICONS[phase];
@@ -366,8 +422,18 @@ export class ProgressManager {
 
     if (!this.state) return;
 
-    const duration = Date.now() - this.state.startTime;
+    const now = Date.now();
+    const duration = now - this.state.startTime;
     const durationStr = formatDuration(duration);
+
+    // Finalize the last phase timing
+    if (this.state.phaseStartTime) {
+      const lastTiming = this.state.phaseTimings.find(t => t.phase === this.state!.phase && !t.endTime);
+      if (lastTiming) {
+        lastTiming.endTime = now;
+        lastTiming.duration = now - this.state.phaseStartTime;
+      }
+    }
 
     if (!this.isJsonMode) {
       const icon = success ? chalk.green('✓') : chalk.red('✗');
@@ -376,6 +442,124 @@ export class ProgressManager {
     }
 
     this.state = null;
+  }
+
+  /**
+   * Get cycle summary with timing breakdown
+   */
+  getCycleSummary(success: boolean): CycleSummary | null {
+    if (!this.state) return null;
+
+    const now = Date.now();
+    const totalDuration = now - this.state.startTime;
+
+    // Calculate phase breakdown with percentages
+    const phaseBreakdown = this.state.phaseTimings
+      .filter(t => t.duration !== undefined)
+      .map(t => ({
+        phase: t.phase,
+        duration: t.duration!,
+        percentage: totalDuration > 0 ? Math.round((t.duration! / totalDuration) * 100) : 0,
+      }));
+
+    // Get worker stats
+    const workers = Array.from(this.state.workers.values());
+    const completedWorkers = workers.filter(w => w.status === 'completed').length;
+    const failedWorkers = workers.filter(w => w.status === 'failed').length;
+
+    // Calculate task success rate
+    const totalTasks = this.state.tasksCompleted + this.state.tasksFailed;
+    const successRate = totalTasks > 0 ? Math.round((this.state.tasksCompleted / totalTasks) * 100) : 0;
+
+    return {
+      cycleNumber: this.state.cycleNumber,
+      success,
+      totalDuration,
+      phaseBreakdown,
+      tasks: {
+        discovered: this.state.tasksDiscovered,
+        completed: this.state.tasksCompleted,
+        failed: this.state.tasksFailed,
+        successRate,
+      },
+      prs: {
+        merged: this.state.prsMerged,
+      },
+      workers: {
+        total: workers.length,
+        completed: completedWorkers,
+        failed: failedWorkers,
+      },
+    };
+  }
+
+  /**
+   * Display formatted cycle summary with color coding
+   */
+  displayCycleSummary(success: boolean): void {
+    const summary = this.getCycleSummary(success);
+    if (!summary) return;
+
+    if (this.isJsonMode) {
+      console.log(JSON.stringify({ type: 'cycle_summary', ...summary }));
+      return;
+    }
+
+    console.log();
+    console.log(chalk.bold('━'.repeat(60)));
+    console.log(chalk.bold('  Cycle Summary'));
+    console.log(chalk.bold('━'.repeat(60)));
+
+    // Overall status with color coding
+    const statusIcon = success ? chalk.green('✓') : chalk.red('✗');
+    const statusColor = success ? chalk.green : chalk.red;
+    const statusText = success ? 'COMPLETED' : 'FAILED';
+    console.log(`  Status:     ${statusIcon} ${statusColor(statusText)}`);
+    console.log(`  Duration:   ${chalk.cyan(formatDuration(summary.totalDuration))}`);
+    console.log();
+
+    // Tasks section with color coding
+    console.log(chalk.bold('  Tasks:'));
+    console.log(`    Discovered:  ${chalk.white(summary.tasks.discovered.toString())}`);
+    const completedColor = summary.tasks.completed > 0 ? chalk.green : chalk.gray;
+    console.log(`    Completed:   ${completedColor(summary.tasks.completed.toString())}`);
+    const failedColor = summary.tasks.failed > 0 ? chalk.red : chalk.gray;
+    console.log(`    Failed:      ${failedColor(summary.tasks.failed.toString())}`);
+    const rateColor = summary.tasks.successRate >= 80 ? chalk.green :
+                      summary.tasks.successRate >= 50 ? chalk.yellow : chalk.red;
+    console.log(`    Success:     ${rateColor(summary.tasks.successRate + '%')}`);
+    console.log();
+
+    // PRs section
+    console.log(chalk.bold('  Pull Requests:'));
+    const mergedColor = summary.prs.merged > 0 ? chalk.green : chalk.gray;
+    console.log(`    Merged:      ${mergedColor(summary.prs.merged.toString())}`);
+    console.log();
+
+    // Timing breakdown section
+    if (summary.phaseBreakdown.length > 0) {
+      console.log(chalk.bold('  Timing Breakdown:'));
+      for (const phase of summary.phaseBreakdown) {
+        const phaseName = PHASE_DESCRIPTIONS[phase.phase] || phase.phase;
+        const duration = formatDuration(phase.duration);
+        const bar = this.createMiniBar(phase.percentage);
+        console.log(`    ${phaseName.padEnd(25)} ${bar} ${chalk.cyan(duration)} ${chalk.gray(`(${phase.percentage}%)`)}`);
+      }
+      console.log();
+    }
+
+    console.log(chalk.bold('━'.repeat(60)));
+    console.log();
+  }
+
+  /**
+   * Create a mini progress bar for timing breakdown
+   */
+  private createMiniBar(percentage: number): string {
+    const width = 15;
+    const filled = Math.round((percentage / 100) * width);
+    const empty = width - filled;
+    return chalk.cyan('█'.repeat(filled)) + chalk.gray('░'.repeat(empty));
   }
 
   /**
