@@ -1,4 +1,4 @@
-import { CodebaseAnalyzer, type CodebaseAnalysis } from './analyzer.js';
+import { CodebaseAnalyzer, type CodebaseAnalysis, type AnalyzerConfig } from './analyzer.js';
 import { type Issue } from '../github/issues.js';
 import { logger } from '../utils/logger.js';
 
@@ -21,6 +21,7 @@ export interface TaskGeneratorOptions {
   tasksPerCycle: number;
   existingIssues: Issue[];
   repoContext?: string; // Optional context about what the repo does
+  analyzerConfig?: AnalyzerConfig; // Optional analyzer configuration (maxDepth, maxFiles)
 }
 
 export class TaskGenerator {
@@ -30,6 +31,7 @@ export class TaskGenerator {
   private tasksPerCycle: number;
   private existingIssues: Issue[];
   private repoContext: string;
+  private analyzerConfig: AnalyzerConfig;
 
   constructor(options: TaskGeneratorOptions) {
     this.claudeAuth = options.claudeAuth;
@@ -38,13 +40,14 @@ export class TaskGenerator {
     this.tasksPerCycle = options.tasksPerCycle;
     this.existingIssues = options.existingIssues;
     this.repoContext = options.repoContext || '';
+    this.analyzerConfig = options.analyzerConfig || {};
   }
 
   async generateTasks(): Promise<DiscoveredTask[]> {
     logger.info('Generating tasks with Claude...');
 
     // First, analyze the codebase
-    const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths);
+    const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths, this.analyzerConfig);
     const analysis = await analyzer.analyze();
     const summary = analyzer.generateSummary(analysis);
 

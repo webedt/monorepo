@@ -50,6 +50,16 @@ export enum ErrorCode {
   EXEC_PUSH_FAILED = 'EXEC_PUSH_FAILED',
   EXEC_TIMEOUT = 'EXEC_TIMEOUT',
 
+  // Analyzer errors (6000-6999)
+  ANALYZER_PATH_NOT_FOUND = 'ANALYZER_PATH_NOT_FOUND',
+  ANALYZER_PATH_NOT_READABLE = 'ANALYZER_PATH_NOT_READABLE',
+  ANALYZER_PATH_NOT_DIRECTORY = 'ANALYZER_PATH_NOT_DIRECTORY',
+  ANALYZER_INVALID_GLOB_PATTERN = 'ANALYZER_INVALID_GLOB_PATTERN',
+  ANALYZER_INVALID_REGEX_PATTERN = 'ANALYZER_INVALID_REGEX_PATTERN',
+  ANALYZER_MAX_DEPTH_EXCEEDED = 'ANALYZER_MAX_DEPTH_EXCEEDED',
+  ANALYZER_MAX_FILES_EXCEEDED = 'ANALYZER_MAX_FILES_EXCEEDED',
+  ANALYZER_INVALID_CONFIG = 'ANALYZER_INVALID_CONFIG',
+
   // General errors (9000-9999)
   INTERNAL_ERROR = 'INTERNAL_ERROR',
   NETWORK_ERROR = 'NETWORK_ERROR',
@@ -470,6 +480,135 @@ export class ExecutionError extends StructuredError {
     });
     this.name = 'ExecutionError';
   }
+}
+
+/**
+ * Analyzer-specific error
+ */
+export class AnalyzerError extends StructuredError {
+  constructor(
+    code: ErrorCode,
+    message: string,
+    options: {
+      path?: string;
+      pattern?: string;
+      limit?: number;
+      recoveryActions?: RecoveryAction[];
+      context?: ErrorContext;
+      cause?: Error;
+    } = {}
+  ) {
+    const recoveryActions = options.recoveryActions ?? getAnalyzerRecoveryActions(code);
+    super(code, message, {
+      severity: 'error',
+      recoveryActions,
+      context: {
+        ...options.context,
+        path: options.path,
+        pattern: options.pattern,
+        limit: options.limit,
+      },
+      cause: options.cause,
+      isRetryable: false,
+    });
+    this.name = 'AnalyzerError';
+  }
+}
+
+function getAnalyzerRecoveryActions(code: ErrorCode): RecoveryAction[] {
+  const actions: RecoveryAction[] = [];
+
+  switch (code) {
+    case ErrorCode.ANALYZER_PATH_NOT_FOUND:
+      actions.push({
+        description: 'Verify the repository path exists and is correct',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Check that the repository was cloned successfully',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.ANALYZER_PATH_NOT_READABLE:
+      actions.push({
+        description: 'Check file system permissions for the repository directory',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Ensure the user has read access to the repository',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.ANALYZER_PATH_NOT_DIRECTORY:
+      actions.push({
+        description: 'Provide a path to a directory, not a file',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Verify the repository path configuration',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.ANALYZER_INVALID_GLOB_PATTERN:
+      actions.push({
+        description: 'Check glob pattern syntax - avoid nested quantifiers and excessive wildcards',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Use simpler patterns like "*.js" or "src/**/*.ts"',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.ANALYZER_INVALID_REGEX_PATTERN:
+      actions.push({
+        description: 'Verify the regex pattern compiles correctly',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Test the pattern in a regex validator before using',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.ANALYZER_MAX_DEPTH_EXCEEDED:
+      actions.push({
+        description: 'Reduce maxDepth configuration value (must be 1-20)',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Use excludePaths to skip deeply nested directories',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.ANALYZER_MAX_FILES_EXCEEDED:
+      actions.push({
+        description: 'Reduce maxFiles configuration value (must be 100-50000)',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Add more paths to excludePaths to reduce files scanned',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.ANALYZER_INVALID_CONFIG:
+      actions.push({
+        description: 'Check analyzer configuration values are within valid ranges',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Run "autonomous-dev help-config" for configuration documentation',
+        automatic: false,
+      });
+      break;
+  }
+
+  return actions;
 }
 
 function getExecutionRecoveryActions(code: ErrorCode): RecoveryAction[] {
