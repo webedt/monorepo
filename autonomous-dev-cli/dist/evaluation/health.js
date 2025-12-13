@@ -136,19 +136,33 @@ async function runSequentialHealthChecks(urls, options, startTime) {
 }
 /**
  * Run health checks in parallel with configurable concurrency
- * Uses a worker pool pattern to limit concurrent requests
+ * Uses a semaphore pattern for true concurrent execution with limits
  */
 async function runParallelHealthChecks(urls, options, concurrency, startTime) {
-    const checks = [];
-    let allPassed = true;
-    // Process URLs in batches based on concurrency limit
-    const batches = [];
-    for (let i = 0; i < urls.length; i += concurrency) {
-        batches.push(urls.slice(i, i + concurrency));
-    }
-    for (const batch of batches) {
-        // Run batch of checks concurrently
-        const batchPromises = batch.map(async (url) => {
+    // Create a semaphore to limit concurrent requests
+    let activeCount = 0;
+    const waiting = [];
+    const acquire = () => {
+        if (activeCount < concurrency) {
+            activeCount++;
+            return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+            waiting.push(resolve);
+        });
+    };
+    const release = () => {
+        activeCount--;
+        const next = waiting.shift();
+        if (next) {
+            activeCount++;
+            next();
+        }
+    };
+    // Execute all health checks in parallel with semaphore-controlled concurrency
+    const checkPromises = urls.map(async (url) => {
+        await acquire();
+        try {
             const check = await checkUrl(url, options);
             if (check.ok) {
                 logger.success(`Health check passed: ${url} (${check.status}, ${check.responseTime}ms)`);
@@ -157,15 +171,14 @@ async function runParallelHealthChecks(urls, options, concurrency, startTime) {
                 logger.failure(`Health check failed: ${url} - ${check.error || `Status ${check.status}`}`);
             }
             return check;
-        });
-        const batchResults = await Promise.all(batchPromises);
-        for (const check of batchResults) {
-            checks.push(check);
-            if (!check.ok) {
-                allPassed = false;
-            }
         }
-    }
+        finally {
+            release();
+        }
+    });
+    // Wait for all checks to complete in parallel
+    const checks = await Promise.all(checkPromises);
+    const allPassed = checks.every((check) => check.ok);
     return {
         success: allPassed,
         checks,

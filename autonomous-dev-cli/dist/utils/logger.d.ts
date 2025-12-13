@@ -100,6 +100,11 @@ export interface PerformanceMetrics {
     timestamp: string;
 }
 /**
+ * Get current memory usage in megabytes
+ * This is a utility function for monitoring memory consumption
+ */
+export declare function getMemoryUsageMB(): number;
+/**
  * Get detailed memory usage statistics
  */
 export declare function getDetailedMemoryUsage(): {
