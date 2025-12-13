@@ -261,6 +261,9 @@ export class Worker {
   }
 
   private async executeWithClaude(repoDir: string, issue: Issue, chatSessionId?: string): Promise<void> {
+    // Log memory usage before starting Claude
+    const memUsage = process.memoryUsage();
+    this.log.info(`Memory before Claude: RSS=${Math.round(memUsage.rss / 1024 / 1024)}MB, Heap=${Math.round(memUsage.heapUsed / 1024 / 1024)}/${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`);
     this.log.info('Executing task with Claude Agent SDK...');
 
     const prompt = this.buildPrompt(issue);
