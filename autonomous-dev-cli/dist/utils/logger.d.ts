@@ -1,5 +1,38 @@
 import { StructuredError, type ErrorContext } from './errors.js';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+/**
+ * Operation metadata for tracking execution context
+ */
+export interface OperationMetadata {
+    correlationId?: string;
+    component?: string;
+    operation?: string;
+    startTime?: number;
+    duration?: number;
+    memoryUsageMB?: number;
+    success?: boolean;
+    error?: string;
+    [key: string]: any;
+}
+/**
+ * Timed operation result with metadata
+ */
+export interface TimedOperationResult<T> {
+    result: T;
+    duration: number;
+    memoryDelta: number;
+    startMemory: number;
+    endMemory: number;
+}
+/**
+ * Performance metrics for an operation
+ */
+export interface PerformanceMetrics {
+    duration: number;
+    memoryUsageMB: number;
+    memoryDeltaMB: number;
+    timestamp: string;
+}
 export type LogFormat = 'pretty' | 'json';
 interface LoggerOptions {
     level: LogLevel;
@@ -52,6 +85,45 @@ export declare function getCorrelationId(): string | undefined;
  * Clear the global correlation ID
  */
 export declare function clearCorrelationId(): void;
+/**
+ * Get current memory usage in megabytes
+ */
+export declare function getMemoryUsageMB(): number;
+/**
+ * Get detailed memory statistics
+ */
+export declare function getMemoryStats(): {
+    heapUsedMB: number;
+    heapTotalMB: number;
+    externalMB: number;
+    rssMB: number;
+};
+/**
+ * Time an async operation and return result with timing info
+ */
+export declare function timeOperation<T>(operation: () => Promise<T>, operationName?: string): Promise<TimedOperationResult<T>>;
+/**
+ * Time a synchronous operation and return result with timing info
+ */
+export declare function timeOperationSync<T>(operation: () => T, operationName?: string): TimedOperationResult<T>;
+/**
+ * Create a scoped operation context for structured logging
+ */
+export interface OperationContext {
+    correlationId: string;
+    component: string;
+    operation: string;
+    startTime: number;
+    metadata: Record<string, any>;
+}
+/**
+ * Create a new operation context for tracing
+ */
+export declare function createOperationContext(component: string, operation: string, metadata?: Record<string, any>): OperationContext;
+/**
+ * Finalize an operation context and return performance metrics
+ */
+export declare function finalizeOperationContext(context: OperationContext, success: boolean, additionalMetadata?: Record<string, any>): OperationMetadata;
 declare class Logger {
     private level;
     private prefix;
@@ -114,6 +186,36 @@ declare class Logger {
      * Log service health status
      */
     serviceStatus(service: string, status: 'healthy' | 'degraded' | 'unavailable', details?: object): void;
+    /**
+     * Log an operation completion with timing and memory metrics
+     */
+    operationComplete(component: string, operation: string, success: boolean, metadata: OperationMetadata): void;
+    /**
+     * Log an API call with request/response details
+     */
+    apiCall(service: string, endpoint: string, method: string, metadata: {
+        statusCode?: number;
+        duration?: number;
+        success: boolean;
+        error?: string;
+        requestId?: string;
+        correlationId?: string;
+    }): void;
+    /**
+     * Log memory usage snapshot
+     */
+    memorySnapshot(component: string, context?: string): void;
+    /**
+     * Log performance metrics for a batch of operations
+     */
+    performanceSummary(component: string, metrics: {
+        totalOperations: number;
+        successCount: number;
+        failureCount: number;
+        totalDuration: number;
+        averageDuration: number;
+        memoryUsageMB: number;
+    }): void;
     header(title: string): void;
     /**
      * Create a child logger with a prefix and optionally inherit correlation ID

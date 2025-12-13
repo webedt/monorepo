@@ -113,6 +113,15 @@ declare class MetricsRegistry {
     readonly claudeApiCallsTotal: Counter;
     readonly claudeApiErrorsTotal: Counter;
     readonly claudeToolUsageTotal: Counter;
+    readonly githubApiDurationMs: Histogram;
+    readonly claudeApiDurationMs: Histogram;
+    readonly workerUtilization: Gauge;
+    readonly workerTasksTotal: Counter;
+    readonly memoryUsageMb: Gauge;
+    readonly discoveryDurationMs: Histogram;
+    readonly analysisCacheHits: Counter;
+    readonly analysisCacheMisses: Counter;
+    private correlationMetrics;
     private startTime;
     /**
      * Record a task completion
@@ -159,6 +168,70 @@ declare class MetricsRegistry {
      * Update health status
      */
     updateHealthStatus(healthy: boolean): void;
+    /**
+     * Record a GitHub API call with timing
+     */
+    recordGitHubApiCall(endpoint: string, method: string, success: boolean, durationMs: number, labels: {
+        repository: string;
+        statusCode?: number;
+    }): void;
+    /**
+     * Record a Claude SDK call with timing
+     */
+    recordClaudeApiCall(operation: string, success: boolean, durationMs: number, labels: {
+        repository: string;
+        workerId?: string;
+    }): void;
+    /**
+     * Update worker utilization
+     */
+    updateWorkerUtilization(activeWorkers: number, maxWorkers: number, queuedTasks: number): void;
+    /**
+     * Record a worker task execution
+     */
+    recordWorkerTask(workerId: string, success: boolean, durationMs: number, labels: {
+        repository: string;
+        issueNumber?: number;
+    }): void;
+    /**
+     * Update memory usage metrics
+     */
+    updateMemoryUsage(heapUsedMB: number): void;
+    /**
+     * Record discovery operation
+     */
+    recordDiscovery(tasksFound: number, durationMs: number, cacheHit: boolean, labels: {
+        repository: string;
+    }): void;
+    /**
+     * Start tracking a correlation ID
+     */
+    startCorrelation(correlationId: string): void;
+    /**
+     * Record an operation for a correlation ID
+     */
+    recordCorrelationOperation(correlationId: string, operation: string): void;
+    /**
+     * Record an error for a correlation ID
+     */
+    recordCorrelationError(correlationId: string): void;
+    /**
+     * End tracking a correlation ID and return summary
+     */
+    endCorrelation(correlationId: string): {
+        duration: number;
+        operationCount: number;
+        errorCount: number;
+    } | null;
+    /**
+     * Get correlation metrics summary (for debugging)
+     */
+    getCorrelationSummary(correlationId: string): {
+        correlationId: string;
+        duration: number;
+        operations: string[];
+        errors: number;
+    } | null;
     /**
      * Get all metrics in Prometheus format
      */

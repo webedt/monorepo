@@ -1,5 +1,11 @@
 // Re-export utilities for convenient importing
-export { logger } from './logger.js';
+export { logger, 
+// Correlation ID management
+generateCorrelationId, setCorrelationId, getCorrelationId, clearCorrelationId, 
+// Memory and timing utilities
+getMemoryUsageMB, getMemoryStats, timeOperation, timeOperationSync, 
+// Operation context utilities
+createOperationContext, finalizeOperationContext, } from './logger.js';
 export { 
 // Error classes
 StructuredError, GitHubError, ClaudeError, ConfigError, ExecutionError, 
@@ -17,4 +23,6 @@ classifyError, isErrorCodeRetryable, isHttpStatusRetryable, isNetworkErrorRetrya
 extractHttpStatus, extractNetworkErrorCode, extractRetryAfterMs, 
 // Error creation
 createClaudeErrorFromResponse, } from './retry.js';
+// Re-export metrics utilities
+export { metrics, Counter, Gauge, Histogram, } from './metrics.js';
 //# sourceMappingURL=index.js.map

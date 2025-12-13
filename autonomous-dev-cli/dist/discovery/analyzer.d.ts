@@ -21,7 +21,7 @@ export declare class AnalysisCache {
      * Generate a content hash based on file modification times
      * This allows for invalidation when files change
      */
-    generateContentHash(repoPath: string, maxSamples?: number): string;
+    generateContentHash(repoPath: string, maxSamples?: number): Promise<string>;
     /**
      * Get cached analysis if valid
      */
@@ -78,13 +78,29 @@ export interface PackageInfo {
     scripts: Record<string, string>;
 }
 /**
+ * Progress callback for reporting analysis progress
+ */
+export type ProgressCallback = (progress: AnalysisProgress) => void;
+/**
+ * Progress information during analysis
+ */
+export interface AnalysisProgress {
+    phase: 'scanning' | 'analyzing-todos' | 'analyzing-packages' | 'analyzing-config' | 'complete';
+    filesScanned: number;
+    totalFiles?: number;
+    currentFile?: string;
+    percentComplete?: number;
+}
+/**
  * Configuration options for the analyzer
  */
 export interface AnalyzerConfig {
     maxDepth?: number;
     maxFiles?: number;
+    maxFileSizeBytes?: number;
     enableCache?: boolean;
     cache?: AnalysisCache;
+    onProgress?: ProgressCallback;
 }
 /**
  * Result type for validation operations
@@ -98,12 +114,18 @@ export declare class CodebaseAnalyzer {
     private excludePaths;
     private maxDepth;
     private maxFiles;
+    private maxFileSizeBytes;
     private fileCount;
     private validationErrors;
     private enableCache;
     private cache;
     private config;
+    private onProgress?;
     constructor(repoPath: string, excludePaths?: string[], config?: AnalyzerConfig);
+    /**
+     * Report progress to the callback if registered
+     */
+    private reportProgress;
     /**
      * Clamp a value between min and max bounds
      */
@@ -111,7 +133,7 @@ export declare class CodebaseAnalyzer {
     /**
      * Validate that a directory path exists and is readable
      */
-    validateDirectoryPath(dirPath: string): ValidationResult;
+    validateDirectoryPath(dirPath: string): Promise<ValidationResult>;
     /**
      * Validate and sanitize a glob pattern to prevent ReDoS attacks
      */
@@ -136,6 +158,10 @@ export declare class CodebaseAnalyzer {
     private scanDirectory;
     private countFiles;
     private findTodoComments;
+    /**
+     * Scan a file using streaming (readline) for memory-efficient TODO detection
+     */
+    private scanFileWithStream;
     private findPackages;
     private findConfigFiles;
     generateSummary(analysis: CodebaseAnalysis): string;

@@ -1,5 +1,6 @@
 import { Octokit } from '@octokit/rest';
-import { logger } from '../utils/logger.js';
+import { logger, getCorrelationId, timeOperation, } from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
 import { GitHubError, ErrorCode, createGitHubErrorFromResponse, withRetry, StructuredError, } from '../utils/errors.js';
 const DEFAULT_GITHUB_RETRY_CONFIG = {
     maxRetries: 3,
@@ -151,6 +152,10 @@ export class GitHubClient {
      * Integrates with circuit breaker for graceful degradation
      */
     async executeWithRetry(operation, endpoint, context) {
+        const startTime = Date.now();
+        const correlationId = getCorrelationId();
+        const method = this.extractMethodFromEndpoint(endpoint);
+        const repository = `${this.owner}/${this.repo}`;
         // Check circuit breaker state
         if (!this.canMakeRequest()) {
             const error = new GitHubError(ErrorCode.GITHUB_API_ERROR, `GitHub API unavailable (circuit breaker open). Will retry after ${this.circuitBreakerConfig.resetTimeoutMs / 1000}s`, {
@@ -162,6 +167,19 @@ export class GitHubClient {
                     lastFailure: this.lastFailureTime?.toISOString(),
                 },
             });
+            // Log the blocked request
+            logger.apiCall('GitHub', endpoint, method, {
+                statusCode: 503,
+                duration: Date.now() - startTime,
+                success: false,
+                error: 'Circuit breaker open',
+                correlationId,
+            });
+            // Record metrics for blocked request
+            metrics.recordGitHubApiCall(endpoint, method, false, Date.now() - startTime, {
+                repository,
+                statusCode: 503,
+            });
             logger.warn('GitHub API request blocked by circuit breaker', {
                 endpoint,
                 circuitState: this.circuitState,
@@ -170,10 +188,18 @@ export class GitHubClient {
             throw error;
         }
         try {
-            const result = await withRetry(operation, {
+            const timedResult = await timeOperation(() => withRetry(operation, {
                 config: this.retryConfig,
                 onRetry: (error, attempt, delay) => {
                     this.updateRateLimitState(error);
+                    const statusCode = error.status ?? error.response?.status;
+                    logger.apiCall('GitHub', endpoint, method, {
+                        statusCode,
+                        duration: Date.now() - startTime,
+                        success: false,
+                        error: `Retry ${attempt}: ${error.message}`,
+                        correlationId,
+                    });
                     logger.warn(`GitHub API retry (attempt ${attempt}): ${endpoint}`, {
                         error: error.message,
                         retryInMs: delay,
@@ -198,17 +224,51 @@ export class GitHubClient {
                     }
                     return false;
                 },
-            });
+            }), `github:${endpoint}`);
             // Success - record it
             this.recordSuccess();
-            return result;
+            // Log successful API call
+            logger.apiCall('GitHub', endpoint, method, {
+                statusCode: 200,
+                duration: timedResult.duration,
+                success: true,
+                correlationId,
+            });
+            // Record metrics
+            metrics.recordGitHubApiCall(endpoint, method, true, timedResult.duration, {
+                repository,
+                statusCode: 200,
+            });
+            return timedResult.result;
         }
         catch (error) {
+            const duration = Date.now() - startTime;
+            const statusCode = error.status ?? error.response?.status;
             // Failure - record it and update rate limit state
             this.updateRateLimitState(error);
             this.recordFailure(error);
+            // Log failed API call
+            logger.apiCall('GitHub', endpoint, method, {
+                statusCode,
+                duration,
+                success: false,
+                error: error.message,
+                correlationId,
+            });
+            // Record metrics
+            metrics.recordGitHubApiCall(endpoint, method, false, duration, {
+                repository,
+                statusCode,
+            });
             throw this.handleError(error, endpoint, context);
         }
+    }
+    /**
+     * Extract HTTP method from endpoint string
+     */
+    extractMethodFromEndpoint(endpoint) {
+        const match = endpoint.match(/^(GET|POST|PUT|PATCH|DELETE)\s/);
+        return match ? match[1] : 'GET';
     }
     /**
      * Execute a GitHub API request with graceful degradation support.

@@ -51,6 +51,10 @@ export declare class Daemon {
     private getErrorContext;
     stop(): Promise<void>;
     /**
+     * Get the current correlation ID from the global context
+     */
+    private getCurrentCorrelationId;
+    /**
      * Update and return the current service health status
      */
     private updateServiceHealth;
