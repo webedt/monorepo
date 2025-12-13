@@ -257,8 +257,14 @@ function parsePriorityTier(content: string, tier: PriorityTier): PriorityFeature
     P3: 'P3 - Future',
   };
 
+  // Match the priority tier section header, table header row, separator row, and capture table content
+  // Table format: | Feature | SPEC Section |
+  //               |---------|--------------|
+  //               | data    | data         |
+  // Note: Using \r?\n for cross-platform (CRLF/LF) compatibility
+  // The end boundary \r?\n\r?\n(?=###|$) captures all rows until the blank line before next section
   const tierRegex = new RegExp(
-    `### ${tierLabels[tier]}[\\s\\S]*?\\|[^|]+\\|[^|]+\\|\\n\\|[-|]+\\|[-|]+\\|([\\s\\S]*?)(?=###|## |$)`,
+    `### ${tierLabels[tier]}[\\s\\S]*?\\|[^|]+\\|[^|]+\\|\\r?\\n\\|[-]+\\|[-]+\\|\\r?\\n([\\s\\S]*?)\\r?\\n\\r?\\n(?=###|$)`,
     'm'
   );
 
@@ -294,8 +300,11 @@ function parsePriorityTier(content: string, tier: PriorityTier): PriorityFeature
 function parseImplementationStatus(content: string): StatusFeature[] {
   const features: StatusFeature[] = [];
 
-  // Find all category sections with tables
-  const categoryRegex = /### ([^\n]+)\n\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|\n\|[-|]+\|([\s\S]*?)(?=###|## |$)/g;
+  // Find all category sections with 4-column tables (Feature | Status | Key Files | Notes)
+  // Match header row, separator row, and capture table content
+  // Note: Using \r?\n for cross-platform (CRLF/LF) compatibility
+  // The end boundary \r?\n\r?\n(?=###|## |$) captures all rows until the blank line before next section
+  const categoryRegex = /### ([^\r\n]+)\r?\n\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|\r?\n\|[-]+\|[-]+\|[-]+\|[-]+\|\r?\n([\s\S]*?)\r?\n\r?\n(?=###|## |$)/g;
   let categoryMatch;
 
   while ((categoryMatch = categoryRegex.exec(content)) !== null) {
