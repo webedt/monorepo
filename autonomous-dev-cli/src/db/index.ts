@@ -1,9 +1,41 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and, gte, lte, desc } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'crypto';
+
+// Import analytics schema
+import {
+  cycleMetrics,
+  taskMetrics,
+  patternEffectiveness,
+  monthlySummary,
+  type CycleMetric,
+  type NewCycleMetric,
+  type TaskMetric,
+  type NewTaskMetric,
+  type PatternEffectiveness as PatternEffectivenessType,
+  type NewPatternEffectiveness,
+  type MonthlySummary as MonthlySummaryType,
+  type NewMonthlySummary,
+} from './schema.js';
+
+// Re-export analytics schema
+export {
+  cycleMetrics,
+  taskMetrics,
+  patternEffectiveness,
+  monthlySummary,
+  type CycleMetric,
+  type NewCycleMetric,
+  type TaskMetric,
+  type NewTaskMetric,
+  type PatternEffectivenessType,
+  type NewPatternEffectiveness,
+  type MonthlySummaryType,
+  type NewMonthlySummary,
+};
 
 const { Pool } = pg;
 
@@ -602,4 +634,337 @@ export async function flushActivityUpdates(chatSessionId?: string): Promise<void
     }
     activityUpdateTimers.clear();
   }
+}
+
+// ============================================================================
+// Analytics Operations
+// ============================================================================
+
+/**
+ * Insert a new cycle metrics record
+ */
+export async function insertCycleMetrics(data: NewCycleMetric): Promise<CycleMetric> {
+  const database = getDb();
+
+  const [result] = await database
+    .insert(cycleMetrics)
+    .values(data)
+    .returning();
+
+  logger.debug('Inserted cycle metrics', { correlationId: data.correlationId, cycleNumber: data.cycleNumber });
+  return result;
+}
+
+/**
+ * Insert task metrics for a cycle
+ */
+export async function insertTaskMetrics(data: NewTaskMetric): Promise<TaskMetric> {
+  const database = getDb();
+
+  const [result] = await database
+    .insert(taskMetrics)
+    .values(data)
+    .returning();
+
+  return result;
+}
+
+/**
+ * Insert multiple task metrics in a batch
+ */
+export async function insertTaskMetricsBatch(data: NewTaskMetric[]): Promise<TaskMetric[]> {
+  if (data.length === 0) return [];
+
+  const database = getDb();
+
+  const results = await database
+    .insert(taskMetrics)
+    .values(data)
+    .returning();
+
+  logger.debug(`Batch inserted ${results.length} task metrics`);
+  return results;
+}
+
+/**
+ * Get cycle metrics for a date range
+ */
+export async function getCycleMetrics(
+  repository: string,
+  startDate: Date,
+  endDate: Date
+): Promise<CycleMetric[]> {
+  const database = getDb();
+
+  return database
+    .select()
+    .from(cycleMetrics)
+    .where(
+      and(
+        eq(cycleMetrics.repository, repository),
+        gte(cycleMetrics.startedAt, startDate),
+        lte(cycleMetrics.startedAt, endDate)
+      )
+    )
+    .orderBy(desc(cycleMetrics.startedAt));
+}
+
+/**
+ * Get task metrics for a correlation ID
+ */
+export async function getTaskMetricsByCycle(correlationId: string): Promise<TaskMetric[]> {
+  const database = getDb();
+
+  return database
+    .select()
+    .from(taskMetrics)
+    .where(eq(taskMetrics.correlationId, correlationId));
+}
+
+/**
+ * Upsert pattern effectiveness record
+ */
+export async function upsertPatternEffectiveness(
+  data: NewPatternEffectiveness
+): Promise<PatternEffectivenessType> {
+  const database = getDb();
+
+  // Check if record exists for this pattern and period
+  const existing = await database
+    .select()
+    .from(patternEffectiveness)
+    .where(
+      and(
+        eq(patternEffectiveness.repository, data.repository),
+        eq(patternEffectiveness.pattern, data.pattern),
+        eq(patternEffectiveness.periodStart, data.periodStart)
+      )
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    // Update existing record
+    const [result] = await database
+      .update(patternEffectiveness)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(patternEffectiveness.id, existing[0].id))
+      .returning();
+    return result;
+  }
+
+  // Insert new record
+  const [result] = await database
+    .insert(patternEffectiveness)
+    .values(data)
+    .returning();
+
+  return result;
+}
+
+/**
+ * Get top performing patterns for a repository
+ */
+export async function getTopPatterns(
+  repository: string,
+  limit: number = 10
+): Promise<PatternEffectivenessType[]> {
+  const database = getDb();
+
+  return database
+    .select()
+    .from(patternEffectiveness)
+    .where(
+      and(
+        eq(patternEffectiveness.repository, repository),
+        gte(patternEffectiveness.totalTasks, 3) // Minimum sample size
+      )
+    )
+    .orderBy(desc(patternEffectiveness.successRate))
+    .limit(limit);
+}
+
+/**
+ * Upsert monthly summary record
+ */
+export async function upsertMonthlySummary(
+  data: NewMonthlySummary
+): Promise<MonthlySummaryType> {
+  const database = getDb();
+
+  // Check if record exists for this month
+  const existing = await database
+    .select()
+    .from(monthlySummary)
+    .where(
+      and(
+        eq(monthlySummary.repository, data.repository),
+        eq(monthlySummary.year, data.year),
+        eq(monthlySummary.month, data.month)
+      )
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    // Update existing record
+    const [result] = await database
+      .update(monthlySummary)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(monthlySummary.id, existing[0].id))
+      .returning();
+    return result;
+  }
+
+  // Insert new record
+  const [result] = await database
+    .insert(monthlySummary)
+    .values(data)
+    .returning();
+
+  return result;
+}
+
+/**
+ * Get monthly summary for a specific month
+ */
+export async function getMonthlySummary(
+  repository: string,
+  year: number,
+  month: number
+): Promise<MonthlySummaryType | null> {
+  const database = getDb();
+
+  const results = await database
+    .select()
+    .from(monthlySummary)
+    .where(
+      and(
+        eq(monthlySummary.repository, repository),
+        eq(monthlySummary.year, year),
+        eq(monthlySummary.month, month)
+      )
+    )
+    .limit(1);
+
+  return results[0] || null;
+}
+
+/**
+ * Get monthly summaries for trend analysis (last N months)
+ */
+export async function getMonthlySummaries(
+  repository: string,
+  monthCount: number = 12
+): Promise<MonthlySummaryType[]> {
+  const database = getDb();
+
+  return database
+    .select()
+    .from(monthlySummary)
+    .where(eq(monthlySummary.repository, repository))
+    .orderBy(desc(monthlySummary.year), desc(monthlySummary.month))
+    .limit(monthCount);
+}
+
+/**
+ * Get aggregate success rates by category for a date range
+ */
+export async function getSuccessRatesByCategory(
+  repository: string,
+  startDate: Date,
+  endDate: Date
+): Promise<Record<string, { total: number; successful: number; rate: number }>> {
+  const database = getDb();
+
+  // Get all task metrics in the date range
+  const tasks = await database
+    .select()
+    .from(taskMetrics)
+    .innerJoin(
+      cycleMetrics,
+      eq(taskMetrics.cycleMetricsId, cycleMetrics.id)
+    )
+    .where(
+      and(
+        eq(cycleMetrics.repository, repository),
+        gte(cycleMetrics.startedAt, startDate),
+        lte(cycleMetrics.startedAt, endDate)
+      )
+    );
+
+  // Aggregate by category
+  const categories: Record<string, { total: number; successful: number; rate: number }> = {};
+
+  for (const { task_metrics: task } of tasks) {
+    const category = task.category || 'other';
+    if (!categories[category]) {
+      categories[category] = { total: 0, successful: 0, rate: 0 };
+    }
+    categories[category].total++;
+    if (task.outcome === 'success') {
+      categories[category].successful++;
+    }
+  }
+
+  // Calculate rates
+  for (const category of Object.keys(categories)) {
+    const { total, successful } = categories[category];
+    categories[category].rate = total > 0 ? (successful / total) * 100 : 0;
+  }
+
+  return categories;
+}
+
+/**
+ * Get aggregate success rates by complexity for a date range
+ */
+export async function getSuccessRatesByComplexity(
+  repository: string,
+  startDate: Date,
+  endDate: Date
+): Promise<Record<string, { total: number; successful: number; rate: number }>> {
+  const database = getDb();
+
+  // Get all task metrics in the date range
+  const tasks = await database
+    .select()
+    .from(taskMetrics)
+    .innerJoin(
+      cycleMetrics,
+      eq(taskMetrics.cycleMetricsId, cycleMetrics.id)
+    )
+    .where(
+      and(
+        eq(cycleMetrics.repository, repository),
+        gte(cycleMetrics.startedAt, startDate),
+        lte(cycleMetrics.startedAt, endDate)
+      )
+    );
+
+  // Aggregate by complexity
+  const complexities: Record<string, { total: number; successful: number; rate: number }> = {};
+
+  for (const { task_metrics: task } of tasks) {
+    const complexity = task.complexity || 'medium';
+    if (!complexities[complexity]) {
+      complexities[complexity] = { total: 0, successful: 0, rate: 0 };
+    }
+    complexities[complexity].total++;
+    if (task.outcome === 'success') {
+      complexities[complexity].successful++;
+    }
+  }
+
+  // Calculate rates
+  for (const complexity of Object.keys(complexities)) {
+    const { total, successful } = complexities[complexity];
+    complexities[complexity].rate = total > 0 ? (successful / total) * 100 : 0;
+  }
+
+  return complexities;
 }

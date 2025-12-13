@@ -6,6 +6,12 @@ import { createWorkerPool, type WorkerTask, type PoolResult } from './executor/i
 import { runEvaluation, type EvaluationResult } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
 import {
+  createAnalyticsCollector,
+  buildCycleAnalyticsData,
+  type AnalyticsCollector,
+  type TaskExecutionData,
+} from './analytics/index.js';
+import {
   logger,
   generateCorrelationId,
   setCorrelationId,
@@ -68,6 +74,11 @@ export interface CycleResult {
   errors: string[];
   degraded: boolean;
   serviceHealth: DaemonServiceHealth;
+  // Analytics data for cycle metrics persistence
+  taskExecutionData?: TaskExecutionData[];
+  discoveryDurationMs?: number;
+  existingIssueCount?: number;
+  discoveredTaskCount?: number;
 }
 
 export class Daemon {
@@ -86,6 +97,7 @@ export class Daemon {
     overallStatus: 'healthy',
     lastCheck: new Date(),
   };
+  private analyticsCollector: AnalyticsCollector;
 
   constructor(options: DaemonOptions = {}) {
     this.options = options;
@@ -108,6 +120,13 @@ export class Daemon {
     if (options.logFormat) {
       logger.setFormat(options.logFormat);
     }
+
+    // Initialize analytics collector (enabled when database logging is enabled)
+    this.analyticsCollector = createAnalyticsCollector({
+      enabled: false, // Will be enabled after database initialization
+      asyncPersistence: true, // Non-blocking persistence
+      logErrors: true,
+    });
   }
 
   async start(): Promise<void> {
@@ -209,6 +228,43 @@ export class Daemon {
 
         // End request lifecycle tracking with summary
         endRequestLifecycle(cycleCorrelationId, result.success, result.errors.length > 0 ? 'CYCLE_HAD_ERRORS' : undefined);
+
+        // Collect and persist cycle analytics (non-blocking)
+        if (this.analyticsCollector.isEnabled()) {
+          const analyticsData = buildCycleAnalyticsData({
+            correlationId: cycleCorrelationId,
+            cycleNumber: this.cycleCount,
+            repository: this.repository,
+            startTime: new Date(correlationContext.startTime!),
+            endTime: new Date(),
+            discoveryDurationMs: result.discoveryDurationMs,
+            existingIssueCount: result.existingIssueCount ?? 0,
+            discoveredTaskCount: result.discoveredTaskCount ?? 0,
+            taskResults: result.taskExecutionData ?? [],
+            degraded: result.degraded,
+            serviceHealth: result.serviceHealth ? {
+              github: result.serviceHealth.github ? {
+                status: result.serviceHealth.github.status,
+                circuitState: result.serviceHealth.github.circuitState,
+                rateLimitRemaining: result.serviceHealth.github.rateLimitRemaining,
+              } : null,
+              overallStatus: result.serviceHealth.overallStatus,
+            } : undefined,
+            errors: result.errors.map((errMsg) => ({
+              code: errMsg.match(/\[([A-Z_]+)\]/)?.[1] ?? 'UNKNOWN',
+              message: errMsg,
+              component: 'Daemon',
+              isRetryable: errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('timeout'),
+            })),
+            memoryDeltaMb: memoryDelta,
+            peakMemoryMb: cycleEndMemory,
+          });
+
+          // Non-blocking analytics persistence
+          this.analyticsCollector.collectCycleAnalytics(analyticsData).catch((err) => {
+            logger.warn('Failed to collect cycle analytics', { error: err.message });
+          });
+        }
 
         // Clear correlation ID after cycle
         clearCorrelationId();
@@ -414,6 +470,10 @@ export class Daemon {
         this.enableDatabaseLogging = true;
         logger.info(`Database logging enabled for user: ${this.userId}`);
 
+        // Enable analytics collection when database is available
+        this.analyticsCollector.setEnabled(true);
+        logger.info('Analytics collection enabled');
+
         if (creds.githubAccessToken) {
           this.config.credentials.githubToken = creds.githubAccessToken;
         }
@@ -512,6 +572,12 @@ export class Daemon {
     // Update health status
     metrics.updateHealthStatus(false);
 
+    // Flush pending analytics writes
+    if (this.analyticsCollector.isEnabled()) {
+      logger.debug('Flushing pending analytics writes...');
+      await this.analyticsCollector.flush();
+    }
+
     // Stop monitoring server
     if (this.monitoringServer) {
       await this.monitoringServer.stop();
@@ -529,6 +595,12 @@ export class Daemon {
     let tasksFailed = 0;
     let prsMerged = 0;
     let degraded = false;
+
+    // Analytics tracking variables
+    let taskExecutionData: TaskExecutionData[] = [];
+    let discoveryDurationMs: number | undefined;
+    let existingIssueCount = 0;
+    let discoveredTaskCount = 0;
 
     // Update service health at start of cycle
     this.logServiceHealthStatus();
@@ -568,6 +640,8 @@ export class Daemon {
       );
 
       const existingIssues = issueResult.value;
+      existingIssueCount = existingIssues.length; // Track for analytics
+
       if (issueResult.degraded) {
         degraded = true;
         metrics.recordCorrelationError(this.getCurrentCorrelationId());
@@ -598,6 +672,7 @@ export class Daemon {
         // In production, this would clone the repo first
 
         try {
+          const discoveryStart = Date.now();
           const tasks = await discoverTasks({
             claudeAuth: this.config.credentials.claudeAuth,
             repoPath: process.cwd(), // Analyze current directory
@@ -606,8 +681,10 @@ export class Daemon {
             existingIssues,
             repoContext: `WebEDT - AI-powered coding assistant platform with React frontend, Express backend, and Claude Agent SDK integration.`,
           });
+          discoveryDurationMs = Date.now() - discoveryStart; // Track for analytics
 
           tasksDiscovered = tasks.length;
+          discoveredTaskCount = tasks.length; // Track for analytics
           logger.info(`Discovered ${tasks.length} new tasks`);
 
           // Create GitHub issues for new tasks
@@ -710,6 +787,15 @@ export class Daemon {
         tasksCompleted = results.filter((r) => r.success).length;
         tasksFailed = results.filter((r) => !r.success).length;
 
+        // Build task execution data for analytics
+        taskExecutionData = results.map((r) => ({
+          issue: r.issue,
+          branchName: r.branchName,
+          success: r.success,
+          error: r.error,
+          workerId: r.workerId,
+        }));
+
         // STEP 4: Create PRs and evaluate
         logger.step(4, 5, 'Creating PRs and evaluating');
 
@@ -768,6 +854,12 @@ export class Daemon {
             // Track PR creation
             metrics.prsCreatedTotal.inc({ repository: this.repository });
 
+            // Update analytics data with PR info
+            const taskData = taskExecutionData.find((t) => t.issue.number === result.issue.number);
+            if (taskData) {
+              taskData.prNumber = pr.number;
+            }
+
             logger.success(`Created PR #${pr.number} for issue #${result.issue.number}`);
 
             // Link PR to issue with graceful degradation
@@ -813,6 +905,12 @@ export class Daemon {
               // Find and close the corresponding issue
               const result = results.find((r) => r.branchName === branch);
               if (result) {
+                // Update analytics data with merge status
+                const taskData = taskExecutionData.find((t) => t.issue.number === result.issue.number);
+                if (taskData) {
+                  taskData.prMerged = true;
+                }
+
                 await this.github.issues.closeIssue(
                   result.issue.number,
                   `✅ Automatically implemented and merged via PR #${mergeResult.pr?.number}`
@@ -838,6 +936,11 @@ export class Daemon {
         errors,
         degraded,
         serviceHealth: finalHealth,
+        // Analytics data
+        taskExecutionData,
+        discoveryDurationMs,
+        existingIssueCount,
+        discoveredTaskCount,
       };
     } catch (error: any) {
       errors.push(error.message);
@@ -853,6 +956,11 @@ export class Daemon {
         errors,
         degraded: true,
         serviceHealth: finalHealth,
+        // Analytics data (may be partial due to error)
+        taskExecutionData,
+        discoveryDurationMs,
+        existingIssueCount,
+        discoveredTaskCount,
       };
     }
   }
