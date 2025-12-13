@@ -1,4 +1,4 @@
-import { loadConfig, type Config } from './config/index.js';
+import { loadConfig, type Config, type LoadConfigResult } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub, type GitHub, type Issue, type ServiceHealth } from './github/index.js';
 import {
@@ -94,6 +94,7 @@ interface DaemonServiceHealth {
 
 export interface DaemonOptions {
   configPath?: string;
+  profile?: string;
   dryRun?: boolean;
   verbose?: boolean;
   singleCycle?: boolean;
@@ -162,7 +163,13 @@ export class Daemon implements DaemonStateProvider {
 
   constructor(options: DaemonOptions = {}) {
     this.options = options;
-    this.config = loadConfig(options.configPath);
+
+    // Load config with profile support
+    const loadResult = loadConfig({
+      configPath: options.configPath,
+      profile: options.profile,
+    });
+    this.config = 'config' in loadResult ? loadResult.config : loadResult;
 
     // Initialize progress manager (will be updated with JSON mode after log format is set)
     this.progressManager = getProgressManager(options.logFormat === 'json');
