@@ -155,13 +155,22 @@ function parseTestOutput(output) {
         total = passed + failed;
         return { total, passed, failed };
     }
-    // Node test runner format: # tests X, # pass Y, # fail Z
-    const nodeMatch = output.match(/# tests (\d+).*# pass (\d+).*# fail (\d+)/is);
-    if (nodeMatch) {
-        total = parseInt(nodeMatch[1], 10) || 0;
-        passed = parseInt(nodeMatch[2], 10) || 0;
-        failed = parseInt(nodeMatch[3], 10) || 0;
-        return { total, passed, failed };
+    // Node.js built-in test runner TAP format (multiline summary)
+    // Matches output like:
+    //   # tests 3
+    //   # pass 2
+    //   # fail 1
+    const nodeTapResult = parseNodeTestRunnerOutput(output);
+    if (nodeTapResult) {
+        return nodeTapResult;
+    }
+    // Generic TAP format: count "ok" and "not ok" lines
+    // Matches TAP output like:
+    //   ok 1 - test description
+    //   not ok 2 - failing test
+    const tapResult = parseTapOutput(output);
+    if (tapResult.total > 0) {
+        return tapResult;
     }
     // Mocha format: X passing, Y failing
     const mochaMatch = output.match(/(\d+)\s+passing.*?(\d+)\s+failing/is);
@@ -171,6 +180,13 @@ function parseTestOutput(output) {
         total = passed + failed;
         return { total, passed, failed };
     }
+    // Mocha format (passing only): X passing
+    const mochaPassOnlyMatch = output.match(/(\d+)\s+passing/i);
+    if (mochaPassOnlyMatch && !output.match(/failing/i)) {
+        passed = parseInt(mochaPassOnlyMatch[1], 10) || 0;
+        total = passed;
+        return { total, passed, failed: 0 };
+    }
     // Generic: count ✓ and ✗ or PASS and FAIL
     const passMatches = output.match(/[✓✔]|PASS/g) || [];
     const failMatches = output.match(/[✗✘]|FAIL/g) || [];
@@ -178,5 +194,78 @@ function parseTestOutput(output) {
     failed = failMatches.length;
     total = passed + failed;
     return { total, passed, failed };
+}
+/**
+ * Parse Node.js built-in test runner output.
+ * The Node.js test runner outputs TAP format with summary lines like:
+ *   # tests 3
+ *   # suites 1
+ *   # pass 2
+ *   # fail 1
+ *   # cancelled 0
+ *   # skipped 0
+ *   # todo 0
+ *   # duration_ms 55.52737
+ */
+function parseNodeTestRunnerOutput(output) {
+    // Match individual summary lines - they appear on separate lines
+    const testsMatch = output.match(/^# tests (\d+)/m);
+    const passMatch = output.match(/^# pass (\d+)/m);
+    const failMatch = output.match(/^# fail (\d+)/m);
+    // If we find at least the tests and pass lines, consider it Node.js test runner output
+    if (testsMatch && passMatch) {
+        const total = parseInt(testsMatch[1], 10) || 0;
+        const passed = parseInt(passMatch[1], 10) || 0;
+        const failed = failMatch ? parseInt(failMatch[1], 10) || 0 : 0;
+        return { total, passed, failed };
+    }
+    // Also support inline format: # tests X # pass Y # fail Z (backwards compatibility)
+    const inlineMatch = output.match(/# tests (\d+).*# pass (\d+).*# fail (\d+)/is);
+    if (inlineMatch) {
+        return {
+            total: parseInt(inlineMatch[1], 10) || 0,
+            passed: parseInt(inlineMatch[2], 10) || 0,
+            failed: parseInt(inlineMatch[3], 10) || 0,
+        };
+    }
+    return null;
+}
+/**
+ * Parse TAP (Test Anything Protocol) format output.
+ * TAP uses "ok N" for passing tests and "not ok N" for failing tests.
+ * Example:
+ *   TAP version 13
+ *   ok 1 - test description
+ *   not ok 2 - failing test
+ *   ok 3 - another passing test
+ *   1..3
+ */
+function parseTapOutput(output) {
+    // Look for TAP version header to confirm it's TAP output
+    const isTapOutput = /^TAP version \d+/m.test(output);
+    if (!isTapOutput) {
+        // Check for TAP plan (1..N) as alternative indicator
+        const hasTapPlan = /^\d+\.\.\d+/m.test(output);
+        if (!hasTapPlan) {
+            return { total: 0, passed: 0, failed: 0 };
+        }
+    }
+    // Count top-level test results only (not indented subtests)
+    // "ok N" at start of line = passed, "not ok N" at start of line = failed
+    const lines = output.split('\n');
+    let passed = 0;
+    let failed = 0;
+    for (const line of lines) {
+        // Match top-level test results (not indented)
+        // "ok N" or "ok N - description"
+        if (/^ok \d+/.test(line)) {
+            passed++;
+        }
+        // "not ok N" or "not ok N - description"
+        else if (/^not ok \d+/.test(line)) {
+            failed++;
+        }
+    }
+    return { total: passed + failed, passed, failed };
 }
 //# sourceMappingURL=tests.js.map

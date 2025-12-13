@@ -153,6 +153,38 @@ export declare const ConfigSchema: z.ZodObject<{
         pauseBetweenCycles?: boolean | undefined;
     }>;
     /**
+     * Circuit Breaker Settings
+     * Configure resilience for Claude API calls.
+     */
+    circuitBreaker: z.ZodDefault<z.ZodObject<{
+        /** Number of consecutive failures before opening circuit (1-20, default: 5) */
+        failureThreshold: z.ZodDefault<z.ZodNumber>;
+        /** Time in milliseconds to keep circuit open before testing (10000-300000, default: 60000 = 60s) */
+        resetTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        /** Base delay for exponential backoff in milliseconds (50-1000, default: 100) */
+        baseDelayMs: z.ZodDefault<z.ZodNumber>;
+        /** Maximum delay for exponential backoff in milliseconds (5000-60000, default: 30000 = 30s) */
+        maxDelayMs: z.ZodDefault<z.ZodNumber>;
+        /** Number of successful requests in half-open to close circuit (1-5, default: 1) */
+        successThreshold: z.ZodDefault<z.ZodNumber>;
+        /** Enable circuit breaker for Claude API calls (default: true) */
+        enabled: z.ZodDefault<z.ZodBoolean>;
+    }, "strip", z.ZodTypeAny, {
+        failureThreshold: number;
+        resetTimeoutMs: number;
+        baseDelayMs: number;
+        maxDelayMs: number;
+        successThreshold: number;
+        enabled: boolean;
+    }, {
+        failureThreshold?: number | undefined;
+        resetTimeoutMs?: number | undefined;
+        baseDelayMs?: number | undefined;
+        maxDelayMs?: number | undefined;
+        successThreshold?: number | undefined;
+        enabled?: boolean | undefined;
+    }>>;
+    /**
      * Credentials
      * Authentication credentials (MUST be set via environment variables, NOT config files).
      *
@@ -244,6 +276,14 @@ export declare const ConfigSchema: z.ZodObject<{
         loopIntervalMs: number;
         pauseBetweenCycles: boolean;
     };
+    circuitBreaker: {
+        failureThreshold: number;
+        resetTimeoutMs: number;
+        baseDelayMs: number;
+        maxDelayMs: number;
+        successThreshold: number;
+        enabled: boolean;
+    };
     credentials: {
         githubToken?: string | undefined;
         claudeAuth?: {
@@ -303,6 +343,14 @@ export declare const ConfigSchema: z.ZodObject<{
         databaseUrl?: string | undefined;
         userEmail?: string | undefined;
     };
+    circuitBreaker?: {
+        failureThreshold?: number | undefined;
+        resetTimeoutMs?: number | undefined;
+        baseDelayMs?: number | undefined;
+        maxDelayMs?: number | undefined;
+        successThreshold?: number | undefined;
+        enabled?: boolean | undefined;
+    } | undefined;
 }>;
 export type Config = z.infer<typeof ConfigSchema>;
 /**

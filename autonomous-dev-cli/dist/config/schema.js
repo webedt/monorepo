@@ -135,6 +135,39 @@ export const ConfigSchema = z.object({
         pauseBetweenCycles: z.boolean().default(true),
     }).describe('Daemon mode settings'),
     /**
+     * Circuit Breaker Settings
+     * Configure resilience for Claude API calls.
+     */
+    circuitBreaker: z.object({
+        /** Number of consecutive failures before opening circuit (1-20, default: 5) */
+        failureThreshold: z.number()
+            .min(1, 'Failure threshold must be at least 1')
+            .max(20, 'Failure threshold cannot exceed 20')
+            .default(5),
+        /** Time in milliseconds to keep circuit open before testing (10000-300000, default: 60000 = 60s) */
+        resetTimeoutMs: z.number()
+            .min(10000, 'Reset timeout must be at least 10 seconds')
+            .max(300000, 'Reset timeout cannot exceed 5 minutes')
+            .default(60000),
+        /** Base delay for exponential backoff in milliseconds (50-1000, default: 100) */
+        baseDelayMs: z.number()
+            .min(50, 'Base delay must be at least 50ms')
+            .max(1000, 'Base delay cannot exceed 1 second')
+            .default(100),
+        /** Maximum delay for exponential backoff in milliseconds (5000-60000, default: 30000 = 30s) */
+        maxDelayMs: z.number()
+            .min(5000, 'Max delay must be at least 5 seconds')
+            .max(60000, 'Max delay cannot exceed 1 minute')
+            .default(30000),
+        /** Number of successful requests in half-open to close circuit (1-5, default: 1) */
+        successThreshold: z.number()
+            .min(1, 'Success threshold must be at least 1')
+            .max(5, 'Success threshold cannot exceed 5')
+            .default(1),
+        /** Enable circuit breaker for Claude API calls (default: true) */
+        enabled: z.boolean().default(true),
+    }).describe('Circuit breaker resilience settings').default({}),
+    /**
      * Credentials
      * Authentication credentials (MUST be set via environment variables, NOT config files).
      *
@@ -216,6 +249,14 @@ export const defaultConfig = {
     daemon: {
         loopIntervalMs: 60000,
         pauseBetweenCycles: true,
+    },
+    circuitBreaker: {
+        failureThreshold: 5,
+        resetTimeoutMs: 60000,
+        baseDelayMs: 100,
+        maxDelayMs: 30000,
+        successThreshold: 1,
+        enabled: true,
     },
 };
 //# sourceMappingURL=schema.js.map

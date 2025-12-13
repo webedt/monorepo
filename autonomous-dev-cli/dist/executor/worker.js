@@ -6,18 +6,28 @@ import { homedir } from 'os';
 import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import { StructuredError, ExecutionError, ErrorCode, withRetry, } from '../utils/errors.js';
+import { getClaudeSDKCircuitBreaker, } from '../utils/circuit-breaker.js';
 import { createChatSession, updateChatSession, addMessage, addEvent, generateSessionPath, } from '../db/index.js';
 export class Worker {
     options;
     workerId;
     log;
     repository;
+    circuitBreaker;
     constructor(options, workerId) {
         this.options = options;
         this.workerId = workerId;
         this.log = logger.child(`Worker-${workerId}`);
         // Extract repository identifier from URL for metrics
         this.repository = this.extractRepoName(options.repoUrl);
+        // Get or create the Claude SDK circuit breaker with optional config overrides
+        this.circuitBreaker = getClaudeSDKCircuitBreaker(options.circuitBreakerConfig);
+    }
+    /**
+     * Get the circuit breaker health status
+     */
+    getCircuitBreakerHealth() {
+        return this.circuitBreaker.getHealth();
     }
     /**
      * Extract repository name from URL for metrics labeling
@@ -419,7 +429,25 @@ export class Worker {
         this.log.info('Executing task with Claude Agent SDK...', {
             issueNumber: issue.number,
             repoDir,
+            circuitState: this.circuitBreaker.getState(),
         });
+        // Check circuit breaker before starting execution
+        if (!this.circuitBreaker.canExecute()) {
+            const error = this.circuitBreaker.createCircuitOpenError({
+                component: 'Worker',
+                operation: 'executeWithClaude',
+                issueNumber: issue.number,
+                workerId: this.workerId,
+            });
+            this.log.warn('Claude Agent SDK execution blocked by circuit breaker', {
+                circuitState: this.circuitBreaker.getState(),
+                issueNumber: issue.number,
+                circuitHealth: this.circuitBreaker.getHealth(),
+            });
+            // Record rejection in metrics
+            metrics.recordCircuitBreakerRejection('claude-sdk');
+            throw error;
+        }
         const prompt = this.buildPrompt(issue);
         const timeoutMs = this.options.timeoutMinutes * 60 * 1000;
         const abortController = new AbortController();
@@ -494,7 +522,10 @@ export class Worker {
                         toolUseCount,
                         turnCount,
                         memoryDeltaMB: Math.round((endMemory - startMemory) * 100) / 100,
+                        circuitState: this.circuitBreaker.getState(),
                     });
+                    // Record success in circuit breaker
+                    this.circuitBreaker.recordSuccess();
                     // Record Claude API call metrics
                     metrics.recordClaudeApiCall('executeTask', true, duration, {
                         repository: this.repository,
@@ -519,6 +550,8 @@ export class Worker {
         catch (error) {
             claudeSuccess = false;
             const duration = Date.now() - claudeStartTime;
+            // Record failure in circuit breaker
+            this.circuitBreaker.recordFailure(error);
             // Record failed Claude API call
             metrics.recordClaudeApiCall('executeTask', false, duration, {
                 repository: this.repository,
@@ -529,6 +562,8 @@ export class Worker {
                 toolUseCount,
                 turnCount,
                 error: error.message,
+                circuitState: this.circuitBreaker.getState(),
+                circuitHealth: this.circuitBreaker.getHealth(),
             });
             throw error;
         }
