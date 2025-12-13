@@ -72,6 +72,10 @@ export declare class Daemon implements DaemonStateProvider {
      */
     private updateServiceHealth;
     /**
+     * Get the current internal service health status
+     */
+    getInternalServiceHealth(): DaemonServiceHealth;
+    /**
      * Log the current service health status
      */
     private logServiceHealthStatus;
@@ -95,6 +99,15 @@ export declare class Daemon implements DaemonStateProvider {
      * DaemonStateProvider implementation: Get error metrics
      */
     getErrorMetrics(): ErrorMetrics;
+    /**
+     * DaemonStateProvider implementation: Get service health
+     */
+    getServiceHealth(): {
+        name: string;
+        status: 'available' | 'degraded' | 'unavailable';
+        latency?: number;
+        details?: Record<string, any>;
+    }[];
     /**
      * Extract error type from error message for categorization
      */

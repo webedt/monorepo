@@ -11,6 +11,12 @@ export {
   type ValidationResult,
   type ProgressCallback,
   type AnalysisProgress,
+  // Git analysis types
+  type GitCommitInfo,
+  type FileChangeStats,
+  type FileDependency,
+  type DependencyGraph,
+  type GitAnalysis,
 } from './analyzer.js';
 export {
   TaskGenerator,

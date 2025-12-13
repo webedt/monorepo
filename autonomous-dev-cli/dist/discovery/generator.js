@@ -329,6 +329,26 @@ export class TaskGenerator {
         return tasks.slice(0, this.tasksPerCycle);
     }
     buildPrompt(codebaseSummary, existingIssues, analysis) {
+        // Build git analysis section if available
+        let gitAnalysisSection = '';
+        if (analysis.gitAnalysis) {
+            const { summary, fileChangeStats, dependencyGraph } = analysis.gitAnalysis;
+            gitAnalysisSection = `
+## Recent Development Activity
+
+### Change Frequency Analysis (Last ${summary.totalCommits} commits)
+**Most Frequently Changed Files (Hotspots):**
+${fileChangeStats.slice(0, 10).map(s => `- ${s.file} (${s.changeCount} changes, impact: ${s.impactScore.toFixed(1)})`).join('\n')}
+
+**Key Contributors:** ${summary.topContributors.slice(0, 5).join(', ')}
+
+### Dependency Impact Analysis
+**High-Impact Files (Many Dependents):**
+${dependencyGraph.hotspots.slice(0, 5).map(f => `- ${f}`).join('\n')}
+
+**Note:** Changes to high-impact files affect many other parts of the codebase. Consider this when prioritizing tasks.
+`;
+        }
         return `You are an expert software developer analyzing a codebase to identify the next set of improvements.
 
 ## Repository Context
@@ -336,7 +356,7 @@ ${this.repoContext || 'This is a web application project.'}
 
 ## Current Codebase Analysis
 ${codebaseSummary}
-
+${gitAnalysisSection}
 ## Existing Open Issues (DO NOT DUPLICATE)
 ${existingIssues}
 
@@ -347,6 +367,7 @@ Identify exactly ${this.tasksPerCycle} actionable improvements for this codebase
 2. **Clear Scope** - Tasks that can be completed independently in a single PR
 3. **Testable** - Changes where success can be verified
 4. **Incremental** - Build on existing patterns, don't require major rewrites
+5. **Active Development Areas** - Prioritize improvements to frequently changed files (see hotspots above)
 
 ### Categories to consider:
 - **security**: Security vulnerabilities, auth issues, data protection

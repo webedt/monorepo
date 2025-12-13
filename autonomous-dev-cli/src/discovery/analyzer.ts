@@ -1,9 +1,10 @@
 import { readFile, readdir, stat, access, constants } from 'fs/promises';
 import { existsSync } from 'fs';
 import { createReadStream } from 'fs';
-import { join, relative, extname, isAbsolute, resolve } from 'path';
+import { join, relative, extname, isAbsolute, resolve, dirname } from 'path';
 import { createHash } from 'crypto';
 import { createInterface } from 'readline';
+import { simpleGit, type SimpleGit, type LogResult, type DefaultLogFields } from 'simple-git';
 import {
   logger,
   getCorrelationId,
@@ -201,6 +202,7 @@ export interface CodebaseAnalysis {
   recentChanges: string[];
   packages: PackageInfo[];
   configFiles: string[];
+  gitAnalysis?: GitAnalysis; // Git integration for recent changes tracking
 }
 
 export interface DirectoryEntry {
@@ -224,6 +226,68 @@ export interface PackageInfo {
   scripts: Record<string, string>;
 }
 
+// ============================================================================
+// Git Analysis Types
+// ============================================================================
+
+/**
+ * Information about a recent git commit
+ */
+export interface GitCommitInfo {
+  hash: string;
+  shortHash: string;
+  author: string;
+  email: string;
+  date: Date;
+  message: string;
+  filesChanged: string[];
+}
+
+/**
+ * File change statistics from git history
+ */
+export interface FileChangeStats {
+  file: string;
+  changeCount: number;
+  lastModified: Date;
+  authors: string[];
+  impactScore: number; // Calculated based on frequency and recency
+}
+
+/**
+ * Dependency relationship between files
+ */
+export interface FileDependency {
+  source: string;
+  target: string;
+  type: 'import' | 'require' | 'dynamic';
+}
+
+/**
+ * Dependency graph for understanding file relationships
+ */
+export interface DependencyGraph {
+  files: string[];
+  dependencies: FileDependency[];
+  entryPoints: string[]; // Files with no incoming dependencies
+  hotspots: string[]; // Files with many dependencies (high impact)
+}
+
+/**
+ * Complete git analysis results
+ */
+export interface GitAnalysis {
+  recentCommits: GitCommitInfo[];
+  fileChangeStats: FileChangeStats[];
+  dependencyGraph: DependencyGraph;
+  summary: {
+    totalCommits: number;
+    activeFiles: number;
+    topContributors: string[];
+    mostChangedFiles: string[];
+  };
+}
+
 /**
  * Progress callback for reporting analysis progress
  */
@@ -233,7 +297,7 @@ export type ProgressCallback = (progress: AnalysisProgress) => void;
  * Progress information during analysis
  */
 export interface AnalysisProgress {
-  phase: 'scanning' | 'analyzing-todos' | 'analyzing-packages' | 'analyzing-config' | 'complete';
+  phase: 'scanning' | 'analyzing-todos' | 'analyzing-packages' | 'analyzing-config' | 'analyzing-git' | 'complete';
   filesScanned: number;
   totalFiles?: number;
   currentFile?: string;
@@ -250,6 +314,9 @@ export interface AnalyzerConfig {
   enableCache?: boolean; // Enable caching of analysis results (default: true)
   cache?: AnalysisCache; // Custom cache instance
   onProgress?: ProgressCallback; // Optional progress callback
+  enableGitAnalysis?: boolean; // Enable git history analysis (default: true)
+  gitAnalysisDays?: number; // Number of days of git history to analyze (default: 30)
+  gitMaxCommits?: number; // Maximum commits to analyze (default: 500)
 }
 
 /**
@@ -337,6 +404,10 @@ const CONFIG_EXTENSIONS = new Set([
   '.env',
 ]);
 
+// Git analysis configuration defaults
+const DEFAULT_GIT_ANALYSIS_DAYS = 30;
+const DEFAULT_GIT_MAX_COMMITS = 500;
+
 export class CodebaseAnalyzer {
   private repoPath: string;
   private excludePaths: string[];
@@ -349,6 +420,10 @@ export class CodebaseAnalyzer {
   private cache: AnalysisCache;
   private config: AnalyzerConfig;
   private onProgress?: ProgressCallback;
+  private enableGitAnalysis: boolean;
+  private gitAnalysisDays: number;
+  private gitMaxCommits: number;
+  private git: SimpleGit | null = null;
 
   constructor(repoPath: string, excludePaths: string[] = [], config: AnalyzerConfig = {}) {
     // Normalize and resolve the path
@@ -375,6 +450,11 @@ export class CodebaseAnalyzer {
 
     // Progress callback
     this.onProgress = config.onProgress;
+
+    // Git analysis configuration
+    this.enableGitAnalysis = config.enableGitAnalysis !== false; // Default true
+    this.gitAnalysisDays = config.gitAnalysisDays ?? DEFAULT_GIT_ANALYSIS_DAYS;
+    this.gitMaxCommits = config.gitMaxCommits ?? DEFAULT_GIT_MAX_COMMITS;
   }
 
   /**
@@ -720,10 +800,29 @@ export class CodebaseAnalyzer {
       phase: 'analyzing-config',
       filesScanned: this.fileCount,
       totalFiles: this.fileCount,
-      percentComplete: 75,
+      percentComplete: 60,
     });
 
     const configFiles = await this.findConfigFiles();
+
+    // Report progress: analyzing git
+    this.reportProgress({
+      phase: 'analyzing-git',
+      filesScanned: this.fileCount,
+      totalFiles: this.fileCount,
+      percentComplete: 75,
+    });
+
+    // Perform git analysis
+    const gitAnalysis = await this.analyzeGit();
+
+    // Generate recentChanges from git analysis for backward compatibility
+    const recentChanges: string[] = [];
+    if (gitAnalysis) {
+      for (const commit of gitAnalysis.recentCommits.slice(0, 20)) {
+        recentChanges.push(`[${commit.shortHash}] ${commit.message.split('\n')[0]} (${commit.author})`);
+      }
+    }
 
     const fileCount = this.countFiles(structure);
     const duration = Date.now() - startTime;
@@ -735,6 +834,8 @@ export class CodebaseAnalyzer {
       todoCount: todoComments.length,
       packageCount: packages.length,
       configFileCount: configFiles.length,
+      gitCommits: gitAnalysis?.recentCommits.length ?? 0,
+      gitActiveFiles: gitAnalysis?.fileChangeStats.length ?? 0,
       duration,
       memoryDeltaMB: memoryDelta,
     });
@@ -748,9 +849,10 @@ export class CodebaseAnalyzer {
       structure,
       fileCount,
       todoComments,
-      recentChanges: [], // Could integrate with git log
+      recentChanges,
       packages,
       configFiles,
+      gitAnalysis,
     };
 
     // Store in cache if enabled
@@ -770,6 +872,8 @@ export class CodebaseAnalyzer {
       fileCount,
       todoCount: todoComments.length,
       packageCount: packages.length,
+      gitCommits: gitAnalysis?.recentCommits.length ?? 0,
+      gitActiveFiles: gitAnalysis?.fileChangeStats.length ?? 0,
       memoryDeltaMB: memoryDelta,
       scanDuration,
     });
@@ -1253,6 +1357,395 @@ export class CodebaseAnalyzer {
 
     lines.push(`\n**Total Files:** ${analysis.fileCount}`);
 
+    // Git analysis section
+    if (analysis.gitAnalysis) {
+      lines.push('\n### Recent Changes\n');
+      const { summary, fileChangeStats } = analysis.gitAnalysis;
+
+      lines.push(`**Commits (last ${this.gitAnalysisDays} days):** ${summary.totalCommits}`);
+      lines.push(`**Active Files:** ${summary.activeFiles}`);
+
+      if (summary.topContributors.length > 0) {
+        lines.push(`**Top Contributors:** ${summary.topContributors.slice(0, 5).join(', ')}`);
+      }
+
+      if (summary.mostChangedFiles.length > 0) {
+        lines.push('\n**Most Frequently Changed Files:**');
+        for (const file of summary.mostChangedFiles.slice(0, 5)) {
+          const stats = fileChangeStats.find(s => s.file === file);
+          if (stats) {
+            lines.push(`- ${file} (${stats.changeCount} changes, impact: ${stats.impactScore.toFixed(1)})`);
+          }
+        }
+      }
+
+      // Recent commit summaries
+      if (analysis.gitAnalysis.recentCommits.length > 0) {
+        lines.push('\n**Recent Commits:**');
+        for (const commit of analysis.gitAnalysis.recentCommits.slice(0, 5)) {
+          const date = commit.date.toISOString().split('T')[0];
+          lines.push(`- [${commit.shortHash}] ${commit.message.split('\n')[0]} (${date})`);
+        }
+      }
+      lines.push('');
+    }
+
     return lines.join('\n');
+  }
+
+  // ============================================================================
+  // Git Analysis Methods
+  // ============================================================================
+
+  /**
+   * Initialize the git instance for the repository
+   */
+  private async initGit(): Promise<SimpleGit | null> {
+    if (this.git) return this.git;
+
+    try {
+      const gitDir = join(this.repoPath, '.git');
+      if (!existsSync(gitDir)) {
+        logger.debug('No .git directory found, skipping git analysis', { path: this.repoPath });
+        return null;
+      }
+
+      const git = simpleGit(this.repoPath);
+      // Verify it's a valid git repo
+      await git.status();
+      this.git = git;
+      return git;
+    } catch (error) {
+      logger.debug('Failed to initialize git', { error, path: this.repoPath });
+      return null;
+    }
+  }
+
+  /**
+   * Get recent commits from git history
+   */
+  async getRecentCommits(): Promise<GitCommitInfo[]> {
+    const git = await this.initGit();
+    if (!git) return [];
+
+    try {
+      const since = new Date();
+      since.setDate(since.getDate() - this.gitAnalysisDays);
+      const sinceStr = since.toISOString().split('T')[0];
+
+      const logResult: LogResult<DefaultLogFields> = await git.log({
+        maxCount: this.gitMaxCommits,
+        '--since': sinceStr,
+      });
+
+      const commits: GitCommitInfo[] = [];
+
+      for (const commit of logResult.all) {
+        // Get files changed for this commit
+        let filesChanged: string[] = [];
+        try {
+          const showResult = await git.show([
+            commit.hash,
+            '--name-only',
+            '--format=',
+          ]);
+          filesChanged = showResult
+            .split('\n')
+            .map(f => f.trim())
+            .filter(f => f.length > 0);
+        } catch {
+          // Some commits might not have file info accessible
+        }
+
+        commits.push({
+          hash: commit.hash,
+          shortHash: commit.hash.substring(0, 7),
+          author: commit.author_name,
+          email: commit.author_email,
+          date: new Date(commit.date),
+          message: commit.message,
+          filesChanged,
+        });
+      }
+
+      logger.debug(`Retrieved ${commits.length} recent commits`, {
+        days: this.gitAnalysisDays,
+        maxCommits: this.gitMaxCommits,
+      });
+
+      return commits;
+    } catch (error) {
+      logger.warn('Failed to get recent commits', { error });
+      return [];
+    }
+  }
+
+  /**
+   * Calculate file change statistics from commit history
+   */
+  private calculateFileChangeStats(commits: GitCommitInfo[]): FileChangeStats[] {
+    const fileStats = new Map<string, {
+      changeCount: number;
+      lastModified: Date;
+      authors: Set<string>;
+      dates: Date[];
+    }>();
+
+    for (const commit of commits) {
+      for (const file of commit.filesChanged) {
+        const existing = fileStats.get(file) || {
+          changeCount: 0,
+          lastModified: new Date(0),
+          authors: new Set<string>(),
+          dates: [],
+        };
+
+        existing.changeCount++;
+        existing.authors.add(commit.author);
+        existing.dates.push(commit.date);
+
+        if (commit.date > existing.lastModified) {
+          existing.lastModified = commit.date;
+        }
+
+        fileStats.set(file, existing);
+      }
+    }
+
+    // Calculate impact scores and convert to array
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const maxAge = this.gitAnalysisDays * dayMs;
+
+    const results: FileChangeStats[] = [];
+    for (const [file, stats] of fileStats) {
+      // Impact score = change frequency weighted by recency
+      // Higher score = more frequently changed AND changed recently
+      const recencyWeight = stats.dates.reduce((sum, date) => {
+        const age = now - date.getTime();
+        return sum + (1 - Math.min(age / maxAge, 1));
+      }, 0);
+
+      const impactScore = stats.changeCount * (recencyWeight / Math.max(stats.dates.length, 1));
+
+      results.push({
+        file,
+        changeCount: stats.changeCount,
+        lastModified: stats.lastModified,
+        authors: Array.from(stats.authors),
+        impactScore: Math.round(impactScore * 10) / 10,
+      });
+    }
+
+    // Sort by impact score descending
+    results.sort((a, b) => b.impactScore - a.impactScore);
+
+    return results;
+  }
+
+  /**
+   * Analyze dependency relationships between files
+   */
+  async analyzeDependencyGraph(): Promise<DependencyGraph> {
+    const dependencies: FileDependency[] = [];
+    const filesWithDeps = new Set<string>();
+    const filesAsDeps = new Set<string>();
+
+    const importPatterns = [
+      // ES6 imports: import x from 'y', import { x } from 'y'
+      /import\s+(?:[\w*{}\s,]+\s+from\s+)?['"]([^'"]+)['"]/g,
+      // CommonJS require: require('x'), require("x")
+      /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+      // Dynamic imports: import('x')
+      /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    ];
+
+    const scanFileForDeps = async (filePath: string): Promise<void> => {
+      const ext = extname(filePath);
+      if (!CODE_EXTENSIONS.has(ext)) return;
+
+      try {
+        const fileStat = await stat(filePath);
+        if (fileStat.size > this.maxFileSizeBytes) return;
+
+        const content = await readFile(filePath, 'utf-8');
+        const relPath = relative(this.repoPath, filePath);
+
+        for (let i = 0; i < importPatterns.length; i++) {
+          const pattern = importPatterns[i];
+          // Reset lastIndex for global regex
+          pattern.lastIndex = 0;
+          let match;
+
+          while ((match = pattern.exec(content)) !== null) {
+            const importPath = match[1];
+
+            // Skip external packages (node_modules, bare imports)
+            if (!importPath.startsWith('.') && !importPath.startsWith('/')) {
+              continue;
+            }
+
+            // Resolve the import path
+            const sourceDir = dirname(filePath);
+            let resolvedPath = importPath;
+
+            if (importPath.startsWith('.')) {
+              resolvedPath = relative(this.repoPath, resolve(sourceDir, importPath));
+            }
+
+            // Try to resolve file extensions
+            const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '', '/index.ts', '/index.js'];
+            let targetPath = resolvedPath;
+
+            for (const ext of possibleExtensions) {
+              const fullPath = join(this.repoPath, resolvedPath + ext);
+              if (existsSync(fullPath)) {
+                targetPath = resolvedPath + ext;
+                break;
+              }
+            }
+
+            const depType = i === 0 ? 'import' : i === 1 ? 'require' : 'dynamic';
+
+            dependencies.push({
+              source: relPath,
+              target: targetPath,
+              type: depType as 'import' | 'require' | 'dynamic',
+            });
+
+            filesWithDeps.add(relPath);
+            filesAsDeps.add(targetPath);
+          }
+        }
+      } catch {
+        // Skip files we can't read
+      }
+    };
+
+    // Scan all files for dependencies
+    const scanDir = async (dirPath: string, depth: number = 0): Promise<void> => {
+      if (depth > this.maxDepth) return;
+
+      try {
+        const items = await readdir(dirPath);
+
+        for (const item of items) {
+          if (IGNORED_DIRS.has(item)) continue;
+
+          const fullPath = join(dirPath, item);
+          const relativePath = relative(this.repoPath, fullPath);
+
+          if (this.shouldExclude(relativePath)) continue;
+
+          try {
+            const fileStat = await stat(fullPath);
+
+            if (fileStat.isDirectory()) {
+              await scanDir(fullPath, depth + 1);
+            } else if (fileStat.isFile()) {
+              await scanFileForDeps(fullPath);
+            }
+          } catch {
+            // Skip inaccessible
+          }
+        }
+      } catch {
+        // Skip inaccessible directories
+      }
+    };
+
+    await scanDir(this.repoPath);
+
+    // Calculate entry points (files with no incoming dependencies)
+    const allFiles = new Set([...filesWithDeps, ...filesAsDeps]);
+    const entryPoints = [...allFiles].filter(f => !filesAsDeps.has(f));
+
+    // Calculate hotspots (files imported by many others)
+    const depCounts = new Map<string, number>();
+    for (const dep of dependencies) {
+      depCounts.set(dep.target, (depCounts.get(dep.target) || 0) + 1);
+    }
+
+    const hotspots = [...depCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([file]) => file);
+
+    return {
+      files: [...allFiles],
+      dependencies,
+      entryPoints,
+      hotspots,
+    };
+  }
+
+  /**
+   * Perform complete git analysis
+   */
+  async analyzeGit(): Promise<GitAnalysis | undefined> {
+    if (!this.enableGitAnalysis) {
+      logger.debug('Git analysis disabled');
+      return undefined;
+    }
+
+    const git = await this.initGit();
+    if (!git) {
+      logger.debug('No git repository found');
+      return undefined;
+    }
+
+    try {
+      logger.debug('Starting git analysis', {
+        days: this.gitAnalysisDays,
+        maxCommits: this.gitMaxCommits,
+      });
+
+      // Get recent commits
+      const recentCommits = await this.getRecentCommits();
+
+      // Calculate file change stats
+      const fileChangeStats = this.calculateFileChangeStats(recentCommits);
+
+      // Analyze dependency graph
+      const dependencyGraph = await this.analyzeDependencyGraph();
+
+      // Generate summary
+      const authorCounts = new Map<string, number>();
+      for (const commit of recentCommits) {
+        authorCounts.set(commit.author, (authorCounts.get(commit.author) || 0) + 1);
+      }
+
+      const topContributors = [...authorCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([author]) => author);
+
+      const mostChangedFiles = fileChangeStats
+        .slice(0, 20)
+        .map(s => s.file);
+
+      const summary = {
+        totalCommits: recentCommits.length,
+        activeFiles: fileChangeStats.length,
+        topContributors,
+        mostChangedFiles,
+      };
+
+      logger.debug('Git analysis complete', {
+        commits: recentCommits.length,
+        activeFiles: fileChangeStats.length,
+        dependencies: dependencyGraph.dependencies.length,
+      });
+
+      return {
+        recentCommits,
+        fileChangeStats,
+        dependencyGraph,
+        summary,
+      };
+    } catch (error) {
+      logger.warn('Git analysis failed', { error });
+      return undefined;
+    }
   }
 }
