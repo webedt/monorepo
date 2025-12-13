@@ -5,6 +5,10 @@ export interface PoolConfig {
     connectionTimeoutMillis?: number;
     acquireTimeoutMillis?: number;
     statementTimeout?: number;
+    reconnectOnError?: boolean;
+    reconnectRetries?: number;
+    reconnectBaseDelayMs?: number;
+    healthCheckIntervalMs?: number;
 }
 export declare const users: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "users";
@@ -1503,7 +1507,33 @@ export interface EventData {
  * Initialize database with optimized connection pool settings
  * Supports configuration for concurrent worker scenarios
  */
-export declare function initDatabase(databaseUrl: string, config?: PoolConfig): Promise<void>;
+export declare function initDatabase(dbUrl: string, config?: PoolConfig): Promise<void>;
+/**
+ * Stop the health check interval
+ */
+export declare function stopHealthCheckInterval(): void;
+/**
+ * Perform a health check on the database connection
+ */
+export declare function performHealthCheck(): Promise<{
+    healthy: boolean;
+    latencyMs: number;
+    error?: string;
+}>;
+/**
+ * Get the current database health status
+ */
+export declare function getDatabaseHealth(): {
+    isHealthy: boolean;
+    isReconnecting: boolean;
+    consecutiveFailures: number;
+    lastHealthCheck: number;
+    lastReconnectAttempt: number;
+};
+/**
+ * Execute a query with automatic reconnection on network errors
+ */
+export declare function executeWithReconnection<T>(queryFn: () => Promise<T>, operationName: string): Promise<T>;
 export declare function getDb(): import("drizzle-orm/node-postgres").NodePgDatabase<Record<string, unknown>> & {
     $client: import("pg").Pool;
 };

@@ -103,6 +103,7 @@ export const taskExecutionHistory = pgTable('task_execution_history', {
 let pool = null;
 let db = null;
 let poolConfig = {};
+let databaseUrl = null;
 let poolStats = {
     totalConnections: 0,
     idleConnections: 0,
@@ -110,25 +111,35 @@ let poolStats = {
     queryCount: 0,
     lastQueryTime: 0,
 };
+// Reconnection state tracking
+let reconnectionState = {
+    isReconnecting: false,
+    consecutiveFailures: 0,
+    lastReconnectAttempt: 0,
+    lastHealthCheck: 0,
+    healthCheckInterval: null,
+    isHealthy: true,
+};
 /**
  * Initialize database with optimized connection pool settings
  * Supports configuration for concurrent worker scenarios
  */
-export async function initDatabase(databaseUrl, config = {}) {
+export async function initDatabase(dbUrl, config = {}) {
     if (pool) {
         return;
     }
     poolConfig = config;
+    databaseUrl = dbUrl;
     // Calculate optimal pool size based on expected concurrent workers
     const maxConnections = config.max ?? 20; // Higher default for concurrent workers
     const minConnections = config.min ?? 2;
     pool = new Pool({
-        connectionString: databaseUrl,
+        connectionString: dbUrl,
         max: maxConnections,
         min: minConnections,
         idleTimeoutMillis: config.idleTimeoutMillis ?? 30000,
         connectionTimeoutMillis: config.connectionTimeoutMillis ?? 5000,
-        ssl: databaseUrl.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
+        ssl: dbUrl.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
         // Additional optimizations
         application_name: 'autonomous-dev-cli',
         statement_timeout: config.statementTimeout ?? 30000,
@@ -137,6 +148,8 @@ export async function initDatabase(databaseUrl, config = {}) {
     // Set up pool event handlers for monitoring
     pool.on('connect', () => {
         poolStats.totalConnections++;
+        reconnectionState.consecutiveFailures = 0;
+        reconnectionState.isHealthy = true;
         logger.debug('Pool: new client connected', { total: poolStats.totalConnections });
     });
     pool.on('acquire', () => {
@@ -146,22 +159,230 @@ export async function initDatabase(databaseUrl, config = {}) {
         poolStats.totalConnections--;
         logger.debug('Pool: client removed', { total: poolStats.totalConnections });
     });
-    pool.on('error', (err) => {
+    pool.on('error', async (err) => {
         logger.error('Pool: unexpected error', { error: err.message });
+        reconnectionState.isHealthy = false;
+        // Attempt automatic reconnection on network errors
+        if (config.reconnectOnError !== false && isNetworkError(err)) {
+            await attemptReconnection();
+        }
     });
     db = drizzle(pool, { schema: { users, chatSessions, messages, events, taskExecutionHistory } });
     try {
         await pool.query('SELECT 1');
+        reconnectionState.isHealthy = true;
         logger.info('Database connection established', {
             maxConnections,
             minConnections,
             idleTimeout: config.idleTimeoutMillis ?? 30000,
         });
+        // Start health check interval if configured
+        const healthCheckInterval = config.healthCheckIntervalMs ?? 30000;
+        if (healthCheckInterval > 0) {
+            startHealthCheckInterval(healthCheckInterval);
+        }
     }
     catch (error) {
         logger.error('Failed to connect to database', { error });
         throw error;
     }
+}
+/**
+ * Check if an error is a network-related error that might benefit from reconnection
+ */
+function isNetworkError(error) {
+    const message = error.message.toLowerCase();
+    const networkPatterns = [
+        'econnrefused',
+        'econnreset',
+        'etimedout',
+        'enotfound',
+        'connection terminated',
+        'connection refused',
+        'network',
+        'socket hang up',
+        'getaddrinfo',
+    ];
+    return networkPatterns.some(pattern => message.includes(pattern));
+}
+/**
+ * Attempt to reconnect to the database with exponential backoff
+ */
+async function attemptReconnection() {
+    if (reconnectionState.isReconnecting || !databaseUrl) {
+        return false;
+    }
+    reconnectionState.isReconnecting = true;
+    const maxRetries = poolConfig.reconnectRetries ?? 3;
+    const baseDelay = poolConfig.reconnectBaseDelayMs ?? 1000;
+    logger.warn('Attempting database reconnection', {
+        consecutiveFailures: reconnectionState.consecutiveFailures,
+    });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Close existing pool if any
+            if (pool) {
+                try {
+                    await pool.end();
+                }
+                catch (closeError) {
+                    logger.debug('Error closing existing pool during reconnection', {
+                        error: closeError.message,
+                    });
+                }
+                pool = null;
+                db = null;
+            }
+            // Wait with exponential backoff
+            const delay = baseDelay * Math.pow(2, attempt - 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            reconnectionState.lastReconnectAttempt = Date.now();
+            // Reinitialize the pool
+            pool = new Pool({
+                connectionString: databaseUrl,
+                max: poolConfig.max ?? 20,
+                min: poolConfig.min ?? 2,
+                idleTimeoutMillis: poolConfig.idleTimeoutMillis ?? 30000,
+                connectionTimeoutMillis: poolConfig.connectionTimeoutMillis ?? 5000,
+                ssl: databaseUrl.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
+                application_name: 'autonomous-dev-cli',
+                statement_timeout: poolConfig.statementTimeout ?? 30000,
+                query_timeout: poolConfig.statementTimeout ?? 30000,
+            });
+            // Test the connection
+            await pool.query('SELECT 1');
+            db = drizzle(pool, { schema: { users, chatSessions, messages, events, taskExecutionHistory } });
+            reconnectionState.isReconnecting = false;
+            reconnectionState.consecutiveFailures = 0;
+            reconnectionState.isHealthy = true;
+            logger.info('Database reconnection successful', {
+                attempt,
+                totalAttempts: maxRetries,
+            });
+            return true;
+        }
+        catch (error) {
+            reconnectionState.consecutiveFailures++;
+            logger.warn(`Database reconnection attempt ${attempt}/${maxRetries} failed`, {
+                error: error.message,
+                consecutiveFailures: reconnectionState.consecutiveFailures,
+            });
+        }
+    }
+    reconnectionState.isReconnecting = false;
+    logger.error('Database reconnection failed after all retries', {
+        consecutiveFailures: reconnectionState.consecutiveFailures,
+        maxRetries,
+    });
+    return false;
+}
+/**
+ * Start periodic health check interval
+ */
+function startHealthCheckInterval(intervalMs) {
+    // Clear existing interval if any
+    if (reconnectionState.healthCheckInterval) {
+        clearInterval(reconnectionState.healthCheckInterval);
+    }
+    reconnectionState.healthCheckInterval = setInterval(async () => {
+        await performHealthCheck();
+    }, intervalMs);
+    logger.debug('Database health check interval started', { intervalMs });
+}
+/**
+ * Stop the health check interval
+ */
+export function stopHealthCheckInterval() {
+    if (reconnectionState.healthCheckInterval) {
+        clearInterval(reconnectionState.healthCheckInterval);
+        reconnectionState.healthCheckInterval = null;
+        logger.debug('Database health check interval stopped');
+    }
+}
+/**
+ * Perform a health check on the database connection
+ */
+export async function performHealthCheck() {
+    reconnectionState.lastHealthCheck = Date.now();
+    if (!pool) {
+        return { healthy: false, latencyMs: 0, error: 'Pool not initialized' };
+    }
+    const startTime = Date.now();
+    try {
+        await pool.query('SELECT 1');
+        const latencyMs = Date.now() - startTime;
+        reconnectionState.isHealthy = true;
+        reconnectionState.consecutiveFailures = 0;
+        // Warn if latency is high
+        if (latencyMs > 1000) {
+            logger.warn('Database health check latency high', { latencyMs });
+        }
+        return { healthy: true, latencyMs };
+    }
+    catch (error) {
+        const latencyMs = Date.now() - startTime;
+        reconnectionState.isHealthy = false;
+        reconnectionState.consecutiveFailures++;
+        logger.error('Database health check failed', {
+            error: error.message,
+            consecutiveFailures: reconnectionState.consecutiveFailures,
+        });
+        // Attempt reconnection if this is a network error
+        if (poolConfig.reconnectOnError !== false && isNetworkError(error)) {
+            attemptReconnection().catch(() => {
+                // Reconnection handled internally
+            });
+        }
+        return {
+            healthy: false,
+            latencyMs,
+            error: error.message,
+        };
+    }
+}
+/**
+ * Get the current database health status
+ */
+export function getDatabaseHealth() {
+    return {
+        isHealthy: reconnectionState.isHealthy,
+        isReconnecting: reconnectionState.isReconnecting,
+        consecutiveFailures: reconnectionState.consecutiveFailures,
+        lastHealthCheck: reconnectionState.lastHealthCheck,
+        lastReconnectAttempt: reconnectionState.lastReconnectAttempt,
+    };
+}
+/**
+ * Execute a query with automatic reconnection on network errors
+ */
+export async function executeWithReconnection(queryFn, operationName) {
+    const maxAttempts = 2; // Original + 1 retry after reconnection
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            // Check if we're healthy before attempting
+            if (!reconnectionState.isHealthy && !reconnectionState.isReconnecting) {
+                const reconnected = await attemptReconnection();
+                if (!reconnected) {
+                    throw new Error('Database unavailable after reconnection attempts');
+                }
+            }
+            return await withQueryTimeout(queryFn, operationName);
+        }
+        catch (error) {
+            // If this is a network error and we haven't retried yet, attempt reconnection
+            if (attempt < maxAttempts && isNetworkError(error)) {
+                logger.warn(`${operationName}: Network error, attempting reconnection`, {
+                    error: error.message,
+                });
+                const reconnected = await attemptReconnection();
+                if (reconnected) {
+                    continue; // Retry the operation
+                }
+            }
+            throw error;
+        }
+    }
+    throw new Error(`${operationName} failed after reconnection attempts`);
 }
 export function getDb() {
     if (!db) {
@@ -206,10 +427,22 @@ export function checkPoolHealth() {
     return true;
 }
 export async function closeDatabase() {
+    // Stop health check interval first
+    stopHealthCheckInterval();
     if (pool) {
         await pool.end();
         pool = null;
         db = null;
+        databaseUrl = null;
+        // Reset reconnection state
+        reconnectionState = {
+            isReconnecting: false,
+            consecutiveFailures: 0,
+            lastReconnectAttempt: 0,
+            lastHealthCheck: 0,
+            healthCheckInterval: null,
+            isHealthy: true,
+        };
         logger.info('Database connection closed');
     }
 }

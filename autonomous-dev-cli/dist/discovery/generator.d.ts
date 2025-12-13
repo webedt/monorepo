@@ -19,10 +19,19 @@ export interface DiscoveredTask {
     /** Related issue numbers for dependency awareness (populated by deduplicator) */
     relatedIssues?: number[];
 }
+/**
+ * Token refresh callback type for Claude authentication
+ */
+export type TokenRefreshCallback = (refreshToken: string) => Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresAt?: number;
+}>;
 export interface TaskGeneratorOptions {
     claudeAuth: {
         accessToken: string;
         refreshToken: string;
+        expiresAt?: number;
     };
     repoPath: string;
     excludePaths: string[];
@@ -33,6 +42,8 @@ export interface TaskGeneratorOptions {
     circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
     /** Enable fallback task generation when Claude fails (default: true) */
     enableFallbackGeneration?: boolean;
+    /** Callback to refresh Claude tokens on 401/403 auth failures */
+    onTokenRefresh?: TokenRefreshCallback;
 }
 /**
  * Result of task generation with status information
@@ -58,7 +69,23 @@ export declare class TaskGenerator {
     private analyzerConfig;
     private circuitBreaker;
     private enableFallbackGeneration;
+    private onTokenRefresh?;
+    private tokenRefreshAttempted;
     constructor(options: TaskGeneratorOptions);
+    /**
+     * Attempt to refresh Claude tokens when authentication fails.
+     * Returns true if refresh was successful, false otherwise.
+     */
+    private attemptTokenRefresh;
+    /**
+     * Reset the token refresh attempt flag for a new request cycle.
+     */
+    resetTokenRefreshState(): void;
+    /**
+     * Check if tokens are about to expire and proactively refresh.
+     * Returns true if tokens are valid or were successfully refreshed.
+     */
+    validateAndRefreshTokensIfNeeded(): Promise<boolean>;
     /**
      * Get the circuit breaker health status
      */

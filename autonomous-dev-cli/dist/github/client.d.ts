@@ -166,6 +166,16 @@ export declare class GitHubClient {
      * Wait for rate limit to reset if necessary
      */
     waitForRateLimitIfNeeded(): Promise<void>;
+    /**
+     * Execute an operation with automatic rate limit backoff.
+     * Waits for rate limit reset when receiving 429 status, using header-based timing.
+     */
+    executeWithRateLimitBackoff<T>(operation: () => Promise<T>, endpoint: string, context?: ErrorContext): Promise<T>;
+    /**
+     * Preemptively check rate limit and wait if running low.
+     * Uses header-based timing from the last response.
+     */
+    preemptiveRateLimitCheck(): Promise<void>;
 }
 export declare function createGitHubClient(options: GitHubClientOptions): GitHubClient;
 //# sourceMappingURL=client.d.ts.map

@@ -517,6 +517,88 @@ export class GitHubClient {
             logger.debug('Failed to check rate limit', { error: error.message });
         }
     }
+    /**
+     * Execute an operation with automatic rate limit backoff.
+     * Waits for rate limit reset when receiving 429 status, using header-based timing.
+     */
+    async executeWithRateLimitBackoff(operation, endpoint, context) {
+        const maxRateLimitRetries = 3;
+        let attempt = 0;
+        while (attempt < maxRateLimitRetries) {
+            try {
+                // Check if we're currently rate limited before making request
+                if (this.rateLimitState.isLimited) {
+                    await this.waitForRateLimitReset();
+                }
+                return await this.executeWithRetry(operation, endpoint, context);
+            }
+            catch (error) {
+                const statusCode = error.status ?? error.response?.status;
+                // Handle 429 rate limit specifically with header-based timing
+                if (statusCode === 429) {
+                    attempt++;
+                    const headers = error.response?.headers;
+                    // Extract rate limit reset time from headers
+                    let waitMs = this.getRequiredDelay();
+                    // If we have a Retry-After header, use that instead
+                    const retryAfter = headers?.['retry-after'] ?? headers?.['Retry-After'];
+                    if (retryAfter) {
+                        waitMs = parseInt(retryAfter, 10) * 1000;
+                    }
+                    // Ensure minimum wait time with exponential backoff for subsequent attempts
+                    const backoffMultiplier = Math.pow(2, attempt - 1);
+                    waitMs = Math.max(waitMs, 1000 * backoffMultiplier);
+                    // Cap at 5 minutes to prevent indefinite waits
+                    waitMs = Math.min(waitMs, 5 * 60 * 1000);
+                    if (attempt < maxRateLimitRetries) {
+                        this.log.warn(`Rate limited (429), waiting ${Math.ceil(waitMs / 1000)}s before retry ${attempt}/${maxRateLimitRetries}`, {
+                            endpoint,
+                            waitMs,
+                            retryAfterHeader: retryAfter,
+                            resetAt: this.rateLimitResetAt?.toISOString(),
+                        });
+                        await new Promise(resolve => setTimeout(resolve, waitMs));
+                        // Reset rate limit state after waiting
+                        this.rateLimitState.isLimited = false;
+                        continue;
+                    }
+                }
+                throw error;
+            }
+        }
+        throw new GitHubError(ErrorCode.GITHUB_RATE_LIMITED, `GitHub API rate limited after ${maxRateLimitRetries} retry attempts`, { endpoint, context });
+    }
+    /**
+     * Preemptively check rate limit and wait if running low.
+     * Uses header-based timing from the last response.
+     */
+    async preemptiveRateLimitCheck() {
+        const { remaining, limit, resetAt, isLimited } = this.rateLimitState;
+        // If already limited, wait for reset
+        if (isLimited) {
+            await this.waitForRateLimitReset();
+            return;
+        }
+        // Calculate threshold (10% of limit or minimum 50 requests)
+        const threshold = Math.max(Math.floor(limit * 0.1), 50);
+        if (remaining <= threshold && remaining > 0) {
+            // Calculate proportional wait time based on remaining requests
+            const resetMs = resetAt * 1000;
+            const now = Date.now();
+            const timeToReset = Math.max(0, resetMs - now);
+            // Spread remaining requests over time to reset
+            const delayPerRequest = timeToReset / (remaining || 1);
+            const waitMs = Math.min(delayPerRequest, 5000); // Cap at 5 seconds
+            if (waitMs > 100) {
+                this.log.debug(`Throttling requests to avoid rate limit`, {
+                    remaining,
+                    threshold,
+                    delayMs: Math.round(waitMs),
+                });
+                await new Promise(resolve => setTimeout(resolve, waitMs));
+            }
+        }
+    }
 }
 export function createGitHubClient(options) {
     return new GitHubClient(options);

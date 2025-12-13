@@ -192,6 +192,94 @@ export const ConfigSchema = z.object({
         enabled: z.boolean().default(true),
     }).describe('Circuit breaker resilience settings').default({}),
     /**
+     * Retry Policy Settings
+     * Configure retry behavior per service type for error recovery.
+     */
+    retryPolicies: z.object({
+        /** GitHub API retry policy */
+        github: z.object({
+            /** Maximum number of retry attempts (1-10, default: 3) */
+            maxRetries: z.number().min(1).max(10).default(3),
+            /** Base delay in milliseconds for exponential backoff (100-5000, default: 1000) */
+            baseDelayMs: z.number().min(100).max(5000).default(1000),
+            /** Maximum delay in milliseconds (5000-120000, default: 60000) */
+            maxDelayMs: z.number().min(5000).max(120000).default(60000),
+            /** Backoff multiplier (1.5-3, default: 2) */
+            backoffMultiplier: z.number().min(1.5).max(3).default(2),
+            /** Enable jitter to prevent thundering herd (default: true) */
+            jitter: z.boolean().default(true),
+            /** Maximum rate limit retry wait time in ms (60000-600000, default: 300000 = 5 min) */
+            maxRateLimitWaitMs: z.number().min(60000).max(600000).default(300000),
+        }).describe('GitHub API retry settings').default({}),
+        /** Claude API retry policy */
+        claude: z.object({
+            /** Maximum number of retry attempts (1-5, default: 3) */
+            maxRetries: z.number().min(1).max(5).default(3),
+            /** Base delay in milliseconds for exponential backoff (1000-10000, default: 2000) */
+            baseDelayMs: z.number().min(1000).max(10000).default(2000),
+            /** Maximum delay in milliseconds (30000-120000, default: 60000) */
+            maxDelayMs: z.number().min(30000).max(120000).default(60000),
+            /** Backoff multiplier (1.5-3, default: 2) */
+            backoffMultiplier: z.number().min(1.5).max(3).default(2),
+            /** Initial timeout in milliseconds (60000-300000, default: 120000 = 2 min) */
+            initialTimeoutMs: z.number().min(60000).max(300000).default(120000),
+            /** Maximum timeout in milliseconds (300000-900000, default: 600000 = 10 min) */
+            maxTimeoutMs: z.number().min(300000).max(900000).default(600000),
+            /** Enable progressive timeout increases per retry (default: true) */
+            progressiveTimeout: z.boolean().default(true),
+            /** Enable token refresh on 401/403 errors (default: true) */
+            enableTokenRefresh: z.boolean().default(true),
+        }).describe('Claude API retry settings').default({}),
+        /** Database retry policy */
+        database: z.object({
+            /** Maximum number of retry attempts (1-5, default: 3) */
+            maxRetries: z.number().min(1).max(5).default(3),
+            /** Base delay in milliseconds for exponential backoff (100-2000, default: 500) */
+            baseDelayMs: z.number().min(100).max(2000).default(500),
+            /** Maximum delay in milliseconds (5000-30000, default: 10000) */
+            maxDelayMs: z.number().min(5000).max(30000).default(10000),
+            /** Query timeout in milliseconds (5000-60000, default: 30000) */
+            queryTimeoutMs: z.number().min(5000).max(60000).default(30000),
+            /** Enable automatic reconnection on network errors (default: true) */
+            reconnectOnError: z.boolean().default(true),
+            /** Health check interval in milliseconds (0 to disable, default: 30000) */
+            healthCheckIntervalMs: z.number().min(0).max(120000).default(30000),
+        }).describe('Database retry settings').default({}),
+        /** Git operations retry policy */
+        git: z.object({
+            /** Maximum number of retry attempts (1-5, default: 3) */
+            maxRetries: z.number().min(1).max(5).default(3),
+            /** Base delay in milliseconds for exponential backoff (1000-10000, default: 2000) */
+            baseDelayMs: z.number().min(1000).max(10000).default(2000),
+            /** Maximum delay in milliseconds (30000-120000, default: 60000) */
+            maxDelayMs: z.number().min(30000).max(120000).default(60000),
+            /** Initial timeout in milliseconds (30000-180000, default: 60000) */
+            initialTimeoutMs: z.number().min(30000).max(180000).default(60000),
+            /** Maximum timeout in milliseconds (120000-600000, default: 300000 = 5 min) */
+            maxTimeoutMs: z.number().min(120000).max(600000).default(300000),
+            /** Enable progressive timeout increases per retry (default: true) */
+            progressiveTimeout: z.boolean().default(true),
+        }).describe('Git operations retry settings').default({}),
+    }).describe('Service-specific retry policies').default({}),
+    /**
+     * Error Recovery Settings
+     * Configure how the system handles and recovers from errors.
+     */
+    errorRecovery: z.object({
+        /** Enable dead letter queue for failed tasks (default: true) */
+        enableDeadLetterQueue: z.boolean().default(true),
+        /** Maximum tasks to keep in dead letter queue (10-1000, default: 100) */
+        maxDeadLetterQueueSize: z.number().min(10).max(1000).default(100),
+        /** Dead letter queue retention in days (1-30, default: 7) */
+        deadLetterRetentionDays: z.number().min(1).max(30).default(7),
+        /** Enable progress checkpointing for timeout recovery (default: true) */
+        enableProgressCheckpoints: z.boolean().default(true),
+        /** Checkpoint retention in hours (1-168, default: 24) */
+        checkpointRetentionHours: z.number().min(1).max(168).default(24),
+        /** Enable automatic task retry from checkpoints (default: false) */
+        autoRetryFromCheckpoint: z.boolean().default(false),
+    }).describe('Error recovery settings').default({}),
+    /**
      * Credentials
      * Authentication credentials (MUST be set via environment variables, NOT config files).
      *
@@ -292,6 +380,50 @@ export const defaultConfig = {
         maxDelayMs: 30000,
         successThreshold: 1,
         enabled: true,
+    },
+    retryPolicies: {
+        github: {
+            maxRetries: 3,
+            baseDelayMs: 1000,
+            maxDelayMs: 60000,
+            backoffMultiplier: 2,
+            jitter: true,
+            maxRateLimitWaitMs: 300000,
+        },
+        claude: {
+            maxRetries: 3,
+            baseDelayMs: 2000,
+            maxDelayMs: 60000,
+            backoffMultiplier: 2,
+            initialTimeoutMs: 120000,
+            maxTimeoutMs: 600000,
+            progressiveTimeout: true,
+            enableTokenRefresh: true,
+        },
+        database: {
+            maxRetries: 3,
+            baseDelayMs: 500,
+            maxDelayMs: 10000,
+            queryTimeoutMs: 30000,
+            reconnectOnError: true,
+            healthCheckIntervalMs: 30000,
+        },
+        git: {
+            maxRetries: 3,
+            baseDelayMs: 2000,
+            maxDelayMs: 60000,
+            initialTimeoutMs: 60000,
+            maxTimeoutMs: 300000,
+            progressiveTimeout: true,
+        },
+    },
+    errorRecovery: {
+        enableDeadLetterQueue: true,
+        maxDeadLetterQueueSize: 100,
+        deadLetterRetentionDays: 7,
+        enableProgressCheckpoints: true,
+        checkpointRetentionHours: 24,
+        autoRetryFromCheckpoint: false,
     },
 };
 //# sourceMappingURL=schema.js.map
