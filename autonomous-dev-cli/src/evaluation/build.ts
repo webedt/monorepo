@@ -2,7 +2,18 @@ import { execSync } from 'child_process';
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
-import { logger } from '../utils/logger.js';
+import {
+  logger,
+  getCorrelationId,
+  timeOperation,
+  createOperationContext,
+  finalizeOperationContext,
+  startPhase,
+  endPhase,
+  recordPhaseOperation,
+  recordPhaseError,
+} from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
 
 export interface BuildResult {
   success: boolean;
@@ -238,8 +249,31 @@ export async function runBuild(options: BuildOptions): Promise<BuildResult> {
     cache: customCache,
   } = options;
   const startTime = Date.now();
+  const correlationId = getCorrelationId();
 
-  logger.info('Running build verification...');
+  // Start evaluation phase if tracking
+  if (correlationId) {
+    startPhase(correlationId, 'evaluation', {
+      operation: 'build',
+      repoPath,
+      packageCount: packages.length,
+    });
+    recordPhaseOperation(correlationId, 'evaluation', 'runBuild');
+  }
+
+  // Create operation context for structured logging
+  const operationContext = createOperationContext('Build', 'runBuild', {
+    repoPath,
+    packages,
+    timeout,
+    enableCache,
+  });
+
+  logger.info('Running build verification...', {
+    correlationId,
+    repoPath,
+    packageCount: packages.length,
+  });
 
   const buildCache = customCache ?? getBuildCache();
 
@@ -310,12 +344,14 @@ export async function runBuild(options: BuildOptions): Promise<BuildResult> {
       }
     }
 
+    const duration = Date.now() - startTime;
+
     logger.success('Build completed successfully');
 
     const result: BuildResult = {
       success: true,
       output: combinedOutput,
-      duration: Date.now() - startTime,
+      duration,
     };
 
     // Cache the successful result
@@ -325,14 +361,53 @@ export async function runBuild(options: BuildOptions): Promise<BuildResult> {
       buildCache.set(cacheKey, result, contentHash);
     }
 
+    // End evaluation phase successfully
+    if (correlationId) {
+      endPhase(correlationId, 'evaluation', true, {
+        operation: 'build',
+        duration,
+        commandCount: buildCommands.length,
+      });
+    }
+
+    // Log operation completion with metrics
+    const operationMetadata = finalizeOperationContext(operationContext, true, {
+      duration,
+      commandCount: buildCommands.length,
+    });
+    logger.operationComplete('Build', 'runBuild', true, operationMetadata);
+
     return result;
   } catch (error: any) {
-    logger.error('Build verification failed', { error: error.message });
+    const duration = Date.now() - startTime;
+
+    // Record error in phase tracking
+    if (correlationId) {
+      recordPhaseError(correlationId, 'evaluation', 'BUILD_FAILED');
+      endPhase(correlationId, 'evaluation', false, {
+        operation: 'build',
+        error: error.message,
+        duration,
+      });
+    }
+
+    // Log operation failure
+    const operationMetadata = finalizeOperationContext(operationContext, false, {
+      error: error.message,
+      duration,
+    });
+    logger.operationComplete('Build', 'runBuild', false, operationMetadata);
+
+    logger.error('Build verification failed', {
+      error: error.message,
+      correlationId,
+      duration,
+    });
 
     return {
       success: false,
       output: '',
-      duration: Date.now() - startTime,
+      duration,
       error: error.message,
     };
   }

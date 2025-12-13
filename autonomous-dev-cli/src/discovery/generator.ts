@@ -1,7 +1,19 @@
 import { CodebaseAnalyzer, type CodebaseAnalysis, type AnalyzerConfig } from './analyzer.js';
 import { type Issue } from '../github/issues.js';
-import { logger } from '../utils/logger.js';
+import {
+  logger,
+  getCorrelationId,
+  timeOperation,
+  createOperationContext,
+  finalizeOperationContext,
+  startPhase,
+  endPhase,
+  recordPhaseOperation,
+  recordPhaseError,
+  type RequestPhase,
+} from '../utils/logger.js';
 import { ClaudeError, ErrorCode } from '../utils/errors.js';
+import { metrics } from '../utils/metrics.js';
 import {
   extractRetryAfterMs,
   extractHttpStatus,
@@ -77,26 +89,136 @@ export class TaskGenerator {
   }
 
   async generateTasks(): Promise<DiscoveredTask[]> {
-    logger.info('Generating tasks with Claude...');
+    const correlationId = getCorrelationId();
+    const startTime = Date.now();
 
-    // First, analyze the codebase
-    const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths, this.analyzerConfig);
-    const analysis = await analyzer.analyze();
-    const summary = analyzer.generateSummary(analysis);
+    // Start discovery phase tracking
+    if (correlationId) {
+      startPhase(correlationId, 'discovery', {
+        repoPath: this.repoPath,
+        existingIssueCount: this.existingIssues.length,
+        tasksPerCycle: this.tasksPerCycle,
+      });
+    }
 
-    // Format existing issues to avoid duplicates
-    const existingIssuesList = this.existingIssues
-      .map((i) => `- #${i.number}: ${i.title}`)
-      .join('\n') || 'None';
+    // Create operation context for structured logging
+    const operationContext = createOperationContext('TaskGenerator', 'generateTasks', {
+      repoPath: this.repoPath,
+      excludePathCount: this.excludePaths.length,
+      existingIssueCount: this.existingIssues.length,
+    });
 
-    // Build the prompt
-    const prompt = this.buildPrompt(summary, existingIssuesList, analysis);
+    logger.info('Generating tasks with Claude...', {
+      correlationId,
+      repoPath: this.repoPath,
+      existingIssueCount: this.existingIssues.length,
+    });
 
-    // Call Claude API
-    const tasks = await this.callClaude(prompt);
+    try {
+      // First, analyze the codebase with timing
+      if (correlationId) {
+        recordPhaseOperation(correlationId, 'discovery', 'analyzeCodebase');
+      }
 
-    logger.info(`Generated ${tasks.length} tasks`);
-    return tasks;
+      const { result: analysis, duration: analysisDuration } = await timeOperation(
+        async () => {
+          const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths, this.analyzerConfig);
+          return analyzer.analyze();
+        },
+        {
+          operationName: 'analyzeCodebase',
+          component: 'TaskGenerator',
+          phase: 'discovery',
+        }
+      );
+
+      logger.debug('Codebase analysis complete', {
+        duration: analysisDuration,
+        fileCount: analysis.fileCount,
+        todoCount: analysis.todoComments.length,
+        correlationId,
+      });
+
+      const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths, this.analyzerConfig);
+      const summary = analyzer.generateSummary(analysis);
+
+      // Format existing issues to avoid duplicates
+      const existingIssuesList = this.existingIssues
+        .map((i) => `- #${i.number}: ${i.title}`)
+        .join('\n') || 'None';
+
+      // Build the prompt
+      const prompt = this.buildPrompt(summary, existingIssuesList, analysis);
+
+      // Call Claude API with timing
+      if (correlationId) {
+        recordPhaseOperation(correlationId, 'discovery', 'callClaudeAPI');
+      }
+
+      const { result: tasks, duration: claudeDuration } = await timeOperation(
+        () => this.callClaude(prompt),
+        {
+          operationName: 'callClaudeAPI',
+          component: 'TaskGenerator',
+          phase: 'discovery',
+        }
+      );
+
+      const totalDuration = Date.now() - startTime;
+
+      // End discovery phase successfully
+      if (correlationId) {
+        endPhase(correlationId, 'discovery', true, {
+          tasksGenerated: tasks.length,
+          analysisDuration,
+          claudeDuration,
+          totalDuration,
+        });
+      }
+
+      // Log operation completion with metrics
+      const operationMetadata = finalizeOperationContext(operationContext, true, {
+        tasksGenerated: tasks.length,
+        analysisDuration,
+        claudeDuration,
+        fileCount: analysis.fileCount,
+      });
+      logger.operationComplete('TaskGenerator', 'generateTasks', true, operationMetadata);
+
+      // Record discovery metrics
+      metrics.recordDiscovery(tasks.length, totalDuration, false, {
+        repository: this.repoPath.split('/').slice(-2).join('/'),
+      });
+
+      logger.info(`Generated ${tasks.length} tasks`, {
+        correlationId,
+        duration: totalDuration,
+        analysisDuration,
+        claudeDuration,
+      });
+
+      return tasks;
+    } catch (error) {
+      const totalDuration = Date.now() - startTime;
+
+      // Record error in phase tracking
+      if (correlationId) {
+        const errorCode = error instanceof ClaudeError ? error.code : 'UNKNOWN';
+        recordPhaseError(correlationId, 'discovery', errorCode);
+        endPhase(correlationId, 'discovery', false, {
+          errorCode,
+          duration: totalDuration,
+        });
+      }
+
+      // Log operation failure
+      const operationMetadata = finalizeOperationContext(operationContext, false, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      logger.operationComplete('TaskGenerator', 'generateTasks', false, operationMetadata);
+
+      throw error;
+    }
   }
 
   private buildPrompt(codebaseSummary: string, existingIssues: string, analysis: CodebaseAnalysis): string {

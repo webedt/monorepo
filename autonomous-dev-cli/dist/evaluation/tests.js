@@ -1,11 +1,33 @@
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { logger } from '../utils/logger.js';
+import { logger, getCorrelationId, createOperationContext, finalizeOperationContext, startPhase, endPhase, recordPhaseOperation, recordPhaseError, } from '../utils/logger.js';
 export async function runTests(options) {
     const { repoPath, packages = [], timeout = 10 * 60 * 1000, testPattern } = options;
     const startTime = Date.now();
-    logger.info('Running tests...');
+    const correlationId = getCorrelationId();
+    // Start evaluation phase if tracking
+    if (correlationId) {
+        startPhase(correlationId, 'evaluation', {
+            operation: 'tests',
+            repoPath,
+            packageCount: packages.length,
+        });
+        recordPhaseOperation(correlationId, 'evaluation', 'runTests');
+    }
+    // Create operation context for structured logging
+    const operationContext = createOperationContext('Tests', 'runTests', {
+        repoPath,
+        packages,
+        timeout,
+        testPattern,
+    });
+    logger.info('Running tests...', {
+        correlationId,
+        repoPath,
+        packageCount: packages.length,
+        testPattern,
+    });
     try {
         const testCommands = await determineTestCommands(repoPath, packages);
         if (testCommands.length === 0) {
@@ -60,33 +82,91 @@ export async function runTests(options) {
                 logger.error(`Tests failed: ${command}`);
             }
         }
+        const duration = Date.now() - startTime;
         if (hasFailure) {
+            // Record test failure in phase tracking
+            if (correlationId) {
+                recordPhaseError(correlationId, 'evaluation', 'TESTS_FAILED');
+                endPhase(correlationId, 'evaluation', false, {
+                    operation: 'tests',
+                    testsRun: totalTests,
+                    testsPassed: passedTests,
+                    testsFailed: failedTests,
+                    duration,
+                });
+            }
+            // Log operation failure
+            const operationMetadata = finalizeOperationContext(operationContext, false, {
+                testsRun: totalTests,
+                testsPassed: passedTests,
+                testsFailed: failedTests,
+                duration,
+            });
+            logger.operationComplete('Tests', 'runTests', false, operationMetadata);
             return {
                 success: false,
                 output: combinedOutput,
-                duration: Date.now() - startTime,
+                duration,
                 testsRun: totalTests,
                 testsPassed: passedTests,
                 testsFailed: failedTests,
                 error: `${failedTests} test(s) failed`,
             };
         }
+        // End evaluation phase successfully
+        if (correlationId) {
+            endPhase(correlationId, 'evaluation', true, {
+                operation: 'tests',
+                testsRun: totalTests,
+                testsPassed: passedTests,
+                testsFailed: failedTests,
+                duration,
+            });
+        }
+        // Log operation completion with metrics
+        const operationMetadata = finalizeOperationContext(operationContext, true, {
+            testsRun: totalTests,
+            testsPassed: passedTests,
+            testsFailed: failedTests,
+            duration,
+        });
+        logger.operationComplete('Tests', 'runTests', true, operationMetadata);
         logger.success(`Tests passed: ${passedTests}/${totalTests}`);
         return {
             success: true,
             output: combinedOutput,
-            duration: Date.now() - startTime,
+            duration,
             testsRun: totalTests,
             testsPassed: passedTests,
             testsFailed: failedTests,
         };
     }
     catch (error) {
-        logger.error('Test execution failed', { error: error.message });
+        const duration = Date.now() - startTime;
+        // Record error in phase tracking
+        if (correlationId) {
+            recordPhaseError(correlationId, 'evaluation', 'TEST_EXECUTION_ERROR');
+            endPhase(correlationId, 'evaluation', false, {
+                operation: 'tests',
+                error: error.message,
+                duration,
+            });
+        }
+        // Log operation failure
+        const operationMetadata = finalizeOperationContext(operationContext, false, {
+            error: error.message,
+            duration,
+        });
+        logger.operationComplete('Tests', 'runTests', false, operationMetadata);
+        logger.error('Test execution failed', {
+            error: error.message,
+            correlationId,
+            duration,
+        });
         return {
             success: false,
             output: '',
-            duration: Date.now() - startTime,
+            duration,
             testsRun: 0,
             testsPassed: 0,
             testsFailed: 0,

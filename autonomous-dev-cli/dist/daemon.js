@@ -4,7 +4,7 @@ import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
 import { createWorkerPool } from './executor/index.js';
 import { createConflictResolver } from './conflicts/index.js';
-import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, } from './utils/logger.js';
+import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, startRequestLifecycle, endRequestLifecycle, } from './utils/logger.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
@@ -78,6 +78,8 @@ export class Daemon {
                     cycleNumber: this.cycleCount,
                 });
                 const cycleStartMemory = getMemoryUsageMB();
+                // Start request lifecycle tracking for the entire cycle
+                startRequestLifecycle(cycleCorrelationId);
                 logger.header(`Cycle #${this.cycleCount}`);
                 logger.info(`Starting cycle`, {
                     cycle: this.cycleCount,
@@ -111,6 +113,8 @@ export class Daemon {
                 logger.operationComplete('Daemon', 'executeCycle', result.success, cycleMetadata);
                 // Log memory snapshot at cycle end
                 logger.memorySnapshot('Daemon', `Cycle #${this.cycleCount} end`);
+                // End request lifecycle tracking with summary
+                endRequestLifecycle(cycleCorrelationId, result.success, result.errors.length > 0 ? 'CYCLE_HAD_ERRORS' : undefined);
                 // Clear correlation ID after cycle
                 clearCorrelationId();
                 if (this.options.singleCycle) {

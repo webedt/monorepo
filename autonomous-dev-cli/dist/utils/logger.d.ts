@@ -1,6 +1,39 @@
 import { StructuredError, type ErrorContext } from './errors.js';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
+ * Default timing threshold in ms for logging slow operations
+ * Operations exceeding this threshold will be automatically logged
+ */
+export declare const DEFAULT_TIMING_THRESHOLD_MS = 100;
+/**
+ * Request lifecycle phase for tracking request flow
+ */
+export type RequestPhase = 'discovery' | 'execution' | 'evaluation' | 'github' | 'claude';
+/**
+ * Request lifecycle tracking for end-to-end tracing
+ */
+export interface RequestLifecycle {
+    correlationId: string;
+    startTime: number;
+    phases: Map<RequestPhase, PhaseMetrics>;
+    totalDuration?: number;
+    success?: boolean;
+    errorCode?: string;
+}
+/**
+ * Metrics for a specific phase in the request lifecycle
+ */
+export interface PhaseMetrics {
+    phase: RequestPhase;
+    startTime: number;
+    endTime?: number;
+    duration?: number;
+    success?: boolean;
+    operationCount: number;
+    errorCount: number;
+    metadata: Record<string, any>;
+}
+/**
  * Operation metadata for tracking execution context
  */
 export interface OperationMetadata {
@@ -12,6 +45,7 @@ export interface OperationMetadata {
     memoryUsageMB?: number;
     success?: boolean;
     error?: string;
+    phase?: RequestPhase;
     [key: string]: any;
 }
 /**
@@ -130,6 +164,34 @@ export declare function setWorkerId(workerId: string): void;
  */
 export declare function getWorkerId(): string | undefined;
 /**
+ * Start tracking a request lifecycle
+ */
+export declare function startRequestLifecycle(correlationId: string): RequestLifecycle;
+/**
+ * Start a phase in the request lifecycle
+ */
+export declare function startPhase(correlationId: string, phase: RequestPhase, metadata?: Record<string, any>): PhaseMetrics;
+/**
+ * End a phase in the request lifecycle
+ */
+export declare function endPhase(correlationId: string, phase: RequestPhase, success: boolean, additionalMetadata?: Record<string, any>): PhaseMetrics | undefined;
+/**
+ * Record an operation within a phase
+ */
+export declare function recordPhaseOperation(correlationId: string, phase: RequestPhase, operationName: string): void;
+/**
+ * Record an error within a phase
+ */
+export declare function recordPhaseError(correlationId: string, phase: RequestPhase, errorCode?: string): void;
+/**
+ * End the request lifecycle and return summary
+ */
+export declare function endRequestLifecycle(correlationId: string, success: boolean, errorCode?: string): RequestLifecycle | undefined;
+/**
+ * Get the current request lifecycle for a correlation ID
+ */
+export declare function getRequestLifecycle(correlationId: string): RequestLifecycle | undefined;
+/**
  * Get current memory usage in megabytes
  */
 export declare function getMemoryUsageMB(): number;
@@ -143,13 +205,32 @@ export declare function getMemoryStats(): {
     rssMB: number;
 };
 /**
- * Time an async operation and return result with timing info
+ * Options for timed operations
  */
-export declare function timeOperation<T>(operation: () => Promise<T>, operationName?: string): Promise<TimedOperationResult<T>>;
+export interface TimedOperationOptions {
+    /** Operation name for logging */
+    operationName?: string;
+    /** Component name for structured logging */
+    component?: string;
+    /** Request phase for lifecycle tracking */
+    phase?: RequestPhase;
+    /** Custom timing threshold in ms (defaults to DEFAULT_TIMING_THRESHOLD_MS) */
+    timingThreshold?: number;
+    /** Whether to log slow operations automatically (default: true) */
+    logSlowOperations?: boolean;
+    /** Additional metadata to include in logs */
+    metadata?: Record<string, any>;
+}
+/**
+ * Time an async operation and return result with timing info
+ * Automatically logs operations that exceed the timing threshold
+ */
+export declare function timeOperation<T>(operation: () => Promise<T>, operationNameOrOptions?: string | TimedOperationOptions): Promise<TimedOperationResult<T>>;
 /**
  * Time a synchronous operation and return result with timing info
+ * Automatically logs operations that exceed the timing threshold
  */
-export declare function timeOperationSync<T>(operation: () => T, operationName?: string): TimedOperationResult<T>;
+export declare function timeOperationSync<T>(operation: () => T, operationNameOrOptions?: string | TimedOperationOptions): TimedOperationResult<T>;
 /**
  * Create a scoped operation context for structured logging
  */

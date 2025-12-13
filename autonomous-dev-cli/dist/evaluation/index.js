@@ -1,7 +1,7 @@
 import { runBuild } from './build.js';
 import { runTests } from './tests.js';
 import { runHealthChecks, generatePreviewUrl } from './health.js';
-import { logger } from '../utils/logger.js';
+import { logger, getCorrelationId, createOperationContext, finalizeOperationContext, startPhase, endPhase, recordPhaseError, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 export { runBuild, runTypeCheck, BuildCache, getBuildCache, initBuildCache } from './build.js';
 export { runTests } from './tests.js';
@@ -10,8 +10,32 @@ export async function runEvaluation(options) {
     const startTime = Date.now();
     const { repoPath, branchName, config, repoInfo } = options;
     const repository = `${repoInfo.owner}/${repoInfo.repo}`;
+    const correlationId = getCorrelationId();
+    // Start evaluation phase if tracking
+    if (correlationId) {
+        startPhase(correlationId, 'evaluation', {
+            repository,
+            branchName,
+            requireBuild: config.requireBuild,
+            requireTests: config.requireTests,
+            requireHealthCheck: config.requireHealthCheck,
+        });
+    }
+    // Create operation context for structured logging
+    const operationContext = createOperationContext('Evaluation', 'runEvaluation', {
+        repository,
+        branchName,
+        repoPath,
+    });
     logger.header('Running Evaluation Pipeline');
-    logger.info('Starting evaluation', { repository, branchName });
+    logger.info('Starting evaluation', {
+        repository,
+        branchName,
+        correlationId,
+        requireBuild: config.requireBuild,
+        requireTests: config.requireTests,
+        requireHealthCheck: config.requireHealthCheck,
+    });
     const result = {
         success: true,
         duration: 0,
@@ -108,12 +132,43 @@ export async function runEvaluation(options) {
     }
     result.duration = Date.now() - startTime;
     result.summary = summaryParts.join('\n');
+    // End evaluation phase
+    if (correlationId) {
+        if (result.success) {
+            endPhase(correlationId, 'evaluation', true, {
+                duration: result.duration,
+                buildSuccess: result.build?.success,
+                testsSuccess: result.tests?.success,
+                healthSuccess: result.health?.success,
+            });
+        }
+        else {
+            recordPhaseError(correlationId, 'evaluation', 'EVALUATION_FAILED');
+            endPhase(correlationId, 'evaluation', false, {
+                duration: result.duration,
+                buildSuccess: result.build?.success,
+                testsSuccess: result.tests?.success,
+                healthSuccess: result.health?.success,
+            });
+        }
+    }
+    // Log operation completion with metrics
+    const operationMetadata = finalizeOperationContext(operationContext, result.success, {
+        duration: result.duration,
+        buildDuration: result.build?.duration,
+        testsDuration: result.tests?.duration,
+        healthDuration: result.health?.duration,
+        testsRun: result.tests?.testsRun,
+        testsPassed: result.tests?.testsPassed,
+    });
+    logger.operationComplete('Evaluation', 'runEvaluation', result.success, operationMetadata);
     logger.divider();
     logger.info(`Evaluation ${result.success ? 'PASSED' : 'FAILED'} in ${result.duration}ms`, {
         success: result.success,
         duration: result.duration,
         repository,
         branchName,
+        correlationId,
     });
     console.log(result.summary);
     return result;

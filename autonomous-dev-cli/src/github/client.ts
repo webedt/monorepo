@@ -4,6 +4,9 @@ import {
   getCorrelationId,
   timeOperation,
   getMemoryUsageMB,
+  recordPhaseOperation,
+  recordPhaseError,
+  DEFAULT_TIMING_THRESHOLD_MS,
 } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import {
@@ -230,6 +233,11 @@ export class GitHubClient {
     const method = this.extractMethodFromEndpoint(endpoint);
     const repository = `${this.owner}/${this.repo}`;
 
+    // Record operation in github phase if tracking
+    if (correlationId) {
+      recordPhaseOperation(correlationId, 'github', endpoint);
+    }
+
     // Check circuit breaker state
     if (!this.canMakeRequest()) {
       const error = new GitHubError(
@@ -337,14 +345,34 @@ export class GitHubClient {
       this.updateRateLimitState(error);
       this.recordFailure(error as Error);
 
-      // Log failed API call
+      // Record error in phase tracking
+      if (correlationId) {
+        const errorCode = error instanceof StructuredError ? error.code : `HTTP_${statusCode || 'UNKNOWN'}`;
+        recordPhaseError(correlationId, 'github', errorCode);
+      }
+
+      // Log failed API call with enhanced context
       logger.apiCall('GitHub', endpoint, method, {
         statusCode,
         duration,
         success: false,
         error: (error as Error).message,
         correlationId,
+        circuitState: this.circuitState,
+        consecutiveFailures: this.consecutiveFailures,
       });
+
+      // Log slow failed operations for debugging
+      if (duration > DEFAULT_TIMING_THRESHOLD_MS) {
+        logger.debug('Slow GitHub API failure', {
+          endpoint,
+          method,
+          duration,
+          threshold: DEFAULT_TIMING_THRESHOLD_MS,
+          statusCode,
+          correlationId,
+        });
+      }
 
       // Record metrics
       metrics.recordGitHubApiCall(endpoint, method, false, duration, {
