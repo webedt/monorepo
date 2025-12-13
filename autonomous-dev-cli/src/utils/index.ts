@@ -118,3 +118,30 @@ export {
   resetAllCircuitBreakers,
   getAllCircuitBreakerHealth,
 } from './circuit-breaker.js';
+
+// Re-export timeout utilities
+export {
+  // Configuration
+  DEFAULT_TIMEOUTS,
+  TIMEOUT_ENV_VARS,
+  getTimeoutFromEnv,
+  getTimeoutConfig,
+  // Error class
+  TimeoutError,
+  // Types
+  type WithTimeoutOptions,
+  type WithTimeoutResult,
+  // Core timeout functions
+  withTimeout,
+  withTimeoutDetailed,
+  withTimeoutAll,
+  // Pre-configured timeout wrappers
+  withGitHubTimeout,
+  withGitTimeout,
+  withDatabaseTimeout,
+  withMergeTimeout,
+  // Utility functions
+  raceWithTimeout,
+  createTimedAbortController,
+  withCleanup,
+} from './timeout.js';
