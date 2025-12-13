@@ -1,5 +1,7 @@
 import { CodebaseAnalyzer } from './analyzer.js';
 import { logger } from '../utils/logger.js';
+import { ClaudeError, ErrorCode } from '../utils/errors.js';
+import { retryWithBackoff, RATE_LIMIT_RETRY_CONFIG, extractRetryAfterMs, extractHttpStatus, isClaudeErrorRetryable, } from '../utils/retry.js';
 export class TaskGenerator {
     claudeAuth;
     repoPath;
@@ -112,61 +114,134 @@ Remember:
 Return ONLY the JSON array, no other text.`;
     }
     async callClaude(prompt) {
-        // Use direct API with OAuth tokens
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': this.claudeAuth.accessToken,
-                'anthropic-version': '2023-06-01',
-            },
-            body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
-                max_tokens: 4096,
-                messages: [
-                    {
-                        role: 'user',
-                        content: prompt,
-                    },
-                ],
-            }),
-        });
-        if (!response.ok) {
-            const error = await response.text();
-            logger.error('Claude API error', { status: response.status, error });
-            throw new Error(`Claude API error: ${response.status} - ${error}`);
-        }
-        const data = await response.json();
-        const content = data.content[0]?.text || '';
-        // Parse JSON from response
-        try {
-            // Find JSON array in response (in case there's extra text)
-            const jsonMatch = content.match(/\[[\s\S]*\]/);
-            if (!jsonMatch) {
-                logger.error('No JSON array found in Claude response', { content });
-                throw new Error('No JSON array found in response');
-            }
-            const tasks = JSON.parse(jsonMatch[0]);
-            // Validate tasks
-            const validTasks = tasks.filter((task) => {
-                const isValid = (typeof task.title === 'string' &&
-                    typeof task.description === 'string' &&
-                    ['critical', 'high', 'medium', 'low'].includes(task.priority) &&
-                    ['security', 'bugfix', 'feature', 'refactor', 'docs', 'test', 'chore'].includes(task.category) &&
-                    ['simple', 'moderate', 'complex'].includes(task.estimatedComplexity) &&
-                    Array.isArray(task.affectedPaths) &&
-                    (task.estimatedDurationMinutes === undefined || typeof task.estimatedDurationMinutes === 'number'));
-                return isValid;
+        // Use retry with exponential backoff for transient failures
+        return retryWithBackoff(async () => {
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': this.claudeAuth.accessToken,
+                    'anthropic-version': '2023-06-01',
+                },
+                body: JSON.stringify({
+                    model: 'claude-sonnet-4-20250514',
+                    max_tokens: 4096,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: prompt,
+                        },
+                    ],
+                }),
             });
-            if (validTasks.length !== tasks.length) {
-                logger.warn(`Filtered out ${tasks.length - validTasks.length} invalid tasks`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                const statusCode = response.status;
+                // Create a structured error with proper classification
+                const error = this.createApiError(statusCode, errorText, response.headers);
+                throw error;
             }
-            return validTasks.slice(0, this.tasksPerCycle);
+            const data = await response.json();
+            const content = data.content[0]?.text || '';
+            // Parse JSON from response
+            return this.parseClaudeResponse(content);
+        }, {
+            config: RATE_LIMIT_RETRY_CONFIG,
+            operationName: 'Claude API call',
+            shouldRetry: (error) => isClaudeErrorRetryable(error),
+            getRetryAfterMs: (error) => extractRetryAfterMs(error),
+            onRetry: (error, attempt, delay) => {
+                const statusCode = extractHttpStatus(error);
+                logger.warn(`Claude API retry (attempt ${attempt})`, {
+                    error: error.message,
+                    statusCode,
+                    retryInMs: Math.round(delay),
+                });
+            },
+        });
+    }
+    /**
+     * Create a structured error from Claude API response
+     */
+    createApiError(statusCode, errorText, headers) {
+        let code;
+        let message;
+        switch (statusCode) {
+            case 401:
+                code = ErrorCode.CLAUDE_AUTH_FAILED;
+                message = `Claude API authentication failed: ${errorText}`;
+                break;
+            case 403:
+                code = ErrorCode.CLAUDE_AUTH_FAILED;
+                message = `Claude API access denied: ${errorText}`;
+                break;
+            case 429:
+                code = ErrorCode.CLAUDE_RATE_LIMITED;
+                message = `Claude API rate limited: ${errorText}`;
+                break;
+            case 408:
+            case 504:
+                code = ErrorCode.CLAUDE_TIMEOUT;
+                message = `Claude API request timed out: ${errorText}`;
+                break;
+            case 500:
+            case 502:
+            case 503:
+                code = ErrorCode.CLAUDE_API_ERROR;
+                message = `Claude API server error (${statusCode}): ${errorText}`;
+                break;
+            default:
+                code = ErrorCode.CLAUDE_API_ERROR;
+                message = `Claude API error (${statusCode}): ${errorText}`;
         }
-        catch (error) {
-            logger.error('Failed to parse Claude response', { error, content });
-            throw new Error('Failed to parse task suggestions from Claude');
+        // Extract Retry-After header if present
+        const retryAfter = headers.get('retry-after') || headers.get('Retry-After');
+        return new ClaudeError(code, message, {
+            context: {
+                statusCode,
+                errorText,
+                retryAfter,
+            },
+        });
+    }
+    /**
+     * Parse and validate Claude response JSON
+     */
+    parseClaudeResponse(content) {
+        // Find JSON array in response (in case there's extra text)
+        const jsonMatch = content.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+            logger.error('No JSON array found in Claude response', { content });
+            throw new ClaudeError(ErrorCode.CLAUDE_INVALID_RESPONSE, 'No JSON array found in Claude response', {
+                context: { contentLength: content.length },
+            });
         }
+        let tasks;
+        try {
+            tasks = JSON.parse(jsonMatch[0]);
+        }
+        catch (parseError) {
+            logger.error('Failed to parse Claude response JSON', { error: parseError, content });
+            throw new ClaudeError(ErrorCode.CLAUDE_INVALID_RESPONSE, 'Failed to parse task suggestions from Claude', {
+                context: { parseError: String(parseError) },
+                cause: parseError instanceof Error ? parseError : undefined,
+            });
+        }
+        // Validate tasks
+        const validTasks = tasks.filter((task) => {
+            const isValid = (typeof task.title === 'string' &&
+                typeof task.description === 'string' &&
+                ['critical', 'high', 'medium', 'low'].includes(task.priority) &&
+                ['security', 'bugfix', 'feature', 'refactor', 'docs', 'test', 'chore'].includes(task.category) &&
+                ['simple', 'moderate', 'complex'].includes(task.estimatedComplexity) &&
+                Array.isArray(task.affectedPaths) &&
+                (task.estimatedDurationMinutes === undefined || typeof task.estimatedDurationMinutes === 'number'));
+            return isValid;
+        });
+        if (validTasks.length !== tasks.length) {
+            logger.warn(`Filtered out ${tasks.length - validTasks.length} invalid tasks`);
+        }
+        return validTasks.slice(0, this.tasksPerCycle);
     }
 }
 export async function discoverTasks(options) {

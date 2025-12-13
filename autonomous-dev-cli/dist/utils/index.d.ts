@@ -1,3 +1,4 @@
 export { logger, type LogLevel } from './logger.js';
 export { StructuredError, GitHubError, ClaudeError, ConfigError, ExecutionError, ErrorCode, type ErrorSeverity, type RecoveryAction, type ErrorContext, type RetryConfig, withRetry, wrapError, createGitHubErrorFromResponse, formatError, DEFAULT_RETRY_CONFIG, } from './errors.js';
+export { type ExtendedRetryConfig, type RetryWithBackoffOptions, API_RETRY_CONFIG, NETWORK_RETRY_CONFIG, RATE_LIMIT_RETRY_CONFIG, retryWithBackoff, calculateBackoffDelay, classifyError, isErrorCodeRetryable, isHttpStatusRetryable, isNetworkErrorRetryable, isClaudeErrorRetryable, extractHttpStatus, extractNetworkErrorCode, extractRetryAfterMs, createClaudeErrorFromResponse, } from './retry.js';
 //# sourceMappingURL=index.d.ts.map

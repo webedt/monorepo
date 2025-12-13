@@ -27,7 +27,9 @@ export enum ErrorCode {
   // Claude/AI errors (2000-2999)
   CLAUDE_AUTH_FAILED = 'CLAUDE_AUTH_FAILED',
   CLAUDE_QUOTA_EXCEEDED = 'CLAUDE_QUOTA_EXCEEDED',
+  CLAUDE_RATE_LIMITED = 'CLAUDE_RATE_LIMITED',
   CLAUDE_TIMEOUT = 'CLAUDE_TIMEOUT',
+  CLAUDE_NETWORK_ERROR = 'CLAUDE_NETWORK_ERROR',
   CLAUDE_API_ERROR = 'CLAUDE_API_ERROR',
   CLAUDE_INVALID_RESPONSE = 'CLAUDE_INVALID_RESPONSE',
 
@@ -145,6 +147,8 @@ export class StructuredError extends Error {
       ErrorCode.GITHUB_SERVICE_DEGRADED,
       ErrorCode.NETWORK_ERROR,
       ErrorCode.CLAUDE_TIMEOUT,
+      ErrorCode.CLAUDE_RATE_LIMITED,
+      ErrorCode.CLAUDE_NETWORK_ERROR,
       ErrorCode.DB_CONNECTION_FAILED,
       ErrorCode.SERVICE_DEGRADED,
       ErrorCode.CIRCUIT_BREAKER_OPEN,
@@ -174,6 +178,8 @@ export class StructuredError extends Error {
       ErrorCode.GITHUB_SERVICE_DEGRADED,
       ErrorCode.NETWORK_ERROR,
       ErrorCode.CLAUDE_TIMEOUT,
+      ErrorCode.CLAUDE_RATE_LIMITED,
+      ErrorCode.CLAUDE_NETWORK_ERROR,
       ErrorCode.DB_CONNECTION_FAILED,
       ErrorCode.EXEC_CLONE_FAILED,
       ErrorCode.EXEC_PUSH_FAILED,
@@ -375,6 +381,8 @@ function getClaudeSeverity(code: ErrorCode): ErrorSeverity {
     case ErrorCode.CLAUDE_QUOTA_EXCEEDED:
       return 'critical';
     case ErrorCode.CLAUDE_TIMEOUT:
+    case ErrorCode.CLAUDE_RATE_LIMITED:
+    case ErrorCode.CLAUDE_NETWORK_ERROR:
       return 'transient';
     default:
       return 'error';
@@ -411,6 +419,36 @@ function getClaudeRecoveryActions(code: ErrorCode): RecoveryAction[] {
       });
       actions.push({
         description: 'Reduce task complexity to use fewer tokens',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.CLAUDE_RATE_LIMITED:
+      actions.push({
+        description: 'Wait for rate limit reset (check Retry-After header)',
+        automatic: true,
+      });
+      actions.push({
+        description: 'Retry the operation with exponential backoff',
+        automatic: true,
+      });
+      actions.push({
+        description: 'Reduce request frequency to stay within limits',
+        automatic: false,
+      });
+      break;
+
+    case ErrorCode.CLAUDE_NETWORK_ERROR:
+      actions.push({
+        description: 'Check your network connection',
+        automatic: false,
+      });
+      actions.push({
+        description: 'Retry the operation',
+        automatic: true,
+      });
+      actions.push({
+        description: 'Check https://status.anthropic.com for service status',
         automatic: false,
       });
       break;

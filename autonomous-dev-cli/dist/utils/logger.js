@@ -326,6 +326,80 @@ class Logger {
             console.log(chalk.gray('─'.repeat(60)));
         }
     }
+    /**
+     * Log service degradation event
+     */
+    degraded(service, message, meta) {
+        if (!this.shouldLog('warn'))
+            return;
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('warn', message);
+            entry.meta = { ...meta, service, degraded: true };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            const timestamp = new Date().toISOString();
+            const correlationId = this.getEffectiveCorrelationId();
+            const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+            console.warn(chalk.gray(timestamp), chalk.yellow('⚡'), chalk.yellow('DEGRADED'), chalk.bold(`[${service}]`), message, correlationStr);
+            if (meta && Object.keys(meta).length > 0) {
+                console.warn(chalk.gray(`  ${JSON.stringify(meta)}`));
+            }
+        }
+    }
+    /**
+     * Log service recovery event
+     */
+    recovered(service, message, meta) {
+        if (!this.shouldLog('info'))
+            return;
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', message);
+            entry.meta = { ...meta, service, recovered: true };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            const timestamp = new Date().toISOString();
+            const correlationId = this.getEffectiveCorrelationId();
+            const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+            console.log(chalk.gray(timestamp), chalk.green('✓'), chalk.green('RECOVERED'), chalk.bold(`[${service}]`), message, correlationStr);
+            if (meta && Object.keys(meta).length > 0) {
+                console.log(chalk.gray(`  ${JSON.stringify(meta)}`));
+            }
+        }
+    }
+    /**
+     * Log service health status
+     */
+    serviceStatus(service, status, details) {
+        if (!this.shouldLog('info'))
+            return;
+        const statusColors = {
+            healthy: chalk.green,
+            degraded: chalk.yellow,
+            unavailable: chalk.red,
+        };
+        const statusIcons = {
+            healthy: '🟢',
+            degraded: '🟡',
+            unavailable: '🔴',
+        };
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', `${service} status: ${status}`);
+            entry.meta = { service, status, ...details };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            const colorFn = statusColors[status] || chalk.white;
+            const icon = statusIcons[status] || '⚪';
+            console.log(`${icon} ${chalk.bold(service)}: ${colorFn(status)}`);
+            if (details && Object.keys(details).length > 0) {
+                for (const [key, value] of Object.entries(details)) {
+                    console.log(chalk.gray(`   ${key}: ${JSON.stringify(value)}`));
+                }
+            }
+        }
+    }
     header(title) {
         if (this.format === 'json') {
             const entry = this.createLogEntry('info', title);

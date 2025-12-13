@@ -40,6 +40,14 @@ export declare class TaskGenerator {
     generateTasks(): Promise<DiscoveredTask[]>;
     private buildPrompt;
     private callClaude;
+    /**
+     * Create a structured error from Claude API response
+     */
+    private createApiError;
+    /**
+     * Parse and validate Claude response JSON
+     */
+    private parseClaudeResponse;
 }
 export declare function discoverTasks(options: TaskGeneratorOptions): Promise<DiscoveredTask[]>;
 //# sourceMappingURL=generator.d.ts.map

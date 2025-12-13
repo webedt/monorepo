@@ -20,6 +20,12 @@ export class Daemon {
     enableDatabaseLogging = false;
     monitoringServer = null;
     repository = '';
+    lastKnownIssues = []; // Cache for graceful degradation
+    serviceHealth = {
+        github: null,
+        overallStatus: 'healthy',
+        lastCheck: new Date(),
+    };
     constructor(options = {}) {
         this.options = options;
         this.config = loadConfig(options.configPath);
@@ -128,6 +134,49 @@ export class Daemon {
         metrics.updateHealthStatus(false);
     }
     /**
+     * Update and return the current service health status
+     */
+    updateServiceHealth() {
+        const githubHealth = this.github?.client.getServiceHealth() ?? null;
+        let overallStatus = 'healthy';
+        if (githubHealth) {
+            if (githubHealth.status === 'unavailable') {
+                overallStatus = 'unavailable';
+            }
+            else if (githubHealth.status === 'degraded') {
+                overallStatus = 'degraded';
+            }
+        }
+        this.serviceHealth = {
+            github: githubHealth,
+            overallStatus,
+            lastCheck: new Date(),
+        };
+        return this.serviceHealth;
+    }
+    /**
+     * Get the current service health status
+     */
+    getServiceHealth() {
+        return this.serviceHealth;
+    }
+    /**
+     * Log the current service health status
+     */
+    logServiceHealthStatus() {
+        const health = this.updateServiceHealth();
+        if (health.github) {
+            logger.serviceStatus('GitHub API', health.github.status, {
+                circuitState: health.github.circuitState,
+                consecutiveFailures: health.github.consecutiveFailures,
+                rateLimitRemaining: health.github.rateLimitRemaining,
+            });
+        }
+        if (health.overallStatus !== 'healthy') {
+            logger.degraded('Services', `Operating in ${health.overallStatus} mode`, { github: health.github?.status });
+        }
+    }
+    /**
      * Start the monitoring server for health checks and metrics
      */
     async startMonitoringServer() {
@@ -138,11 +187,26 @@ export class Daemon {
             host: '0.0.0.0',
         });
         // Register health checks
-        this.monitoringServer.registerHealthCheck(async () => ({
-            name: 'github',
-            status: this.github ? 'pass' : 'fail',
-            message: this.github ? 'GitHub client initialized' : 'GitHub client not initialized',
-        }));
+        this.monitoringServer.registerHealthCheck(async () => {
+            if (!this.github) {
+                return {
+                    name: 'github',
+                    status: 'fail',
+                    message: 'GitHub client not initialized',
+                };
+            }
+            const health = this.github.client.getServiceHealth();
+            const statusMap = {
+                healthy: 'pass',
+                degraded: 'pass', // Still operational, just degraded
+                unavailable: 'fail',
+            };
+            return {
+                name: 'github',
+                status: statusMap[health.status] ?? 'fail',
+                message: `GitHub API ${health.status} (circuit: ${health.circuitState})`,
+            };
+        });
         this.monitoringServer.registerHealthCheck(async () => ({
             name: 'database',
             status: this.enableDatabaseLogging ? 'pass' : 'pass', // Pass if DB not required
@@ -261,6 +325,9 @@ export class Daemon {
         let tasksCompleted = 0;
         let tasksFailed = 0;
         let prsMerged = 0;
+        let degraded = false;
+        // Update service health at start of cycle
+        this.logServiceHealthStatus();
         try {
             if (!this.github || !this.config.credentials.claudeAuth) {
                 throw new StructuredError(ErrorCode.NOT_INITIALIZED, 'Daemon not properly initialized: GitHub client or Claude auth is missing', {
@@ -278,10 +345,20 @@ export class Daemon {
                     ],
                 });
             }
-            // STEP 1: Get existing issues
+            // STEP 1: Get existing issues with graceful degradation
             logger.step(1, 5, 'Fetching existing issues');
-            const existingIssues = await this.github.issues.listOpenIssues(this.config.discovery.issueLabel);
-            logger.info(`Found ${existingIssues.length} existing issues with label '${this.config.discovery.issueLabel}'`);
+            const issueResult = await this.github.issues.listOpenIssuesWithFallback(this.config.discovery.issueLabel, this.lastKnownIssues // Use cached issues as fallback
+            );
+            const existingIssues = issueResult.value;
+            if (issueResult.degraded) {
+                degraded = true;
+                logger.warn(`Using ${this.lastKnownIssues.length} cached issues due to GitHub API degradation`);
+            }
+            else {
+                // Update cache with fresh data
+                this.lastKnownIssues = existingIssues;
+            }
+            logger.info(`Found ${existingIssues.length} existing issues with label '${this.config.discovery.issueLabel}'${issueResult.degraded ? ' (cached)' : ''}`);
             // Check if we have capacity for more issues
             const availableSlots = this.config.discovery.maxOpenIssues - existingIssues.length;
             // STEP 2: Discover new tasks (if we have capacity)
@@ -304,18 +381,28 @@ export class Daemon {
                     tasksDiscovered = tasks.length;
                     logger.info(`Discovered ${tasks.length} new tasks`);
                     // Create GitHub issues for new tasks
-                    for (const task of tasks) {
-                        try {
-                            const issue = await this.createIssueForTask(task);
-                            newIssues.push(issue);
-                            logger.success(`Created issue #${issue.number}: ${issue.title}`);
-                        }
-                        catch (error) {
-                            const structuredError = error instanceof StructuredError
-                                ? error
-                                : new GitHubError(ErrorCode.GITHUB_API_ERROR, `Failed to create issue for "${task.title}": ${error.message}`, { context: { taskTitle: task.title }, cause: error });
-                            errors.push(`[${structuredError.code}] ${structuredError.message}`);
-                            logger.structuredError(structuredError, { context: { taskTitle: task.title } });
+                    // Check if GitHub is available before attempting to create issues
+                    if (!this.github.client.isAvailable()) {
+                        degraded = true;
+                        logger.degraded('GitHub', 'Skipping issue creation due to service degradation', {
+                            tasksDiscovered: tasks.length,
+                        });
+                        errors.push(`[${ErrorCode.GITHUB_SERVICE_DEGRADED}] Issue creation skipped due to GitHub service degradation`);
+                    }
+                    else {
+                        for (const task of tasks) {
+                            try {
+                                const issue = await this.createIssueForTask(task);
+                                newIssues.push(issue);
+                                logger.success(`Created issue #${issue.number}: ${issue.title}`);
+                            }
+                            catch (error) {
+                                const structuredError = error instanceof StructuredError
+                                    ? error
+                                    : new GitHubError(ErrorCode.GITHUB_API_ERROR, `Failed to create issue for "${task.title}": ${error.message}`, { context: { taskTitle: task.title }, cause: error });
+                                errors.push(`[${structuredError.code}] ${structuredError.message}`);
+                                logger.structuredError(structuredError, { context: { taskTitle: task.title } });
+                            }
                         }
                     }
                 }
@@ -328,6 +415,8 @@ export class Daemon {
                         context: this.getErrorContext('discoverTasks'),
                         includeRecovery: true,
                     });
+                    // Mark as degraded but continue with existing issues
+                    degraded = true;
                 }
             }
             else if (availableSlots <= 0) {
@@ -350,9 +439,12 @@ export class Daemon {
                 logger.info(`Dry run - would execute ${issuesToWork.length} tasks`);
             }
             else {
-                // Mark issues as in-progress
+                // Mark issues as in-progress with graceful degradation
                 for (const issue of issuesToWork) {
-                    await this.github.issues.addLabels(issue.number, ['in-progress']);
+                    const labelResult = await this.github.issues.addLabelsWithFallback(issue.number, ['in-progress']);
+                    if (labelResult.degraded) {
+                        degraded = true;
+                    }
                 }
                 // Create worker pool and execute
                 const workerPool = createWorkerPool({
@@ -380,56 +472,57 @@ export class Daemon {
                 logger.step(4, 5, 'Creating PRs and evaluating');
                 for (const result of results) {
                     if (!result.success) {
-                        // Remove in-progress label, add failed label
+                        // Remove in-progress label, add failed label with graceful degradation
                         await this.github.issues.removeLabel(result.issue.number, 'in-progress');
-                        await this.github.issues.addLabels(result.issue.number, ['needs-review']);
-                        await this.github.issues.addComment(result.issue.number, `⚠️ Autonomous implementation failed:\n\n\`\`\`\n${result.error}\n\`\`\``);
+                        const labelResult = await this.github.issues.addLabelsWithFallback(result.issue.number, ['needs-review']);
+                        if (labelResult.degraded) {
+                            degraded = true;
+                        }
+                        const commentResult = await this.github.issues.addCommentWithFallback(result.issue.number, `⚠️ Autonomous implementation failed:\n\n\`\`\`\n${result.error}\n\`\`\``);
+                        if (commentResult.degraded) {
+                            degraded = true;
+                        }
                         continue;
                     }
-                    // Create PR
-                    try {
-                        // Track GitHub API call
-                        metrics.githubApiCallsTotal.inc({ repository: this.repository });
-                        const pr = await this.github.pulls.createPR({
-                            title: result.issue.title,
-                            body: this.generatePRBody(result.issue),
-                            head: result.branchName,
-                            base: this.config.repo.baseBranch,
-                        });
-                        // Track PR creation
-                        metrics.prsCreatedTotal.inc({ repository: this.repository });
-                        logger.success(`Created PR #${pr.number} for issue #${result.issue.number}`);
-                        // Link PR to issue
-                        await this.github.issues.addComment(result.issue.number, `🔗 PR created: #${pr.number}`);
-                    }
-                    catch (error) {
-                        const structuredError = error instanceof StructuredError
-                            ? error
-                            : new GitHubError(ErrorCode.GITHUB_API_ERROR, `Failed to create PR for issue #${result.issue.number}: ${error.message}`, {
-                                context: {
-                                    issueNumber: result.issue.number,
-                                    branchName: result.branchName,
-                                },
-                                cause: error,
-                            });
-                        // Track GitHub API error
+                    // Create PR with graceful degradation
+                    metrics.githubApiCallsTotal.inc({ repository: this.repository });
+                    const prResult = await this.github.pulls.createPRWithFallback({
+                        title: result.issue.title,
+                        body: this.generatePRBody(result.issue),
+                        head: result.branchName,
+                        base: this.config.repo.baseBranch,
+                    });
+                    if (prResult.degraded) {
+                        degraded = true;
+                        // Track GitHub API error for degraded PR creation
                         metrics.githubApiErrorsTotal.inc({ repository: this.repository });
                         metrics.recordError({
                             repository: this.repository,
                             component: 'Daemon',
                             operation: 'createPR',
-                            errorCode: structuredError.code,
-                            severity: structuredError.severity,
+                            errorCode: ErrorCode.GITHUB_SERVICE_DEGRADED,
+                            severity: 'transient',
                             issueNumber: result.issue.number,
                             branchName: result.branchName,
                         });
-                        errors.push(`[${structuredError.code}] ${structuredError.message}`);
-                        logger.structuredError(structuredError, {
-                            context: {
-                                issueNumber: result.issue.number,
-                                branchName: result.branchName,
-                            },
+                        logger.warn(`PR creation skipped for issue #${result.issue.number} due to service degradation`, {
+                            issueNumber: result.issue.number,
+                            branchName: result.branchName,
                         });
+                        // Add a label to indicate PR creation was skipped
+                        await this.github.issues.addLabelsWithFallback(result.issue.number, ['pr-pending']);
+                        errors.push(`[${ErrorCode.GITHUB_SERVICE_DEGRADED}] PR creation skipped for issue #${result.issue.number}`);
+                    }
+                    else if (prResult.value) {
+                        const pr = prResult.value;
+                        // Track PR creation
+                        metrics.prsCreatedTotal.inc({ repository: this.repository });
+                        logger.success(`Created PR #${pr.number} for issue #${result.issue.number}`);
+                        // Link PR to issue with graceful degradation
+                        const commentResult = await this.github.issues.addCommentWithFallback(result.issue.number, `🔗 PR created: #${pr.number}`);
+                        if (commentResult.degraded) {
+                            degraded = true;
+                        }
                     }
                 }
                 // STEP 5: Merge successful PRs
@@ -467,6 +560,8 @@ export class Daemon {
                     }
                 }
             }
+            // Update service health at end of cycle
+            const finalHealth = this.updateServiceHealth();
             return {
                 success: errors.length === 0,
                 tasksDiscovered,
@@ -475,10 +570,13 @@ export class Daemon {
                 prsMerged,
                 duration: Date.now() - startTime,
                 errors,
+                degraded,
+                serviceHealth: finalHealth,
             };
         }
         catch (error) {
             errors.push(error.message);
+            const finalHealth = this.updateServiceHealth();
             return {
                 success: false,
                 tasksDiscovered,
@@ -487,6 +585,8 @@ export class Daemon {
                 prsMerged,
                 duration: Date.now() - startTime,
                 errors,
+                degraded: true,
+                serviceHealth: finalHealth,
             };
         }
     }
@@ -551,6 +651,24 @@ ${issue.body || ''}
         console.log(`  Tasks failed:     ${result.tasksFailed}`);
         console.log(`  PRs merged:       ${result.prsMerged}`);
         console.log(`  Duration:         ${(result.duration / 1000).toFixed(1)}s`);
+        // Show service health status
+        if (result.degraded) {
+            console.log(`\n  ⚡ Service Status: DEGRADED`);
+        }
+        else {
+            console.log(`\n  ✓ Service Status: Healthy`);
+        }
+        // Show GitHub service health details if available
+        if (result.serviceHealth.github) {
+            const gh = result.serviceHealth.github;
+            console.log(`    GitHub: ${gh.status} (circuit: ${gh.circuitState})`);
+            if (gh.consecutiveFailures > 0) {
+                console.log(`    Consecutive failures: ${gh.consecutiveFailures}`);
+            }
+            if (gh.rateLimitRemaining !== undefined) {
+                console.log(`    Rate limit remaining: ${gh.rateLimitRemaining}`);
+            }
+        }
         if (result.errors.length > 0) {
             console.log(`\n  Errors:`);
             for (const error of result.errors) {

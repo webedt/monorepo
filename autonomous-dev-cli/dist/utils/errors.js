@@ -16,10 +16,14 @@ export var ErrorCode;
     ErrorCode["GITHUB_BRANCH_NOT_FOUND"] = "GITHUB_BRANCH_NOT_FOUND";
     ErrorCode["GITHUB_PR_CONFLICT"] = "GITHUB_PR_CONFLICT";
     ErrorCode["GITHUB_ISSUE_NOT_FOUND"] = "GITHUB_ISSUE_NOT_FOUND";
+    ErrorCode["GITHUB_CIRCUIT_OPEN"] = "GITHUB_CIRCUIT_OPEN";
+    ErrorCode["GITHUB_SERVICE_DEGRADED"] = "GITHUB_SERVICE_DEGRADED";
     // Claude/AI errors (2000-2999)
     ErrorCode["CLAUDE_AUTH_FAILED"] = "CLAUDE_AUTH_FAILED";
     ErrorCode["CLAUDE_QUOTA_EXCEEDED"] = "CLAUDE_QUOTA_EXCEEDED";
+    ErrorCode["CLAUDE_RATE_LIMITED"] = "CLAUDE_RATE_LIMITED";
     ErrorCode["CLAUDE_TIMEOUT"] = "CLAUDE_TIMEOUT";
+    ErrorCode["CLAUDE_NETWORK_ERROR"] = "CLAUDE_NETWORK_ERROR";
     ErrorCode["CLAUDE_API_ERROR"] = "CLAUDE_API_ERROR";
     ErrorCode["CLAUDE_INVALID_RESPONSE"] = "CLAUDE_INVALID_RESPONSE";
     // Configuration errors (3000-3999)
@@ -54,6 +58,9 @@ export var ErrorCode;
     ErrorCode["NETWORK_ERROR"] = "NETWORK_ERROR";
     ErrorCode["NOT_INITIALIZED"] = "NOT_INITIALIZED";
     ErrorCode["UNKNOWN_ERROR"] = "UNKNOWN_ERROR";
+    ErrorCode["SERVICE_DEGRADED"] = "SERVICE_DEGRADED";
+    ErrorCode["CIRCUIT_BREAKER_OPEN"] = "CIRCUIT_BREAKER_OPEN";
+    ErrorCode["OFFLINE_MODE"] = "OFFLINE_MODE";
 })(ErrorCode || (ErrorCode = {}));
 /**
  * Base structured error class
@@ -89,9 +96,15 @@ export class StructuredError extends Error {
         const transientCodes = [
             ErrorCode.GITHUB_RATE_LIMITED,
             ErrorCode.GITHUB_NETWORK_ERROR,
+            ErrorCode.GITHUB_CIRCUIT_OPEN,
+            ErrorCode.GITHUB_SERVICE_DEGRADED,
             ErrorCode.NETWORK_ERROR,
             ErrorCode.CLAUDE_TIMEOUT,
+            ErrorCode.CLAUDE_RATE_LIMITED,
+            ErrorCode.CLAUDE_NETWORK_ERROR,
             ErrorCode.DB_CONNECTION_FAILED,
+            ErrorCode.SERVICE_DEGRADED,
+            ErrorCode.CIRCUIT_BREAKER_OPEN,
         ];
         if (transientCodes.includes(code))
             return 'transient';
@@ -104,17 +117,26 @@ export class StructuredError extends Error {
         ];
         if (criticalCodes.includes(code))
             return 'critical';
+        // Warning for offline mode - not an error, just informational
+        if (code === ErrorCode.OFFLINE_MODE)
+            return 'warning';
         return 'error';
     }
     inferRetryable(code) {
         const retryableCodes = [
             ErrorCode.GITHUB_RATE_LIMITED,
             ErrorCode.GITHUB_NETWORK_ERROR,
+            ErrorCode.GITHUB_CIRCUIT_OPEN,
+            ErrorCode.GITHUB_SERVICE_DEGRADED,
             ErrorCode.NETWORK_ERROR,
             ErrorCode.CLAUDE_TIMEOUT,
+            ErrorCode.CLAUDE_RATE_LIMITED,
+            ErrorCode.CLAUDE_NETWORK_ERROR,
             ErrorCode.DB_CONNECTION_FAILED,
             ErrorCode.EXEC_CLONE_FAILED,
             ErrorCode.EXEC_PUSH_FAILED,
+            ErrorCode.SERVICE_DEGRADED,
+            ErrorCode.CIRCUIT_BREAKER_OPEN,
         ];
         return retryableCodes.includes(code);
     }
@@ -244,6 +266,21 @@ function getGitHubRecoveryActions(code, statusCode) {
                 automatic: false,
             });
             break;
+        case ErrorCode.GITHUB_CIRCUIT_OPEN:
+        case ErrorCode.GITHUB_SERVICE_DEGRADED:
+            actions.push({
+                description: 'Wait for circuit breaker timeout to allow recovery attempts',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Check GitHub status at https://www.githubstatus.com/',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Operations will continue with graceful degradation',
+                automatic: true,
+            });
+            break;
     }
     return actions;
 }
@@ -268,6 +305,8 @@ function getClaudeSeverity(code) {
         case ErrorCode.CLAUDE_QUOTA_EXCEEDED:
             return 'critical';
         case ErrorCode.CLAUDE_TIMEOUT:
+        case ErrorCode.CLAUDE_RATE_LIMITED:
+        case ErrorCode.CLAUDE_NETWORK_ERROR:
             return 'transient';
         default:
             return 'error';
@@ -301,6 +340,34 @@ function getClaudeRecoveryActions(code) {
             });
             actions.push({
                 description: 'Reduce task complexity to use fewer tokens',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.CLAUDE_RATE_LIMITED:
+            actions.push({
+                description: 'Wait for rate limit reset (check Retry-After header)',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Retry the operation with exponential backoff',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Reduce request frequency to stay within limits',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.CLAUDE_NETWORK_ERROR:
+            actions.push({
+                description: 'Check your network connection',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Retry the operation',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Check https://status.anthropic.com for service status',
                 automatic: false,
             });
             break;
