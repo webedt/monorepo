@@ -29,6 +29,8 @@ WebEDT is a web-based game development platform that combines a digital storefro
 
 ## 2. Dashboard (Homepage)
 
+The Dashboard is a separate page from the Store, serving as a personalized aggregation hub that pulls content from multiple sections of the platform.
+
 ### 2.1 Layout
 - **Customizable Widget System:**
   - Drag-and-drop widget arrangement
@@ -202,7 +204,7 @@ The editor is the core feature of WebEDT, providing a complete game development 
 - User selects a repository and base branch
 - System creates a new branch with auto-generated name based on request + base branch
 - Session persists across all editor tools (Chat, Code, Images, Sounds, Scenes, Preview)
-- **Sessions never auto-expire** - persist until explicitly deleted
+- **Sessions never auto-expire** - active sessions persist indefinitely until explicitly deleted by the user. Deleted sessions in trash may be automatically cleaned up after extended periods of inactivity.
 
 #### 6.1.2 Sessions Page
 - **New Session Creation:** Easy interface to start new sessions with repo/branch selection
@@ -582,7 +584,7 @@ Two sub-sections integrating Code, Images, and Sounds:
 
 **Currently Supported:**
 1. **Web (TypeScript/JavaScript):** HTML, CSS, JS/TS games running directly in browser
-2. **Love2D:** Lua games running via Love.js in an embedded panel
+2. **Love2D:** Lua games running via Love.js in an embedded panel (deployed via GitHub Action)
 
 **Future/Native Export:**
 - Users can export to native platforms (desktop, mobile) outside of WebEDT

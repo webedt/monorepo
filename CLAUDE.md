@@ -435,4 +435,35 @@ Example: Branch `claude/fix-bug` → Live Site URL uses `claude-fix-bug`
 
 ---
 
-*Documentation last updated: 2025-12-06*
+## Autonomous Development Workflow
+
+This repo supports long-running autonomous development via the autonomous CLI.
+
+### Key Files
+
+- **SPEC.md** - North star roadmap describing the complete platform vision. This is the aspirational end-state of what WebEDT should become.
+- **STATUS.md** - Implementation status, priorities (P0-P3), and progress tracking. This tracks what's been built vs. what remains.
+
+### Workflow for Implementing Features
+
+1. Read `STATUS.md` to understand current state and priorities
+2. Pick the highest priority (P0 first) incomplete feature
+3. Read the relevant `SPEC.md` sections for detailed requirements
+4. Implement the feature following existing patterns in the codebase
+5. Run `npm install && npm run build` in modified project folders
+6. Update `STATUS.md` with:
+   - New status (✅ Complete, 🟡 Partial)
+   - Key files added/modified
+   - Add entry to Changelog section
+7. Commit changes and repeat
+
+### Priority Tiers
+
+- **P0 (Core MVP):** Essential features for a functional platform
+- **P1 (Important):** Build after core MVP is stable
+- **P2 (Nice to Have):** Enhance the platform experience
+- **P3 (Future):** Long-term vision features
+
+---
+
+*Documentation last updated: 2025-12-13*
