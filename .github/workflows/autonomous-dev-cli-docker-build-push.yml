@@ -2,6 +2,8 @@ name: Autonomous Dev CLI - Build and Push Docker Image
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "autonomous-dev-cli/**"
       - ".github/workflows/autonomous-dev-cli-docker-build-push.yml"
