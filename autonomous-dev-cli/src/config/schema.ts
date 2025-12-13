@@ -45,8 +45,8 @@ export const ConfigSchema = z.object({
     autoMerge: z.boolean().default(true),
     requireAllChecks: z.boolean().default(true),
     maxRetries: z.number().min(1).max(5).default(3),
-    conflictStrategy: z.enum(['rebase', 'merge', 'manual']).default('rebase'),
-    mergeMethod: z.enum(['merge', 'squash', 'rebase']).default('squash'),
+    conflictStrategy: z.enum(['rebase', 'merge', 'manual', 'ai']).default('ai'),
+    mergeMethod: z.enum(['merge', 'squash', 'rebase']).default('merge'), // Use 'merge' to preserve commit history
   }),
 
   // Daemon
@@ -95,8 +95,8 @@ export const defaultConfig: Partial<Config> = {
     autoMerge: true,
     requireAllChecks: true,
     maxRetries: 3,
-    conflictStrategy: 'rebase',
-    mergeMethod: 'squash',
+    conflictStrategy: 'ai',
+    mergeMethod: 'merge',
   },
   daemon: {
     loopIntervalMs: 60000,

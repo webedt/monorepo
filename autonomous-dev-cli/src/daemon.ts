@@ -6,8 +6,9 @@ import { createWorkerPool, type WorkerTask, type PoolResult } from './executor/i
 import { runEvaluation, type EvaluationResult } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
 import { logger } from './utils/logger.js';
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
+import { simpleGit } from 'simple-git';
 
 export interface DaemonOptions {
   configPath?: string;
@@ -213,19 +214,32 @@ export class Daemon {
       if (availableSlots > 0 && !this.options.dryRun) {
         logger.step(2, 5, 'Discovering new tasks');
 
-        // Clone repo for analysis
+        // Clone repo for analysis (to get the full monorepo, not just /app)
         const analysisDir = join(this.config.execution.workDir, 'analysis');
-        // For now, we'll analyze the current directory if it's the target repo
-        // In production, this would clone the repo first
+        let repoPath = process.cwd();
+
+        try {
+          repoPath = await this.cloneRepoForAnalysis(analysisDir);
+          logger.info(`Analyzing cloned repo at: ${repoPath}`);
+        } catch (cloneError: any) {
+          logger.warn(`Failed to clone repo for analysis: ${cloneError.message}. Using current directory.`);
+        }
 
         try {
           const tasks = await discoverTasks({
             claudeAuth: this.config.credentials.claudeAuth,
-            repoPath: process.cwd(), // Analyze current directory
+            repoPath,
             excludePaths: this.config.discovery.excludePaths,
             tasksPerCycle: Math.min(this.config.discovery.tasksPerCycle, availableSlots),
             existingIssues,
-            repoContext: `WebEDT - AI-powered coding assistant platform with React frontend, Express backend, and Claude Agent SDK integration.`,
+            repoContext: `WebEDT Monorepo - AI-powered coding assistant platform containing:
+- /website: React frontend (Vite) + Express API facade
+- /internal-api-server: Backend API, database, storage, GitHub operations
+- /ai-coding-worker: Claude Agent SDK worker for LLM execution
+- /autonomous-dev-cli: Autonomous development daemon
+- /shared: Shared utilities and types
+
+Focus on improvements across the ENTIRE monorepo, not just one package.`,
           });
 
           tasksDiscovered = tasks.length;
@@ -347,6 +361,10 @@ export class Daemon {
             owner: this.config.repo.owner,
             repo: this.config.repo.name,
             baseBranch: this.config.repo.baseBranch,
+            // For AI conflict resolution
+            githubToken: this.config.credentials.githubToken,
+            claudeAuth: this.config.credentials.claudeAuth,
+            workDir: this.config.execution.workDir,
           });
 
           // Get branches to merge
@@ -491,6 +509,39 @@ ${issue.body || ''}
         }
       }, 1000);
     });
+  }
+
+  /**
+   * Clone the repository for analysis to get the full monorepo contents.
+   * Returns the path to the cloned repo.
+   */
+  private async cloneRepoForAnalysis(analysisDir: string): Promise<string> {
+    const repoDir = join(analysisDir, 'repo');
+
+    // Clean up any existing analysis directory
+    if (existsSync(analysisDir)) {
+      rmSync(analysisDir, { recursive: true, force: true });
+    }
+    mkdirSync(analysisDir, { recursive: true });
+
+    logger.info('Cloning repository for analysis...');
+
+    // Clone with auth token
+    const repoUrl = `https://github.com/${this.config.repo.owner}/${this.config.repo.name}`;
+    const urlWithAuth = repoUrl.replace(
+      'https://github.com',
+      `https://${this.config.credentials.githubToken}@github.com`
+    );
+
+    const git = simpleGit(analysisDir);
+    await git.clone(urlWithAuth, 'repo', [
+      '--depth', '1',
+      '--branch', this.config.repo.baseBranch,
+      '--single-branch',
+    ]);
+
+    logger.info('Repository cloned for analysis');
+    return repoDir;
   }
 }
 
