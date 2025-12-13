@@ -21,6 +21,10 @@ import {
   ClaudeError,
   ConfigError,
   wrapError,
+  isCriticalError,
+  isRecoverableError,
+  formatUserFriendlyError,
+  withErrorBoundary,
   type ErrorContext,
 } from './utils/errors.js';
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'fs';
@@ -43,6 +47,7 @@ export interface CycleResult {
   prsMerged: number;
   duration: number;
   errors: string[];
+  criticalError?: StructuredError;
 }
 
 export class Daemon {
@@ -102,7 +107,8 @@ export class Daemon {
           correlationId: cycleCorrelationId,
         });
 
-        const result = await this.runCycle();
+        // Use error boundary to prevent crashes from individual cycle failures
+        const result = await this.runCycleWithErrorBoundary();
 
         this.logCycleResult(result);
 
@@ -114,6 +120,14 @@ export class Daemon {
           result.duration,
           { repository: this.repository }
         );
+
+        // Check if we encountered a critical error that should stop the daemon
+        if (result.criticalError) {
+          logger.error('Critical error encountered - initiating graceful shutdown');
+          console.log('\n' + formatUserFriendlyError(result.criticalError));
+          this.isRunning = false;
+          break;
+        }
 
         // Clear correlation ID after cycle
         clearCorrelationId();
@@ -135,6 +149,10 @@ export class Daemon {
       }
     } catch (error: any) {
       const structuredError = this.wrapDaemonError(error);
+
+      // Log user-friendly error message
+      console.error('\n' + formatUserFriendlyError(structuredError));
+
       logger.structuredError(structuredError, {
         context: this.getErrorContext('start'),
         includeStack: true,
@@ -180,6 +198,73 @@ export class Daemon {
         dryRun: this.options.dryRun ?? false,
       },
     };
+  }
+
+  /**
+   * Run a cycle with error boundary protection
+   * This catches errors and determines if they are recoverable or critical
+   */
+  private async runCycleWithErrorBoundary(): Promise<CycleResult> {
+    const startTime = Date.now();
+
+    try {
+      return await this.runCycle();
+    } catch (error: any) {
+      // Wrap the error with context
+      const structuredError = this.wrapDaemonError(error, 'runCycle');
+
+      // Check if this is a critical error that should stop the daemon
+      const critical = isCriticalError(structuredError);
+      const recoverable = isRecoverableError(structuredError);
+
+      // Log the error with appropriate severity
+      if (critical) {
+        logger.error('Critical error during cycle - daemon will shut down', {
+          code: structuredError.code,
+          message: structuredError.message,
+          severity: structuredError.severity,
+        });
+      } else if (!recoverable) {
+        logger.error('Non-recoverable error during cycle', {
+          code: structuredError.code,
+          message: structuredError.message,
+        });
+      } else {
+        logger.warn('Recoverable error during cycle - continuing to next cycle', {
+          code: structuredError.code,
+          message: structuredError.message,
+        });
+      }
+
+      // Log structured error details
+      logger.structuredError(structuredError, {
+        context: this.getErrorContext('runCycleWithErrorBoundary'),
+        includeStack: true,
+        includeRecovery: true,
+      });
+
+      // Record error metrics
+      metrics.recordError({
+        repository: this.repository,
+        component: 'Daemon',
+        operation: 'runCycle',
+        errorCode: structuredError.code,
+        severity: structuredError.severity,
+        isRetryable: structuredError.isRetryable,
+      });
+
+      // Return a failed cycle result
+      return {
+        success: false,
+        tasksDiscovered: 0,
+        tasksCompleted: 0,
+        tasksFailed: 0,
+        prsMerged: 0,
+        duration: Date.now() - startTime,
+        errors: [`[${structuredError.code}] ${structuredError.message}`],
+        criticalError: critical ? structuredError : undefined,
+      };
+    }
   }
 
   async stop(): Promise<void> {

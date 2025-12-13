@@ -1,4 +1,5 @@
 import { type LogFormat } from './utils/logger.js';
+import { StructuredError } from './utils/errors.js';
 export interface DaemonOptions {
     configPath?: string;
     dryRun?: boolean;
@@ -15,6 +16,7 @@ export interface CycleResult {
     prsMerged: number;
     duration: number;
     errors: string[];
+    criticalError?: StructuredError;
 }
 export declare class Daemon {
     private config;
@@ -36,6 +38,11 @@ export declare class Daemon {
      * Get current error context for debugging
      */
     private getErrorContext;
+    /**
+     * Run a cycle with error boundary protection
+     * This catches errors and determines if they are recoverable or critical
+     */
+    private runCycleWithErrorBoundary;
     stop(): Promise<void>;
     /**
      * Start the monitoring server for health checks and metrics

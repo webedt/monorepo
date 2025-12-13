@@ -1,3 +1,4 @@
+import { TestError } from '../utils/errors.js';
 export interface TestResult {
     success: boolean;
     output: string;
@@ -6,6 +7,7 @@ export interface TestResult {
     testsPassed: number;
     testsFailed: number;
     error?: string;
+    structuredError?: TestError;
 }
 export interface TestOptions {
     repoPath: string;

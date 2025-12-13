@@ -1,8 +1,10 @@
+import { BuildError } from '../utils/errors.js';
 export interface BuildResult {
     success: boolean;
     output: string;
     duration: number;
     error?: string;
+    structuredError?: BuildError;
 }
 export interface BuildOptions {
     repoPath: string;

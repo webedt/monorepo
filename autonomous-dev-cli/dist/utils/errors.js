@@ -40,6 +40,24 @@ export var ErrorCode;
     ErrorCode["EXEC_COMMIT_FAILED"] = "EXEC_COMMIT_FAILED";
     ErrorCode["EXEC_PUSH_FAILED"] = "EXEC_PUSH_FAILED";
     ErrorCode["EXEC_TIMEOUT"] = "EXEC_TIMEOUT";
+    // Workspace errors (5100-5199)
+    ErrorCode["WORKSPACE_CREATE_FAILED"] = "WORKSPACE_CREATE_FAILED";
+    ErrorCode["WORKSPACE_CLEANUP_FAILED"] = "WORKSPACE_CLEANUP_FAILED";
+    ErrorCode["WORKSPACE_PERMISSION_DENIED"] = "WORKSPACE_PERMISSION_DENIED";
+    ErrorCode["WORKSPACE_DISK_FULL"] = "WORKSPACE_DISK_FULL";
+    ErrorCode["WORKSPACE_PATH_INVALID"] = "WORKSPACE_PATH_INVALID";
+    // Build errors (5200-5299)
+    ErrorCode["BUILD_FAILED"] = "BUILD_FAILED";
+    ErrorCode["BUILD_TIMEOUT"] = "BUILD_TIMEOUT";
+    ErrorCode["BUILD_DEPENDENCY_MISSING"] = "BUILD_DEPENDENCY_MISSING";
+    ErrorCode["BUILD_CONFIG_INVALID"] = "BUILD_CONFIG_INVALID";
+    ErrorCode["BUILD_SCRIPT_NOT_FOUND"] = "BUILD_SCRIPT_NOT_FOUND";
+    // Test errors (5300-5399)
+    ErrorCode["TEST_FAILED"] = "TEST_FAILED";
+    ErrorCode["TEST_TIMEOUT"] = "TEST_TIMEOUT";
+    ErrorCode["TEST_CONFIG_INVALID"] = "TEST_CONFIG_INVALID";
+    ErrorCode["TEST_SCRIPT_NOT_FOUND"] = "TEST_SCRIPT_NOT_FOUND";
+    ErrorCode["TEST_ENVIRONMENT_ERROR"] = "TEST_ENVIRONMENT_ERROR";
     // Analyzer errors (6000-6999)
     ErrorCode["ANALYZER_PATH_NOT_FOUND"] = "ANALYZER_PATH_NOT_FOUND";
     ErrorCode["ANALYZER_PATH_NOT_READABLE"] = "ANALYZER_PATH_NOT_READABLE";
@@ -375,6 +393,399 @@ export class ExecutionError extends StructuredError {
     }
 }
 /**
+ * Workspace-specific error for file system and workspace operations
+ */
+export class WorkspaceError extends StructuredError {
+    constructor(code, message, options = {}) {
+        const recoveryActions = options.recoveryActions ?? getWorkspaceRecoveryActions(code, options.path);
+        super(code, message, {
+            severity: getWorkspaceSeverity(code),
+            recoveryActions,
+            context: {
+                ...options.context,
+                path: options.path,
+                operation: options.operation,
+            },
+            cause: options.cause,
+            isRetryable: isWorkspaceRetryable(code),
+        });
+        this.name = 'WorkspaceError';
+    }
+}
+function getWorkspaceSeverity(code) {
+    switch (code) {
+        case ErrorCode.WORKSPACE_DISK_FULL:
+        case ErrorCode.WORKSPACE_PERMISSION_DENIED:
+            return 'critical';
+        case ErrorCode.WORKSPACE_CLEANUP_FAILED:
+            return 'warning';
+        default:
+            return 'error';
+    }
+}
+function isWorkspaceRetryable(code) {
+    return code === ErrorCode.WORKSPACE_CREATE_FAILED;
+}
+function getWorkspaceRecoveryActions(code, path) {
+    const actions = [];
+    switch (code) {
+        case ErrorCode.WORKSPACE_CREATE_FAILED:
+            actions.push({
+                description: 'Check that the parent directory exists and is writable',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Verify sufficient disk space is available',
+                automatic: false,
+            });
+            if (path) {
+                actions.push({
+                    description: `Check permissions on: ${path}`,
+                    automatic: false,
+                });
+            }
+            break;
+        case ErrorCode.WORKSPACE_PERMISSION_DENIED:
+            actions.push({
+                description: 'Run with appropriate permissions or change workspace directory',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Configure WORK_DIR environment variable to a writable location',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.WORKSPACE_DISK_FULL:
+            actions.push({
+                description: 'Free up disk space in the workspace directory',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Configure a workspace directory on a partition with more space',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Clean up old task directories: rm -rf /tmp/autonomous-dev/task-*',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.WORKSPACE_CLEANUP_FAILED:
+            actions.push({
+                description: 'Manually clean up the workspace directory',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check for locked files or running processes',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.WORKSPACE_PATH_INVALID:
+            actions.push({
+                description: 'Verify the workspace path is a valid absolute path',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Configure WORK_DIR to a valid directory path',
+                automatic: false,
+            });
+            break;
+    }
+    return actions;
+}
+/**
+ * Build-specific error for compilation and build process failures
+ */
+export class BuildError extends StructuredError {
+    exitCode;
+    buildOutput;
+    constructor(code, message, options = {}) {
+        const recoveryActions = options.recoveryActions ?? getBuildRecoveryActions(code, options.buildOutput);
+        super(code, message, {
+            severity: getBuildSeverity(code),
+            recoveryActions,
+            context: {
+                ...options.context,
+                command: options.command,
+                repoPath: options.repoPath,
+                exitCode: options.exitCode,
+            },
+            cause: options.cause,
+            isRetryable: isBuildRetryable(code),
+        });
+        this.name = 'BuildError';
+        this.exitCode = options.exitCode;
+        this.buildOutput = options.buildOutput;
+    }
+    /**
+     * Get user-friendly error message with actionable suggestions
+     */
+    getUserFriendlyMessage() {
+        const lines = [];
+        lines.push(`Build failed: ${this.message}`);
+        if (this.exitCode !== undefined) {
+            lines.push(`Exit code: ${this.exitCode}`);
+        }
+        if (this.recoveryActions.length > 0) {
+            lines.push('\nSuggested fixes:');
+            for (const action of this.recoveryActions) {
+                lines.push(`  • ${action.description}`);
+            }
+        }
+        return lines.join('\n');
+    }
+}
+function getBuildSeverity(code) {
+    switch (code) {
+        case ErrorCode.BUILD_TIMEOUT:
+            return 'transient';
+        case ErrorCode.BUILD_CONFIG_INVALID:
+            return 'critical';
+        default:
+            return 'error';
+    }
+}
+function isBuildRetryable(code) {
+    return code === ErrorCode.BUILD_TIMEOUT;
+}
+function getBuildRecoveryActions(code, buildOutput) {
+    const actions = [];
+    switch (code) {
+        case ErrorCode.BUILD_FAILED:
+            actions.push({
+                description: 'Review build output for specific compilation errors',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Run "npm install" to ensure dependencies are installed',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Check for TypeScript errors with "npx tsc --noEmit"',
+                automatic: false,
+            });
+            // Analyze build output for common patterns
+            if (buildOutput) {
+                if (buildOutput.includes('Cannot find module')) {
+                    actions.push({
+                        description: 'Install missing dependencies: check for "Cannot find module" errors',
+                        automatic: false,
+                    });
+                }
+                if (buildOutput.includes('ENOMEM') || buildOutput.includes('out of memory')) {
+                    actions.push({
+                        description: 'Increase Node.js memory: NODE_OPTIONS="--max-old-space-size=4096"',
+                        automatic: false,
+                    });
+                }
+            }
+            break;
+        case ErrorCode.BUILD_TIMEOUT:
+            actions.push({
+                description: 'Increase build timeout in configuration (TIMEOUT_MINUTES)',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Consider splitting the build into smaller steps',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check for infinite loops or hanging processes in build scripts',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.BUILD_DEPENDENCY_MISSING:
+            actions.push({
+                description: 'Run "npm install" to install missing dependencies',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Check package.json for correct dependency versions',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Clear node_modules and reinstall: rm -rf node_modules && npm install',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.BUILD_CONFIG_INVALID:
+            actions.push({
+                description: 'Verify tsconfig.json or build configuration syntax',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check for JSON syntax errors in configuration files',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.BUILD_SCRIPT_NOT_FOUND:
+            actions.push({
+                description: 'Add a "build" script to package.json',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Verify the project has a valid package.json with build configuration',
+                automatic: false,
+            });
+            break;
+    }
+    return actions;
+}
+/**
+ * Test-specific error for test execution failures
+ */
+export class TestError extends StructuredError {
+    exitCode;
+    testOutput;
+    testsRun;
+    testsPassed;
+    testsFailed;
+    constructor(code, message, options = {}) {
+        const recoveryActions = options.recoveryActions ?? getTestRecoveryActions(code, options.testOutput);
+        super(code, message, {
+            severity: getTestSeverity(code),
+            recoveryActions,
+            context: {
+                ...options.context,
+                command: options.command,
+                repoPath: options.repoPath,
+                exitCode: options.exitCode,
+                testsRun: options.testsRun,
+                testsPassed: options.testsPassed,
+                testsFailed: options.testsFailed,
+            },
+            cause: options.cause,
+            isRetryable: isTestRetryable(code),
+        });
+        this.name = 'TestError';
+        this.exitCode = options.exitCode;
+        this.testOutput = options.testOutput;
+        this.testsRun = options.testsRun;
+        this.testsPassed = options.testsPassed;
+        this.testsFailed = options.testsFailed;
+    }
+    /**
+     * Get user-friendly error message with test statistics and actionable suggestions
+     */
+    getUserFriendlyMessage() {
+        const lines = [];
+        lines.push(`Tests failed: ${this.message}`);
+        if (this.testsRun !== undefined) {
+            lines.push(`Test results: ${this.testsPassed ?? 0}/${this.testsRun} passed, ${this.testsFailed ?? 0} failed`);
+        }
+        if (this.recoveryActions.length > 0) {
+            lines.push('\nSuggested fixes:');
+            for (const action of this.recoveryActions) {
+                lines.push(`  • ${action.description}`);
+            }
+        }
+        return lines.join('\n');
+    }
+}
+function getTestSeverity(code) {
+    switch (code) {
+        case ErrorCode.TEST_TIMEOUT:
+            return 'transient';
+        case ErrorCode.TEST_CONFIG_INVALID:
+            return 'critical';
+        case ErrorCode.TEST_FAILED:
+            return 'error';
+        default:
+            return 'error';
+    }
+}
+function isTestRetryable(code) {
+    return code === ErrorCode.TEST_TIMEOUT || code === ErrorCode.TEST_ENVIRONMENT_ERROR;
+}
+function getTestRecoveryActions(code, testOutput) {
+    const actions = [];
+    switch (code) {
+        case ErrorCode.TEST_FAILED:
+            actions.push({
+                description: 'Review test output for specific assertion failures',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Run tests locally to reproduce: npm test',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check if tests depend on external services or databases',
+                automatic: false,
+            });
+            // Analyze test output for common patterns
+            if (testOutput) {
+                if (testOutput.includes('ECONNREFUSED') || testOutput.includes('connect ECONNREFUSED')) {
+                    actions.push({
+                        description: 'Tests require a running service - check if database/API is running',
+                        automatic: false,
+                    });
+                }
+                if (testOutput.includes('Timeout') || testOutput.includes('async callback was not invoked')) {
+                    actions.push({
+                        description: 'Tests have async issues - check for missing await or done() calls',
+                        automatic: false,
+                    });
+                }
+                if (testOutput.includes('Cannot find module')) {
+                    actions.push({
+                        description: 'Run "npm install" to install missing test dependencies',
+                        automatic: true,
+                    });
+                }
+            }
+            break;
+        case ErrorCode.TEST_TIMEOUT:
+            actions.push({
+                description: 'Increase test timeout in configuration or test files',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check for infinite loops or hanging async operations',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Run tests in parallel if not already: jest --maxWorkers=50%',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.TEST_CONFIG_INVALID:
+            actions.push({
+                description: 'Verify jest.config.js or test configuration syntax',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check that test file patterns match your test files',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.TEST_SCRIPT_NOT_FOUND:
+            actions.push({
+                description: 'Add a "test" script to package.json',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Install a test framework: npm install --save-dev jest',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.TEST_ENVIRONMENT_ERROR:
+            actions.push({
+                description: 'Check test environment setup (database, environment variables)',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Verify CI environment has all required test dependencies',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Retry the test run',
+                automatic: true,
+            });
+            break;
+    }
+    return actions;
+}
+/**
  * Analyzer-specific error
  */
 export class AnalyzerError extends StructuredError {
@@ -674,5 +1085,156 @@ export function formatError(error) {
         }
     }
     return lines.join('\n');
+}
+/**
+ * User-friendly error messages for common error codes
+ */
+const userFriendlyMessages = {
+    // GitHub errors
+    [ErrorCode.GITHUB_AUTH_FAILED]: 'GitHub authentication failed. Your token may be invalid or expired.',
+    [ErrorCode.GITHUB_RATE_LIMITED]: 'GitHub API rate limit exceeded. Please wait before retrying.',
+    [ErrorCode.GITHUB_REPO_NOT_FOUND]: 'Repository not found. Check the owner and repository name.',
+    [ErrorCode.GITHUB_PERMISSION_DENIED]: 'Permission denied. Your token may not have sufficient access.',
+    [ErrorCode.GITHUB_NETWORK_ERROR]: 'Network error connecting to GitHub. Check your internet connection.',
+    [ErrorCode.GITHUB_BRANCH_NOT_FOUND]: 'Branch not found in the repository.',
+    [ErrorCode.GITHUB_PR_CONFLICT]: 'Pull request has merge conflicts that need to be resolved.',
+    [ErrorCode.GITHUB_ISSUE_NOT_FOUND]: 'Issue not found in the repository.',
+    // Claude errors
+    [ErrorCode.CLAUDE_AUTH_FAILED]: 'Claude authentication failed. Check your API credentials.',
+    [ErrorCode.CLAUDE_QUOTA_EXCEEDED]: 'Claude API quota exceeded. Please check your usage limits.',
+    [ErrorCode.CLAUDE_TIMEOUT]: 'Claude API request timed out. The operation may be too complex.',
+    [ErrorCode.CLAUDE_API_ERROR]: 'Claude API error. Please try again later.',
+    // Config errors
+    [ErrorCode.CONFIG_INVALID]: 'Configuration is invalid. Please check your config file.',
+    [ErrorCode.CONFIG_MISSING_REQUIRED]: 'Required configuration is missing.',
+    [ErrorCode.CONFIG_FILE_NOT_FOUND]: 'Configuration file not found.',
+    [ErrorCode.CONFIG_PARSE_ERROR]: 'Failed to parse configuration file. Check for JSON syntax errors.',
+    [ErrorCode.CONFIG_VALIDATION_FAILED]: 'Configuration validation failed.',
+    // Workspace errors
+    [ErrorCode.WORKSPACE_CREATE_FAILED]: 'Failed to create workspace directory.',
+    [ErrorCode.WORKSPACE_CLEANUP_FAILED]: 'Failed to clean up workspace. This may cause disk space issues.',
+    [ErrorCode.WORKSPACE_PERMISSION_DENIED]: 'Permission denied accessing workspace directory.',
+    [ErrorCode.WORKSPACE_DISK_FULL]: 'Disk is full. Cannot create workspace.',
+    [ErrorCode.WORKSPACE_PATH_INVALID]: 'Workspace path is invalid.',
+    // Build errors
+    [ErrorCode.BUILD_FAILED]: 'Build failed. Check the build output for errors.',
+    [ErrorCode.BUILD_TIMEOUT]: 'Build timed out. Consider increasing the timeout or optimizing the build.',
+    [ErrorCode.BUILD_DEPENDENCY_MISSING]: 'Missing build dependencies. Run npm install.',
+    [ErrorCode.BUILD_CONFIG_INVALID]: 'Build configuration is invalid.',
+    [ErrorCode.BUILD_SCRIPT_NOT_FOUND]: 'No build script found in package.json.',
+    // Test errors
+    [ErrorCode.TEST_FAILED]: 'Tests failed. Review the test output for details.',
+    [ErrorCode.TEST_TIMEOUT]: 'Tests timed out. Check for hanging tests or increase timeout.',
+    [ErrorCode.TEST_CONFIG_INVALID]: 'Test configuration is invalid.',
+    [ErrorCode.TEST_SCRIPT_NOT_FOUND]: 'No test script found in package.json.',
+    [ErrorCode.TEST_ENVIRONMENT_ERROR]: 'Test environment setup failed.',
+    // Execution errors
+    [ErrorCode.EXEC_CLONE_FAILED]: 'Failed to clone repository. Check network and credentials.',
+    [ErrorCode.EXEC_BRANCH_FAILED]: 'Failed to create or checkout branch.',
+    [ErrorCode.EXEC_NO_CHANGES]: 'No changes were made. The task may already be complete.',
+    [ErrorCode.EXEC_COMMIT_FAILED]: 'Failed to commit changes.',
+    [ErrorCode.EXEC_PUSH_FAILED]: 'Failed to push changes. Check branch permissions.',
+    [ErrorCode.EXEC_TIMEOUT]: 'Task execution timed out.',
+    // General errors
+    [ErrorCode.INTERNAL_ERROR]: 'An internal error occurred.',
+    [ErrorCode.NETWORK_ERROR]: 'Network error. Check your internet connection.',
+    [ErrorCode.NOT_INITIALIZED]: 'System not properly initialized.',
+    [ErrorCode.UNKNOWN_ERROR]: 'An unexpected error occurred.',
+};
+/**
+ * Format an error for user-friendly display with clear next steps
+ */
+export function formatUserFriendlyError(error) {
+    const lines = [];
+    // Get user-friendly message or fall back to error message
+    const friendlyMessage = userFriendlyMessages[error.code] || error.message;
+    // Add error header with icon based on severity
+    const severityIcon = {
+        critical: '🚨',
+        error: '❌',
+        warning: '⚠️',
+        transient: '🔄',
+    }[error.severity];
+    lines.push(`${severityIcon} ${friendlyMessage}`);
+    lines.push('');
+    // Add error code for programmatic reference
+    lines.push(`Error Code: ${error.code}`);
+    // Add next steps if available
+    if (error.recoveryActions.length > 0) {
+        lines.push('');
+        lines.push('What you can do:');
+        const manualActions = error.recoveryActions.filter((a) => !a.automatic);
+        const autoActions = error.recoveryActions.filter((a) => a.automatic);
+        // Show manual actions first
+        for (let i = 0; i < manualActions.length; i++) {
+            lines.push(`  ${i + 1}. ${manualActions[i].description}`);
+        }
+        // Mention automatic recovery if available
+        if (autoActions.length > 0 && error.isRetryable) {
+            lines.push('');
+            lines.push('ℹ️  This error may be automatically recovered on retry.');
+        }
+    }
+    return lines.join('\n');
+}
+/**
+ * Check if an error is considered critical and should trigger graceful shutdown
+ */
+export function isCriticalError(error) {
+    // Critical severity always requires attention
+    if (error.severity === 'critical') {
+        return true;
+    }
+    // Specific error codes that should trigger shutdown
+    const criticalCodes = [
+        ErrorCode.GITHUB_AUTH_FAILED,
+        ErrorCode.CLAUDE_AUTH_FAILED,
+        ErrorCode.CONFIG_INVALID,
+        ErrorCode.CONFIG_MISSING_REQUIRED,
+        ErrorCode.DB_CONNECTION_FAILED,
+        ErrorCode.WORKSPACE_PERMISSION_DENIED,
+        ErrorCode.WORKSPACE_DISK_FULL,
+    ];
+    return criticalCodes.includes(error.code);
+}
+/**
+ * Check if an error is recoverable (daemon should continue running)
+ */
+export function isRecoverableError(error) {
+    // Transient errors are always recoverable
+    if (error.severity === 'transient') {
+        return true;
+    }
+    // Retryable errors are recoverable
+    if (error.isRetryable) {
+        return true;
+    }
+    // Non-critical errors are generally recoverable
+    if (error.severity !== 'critical') {
+        return true;
+    }
+    return false;
+}
+/**
+ * Create an error boundary wrapper for async functions
+ * Converts thrown errors to StructuredError and handles logging
+ */
+export async function withErrorBoundary(operation, options) {
+    try {
+        return await operation();
+    }
+    catch (error) {
+        const structuredError = wrapError(error, options.defaultErrorCode ?? ErrorCode.INTERNAL_ERROR, {
+            operation: options.operationName,
+            component: options.component,
+        });
+        // Call error handler if provided
+        options.onError?.(structuredError);
+        // Rethrow if requested
+        if (options.rethrow) {
+            throw structuredError;
+        }
+        return null;
+    }
 }
 //# sourceMappingURL=errors.js.map

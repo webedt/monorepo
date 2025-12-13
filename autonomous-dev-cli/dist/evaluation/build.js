@@ -2,6 +2,44 @@ import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
+import { BuildError, ErrorCode, } from '../utils/errors.js';
+/**
+ * Get error context for build operations
+ */
+function getErrorContext(repoPath, command) {
+    return {
+        operation: 'build',
+        component: 'BuildEvaluator',
+        repoPath,
+        command,
+    };
+}
+/**
+ * Create a BuildError with appropriate error code based on the failure
+ */
+function createBuildError(message, output, repoPath, command, exitCode, cause) {
+    // Determine error code based on output patterns
+    let code = ErrorCode.BUILD_FAILED;
+    if (output.includes('ETIMEDOUT') || output.includes('timed out')) {
+        code = ErrorCode.BUILD_TIMEOUT;
+    }
+    else if (output.includes('Cannot find module') || output.includes('Module not found')) {
+        code = ErrorCode.BUILD_DEPENDENCY_MISSING;
+    }
+    else if (output.includes('SyntaxError') ||
+        output.includes('Unexpected token') ||
+        output.includes('Invalid configuration')) {
+        code = ErrorCode.BUILD_CONFIG_INVALID;
+    }
+    return new BuildError(code, message, {
+        exitCode,
+        buildOutput: output,
+        command,
+        repoPath,
+        context: getErrorContext(repoPath, command),
+        cause,
+    });
+}
 export async function runBuild(options) {
     const { repoPath, packages = [], timeout = 5 * 60 * 1000 } = options;
     const startTime = Date.now();
@@ -37,12 +75,21 @@ export async function runBuild(options) {
             catch (execError) {
                 const stderr = execError.stderr?.toString() || '';
                 const stdout = execError.stdout?.toString() || '';
-                logger.error(`Build failed: ${command}`, { stderr, stdout });
+                const fullOutput = `${combinedOutput}\n=== ${command} (FAILED) ===\n${stdout}\n${stderr}`;
+                // Create structured error
+                const structuredError = createBuildError(`Build command failed: ${command}`, fullOutput, repoPath, command, execError.status, execError);
+                logger.error(`Build failed: ${command}`, {
+                    code: structuredError.code,
+                    exitCode: execError.status,
+                });
+                // Log user-friendly error message
+                logger.error(structuredError.getUserFriendlyMessage());
                 return {
                     success: false,
-                    output: `${combinedOutput}\n=== ${command} (FAILED) ===\n${stdout}\n${stderr}`,
+                    output: fullOutput,
                     duration: Date.now() - startTime,
                     error: `Build command failed: ${command}`,
+                    structuredError,
                 };
             }
         }
@@ -54,12 +101,24 @@ export async function runBuild(options) {
         };
     }
     catch (error) {
-        logger.error('Build verification failed', { error: error.message });
+        // Handle timeout or other unexpected errors
+        const isTimeout = error.message?.includes('ETIMEDOUT') || error.killed;
+        const errorCode = isTimeout ? ErrorCode.BUILD_TIMEOUT : ErrorCode.BUILD_FAILED;
+        const structuredError = new BuildError(errorCode, isTimeout ? 'Build timed out' : `Build verification failed: ${error.message}`, {
+            repoPath,
+            context: getErrorContext(repoPath),
+            cause: error,
+        });
+        logger.error('Build verification failed', {
+            code: structuredError.code,
+            message: structuredError.message,
+        });
         return {
             success: false,
             output: '',
             duration: Date.now() - startTime,
-            error: error.message,
+            error: structuredError.message,
+            structuredError,
         };
     }
 }
@@ -124,6 +183,7 @@ async function determineBuildCommands(repoPath, packages) {
 // Type-check only (faster than full build)
 export async function runTypeCheck(repoPath) {
     const startTime = Date.now();
+    const command = 'npx tsc --noEmit';
     logger.info('Running TypeScript type check...');
     // Find tsconfig
     const tsconfigPath = join(repoPath, 'tsconfig.json');
@@ -135,7 +195,7 @@ export async function runTypeCheck(repoPath) {
         };
     }
     try {
-        const output = execSync('npx tsc --noEmit', {
+        const output = execSync(command, {
             cwd: repoPath,
             encoding: 'utf-8',
             timeout: 3 * 60 * 1000, // 3 minutes
@@ -151,12 +211,19 @@ export async function runTypeCheck(repoPath) {
     catch (error) {
         const stderr = error.stderr?.toString() || '';
         const stdout = error.stdout?.toString() || '';
-        logger.error('Type check failed');
+        const fullOutput = `${stdout}\n${stderr}`;
+        // Create structured error
+        const structuredError = createBuildError('TypeScript type check failed', fullOutput, repoPath, command, error.status, error);
+        logger.error('Type check failed', {
+            code: structuredError.code,
+            exitCode: error.status,
+        });
         return {
             success: false,
-            output: `${stdout}\n${stderr}`,
+            output: fullOutput,
             duration: Date.now() - startTime,
             error: 'TypeScript type check failed',
+            structuredError,
         };
     }
 }

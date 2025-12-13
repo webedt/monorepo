@@ -1,5 +1,11 @@
 import { GitHubClient } from './client.js';
 import { logger } from '../utils/logger.js';
+import {
+  GitHubError,
+  ErrorCode,
+  createGitHubErrorFromResponse,
+  type ErrorContext,
+} from '../utils/errors.js';
 
 export interface PullRequest {
   number: number;
@@ -44,6 +50,27 @@ export function createPRManager(client: GitHubClient): PRManager {
   const octokit = client.client;
   const { owner, repo } = client;
 
+  /**
+   * Get error context for debugging
+   */
+  const getErrorContext = (operation: string, extra?: Record<string, unknown>): ErrorContext => ({
+    operation,
+    component: 'PRManager',
+    owner,
+    repo,
+    ...extra,
+  });
+
+  /**
+   * Handle and convert errors to structured GitHubError
+   */
+  const handleError = (error: any, operation: string, extra?: Record<string, unknown>): GitHubError => {
+    if (error instanceof GitHubError) {
+      return error;
+    }
+    return createGitHubErrorFromResponse(error, `pulls.${operation}`, getErrorContext(operation, extra));
+  };
+
   const mapPR = (data: any): PullRequest => ({
     number: data.number,
     title: data.title,
@@ -68,9 +95,13 @@ export function createPRManager(client: GitHubClient): PRManager {
         });
 
         return data.map(mapPR);
-      } catch (error) {
-        logger.error('Failed to list PRs', { error });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'listOpenPRs');
+        logger.error('Failed to list PRs', {
+          code: structuredError.code,
+          message: structuredError.message,
+        });
+        throw structuredError;
       }
     },
 
@@ -84,10 +115,18 @@ export function createPRManager(client: GitHubClient): PRManager {
 
         return mapPR(data);
       } catch (error: any) {
+        // Return null for 404 (PR not found)
         if (error.status === 404) {
+          logger.debug(`PR #${number} not found`, { prNumber: number });
           return null;
         }
-        throw error;
+        const structuredError = handleError(error, 'getPR', { prNumber: number });
+        logger.error('Failed to get PR', {
+          code: structuredError.code,
+          message: structuredError.message,
+          prNumber: number,
+        });
+        throw structuredError;
       }
     },
 
@@ -117,9 +156,14 @@ export function createPRManager(client: GitHubClient): PRManager {
         }
 
         return mapPR(data[0]);
-      } catch (error) {
-        logger.error('Failed to find PR for branch', { error, branchName });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'findPRForBranch', { branchName, base });
+        logger.error('Failed to find PR for branch', {
+          code: structuredError.code,
+          message: structuredError.message,
+          branchName,
+        });
+        throw structuredError;
       }
     },
 
@@ -153,8 +197,17 @@ export function createPRManager(client: GitHubClient): PRManager {
             return existing;
           }
         }
-        logger.error('Failed to create PR', { error, head: options.head });
-        throw error;
+        const structuredError = handleError(error, 'createPR', {
+          head: options.head,
+          base: options.base,
+          title: options.title,
+        });
+        logger.error('Failed to create PR', {
+          code: structuredError.code,
+          message: structuredError.message,
+          head: options.head,
+        });
+        throw structuredError;
       }
     },
 
@@ -175,12 +228,42 @@ export function createPRManager(client: GitHubClient): PRManager {
           message: data.message,
         };
       } catch (error: any) {
-        logger.error('Failed to merge PR', { error, number, method });
+        // Handle merge conflicts specifically
+        if (error.status === 405 || error.status === 409) {
+          const structuredError = new GitHubError(
+            ErrorCode.GITHUB_PR_CONFLICT,
+            `Cannot merge PR #${number}: ${error.message || 'merge conflict or branch not mergeable'}`,
+            {
+              statusCode: error.status,
+              endpoint: 'pulls.merge',
+              context: getErrorContext('mergePR', { prNumber: number, method }),
+              cause: error,
+            }
+          );
+          logger.warn('Merge failed due to conflict', {
+            code: structuredError.code,
+            prNumber: number,
+            method,
+          });
+          return {
+            merged: false,
+            sha: null,
+            message: structuredError.message,
+          };
+        }
+
+        const structuredError = handleError(error, 'mergePR', { prNumber: number, method });
+        logger.error('Failed to merge PR', {
+          code: structuredError.code,
+          message: structuredError.message,
+          prNumber: number,
+          method,
+        });
 
         return {
           merged: false,
           sha: null,
-          message: error.message || 'Merge failed',
+          message: structuredError.message,
         };
       }
     },
@@ -194,9 +277,14 @@ export function createPRManager(client: GitHubClient): PRManager {
           state: 'closed',
         });
         logger.info(`Closed PR #${number}`);
-      } catch (error) {
-        logger.error('Failed to close PR', { error, number });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'closePR', { prNumber: number });
+        logger.error('Failed to close PR', {
+          code: structuredError.code,
+          message: structuredError.message,
+          prNumber: number,
+        });
+        throw structuredError;
       }
     },
 
@@ -204,7 +292,7 @@ export function createPRManager(client: GitHubClient): PRManager {
       try {
         const pr = await this.getPR(number);
         if (!pr) {
-          logger.error('PR not found', { number });
+          logger.warn('PR not found for update', { prNumber: number });
           return false;
         }
 
@@ -226,12 +314,30 @@ export function createPRManager(client: GitHubClient): PRManager {
           return true;
         }
         if (error.status === 409) {
-          // Merge conflict
-          logger.warn(`PR #${number} has merge conflicts`);
+          // Merge conflict - this is expected and not a true error
+          const conflictError = new GitHubError(
+            ErrorCode.GITHUB_PR_CONFLICT,
+            `PR #${number} has merge conflicts that require manual resolution`,
+            {
+              statusCode: 409,
+              endpoint: 'repos.merge',
+              context: getErrorContext('updatePRFromBase', { prNumber: number }),
+              cause: error,
+            }
+          );
+          logger.warn('PR has merge conflicts', {
+            code: conflictError.code,
+            prNumber: number,
+          });
           return false;
         }
-        logger.error('Failed to update PR from base', { error, number });
-        throw error;
+        const structuredError = handleError(error, 'updatePRFromBase', { prNumber: number });
+        logger.error('Failed to update PR from base', {
+          code: structuredError.code,
+          message: structuredError.message,
+          prNumber: number,
+        });
+        throw structuredError;
       }
     },
 
@@ -239,6 +345,7 @@ export function createPRManager(client: GitHubClient): PRManager {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const pr = await this.getPR(number);
         if (!pr) {
+          logger.debug(`PR #${number} not found while waiting for mergeability`);
           return false;
         }
 
@@ -247,7 +354,7 @@ export function createPRManager(client: GitHubClient): PRManager {
         }
 
         if (pr.mergeable === false) {
-          logger.warn(`PR #${number} has conflicts`);
+          logger.warn(`PR #${number} has conflicts and is not mergeable`);
           return false;
         }
 
@@ -256,7 +363,7 @@ export function createPRManager(client: GitHubClient): PRManager {
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
 
-      logger.warn(`Timed out waiting for PR #${number} mergeability`);
+      logger.warn(`Timed out waiting for PR #${number} mergeability after ${maxAttempts} attempts`);
       return false;
     },
 
@@ -275,9 +382,14 @@ export function createPRManager(client: GitHubClient): PRManager {
             state: s.state,
           })),
         };
-      } catch (error) {
-        logger.error('Failed to get checks status', { error, ref });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'getChecksStatus', { ref });
+        logger.error('Failed to get checks status', {
+          code: structuredError.code,
+          message: structuredError.message,
+          ref,
+        });
+        throw structuredError;
       }
     },
   };

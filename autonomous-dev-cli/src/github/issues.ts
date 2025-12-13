@@ -1,5 +1,11 @@
 import { GitHubClient } from './client.js';
 import { logger } from '../utils/logger.js';
+import {
+  GitHubError,
+  ErrorCode,
+  createGitHubErrorFromResponse,
+  type ErrorContext,
+} from '../utils/errors.js';
 
 export interface Issue {
   number: number;
@@ -31,6 +37,27 @@ export interface IssueManager {
 export function createIssueManager(client: GitHubClient): IssueManager {
   const octokit = client.client;
   const { owner, repo } = client;
+
+  /**
+   * Get error context for debugging
+   */
+  const getErrorContext = (operation: string, extra?: Record<string, unknown>): ErrorContext => ({
+    operation,
+    component: 'IssueManager',
+    owner,
+    repo,
+    ...extra,
+  });
+
+  /**
+   * Handle and convert errors to structured GitHubError
+   */
+  const handleError = (error: any, operation: string, extra?: Record<string, unknown>): GitHubError => {
+    if (error instanceof GitHubError) {
+      return error;
+    }
+    return createGitHubErrorFromResponse(error, `issues.${operation}`, getErrorContext(operation, extra));
+  };
 
   return {
     async listOpenIssues(label?: string): Promise<Issue[]> {
@@ -67,9 +94,14 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           createdAt: issue.created_at,
           assignee: issue.assignee?.login || null,
         }));
-      } catch (error) {
-        logger.error('Failed to list issues', { error });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'listOpenIssues', { label });
+        logger.error('Failed to list issues', {
+          code: structuredError.code,
+          message: structuredError.message,
+          label,
+        });
+        throw structuredError;
       }
     },
 
@@ -92,10 +124,18 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           assignee: data.assignee?.login || null,
         };
       } catch (error: any) {
+        // Return null for 404 (issue not found)
         if (error.status === 404) {
+          logger.debug(`Issue #${number} not found`, { issueNumber: number });
           return null;
         }
-        throw error;
+        const structuredError = handleError(error, 'getIssue', { issueNumber: number });
+        logger.error('Failed to get issue', {
+          code: structuredError.code,
+          message: structuredError.message,
+          issueNumber: number,
+        });
+        throw structuredError;
       }
     },
 
@@ -121,9 +161,17 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           createdAt: data.created_at,
           assignee: data.assignee?.login || null,
         };
-      } catch (error) {
-        logger.error('Failed to create issue', { error, title: options.title });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'createIssue', {
+          title: options.title,
+          labelsCount: options.labels?.length ?? 0,
+        });
+        logger.error('Failed to create issue', {
+          code: structuredError.code,
+          message: structuredError.message,
+          title: options.title,
+        });
+        throw structuredError;
       }
     },
 
@@ -136,9 +184,15 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           labels,
         });
         logger.debug(`Added labels to issue #${issueNumber}`, { labels });
-      } catch (error) {
-        logger.error('Failed to add labels', { error, issueNumber, labels });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'addLabels', { issueNumber, labels });
+        logger.error('Failed to add labels', {
+          code: structuredError.code,
+          message: structuredError.message,
+          issueNumber,
+          labels,
+        });
+        throw structuredError;
       }
     },
 
@@ -152,10 +206,19 @@ export function createIssueManager(client: GitHubClient): IssueManager {
         });
         logger.debug(`Removed label '${label}' from issue #${issueNumber}`);
       } catch (error: any) {
-        // Ignore if label doesn't exist
-        if (error.status !== 404) {
-          throw error;
+        // Ignore if label doesn't exist (404)
+        if (error.status === 404) {
+          logger.debug(`Label '${label}' not found on issue #${issueNumber}`);
+          return;
         }
+        const structuredError = handleError(error, 'removeLabel', { issueNumber, label });
+        logger.error('Failed to remove label', {
+          code: structuredError.code,
+          message: structuredError.message,
+          issueNumber,
+          label,
+        });
+        throw structuredError;
       }
     },
 
@@ -178,9 +241,14 @@ export function createIssueManager(client: GitHubClient): IssueManager {
         });
 
         logger.info(`Closed issue #${issueNumber}`);
-      } catch (error) {
-        logger.error('Failed to close issue', { error, issueNumber });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'closeIssue', { issueNumber, hasComment: !!comment });
+        logger.error('Failed to close issue', {
+          code: structuredError.code,
+          message: structuredError.message,
+          issueNumber,
+        });
+        throw structuredError;
       }
     },
 
@@ -193,9 +261,17 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           body,
         });
         logger.debug(`Added comment to issue #${issueNumber}`);
-      } catch (error) {
-        logger.error('Failed to add comment', { error, issueNumber });
-        throw error;
+      } catch (error: any) {
+        const structuredError = handleError(error, 'addComment', {
+          issueNumber,
+          bodyLength: body.length,
+        });
+        logger.error('Failed to add comment', {
+          code: structuredError.code,
+          message: structuredError.message,
+          issueNumber,
+        });
+        throw structuredError;
       }
     },
   };

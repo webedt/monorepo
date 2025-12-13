@@ -2,6 +2,52 @@ import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
+import { TestError, ErrorCode, } from '../utils/errors.js';
+/**
+ * Get error context for test operations
+ */
+function getErrorContext(repoPath, command) {
+    return {
+        operation: 'test',
+        component: 'TestEvaluator',
+        repoPath,
+        command,
+    };
+}
+/**
+ * Create a TestError with appropriate error code based on the failure
+ */
+function createTestError(message, output, repoPath, testsRun, testsPassed, testsFailed, command, exitCode, cause) {
+    // Determine error code based on output patterns
+    let code = ErrorCode.TEST_FAILED;
+    if (output.includes('ETIMEDOUT') || output.includes('timed out') || output.includes('Exceeded timeout')) {
+        code = ErrorCode.TEST_TIMEOUT;
+    }
+    else if (output.includes('Cannot find module') || output.includes('Module not found')) {
+        code = ErrorCode.TEST_ENVIRONMENT_ERROR;
+    }
+    else if (output.includes('ECONNREFUSED') ||
+        output.includes('Connection refused') ||
+        output.includes('database')) {
+        code = ErrorCode.TEST_ENVIRONMENT_ERROR;
+    }
+    else if (output.includes('Invalid configuration') ||
+        output.includes('Configuration error') ||
+        output.includes('jest.config')) {
+        code = ErrorCode.TEST_CONFIG_INVALID;
+    }
+    return new TestError(code, message, {
+        exitCode,
+        testOutput: output,
+        testsRun,
+        testsPassed,
+        testsFailed,
+        command,
+        repoPath,
+        context: getErrorContext(repoPath, command),
+        cause,
+    });
+}
 export async function runTests(options) {
     const { repoPath, packages = [], timeout = 10 * 60 * 1000, testPattern } = options;
     const startTime = Date.now();
@@ -24,8 +70,10 @@ export async function runTests(options) {
         let passedTests = 0;
         let failedTests = 0;
         let hasFailure = false;
+        let lastCommand = '';
         for (const { command, cwd } of testCommands) {
             const fullCommand = testPattern ? `${command} -- --testPathPattern="${testPattern}"` : command;
+            lastCommand = fullCommand;
             logger.info(`Running: ${fullCommand} in ${cwd}`);
             try {
                 const output = execSync(fullCommand, {
@@ -57,10 +105,18 @@ export async function runTests(options) {
                 passedTests += stats.passed;
                 failedTests += stats.failed;
                 hasFailure = true;
-                logger.error(`Tests failed: ${command}`);
+                logger.error(`Tests failed: ${command}`, {
+                    exitCode: execError.status,
+                    testsRun: stats.total,
+                    testsFailed: stats.failed,
+                });
             }
         }
         if (hasFailure) {
+            // Create structured error for test failures
+            const structuredError = createTestError(`${failedTests} test(s) failed`, combinedOutput, repoPath, totalTests, passedTests, failedTests, lastCommand);
+            // Log user-friendly error message
+            logger.error(structuredError.getUserFriendlyMessage());
             return {
                 success: false,
                 output: combinedOutput,
@@ -69,6 +125,7 @@ export async function runTests(options) {
                 testsPassed: passedTests,
                 testsFailed: failedTests,
                 error: `${failedTests} test(s) failed`,
+                structuredError,
             };
         }
         logger.success(`Tests passed: ${passedTests}/${totalTests}`);
@@ -82,7 +139,21 @@ export async function runTests(options) {
         };
     }
     catch (error) {
-        logger.error('Test execution failed', { error: error.message });
+        // Handle timeout or other unexpected errors
+        const isTimeout = error.message?.includes('ETIMEDOUT') || error.killed;
+        const errorCode = isTimeout ? ErrorCode.TEST_TIMEOUT : ErrorCode.TEST_FAILED;
+        const structuredError = new TestError(errorCode, isTimeout ? 'Test execution timed out' : `Test execution failed: ${error.message}`, {
+            repoPath,
+            testsRun: 0,
+            testsPassed: 0,
+            testsFailed: 0,
+            context: getErrorContext(repoPath),
+            cause: error,
+        });
+        logger.error('Test execution failed', {
+            code: structuredError.code,
+            message: structuredError.message,
+        });
         return {
             success: false,
             output: '',
@@ -90,7 +161,8 @@ export async function runTests(options) {
             testsRun: 0,
             testsPassed: 0,
             testsFailed: 0,
-            error: error.message,
+            error: structuredError.message,
+            structuredError,
         };
     }
 }
