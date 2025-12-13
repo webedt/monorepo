@@ -1,5 +1,6 @@
 import { Worker, type WorkerOptions, type WorkerTask, type WorkerResult } from './worker.js';
-import { logger } from '../utils/logger.js';
+import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId } from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
 
 export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
   maxWorkers: number;
@@ -21,10 +22,33 @@ export class WorkerPool {
   private results: PoolResult[] = [];
   private isRunning: boolean = false;
   private workerIdCounter: number = 0;
+  private repository: string;
 
   constructor(options: WorkerPoolOptions) {
     this.options = options;
-    logger.info(`Worker pool initialized with ${options.maxWorkers} max workers`);
+    this.repository = this.extractRepoName(options.repoUrl);
+    logger.info(`Worker pool initialized with ${options.maxWorkers} max workers`, {
+      maxWorkers: options.maxWorkers,
+      repository: this.repository,
+    });
+
+    // Initialize worker pool metrics
+    metrics.updateWorkerPoolStatus(0, 0);
+  }
+
+  /**
+   * Extract repository name from URL for metrics labeling
+   */
+  private extractRepoName(repoUrl: string): string {
+    const match = repoUrl.match(/github\.com[\/:]([^\/]+\/[^\/]+?)(?:\.git)?$/);
+    return match ? match[1] : repoUrl;
+  }
+
+  /**
+   * Update worker pool metrics
+   */
+  private updateMetrics(): void {
+    metrics.updateWorkerPoolStatus(this.activeWorkers.size, this.taskQueue.length);
   }
 
   async executeTasks(tasks: WorkerTask[]): Promise<PoolResult[]> {
@@ -35,7 +59,13 @@ export class WorkerPool {
       id: `task-${index + 1}`,
     }));
 
-    logger.info(`Executing ${tasks.length} tasks with up to ${this.options.maxWorkers} workers`);
+    logger.info(`Executing ${tasks.length} tasks with up to ${this.options.maxWorkers} workers`, {
+      taskCount: tasks.length,
+      maxWorkers: this.options.maxWorkers,
+    });
+
+    // Update initial metrics
+    this.updateMetrics();
 
     // Start initial workers
     while (this.activeWorkers.size < this.options.maxWorkers && this.taskQueue.length > 0) {
@@ -57,6 +87,9 @@ export class WorkerPool {
         // Remove completed worker
         this.activeWorkers.delete(completedId);
 
+        // Update metrics after worker completion
+        this.updateMetrics();
+
         // Start next task if available
         if (this.taskQueue.length > 0 && this.isRunning) {
           this.startNextTask();
@@ -64,7 +97,17 @@ export class WorkerPool {
       }
     }
 
-    logger.info(`All tasks completed: ${this.results.filter(r => r.success).length}/${this.results.length} succeeded`);
+    const succeeded = this.results.filter(r => r.success).length;
+    const failed = this.results.filter(r => !r.success).length;
+
+    logger.info(`All tasks completed: ${succeeded}/${this.results.length} succeeded`, {
+      succeeded,
+      failed,
+      total: this.results.length,
+    });
+
+    // Reset pool metrics
+    metrics.updateWorkerPoolStatus(0, 0);
 
     return this.results;
   }
@@ -74,7 +117,14 @@ export class WorkerPool {
     if (!task) return;
 
     const workerId = `worker-${++this.workerIdCounter}`;
-    logger.info(`Starting ${task.id} with ${workerId}: ${task.issue.title}`);
+    logger.info(`Starting ${task.id} with ${workerId}: ${task.issue.title}`, {
+      taskId: task.id,
+      workerId,
+      issueNumber: task.issue.number,
+    });
+
+    // Update metrics after task is dequeued
+    this.updateMetrics();
 
     const worker = new Worker(
       {
