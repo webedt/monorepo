@@ -173,10 +173,11 @@ Return ONLY the JSON array, no other text.`;
     ensureClaudeCredentials(this.claudeAuth);
 
     // Use Claude Agent SDK which handles OAuth automatically
+    // maxTurns needs to be high enough for Claude to explore and return results
     const options: Options = {
       model: 'claude-sonnet-4-20250514',
       cwd: this.repoPath,
-      maxTurns: 1,
+      maxTurns: 20,
       allowDangerouslySkipPermissions: true,
       permissionMode: 'bypassPermissions',
     };
