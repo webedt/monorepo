@@ -7,6 +7,7 @@ A powerful CLI tool that runs as a continuous daemon to autonomously develop you
 ## Table of Contents
 
 - [Features](#features)
+- [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quick Start (5 Steps)](#quick-start)
@@ -32,6 +33,7 @@ A powerful CLI tool that runs as a continuous daemon to autonomously develop you
 - [Troubleshooting](#troubleshooting)
 - [Documentation](#documentation)
 - [Development](#development)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Features
@@ -43,6 +45,71 @@ A powerful CLI tool that runs as a continuous daemon to autonomously develop you
 - **Auto-Merge**: Automatically merges PRs when all checks pass
 - **Conflict Resolution**: Handles merge conflicts with configurable strategies (rebase, merge, or manual)
 - **Database Credential Storage**: Optionally stores and retrieves credentials from PostgreSQL
+
+## Architecture Overview
+
+The Autonomous Dev CLI orchestrates multiple components to provide end-to-end autonomous development:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          AUTONOMOUS DEV CLI                                      │
+│                                                                                  │
+│  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐        │
+│  │   Config Loader  │────▶│  Daemon Manager  │────▶│  Cycle Executor  │        │
+│  │                  │     │                  │     │                  │        │
+│  │  - JSON config   │     │  - Loop control  │     │  - Orchestrates  │        │
+│  │  - Env vars      │     │  - Graceful stop │     │    all phases    │        │
+│  │  - Validation    │     │  - Intervals     │     │                  │        │
+│  └──────────────────┘     └──────────────────┘     └────────┬─────────┘        │
+│                                                              │                  │
+│                                                              ▼                  │
+│  ┌──────────────────────────────────────────────────────────────────────────┐  │
+│  │                           DEVELOPMENT CYCLE                               │  │
+│  │                                                                          │  │
+│  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌───────────┐ │  │
+│  │  │  DISCOVER   │───▶│   CREATE    │───▶│  IMPLEMENT  │───▶│  EVALUATE │ │  │
+│  │  │             │    │   ISSUES    │    │  (Parallel) │    │           │ │  │
+│  │  │ Claude AI   │    │  GitHub API │    │ Worker Pool │    │ Build/Test│ │  │
+│  │  └─────────────┘    └─────────────┘    └─────────────┘    └─────┬─────┘ │  │
+│  │                                                                  │       │  │
+│  │                                         ┌────────────────────────┘       │  │
+│  │                                         ▼                                │  │
+│  │                                   ┌───────────┐                          │  │
+│  │                                   │   MERGE   │                          │  │
+│  │                                   │           │                          │  │
+│  │                                   │ Auto-PR   │                          │  │
+│  │                                   │ Conflicts │                          │  │
+│  │                                   └───────────┘                          │  │
+│  │                                                                          │  │
+│  └──────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    │                   │                   │
+                    ▼                   ▼                   ▼
+           ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+           │   GitHub     │    │   Claude     │    │  PostgreSQL  │
+           │   API        │    │   Agent SDK  │    │  (Optional)  │
+           │              │    │              │    │              │
+           │ - Issues     │    │ - Analysis   │    │ - Credential │
+           │ - PRs        │    │ - Discovery  │    │   storage    │
+           │ - Branches   │    │ - Implement  │    │              │
+           └──────────────┘    └──────────────┘    └──────────────┘
+```
+
+### Component Responsibilities
+
+| Component | Description |
+|-----------|-------------|
+| **Config Loader** | Reads configuration from JSON files and environment variables, validates settings |
+| **Daemon Manager** | Controls the continuous loop, handles signals for graceful shutdown |
+| **Cycle Executor** | Orchestrates the 5-phase development cycle |
+| **Discovery Module** | Uses Claude AI to analyze codebase and suggest improvements |
+| **GitHub Client** | Manages issues, pull requests, branches via Octokit |
+| **Worker Pool** | Executes multiple implementations in parallel |
+| **Evaluation Engine** | Runs build, tests, and health checks |
+| **Merge Handler** | Creates PRs, handles conflicts, auto-merges passing changes |
 
 ## Prerequisites
 
@@ -982,6 +1049,60 @@ autonomous-dev-cli/
 └── autonomous-dev.config.example.json
 ```
 
+## Contributing
+
+Contributions are welcome! Here's how you can help:
+
+### Reporting Issues
+
+- Check existing issues before creating a new one
+- Provide clear reproduction steps
+- Include relevant configuration and error logs
+
+### Pull Requests
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Make your changes following the coding style
+4. Run tests: `npm test`
+5. Build the project: `npm run build`
+6. Commit with clear messages (imperative mood, no prefixes)
+7. Push and create a pull request
+
+### Development Guidelines
+
+- Follow TypeScript best practices
+- Add tests for new features
+- Update documentation for API changes
+- Keep PRs focused on a single change
+
+### Code Style
+
+- Use TypeScript strict mode
+- Prefer `async/await` over raw promises
+- Use meaningful variable and function names
+- Add JSDoc comments for public APIs
+
 ## License
 
-MIT
+MIT License
+
+Copyright (c) 2024 ETdoFresh
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
