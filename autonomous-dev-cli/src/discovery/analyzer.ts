@@ -1119,7 +1119,7 @@ export class CodebaseAnalyzer {
 
     // Full analysis (when not doing incremental)
     if (!incrementalUpdate) {
-      // Time directory scanning (async)
+      // Time directory scanning (async) - must complete first for file count
       const scanResult = await timeOperation(
         () => this.scanDirectory(this.repoPath),
         'scanDirectory'
@@ -1137,7 +1137,7 @@ export class CodebaseAnalyzer {
         logger.warn(`File limit reached (${this.maxFiles}). Some files may not be included in analysis.`);
       }
 
-      // Report progress: analyzing TODOs
+      // Report progress: starting parallel analysis phase
       this.reportProgress({
         phase: 'analyzing-todos',
         filesScanned: this.fileCount,
@@ -1145,38 +1145,60 @@ export class CodebaseAnalyzer {
         percentComplete: 25,
       });
 
-      todoComments = await this.findTodoComments();
+      // Run independent analysis tasks in parallel for better performance
+      // This significantly improves analysis time for large codebases
+      const parallelAnalysisStart = Date.now();
 
-      // Report progress: analyzing packages
-      this.reportProgress({
-        phase: 'analyzing-packages',
-        filesScanned: this.fileCount,
-        totalFiles: this.fileCount,
-        percentComplete: 50,
+      const [todoResult, packagesResult, configResult, gitResult] = await Promise.all([
+        // TODO comments analysis (independent of other analyses)
+        this.findTodoComments().then(result => {
+          this.reportProgress({
+            phase: 'analyzing-packages',
+            filesScanned: this.fileCount,
+            totalFiles: this.fileCount,
+            percentComplete: 40,
+          });
+          return result;
+        }),
+        // Package analysis (independent of other analyses)
+        this.findPackages().then(result => {
+          this.reportProgress({
+            phase: 'analyzing-config',
+            filesScanned: this.fileCount,
+            totalFiles: this.fileCount,
+            percentComplete: 55,
+          });
+          return result;
+        }),
+        // Config file analysis (independent of other analyses)
+        this.findConfigFiles().then(result => {
+          return result;
+        }),
+        // Git analysis (independent of other analyses)
+        this.analyzeGit().then(result => {
+          this.reportProgress({
+            phase: 'analyzing-git',
+            filesScanned: this.fileCount,
+            totalFiles: this.fileCount,
+            percentComplete: 75,
+          });
+          return result;
+        }),
+      ]);
+
+      todoComments = todoResult;
+      packages = packagesResult;
+      configFiles = configResult;
+      gitAnalysis = gitResult;
+
+      const parallelDuration = Date.now() - parallelAnalysisStart;
+      logger.debug('Parallel analysis complete', {
+        duration: parallelDuration,
+        todoCount: todoComments.length,
+        packageCount: packages.length,
+        configCount: configFiles.length,
+        hasGitAnalysis: !!gitAnalysis,
       });
-
-      packages = await this.findPackages();
-
-      // Report progress: analyzing config
-      this.reportProgress({
-        phase: 'analyzing-config',
-        filesScanned: this.fileCount,
-        totalFiles: this.fileCount,
-        percentComplete: 60,
-      });
-
-      configFiles = await this.findConfigFiles();
-
-      // Report progress: analyzing git
-      this.reportProgress({
-        phase: 'analyzing-git',
-        filesScanned: this.fileCount,
-        totalFiles: this.fileCount,
-        percentComplete: 75,
-      });
-
-      // Perform git analysis
-      gitAnalysis = await this.analyzeGit();
     }
 
     // Generate recentChanges from git analysis for backward compatibility
@@ -1463,29 +1485,31 @@ export class CodebaseAnalyzer {
       }
     };
 
+    // Collect all file paths first, then process in parallel with concurrency limit
+    const filesToScan: string[] = [];
+
     /**
-     * Scan directory recursively for files with TODO comments
+     * Collect files recursively from directory
      */
-    const scanDir = async (dirPath: string, depth: number = 0): Promise<void> => {
+    const collectFiles = async (dirPath: string, depth: number = 0): Promise<void> => {
       // Enforce depth limit
       if (depth > this.maxDepth) {
         return;
       }
 
-      if (scannedFiles >= this.maxFiles) {
+      if (filesToScan.length >= this.maxFiles) {
         return;
       }
 
       try {
         const items = await readdir(dirPath);
+        const subDirs: string[] = [];
+        const files: string[] = [];
 
-        for (const item of items) {
-          if (scannedFiles >= this.maxFiles) {
-            break;
-          }
-
+        // Sort items into files and directories
+        await Promise.all(items.map(async (item) => {
           if (IGNORED_DIRS.has(item)) {
-            continue;
+            return;
           }
 
           const fullPath = join(dirPath, item);
@@ -1493,27 +1517,51 @@ export class CodebaseAnalyzer {
 
           // Check exclude paths
           if (this.shouldExclude(relativePath)) {
-            continue;
+            return;
           }
 
           try {
             const fileStat = await stat(fullPath);
-
             if (fileStat.isDirectory()) {
-              await scanDir(fullPath, depth + 1);
+              subDirs.push(fullPath);
             } else if (fileStat.isFile()) {
-              await scanFile(fullPath);
+              files.push(fullPath);
             }
           } catch {
             // Skip inaccessible files
           }
-        }
+        }));
+
+        // Add files to scan list
+        filesToScan.push(...files);
+
+        // Recursively collect from subdirectories in parallel
+        await Promise.all(subDirs.map(dir => collectFiles(dir, depth + 1)));
       } catch {
         // Skip inaccessible directories
       }
     };
 
-    await scanDir(this.repoPath);
+    // Phase 1: Collect all files to scan
+    await collectFiles(this.repoPath);
+
+    // Limit to maxFiles
+    const filesToProcess = filesToScan.slice(0, this.maxFiles);
+
+    // Phase 2: Process files in parallel with concurrency limit
+    // Using a concurrency limit prevents overwhelming the filesystem
+    const CONCURRENCY_LIMIT = 10;
+    const fileChunks: string[][] = [];
+    for (let i = 0; i < filesToProcess.length; i += CONCURRENCY_LIMIT) {
+      fileChunks.push(filesToProcess.slice(i, i + CONCURRENCY_LIMIT));
+    }
+
+    for (const chunk of fileChunks) {
+      if (scannedFiles >= this.maxFiles) {
+        break;
+      }
+      await Promise.all(chunk.map(file => scanFile(file)));
+    }
 
     return todos;
   }
@@ -1521,24 +1569,26 @@ export class CodebaseAnalyzer {
   /**
    * Find TODO comments in a specific list of files (for incremental analysis)
    * This is more efficient than scanning the entire codebase when only
-   * a few files have changed.
+   * a few files have changed. Uses parallel processing with concurrency limit.
    */
   private async findTodoCommentsInFiles(filePaths: string[]): Promise<TodoComment[]> {
     const todos: TodoComment[] = [];
-    const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)/gi;
 
     logger.debug('Scanning specific files for TODOs', {
       fileCount: filePaths.length,
     });
 
-    for (const relativePath of filePaths) {
-      const fullPath = join(this.repoPath, relativePath);
-      const ext = extname(fullPath);
+    // Filter to only code files
+    const codeFiles = filePaths.filter(relativePath => {
+      const ext = extname(relativePath);
+      return CODE_EXTENSIONS.has(ext);
+    });
 
-      // Skip non-code files
-      if (!CODE_EXTENSIONS.has(ext)) {
-        continue;
-      }
+    // Process file and return found TODOs
+    const processFile = async (relativePath: string): Promise<TodoComment[]> => {
+      const fileTodos: TodoComment[] = [];
+      const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)/gi;
+      const fullPath = join(this.repoPath, relativePath);
 
       try {
         // Check if file exists and get stats
@@ -1547,12 +1597,12 @@ export class CodebaseAnalyzer {
         // Skip files larger than max size limit
         if (fileStat.size > this.maxFileSizeBytes) {
           logger.debug(`Skipping large file for TODO scan: ${fullPath}`);
-          continue;
+          return fileTodos;
         }
 
         // Use streaming for large files (>1MB)
         if (fileStat.size > 1024 * 1024) {
-          await this.scanFileWithStream(fullPath, todoPattern, todos);
+          await this.scanFileWithStream(fullPath, todoPattern, fileTodos);
         } else {
           // For smaller files, read entire content
           const content = await readFile(fullPath, 'utf-8');
@@ -1565,7 +1615,7 @@ export class CodebaseAnalyzer {
             const matches = line.matchAll(todoPattern);
 
             for (const match of matches) {
-              todos.push({
+              fileTodos.push({
                 file: relativePath,
                 line: i + 1,
                 text: match[2]?.trim() || '',
@@ -1579,10 +1629,26 @@ export class CodebaseAnalyzer {
         // This is expected for deleted files
         logger.debug(`Skipping inaccessible file: ${relativePath}`);
       }
+
+      return fileTodos;
+    };
+
+    // Process files in parallel with concurrency limit
+    const CONCURRENCY_LIMIT = 10;
+    const fileChunks: string[][] = [];
+    for (let i = 0; i < codeFiles.length; i += CONCURRENCY_LIMIT) {
+      fileChunks.push(codeFiles.slice(i, i + CONCURRENCY_LIMIT));
+    }
+
+    for (const chunk of fileChunks) {
+      const chunkResults = await Promise.all(chunk.map(file => processFile(file)));
+      for (const fileTodos of chunkResults) {
+        todos.push(...fileTodos);
+      }
     }
 
     logger.debug('Incremental TODO scan complete', {
-      filesScanned: filePaths.length,
+      filesScanned: codeFiles.length,
       todosFound: todos.length,
     });
 

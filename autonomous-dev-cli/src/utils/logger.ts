@@ -154,6 +154,35 @@ export interface PerformanceMetrics {
   timestamp: string;
 }
 
+/**
+ * Get current memory usage in megabytes
+ * This is a utility function for monitoring memory consumption
+ */
+export function getMemoryUsageMB(): number {
+  const usage = memoryUsage();
+  return Math.round((usage.heapUsed / (1024 * 1024)) * 100) / 100;
+}
+
+/**
+ * Get detailed memory usage statistics
+ */
+export function getDetailedMemoryUsage(): {
+  heapUsedMB: number;
+  heapTotalMB: number;
+  externalMB: number;
+  rssMB: number;
+  arrayBuffersMB: number;
+} {
+  const usage = memoryUsage();
+  return {
+    heapUsedMB: Math.round((usage.heapUsed / (1024 * 1024)) * 100) / 100,
+    heapTotalMB: Math.round((usage.heapTotal / (1024 * 1024)) * 100) / 100,
+    externalMB: Math.round((usage.external / (1024 * 1024)) * 100) / 100,
+    rssMB: Math.round((usage.rss / (1024 * 1024)) * 100) / 100,
+    arrayBuffersMB: Math.round((usage.arrayBuffers / (1024 * 1024)) * 100) / 100,
+  };
+}
+
 export type LogFormat = 'pretty' | 'json';
 
 interface LoggerOptions {

@@ -1,5 +1,5 @@
 import { Worker, type WorkerOptions, type WorkerTask, type WorkerResult } from './worker.js';
-import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId } from '../utils/logger.js';
+import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId, getMemoryUsageMB } from '../utils/logger.js';
 import {
   getProgressManager,
   createProgressBar,
@@ -24,6 +24,7 @@ import {
 } from '../errors/executor-errors.js';
 import { StructuredError } from '../utils/errors.js';
 import * as os from 'os';
+import { EventEmitter } from 'events';
 
 /** Task priority levels - higher value = higher priority */
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -101,6 +102,24 @@ export interface QueueConfig {
   enablePersistence: boolean;
 }
 
+/** Concurrency configuration for fine-grained control */
+export interface ConcurrencyConfig {
+  /** Minimum number of concurrent workers (default: 1) */
+  minConcurrency: number;
+  /** Maximum number of concurrent workers (default: CPU cores) */
+  maxConcurrency: number;
+  /** Target concurrency when system is idle (default: maxConcurrency / 2) */
+  targetConcurrency: number;
+  /** Time in ms to wait before scaling up (default: 5000) */
+  scaleUpDelayMs: number;
+  /** Time in ms to wait before scaling down (default: 10000) */
+  scaleDownDelayMs: number;
+  /** Enable adaptive concurrency based on task success rate (default: true) */
+  enableAdaptiveConcurrency: boolean;
+  /** Reduce concurrency when success rate drops below this (default: 0.7) */
+  successRateThreshold: number;
+}
+
 /** Execution history entry for audit trail */
 export interface ExecutionHistoryEntry {
   taskId: string;
@@ -140,6 +159,10 @@ export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
   scalingConfig?: Partial<ScalingConfig>;
   /** Optional queue configuration for memory management */
   queueConfig?: Partial<QueueConfig>;
+  /** Optional concurrency configuration for fine-grained control */
+  concurrencyConfig?: Partial<ConcurrencyConfig>;
+  /** Optional memory configuration for automatic cleanup */
+  memoryConfig?: Partial<MemoryConfig>;
   /** Enable dynamic scaling based on system resources */
   enableDynamicScaling?: boolean;
   /** Enable graceful degradation when services fail */
@@ -199,7 +222,63 @@ export interface PoolResult extends WorkerResult {
   taskId: string;
 }
 
-export class WorkerPool {
+/** Worker pool metrics for monitoring and observability */
+export interface WorkerPoolMetrics {
+  /** Number of currently active workers */
+  activeWorkers: number;
+  /** Number of tasks in queue */
+  queuedTasks: number;
+  /** Total tasks completed successfully */
+  completedTasks: number;
+  /** Total tasks failed */
+  failedTasks: number;
+  /** Total tasks processed (completed + failed) */
+  totalProcessed: number;
+  /** Success rate as percentage (0-100) */
+  successRate: number;
+  /** Average task duration in milliseconds */
+  avgTaskDurationMs: number;
+  /** Maximum concurrent workers reached */
+  peakConcurrency: number;
+  /** Current memory usage in MB */
+  memoryUsageMB: number;
+  /** Memory usage at peak concurrency in MB */
+  peakMemoryUsageMB: number;
+  /** Current worker limit (may be adjusted by scaling) */
+  currentWorkerLimit: number;
+  /** Configured max workers */
+  maxWorkers: number;
+  /** Worker utilization percentage (0-100) */
+  utilizationPercent: number;
+  /** Time since pool started in milliseconds */
+  uptimeMs: number;
+  /** Tasks per minute throughput */
+  tasksPerMinute: number;
+}
+
+/** Event emitted when a worker completes */
+interface WorkerCompletionEvent {
+  taskId: string;
+  workerId: string;
+  success: boolean;
+  duration: number;
+  groupId?: string;
+  result: WorkerResult;
+}
+
+/** Memory monitoring configuration */
+export interface MemoryConfig {
+  /** Memory usage threshold in MB to trigger cleanup (default: 80% of available) */
+  cleanupThresholdMB: number;
+  /** Interval for memory checks in milliseconds (default: 30000) */
+  checkIntervalMs: number;
+  /** Enable automatic memory cleanup between tasks (default: true) */
+  enableAutoCleanup: boolean;
+  /** Force garbage collection if available (default: false) */
+  forceGC: boolean;
+}
+
+export class WorkerPool extends EventEmitter {
   private options: WorkerPoolOptions;
   private activeWorkers: Map<string, Promise<WorkerResult>> = new Map();
   private taskQueue: PoolTask[] = [];
@@ -238,6 +317,30 @@ export class WorkerPool {
   private consecutiveFailures: number = 0;
   private failureThreshold: number = 5; // Number of consecutive failures before degradation
 
+  // Event-based worker completion tracking (replaces Promise.race pattern)
+  private completionQueue: WorkerCompletionEvent[] = [];
+  private completionResolver: ((event: WorkerCompletionEvent) => void) | null = null;
+
+  // Enhanced metrics tracking
+  private poolStartTime: number = 0;
+  private peakConcurrency: number = 0;
+  private peakMemoryUsageMB: number = 0;
+  private totalTaskDurationMs: number = 0;
+  private completedTaskCount: number = 0;
+  private failedTaskCount: number = 0;
+
+  // Memory monitoring
+  private memoryConfig: MemoryConfig;
+  private memoryCheckInterval: NodeJS.Timeout | null = null;
+  private lastMemoryCleanup: number = 0;
+
+  // Concurrency control
+  private concurrencyConfig: ConcurrencyConfig;
+  private lastScaleUpTime: number = 0;
+  private lastScaleDownTime: number = 0;
+  private recentSuccessRate: number = 1.0;
+  private adaptiveConcurrencyLimit: number = 0;
+
   /** Default scaling configuration */
   private static readonly DEFAULT_SCALING_CONFIG: ScalingConfig = {
     minWorkers: 1,
@@ -257,7 +360,27 @@ export class WorkerPool {
     enablePersistence: true,
   };
 
+  /** Default memory configuration */
+  private static readonly DEFAULT_MEMORY_CONFIG: MemoryConfig = {
+    cleanupThresholdMB: Math.round(os.totalmem() / (1024 * 1024) * 0.8),
+    checkIntervalMs: 30000,
+    enableAutoCleanup: true,
+    forceGC: false,
+  };
+
+  /** Default concurrency configuration */
+  private static readonly DEFAULT_CONCURRENCY_CONFIG: ConcurrencyConfig = {
+    minConcurrency: 1,
+    maxConcurrency: os.cpus().length,
+    targetConcurrency: Math.max(1, Math.floor(os.cpus().length / 2)),
+    scaleUpDelayMs: 5000,
+    scaleDownDelayMs: 10000,
+    enableAdaptiveConcurrency: true,
+    successRateThreshold: 0.7,
+  };
+
   constructor(options: WorkerPoolOptions) {
+    super(); // Initialize EventEmitter
     this.options = options;
     this.repository = this.extractRepoName(options.repoUrl);
 
@@ -277,8 +400,16 @@ export class WorkerPool {
       ...options.queueConfig,
     };
 
+    // Initialize memory configuration
+    this.memoryConfig = {
+      ...WorkerPool.DEFAULT_MEMORY_CONFIG,
+    };
+
     // Compute initial worker limit based on system resources
     this.currentWorkerLimit = this.computeOptimalWorkerCount();
+
+    // Initialize pool start time for metrics
+    this.poolStartTime = Date.now();
 
     logger.info(`Worker pool initialized`, {
       maxWorkers: options.maxWorkers,
@@ -397,6 +528,193 @@ export class WorkerPool {
     if (this.scaleCheckInterval) {
       clearInterval(this.scaleCheckInterval);
       this.scaleCheckInterval = null;
+    }
+  }
+
+  /**
+   * Start memory monitoring for automatic cleanup
+   */
+  private startMemoryMonitor(): void {
+    if (!this.memoryConfig.enableAutoCleanup || this.memoryCheckInterval) {
+      return;
+    }
+
+    this.memoryCheckInterval = setInterval(() => {
+      this.checkMemoryUsage();
+    }, this.memoryConfig.checkIntervalMs);
+
+    logger.debug('Memory monitor started', {
+      cleanupThresholdMB: this.memoryConfig.cleanupThresholdMB,
+      checkIntervalMs: this.memoryConfig.checkIntervalMs,
+    });
+  }
+
+  /**
+   * Stop memory monitoring
+   */
+  private stopMemoryMonitor(): void {
+    if (this.memoryCheckInterval) {
+      clearInterval(this.memoryCheckInterval);
+      this.memoryCheckInterval = null;
+    }
+  }
+
+  /**
+   * Check memory usage and trigger cleanup if needed
+   */
+  private checkMemoryUsage(): void {
+    const currentMemoryMB = getMemoryUsageMB();
+
+    // Track peak memory usage
+    if (currentMemoryMB > this.peakMemoryUsageMB) {
+      this.peakMemoryUsageMB = currentMemoryMB;
+    }
+
+    // Update metrics
+    metrics.updateMemoryUsage(currentMemoryMB);
+
+    if (currentMemoryMB > this.memoryConfig.cleanupThresholdMB) {
+      this.performMemoryCleanup(currentMemoryMB);
+    }
+  }
+
+  /**
+   * Perform memory cleanup operations
+   */
+  private performMemoryCleanup(currentMemoryMB: number): void {
+    const timeSinceLastCleanup = Date.now() - this.lastMemoryCleanup;
+
+    // Avoid cleanup too frequently (min 10 seconds between cleanups)
+    if (timeSinceLastCleanup < 10000) {
+      return;
+    }
+
+    logger.info('Performing memory cleanup', {
+      currentMemoryMB,
+      thresholdMB: this.memoryConfig.cleanupThresholdMB,
+      activeWorkers: this.activeWorkers.size,
+    });
+
+    // Clear old overflow events (keep last 100)
+    if (this.overflowEvents.length > 100) {
+      this.overflowEvents = this.overflowEvents.slice(-100);
+    }
+
+    // Trim execution history if it exceeds limit
+    if (this.executionHistory.length > this.maxHistoryEntries) {
+      this.executionHistory = this.executionHistory.slice(-this.maxHistoryEntries);
+    }
+
+    // Clear completed results if we have too many
+    if (this.results.length > 1000) {
+      this.results = this.results.slice(-1000);
+    }
+
+    // Force garbage collection if enabled and available
+    if (this.memoryConfig.forceGC && global.gc) {
+      try {
+        global.gc();
+        logger.debug('Forced garbage collection completed');
+      } catch (error) {
+        logger.warn('Failed to force garbage collection', { error });
+      }
+    }
+
+    this.lastMemoryCleanup = Date.now();
+    const afterCleanupMB = getMemoryUsageMB();
+
+    logger.info('Memory cleanup completed', {
+      beforeMB: currentMemoryMB,
+      afterMB: afterCleanupMB,
+      freedMB: Math.round((currentMemoryMB - afterCleanupMB) * 100) / 100,
+    });
+  }
+
+  /**
+   * Signal that a worker has completed (event-based tracking)
+   * This replaces the O(n) Promise.race() pattern with O(1) event-based completion
+   */
+  private signalWorkerCompletion(event: WorkerCompletionEvent): void {
+    // Emit event for external listeners
+    this.emit('workerComplete', event);
+
+    // If there's a pending resolver, resolve immediately (O(1) completion detection)
+    if (this.completionResolver) {
+      const resolver = this.completionResolver;
+      this.completionResolver = null;
+      resolver(event);
+    } else {
+      // Queue for later consumption
+      this.completionQueue.push(event);
+    }
+  }
+
+  /**
+   * Wait for the next worker completion using event-based tracking
+   * This is O(1) complexity compared to O(n) Promise.race()
+   */
+  private waitForWorkerCompletion(): Promise<WorkerCompletionEvent> {
+    // Check if we already have a completed event queued
+    if (this.completionQueue.length > 0) {
+      return Promise.resolve(this.completionQueue.shift()!);
+    }
+
+    // Wait for the next completion event
+    return new Promise<WorkerCompletionEvent>((resolve) => {
+      this.completionResolver = resolve;
+    });
+  }
+
+  /**
+   * Get comprehensive worker pool metrics
+   */
+  getPoolMetrics(): WorkerPoolMetrics {
+    const currentMemoryMB = getMemoryUsageMB();
+    const uptimeMs = Date.now() - this.poolStartTime;
+    const totalProcessed = this.completedTaskCount + this.failedTaskCount;
+    const avgDuration = totalProcessed > 0 ? this.totalTaskDurationMs / totalProcessed : 0;
+    const successRate = totalProcessed > 0 ? (this.completedTaskCount / totalProcessed) * 100 : 0;
+
+    // Calculate tasks per minute
+    const uptimeMinutes = uptimeMs / 60000;
+    const tasksPerMinute = uptimeMinutes > 0 ? totalProcessed / uptimeMinutes : 0;
+
+    // Calculate utilization
+    const utilizationPercent = this.options.maxWorkers > 0
+      ? (this.activeWorkers.size / this.options.maxWorkers) * 100
+      : 0;
+
+    return {
+      activeWorkers: this.activeWorkers.size,
+      queuedTasks: this.taskQueue.length,
+      completedTasks: this.completedTaskCount,
+      failedTasks: this.failedTaskCount,
+      totalProcessed,
+      successRate: Math.round(successRate * 100) / 100,
+      avgTaskDurationMs: Math.round(avgDuration),
+      peakConcurrency: this.peakConcurrency,
+      memoryUsageMB: Math.round(currentMemoryMB * 100) / 100,
+      peakMemoryUsageMB: Math.round(this.peakMemoryUsageMB * 100) / 100,
+      currentWorkerLimit: this.currentWorkerLimit,
+      maxWorkers: this.options.maxWorkers,
+      utilizationPercent: Math.round(utilizationPercent * 100) / 100,
+      uptimeMs,
+      tasksPerMinute: Math.round(tasksPerMinute * 100) / 100,
+    };
+  }
+
+  /**
+   * Update peak concurrency tracking
+   */
+  private updatePeakConcurrency(): void {
+    if (this.activeWorkers.size > this.peakConcurrency) {
+      this.peakConcurrency = this.activeWorkers.size;
+
+      // Also track memory at peak
+      const currentMemory = getMemoryUsageMB();
+      if (currentMemory > this.peakMemoryUsageMB) {
+        this.peakMemoryUsageMB = currentMemory;
+      }
     }
   }
 
@@ -1211,36 +1529,43 @@ export class WorkerPool {
     // Update initial metrics
     this.updateMetrics();
 
+    // Reset metrics tracking for this execution batch
+    this.completedTaskCount = 0;
+    this.failedTaskCount = 0;
+    this.totalTaskDurationMs = 0;
+    this.peakConcurrency = 0;
+    this.peakMemoryUsageMB = getMemoryUsageMB();
+    this.completionQueue = [];
+    this.completionResolver = null;
+
     // Start dynamic scaling monitor if enabled
     this.startScalingMonitor();
 
     // Start graceful degradation monitor if enabled
     this.startDegradationMonitor();
 
+    // Start memory monitor for automatic cleanup
+    this.startMemoryMonitor();
+
     // Start initial workers
     while (this.activeWorkers.size < effectiveWorkerLimit && this.taskQueue.length > 0) {
       this.startNextTask();
+      this.updatePeakConcurrency();
     }
 
-    // Wait for all tasks to complete (respecting shutdown)
+    // Wait for all tasks to complete using event-based tracking (O(1) complexity)
+    // This replaces the inefficient Promise.race() pattern which was O(n)
     while ((this.activeWorkers.size > 0 || this.taskQueue.length > 0) && !this.isShuttingDown) {
       if (this.activeWorkers.size > 0) {
-        // Wait for any worker to complete
-        const completedPromises = Array.from(this.activeWorkers.entries());
-        const [completedId] = await Promise.race(
-          completedPromises.map(async ([id, promise]) => {
-            await promise;
-            return [id] as [string];
-          })
-        );
+        // Wait for next worker completion using event-based tracking (O(1))
+        const completionEvent = await this.waitForWorkerCompletion();
 
         // Get the completed task's group for worker affinity
-        const completedTask = this.workerTaskMap.get(completedId);
-        const completedGroupId = completedTask?.groupId;
+        const completedGroupId = completionEvent.groupId;
 
         // Clean up worker tracking
-        this.activeWorkers.delete(completedId);
-        this.workerTaskMap.delete(completedId);
+        this.activeWorkers.delete(completionEvent.taskId);
+        this.workerTaskMap.delete(completionEvent.taskId);
 
         // Update metrics after worker completion
         this.updateMetrics();
@@ -1249,23 +1574,31 @@ export class WorkerPool {
         if (this.taskQueue.length > 0 && this.isRunning && !this.isShuttingDown) {
           // Use worker affinity: try to assign same-group tasks to same worker
           this.startNextTask(completedGroupId);
+          this.updatePeakConcurrency();
         }
       }
     }
 
-    // Stop dynamic scaling monitor
+    // Stop all monitors
     this.stopScalingMonitor();
-
-    // Stop degradation monitor
     this.stopDegradationMonitor();
+    this.stopMemoryMonitor();
 
     const succeeded = this.results.filter(r => r.success).length;
     const failed = this.results.filter(r => !r.success).length;
+
+    // Get final pool metrics
+    const finalMetrics = this.getPoolMetrics();
 
     logger.info(`All tasks completed: ${succeeded}/${this.results.length} succeeded`, {
       succeeded,
       failed,
       total: this.results.length,
+      successRate: `${finalMetrics.successRate}%`,
+      avgDurationMs: finalMetrics.avgTaskDurationMs,
+      peakConcurrency: finalMetrics.peakConcurrency,
+      peakMemoryMB: finalMetrics.peakMemoryUsageMB,
+      tasksPerMinute: finalMetrics.tasksPerMinute,
       degradationOccurred: this.degradationStatus.isDegraded || this.consecutiveFailures > 0,
       dlqStats: this.getDeadLetterQueueStats(),
     });
@@ -1398,6 +1731,16 @@ export class WorkerPool {
       // Track result for graceful degradation
       this.recordTaskResult(result.success);
 
+      // Update metrics tracking
+      if (result.success) {
+        this.completedTaskCount++;
+      } else {
+        this.failedTaskCount++;
+      }
+      if (result.duration) {
+        this.totalTaskDurationMs += result.duration;
+      }
+
       // Record in execution history
       if (result.success) {
         this.recordExecutionHistory(task, 'completed', workerId);
@@ -1428,6 +1771,7 @@ export class WorkerPool {
         } : undefined;
 
         this.recordExecutionHistory(task, 'failed', workerId, errorInfo);
+        this.progressManager.completeWorker(workerId, false);
         logger.failure(`${task.id} failed: ${result.error}`);
         logger.debug(`Task failure details`, {
           taskId: task.id,
@@ -1440,6 +1784,17 @@ export class WorkerPool {
         });
       }
 
+      // Signal completion using event-based tracking (O(1) complexity)
+      // This replaces the old Promise.race() pattern
+      this.signalWorkerCompletion({
+        taskId: task.id,
+        workerId,
+        success: result.success,
+        duration: result.duration,
+        groupId: task.groupId,
+        result,
+      });
+
       return result;
     });
 
@@ -1450,9 +1805,11 @@ export class WorkerPool {
     this.isRunning = false;
     this.stopScalingMonitor();
     this.stopDegradationMonitor();
+    this.stopMemoryMonitor();
     logger.warn('Worker pool stop requested', {
       activeWorkers: this.activeWorkers.size,
       queuedTasks: this.taskQueue.length,
+      poolMetrics: this.getPoolMetrics(),
     });
   }
 
