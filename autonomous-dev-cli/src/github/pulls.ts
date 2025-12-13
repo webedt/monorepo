@@ -1,5 +1,10 @@
-import { GitHubClient } from './client.js';
+import { GitHubClient, type ServiceHealth } from './client.js';
 import { logger } from '../utils/logger.js';
+import {
+  GitHubError,
+  ErrorCode,
+  createGitHubErrorFromResponse,
+} from '../utils/errors.js';
 
 export interface PullRequest {
   number: number;
@@ -28,16 +33,29 @@ export interface MergeResult {
   message: string;
 }
 
+/**
+ * Result type for operations that support graceful degradation
+ */
+export interface DegradedResult<T> {
+  value: T;
+  degraded: boolean;
+}
+
 export interface PRManager {
   listOpenPRs(): Promise<PullRequest[]>;
+  listOpenPRsWithFallback(fallback?: PullRequest[]): Promise<DegradedResult<PullRequest[]>>;
   getPR(number: number): Promise<PullRequest | null>;
   findPRForBranch(branchName: string, base?: string): Promise<PullRequest | null>;
   createPR(options: CreatePROptions): Promise<PullRequest>;
+  createPRWithFallback(options: CreatePROptions): Promise<DegradedResult<PullRequest | null>>;
   mergePR(number: number, method?: 'merge' | 'squash' | 'rebase'): Promise<MergeResult>;
+  mergePRWithFallback(number: number, method?: 'merge' | 'squash' | 'rebase'): Promise<DegradedResult<MergeResult>>;
   closePR(number: number): Promise<void>;
   updatePRFromBase(number: number): Promise<boolean>;
   waitForMergeable(number: number, maxAttempts?: number): Promise<boolean>;
   getChecksStatus(ref: string): Promise<{ state: string; statuses: Array<{ context: string; state: string }> }>;
+  getServiceHealth(): ServiceHealth;
+  isAvailable(): boolean;
 }
 
 export function createPRManager(client: GitHubClient): PRManager {
@@ -57,7 +75,28 @@ export function createPRManager(client: GitHubClient): PRManager {
     draft: data.draft,
   });
 
+  /**
+   * Wrap error with structured error handling
+   */
+  const handleError = (error: any, operation: string, context?: Record<string, unknown>): never => {
+    const structuredError = createGitHubErrorFromResponse(error, operation, {
+      owner,
+      repo,
+      ...context,
+    });
+    logger.error(`Failed to ${operation}`, { error: structuredError.message, ...context });
+    throw structuredError;
+  };
+
   return {
+    getServiceHealth(): ServiceHealth {
+      return client.getServiceHealth();
+    },
+
+    isAvailable(): boolean {
+      return client.isAvailable();
+    },
+
     async listOpenPRs(): Promise<PullRequest[]> {
       try {
         const { data } = await octokit.pulls.list({
@@ -69,9 +108,33 @@ export function createPRManager(client: GitHubClient): PRManager {
 
         return data.map(mapPR);
       } catch (error) {
-        logger.error('Failed to list PRs', { error });
-        throw error;
+        handleError(error, 'list PRs');
       }
+    },
+
+    async listOpenPRsWithFallback(fallback: PullRequest[] = []): Promise<DegradedResult<PullRequest[]>> {
+      const result = await client.executeWithFallback(
+        async () => {
+          const { data } = await octokit.pulls.list({
+            owner,
+            repo,
+            state: 'open',
+            per_page: 100,
+          });
+          return data.map(mapPR);
+        },
+        fallback,
+        `GET /repos/${owner}/${repo}/pulls`,
+        { operation: 'listOpenPRs' }
+      );
+
+      if (result.degraded) {
+        logger.warn('PR list fetch degraded - using fallback', {
+          fallbackCount: fallback.length,
+        });
+      }
+
+      return result;
     },
 
     async getPR(number: number): Promise<PullRequest | null> {
@@ -87,7 +150,7 @@ export function createPRManager(client: GitHubClient): PRManager {
         if (error.status === 404) {
           return null;
         }
-        throw error;
+        handleError(error, 'get PR', { prNumber: number });
       }
     },
 
@@ -118,8 +181,7 @@ export function createPRManager(client: GitHubClient): PRManager {
 
         return mapPR(data[0]);
       } catch (error) {
-        logger.error('Failed to find PR for branch', { error, branchName });
-        throw error;
+        handleError(error, 'find PR for branch', { branchName, base });
       }
     },
 
@@ -153,9 +215,46 @@ export function createPRManager(client: GitHubClient): PRManager {
             return existing;
           }
         }
-        logger.error('Failed to create PR', { error, head: options.head });
-        throw error;
+        handleError(error, 'create PR', { head: options.head, base: options.base });
       }
+    },
+
+    async createPRWithFallback(options: CreatePROptions): Promise<DegradedResult<PullRequest | null>> {
+      const result = await client.executeWithFallback(
+        async () => {
+          // Check if PR already exists
+          const existing = await this.findPRForBranch(options.head, options.base);
+          if (existing) {
+            logger.info(`PR already exists for branch '${options.head}': #${existing.number}`);
+            return existing;
+          }
+
+          const { data } = await octokit.pulls.create({
+            owner,
+            repo,
+            title: options.title,
+            body: options.body,
+            head: options.head,
+            base: options.base,
+            draft: options.draft,
+          });
+
+          logger.info(`Created PR #${data.number}: ${data.title}`);
+          return mapPR(data);
+        },
+        null,
+        `POST /repos/${owner}/${repo}/pulls`,
+        { operation: 'createPR', head: options.head }
+      );
+
+      if (result.degraded) {
+        logger.warn('PR creation degraded - operation skipped', {
+          head: options.head,
+          base: options.base,
+        });
+      }
+
+      return result;
     },
 
     async mergePR(number: number, method: 'merge' | 'squash' | 'rebase' = 'squash'): Promise<MergeResult> {
@@ -175,7 +274,7 @@ export function createPRManager(client: GitHubClient): PRManager {
           message: data.message,
         };
       } catch (error: any) {
-        logger.error('Failed to merge PR', { error, number, method });
+        logger.error('Failed to merge PR', { error: error.message, number, method });
 
         return {
           merged: false,
@@ -183,6 +282,45 @@ export function createPRManager(client: GitHubClient): PRManager {
           message: error.message || 'Merge failed',
         };
       }
+    },
+
+    async mergePRWithFallback(number: number, method: 'merge' | 'squash' | 'rebase' = 'squash'): Promise<DegradedResult<MergeResult>> {
+      const failedResult: MergeResult = {
+        merged: false,
+        sha: null,
+        message: 'Merge skipped due to service degradation',
+      };
+
+      const result = await client.executeWithFallback(
+        async () => {
+          const { data } = await octokit.pulls.merge({
+            owner,
+            repo,
+            pull_number: number,
+            merge_method: method,
+          });
+
+          logger.info(`Merged PR #${number} via ${method}`);
+
+          return {
+            merged: data.merged,
+            sha: data.sha,
+            message: data.message,
+          };
+        },
+        failedResult,
+        `PUT /repos/${owner}/${repo}/pulls/${number}/merge`,
+        { operation: 'mergePR', prNumber: number, method }
+      );
+
+      if (result.degraded) {
+        logger.warn('PR merge degraded - operation skipped', {
+          prNumber: number,
+          method,
+        });
+      }
+
+      return result;
     },
 
     async closePR(number: number): Promise<void> {
@@ -195,8 +333,7 @@ export function createPRManager(client: GitHubClient): PRManager {
         });
         logger.info(`Closed PR #${number}`);
       } catch (error) {
-        logger.error('Failed to close PR', { error, number });
-        throw error;
+        handleError(error, 'close PR', { prNumber: number });
       }
     },
 
@@ -230,8 +367,7 @@ export function createPRManager(client: GitHubClient): PRManager {
           logger.warn(`PR #${number} has merge conflicts`);
           return false;
         }
-        logger.error('Failed to update PR from base', { error, number });
-        throw error;
+        handleError(error, 'update PR from base', { prNumber: number });
       }
     },
 
@@ -276,8 +412,7 @@ export function createPRManager(client: GitHubClient): PRManager {
           })),
         };
       } catch (error) {
-        logger.error('Failed to get checks status', { error, ref });
-        throw error;
+        handleError(error, 'get checks status', { ref });
       }
     },
   };

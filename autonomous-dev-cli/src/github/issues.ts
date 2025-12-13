@@ -1,5 +1,10 @@
-import { GitHubClient } from './client.js';
+import { GitHubClient, type ServiceHealth } from './client.js';
 import { logger } from '../utils/logger.js';
+import {
+  GitHubError,
+  ErrorCode,
+  createGitHubErrorFromResponse,
+} from '../utils/errors.js';
 
 export interface Issue {
   number: number;
@@ -18,59 +23,134 @@ export interface CreateIssueOptions {
   labels?: string[];
 }
 
+/**
+ * Result type for operations that support graceful degradation
+ */
+export interface DegradedResult<T> {
+  value: T;
+  degraded: boolean;
+}
+
 export interface IssueManager {
   listOpenIssues(label?: string): Promise<Issue[]>;
+  listOpenIssuesWithFallback(label?: string, fallback?: Issue[]): Promise<DegradedResult<Issue[]>>;
   getIssue(number: number): Promise<Issue | null>;
   createIssue(options: CreateIssueOptions): Promise<Issue>;
   addLabels(issueNumber: number, labels: string[]): Promise<void>;
+  addLabelsWithFallback(issueNumber: number, labels: string[]): Promise<DegradedResult<void>>;
   removeLabel(issueNumber: number, label: string): Promise<void>;
   closeIssue(issueNumber: number, comment?: string): Promise<void>;
   addComment(issueNumber: number, body: string): Promise<void>;
+  addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<void>>;
+  getServiceHealth(): ServiceHealth;
+  isAvailable(): boolean;
 }
 
 export function createIssueManager(client: GitHubClient): IssueManager {
   const octokit = client.client;
   const { owner, repo } = client;
 
+  /**
+   * Helper function to map GitHub API issue response to Issue type
+   */
+  const mapIssue = (issue: any): Issue => ({
+    number: issue.number,
+    title: issue.title,
+    body: issue.body ?? null,
+    state: issue.state as 'open' | 'closed',
+    labels: issue.labels.map((l: any) => (typeof l === 'string' ? l : l.name || '')),
+    htmlUrl: issue.html_url,
+    createdAt: issue.created_at,
+    assignee: issue.assignee?.login || null,
+  });
+
+  /**
+   * Wrap error with structured error handling
+   */
+  const handleError = (error: any, operation: string, context?: Record<string, unknown>): never => {
+    const structuredError = createGitHubErrorFromResponse(error, operation, {
+      owner,
+      repo,
+      ...context,
+    });
+    logger.error(`Failed to ${operation}`, { error: structuredError.message, ...context });
+    throw structuredError;
+  };
+
   return {
+    getServiceHealth(): ServiceHealth {
+      return client.getServiceHealth();
+    },
+
+    isAvailable(): boolean {
+      return client.isAvailable();
+    },
+
     async listOpenIssues(label?: string): Promise<Issue[]> {
+      const params: {
+        owner: string;
+        repo: string;
+        state: 'open';
+        per_page: number;
+        labels?: string;
+      } = {
+        owner,
+        repo,
+        state: 'open',
+        per_page: 100,
+      };
+
+      if (label) {
+        params.labels = label;
+      }
+
       try {
-        const params: {
-          owner: string;
-          repo: string;
-          state: 'open';
-          per_page: number;
-          labels?: string;
-        } = {
-          owner,
-          repo,
-          state: 'open',
-          per_page: 100,
-        };
-
-        if (label) {
-          params.labels = label;
-        }
-
         const { data } = await octokit.issues.listForRepo(params);
-
         // Filter out pull requests (GitHub API returns PRs as issues)
         const issues = data.filter((item) => !item.pull_request);
-
-        return issues.map((issue) => ({
-          number: issue.number,
-          title: issue.title,
-          body: issue.body ?? null,
-          state: issue.state as 'open' | 'closed',
-          labels: issue.labels.map((l) => (typeof l === 'string' ? l : l.name || '')),
-          htmlUrl: issue.html_url,
-          createdAt: issue.created_at,
-          assignee: issue.assignee?.login || null,
-        }));
+        return issues.map(mapIssue);
       } catch (error) {
-        logger.error('Failed to list issues', { error });
-        throw error;
+        handleError(error, 'list issues', { label });
       }
+    },
+
+    async listOpenIssuesWithFallback(label?: string, fallback: Issue[] = []): Promise<DegradedResult<Issue[]>> {
+      const params: {
+        owner: string;
+        repo: string;
+        state: 'open';
+        per_page: number;
+        labels?: string;
+      } = {
+        owner,
+        repo,
+        state: 'open',
+        per_page: 100,
+      };
+
+      if (label) {
+        params.labels = label;
+      }
+
+      const result = await client.executeWithFallback(
+        async () => {
+          const { data } = await octokit.issues.listForRepo(params);
+          const issues = data.filter((item) => !item.pull_request);
+          return issues.map(mapIssue);
+        },
+        fallback,
+        `GET /repos/${owner}/${repo}/issues`,
+        { operation: 'listOpenIssues', label }
+      );
+
+      if (result.degraded) {
+        logger.warn('Issue list fetch degraded - using fallback', {
+          label,
+          fallbackCount: fallback.length,
+        });
+      }
+
+      return result;
     },
 
     async getIssue(number: number): Promise<Issue | null> {
@@ -80,22 +160,12 @@ export function createIssueManager(client: GitHubClient): IssueManager {
           repo,
           issue_number: number,
         });
-
-        return {
-          number: data.number,
-          title: data.title,
-          body: data.body ?? null,
-          state: data.state as 'open' | 'closed',
-          labels: data.labels.map((l) => (typeof l === 'string' ? l : l.name || '')),
-          htmlUrl: data.html_url,
-          createdAt: data.created_at,
-          assignee: data.assignee?.login || null,
-        };
+        return mapIssue(data);
       } catch (error: any) {
         if (error.status === 404) {
           return null;
         }
-        throw error;
+        handleError(error, 'get issue', { issueNumber: number });
       }
     },
 
@@ -110,20 +180,9 @@ export function createIssueManager(client: GitHubClient): IssueManager {
         });
 
         logger.info(`Created issue #${data.number}: ${data.title}`);
-
-        return {
-          number: data.number,
-          title: data.title,
-          body: data.body ?? null,
-          state: data.state as 'open' | 'closed',
-          labels: data.labels.map((l) => (typeof l === 'string' ? l : l.name || '')),
-          htmlUrl: data.html_url,
-          createdAt: data.created_at,
-          assignee: data.assignee?.login || null,
-        };
+        return mapIssue(data);
       } catch (error) {
-        logger.error('Failed to create issue', { error, title: options.title });
-        throw error;
+        handleError(error, 'create issue', { title: options.title });
       }
     },
 
@@ -137,9 +196,31 @@ export function createIssueManager(client: GitHubClient): IssueManager {
         });
         logger.debug(`Added labels to issue #${issueNumber}`, { labels });
       } catch (error) {
-        logger.error('Failed to add labels', { error, issueNumber, labels });
-        throw error;
+        handleError(error, 'add labels', { issueNumber, labels });
       }
+    },
+
+    async addLabelsWithFallback(issueNumber: number, labels: string[]): Promise<DegradedResult<void>> {
+      const result = await client.executeWithFallback(
+        async () => {
+          await octokit.issues.addLabels({
+            owner,
+            repo,
+            issue_number: issueNumber,
+            labels,
+          });
+          logger.debug(`Added labels to issue #${issueNumber}`, { labels });
+        },
+        undefined,
+        `POST /repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+        { operation: 'addLabels', issueNumber, labels }
+      );
+
+      if (result.degraded) {
+        logger.warn('Add labels degraded - operation skipped', { issueNumber, labels });
+      }
+
+      return result;
     },
 
     async removeLabel(issueNumber: number, label: string): Promise<void> {
@@ -154,7 +235,7 @@ export function createIssueManager(client: GitHubClient): IssueManager {
       } catch (error: any) {
         // Ignore if label doesn't exist
         if (error.status !== 404) {
-          throw error;
+          handleError(error, 'remove label', { issueNumber, label });
         }
       }
     },
@@ -179,8 +260,7 @@ export function createIssueManager(client: GitHubClient): IssueManager {
 
         logger.info(`Closed issue #${issueNumber}`);
       } catch (error) {
-        logger.error('Failed to close issue', { error, issueNumber });
-        throw error;
+        handleError(error, 'close issue', { issueNumber });
       }
     },
 
@@ -194,9 +274,31 @@ export function createIssueManager(client: GitHubClient): IssueManager {
         });
         logger.debug(`Added comment to issue #${issueNumber}`);
       } catch (error) {
-        logger.error('Failed to add comment', { error, issueNumber });
-        throw error;
+        handleError(error, 'add comment', { issueNumber });
       }
+    },
+
+    async addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<void>> {
+      const result = await client.executeWithFallback(
+        async () => {
+          await octokit.issues.createComment({
+            owner,
+            repo,
+            issue_number: issueNumber,
+            body,
+          });
+          logger.debug(`Added comment to issue #${issueNumber}`);
+        },
+        undefined,
+        `POST /repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+        { operation: 'addComment', issueNumber }
+      );
+
+      if (result.degraded) {
+        logger.warn('Add comment degraded - operation skipped', { issueNumber });
+      }
+
+      return result;
     },
   };
 }
