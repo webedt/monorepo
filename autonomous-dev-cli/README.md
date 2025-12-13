@@ -2,12 +2,15 @@
 
 A powerful CLI tool that runs as a continuous daemon to autonomously develop your codebase. It discovers tasks using AI analysis, creates GitHub issues, implements them in parallel via Claude Agent SDK, evaluates the results, and auto-merges successful changes.
 
+> **New to Autonomous Dev?** Check out our [Quick Start Guide](./docs/quick-start.md) to get running in under 10 minutes!
+
 ## Table of Contents
 
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
+- [Quick Start (5 Steps)](#quick-start)
+- [The Autonomous Cycle](#the-autonomous-cycle)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Configuration File](#configuration-file)
@@ -27,6 +30,7 @@ A powerful CLI tool that runs as a continuous daemon to autonomously develop you
 - [How It Works](#how-it-works)
 - [Example Configurations](#example-configurations)
 - [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
 - [Development](#development)
 - [License](#license)
 
@@ -138,6 +142,72 @@ autonomous-dev discover --dry-run
 ```bash
 autonomous-dev start
 ```
+
+## The Autonomous Cycle
+
+The CLI runs a continuous 5-step development cycle:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  STEP 1: DISCOVER                                                       │
+│  ─────────────────                                                      │
+│  Claude AI analyzes your codebase to identify:                          │
+│  • Bug fixes needed                                                     │
+│  • New features to implement                                            │
+│  • Code improvements and refactoring                                    │
+│  • Documentation gaps                                                   │
+│  • Test coverage improvements                                           │
+│                                                                         │
+│                              ▼                                          │
+│                                                                         │
+│  STEP 2: CREATE ISSUES                                                  │
+│  ─────────────────────                                                  │
+│  For each discovered task:                                              │
+│  • Create a GitHub issue with detailed description                      │
+│  • Add appropriate labels (priority, type, complexity)                  │
+│  • Link affected file paths                                             │
+│                                                                         │
+│                              ▼                                          │
+│                                                                         │
+│  STEP 3: IMPLEMENT (Parallel)                                           │
+│  ────────────────────────────                                           │
+│  Multiple workers operate simultaneously:                               │
+│  • Clone repo to isolated workspace                                     │
+│  • Create branch: auto/{issue-number}-{slug}                            │
+│  • Claude Agent implements the change                                   │
+│  • Commit and push to remote                                            │
+│                                                                         │
+│                              ▼                                          │
+│                                                                         │
+│  STEP 4: EVALUATE                                                       │
+│  ────────────────                                                       │
+│  Verify each implementation:                                            │
+│  • Run build (npm run build)                                            │
+│  • Run tests (npm test)                                                 │
+│  • Check health endpoints                                               │
+│  • Run smoke tests (if configured)                                      │
+│                                                                         │
+│                              ▼                                          │
+│                                                                         │
+│  STEP 5: MERGE                                                          │
+│  ─────────────                                                          │
+│  For passing implementations:                                           │
+│  • Create pull request                                                  │
+│  • Wait for CI checks                                                   │
+│  • Handle merge conflicts                                               │
+│  • Auto-merge (squash by default)                                       │
+│  • Close the associated issue                                           │
+│                                                                         │
+│                              ▼                                          │
+│                                                                         │
+│  ↩ REPEAT                                                              │
+│  Wait for configured interval, then start again                         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+This cycle continues indefinitely (when using `start`) or runs once (when using `run`).
 
 ## Configuration
 
@@ -829,6 +899,30 @@ For monorepo projects:
 2. Check system resources
 3. Increase `timeoutMinutes` for complex tasks
 4. Use a process manager like PM2 for automatic restarts
+
+## Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+| Document | Description |
+|----------|-------------|
+| [Quick Start Guide](./docs/quick-start.md) | Get running in under 10 minutes |
+| [Configuration Guide](./docs/configuration.md) | Complete configuration reference |
+| [GitHub Setup](./docs/github-setup.md) | Detailed GitHub token setup |
+| [Claude Setup](./docs/claude-setup.md) | Claude API credential configuration |
+| [Database Setup](./docs/database-setup.md) | PostgreSQL credential storage |
+| [Security Best Practices](./docs/security.md) | Credential management and security |
+| [Troubleshooting](./docs/troubleshooting.md) | Common issues and solutions |
+
+### Example Configurations
+
+See the `examples/` directory for ready-to-use configuration files:
+
+- `minimal.config.json` - Simplest setup with defaults
+- `conservative.config.json` - Safe, review-focused configuration
+- `aggressive.config.json` - Fast, high-throughput configuration
+- `monorepo.config.json` - Optimized for monorepo projects
+- `ci-cd.config.json` - For scheduled CI/CD runs
 
 ## Development
 
