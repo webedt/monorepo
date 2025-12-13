@@ -138,12 +138,12 @@ Return ONLY the JSON array, no other text.`;
   }
 
   private async callClaude(prompt: string): Promise<DiscoveredTask[]> {
-    // Use direct API with OAuth tokens
+    // Use direct API with OAuth tokens (Bearer auth, not x-api-key)
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': this.claudeAuth.accessToken,
+        'Authorization': `Bearer ${this.claudeAuth.accessToken}`,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
