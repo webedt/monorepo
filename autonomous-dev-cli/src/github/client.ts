@@ -39,6 +39,36 @@ export interface GitHubClientOptions {
   circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
   /** Timeout for individual API calls in milliseconds (default: 30000) */
   requestTimeoutMs?: number;
+  /** Configuration for rate limit handling */
+  rateLimitConfig?: Partial<RateLimitConfig>;
+}
+
+/**
+ * Configuration options for rate limit handling
+ */
+export interface RateLimitConfig {
+  /** Threshold (remaining requests) at which to start queuing requests (default: 100) */
+  queueThreshold: number;
+  /** Maximum number of requests to queue before rejecting (default: 50) */
+  maxQueueSize: number;
+  /** Maximum time to wait in queue in milliseconds (default: 120000 = 2 minutes) */
+  maxQueueWaitMs: number;
+  /** Whether to preemptively wait when approaching rate limit (default: true) */
+  preemptiveWait: boolean;
+  /** Log rate limit status at debug level on every request (default: true) */
+  logRateLimitStatus: boolean;
+}
+
+/**
+ * Queued request waiting for rate limit to reset
+ */
+interface QueuedRequest<T> {
+  operation: () => Promise<T>;
+  endpoint: string;
+  context?: ErrorContext;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: any) => void;
+  queuedAt: number;
 }
 
 /**
@@ -88,6 +118,8 @@ export interface ServiceHealth {
   rateLimitRemaining?: number;
   rateLimitResetAt?: Date;
   rateLimitState?: RateLimitState;
+  /** Number of requests currently queued due to rate limiting */
+  queuedRequests?: number;
 }
 
 const DEFAULT_GITHUB_RETRY_CONFIG: Partial<RetryConfig> = {
@@ -104,12 +136,21 @@ const DEFAULT_CIRCUIT_BREAKER_CONFIG: CircuitBreakerConfig = {
   halfOpenMaxAttempts: 3,
 };
 
+const DEFAULT_RATE_LIMIT_CONFIG: RateLimitConfig = {
+  queueThreshold: 100,
+  maxQueueSize: 50,
+  maxQueueWaitMs: 120000,
+  preemptiveWait: true,
+  logRateLimitStatus: true,
+};
+
 export class GitHubClient {
   private octokit: Octokit;
   public readonly owner: string;
   public readonly repo: string;
   private retryConfig: Partial<RetryConfig>;
   private circuitBreakerConfig: CircuitBreakerConfig;
+  private rateLimitConfig: RateLimitConfig;
   private requestTimeoutMs: number;
 
   // Circuit breaker state
@@ -131,6 +172,12 @@ export class GitHubClient {
     resource: 'core',
     isLimited: false,
   };
+
+  // Request queue for rate limiting
+  private requestQueue: QueuedRequest<any>[] = [];
+  private isProcessingQueue: boolean = false;
+  private queueProcessorInterval: ReturnType<typeof setInterval> | null = null;
+
   private log = logger.child('GitHubClient');
 
   constructor(options: GitHubClientOptions) {
@@ -139,9 +186,24 @@ export class GitHubClient {
     this.repo = options.repo;
     this.retryConfig = { ...DEFAULT_GITHUB_RETRY_CONFIG, ...options.retryConfig };
     this.circuitBreakerConfig = { ...DEFAULT_CIRCUIT_BREAKER_CONFIG, ...options.circuitBreakerConfig };
+    this.rateLimitConfig = { ...DEFAULT_RATE_LIMIT_CONFIG, ...options.rateLimitConfig };
     // Configure request timeout from options or environment variable or default
     this.requestTimeoutMs = options.requestTimeoutMs
       ?? getTimeoutFromEnv('GITHUB_API', DEFAULT_TIMEOUTS.GITHUB_API);
+
+    // Add hook to capture rate limit headers from all responses
+    this.octokit.hook.after('request', (response) => {
+      if (response.headers) {
+        this.updateRateLimitFromHeaders(response.headers as Record<string, any>);
+      }
+    });
+
+    this.log.debug('GitHubClient initialized', {
+      owner: this.owner,
+      repo: this.repo,
+      retryConfig: this.retryConfig,
+      rateLimitConfig: this.rateLimitConfig,
+    });
   }
 
   get client(): Octokit {
@@ -160,6 +222,8 @@ export class GitHubClient {
       status = 'degraded';
     } else if (this.rateLimitState.isLimited) {
       status = 'degraded';
+    } else if (this.requestQueue.length > 0) {
+      status = 'degraded';
     }
 
     return {
@@ -173,6 +237,7 @@ export class GitHubClient {
       rateLimitRemaining: this.rateLimitRemaining,
       rateLimitResetAt: this.rateLimitResetAt,
       rateLimitState: { ...this.rateLimitState },
+      queuedRequests: this.requestQueue.length,
     };
   }
 
@@ -181,6 +246,42 @@ export class GitHubClient {
    */
   getRateLimitState(): RateLimitState {
     return { ...this.rateLimitState };
+  }
+
+  /**
+   * Get the current queue status
+   */
+  getQueueStatus(): { size: number; isProcessing: boolean; config: RateLimitConfig } {
+    return {
+      size: this.requestQueue.length,
+      isProcessing: this.isProcessingQueue,
+      config: { ...this.rateLimitConfig },
+    };
+  }
+
+  /**
+   * Clear the request queue (e.g., on shutdown)
+   */
+  clearQueue(): void {
+    const queueSize = this.requestQueue.length;
+    for (const request of this.requestQueue) {
+      request.reject(
+        new GitHubError(
+          ErrorCode.GITHUB_SERVICE_DEGRADED,
+          'Request queue cleared',
+          {
+            statusCode: 503,
+            endpoint: request.endpoint,
+            context: request.context,
+          }
+        )
+      );
+    }
+    this.requestQueue = [];
+    this.stopQueueProcessor();
+    if (queueSize > 0) {
+      this.log.info(`Cleared ${queueSize} requests from queue`);
+    }
   }
 
   /**
@@ -379,6 +480,247 @@ export class GitHubClient {
       await new Promise(resolve => setTimeout(resolve, delay));
       this.rateLimitState.isLimited = false;
     }
+  }
+
+  /**
+   * Check if rate limit is approaching and requests should be queued
+   */
+  private shouldQueueRequest(): boolean {
+    return (
+      this.rateLimitState.remaining <= this.rateLimitConfig.queueThreshold &&
+      this.rateLimitState.remaining > 0 &&
+      !this.rateLimitState.isLimited
+    );
+  }
+
+  /**
+   * Add a request to the queue when rate limit is approaching
+   */
+  private async enqueueRequest<T>(
+    operation: () => Promise<T>,
+    endpoint: string,
+    context?: ErrorContext
+  ): Promise<T> {
+    // Check queue size limit
+    if (this.requestQueue.length >= this.rateLimitConfig.maxQueueSize) {
+      this.log.warn('Request queue full, rejecting request', {
+        queueSize: this.requestQueue.length,
+        maxQueueSize: this.rateLimitConfig.maxQueueSize,
+        endpoint,
+      });
+      throw new GitHubError(
+        ErrorCode.GITHUB_RATE_LIMITED,
+        `Request queue full (${this.requestQueue.length}/${this.rateLimitConfig.maxQueueSize}). Rate limit approaching.`,
+        {
+          statusCode: 429,
+          endpoint,
+          context: {
+            ...context,
+            queueSize: this.requestQueue.length,
+            rateLimitRemaining: this.rateLimitState.remaining,
+          },
+        }
+      );
+    }
+
+    this.log.debug('Queuing request due to rate limit threshold', {
+      endpoint,
+      queueSize: this.requestQueue.length + 1,
+      rateLimitRemaining: this.rateLimitState.remaining,
+      threshold: this.rateLimitConfig.queueThreshold,
+    });
+
+    return new Promise<T>((resolve, reject) => {
+      const queuedRequest: QueuedRequest<T> = {
+        operation,
+        endpoint,
+        context,
+        resolve,
+        reject,
+        queuedAt: Date.now(),
+      };
+      this.requestQueue.push(queuedRequest);
+      this.startQueueProcessor();
+    });
+  }
+
+  /**
+   * Start the queue processor if not already running
+   */
+  private startQueueProcessor(): void {
+    if (this.queueProcessorInterval) {
+      return;
+    }
+
+    this.log.debug('Starting request queue processor');
+
+    // Process queue every second
+    this.queueProcessorInterval = setInterval(() => {
+      this.processQueue();
+    }, 1000);
+
+    // Also trigger immediate processing
+    this.processQueue();
+  }
+
+  /**
+   * Stop the queue processor
+   */
+  private stopQueueProcessor(): void {
+    if (this.queueProcessorInterval) {
+      clearInterval(this.queueProcessorInterval);
+      this.queueProcessorInterval = null;
+      this.log.debug('Stopped request queue processor');
+    }
+  }
+
+  /**
+   * Process queued requests when rate limit allows
+   */
+  private async processQueue(): Promise<void> {
+    // Don't process if already processing or queue is empty
+    if (this.isProcessingQueue || this.requestQueue.length === 0) {
+      if (this.requestQueue.length === 0) {
+        this.stopQueueProcessor();
+      }
+      return;
+    }
+
+    // Check if we can make requests now
+    if (this.rateLimitState.isLimited) {
+      const delay = this.getRequiredDelay();
+      if (delay > 0) {
+        this.log.debug('Queue processor waiting for rate limit reset', {
+          delayMs: delay,
+          queueSize: this.requestQueue.length,
+        });
+        return;
+      }
+      this.rateLimitState.isLimited = false;
+    }
+
+    // Check if we're still below threshold (but not limited)
+    if (this.rateLimitState.remaining <= 10 && this.rateLimitState.remaining > 0) {
+      this.log.debug('Rate limit very low, delaying queue processing', {
+        remaining: this.rateLimitState.remaining,
+        queueSize: this.requestQueue.length,
+      });
+      return;
+    }
+
+    this.isProcessingQueue = true;
+
+    try {
+      const now = Date.now();
+
+      // Process timed out requests first
+      const timedOutRequests: QueuedRequest<any>[] = [];
+      const validRequests: QueuedRequest<any>[] = [];
+
+      for (const request of this.requestQueue) {
+        const waitTime = now - request.queuedAt;
+        if (waitTime > this.rateLimitConfig.maxQueueWaitMs) {
+          timedOutRequests.push(request);
+        } else {
+          validRequests.push(request);
+        }
+      }
+
+      // Reject timed out requests
+      for (const request of timedOutRequests) {
+        const waitTime = now - request.queuedAt;
+        this.log.warn('Request timed out in queue', {
+          endpoint: request.endpoint,
+          waitTimeMs: waitTime,
+          maxWaitMs: this.rateLimitConfig.maxQueueWaitMs,
+        });
+        request.reject(
+          new GitHubError(
+            ErrorCode.GITHUB_RATE_LIMITED,
+            `Request timed out waiting in rate limit queue (waited ${Math.round(waitTime / 1000)}s)`,
+            {
+              statusCode: 429,
+              endpoint: request.endpoint,
+              context: {
+                ...request.context,
+                waitTimeMs: waitTime,
+              },
+            }
+          )
+        );
+      }
+
+      this.requestQueue = validRequests;
+
+      // Process one request if we have remaining capacity
+      if (this.requestQueue.length > 0 && this.rateLimitState.remaining > 10) {
+        const request = this.requestQueue.shift()!;
+        this.log.debug('Processing queued request', {
+          endpoint: request.endpoint,
+          queuedFor: now - request.queuedAt,
+          remainingInQueue: this.requestQueue.length,
+        });
+
+        try {
+          const result = await this.executeWithRetry(
+            request.operation,
+            request.endpoint,
+            request.context
+          );
+          request.resolve(result);
+        } catch (error) {
+          request.reject(error);
+        }
+      }
+    } finally {
+      this.isProcessingQueue = false;
+    }
+  }
+
+  /**
+   * Log rate limit status at debug level
+   */
+  private logRateLimitStatus(endpoint: string): void {
+    if (!this.rateLimitConfig.logRateLimitStatus) {
+      return;
+    }
+
+    this.log.debug('Rate limit status', {
+      endpoint,
+      remaining: this.rateLimitState.remaining,
+      limit: this.rateLimitState.limit,
+      used: this.rateLimitState.limit - this.rateLimitState.remaining,
+      percentUsed: ((this.rateLimitState.limit - this.rateLimitState.remaining) / this.rateLimitState.limit * 100).toFixed(1),
+      resetAt: this.rateLimitResetAt?.toISOString(),
+      resource: this.rateLimitState.resource,
+      isLimited: this.rateLimitState.isLimited,
+      queueSize: this.requestQueue.length,
+    });
+  }
+
+  /**
+   * Execute a GitHub API request with rate limit awareness
+   * Routes requests through the queue when approaching rate limits
+   */
+  async execute<T>(
+    operation: () => Promise<T>,
+    endpoint: string,
+    context?: ErrorContext
+  ): Promise<T> {
+    // Log rate limit status before request
+    this.logRateLimitStatus(endpoint);
+
+    // Check if we should queue this request
+    if (this.rateLimitConfig.preemptiveWait && this.shouldQueueRequest()) {
+      return this.enqueueRequest(operation, endpoint, context);
+    }
+
+    // If rate limited, wait for reset
+    if (this.rateLimitState.isLimited) {
+      await this.waitForRateLimitReset();
+    }
+
+    return this.executeWithRetry(operation, endpoint, context);
   }
 
   /**
