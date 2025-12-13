@@ -25,7 +25,7 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "types": []
+    "types": ["node"]
   },
   "include": ["src"],
   "exclude": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"],
