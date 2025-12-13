@@ -4,7 +4,7 @@ import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
 import { createWorkerPool } from './executor/index.js';
 import { createConflictResolver } from './conflicts/index.js';
-import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId, getCorrelationId, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, } from './utils/logger.js';
+import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, } from './utils/logger.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
@@ -29,10 +29,18 @@ export class Daemon {
     constructor(options = {}) {
         this.options = options;
         this.config = loadConfig(options.configPath);
+        // Configure logging from config (can be overridden by options)
+        if (this.config.logging) {
+            logger.setFormat(this.config.logging.format);
+            logger.setLevel(this.config.logging.level);
+            logger.setIncludeCorrelationId(this.config.logging.includeCorrelationId);
+            logger.setIncludeTimestamp(this.config.logging.includeTimestamp);
+        }
+        // Override with verbose flag if set
         if (options.verbose) {
             logger.setLevel('debug');
         }
-        // Set log format (default: pretty for terminal, json for production)
+        // Override log format if explicitly set in options
         if (options.logFormat) {
             logger.setFormat(options.logFormat);
         }
@@ -55,7 +63,14 @@ export class Daemon {
                 this.cycleCount++;
                 // Generate correlation ID for this cycle
                 const cycleCorrelationId = generateCorrelationId();
-                setCorrelationId(cycleCorrelationId);
+                // Set full correlation context with cycle number
+                const correlationContext = {
+                    correlationId: cycleCorrelationId,
+                    cycleNumber: this.cycleCount,
+                    component: 'Daemon',
+                    startTime: Date.now(),
+                };
+                setCorrelationContext(correlationContext);
                 // Start correlation tracking in metrics
                 metrics.startCorrelation(cycleCorrelationId);
                 // Create operation context for the cycle
@@ -504,6 +519,9 @@ export class Daemon {
                     repoOwner: this.config.repo.owner,
                     repoName: this.config.repo.name,
                     enableDatabaseLogging: this.enableDatabaseLogging,
+                    // Correlation context for request tracing
+                    cycleCorrelationId: this.getCurrentCorrelationId(),
+                    cycleNumber: this.cycleCount,
                 });
                 const workerTasks = issuesToWork.map((issue) => ({
                     issue,
