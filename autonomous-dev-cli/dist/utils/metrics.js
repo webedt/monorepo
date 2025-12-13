@@ -491,7 +491,8 @@ class MetricsRegistry {
             correlationId,
             duration: Date.now() - metrics.startTime,
             operations: [...metrics.operations],
-            errors: metrics.errors,
+            operationCount: metrics.operations.length,
+            errorCount: metrics.errors,
         };
     }
     /**
