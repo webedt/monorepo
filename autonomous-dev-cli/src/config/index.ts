@@ -4,6 +4,12 @@ import { config as loadEnv } from 'dotenv';
 import { ConfigSchema, defaultConfig, type Config } from './schema.js';
 import { logger } from '../utils/logger.js';
 import { ZodError, ZodIssue } from 'zod';
+import {
+  ConfigError,
+  ErrorCode,
+  type ErrorContext,
+  type RecoveryAction,
+} from '../utils/errors.js';
 
 // Load .env file
 loadEnv();
@@ -198,6 +204,46 @@ function getValidationSuggestion(issue: ZodIssue): string {
 }
 
 /**
+ * Build recovery actions from validation errors
+ */
+function buildRecoveryActionsFromValidation(errors: ZodIssue[]): RecoveryAction[] {
+  const actions: RecoveryAction[] = [];
+
+  // Add field-specific actions
+  for (const issue of errors) {
+    const path = issue.path.join('.');
+    const help = configFieldHelp[path];
+
+    if (help?.envVar) {
+      actions.push({
+        description: `Set the ${help.envVar} environment variable`,
+        automatic: false,
+      });
+    }
+  }
+
+  // Add general recovery actions
+  actions.push({
+    description: 'Run "autonomous-dev init" to create a new configuration file',
+    automatic: false,
+  });
+  actions.push({
+    description: 'Run "autonomous-dev help-config" for detailed configuration documentation',
+    automatic: false,
+  });
+  actions.push({
+    description: 'Check that environment variables are set correctly',
+    automatic: false,
+  });
+  actions.push({
+    description: 'Verify your config file is valid JSON',
+    automatic: false,
+  });
+
+  return actions;
+}
+
+/**
  * Format validation errors with helpful suggestions
  */
 function formatValidationErrors(error: ZodError): void {
@@ -222,6 +268,41 @@ function formatValidationErrors(error: ZodError): void {
   console.log('  3. Check that environment variables are set correctly');
   console.log('  4. Verify your config file is valid JSON');
   console.log();
+}
+
+/**
+ * Create a structured ConfigError from Zod validation errors
+ */
+function createConfigValidationError(zodError: ZodError, configPath?: string): ConfigError {
+  const errorMessages = zodError.errors.map((e) => {
+    const path = e.path.join('.') || 'root';
+    return `${path}: ${e.message}`;
+  });
+
+  const firstError = zodError.errors[0];
+  const field = firstError?.path.join('.') || undefined;
+
+  return new ConfigError(
+    ErrorCode.CONFIG_VALIDATION_FAILED,
+    `Configuration validation failed: ${errorMessages.join('; ')}`,
+    {
+      field,
+      recoveryActions: buildRecoveryActionsFromValidation(zodError.errors),
+      context: {
+        validationErrors: zodError.errors.map((e) => ({
+          path: e.path.join('.'),
+          message: e.message,
+          code: e.code,
+        })),
+        configPath,
+        configSourcesChecked: [
+          './autonomous-dev.config.json',
+          './autonomous-dev.json',
+          './.autonomous-dev.json',
+        ],
+      },
+    }
+  );
 }
 
 /**
@@ -342,16 +423,40 @@ export function loadConfig(configPath?: string): Config {
         './.autonomous-dev.json',
       ];
 
+  let configLoadPath: string | undefined;
   for (const path of possiblePaths) {
     const fullPath = resolve(path);
     if (existsSync(fullPath)) {
       try {
         const content = readFileSync(fullPath, 'utf-8');
         fileConfig = JSON.parse(content);
+        configLoadPath = fullPath;
         logger.info(`Loaded config from ${fullPath}`);
         break;
-      } catch (error) {
-        logger.warn(`Failed to parse config file ${fullPath}: ${error}`);
+      } catch (error: any) {
+        const parseError = new ConfigError(
+          ErrorCode.CONFIG_PARSE_ERROR,
+          `Failed to parse config file ${fullPath}: ${error.message}`,
+          {
+            context: { configPath: fullPath },
+            recoveryActions: [
+              {
+                description: 'Verify your config file is valid JSON',
+                automatic: false,
+              },
+              {
+                description: 'Use a JSON validator to check for syntax errors',
+                automatic: false,
+              },
+              {
+                description: 'Run "autonomous-dev init" to create a new configuration file',
+                automatic: false,
+              },
+            ],
+            cause: error,
+          }
+        );
+        logger.structuredError(parseError);
       }
     }
   }
@@ -429,7 +534,7 @@ export function loadConfig(configPath?: string): Config {
   const result = ConfigSchema.safeParse(mergedConfig);
   if (!result.success) {
     formatValidationErrors(result.error);
-    throw new Error('Configuration validation failed');
+    throw createConfigValidationError(result.error, configPath);
   }
 
   return result.data;

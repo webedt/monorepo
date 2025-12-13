@@ -6,6 +6,15 @@ import { createWorkerPool, type WorkerTask, type PoolResult } from './executor/i
 import { runEvaluation, type EvaluationResult } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
 import { logger } from './utils/logger.js';
+import {
+  StructuredError,
+  ErrorCode,
+  GitHubError,
+  ClaudeError,
+  ConfigError,
+  wrapError,
+  type ErrorContext,
+} from './utils/errors.js';
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -79,11 +88,52 @@ export class Daemon {
         }
       }
     } catch (error: any) {
-      logger.error('Daemon error', { error: error.message });
-      throw error;
+      const structuredError = this.wrapDaemonError(error);
+      logger.structuredError(structuredError, {
+        context: this.getErrorContext('start'),
+        includeStack: true,
+        includeRecovery: true,
+      });
+      throw structuredError;
     } finally {
       await this.shutdown();
     }
+  }
+
+  /**
+   * Wrap any error as a StructuredError with daemon-specific context
+   */
+  private wrapDaemonError(error: any, operation?: string): StructuredError {
+    if (error instanceof StructuredError) {
+      return error;
+    }
+    return wrapError(error, ErrorCode.INTERNAL_ERROR, {
+      operation: operation ?? 'daemon',
+      component: 'Daemon',
+    });
+  }
+
+  /**
+   * Get current error context for debugging
+   */
+  private getErrorContext(operation: string): ErrorContext {
+    return {
+      operation,
+      component: 'Daemon',
+      cycleCount: this.cycleCount,
+      isRunning: this.isRunning,
+      config: {
+        repo: `${this.config.repo.owner}/${this.config.repo.name}`,
+        baseBranch: this.config.repo.baseBranch,
+        parallelWorkers: this.config.execution.parallelWorkers,
+        timeoutMinutes: this.config.execution.timeoutMinutes,
+      },
+      systemState: {
+        userId: this.userId ?? 'not-set',
+        databaseLogging: this.enableDatabaseLogging,
+        dryRun: this.options.dryRun ?? false,
+      },
+    };
   }
 
   async stop(): Promise<void> {
@@ -118,16 +168,62 @@ export class Daemon {
           };
         }
       } else {
-        throw new Error(`User not found: ${this.config.credentials.userEmail}`);
+        throw new ConfigError(
+          ErrorCode.DB_USER_NOT_FOUND,
+          `User not found in database: ${this.config.credentials.userEmail}`,
+          {
+            field: 'credentials.userEmail',
+            value: this.config.credentials.userEmail,
+            context: this.getErrorContext('initialize'),
+          }
+        );
       }
     }
 
     // Validate required credentials
     if (!this.config.credentials.githubToken) {
-      throw new Error('GitHub token not configured');
+      throw new ConfigError(
+        ErrorCode.CONFIG_MISSING_REQUIRED,
+        'GitHub token not configured',
+        {
+          field: 'credentials.githubToken',
+          recoveryActions: [
+            {
+              description: 'Set the GITHUB_TOKEN environment variable',
+              automatic: false,
+            },
+            {
+              description: 'Add githubToken to your config file under credentials',
+              automatic: false,
+            },
+            {
+              description: 'Generate a new token at https://github.com/settings/tokens with repo scope',
+              automatic: false,
+            },
+          ],
+          context: this.getErrorContext('initialize'),
+        }
+      );
     }
     if (!this.config.credentials.claudeAuth) {
-      throw new Error('Claude auth not configured');
+      throw new ConfigError(
+        ErrorCode.CONFIG_MISSING_REQUIRED,
+        'Claude authentication not configured',
+        {
+          field: 'credentials.claudeAuth',
+          recoveryActions: [
+            {
+              description: 'Set the CLAUDE_ACCESS_TOKEN environment variable',
+              automatic: false,
+            },
+            {
+              description: 'Configure Claude credentials in the database if using database authentication',
+              automatic: false,
+            },
+          ],
+          context: this.getErrorContext('initialize'),
+        }
+      );
     }
 
     // Initialize GitHub client
@@ -169,7 +265,24 @@ export class Daemon {
 
     try {
       if (!this.github || !this.config.credentials.claudeAuth) {
-        throw new Error('Not initialized');
+        throw new StructuredError(
+          ErrorCode.NOT_INITIALIZED,
+          'Daemon not properly initialized: GitHub client or Claude auth is missing',
+          {
+            severity: 'critical',
+            context: this.getErrorContext('runCycle'),
+            recoveryActions: [
+              {
+                description: 'Call initialize() before running cycles',
+                automatic: false,
+              },
+              {
+                description: 'Check that credentials are properly configured',
+                automatic: false,
+              },
+            ],
+          }
+        );
       }
 
       // STEP 1: Get existing issues
@@ -213,13 +326,30 @@ export class Daemon {
               newIssues.push(issue);
               logger.success(`Created issue #${issue.number}: ${issue.title}`);
             } catch (error: any) {
-              errors.push(`Failed to create issue for "${task.title}": ${error.message}`);
-              logger.error(`Failed to create issue: ${error.message}`);
+              const structuredError = error instanceof StructuredError
+                ? error
+                : new GitHubError(
+                    ErrorCode.GITHUB_API_ERROR,
+                    `Failed to create issue for "${task.title}": ${error.message}`,
+                    { context: { taskTitle: task.title }, cause: error }
+                  );
+              errors.push(`[${structuredError.code}] ${structuredError.message}`);
+              logger.structuredError(structuredError, { context: { taskTitle: task.title } });
             }
           }
         } catch (error: any) {
-          errors.push(`Task discovery failed: ${error.message}`);
-          logger.error('Task discovery failed', { error: error.message });
+          const structuredError = error instanceof StructuredError
+            ? error
+            : new ClaudeError(
+                ErrorCode.CLAUDE_API_ERROR,
+                `Task discovery failed: ${error.message}`,
+                { context: this.getErrorContext('discoverTasks'), cause: error }
+              );
+          errors.push(`[${structuredError.code}] ${structuredError.message}`);
+          logger.structuredError(structuredError, {
+            context: this.getErrorContext('discoverTasks'),
+            includeRecovery: true,
+          });
         }
       } else if (availableSlots <= 0) {
         logger.info('Max open issues reached, skipping discovery');
@@ -304,8 +434,26 @@ export class Daemon {
               `🔗 PR created: #${pr.number}`
             );
           } catch (error: any) {
-            errors.push(`Failed to create PR for issue #${result.issue.number}: ${error.message}`);
-            logger.error('Failed to create PR', { error: error.message });
+            const structuredError = error instanceof StructuredError
+              ? error
+              : new GitHubError(
+                  ErrorCode.GITHUB_API_ERROR,
+                  `Failed to create PR for issue #${result.issue.number}: ${error.message}`,
+                  {
+                    context: {
+                      issueNumber: result.issue.number,
+                      branchName: result.branchName,
+                    },
+                    cause: error,
+                  }
+                );
+            errors.push(`[${structuredError.code}] ${structuredError.message}`);
+            logger.structuredError(structuredError, {
+              context: {
+                issueNumber: result.issue.number,
+                branchName: result.branchName,
+              },
+            });
           }
         }
 

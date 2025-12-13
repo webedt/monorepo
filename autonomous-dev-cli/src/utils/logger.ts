@@ -1,10 +1,17 @@
 import chalk from 'chalk';
+import { StructuredError, type ErrorContext, formatError } from './errors.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 interface LoggerOptions {
   level: LogLevel;
   prefix?: string;
+}
+
+interface ErrorLogOptions {
+  context?: ErrorContext;
+  includeStack?: boolean;
+  includeRecovery?: boolean;
 }
 
 const levelPriority: Record<LogLevel, number> = {
@@ -81,6 +88,138 @@ class Logger {
   error(message: string, meta?: object): void {
     if (this.shouldLog('error')) {
       console.error(this.formatMessage('error', message, meta));
+    }
+  }
+
+  /**
+   * Log a structured error with full context, recovery suggestions, and optional stack trace
+   */
+  structuredError(error: StructuredError, options: ErrorLogOptions = {}): void {
+    if (!this.shouldLog('error')) return;
+
+    const { context, includeStack = false, includeRecovery = true } = options;
+
+    // Merge additional context if provided
+    const mergedContext = context ? { ...error.context, ...context } : error.context;
+
+    // Build comprehensive log output
+    const timestamp = new Date().toISOString();
+    const prefix = this.prefix ? `[${this.prefix}] ` : '';
+    const severityColor = this.getSeverityColor(error.severity);
+
+    console.error();
+    console.error(
+      chalk.gray(timestamp),
+      levelIcons.error,
+      levelColors.error('ERROR'),
+      prefix,
+      chalk.bold(`[${error.code}]`),
+      error.message
+    );
+    console.error(chalk.gray('  Severity:'), severityColor(error.severity));
+    console.error(chalk.gray('  Retryable:'), error.isRetryable ? chalk.green('yes') : chalk.red('no'));
+
+    // Log context details
+    if (Object.keys(mergedContext).length > 0) {
+      console.error(chalk.gray('  Context:'));
+      for (const [key, value] of Object.entries(mergedContext)) {
+        if (value !== undefined && key !== 'timestamp') {
+          const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+          console.error(chalk.gray(`    ${key}:`), displayValue);
+        }
+      }
+    }
+
+    // Log recovery suggestions
+    if (includeRecovery && error.recoveryActions.length > 0) {
+      console.error(chalk.yellow('  Recovery suggestions:'));
+      for (const action of error.recoveryActions) {
+        const actionType = action.automatic ? chalk.cyan('(auto)') : chalk.magenta('(manual)');
+        console.error(`    ${actionType} ${action.description}`);
+      }
+    }
+
+    // Log stack trace if requested
+    if (includeStack && error.stack) {
+      console.error(chalk.gray('  Stack trace:'));
+      const stackLines = error.stack.split('\n').slice(1);
+      for (const line of stackLines.slice(0, 5)) {
+        console.error(chalk.gray(`  ${line}`));
+      }
+      if (stackLines.length > 5) {
+        console.error(chalk.gray(`    ... ${stackLines.length - 5} more lines`));
+      }
+    }
+
+    // Log cause chain if present
+    if (error.cause) {
+      console.error(chalk.gray('  Caused by:'), error.cause.message);
+    }
+
+    console.error();
+  }
+
+  /**
+   * Log error with full context for debugging (includes config, system state)
+   */
+  errorWithContext(
+    message: string,
+    error: Error | StructuredError,
+    context: ErrorContext
+  ): void {
+    if (!this.shouldLog('error')) return;
+
+    if (error instanceof StructuredError) {
+      this.structuredError(error, { context, includeStack: true, includeRecovery: true });
+    } else {
+      // Convert regular error to structured format for consistent logging
+      const timestamp = new Date().toISOString();
+      const prefix = this.prefix ? `[${this.prefix}] ` : '';
+
+      console.error();
+      console.error(
+        chalk.gray(timestamp),
+        levelIcons.error,
+        levelColors.error('ERROR'),
+        prefix,
+        message
+      );
+      console.error(chalk.gray('  Error:'), error.message);
+
+      if (Object.keys(context).length > 0) {
+        console.error(chalk.gray('  Context:'));
+        for (const [key, value] of Object.entries(context)) {
+          if (value !== undefined) {
+            const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+            console.error(chalk.gray(`    ${key}:`), displayValue);
+          }
+        }
+      }
+
+      if (error.stack) {
+        console.error(chalk.gray('  Stack trace:'));
+        const stackLines = error.stack.split('\n').slice(1, 4);
+        for (const line of stackLines) {
+          console.error(chalk.gray(`  ${line}`));
+        }
+      }
+
+      console.error();
+    }
+  }
+
+  private getSeverityColor(severity: string): (text: string) => string {
+    switch (severity) {
+      case 'critical':
+        return chalk.red.bold;
+      case 'error':
+        return chalk.red;
+      case 'warning':
+        return chalk.yellow;
+      case 'transient':
+        return chalk.cyan;
+      default:
+        return chalk.white;
     }
   }
 
