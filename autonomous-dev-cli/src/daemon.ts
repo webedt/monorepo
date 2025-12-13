@@ -18,6 +18,10 @@ import {
   timeOperation,
   createOperationContext,
   finalizeOperationContext,
+  startRequestLifecycle,
+  endRequestLifecycle,
+  startPhase,
+  endPhase,
   type LogFormat,
   type OperationMetadata,
   type CorrelationContext,
@@ -150,6 +154,9 @@ export class Daemon {
 
         const cycleStartMemory = getMemoryUsageMB();
 
+        // Start request lifecycle tracking for the entire cycle
+        startRequestLifecycle(cycleCorrelationId);
+
         logger.header(`Cycle #${this.cycleCount}`);
         logger.info(`Starting cycle`, {
           cycle: this.cycleCount,
@@ -199,6 +206,9 @@ export class Daemon {
 
         // Log memory snapshot at cycle end
         logger.memorySnapshot('Daemon', `Cycle #${this.cycleCount} end`);
+
+        // End request lifecycle tracking with summary
+        endRequestLifecycle(cycleCorrelationId, result.success, result.errors.length > 0 ? 'CYCLE_HAD_ERRORS' : undefined);
 
         // Clear correlation ID after cycle
         clearCorrelationId();

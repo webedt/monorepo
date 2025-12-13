@@ -1,9 +1,35 @@
-import { logger } from '../utils/logger.js';
+import { logger, getCorrelationId, createOperationContext, finalizeOperationContext, startPhase, endPhase, recordPhaseOperation, recordPhaseError, } from '../utils/logger.js';
 export async function runHealthChecks(options) {
     const { urls, timeout = 10000, expectedStatus = 200, retries = 2, retryDelay = 1000, concurrency = 5, parallel = true, } = options;
     const startTime = Date.now();
+    const correlationId = getCorrelationId();
+    // Start evaluation phase if tracking
+    if (correlationId) {
+        startPhase(correlationId, 'evaluation', {
+            operation: 'healthCheck',
+            urlCount: urls.length,
+            parallel,
+        });
+        recordPhaseOperation(correlationId, 'evaluation', 'runHealthChecks');
+    }
+    // Create operation context for structured logging
+    const operationContext = createOperationContext('HealthCheck', 'runHealthChecks', {
+        urlCount: urls.length,
+        timeout,
+        expectedStatus,
+        retries,
+        parallel,
+        concurrency,
+    });
     if (urls.length === 0) {
-        logger.info('No health check URLs configured, skipping');
+        logger.info('No health check URLs configured, skipping', { correlationId });
+        // End phase successfully for empty checks
+        if (correlationId) {
+            endPhase(correlationId, 'evaluation', true, {
+                operation: 'healthCheck',
+                skipped: true,
+            });
+        }
         return {
             success: true,
             checks: [],
@@ -12,12 +38,77 @@ export async function runHealthChecks(options) {
     }
     const checkOptions = { timeout, expectedStatus, retries, retryDelay };
     if (parallel) {
-        logger.info(`Running ${urls.length} health check(s) in parallel (concurrency: ${concurrency})...`);
-        return runParallelHealthChecks(urls, checkOptions, concurrency, startTime);
+        logger.info(`Running ${urls.length} health check(s) in parallel (concurrency: ${concurrency})...`, {
+            correlationId,
+            urlCount: urls.length,
+            concurrency,
+        });
+        const result = await runParallelHealthChecks(urls, checkOptions, concurrency, startTime);
+        // End phase and log completion
+        const passedCount = result.checks.filter(c => c.ok).length;
+        const failedCount = result.checks.filter(c => !c.ok).length;
+        if (correlationId) {
+            if (result.success) {
+                endPhase(correlationId, 'evaluation', true, {
+                    operation: 'healthCheck',
+                    passed: passedCount,
+                    failed: failedCount,
+                    duration: result.duration,
+                });
+            }
+            else {
+                recordPhaseError(correlationId, 'evaluation', 'HEALTH_CHECK_FAILED');
+                endPhase(correlationId, 'evaluation', false, {
+                    operation: 'healthCheck',
+                    passed: passedCount,
+                    failed: failedCount,
+                    duration: result.duration,
+                });
+            }
+        }
+        const operationMetadata = finalizeOperationContext(operationContext, result.success, {
+            passed: passedCount,
+            failed: failedCount,
+            duration: result.duration,
+        });
+        logger.operationComplete('HealthCheck', 'runHealthChecks', result.success, operationMetadata);
+        return result;
     }
     else {
-        logger.info(`Running ${urls.length} health check(s) sequentially...`);
-        return runSequentialHealthChecks(urls, checkOptions, startTime);
+        logger.info(`Running ${urls.length} health check(s) sequentially...`, {
+            correlationId,
+            urlCount: urls.length,
+        });
+        const result = await runSequentialHealthChecks(urls, checkOptions, startTime);
+        // End phase and log completion
+        const passedCount = result.checks.filter(c => c.ok).length;
+        const failedCount = result.checks.filter(c => !c.ok).length;
+        if (correlationId) {
+            if (result.success) {
+                endPhase(correlationId, 'evaluation', true, {
+                    operation: 'healthCheck',
+                    passed: passedCount,
+                    failed: failedCount,
+                    duration: result.duration,
+                });
+            }
+            else {
+                recordPhaseError(correlationId, 'evaluation', 'HEALTH_CHECK_FAILED');
+                endPhase(correlationId, 'evaluation', false, {
+                    operation: 'healthCheck',
+                    passed: passedCount,
+                    failed: failedCount,
+                    duration: result.duration,
+                });
+            }
+        }
+        const operationMetadata = finalizeOperationContext(operationContext, result.success, {
+            passed: passedCount,
+            failed: failedCount,
+            duration: result.duration,
+        });
+        logger.operationComplete('HealthCheck', 'runHealthChecks', result.success, operationMetadata);
+        return result;
     }
 }
 /**

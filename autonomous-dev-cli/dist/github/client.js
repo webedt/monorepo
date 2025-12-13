@@ -1,5 +1,5 @@
 import { Octokit } from '@octokit/rest';
-import { logger, getCorrelationId, timeOperation, } from '../utils/logger.js';
+import { logger, getCorrelationId, timeOperation, recordPhaseOperation, recordPhaseError, DEFAULT_TIMING_THRESHOLD_MS, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import { GitHubError, ErrorCode, createGitHubErrorFromResponse, withRetry, StructuredError, } from '../utils/errors.js';
 const DEFAULT_GITHUB_RETRY_CONFIG = {
@@ -156,6 +156,10 @@ export class GitHubClient {
         const correlationId = getCorrelationId();
         const method = this.extractMethodFromEndpoint(endpoint);
         const repository = `${this.owner}/${this.repo}`;
+        // Record operation in github phase if tracking
+        if (correlationId) {
+            recordPhaseOperation(correlationId, 'github', endpoint);
+        }
         // Check circuit breaker state
         if (!this.canMakeRequest()) {
             const error = new GitHubError(ErrorCode.GITHUB_API_ERROR, `GitHub API unavailable (circuit breaker open). Will retry after ${this.circuitBreakerConfig.resetTimeoutMs / 1000}s`, {
@@ -247,14 +251,32 @@ export class GitHubClient {
             // Failure - record it and update rate limit state
             this.updateRateLimitState(error);
             this.recordFailure(error);
-            // Log failed API call
+            // Record error in phase tracking
+            if (correlationId) {
+                const errorCode = error instanceof StructuredError ? error.code : `HTTP_${statusCode || 'UNKNOWN'}`;
+                recordPhaseError(correlationId, 'github', errorCode);
+            }
+            // Log failed API call with enhanced context
             logger.apiCall('GitHub', endpoint, method, {
                 statusCode,
                 duration,
                 success: false,
                 error: error.message,
                 correlationId,
+                circuitState: this.circuitState,
+                consecutiveFailures: this.consecutiveFailures,
             });
+            // Log slow failed operations for debugging
+            if (duration > DEFAULT_TIMING_THRESHOLD_MS) {
+                logger.debug('Slow GitHub API failure', {
+                    endpoint,
+                    method,
+                    duration,
+                    threshold: DEFAULT_TIMING_THRESHOLD_MS,
+                    statusCode,
+                    correlationId,
+                });
+            }
             // Record metrics
             metrics.recordGitHubApiCall(endpoint, method, false, duration, {
                 repository,

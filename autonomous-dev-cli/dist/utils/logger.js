@@ -2,6 +2,11 @@ import chalk from 'chalk';
 import { StructuredError } from './errors.js';
 import { randomUUID } from 'crypto';
 import { memoryUsage } from 'process';
+/**
+ * Default timing threshold in ms for logging slow operations
+ * Operations exceeding this threshold will be automatically logged
+ */
+export const DEFAULT_TIMING_THRESHOLD_MS = 100;
 const levelPriority = {
     debug: 0,
     info: 1,
@@ -102,6 +107,123 @@ export function setWorkerId(workerId) {
 export function getWorkerId() {
     return globalCorrelationContext?.workerId;
 }
+// Request lifecycle tracking for end-to-end tracing
+const requestLifecycles = new Map();
+/**
+ * Start tracking a request lifecycle
+ */
+export function startRequestLifecycle(correlationId) {
+    const lifecycle = {
+        correlationId,
+        startTime: Date.now(),
+        phases: new Map(),
+    };
+    requestLifecycles.set(correlationId, lifecycle);
+    return lifecycle;
+}
+/**
+ * Start a phase in the request lifecycle
+ */
+export function startPhase(correlationId, phase, metadata = {}) {
+    const lifecycle = requestLifecycles.get(correlationId);
+    if (!lifecycle) {
+        // Auto-create lifecycle if not exists
+        startRequestLifecycle(correlationId);
+    }
+    const phaseMetrics = {
+        phase,
+        startTime: Date.now(),
+        operationCount: 0,
+        errorCount: 0,
+        metadata,
+    };
+    requestLifecycles.get(correlationId)?.phases.set(phase, phaseMetrics);
+    return phaseMetrics;
+}
+/**
+ * End a phase in the request lifecycle
+ */
+export function endPhase(correlationId, phase, success, additionalMetadata = {}) {
+    const lifecycle = requestLifecycles.get(correlationId);
+    const phaseMetrics = lifecycle?.phases.get(phase);
+    if (phaseMetrics) {
+        phaseMetrics.endTime = Date.now();
+        phaseMetrics.duration = phaseMetrics.endTime - phaseMetrics.startTime;
+        phaseMetrics.success = success;
+        phaseMetrics.metadata = { ...phaseMetrics.metadata, ...additionalMetadata };
+        // Log slow phases automatically
+        if (phaseMetrics.duration > DEFAULT_TIMING_THRESHOLD_MS) {
+            logger.debug(`Slow phase detected: ${phase}`, {
+                phase,
+                duration: phaseMetrics.duration,
+                threshold: DEFAULT_TIMING_THRESHOLD_MS,
+                correlationId,
+                success,
+            });
+        }
+    }
+    return phaseMetrics;
+}
+/**
+ * Record an operation within a phase
+ */
+export function recordPhaseOperation(correlationId, phase, operationName) {
+    const lifecycle = requestLifecycles.get(correlationId);
+    const phaseMetrics = lifecycle?.phases.get(phase);
+    if (phaseMetrics) {
+        phaseMetrics.operationCount++;
+    }
+}
+/**
+ * Record an error within a phase
+ */
+export function recordPhaseError(correlationId, phase, errorCode) {
+    const lifecycle = requestLifecycles.get(correlationId);
+    const phaseMetrics = lifecycle?.phases.get(phase);
+    if (phaseMetrics) {
+        phaseMetrics.errorCount++;
+        if (errorCode) {
+            phaseMetrics.metadata.lastErrorCode = errorCode;
+        }
+    }
+}
+/**
+ * End the request lifecycle and return summary
+ */
+export function endRequestLifecycle(correlationId, success, errorCode) {
+    const lifecycle = requestLifecycles.get(correlationId);
+    if (lifecycle) {
+        lifecycle.totalDuration = Date.now() - lifecycle.startTime;
+        lifecycle.success = success;
+        lifecycle.errorCode = errorCode;
+        // Log lifecycle summary
+        const phaseSummary = {};
+        lifecycle.phases.forEach((metrics, phase) => {
+            phaseSummary[phase] = {
+                duration: metrics.duration || 0,
+                success: metrics.success || false,
+                operations: metrics.operationCount,
+                errors: metrics.errorCount,
+            };
+        });
+        logger.info('Request lifecycle completed', {
+            correlationId,
+            totalDuration: lifecycle.totalDuration,
+            success,
+            errorCode,
+            phases: phaseSummary,
+        });
+        // Clean up after logging
+        requestLifecycles.delete(correlationId);
+    }
+    return lifecycle;
+}
+/**
+ * Get the current request lifecycle for a correlation ID
+ */
+export function getRequestLifecycle(correlationId) {
+    return requestLifecycles.get(correlationId);
+}
 /**
  * Get current memory usage in megabytes
  */
@@ -123,18 +245,42 @@ export function getMemoryStats() {
 }
 /**
  * Time an async operation and return result with timing info
+ * Automatically logs operations that exceed the timing threshold
  */
-export async function timeOperation(operation, operationName) {
+export async function timeOperation(operation, operationNameOrOptions) {
+    const options = typeof operationNameOrOptions === 'string'
+        ? { operationName: operationNameOrOptions }
+        : operationNameOrOptions || {};
+    const { operationName, component, phase, timingThreshold = DEFAULT_TIMING_THRESHOLD_MS, logSlowOperations = true, metadata = {}, } = options;
     const startMemory = getMemoryUsageMB();
     const startTime = Date.now();
+    const correlationId = getCorrelationId();
+    // Record operation in phase if tracking
+    if (correlationId && phase && operationName) {
+        recordPhaseOperation(correlationId, phase, operationName);
+    }
     try {
         const result = await operation();
         const duration = Date.now() - startTime;
         const endMemory = getMemoryUsageMB();
+        const memoryDelta = Math.round((endMemory - startMemory) * 100) / 100;
+        // Log slow operations automatically
+        if (logSlowOperations && duration > timingThreshold) {
+            logger.debug(`Slow operation: ${operationName || 'unnamed'}`, {
+                operation: operationName,
+                component,
+                phase,
+                duration,
+                threshold: timingThreshold,
+                memoryDeltaMB: memoryDelta,
+                correlationId,
+                ...metadata,
+            });
+        }
         return {
             result,
             duration,
-            memoryDelta: Math.round((endMemory - startMemory) * 100) / 100,
+            memoryDelta,
             startMemory,
             endMemory,
         };
@@ -142,6 +288,11 @@ export async function timeOperation(operation, operationName) {
     catch (error) {
         const duration = Date.now() - startTime;
         const endMemory = getMemoryUsageMB();
+        // Record error in phase tracking
+        if (correlationId && phase) {
+            const errorCode = error instanceof StructuredError ? error.code : undefined;
+            recordPhaseError(correlationId, phase, errorCode);
+        }
         // Re-throw with timing info attached
         if (error instanceof Error) {
             error.operationDuration = duration;
@@ -152,24 +303,53 @@ export async function timeOperation(operation, operationName) {
 }
 /**
  * Time a synchronous operation and return result with timing info
+ * Automatically logs operations that exceed the timing threshold
  */
-export function timeOperationSync(operation, operationName) {
+export function timeOperationSync(operation, operationNameOrOptions) {
+    const options = typeof operationNameOrOptions === 'string'
+        ? { operationName: operationNameOrOptions }
+        : operationNameOrOptions || {};
+    const { operationName, component, phase, timingThreshold = DEFAULT_TIMING_THRESHOLD_MS, logSlowOperations = true, metadata = {}, } = options;
     const startMemory = getMemoryUsageMB();
     const startTime = Date.now();
+    const correlationId = getCorrelationId();
+    // Record operation in phase if tracking
+    if (correlationId && phase && operationName) {
+        recordPhaseOperation(correlationId, phase, operationName);
+    }
     try {
         const result = operation();
         const duration = Date.now() - startTime;
         const endMemory = getMemoryUsageMB();
+        const memoryDelta = Math.round((endMemory - startMemory) * 100) / 100;
+        // Log slow operations automatically
+        if (logSlowOperations && duration > timingThreshold) {
+            logger.debug(`Slow operation: ${operationName || 'unnamed'}`, {
+                operation: operationName,
+                component,
+                phase,
+                duration,
+                threshold: timingThreshold,
+                memoryDeltaMB: memoryDelta,
+                correlationId,
+                ...metadata,
+            });
+        }
         return {
             result,
             duration,
-            memoryDelta: Math.round((endMemory - startMemory) * 100) / 100,
+            memoryDelta,
             startMemory,
             endMemory,
         };
     }
     catch (error) {
         const duration = Date.now() - startTime;
+        // Record error in phase tracking
+        if (correlationId && phase) {
+            const errorCode = error instanceof StructuredError ? error.code : undefined;
+            recordPhaseError(correlationId, phase, errorCode);
+        }
         if (error instanceof Error) {
             error.operationDuration = duration;
             error.operationName = operationName;
