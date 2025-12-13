@@ -1001,10 +1001,468 @@ export declare const events: import("drizzle-orm/pg-core").PgTableWithColumns<{
     };
     dialect: "pg";
 }>;
+export declare const taskExecutionHistory: import("drizzle-orm/pg-core").PgTableWithColumns<{
+    name: "task_execution_history";
+    schema: undefined;
+    columns: {
+        id: import("drizzle-orm/pg-core").PgColumn<{
+            name: "id";
+            tableName: "task_execution_history";
+            dataType: "number";
+            columnType: "PgSerial";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        taskId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "task_id";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        issueNumber: import("drizzle-orm/pg-core").PgColumn<{
+            name: "issue_number";
+            tableName: "task_execution_history";
+            dataType: "number";
+            columnType: "PgInteger";
+            data: number;
+            driverParam: string | number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        branchName: import("drizzle-orm/pg-core").PgColumn<{
+            name: "branch_name";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        repository: import("drizzle-orm/pg-core").PgColumn<{
+            name: "repository";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        priority: import("drizzle-orm/pg-core").PgColumn<{
+            name: "priority";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        category: import("drizzle-orm/pg-core").PgColumn<{
+            name: "category";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        complexity: import("drizzle-orm/pg-core").PgColumn<{
+            name: "complexity";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        status: import("drizzle-orm/pg-core").PgColumn<{
+            name: "status";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        workerId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "worker_id";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        queuedAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "queued_at";
+            tableName: "task_execution_history";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        startedAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "started_at";
+            tableName: "task_execution_history";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        completedAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "completed_at";
+            tableName: "task_execution_history";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        duration: import("drizzle-orm/pg-core").PgColumn<{
+            name: "duration";
+            tableName: "task_execution_history";
+            dataType: "number";
+            columnType: "PgInteger";
+            data: number;
+            driverParam: string | number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        retryCount: import("drizzle-orm/pg-core").PgColumn<{
+            name: "retry_count";
+            tableName: "task_execution_history";
+            dataType: "number";
+            columnType: "PgInteger";
+            data: number;
+            driverParam: string | number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        maxRetries: import("drizzle-orm/pg-core").PgColumn<{
+            name: "max_retries";
+            tableName: "task_execution_history";
+            dataType: "number";
+            columnType: "PgInteger";
+            data: number;
+            driverParam: string | number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        errorCode: import("drizzle-orm/pg-core").PgColumn<{
+            name: "error_code";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        errorMessage: import("drizzle-orm/pg-core").PgColumn<{
+            name: "error_message";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        isRetryable: import("drizzle-orm/pg-core").PgColumn<{
+            name: "is_retryable";
+            tableName: "task_execution_history";
+            dataType: "boolean";
+            columnType: "PgBoolean";
+            data: boolean;
+            driverParam: boolean;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        priorityScore: import("drizzle-orm/pg-core").PgColumn<{
+            name: "priority_score";
+            tableName: "task_execution_history";
+            dataType: "number";
+            columnType: "PgInteger";
+            data: number;
+            driverParam: string | number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        groupId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "group_id";
+            tableName: "task_execution_history";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        metadata: import("drizzle-orm/pg-core").PgColumn<{
+            name: "metadata";
+            tableName: "task_execution_history";
+            dataType: "json";
+            columnType: "PgJson";
+            data: Record<string, unknown>;
+            driverParam: unknown;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            $type: Record<string, unknown>;
+        }>;
+        createdAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "created_at";
+            tableName: "task_execution_history";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        updatedAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "updated_at";
+            tableName: "task_execution_history";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "pg";
+}>;
 export type User = typeof users.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type DbEvent = typeof events.$inferSelect;
+export type TaskExecutionHistoryEntry = typeof taskExecutionHistory.$inferSelect;
+/** Status values for task execution */
+export type TaskExecutionStatus = 'queued' | 'started' | 'completed' | 'failed' | 'dropped' | 'retrying';
+/** Priority levels for tasks */
+export type TaskPriorityLevel = 'critical' | 'high' | 'medium' | 'low';
+/** Parameters for recording task execution history */
+export interface RecordExecutionHistoryParams {
+    taskId: string;
+    repository: string;
+    status: TaskExecutionStatus;
+    issueNumber?: number;
+    branchName?: string;
+    priority?: TaskPriorityLevel;
+    category?: string;
+    complexity?: string;
+    workerId?: string;
+    queuedAt?: Date;
+    startedAt?: Date;
+    completedAt?: Date;
+    duration?: number;
+    retryCount?: number;
+    maxRetries?: number;
+    errorCode?: string;
+    errorMessage?: string;
+    isRetryable?: boolean;
+    priorityScore?: number;
+    groupId?: string;
+    metadata?: Record<string, unknown>;
+}
+/** Query options for execution history */
+export interface ExecutionHistoryQueryOptions {
+    repository?: string;
+    status?: TaskExecutionStatus;
+    priority?: TaskPriorityLevel;
+    workerId?: string;
+    since?: Date;
+    until?: Date;
+    issueNumber?: number;
+    limit?: number;
+    offset?: number;
+}
 export interface UserCredentials {
     userId: string;
     githubAccessToken: string | null;
@@ -1120,4 +1578,41 @@ export declare function addEventOptimized(chatSessionId: string, eventType: stri
  * Flush pending activity updates (call before closing session)
  */
 export declare function flushActivityUpdates(chatSessionId?: string): Promise<void>;
+/**
+ * Record a task execution event in the history.
+ * This creates or updates a history entry for audit trail purposes.
+ */
+export declare function recordExecutionHistory(params: RecordExecutionHistoryParams): Promise<TaskExecutionHistoryEntry>;
+/**
+ * Update an existing execution history entry
+ */
+export declare function updateExecutionHistory(taskId: string, updates: Partial<Omit<RecordExecutionHistoryParams, 'taskId' | 'repository'>>): Promise<void>;
+/**
+ * Query execution history with optional filters
+ */
+export declare function queryExecutionHistory(options?: ExecutionHistoryQueryOptions): Promise<TaskExecutionHistoryEntry[]>;
+/**
+ * Get execution statistics for a repository
+ */
+export declare function getExecutionStatistics(repository: string, since?: Date): Promise<{
+    total: number;
+    byStatus: Record<string, number>;
+    byPriority: Record<string, number>;
+    avgDuration: number;
+    successRate: number;
+    totalRetries: number;
+    failedTasks: number;
+}>;
+/**
+ * Get recent failed tasks that are retryable
+ */
+export declare function getRetryableTasks(repository: string, limit?: number): Promise<TaskExecutionHistoryEntry[]>;
+/**
+ * Record batch execution history entries efficiently
+ */
+export declare function recordExecutionHistoryBatch(entries: RecordExecutionHistoryParams[]): Promise<TaskExecutionHistoryEntry[]>;
+/**
+ * Clean up old execution history entries
+ */
+export declare function cleanupExecutionHistory(repository: string, retentionDays?: number): Promise<number>;
 //# sourceMappingURL=index.d.ts.map

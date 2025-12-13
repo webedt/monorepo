@@ -34,11 +34,54 @@ export interface ScalingConfig {
     memoryThresholdLow: number;
     scaleCheckIntervalMs: number;
 }
+/** Queue configuration for memory management and overflow handling */
+export interface QueueConfig {
+    /** Maximum number of tasks allowed in queue (default: 100) */
+    maxQueueSize: number;
+    /** Strategy when queue is full: 'reject' | 'drop-lowest' | 'pause' */
+    overflowStrategy: 'reject' | 'drop-lowest' | 'pause';
+    /** Emit warning when queue reaches this percentage (default: 80) */
+    queueWarningThreshold: number;
+    /** Enable queue persistence for graceful shutdown (default: true) */
+    enablePersistence: boolean;
+}
+/** Execution history entry for audit trail */
+export interface ExecutionHistoryEntry {
+    taskId: string;
+    issueNumber?: number;
+    branchName?: string;
+    priority: TaskPriority;
+    category?: TaskCategory;
+    status: 'queued' | 'started' | 'completed' | 'failed' | 'dropped';
+    queuedAt: Date;
+    startedAt?: Date;
+    completedAt?: Date;
+    duration?: number;
+    workerId?: string;
+    retryCount: number;
+    error?: {
+        code: string;
+        message: string;
+        isRetryable: boolean;
+    };
+    metadata?: Record<string, unknown>;
+}
+/** Queue overflow event for monitoring */
+export interface QueueOverflowEvent {
+    timestamp: Date;
+    queueSize: number;
+    maxQueueSize: number;
+    strategy: QueueConfig['overflowStrategy'];
+    droppedTaskId?: string;
+    droppedTaskPriority?: TaskPriority;
+}
 export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
     maxWorkers: number;
     workDir: string;
     /** Optional scaling configuration for dynamic worker management */
     scalingConfig?: Partial<ScalingConfig>;
+    /** Optional queue configuration for memory management */
+    queueConfig?: Partial<QueueConfig>;
     /** Enable dynamic scaling based on system resources */
     enableDynamicScaling?: boolean;
     /** Enable graceful degradation when services fail */
@@ -49,6 +92,8 @@ export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
         enableDeadLetterQueue?: boolean;
         progressiveTimeout?: boolean;
     };
+    /** Enable execution history tracking for audit trail */
+    enableExecutionHistory?: boolean;
 }
 /**
  * Degradation status for the worker pool
@@ -82,6 +127,12 @@ export interface PoolTask extends WorkerTask {
     priorityScore?: number;
     /** Group ID for related tasks */
     groupId?: string;
+    /** Time when task was added to queue */
+    queuedAt?: Date;
+    /** Current retry count for this task */
+    retryCount?: number;
+    /** Maximum retries allowed for this task */
+    maxRetries?: number;
 }
 export interface PoolResult extends WorkerResult {
     taskId: string;
@@ -92,19 +143,26 @@ export declare class WorkerPool {
     private taskQueue;
     private results;
     private isRunning;
+    private isShuttingDown;
     private workerIdCounter;
     private repository;
     private scalingConfig;
+    private queueConfig;
     private currentWorkerLimit;
     private scaleCheckInterval;
     private workerTaskMap;
     private taskGroupWorkers;
+    private executionHistory;
+    private maxHistoryEntries;
+    private overflowEvents;
     private degradationStatus;
     private degradationCheckInterval;
     private consecutiveFailures;
     private failureThreshold;
     /** Default scaling configuration */
     private static readonly DEFAULT_SCALING_CONFIG;
+    /** Default queue configuration */
+    private static readonly DEFAULT_QUEUE_CONFIG;
     constructor(options: WorkerPoolOptions);
     /**
      * Extract repository name from URL for metrics labeling
@@ -154,6 +212,65 @@ export declare class WorkerPool {
      * Check if the pool can accept new tasks
      */
     canAcceptTasks(): boolean;
+    /**
+     * Get current queue utilization percentage
+     */
+    getQueueUtilization(): number;
+    /**
+     * Check if queue is approaching capacity and emit warning
+     */
+    private checkQueueCapacity;
+    /**
+     * Handle queue overflow based on configured strategy
+     * @returns true if task was added, false if rejected
+     */
+    private handleQueueOverflow;
+    /**
+     * Find the index of the lowest priority task in the queue
+     */
+    private findLowestPriorityTaskIndex;
+    /**
+     * Record task execution in history for audit trail
+     */
+    private recordExecutionHistory;
+    /**
+     * Get execution history with optional filtering
+     */
+    getExecutionHistory(options?: {
+        status?: ExecutionHistoryEntry['status'];
+        priority?: TaskPriority;
+        limit?: number;
+        since?: Date;
+    }): ExecutionHistoryEntry[];
+    /**
+     * Get execution statistics from history
+     */
+    getExecutionStats(): {
+        total: number;
+        byStatus: Record<string, number>;
+        byPriority: Record<string, number>;
+        avgDuration: number;
+        successRate: number;
+        retriesTotal: number;
+    };
+    /**
+     * Get queue overflow events
+     */
+    getOverflowEvents(limit?: number): QueueOverflowEvent[];
+    /**
+     * Gracefully shutdown the worker pool, preserving queued tasks
+     * @param timeoutMs Maximum time to wait for active workers to complete
+     * @returns Remaining queued tasks that were not processed
+     */
+    gracefulShutdown(timeoutMs?: number): Promise<PoolTask[]>;
+    /**
+     * Persist queued tasks to disk for recovery
+     */
+    private persistQueuedTasks;
+    /**
+     * Load previously persisted queued tasks
+     */
+    loadPersistedTasks(): Promise<PoolTask[]>;
     /**
      * Get dead letter queue stats
      */
@@ -220,6 +337,18 @@ export declare class WorkerPool {
     private extractTaskMetadata;
     private startNextTask;
     stop(): void;
+    /**
+     * Check if the pool is currently shutting down
+     */
+    isInShutdown(): boolean;
+    /**
+     * Get the current queue configuration
+     */
+    getQueueConfig(): QueueConfig;
+    /**
+     * Update queue configuration at runtime
+     */
+    updateQueueConfig(config: Partial<QueueConfig>): void;
     getStatus(): {
         active: number;
         queued: number;
@@ -232,6 +361,15 @@ export declare class WorkerPool {
         degradationStatus: DegradationStatus;
         dlqStats: ReturnType<typeof getDeadLetterQueue>['getStats'] extends () => infer R ? R : never;
         errorAggregation: ReturnType<typeof getErrorAggregator>['getSummary'] extends () => infer R ? R : never;
+        queueStatus: {
+            utilization: number;
+            maxSize: number;
+            isAtCapacity: boolean;
+            overflowStrategy: QueueConfig['overflowStrategy'];
+            recentOverflowCount: number;
+        };
+        executionStats: ReturnType<WorkerPool['getExecutionStats']>;
+        isShuttingDown: boolean;
     };
     /**
      * Get the current scaling configuration

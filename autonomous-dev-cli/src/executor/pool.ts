@@ -81,11 +81,57 @@ export interface ScalingConfig {
   scaleCheckIntervalMs: number;
 }
 
+/** Queue configuration for memory management and overflow handling */
+export interface QueueConfig {
+  /** Maximum number of tasks allowed in queue (default: 100) */
+  maxQueueSize: number;
+  /** Strategy when queue is full: 'reject' | 'drop-lowest' | 'pause' */
+  overflowStrategy: 'reject' | 'drop-lowest' | 'pause';
+  /** Emit warning when queue reaches this percentage (default: 80) */
+  queueWarningThreshold: number;
+  /** Enable queue persistence for graceful shutdown (default: true) */
+  enablePersistence: boolean;
+}
+
+/** Execution history entry for audit trail */
+export interface ExecutionHistoryEntry {
+  taskId: string;
+  issueNumber?: number;
+  branchName?: string;
+  priority: TaskPriority;
+  category?: TaskCategory;
+  status: 'queued' | 'started' | 'completed' | 'failed' | 'dropped';
+  queuedAt: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  duration?: number;
+  workerId?: string;
+  retryCount: number;
+  error?: {
+    code: string;
+    message: string;
+    isRetryable: boolean;
+  };
+  metadata?: Record<string, unknown>;
+}
+
+/** Queue overflow event for monitoring */
+export interface QueueOverflowEvent {
+  timestamp: Date;
+  queueSize: number;
+  maxQueueSize: number;
+  strategy: QueueConfig['overflowStrategy'];
+  droppedTaskId?: string;
+  droppedTaskPriority?: TaskPriority;
+}
+
 export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
   maxWorkers: number;
   workDir: string;
   /** Optional scaling configuration for dynamic worker management */
   scalingConfig?: Partial<ScalingConfig>;
+  /** Optional queue configuration for memory management */
+  queueConfig?: Partial<QueueConfig>;
   /** Enable dynamic scaling based on system resources */
   enableDynamicScaling?: boolean;
   /** Enable graceful degradation when services fail */
@@ -96,6 +142,8 @@ export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
     enableDeadLetterQueue?: boolean;
     progressiveTimeout?: boolean;
   };
+  /** Enable execution history tracking for audit trail */
+  enableExecutionHistory?: boolean;
 }
 
 /**
@@ -131,6 +179,12 @@ export interface PoolTask extends WorkerTask {
   priorityScore?: number;
   /** Group ID for related tasks */
   groupId?: string;
+  /** Time when task was added to queue */
+  queuedAt?: Date;
+  /** Current retry count for this task */
+  retryCount?: number;
+  /** Maximum retries allowed for this task */
+  maxRetries?: number;
 }
 
 export interface PoolResult extends WorkerResult {
@@ -143,13 +197,22 @@ export class WorkerPool {
   private taskQueue: PoolTask[] = [];
   private results: PoolResult[] = [];
   private isRunning: boolean = false;
+  private isShuttingDown: boolean = false;
   private workerIdCounter: number = 0;
   private repository: string;
   private scalingConfig: ScalingConfig;
+  private queueConfig: QueueConfig;
   private currentWorkerLimit: number;
   private scaleCheckInterval: NodeJS.Timeout | null = null;
   private workerTaskMap: Map<string, PoolTask> = new Map(); // Maps worker ID to assigned task
   private taskGroupWorkers: Map<string, string> = new Map(); // Maps group ID to preferred worker ID
+
+  // Execution history for audit trail
+  private executionHistory: ExecutionHistoryEntry[] = [];
+  private maxHistoryEntries: number = 1000;
+
+  // Queue overflow tracking
+  private overflowEvents: QueueOverflowEvent[] = [];
 
   // Graceful degradation state
   private degradationStatus: DegradationStatus = {
@@ -173,6 +236,14 @@ export class WorkerPool {
     scaleCheckIntervalMs: 10000,
   };
 
+  /** Default queue configuration */
+  private static readonly DEFAULT_QUEUE_CONFIG: QueueConfig = {
+    maxQueueSize: 100,
+    overflowStrategy: 'drop-lowest',
+    queueWarningThreshold: 80,
+    enablePersistence: true,
+  };
+
   constructor(options: WorkerPoolOptions) {
     this.options = options;
     this.repository = this.extractRepoName(options.repoUrl);
@@ -184,13 +255,22 @@ export class WorkerPool {
       ...options.scalingConfig,
     };
 
+    // Initialize queue configuration
+    this.queueConfig = {
+      ...WorkerPool.DEFAULT_QUEUE_CONFIG,
+      ...options.queueConfig,
+    };
+
     // Compute initial worker limit based on system resources
     this.currentWorkerLimit = this.computeOptimalWorkerCount();
 
     logger.info(`Worker pool initialized`, {
       maxWorkers: options.maxWorkers,
       initialWorkerLimit: this.currentWorkerLimit,
+      maxQueueSize: this.queueConfig.maxQueueSize,
+      overflowStrategy: this.queueConfig.overflowStrategy,
       enableDynamicScaling: options.enableDynamicScaling ?? false,
+      enableExecutionHistory: options.enableExecutionHistory ?? false,
       repository: this.repository,
     });
 
@@ -434,12 +514,445 @@ export class WorkerPool {
    * Check if the pool can accept new tasks
    */
   canAcceptTasks(): boolean {
+    // Don't accept new tasks during shutdown
+    if (this.isShuttingDown) {
+      return false;
+    }
+
+    // Check queue size limit
+    if (this.taskQueue.length >= this.queueConfig.maxQueueSize) {
+      // In 'pause' strategy, reject new tasks when full
+      if (this.queueConfig.overflowStrategy === 'pause') {
+        return false;
+      }
+    }
+
     // In degraded mode, we can still accept tasks but with reduced capacity
     if (this.degradationStatus.isDegraded) {
-      // Only accept if we have workers available and queue isn't full
-      return this.taskQueue.length < this.scalingConfig.maxWorkers * 2;
+      // Only accept if we have workers available and queue isn't critically full
+      return this.taskQueue.length < this.queueConfig.maxQueueSize * 0.9;
     }
     return true;
+  }
+
+  /**
+   * Get current queue utilization percentage
+   */
+  getQueueUtilization(): number {
+    return (this.taskQueue.length / this.queueConfig.maxQueueSize) * 100;
+  }
+
+  /**
+   * Check if queue is approaching capacity and emit warning
+   */
+  private checkQueueCapacity(): void {
+    const utilization = this.getQueueUtilization();
+    if (utilization >= this.queueConfig.queueWarningThreshold) {
+      logger.warn(`Queue approaching capacity: ${utilization.toFixed(1)}%`, {
+        currentSize: this.taskQueue.length,
+        maxSize: this.queueConfig.maxQueueSize,
+        warningThreshold: this.queueConfig.queueWarningThreshold,
+      });
+    }
+  }
+
+  /**
+   * Handle queue overflow based on configured strategy
+   * @returns true if task was added, false if rejected
+   */
+  private handleQueueOverflow(newTask: PoolTask): boolean {
+    if (this.taskQueue.length < this.queueConfig.maxQueueSize) {
+      return true; // No overflow, task can be added
+    }
+
+    const overflowEvent: QueueOverflowEvent = {
+      timestamp: new Date(),
+      queueSize: this.taskQueue.length,
+      maxQueueSize: this.queueConfig.maxQueueSize,
+      strategy: this.queueConfig.overflowStrategy,
+    };
+
+    switch (this.queueConfig.overflowStrategy) {
+      case 'reject':
+        // Reject the new task
+        logger.warn(`Queue full, rejecting task: ${newTask.id}`, {
+          taskId: newTask.id,
+          issueNumber: newTask.issue.number,
+          priority: newTask.metadata?.priority ?? 'medium',
+          queueSize: this.taskQueue.length,
+        });
+
+        // Record in execution history as dropped
+        this.recordExecutionHistory(newTask, 'dropped');
+
+        this.overflowEvents.push(overflowEvent);
+        return false;
+
+      case 'drop-lowest':
+        // Find and remove the lowest priority task
+        const lowestPriorityIndex = this.findLowestPriorityTaskIndex();
+        if (lowestPriorityIndex !== -1) {
+          const droppedTask = this.taskQueue[lowestPriorityIndex];
+
+          // Only drop if new task has higher priority
+          if ((newTask.priorityScore ?? 0) > (droppedTask.priorityScore ?? 0)) {
+            this.taskQueue.splice(lowestPriorityIndex, 1);
+
+            logger.warn(`Queue full, dropped lowest priority task: ${droppedTask.id}`, {
+              droppedTaskId: droppedTask.id,
+              droppedPriority: droppedTask.metadata?.priority ?? 'medium',
+              droppedScore: droppedTask.priorityScore,
+              newTaskId: newTask.id,
+              newPriority: newTask.metadata?.priority ?? 'medium',
+              newScore: newTask.priorityScore,
+            });
+
+            // Record dropped task in history
+            this.recordExecutionHistory(droppedTask, 'dropped');
+
+            overflowEvent.droppedTaskId = droppedTask.id;
+            overflowEvent.droppedTaskPriority = droppedTask.metadata?.priority;
+            this.overflowEvents.push(overflowEvent);
+            return true;
+          }
+        }
+
+        // New task has lower or equal priority, reject it
+        logger.warn(`Queue full, new task has lower priority, rejecting: ${newTask.id}`, {
+          taskId: newTask.id,
+          priority: newTask.metadata?.priority ?? 'medium',
+        });
+        this.recordExecutionHistory(newTask, 'dropped');
+        this.overflowEvents.push(overflowEvent);
+        return false;
+
+      case 'pause':
+        // Should not reach here as canAcceptTasks returns false
+        logger.warn(`Queue full in pause mode, rejecting task: ${newTask.id}`);
+        this.overflowEvents.push(overflowEvent);
+        return false;
+
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Find the index of the lowest priority task in the queue
+   */
+  private findLowestPriorityTaskIndex(): number {
+    if (this.taskQueue.length === 0) return -1;
+
+    let lowestIndex = 0;
+    let lowestScore = this.taskQueue[0].priorityScore ?? 0;
+
+    for (let i = 1; i < this.taskQueue.length; i++) {
+      const score = this.taskQueue[i].priorityScore ?? 0;
+      if (score < lowestScore) {
+        lowestScore = score;
+        lowestIndex = i;
+      }
+    }
+
+    return lowestIndex;
+  }
+
+  /**
+   * Record task execution in history for audit trail
+   */
+  private recordExecutionHistory(
+    task: PoolTask,
+    status: ExecutionHistoryEntry['status'],
+    workerId?: string,
+    error?: ExecutionHistoryEntry['error']
+  ): void {
+    if (!this.options.enableExecutionHistory) return;
+
+    const existingEntry = this.executionHistory.find(e => e.taskId === task.id);
+
+    if (existingEntry) {
+      // Update existing entry
+      existingEntry.status = status;
+      if (status === 'started') {
+        existingEntry.startedAt = new Date();
+        existingEntry.workerId = workerId;
+      } else if (status === 'completed' || status === 'failed') {
+        existingEntry.completedAt = new Date();
+        if (existingEntry.startedAt) {
+          existingEntry.duration = existingEntry.completedAt.getTime() - existingEntry.startedAt.getTime();
+        }
+        if (error) {
+          existingEntry.error = error;
+        }
+      }
+      existingEntry.retryCount = task.retryCount ?? 0;
+    } else {
+      // Create new entry
+      const entry: ExecutionHistoryEntry = {
+        taskId: task.id,
+        issueNumber: task.issue.number,
+        branchName: task.branchName,
+        priority: task.metadata?.priority ?? 'medium',
+        category: task.metadata?.category,
+        status,
+        queuedAt: task.queuedAt ?? new Date(),
+        retryCount: task.retryCount ?? 0,
+        workerId,
+        error,
+        metadata: {
+          priorityScore: task.priorityScore,
+          groupId: task.groupId,
+          complexity: task.metadata?.complexity,
+        },
+      };
+
+      if (status === 'started') {
+        entry.startedAt = new Date();
+      } else if (status === 'completed' || status === 'failed') {
+        entry.startedAt = new Date();
+        entry.completedAt = new Date();
+      }
+
+      this.executionHistory.push(entry);
+
+      // Trim history if exceeds max
+      if (this.executionHistory.length > this.maxHistoryEntries) {
+        this.executionHistory.shift();
+      }
+    }
+  }
+
+  /**
+   * Get execution history with optional filtering
+   */
+  getExecutionHistory(options?: {
+    status?: ExecutionHistoryEntry['status'];
+    priority?: TaskPriority;
+    limit?: number;
+    since?: Date;
+  }): ExecutionHistoryEntry[] {
+    let filtered = [...this.executionHistory];
+
+    if (options?.status) {
+      filtered = filtered.filter(e => e.status === options.status);
+    }
+    if (options?.priority) {
+      filtered = filtered.filter(e => e.priority === options.priority);
+    }
+    if (options?.since) {
+      filtered = filtered.filter(e => e.queuedAt >= options.since!);
+    }
+    if (options?.limit) {
+      filtered = filtered.slice(-options.limit);
+    }
+
+    return filtered;
+  }
+
+  /**
+   * Get execution statistics from history
+   */
+  getExecutionStats(): {
+    total: number;
+    byStatus: Record<string, number>;
+    byPriority: Record<string, number>;
+    avgDuration: number;
+    successRate: number;
+    retriesTotal: number;
+  } {
+    const stats = {
+      total: this.executionHistory.length,
+      byStatus: {} as Record<string, number>,
+      byPriority: {} as Record<string, number>,
+      avgDuration: 0,
+      successRate: 0,
+      retriesTotal: 0,
+    };
+
+    let totalDuration = 0;
+    let completedCount = 0;
+    let successCount = 0;
+
+    for (const entry of this.executionHistory) {
+      // Count by status
+      stats.byStatus[entry.status] = (stats.byStatus[entry.status] || 0) + 1;
+
+      // Count by priority
+      stats.byPriority[entry.priority] = (stats.byPriority[entry.priority] || 0) + 1;
+
+      // Sum durations
+      if (entry.duration) {
+        totalDuration += entry.duration;
+        completedCount++;
+      }
+
+      // Count successes
+      if (entry.status === 'completed') {
+        successCount++;
+      }
+
+      // Sum retries
+      stats.retriesTotal += entry.retryCount;
+    }
+
+    stats.avgDuration = completedCount > 0 ? totalDuration / completedCount : 0;
+    stats.successRate = stats.total > 0 ? (successCount / stats.total) * 100 : 0;
+
+    return stats;
+  }
+
+  /**
+   * Get queue overflow events
+   */
+  getOverflowEvents(limit?: number): QueueOverflowEvent[] {
+    const events = [...this.overflowEvents];
+    return limit ? events.slice(-limit) : events;
+  }
+
+  /**
+   * Gracefully shutdown the worker pool, preserving queued tasks
+   * @param timeoutMs Maximum time to wait for active workers to complete
+   * @returns Remaining queued tasks that were not processed
+   */
+  async gracefulShutdown(timeoutMs: number = 60000): Promise<PoolTask[]> {
+    if (this.isShuttingDown) {
+      logger.warn('Graceful shutdown already in progress');
+      return [...this.taskQueue];
+    }
+
+    this.isShuttingDown = true;
+    logger.info('Initiating graceful shutdown of worker pool', {
+      activeWorkers: this.activeWorkers.size,
+      queuedTasks: this.taskQueue.length,
+      timeoutMs,
+    });
+
+    // Stop accepting new tasks and scaling
+    this.isRunning = false;
+    this.stopScalingMonitor();
+    this.stopDegradationMonitor();
+
+    // Wait for active workers to complete (with timeout)
+    if (this.activeWorkers.size > 0) {
+      const startTime = Date.now();
+      const activePromises = Array.from(this.activeWorkers.values());
+
+      try {
+        await Promise.race([
+          Promise.all(activePromises),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Shutdown timeout')), timeoutMs)
+          ),
+        ]);
+        logger.info('All active workers completed during graceful shutdown');
+      } catch (error) {
+        const elapsed = Date.now() - startTime;
+        logger.warn(`Shutdown timeout reached after ${elapsed}ms, ${this.activeWorkers.size} workers still active`);
+      }
+    }
+
+    // Persist remaining queue if enabled
+    const remainingTasks = [...this.taskQueue];
+    if (this.queueConfig.enablePersistence && remainingTasks.length > 0) {
+      await this.persistQueuedTasks(remainingTasks);
+    }
+
+    // Update history for remaining queued tasks
+    for (const task of remainingTasks) {
+      this.recordExecutionHistory(task, 'dropped', undefined, {
+        code: 'SHUTDOWN',
+        message: 'Task dropped due to graceful shutdown',
+        isRetryable: true,
+      });
+    }
+
+    logger.info('Graceful shutdown completed', {
+      preservedTasks: remainingTasks.length,
+      completedResults: this.results.length,
+    });
+
+    this.isShuttingDown = false;
+    return remainingTasks;
+  }
+
+  /**
+   * Persist queued tasks to disk for recovery
+   */
+  private async persistQueuedTasks(tasks: PoolTask[]): Promise<void> {
+    try {
+      const { writeFileSync, existsSync, mkdirSync } = await import('fs');
+      const { join } = await import('path');
+
+      const persistDir = join(this.options.workDir, 'queue-persist');
+      if (!existsSync(persistDir)) {
+        mkdirSync(persistDir, { recursive: true });
+      }
+
+      const persistPath = join(persistDir, `queue-${Date.now()}.json`);
+      const persistData = tasks.map(task => ({
+        id: task.id,
+        issue: task.issue,
+        branchName: task.branchName,
+        metadata: task.metadata,
+        priorityScore: task.priorityScore,
+        groupId: task.groupId,
+        queuedAt: task.queuedAt?.toISOString(),
+        retryCount: task.retryCount,
+      }));
+
+      writeFileSync(persistPath, JSON.stringify(persistData, null, 2));
+      logger.info(`Persisted ${tasks.length} queued tasks to ${persistPath}`);
+    } catch (error) {
+      logger.error('Failed to persist queued tasks', { error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Load previously persisted queued tasks
+   */
+  async loadPersistedTasks(): Promise<PoolTask[]> {
+    try {
+      const { readdirSync, readFileSync, existsSync, unlinkSync } = await import('fs');
+      const { join } = await import('path');
+
+      const persistDir = join(this.options.workDir, 'queue-persist');
+      if (!existsSync(persistDir)) {
+        return [];
+      }
+
+      const files = readdirSync(persistDir)
+        .filter(f => f.startsWith('queue-') && f.endsWith('.json'))
+        .sort()
+        .reverse();
+
+      if (files.length === 0) {
+        return [];
+      }
+
+      // Load the most recent persisted queue
+      const latestFile = join(persistDir, files[0]);
+      const data = JSON.parse(readFileSync(latestFile, 'utf-8'));
+
+      const tasks: PoolTask[] = data.map((item: any) => ({
+        id: item.id,
+        issue: item.issue,
+        branchName: item.branchName,
+        metadata: item.metadata,
+        priorityScore: item.priorityScore,
+        groupId: item.groupId,
+        queuedAt: item.queuedAt ? new Date(item.queuedAt) : new Date(),
+        retryCount: item.retryCount ?? 0,
+      }));
+
+      // Clean up the persisted file after loading
+      unlinkSync(latestFile);
+
+      logger.info(`Loaded ${tasks.length} persisted tasks from ${latestFile}`);
+      return tasks;
+    } catch (error) {
+      logger.warn('Failed to load persisted tasks', { error: (error as Error).message });
+      return [];
+    }
   }
 
   /**
@@ -602,16 +1115,23 @@ export class WorkerPool {
 
   async executeTasks(tasks: WorkerTask[]): Promise<PoolResult[]> {
     this.isRunning = true;
+    this.isShuttingDown = false;
     this.results = [];
     this.workerTaskMap.clear();
     this.taskGroupWorkers.clear();
 
+    // Load any persisted tasks from previous shutdown
+    const persistedTasks = await this.loadPersistedTasks();
+
     // Convert tasks to PoolTasks with metadata enrichment
-    this.taskQueue = tasks.map((task, index) => {
+    const newTasks: PoolTask[] = tasks.map((task, index) => {
       const poolTask: PoolTask = {
         ...task,
         id: `task-${index + 1}`,
         metadata: this.extractTaskMetadata(task),
+        queuedAt: new Date(),
+        retryCount: 0,
+        maxRetries: this.options.retryConfig?.maxRetries ?? 3,
       };
 
       // Calculate priority score and group ID
@@ -621,17 +1141,50 @@ export class WorkerPool {
       return poolTask;
     });
 
+    // Combine persisted tasks (higher priority) with new tasks
+    const allTasks = [...persistedTasks, ...newTasks];
+
+    // Add tasks to queue with overflow handling
+    this.taskQueue = [];
+    const rejectedTasks: PoolTask[] = [];
+
+    for (const task of allTasks) {
+      if (this.handleQueueOverflow(task)) {
+        this.taskQueue.push(task);
+        this.recordExecutionHistory(task, 'queued');
+      } else {
+        rejectedTasks.push(task);
+      }
+    }
+
+    if (rejectedTasks.length > 0) {
+      logger.warn(`${rejectedTasks.length} tasks rejected due to queue overflow`, {
+        rejectedCount: rejectedTasks.length,
+        queueSize: this.taskQueue.length,
+        maxQueueSize: this.queueConfig.maxQueueSize,
+      });
+    }
+
     // Sort by priority (highest first)
     this.sortTaskQueue();
+
+    // Check queue capacity and emit warnings
+    this.checkQueueCapacity();
 
     // Get effective worker limit based on current resources
     const effectiveWorkerLimit = Math.min(this.currentWorkerLimit, this.options.maxWorkers);
 
-    logger.info(`Executing ${tasks.length} tasks with up to ${effectiveWorkerLimit} workers`, {
-      taskCount: tasks.length,
+    logger.info(`Executing ${this.taskQueue.length} tasks with up to ${effectiveWorkerLimit} workers`, {
+      taskCount: this.taskQueue.length,
+      originalTaskCount: tasks.length,
+      persistedTaskCount: persistedTasks.length,
+      rejectedTaskCount: rejectedTasks.length,
       maxWorkers: this.options.maxWorkers,
       effectiveWorkerLimit,
+      queueUtilization: `${this.getQueueUtilization().toFixed(1)}%`,
+      maxQueueSize: this.queueConfig.maxQueueSize,
       enableDynamicScaling: this.options.enableDynamicScaling ?? false,
+      enableExecutionHistory: this.options.enableExecutionHistory ?? false,
       systemResources: this.getSystemResources(),
     });
 
@@ -649,8 +1202,8 @@ export class WorkerPool {
       this.startNextTask();
     }
 
-    // Wait for all tasks to complete
-    while (this.activeWorkers.size > 0 || this.taskQueue.length > 0) {
+    // Wait for all tasks to complete (respecting shutdown)
+    while ((this.activeWorkers.size > 0 || this.taskQueue.length > 0) && !this.isShuttingDown) {
       if (this.activeWorkers.size > 0) {
         // Wait for any worker to complete
         const completedPromises = Array.from(this.activeWorkers.entries());
@@ -672,8 +1225,8 @@ export class WorkerPool {
         // Update metrics after worker completion
         this.updateMetrics();
 
-        // Start next task if available
-        if (this.taskQueue.length > 0 && this.isRunning) {
+        // Start next task if available and not shutting down
+        if (this.taskQueue.length > 0 && this.isRunning && !this.isShuttingDown) {
           // Use worker affinity: try to assign same-group tasks to same worker
           this.startNextTask(completedGroupId);
         }
@@ -767,6 +1320,9 @@ export class WorkerPool {
       this.taskGroupWorkers.set(task.groupId, workerId);
     }
 
+    // Record task started in execution history
+    this.recordExecutionHistory(task, 'started', workerId);
+
     // Calculate task-specific timeout
     const taskTimeoutMs = this.getTaskTimeout(task);
     const taskTimeoutMinutes = Math.round(taskTimeoutMs / 60000);
@@ -781,6 +1337,8 @@ export class WorkerPool {
       priorityScore: task.priorityScore,
       groupId: task.groupId,
       timeoutMinutes: taskTimeoutMinutes,
+      retryCount: task.retryCount ?? 0,
+      queuedAt: task.queuedAt?.toISOString(),
     });
 
     // Update metrics after task is dequeued
@@ -799,6 +1357,8 @@ export class WorkerPool {
         repoOwner: this.options.repoOwner,
         repoName: this.options.repoName,
         enableDatabaseLogging: this.options.enableDatabaseLogging,
+        // Retry configuration
+        retryConfig: this.options.retryConfig,
       },
       workerId
     );
@@ -812,21 +1372,33 @@ export class WorkerPool {
       // Track result for graceful degradation
       this.recordTaskResult(result.success);
 
+      // Record in execution history
       if (result.success) {
+        this.recordExecutionHistory(task, 'completed', workerId);
         logger.success(`${task.id} completed: ${task.issue.title}`);
         logger.debug(`Task completion details`, {
           taskId: task.id,
           priority: task.metadata?.priority,
           groupId: task.groupId,
           duration: result.duration,
+          retryCount: task.retryCount ?? 0,
         });
       } else {
+        // Extract error info for history
+        const errorInfo = result.error ? {
+          code: result.error.match(/\[([^\]]+)\]/)?.[1] ?? 'UNKNOWN',
+          message: result.error,
+          isRetryable: !result.error.includes('AUTH') && !result.error.includes('PERMISSION'),
+        } : undefined;
+
+        this.recordExecutionHistory(task, 'failed', workerId, errorInfo);
         logger.failure(`${task.id} failed: ${result.error}`);
         logger.debug(`Task failure details`, {
           taskId: task.id,
           priority: task.metadata?.priority,
           groupId: task.groupId,
           duration: result.duration,
+          retryCount: task.retryCount ?? 0,
           consecutiveFailures: this.consecutiveFailures,
           isDegraded: this.degradationStatus.isDegraded,
         });
@@ -842,7 +1414,34 @@ export class WorkerPool {
     this.isRunning = false;
     this.stopScalingMonitor();
     this.stopDegradationMonitor();
-    logger.warn('Worker pool stop requested');
+    logger.warn('Worker pool stop requested', {
+      activeWorkers: this.activeWorkers.size,
+      queuedTasks: this.taskQueue.length,
+    });
+  }
+
+  /**
+   * Check if the pool is currently shutting down
+   */
+  isInShutdown(): boolean {
+    return this.isShuttingDown;
+  }
+
+  /**
+   * Get the current queue configuration
+   */
+  getQueueConfig(): QueueConfig {
+    return { ...this.queueConfig };
+  }
+
+  /**
+   * Update queue configuration at runtime
+   */
+  updateQueueConfig(config: Partial<QueueConfig>): void {
+    this.queueConfig = { ...this.queueConfig, ...config };
+    logger.info('Queue configuration updated', {
+      config: this.queueConfig,
+    });
   }
 
   getStatus(): {
@@ -857,8 +1456,19 @@ export class WorkerPool {
     degradationStatus: DegradationStatus;
     dlqStats: ReturnType<typeof getDeadLetterQueue>['getStats'] extends () => infer R ? R : never;
     errorAggregation: ReturnType<typeof getErrorAggregator>['getSummary'] extends () => infer R ? R : never;
+    queueStatus: {
+      utilization: number;
+      maxSize: number;
+      isAtCapacity: boolean;
+      overflowStrategy: QueueConfig['overflowStrategy'];
+      recentOverflowCount: number;
+    };
+    executionStats: ReturnType<WorkerPool['getExecutionStats']>;
+    isShuttingDown: boolean;
   } {
     const groupIds = new Set(this.taskQueue.map(t => t.groupId).filter(Boolean));
+    const utilization = this.getQueueUtilization();
+
     return {
       active: this.activeWorkers.size,
       queued: this.taskQueue.length,
@@ -871,6 +1481,17 @@ export class WorkerPool {
       degradationStatus: this.getDegradationStatus(),
       dlqStats: this.getDeadLetterQueueStats(),
       errorAggregation: this.getErrorAggregationSummary(),
+      queueStatus: {
+        utilization,
+        maxSize: this.queueConfig.maxQueueSize,
+        isAtCapacity: utilization >= 100,
+        overflowStrategy: this.queueConfig.overflowStrategy,
+        recentOverflowCount: this.overflowEvents.filter(
+          e => e.timestamp.getTime() > Date.now() - 60000 // Last minute
+        ).length,
+      },
+      executionStats: this.getExecutionStats(),
+      isShuttingDown: this.isShuttingDown,
     };
   }
 

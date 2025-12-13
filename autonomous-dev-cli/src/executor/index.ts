@@ -11,4 +11,7 @@ export {
   type TaskComplexity,
   type SystemResources,
   type ScalingConfig,
+  type QueueConfig,
+  type ExecutionHistoryEntry,
+  type QueueOverflowEvent,
 } from './pool.js';
