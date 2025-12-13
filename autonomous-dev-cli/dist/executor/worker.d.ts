@@ -1,4 +1,5 @@
 import { type CircuitBreakerConfig } from '../utils/circuit-breaker.js';
+import { type RetryAttempt } from '../utils/dead-letter-queue.js';
 import { type Issue } from '../github/issues.js';
 export interface WorkerOptions {
     workDir: string;
@@ -21,6 +22,29 @@ export interface WorkerOptions {
     };
     useShallowClone?: boolean;
     circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
+    retryConfig?: {
+        /** Max retries for transient failures (default: 3) */
+        maxRetries?: number;
+        /** Enable dead letter queue for failed tasks (default: true) */
+        enableDeadLetterQueue?: boolean;
+        /** Enable progressive timeout increases (default: true) */
+        progressiveTimeout?: boolean;
+    };
+}
+/**
+ * Retry state preserved across retry attempts
+ */
+export interface WorkerRetryState {
+    taskId: string;
+    issueNumber: number;
+    branchName: string;
+    retryCount: number;
+    maxRetries: number;
+    firstAttemptAt: Date;
+    lastAttemptAt: Date;
+    attemptHistory: RetryAttempt[];
+    totalElapsedMs: number;
+    currentTimeoutMs: number;
 }
 export interface WorkerTask {
     issue: Issue;

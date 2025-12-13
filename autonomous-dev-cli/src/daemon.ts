@@ -1,7 +1,13 @@
 import { loadConfig, type Config } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub, type GitHub, type Issue, type ServiceHealth } from './github/index.js';
-import { discoverTasks, type DiscoveredTask } from './discovery/index.js';
+import {
+  discoverTasks,
+  createDeduplicator,
+  getParallelSafeTasks,
+  type DiscoveredTask,
+  type DeduplicatedTask,
+} from './discovery/index.js';
 import { createWorkerPool, type WorkerTask, type PoolResult } from './executor/index.js';
 import { runEvaluation, type EvaluationResult } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
@@ -598,7 +604,7 @@ export class Daemon {
         // In production, this would clone the repo first
 
         try {
-          const tasks = await discoverTasks({
+          const rawTasks = await discoverTasks({
             claudeAuth: this.config.credentials.claudeAuth,
             repoPath: process.cwd(), // Analyze current directory
             excludePaths: this.config.discovery.excludePaths,
@@ -607,8 +613,35 @@ export class Daemon {
             repoContext: `WebEDT - AI-powered coding assistant platform with React frontend, Express backend, and Claude Agent SDK integration.`,
           });
 
+          logger.info(`Discovered ${rawTasks.length} raw tasks, running deduplication...`);
+
+          // Run deduplication and conflict detection
+          const deduplicator = createDeduplicator({
+            similarityThreshold: 0.7, // Flag tasks with >70% overlap
+          });
+          const deduplicatedTasks = await deduplicator.deduplicateTasks(rawTasks, existingIssues);
+
+          // Filter out potential duplicates and get conflict-safe tasks
+          const nonDuplicateTasks = deduplicator.filterDuplicates(deduplicatedTasks);
+          const safeTasks = getParallelSafeTasks(nonDuplicateTasks);
+
+          // Log deduplication results
+          const duplicateCount = deduplicatedTasks.filter(t => t.isPotentialDuplicate).length;
+          const highRiskCount = deduplicatedTasks.filter(t => t.conflictPrediction.hasHighConflictRisk).length;
+
+          if (duplicateCount > 0) {
+            logger.info(`Filtered out ${duplicateCount} potential duplicate tasks`);
+          }
+          if (highRiskCount > 0) {
+            logger.info(`Found ${highRiskCount} tasks with high conflict risk`);
+          }
+
+          // Use non-duplicate tasks for issue creation, prioritizing safe tasks
+          // Safe tasks (low conflict risk) come first, then higher risk tasks
+          const tasks = deduplicator.getConflictSafeOrder(nonDuplicateTasks);
+
           tasksDiscovered = tasks.length;
-          logger.info(`Discovered ${tasks.length} new tasks`);
+          logger.info(`${tasks.length} tasks remaining after deduplication`);
 
           // Create GitHub issues for new tasks
           // Check if GitHub is available before attempting to create issues
@@ -857,7 +890,7 @@ export class Daemon {
     }
   }
 
-  private async createIssueForTask(task: DiscoveredTask): Promise<Issue> {
+  private async createIssueForTask(task: DiscoveredTask | DeduplicatedTask): Promise<Issue> {
     if (!this.github) {
       throw new Error('GitHub client not initialized');
     }
@@ -869,14 +902,28 @@ export class Daemon {
       `complexity:${task.estimatedComplexity}`,
     ];
 
+    // Build related issues section if available
+    const relatedIssues = 'relatedIssues' in task && task.relatedIssues && task.relatedIssues.length > 0
+      ? task.relatedIssues
+      : task.relatedIssues ?? [];
+
+    const relatedIssuesSection = relatedIssues.length > 0
+      ? `\n## Related Issues\n\n${relatedIssues.map((n) => `- #${n}`).join('\n')}\n`
+      : '';
+
+    // Build conflict warning if this is a deduplicated task with high risk
+    const conflictWarning = 'conflictPrediction' in task && task.conflictPrediction?.hasHighConflictRisk
+      ? `\n> ⚠️ **Note:** This task has been flagged with potential conflict risk. Consider reviewing related issues before implementation.\n`
+      : '';
+
     const body = `## Description
 
 ${task.description}
-
+${conflictWarning}
 ## Affected Paths
 
 ${task.affectedPaths.map((p) => `- \`${p}\``).join('\n')}
-
+${relatedIssuesSection}
 ---
 
 *🤖 This issue was automatically created by Autonomous Dev CLI*

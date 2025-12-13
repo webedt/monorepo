@@ -14,15 +14,19 @@ ErrorCode,
 // Utility functions
 withRetry, wrapError, createGitHubErrorFromResponse, formatError, DEFAULT_RETRY_CONFIG, } from './errors.js';
 // Re-export enhanced retry utilities
-export { API_RETRY_CONFIG, NETWORK_RETRY_CONFIG, RATE_LIMIT_RETRY_CONFIG, 
-// Core retry function
-retryWithBackoff, calculateBackoffDelay, 
+export { API_RETRY_CONFIG, NETWORK_RETRY_CONFIG, RATE_LIMIT_RETRY_CONFIG, CLAUDE_RETRY_CONFIG, DATABASE_RETRY_CONFIG, 
+// Core retry functions
+retryWithBackoff, retryWithBackoffDetailed, calculateBackoffDelay, calculateProgressiveTimeout, 
+// Context management
+createRetryContext, updateRetryContext, markContextFailed, 
 // Error classification
 classifyError, isErrorCodeRetryable, isHttpStatusRetryable, isNetworkErrorRetryable, isClaudeErrorRetryable, 
 // Error extraction
 extractHttpStatus, extractNetworkErrorCode, extractRetryAfterMs, 
 // Error creation
 createClaudeErrorFromResponse, } from './retry.js';
+// Re-export dead letter queue utilities
+export { DeadLetterQueue, getDeadLetterQueue, resetDeadLetterQueue, } from './dead-letter-queue.js';
 // Re-export metrics utilities
 export { metrics, Counter, Gauge, Histogram, } from './metrics.js';
 // Re-export circuit breaker utilities

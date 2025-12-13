@@ -16,6 +16,8 @@ export interface DiscoveredTask {
     affectedPaths: string[];
     /** Optional estimated duration in minutes for better scheduling */
     estimatedDurationMinutes?: number;
+    /** Related issue numbers for dependency awareness (populated by deduplicator) */
+    relatedIssues?: number[];
 }
 export interface TaskGeneratorOptions {
     claudeAuth: {

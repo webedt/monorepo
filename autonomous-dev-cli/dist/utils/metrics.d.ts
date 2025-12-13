@@ -141,6 +141,19 @@ declare class MetricsRegistry {
     readonly circuitBreakerFailures: Counter;
     readonly circuitBreakerStateChanges: Counter;
     readonly circuitBreakerRejections: Counter;
+    readonly retryAttemptsTotal: Counter;
+    readonly retryDelayMs: Histogram;
+    readonly retryExhaustedTotal: Counter;
+    readonly retrySuccessAfterRetryTotal: Counter;
+    readonly retryTimeoutProgressionMs: Histogram;
+    readonly dlqEntriesTotal: Counter;
+    readonly dlqReprocessTotal: Counter;
+    readonly dlqEntriesCurrent: Gauge;
+    readonly rateLimitHitsTotal: Counter;
+    readonly rateLimitWaitMs: Histogram;
+    readonly rateLimitRemaining: Gauge;
+    readonly degradationState: Gauge;
+    readonly degradationDurationMs: Histogram;
     private correlationMetrics;
     private startTime;
     /**
@@ -239,6 +252,62 @@ declare class MetricsRegistry {
      * Record circuit breaker rejection (request blocked by open circuit)
      */
     recordCircuitBreakerRejection(name: string): void;
+    /**
+     * Record a retry attempt
+     */
+    recordRetryAttempt(operation: string, attempt: number, delayMs: number, success: boolean, labels: {
+        repository?: string;
+        errorType?: string;
+    }): void;
+    /**
+     * Record when all retries are exhausted
+     */
+    recordRetryExhausted(operation: string, totalAttempts: number, totalDurationMs: number, labels: {
+        repository?: string;
+        errorType?: string;
+    }): void;
+    /**
+     * Record successful operation after retry
+     */
+    recordRetrySuccess(operation: string, attemptsTaken: number, totalDurationMs: number, labels: {
+        repository?: string;
+    }): void;
+    /**
+     * Record progressive timeout value
+     */
+    recordProgressiveTimeout(operation: string, timeoutMs: number, attempt: number, labels: {
+        repository?: string;
+    }): void;
+    /**
+     * Record dead letter queue entry
+     */
+    recordDLQEntry(taskType: string, errorCode: string, labels: {
+        repository: string;
+    }): void;
+    /**
+     * Update current DLQ entry count
+     */
+    updateDLQCount(count: number): void;
+    /**
+     * Record DLQ reprocess attempt
+     */
+    recordDLQReprocess(success: boolean, labels: {
+        repository: string;
+    }): void;
+    /**
+     * Record rate limit hit
+     */
+    recordRateLimitHit(service: string, waitMs: number, labels: {
+        repository?: string;
+    }): void;
+    /**
+     * Update rate limit remaining count
+     */
+    updateRateLimitRemaining(service: string, remaining: number): void;
+    /**
+     * Record degradation state change
+     */
+    recordDegradationState(isDegraded: boolean, durationMs?: number): void;
     /**
      * Categorize error message for circuit breaker metrics
      */

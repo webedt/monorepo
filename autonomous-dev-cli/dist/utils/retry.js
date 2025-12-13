@@ -1,6 +1,13 @@
 /**
  * Enhanced retry utilities with exponential backoff and error classification.
  * Provides configurable retry behavior for API calls and network operations.
+ *
+ * Features:
+ * - Exponential backoff with jitter
+ * - Progressive timeout increases for subsequent retries
+ * - Error classification (transient vs permanent)
+ * - Rate limit aware retry delays (respects Retry-After and X-RateLimit headers)
+ * - Detailed retry context preservation across attempts
  */
 import { logger } from './logger.js';
 import { ErrorCode, StructuredError, ClaudeError, } from './errors.js';
@@ -14,6 +21,10 @@ export const API_RETRY_CONFIG = {
     backoffMultiplier: 2,
     jitter: true,
     jitterFactor: 0.1,
+    progressiveTimeout: true,
+    timeoutIncreaseFactor: 1.5,
+    initialTimeoutMs: 30000,
+    maxTimeoutMs: 120000,
 };
 /**
  * Retry configuration for network-heavy operations (git clone, push)
@@ -21,10 +32,14 @@ export const API_RETRY_CONFIG = {
 export const NETWORK_RETRY_CONFIG = {
     maxRetries: 3,
     baseDelayMs: 2000,
-    maxDelayMs: 30000,
+    maxDelayMs: 60000,
     backoffMultiplier: 2,
     jitter: true,
     jitterFactor: 0.1,
+    progressiveTimeout: true,
+    timeoutIncreaseFactor: 2.0,
+    initialTimeoutMs: 60000,
+    maxTimeoutMs: 300000, // 5 minutes for network ops
 };
 /**
  * Retry configuration for rate-limited APIs (respects Retry-After)
@@ -36,6 +51,38 @@ export const RATE_LIMIT_RETRY_CONFIG = {
     backoffMultiplier: 2,
     jitter: true,
     jitterFactor: 0.05,
+    progressiveTimeout: false, // Rate limits don't need progressive timeout
+    initialTimeoutMs: 30000,
+    maxTimeoutMs: 30000,
+};
+/**
+ * Retry configuration for Claude API calls
+ */
+export const CLAUDE_RETRY_CONFIG = {
+    maxRetries: 3,
+    baseDelayMs: 2000,
+    maxDelayMs: 60000,
+    backoffMultiplier: 2,
+    jitter: true,
+    jitterFactor: 0.15,
+    progressiveTimeout: true,
+    timeoutIncreaseFactor: 1.5,
+    initialTimeoutMs: 120000, // 2 minutes initial
+    maxTimeoutMs: 600000, // 10 minutes max
+};
+/**
+ * Retry configuration for database operations
+ */
+export const DATABASE_RETRY_CONFIG = {
+    maxRetries: 3,
+    baseDelayMs: 500,
+    maxDelayMs: 10000,
+    backoffMultiplier: 2,
+    jitter: true,
+    jitterFactor: 0.1,
+    progressiveTimeout: false,
+    initialTimeoutMs: 5000,
+    maxTimeoutMs: 30000,
 };
 /**
  * Error types that are never retryable
@@ -279,6 +326,62 @@ export function extractRetryAfterMs(error) {
     return undefined;
 }
 /**
+ * Calculate progressive timeout for retry attempts
+ */
+export function calculateProgressiveTimeout(attempt, config) {
+    if (!config.progressiveTimeout) {
+        return config.initialTimeoutMs ?? 30000;
+    }
+    const factor = config.timeoutIncreaseFactor ?? 1.5;
+    const initial = config.initialTimeoutMs ?? 30000;
+    const max = config.maxTimeoutMs ?? 300000;
+    const timeout = initial * Math.pow(factor, attempt);
+    return Math.min(Math.max(0, timeout), max);
+}
+/**
+ * Create a new retry context
+ */
+export function createRetryContext(config) {
+    const now = new Date();
+    return {
+        attempt: 0,
+        maxRetries: config.maxRetries,
+        firstAttemptAt: now,
+        currentAttemptAt: now,
+        elapsedMs: 0,
+        currentTimeoutMs: config.initialTimeoutMs ?? 30000,
+        attemptHistory: [],
+        permanentlyFailed: false,
+    };
+}
+/**
+ * Update retry context for a new attempt
+ */
+export function updateRetryContext(context, config, error, delayMs, classification) {
+    const now = new Date();
+    context.attempt++;
+    context.currentAttemptAt = now;
+    context.elapsedMs = now.getTime() - context.firstAttemptAt.getTime();
+    context.currentTimeoutMs = calculateProgressiveTimeout(context.attempt, config);
+    // Record the attempt in history
+    context.attemptHistory.push({
+        attempt: context.attempt,
+        timestamp: now.toISOString(),
+        errorCode: error instanceof StructuredError ? error.code : extractHttpStatus(error)?.toString(),
+        errorMessage: error.message,
+        delayMs,
+        timeoutMs: context.currentTimeoutMs,
+        classification,
+    });
+}
+/**
+ * Mark context as permanently failed
+ */
+export function markContextFailed(context, error) {
+    context.permanentlyFailed = true;
+    context.finalError = error;
+}
+/**
  * Classify an error to determine if it's retryable
  */
 export function classifyError(error) {
@@ -358,61 +461,109 @@ export function classifyError(error) {
     };
 }
 /**
- * Execute an operation with exponential backoff retry
+ * Execute an operation with exponential backoff retry and full context tracking
  */
 export async function retryWithBackoff(operation, options = {}) {
     const config = { ...API_RETRY_CONFIG, ...options.config };
     const operationName = options.operationName ?? 'operation';
+    // Initialize retry context
+    const context = createRetryContext(config);
     let lastError;
     for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+        // Check if aborted
+        if (options.abortSignal?.aborted) {
+            const abortError = new Error('Operation aborted');
+            markContextFailed(context, abortError);
+            throw abortError;
+        }
+        // Update context for this attempt
+        context.attempt = attempt;
+        context.currentAttemptAt = new Date();
+        context.elapsedMs = context.currentAttemptAt.getTime() - context.firstAttemptAt.getTime();
+        context.currentTimeoutMs = calculateProgressiveTimeout(attempt, config);
         try {
-            return await operation();
+            const result = await operation(context);
+            // Log successful retry if it took multiple attempts
+            if (attempt > 0) {
+                logger.info(`${operationName}: Succeeded after ${attempt + 1} attempts`, {
+                    totalAttempts: attempt + 1,
+                    elapsedMs: context.elapsedMs,
+                    finalTimeoutMs: context.currentTimeoutMs,
+                });
+            }
+            return result;
         }
         catch (error) {
             lastError = error;
             // Classify the error
             const classification = classifyError(error);
+            // Calculate delay for next retry (used in context even if we don't retry)
+            const retryAfterMs = options.getRetryAfterMs?.(lastError) ?? classification.retryAfterMs;
+            let delay;
+            if (retryAfterMs !== undefined && retryAfterMs > 0) {
+                delay = Math.min(retryAfterMs, config.maxDelayMs);
+            }
+            else {
+                delay = calculateBackoffDelay(attempt, config);
+            }
+            // Update context with attempt details
+            updateRetryContext(context, config, lastError, delay, classification);
             // Check if we should retry
-            const shouldRetry = options.shouldRetry?.(lastError) ?? classification.isRetryable;
+            const shouldRetry = options.shouldRetry?.(lastError, context) ?? classification.isRetryable;
             if (!shouldRetry || attempt >= config.maxRetries) {
+                // Mark as permanently failed
+                markContextFailed(context, lastError);
                 logger.debug(`${operationName}: Not retrying`, {
                     attempt: attempt + 1,
                     maxRetries: config.maxRetries,
                     isRetryable: shouldRetry,
                     reason: classification.reason,
+                    totalElapsedMs: context.elapsedMs,
+                    attemptHistoryLength: context.attemptHistory.length,
                 });
+                // Call exhausted callback
+                options.onExhausted?.(lastError, context);
                 throw lastError;
             }
-            // Calculate delay
-            let delay;
-            // Respect Retry-After header for rate limits
-            const retryAfterMs = options.getRetryAfterMs?.(lastError) ?? classification.retryAfterMs;
-            if (retryAfterMs !== undefined && retryAfterMs > 0) {
-                // Use Retry-After delay, but cap it to maxDelayMs
-                delay = Math.min(retryAfterMs, config.maxDelayMs);
-                logger.debug(`${operationName}: Using Retry-After delay`, {
-                    retryAfterMs,
-                    cappedDelay: delay,
-                });
-            }
-            else {
-                delay = calculateBackoffDelay(attempt, config);
-            }
-            // Log the retry
+            // Log the retry with full context
             logger.warn(`${operationName}: Retry attempt ${attempt + 1}/${config.maxRetries}`, {
                 error: lastError.message,
                 delayMs: Math.round(delay),
+                nextTimeoutMs: calculateProgressiveTimeout(attempt + 1, config),
                 errorType: classification.errorType,
                 reason: classification.reason,
+                totalElapsedMs: context.elapsedMs,
+                attemptNumber: attempt + 1,
             });
-            // Call onRetry callback
-            options.onRetry?.(lastError, attempt + 1, delay);
+            // Call onRetry callback with context
+            options.onRetry?.(lastError, attempt + 1, delay, context);
             // Wait before retrying
             await sleep(delay);
         }
     }
     // This should not be reached, but TypeScript needs it
+    markContextFailed(context, lastError);
+    options.onExhausted?.(lastError, context);
     throw lastError;
+}
+/**
+ * Execute an operation with retry and return full result with context
+ */
+export async function retryWithBackoffDetailed(operation, options = {}) {
+    const config = { ...API_RETRY_CONFIG, ...options.config };
+    const context = createRetryContext(config);
+    const startTime = Date.now();
+    const result = await retryWithBackoff((ctx) => {
+        // Sync context
+        Object.assign(context, ctx);
+        return operation(ctx);
+    }, options);
+    return {
+        result,
+        context,
+        totalAttempts: context.attempt + 1,
+        totalDurationMs: Date.now() - startTime,
+    };
 }
 /**
  * Create a Claude-specific error from an HTTP response

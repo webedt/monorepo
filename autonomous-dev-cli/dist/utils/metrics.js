@@ -206,6 +206,23 @@ class MetricsRegistry {
     circuitBreakerFailures = new Counter('autonomous_dev_circuit_breaker_failures_total', 'Total failed requests through circuit breaker');
     circuitBreakerStateChanges = new Counter('autonomous_dev_circuit_breaker_state_changes_total', 'Total circuit breaker state transitions');
     circuitBreakerRejections = new Counter('autonomous_dev_circuit_breaker_rejections_total', 'Total requests rejected by open circuit breaker');
+    // Retry metrics
+    retryAttemptsTotal = new Counter('autonomous_dev_retry_attempts_total', 'Total number of retry attempts by operation and status');
+    retryDelayMs = new Histogram('autonomous_dev_retry_delay_ms', 'Retry delay distribution in milliseconds', [100, 500, 1000, 2000, 5000, 10000, 30000, 60000, 120000]);
+    retryExhaustedTotal = new Counter('autonomous_dev_retry_exhausted_total', 'Total number of operations that exhausted all retries');
+    retrySuccessAfterRetryTotal = new Counter('autonomous_dev_retry_success_after_retry_total', 'Total number of operations that succeeded after at least one retry');
+    retryTimeoutProgressionMs = new Histogram('autonomous_dev_retry_timeout_progression_ms', 'Progressive timeout values used in retries', [30000, 45000, 60000, 90000, 120000, 180000, 300000, 600000]);
+    // Dead letter queue metrics
+    dlqEntriesTotal = new Counter('autonomous_dev_dlq_entries_total', 'Total number of entries added to dead letter queue');
+    dlqReprocessTotal = new Counter('autonomous_dev_dlq_reprocess_total', 'Total number of DLQ reprocess attempts');
+    dlqEntriesCurrent = new Gauge('autonomous_dev_dlq_entries_current', 'Current number of entries in dead letter queue');
+    // Rate limit metrics
+    rateLimitHitsTotal = new Counter('autonomous_dev_rate_limit_hits_total', 'Total number of rate limit hits by service');
+    rateLimitWaitMs = new Histogram('autonomous_dev_rate_limit_wait_ms', 'Time spent waiting for rate limits to reset', [1000, 5000, 10000, 30000, 60000, 120000, 300000]);
+    rateLimitRemaining = new Gauge('autonomous_dev_rate_limit_remaining', 'Current remaining requests before rate limit');
+    // Degradation metrics
+    degradationState = new Gauge('autonomous_dev_degradation_state', 'Current degradation state (0=normal, 1=degraded)');
+    degradationDurationMs = new Histogram('autonomous_dev_degradation_duration_ms', 'Duration of degradation periods in milliseconds', [5000, 10000, 30000, 60000, 120000, 300000, 600000]);
     // Correlation tracking for debugging
     correlationMetrics = new Map();
     startTime = Date.now();
@@ -413,6 +430,106 @@ class MetricsRegistry {
      */
     recordCircuitBreakerRejection(name) {
         this.circuitBreakerRejections.inc({ circuit_name: name });
+    }
+    /**
+     * Record a retry attempt
+     */
+    recordRetryAttempt(operation, attempt, delayMs, success, labels) {
+        this.retryAttemptsTotal.inc({
+            operation,
+            attempt: String(attempt),
+            success: String(success),
+            repository: labels.repository || 'unknown',
+            error_type: labels.errorType || 'unknown',
+        });
+        this.retryDelayMs.observe({
+            operation,
+            repository: labels.repository || 'unknown',
+        }, delayMs);
+    }
+    /**
+     * Record when all retries are exhausted
+     */
+    recordRetryExhausted(operation, totalAttempts, totalDurationMs, labels) {
+        this.retryExhaustedTotal.inc({
+            operation,
+            total_attempts: String(totalAttempts),
+            repository: labels.repository || 'unknown',
+            error_type: labels.errorType || 'unknown',
+        });
+    }
+    /**
+     * Record successful operation after retry
+     */
+    recordRetrySuccess(operation, attemptsTaken, totalDurationMs, labels) {
+        this.retrySuccessAfterRetryTotal.inc({
+            operation,
+            attempts_taken: String(attemptsTaken),
+            repository: labels.repository || 'unknown',
+        });
+    }
+    /**
+     * Record progressive timeout value
+     */
+    recordProgressiveTimeout(operation, timeoutMs, attempt, labels) {
+        this.retryTimeoutProgressionMs.observe({
+            operation,
+            attempt: String(attempt),
+            repository: labels.repository || 'unknown',
+        }, timeoutMs);
+    }
+    /**
+     * Record dead letter queue entry
+     */
+    recordDLQEntry(taskType, errorCode, labels) {
+        this.dlqEntriesTotal.inc({
+            task_type: taskType,
+            error_code: errorCode,
+            repository: labels.repository,
+        });
+    }
+    /**
+     * Update current DLQ entry count
+     */
+    updateDLQCount(count) {
+        this.dlqEntriesCurrent.set({}, count);
+    }
+    /**
+     * Record DLQ reprocess attempt
+     */
+    recordDLQReprocess(success, labels) {
+        this.dlqReprocessTotal.inc({
+            success: String(success),
+            repository: labels.repository,
+        });
+    }
+    /**
+     * Record rate limit hit
+     */
+    recordRateLimitHit(service, waitMs, labels) {
+        this.rateLimitHitsTotal.inc({
+            service,
+            repository: labels.repository || 'unknown',
+        });
+        this.rateLimitWaitMs.observe({
+            service,
+            repository: labels.repository || 'unknown',
+        }, waitMs);
+    }
+    /**
+     * Update rate limit remaining count
+     */
+    updateRateLimitRemaining(service, remaining) {
+        this.rateLimitRemaining.set({ service }, remaining);
+    }
+    /**
+     * Record degradation state change
+     */
+    recordDegradationState(isDegraded, durationMs) {
+        this.degradationState.set({}, isDegraded ? 1 : 0);
+        if (durationMs !== undefined && durationMs > 0) {
+            this.degradationDurationMs.observe({}, durationMs);
+        }
     }
     /**
      * Categorize error message for circuit breaker metrics

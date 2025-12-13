@@ -6,8 +6,10 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-import { StructuredError, ExecutionError, ErrorCode, withRetry, } from '../utils/errors.js';
+import { StructuredError, ExecutionError, ErrorCode, } from '../utils/errors.js';
 import { getClaudeSDKCircuitBreaker, } from '../utils/circuit-breaker.js';
+import { retryWithBackoff, NETWORK_RETRY_CONFIG, } from '../utils/retry.js';
+import { getDeadLetterQueue, } from '../utils/dead-letter-queue.js';
 import { createChatSession, updateChatSession, addMessage, addEvent, generateSessionPath, } from '../db/index.js';
 export class Worker {
     options;
@@ -296,6 +298,40 @@ export class Worker {
                 });
                 await updateChatSession(chatSessionId, { status: 'error', completedAt: new Date() });
             }
+            // Add to dead letter queue if enabled and max retries exceeded
+            if (this.options.retryConfig?.enableDeadLetterQueue !== false) {
+                const dlq = getDeadLetterQueue({}, this.options.workDir);
+                const dlqId = dlq.createEntryFromRetryContext(`task-${issue.number}`, 'issue', this.repository, [{
+                        attemptNumber: 1,
+                        timestamp: new Date().toISOString(),
+                        errorCode: structuredError.code,
+                        errorMessage: structuredError.message,
+                        delayMs: 0,
+                        duration,
+                    }], {
+                    code: structuredError.code,
+                    message: structuredError.message,
+                    severity: structuredError.severity,
+                    isRetryable: structuredError.isRetryable,
+                    stack: structuredError.stack,
+                }, {
+                    workerId: this.workerId,
+                    correlationId,
+                    originalTimeout: this.options.timeoutMinutes * 60 * 1000,
+                    chatSessionId,
+                    memoryDeltaMB: memoryDelta,
+                }, {
+                    issueNumber: issue.number,
+                    branchName,
+                    maxRetries: this.options.retryConfig?.maxRetries ?? 3,
+                });
+                taskLog.info('Task added to dead letter queue', {
+                    dlqId,
+                    issueNumber: issue.number,
+                    errorCode: structuredError.code,
+                    canReprocess: structuredError.isRetryable,
+                });
+            }
             return {
                 success: false,
                 issue,
@@ -334,10 +370,18 @@ export class Worker {
         const urlWithAuth = this.options.repoUrl.replace('https://github.com', `https://${this.options.githubToken}@github.com`);
         const useShallow = this.options.useShallowClone !== false; // Default true
         const sparseConfig = this.options.sparseCheckout;
-        // Clone with retry for transient network failures
-        return withRetry(async () => {
+        const maxRetries = this.options.retryConfig?.maxRetries ?? 3;
+        // Clone with retry for transient network failures using enhanced retry
+        return retryWithBackoff(async (retryContext) => {
             const git = simpleGit(taskDir);
             const repoDir = join(taskDir, 'repo');
+            // Log retry context for debugging
+            if (retryContext.attempt > 0) {
+                this.log.info(`Clone attempt ${retryContext.attempt + 1}/${maxRetries + 1}`, {
+                    elapsedMs: retryContext.elapsedMs,
+                    currentTimeoutMs: retryContext.currentTimeoutMs,
+                });
+            }
             // Use sparse checkout for targeted cloning (faster for large repos)
             if (sparseConfig?.enabled) {
                 this.log.info('Using sparse checkout for optimized cloning');
@@ -376,9 +420,34 @@ export class Worker {
             await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
             return repoDir;
         }, {
-            config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
-            onRetry: (error, attempt, delay) => {
-                this.log.warn(`Clone retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
+            config: {
+                ...NETWORK_RETRY_CONFIG,
+                maxRetries,
+                progressiveTimeout: this.options.retryConfig?.progressiveTimeout ?? true,
+            },
+            operationName: 'git-clone',
+            onRetry: (error, attempt, delay, context) => {
+                this.log.warn(`Clone retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`, {
+                    totalElapsedMs: context.elapsedMs,
+                    nextTimeoutMs: context.currentTimeoutMs,
+                    attemptHistory: context.attemptHistory.length,
+                });
+                // Record retry metrics
+                metrics.recordError({
+                    repository: this.repository,
+                    errorCode: 'EXEC_CLONE_RETRY',
+                    severity: 'transient',
+                    isRetryable: true,
+                    component: 'Worker',
+                    operation: 'cloneRepo',
+                });
+            },
+            onExhausted: (error, context) => {
+                this.log.error('Clone failed after all retries', {
+                    totalAttempts: context.attemptHistory.length + 1,
+                    totalElapsedMs: context.elapsedMs,
+                    attemptHistory: context.attemptHistory,
+                });
             },
             shouldRetry: (error) => {
                 // Retry network-related errors
@@ -387,7 +456,9 @@ export class Worker {
                     message.includes('timeout') ||
                     message.includes('connection') ||
                     message.includes('enotfound') ||
-                    message.includes('etimedout'));
+                    message.includes('etimedout') ||
+                    message.includes('econnreset') ||
+                    message.includes('econnrefused'));
             },
         }).catch((error) => {
             throw new ExecutionError(ErrorCode.EXEC_CLONE_FAILED, `Failed to clone repository: ${error.message}`, {
@@ -511,7 +582,7 @@ export class Worker {
                                         type: 'tool_use',
                                         tool: toolName,
                                         input: this.sanitizeToolInput(toolName, toolInput),
-                                        toolCount,
+                                        toolCount: toolUseCount,
                                         turnCount,
                                     });
                                 }
@@ -661,20 +732,56 @@ Implements #${issue.number}
                 cause: error,
             });
         }
-        // Push with retry for transient failures
-        await withRetry(async () => {
+        // Push with retry for transient failures using enhanced retry
+        const maxRetries = this.options.retryConfig?.maxRetries ?? 3;
+        await retryWithBackoff(async (retryContext) => {
+            // Log retry context for debugging
+            if (retryContext.attempt > 0) {
+                this.log.info(`Push attempt ${retryContext.attempt + 1}/${maxRetries + 1}`, {
+                    elapsedMs: retryContext.elapsedMs,
+                    currentTimeoutMs: retryContext.currentTimeoutMs,
+                });
+            }
             await git.push(['-u', 'origin', branchName]);
         }, {
-            config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
-            onRetry: (error, attempt, delay) => {
-                this.log.warn(`Push retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
+            config: {
+                ...NETWORK_RETRY_CONFIG,
+                maxRetries,
+                progressiveTimeout: this.options.retryConfig?.progressiveTimeout ?? true,
+            },
+            operationName: 'git-push',
+            onRetry: (error, attempt, delay, context) => {
+                this.log.warn(`Push retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`, {
+                    totalElapsedMs: context.elapsedMs,
+                    nextTimeoutMs: context.currentTimeoutMs,
+                    commitSha,
+                });
+                // Record retry metrics
+                metrics.recordError({
+                    repository: this.repository,
+                    errorCode: 'EXEC_PUSH_RETRY',
+                    severity: 'transient',
+                    isRetryable: true,
+                    component: 'Worker',
+                    operation: 'commitAndPush',
+                });
+            },
+            onExhausted: (error, context) => {
+                this.log.error('Push failed after all retries', {
+                    totalAttempts: context.attemptHistory.length + 1,
+                    totalElapsedMs: context.elapsedMs,
+                    commitSha,
+                    branchName,
+                });
             },
             shouldRetry: (error) => {
                 const message = error.message.toLowerCase();
                 return (message.includes('network') ||
                     message.includes('timeout') ||
                     message.includes('connection') ||
-                    message.includes('could not read from remote'));
+                    message.includes('could not read from remote') ||
+                    message.includes('econnreset') ||
+                    message.includes('econnrefused'));
             },
         }).catch((error) => {
             throw new ExecutionError(ErrorCode.EXEC_PUSH_FAILED, `Failed to push changes: ${error.message}`, {

@@ -21,6 +21,23 @@ export interface CircuitBreakerConfig {
  */
 export type CircuitState = 'closed' | 'open' | 'half-open';
 /**
+ * Rate limit state tracking
+ */
+export interface RateLimitState {
+    /** Remaining requests in current window */
+    remaining: number;
+    /** Total limit for current window */
+    limit: number;
+    /** When the rate limit resets (Unix timestamp in seconds) */
+    resetAt: number;
+    /** Resource type (core, search, graphql, etc.) */
+    resource: string;
+    /** Whether currently rate limited */
+    isLimited: boolean;
+    /** Delay until rate limit resets in ms */
+    retryAfterMs?: number;
+}
+/**
  * Service health status for monitoring
  */
 export interface ServiceHealth {
@@ -33,6 +50,7 @@ export interface ServiceHealth {
     lastError?: string;
     rateLimitRemaining?: number;
     rateLimitResetAt?: Date;
+    rateLimitState?: RateLimitState;
 }
 export declare class GitHubClient {
     private octokit;
@@ -49,12 +67,18 @@ export declare class GitHubClient {
     private halfOpenAttempts;
     private rateLimitRemaining;
     private rateLimitResetAt;
+    private rateLimitState;
+    private log;
     constructor(options: GitHubClientOptions);
     get client(): Octokit;
     /**
      * Get the current service health status
      */
     getServiceHealth(): ServiceHealth;
+    /**
+     * Get the current rate limit state
+     */
+    getRateLimitState(): RateLimitState;
     /**
      * Check if the circuit breaker allows requests
      */
@@ -68,9 +92,21 @@ export declare class GitHubClient {
      */
     private recordFailure;
     /**
+     * Update rate limit state from response headers
+     */
+    private updateRateLimitFromHeaders;
+    /**
      * Check if an error is due to rate limiting and update rate limit state
      */
     private updateRateLimitState;
+    /**
+     * Get the delay needed before making a request (respects rate limits)
+     */
+    getRequiredDelay(): number;
+    /**
+     * Wait for rate limit if needed before making a request
+     */
+    waitForRateLimitReset(): Promise<void>;
     /**
      * Execute a GitHub API request with automatic retry for transient failures
      * Integrates with circuit breaker for graceful degradation

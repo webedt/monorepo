@@ -1,4 +1,6 @@
 import { type WorkerOptions, type WorkerTask, type WorkerResult } from './worker.js';
+import { getDeadLetterQueue, type DeadLetterEntry } from '../utils/dead-letter-queue.js';
+import { type CircuitBreakerHealth } from '../utils/circuit-breaker.js';
 /** Task priority levels - higher value = higher priority */
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 /** Task category for classification */
@@ -38,6 +40,31 @@ export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
     scalingConfig?: Partial<ScalingConfig>;
     /** Enable dynamic scaling based on system resources */
     enableDynamicScaling?: boolean;
+    /** Enable graceful degradation when services fail */
+    enableGracefulDegradation?: boolean;
+    /** Retry configuration passed to workers */
+    retryConfig?: {
+        maxRetries?: number;
+        enableDeadLetterQueue?: boolean;
+        progressiveTimeout?: boolean;
+    };
+}
+/**
+ * Degradation status for the worker pool
+ */
+export interface DegradationStatus {
+    /** Whether the pool is operating in degraded mode */
+    isDegraded: boolean;
+    /** Reason for degradation */
+    reason?: string;
+    /** Which services are affected */
+    affectedServices: string[];
+    /** Circuit breaker states */
+    circuitBreakers: Record<string, CircuitBreakerHealth>;
+    /** When degradation started */
+    startedAt?: Date;
+    /** Suggested recovery actions */
+    recoveryActions: string[];
 }
 export interface PoolTask extends WorkerTask {
     id: string;
@@ -64,6 +91,10 @@ export declare class WorkerPool {
     private scaleCheckInterval;
     private workerTaskMap;
     private taskGroupWorkers;
+    private degradationStatus;
+    private degradationCheckInterval;
+    private consecutiveFailures;
+    private failureThreshold;
     /** Default scaling configuration */
     private static readonly DEFAULT_SCALING_CONFIG;
     constructor(options: WorkerPoolOptions);
@@ -91,6 +122,38 @@ export declare class WorkerPool {
      * Stop dynamic scaling monitor
      */
     private stopScalingMonitor;
+    /**
+     * Start degradation monitoring
+     */
+    private startDegradationMonitor;
+    /**
+     * Stop degradation monitoring
+     */
+    private stopDegradationMonitor;
+    /**
+     * Check and update degradation status
+     */
+    private checkDegradationStatus;
+    /**
+     * Record a task result and update failure tracking
+     */
+    private recordTaskResult;
+    /**
+     * Get current degradation status
+     */
+    getDegradationStatus(): DegradationStatus;
+    /**
+     * Check if the pool can accept new tasks
+     */
+    canAcceptTasks(): boolean;
+    /**
+     * Get dead letter queue stats
+     */
+    getDeadLetterQueueStats(): import("../utils/dead-letter-queue.js").DLQStats;
+    /**
+     * Get reprocessable tasks from dead letter queue
+     */
+    getReprocessableTasks(): DeadLetterEntry[];
     /**
      * Calculate priority score for a task
      */
@@ -127,6 +190,8 @@ export declare class WorkerPool {
         currentWorkerLimit: number;
         systemResources: SystemResources;
         taskGroups: number;
+        degradationStatus: DegradationStatus;
+        dlqStats: ReturnType<typeof getDeadLetterQueue>['getStats'] extends () => infer R ? R : never;
     };
     /**
      * Get the current scaling configuration
