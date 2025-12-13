@@ -18,6 +18,12 @@ import {
   type ErrorContext,
   StructuredError,
 } from '../utils/errors.js';
+import {
+  retryWithBackoff,
+  RATE_LIMIT_RETRY_CONFIG,
+  extractRetryAfterMs,
+  type RetryContext,
+} from '../utils/retry.js';
 
 export interface GitHubClientOptions {
   token: string;
@@ -43,6 +49,24 @@ export interface CircuitBreakerConfig {
 export type CircuitState = 'closed' | 'open' | 'half-open';
 
 /**
+ * Rate limit state tracking
+ */
+export interface RateLimitState {
+  /** Remaining requests in current window */
+  remaining: number;
+  /** Total limit for current window */
+  limit: number;
+  /** When the rate limit resets (Unix timestamp in seconds) */
+  resetAt: number;
+  /** Resource type (core, search, graphql, etc.) */
+  resource: string;
+  /** Whether currently rate limited */
+  isLimited: boolean;
+  /** Delay until rate limit resets in ms */
+  retryAfterMs?: number;
+}
+
+/**
  * Service health status for monitoring
  */
 export interface ServiceHealth {
@@ -55,6 +79,7 @@ export interface ServiceHealth {
   lastError?: string;
   rateLimitRemaining?: number;
   rateLimitResetAt?: Date;
+  rateLimitState?: RateLimitState;
 }
 
 const DEFAULT_GITHUB_RETRY_CONFIG: Partial<RetryConfig> = {
@@ -87,9 +112,17 @@ export class GitHubClient {
   private lastErrorMessage: string | undefined;
   private halfOpenAttempts: number = 0;
 
-  // Rate limit tracking
+  // Rate limit tracking (enhanced)
   private rateLimitRemaining: number | undefined;
   private rateLimitResetAt: Date | undefined;
+  private rateLimitState: RateLimitState = {
+    remaining: 5000,
+    limit: 5000,
+    resetAt: 0,
+    resource: 'core',
+    isLimited: false,
+  };
+  private log = logger.child('GitHubClient');
 
   constructor(options: GitHubClientOptions) {
     this.octokit = new Octokit({ auth: options.token });
@@ -113,6 +146,8 @@ export class GitHubClient {
       status = 'unavailable';
     } else if (this.circuitState === 'half-open' || this.consecutiveFailures > 0) {
       status = 'degraded';
+    } else if (this.rateLimitState.isLimited) {
+      status = 'degraded';
     }
 
     return {
@@ -125,7 +160,15 @@ export class GitHubClient {
       lastError: this.lastErrorMessage,
       rateLimitRemaining: this.rateLimitRemaining,
       rateLimitResetAt: this.rateLimitResetAt,
+      rateLimitState: { ...this.rateLimitState },
     };
+  }
+
+  /**
+   * Get the current rate limit state
+   */
+  getRateLimitState(): RateLimitState {
+    return { ...this.rateLimitState };
   }
 
   /**
@@ -206,16 +249,123 @@ export class GitHubClient {
   }
 
   /**
+   * Update rate limit state from response headers
+   */
+  private updateRateLimitFromHeaders(headers: Record<string, any> | undefined): void {
+    if (!headers) return;
+
+    // Extract all rate limit headers (case-insensitive)
+    const remaining = headers['x-ratelimit-remaining'] ?? headers['X-RateLimit-Remaining'];
+    const limit = headers['x-ratelimit-limit'] ?? headers['X-RateLimit-Limit'];
+    const reset = headers['x-ratelimit-reset'] ?? headers['X-RateLimit-Reset'];
+    const resource = headers['x-ratelimit-resource'] ?? headers['X-RateLimit-Resource'] ?? 'core';
+    const used = headers['x-ratelimit-used'] ?? headers['X-RateLimit-Used'];
+
+    if (remaining !== undefined) {
+      const remainingNum = parseInt(remaining, 10);
+      this.rateLimitState.remaining = remainingNum;
+      this.rateLimitRemaining = remainingNum;
+      this.rateLimitState.isLimited = remainingNum === 0;
+    }
+
+    if (limit !== undefined) {
+      this.rateLimitState.limit = parseInt(limit, 10);
+    }
+
+    if (reset !== undefined) {
+      const resetTimestamp = parseInt(reset, 10);
+      this.rateLimitState.resetAt = resetTimestamp;
+      this.rateLimitResetAt = new Date(resetTimestamp * 1000);
+
+      // Calculate retry delay
+      if (this.rateLimitState.isLimited) {
+        const now = Date.now();
+        const resetMs = resetTimestamp * 1000;
+        this.rateLimitState.retryAfterMs = Math.max(0, resetMs - now + 1000); // +1s buffer
+      }
+    }
+
+    if (resource) {
+      this.rateLimitState.resource = resource;
+    }
+
+    // Log warning if rate limit is low
+    if (this.rateLimitState.remaining < 100 && this.rateLimitState.remaining > 0) {
+      this.log.warn('GitHub rate limit running low', {
+        remaining: this.rateLimitState.remaining,
+        limit: this.rateLimitState.limit,
+        resetAt: this.rateLimitResetAt?.toISOString(),
+        resource: this.rateLimitState.resource,
+      });
+    }
+  }
+
+  /**
    * Check if an error is due to rate limiting and update rate limit state
    */
   private updateRateLimitState(error: any): void {
     const statusCode = error.status ?? error.response?.status;
+
+    // Update from response headers if available
+    const headers = error.response?.headers;
+    if (headers) {
+      this.updateRateLimitFromHeaders(headers);
+    }
+
     if (statusCode === 429 || error.message?.toLowerCase().includes('rate limit')) {
-      const resetHeader = error.response?.headers?.['x-ratelimit-reset'];
-      if (resetHeader) {
-        this.rateLimitResetAt = new Date(parseInt(resetHeader) * 1000);
-        this.rateLimitRemaining = 0;
+      this.rateLimitState.isLimited = true;
+      this.rateLimitState.remaining = 0;
+
+      // Check for Retry-After header
+      const retryAfter = headers?.['retry-after'] ?? headers?.['Retry-After'];
+      if (retryAfter) {
+        const retryAfterMs = parseInt(retryAfter, 10) * 1000;
+        this.rateLimitState.retryAfterMs = retryAfterMs;
       }
+
+      // Log rate limit hit
+      this.log.warn('GitHub rate limit exceeded', {
+        statusCode,
+        retryAfterMs: this.rateLimitState.retryAfterMs,
+        resetAt: this.rateLimitResetAt?.toISOString(),
+        resource: this.rateLimitState.resource,
+      });
+    }
+  }
+
+  /**
+   * Get the delay needed before making a request (respects rate limits)
+   */
+  getRequiredDelay(): number {
+    if (!this.rateLimitState.isLimited) {
+      return 0;
+    }
+
+    if (this.rateLimitState.retryAfterMs) {
+      return this.rateLimitState.retryAfterMs;
+    }
+
+    if (this.rateLimitState.resetAt) {
+      const now = Date.now();
+      const resetMs = this.rateLimitState.resetAt * 1000;
+      return Math.max(0, resetMs - now + 1000);
+    }
+
+    return 0;
+  }
+
+  /**
+   * Wait for rate limit if needed before making a request
+   */
+  async waitForRateLimitReset(): Promise<void> {
+    const delay = this.getRequiredDelay();
+    if (delay > 0) {
+      this.log.info(`Waiting ${Math.ceil(delay / 1000)}s for rate limit reset`, {
+        resetAt: this.rateLimitResetAt?.toISOString(),
+        resource: this.rateLimitState.resource,
+      });
+      await new Promise(resolve => setTimeout(resolve, delay));
+      this.rateLimitState.isLimited = false;
     }
   }
 

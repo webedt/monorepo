@@ -465,6 +465,79 @@ class MetricsRegistry {
     'Total requests rejected by open circuit breaker'
   );
 
+  // Retry metrics
+  readonly retryAttemptsTotal = new Counter(
+    'autonomous_dev_retry_attempts_total',
+    'Total number of retry attempts by operation and status'
+  );
+
+  readonly retryDelayMs = new Histogram(
+    'autonomous_dev_retry_delay_ms',
+    'Retry delay distribution in milliseconds',
+    [100, 500, 1000, 2000, 5000, 10000, 30000, 60000, 120000]
+  );
+
+  readonly retryExhaustedTotal = new Counter(
+    'autonomous_dev_retry_exhausted_total',
+    'Total number of operations that exhausted all retries'
+  );
+
+  readonly retrySuccessAfterRetryTotal = new Counter(
+    'autonomous_dev_retry_success_after_retry_total',
+    'Total number of operations that succeeded after at least one retry'
+  );
+
+  readonly retryTimeoutProgressionMs = new Histogram(
+    'autonomous_dev_retry_timeout_progression_ms',
+    'Progressive timeout values used in retries',
+    [30000, 45000, 60000, 90000, 120000, 180000, 300000, 600000]
+  );
+
+  // Dead letter queue metrics
+  readonly dlqEntriesTotal = new Counter(
+    'autonomous_dev_dlq_entries_total',
+    'Total number of entries added to dead letter queue'
+  );
+
+  readonly dlqReprocessTotal = new Counter(
+    'autonomous_dev_dlq_reprocess_total',
+    'Total number of DLQ reprocess attempts'
+  );
+
+  readonly dlqEntriesCurrent = new Gauge(
+    'autonomous_dev_dlq_entries_current',
+    'Current number of entries in dead letter queue'
+  );
+
+  // Rate limit metrics
+  readonly rateLimitHitsTotal = new Counter(
+    'autonomous_dev_rate_limit_hits_total',
+    'Total number of rate limit hits by service'
+  );
+
+  readonly rateLimitWaitMs = new Histogram(
+    'autonomous_dev_rate_limit_wait_ms',
+    'Time spent waiting for rate limits to reset',
+    [1000, 5000, 10000, 30000, 60000, 120000, 300000]
+  );
+
+  readonly rateLimitRemaining = new Gauge(
+    'autonomous_dev_rate_limit_remaining',
+    'Current remaining requests before rate limit'
+  );
+
+  // Degradation metrics
+  readonly degradationState = new Gauge(
+    'autonomous_dev_degradation_state',
+    'Current degradation state (0=normal, 1=degraded)'
+  );
+
+  readonly degradationDurationMs = new Histogram(
+    'autonomous_dev_degradation_duration_ms',
+    'Duration of degradation periods in milliseconds',
+    [5000, 10000, 30000, 60000, 120000, 300000, 600000]
+  );
+
   // Correlation tracking for debugging
   private correlationMetrics: Map<string, {
     startTime: number;
@@ -751,6 +824,157 @@ class MetricsRegistry {
    */
   recordCircuitBreakerRejection(name: string): void {
     this.circuitBreakerRejections.inc({ circuit_name: name });
+  }
+
+  /**
+   * Record a retry attempt
+   */
+  recordRetryAttempt(
+    operation: string,
+    attempt: number,
+    delayMs: number,
+    success: boolean,
+    labels: { repository?: string; errorType?: string }
+  ): void {
+    this.retryAttemptsTotal.inc({
+      operation,
+      attempt: String(attempt),
+      success: String(success),
+      repository: labels.repository || 'unknown',
+      error_type: labels.errorType || 'unknown',
+    });
+
+    this.retryDelayMs.observe(
+      {
+        operation,
+        repository: labels.repository || 'unknown',
+      },
+      delayMs
+    );
+  }
+
+  /**
+   * Record when all retries are exhausted
+   */
+  recordRetryExhausted(
+    operation: string,
+    totalAttempts: number,
+    totalDurationMs: number,
+    labels: { repository?: string; errorType?: string }
+  ): void {
+    this.retryExhaustedTotal.inc({
+      operation,
+      total_attempts: String(totalAttempts),
+      repository: labels.repository || 'unknown',
+      error_type: labels.errorType || 'unknown',
+    });
+  }
+
+  /**
+   * Record successful operation after retry
+   */
+  recordRetrySuccess(
+    operation: string,
+    attemptsTaken: number,
+    totalDurationMs: number,
+    labels: { repository?: string }
+  ): void {
+    this.retrySuccessAfterRetryTotal.inc({
+      operation,
+      attempts_taken: String(attemptsTaken),
+      repository: labels.repository || 'unknown',
+    });
+  }
+
+  /**
+   * Record progressive timeout value
+   */
+  recordProgressiveTimeout(
+    operation: string,
+    timeoutMs: number,
+    attempt: number,
+    labels: { repository?: string }
+  ): void {
+    this.retryTimeoutProgressionMs.observe(
+      {
+        operation,
+        attempt: String(attempt),
+        repository: labels.repository || 'unknown',
+      },
+      timeoutMs
+    );
+  }
+
+  /**
+   * Record dead letter queue entry
+   */
+  recordDLQEntry(
+    taskType: string,
+    errorCode: string,
+    labels: { repository: string }
+  ): void {
+    this.dlqEntriesTotal.inc({
+      task_type: taskType,
+      error_code: errorCode,
+      repository: labels.repository,
+    });
+  }
+
+  /**
+   * Update current DLQ entry count
+   */
+  updateDLQCount(count: number): void {
+    this.dlqEntriesCurrent.set({}, count);
+  }
+
+  /**
+   * Record DLQ reprocess attempt
+   */
+  recordDLQReprocess(success: boolean, labels: { repository: string }): void {
+    this.dlqReprocessTotal.inc({
+      success: String(success),
+      repository: labels.repository,
+    });
+  }
+
+  /**
+   * Record rate limit hit
+   */
+  recordRateLimitHit(
+    service: string,
+    waitMs: number,
+    labels: { repository?: string }
+  ): void {
+    this.rateLimitHitsTotal.inc({
+      service,
+      repository: labels.repository || 'unknown',
+    });
+
+    this.rateLimitWaitMs.observe(
+      {
+        service,
+        repository: labels.repository || 'unknown',
+      },
+      waitMs
+    );
+  }
+
+  /**
+   * Update rate limit remaining count
+   */
+  updateRateLimitRemaining(service: string, remaining: number): void {
+    this.rateLimitRemaining.set({ service }, remaining);
+  }
+
+  /**
+   * Record degradation state change
+   */
+  recordDegradationState(isDegraded: boolean, durationMs?: number): void {
+    this.degradationState.set({}, isDegraded ? 1 : 0);
+
+    if (durationMs !== undefined && durationMs > 0) {
+      this.degradationDurationMs.observe({}, durationMs);
+    }
   }
 
   /**

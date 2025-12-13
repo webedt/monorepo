@@ -48,12 +48,24 @@ export {
   // Configuration
   type ExtendedRetryConfig,
   type RetryWithBackoffOptions,
+  type RetryContext,
+  type RetryAttemptRecord,
+  type RetryErrorClassification,
+  type RetryWithBackoffResult,
   API_RETRY_CONFIG,
   NETWORK_RETRY_CONFIG,
   RATE_LIMIT_RETRY_CONFIG,
-  // Core retry function
+  CLAUDE_RETRY_CONFIG,
+  DATABASE_RETRY_CONFIG,
+  // Core retry functions
   retryWithBackoff,
+  retryWithBackoffDetailed,
   calculateBackoffDelay,
+  calculateProgressiveTimeout,
+  // Context management
+  createRetryContext,
+  updateRetryContext,
+  markContextFailed,
   // Error classification
   classifyError,
   isErrorCodeRetryable,
@@ -67,6 +79,17 @@ export {
   // Error creation
   createClaudeErrorFromResponse,
 } from './retry.js';
+
+// Re-export dead letter queue utilities
+export {
+  DeadLetterQueue,
+  type DeadLetterEntry,
+  type RetryAttempt,
+  type DLQStats,
+  type DLQConfig,
+  getDeadLetterQueue,
+  resetDeadLetterQueue,
+} from './dead-letter-queue.js';
 
 // Re-export metrics utilities
 export {
