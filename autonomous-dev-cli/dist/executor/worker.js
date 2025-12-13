@@ -6,7 +6,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, ClaudeExecutionLogger, getStructuredFileLogger, isClaudeLoggingEnabled, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-import { StructuredError, ClaudeError, ErrorCode, } from '../utils/errors.js';
+import { StructuredError, ClaudeError, ErrorCode, getErrorMessage, } from '../utils/errors.js';
 import { ExecutorError, NetworkExecutorError, TimeoutExecutorError, GitExecutorError, ClaudeExecutorError, createExecutorError, getErrorAggregator, } from '../errors/executor-errors.js';
 import { getClaudeSDKCircuitBreaker, } from '../utils/circuit-breaker.js';
 import { retryWithBackoff, NETWORK_RETRY_CONFIG, } from '../utils/retry.js';
@@ -179,7 +179,7 @@ export class Worker {
                 });
             }
             catch (error) {
-                taskLog.warn(`Failed to create chat session: ${error.message}`);
+                taskLog.warn(`Failed to create chat session: ${getErrorMessage(error)}`);
             }
         }
         try {
@@ -303,7 +303,7 @@ export class Worker {
                 requiresCleanup: true,
             };
             // Wrap the error with structured context using typed executor errors
-            const structuredError = this.wrapExecutionError(error, ErrorCode.INTERNAL_ERROR, `Task execution failed: ${error.message}`, task, executionState);
+            const structuredError = this.wrapExecutionError(error, ErrorCode.INTERNAL_ERROR, `Task execution failed: ${getErrorMessage(error)}`, task, executionState);
             const duration = Date.now() - startTime;
             const endMemory = getMemoryUsageMB();
             const memoryDelta = Math.round((endMemory - startMemory) * 100) / 100;

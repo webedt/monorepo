@@ -31,17 +31,38 @@ export {
   type BranchProtectionStatus,
   type PRDescriptionOptions,
 } from './pulls.js';
+export {
+  createChecksManager,
+  type ChecksManager,
+  type StatusCheck,
+  type CombinedStatus,
+  type CheckRun,
+  type CheckSuite,
+  type ChecksWaitResult,
+  type WaitForChecksOptions,
+  type CreateStatusOptions,
+} from './checks.js';
+export {
+  GitHubManager,
+  createGitHubManager,
+  OperationPriority,
+  type GitHubManagerConfig,
+  type RequestStats,
+  type ManagerHealth,
+} from './manager.js';
 
 import { GitHubClient, createGitHubClient, type GitHubClientOptions } from './client.js';
 import { createIssueManager, type IssueManager } from './issues.js';
 import { createBranchManager, type BranchManager } from './branches.js';
 import { createPRManager, type PRManager } from './pulls.js';
+import { createChecksManager, type ChecksManager } from './checks.js';
 
 export interface GitHub {
   client: GitHubClient;
   issues: IssueManager;
   branches: BranchManager;
   pulls: PRManager;
+  checks: ChecksManager;
 }
 
 export function createGitHub(options: GitHubClientOptions): GitHub {
@@ -52,5 +73,6 @@ export function createGitHub(options: GitHubClientOptions): GitHub {
     issues: createIssueManager(client),
     branches: createBranchManager(client),
     pulls: createPRManager(client),
+    checks: createChecksManager(client),
   };
 }

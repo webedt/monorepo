@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'crypto';
 import { withTimeout, DEFAULT_TIMEOUTS, getTimeoutFromEnv, TimeoutError, } from '../utils/timeout.js';
+import { getErrorMessage } from '../utils/errors.js';
 const { Pool } = pg;
 // ============================================================================
 // Schema (matching internal-api-server)
@@ -220,7 +221,7 @@ export async function closeDatabase(options = {}) {
         await flushActivityUpdates();
     }
     catch (error) {
-        logger.warn(`Failed to flush activity updates: ${error.message}`);
+        logger.warn(`Failed to flush activity updates: ${getErrorMessage(error)}`);
     }
     const stats = getPoolStats();
     logger.info('Closing database connections...', {
@@ -245,7 +246,8 @@ export async function closeDatabase(options = {}) {
         logger.info('Database connection closed gracefully');
     }
     catch (error) {
-        if (error.message.includes('timeout')) {
+        const errorMsg = getErrorMessage(error);
+        if (errorMsg.includes('timeout')) {
             logger.warn(`Database close timed out after ${timeoutMs}ms`);
             if (force) {
                 logger.warn('Forcing database connection close...');
@@ -270,7 +272,7 @@ export async function closeDatabase(options = {}) {
             }
         }
         else {
-            logger.error(`Database close error: ${error.message}`);
+            logger.error(`Database close error: ${errorMsg}`);
             throw error;
         }
     }
