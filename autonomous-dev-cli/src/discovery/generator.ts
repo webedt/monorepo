@@ -184,12 +184,17 @@ Return ONLY the JSON array, no other text.`;
     let content = '';
 
     try {
+      logger.info('Starting Claude SDK query...');
       const queryStream = query({ prompt, options });
 
       for await (const message of queryStream) {
+        // Log all messages for debugging
+        logger.info('Claude SDK message', { type: message.type, subtype: (message as any).subtype });
+
         // Capture the final result
         if (message.type === 'result' && message.subtype === 'success') {
           content = message.result;
+          logger.info('Got result from Claude SDK', { resultLength: content.length });
         }
         // Also capture assistant text messages
         else if (message.type === 'assistant' && message.message?.content) {
@@ -198,11 +203,14 @@ Return ONLY the JSON array, no other text.`;
             for (const item of msgContent) {
               if (item.type === 'text' && item.text) {
                 content = item.text;
+                // Log partial content for progress visibility
+                logger.info('Claude responding...', { chars: item.text.length });
               }
             }
           }
         }
       }
+      logger.info('Claude SDK query complete');
     } catch (error) {
       logger.error('Claude SDK error', { error });
       throw new Error(`Claude SDK error: ${error instanceof Error ? error.message : String(error)}`);
