@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { memoryUsage } from 'process';
 import { existsSync, mkdirSync, appendFileSync, statSync, renameSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { getProgressManager, createProgressBar, formatDuration, formatETA, } from './progress.js';
 /**
  * Default timing threshold in ms for logging slow operations
  * Operations exceeding this threshold will be automatically logged
@@ -136,15 +137,22 @@ export class StructuredFileLogger {
     currentLogFile;
     metricsAggregator;
     enabled = false;
+    lastRotationTime;
+    rotationCheckInterval = null;
     constructor(config = {}) {
         this.config = {
             logDir: config.logDir || './logs',
             maxFileSizeBytes: config.maxFileSizeBytes || 10 * 1024 * 1024,
             maxFiles: config.maxFiles || 5,
             includeMetrics: config.includeMetrics !== false,
+            rotationPolicy: config.rotationPolicy || 'size',
+            rotationInterval: config.rotationInterval || 'daily',
+            maxAgeDays: config.maxAgeDays || 30,
+            compressRotated: config.compressRotated || false,
         };
         this.currentLogFile = this.getLogFilePath();
         this.metricsAggregator = new MetricsAggregator();
+        this.lastRotationTime = new Date();
     }
     /**
      * Enable structured file logging
@@ -152,12 +160,89 @@ export class StructuredFileLogger {
     enable() {
         this.ensureLogDirectory();
         this.enabled = true;
+        this.startRotationCheck();
+        this.cleanupOldLogFiles();
     }
     /**
      * Disable structured file logging
      */
     disable() {
         this.enabled = false;
+        this.stopRotationCheck();
+    }
+    /**
+     * Start periodic rotation check for time-based rotation
+     */
+    startRotationCheck() {
+        if (this.rotationCheckInterval)
+            return;
+        // Check every minute for time-based rotation
+        if (this.config.rotationPolicy === 'time' || this.config.rotationPolicy === 'both') {
+            this.rotationCheckInterval = setInterval(() => {
+                if (this.needsTimeBasedRotation()) {
+                    this.rotateLogFiles();
+                    this.lastRotationTime = new Date();
+                }
+            }, 60000); // Check every minute
+        }
+    }
+    /**
+     * Stop periodic rotation check
+     */
+    stopRotationCheck() {
+        if (this.rotationCheckInterval) {
+            clearInterval(this.rotationCheckInterval);
+            this.rotationCheckInterval = null;
+        }
+    }
+    /**
+     * Check if time-based rotation is needed
+     */
+    needsTimeBasedRotation() {
+        const now = new Date();
+        const lastRotation = this.lastRotationTime;
+        switch (this.config.rotationInterval) {
+            case 'hourly':
+                return now.getHours() !== lastRotation.getHours() ||
+                    now.getDate() !== lastRotation.getDate();
+            case 'daily':
+                return now.getDate() !== lastRotation.getDate() ||
+                    now.getMonth() !== lastRotation.getMonth();
+            case 'weekly':
+                const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+                return (now.getTime() - lastRotation.getTime()) >= msPerWeek;
+            default:
+                return false;
+        }
+    }
+    /**
+     * Cleanup log files older than maxAgeDays
+     */
+    cleanupOldLogFiles() {
+        if (this.config.maxAgeDays <= 0)
+            return;
+        try {
+            const files = readdirSync(this.config.logDir);
+            const now = Date.now();
+            const maxAgeMs = this.config.maxAgeDays * 24 * 60 * 60 * 1000;
+            for (const file of files) {
+                if (!file.startsWith('autonomous-dev'))
+                    continue;
+                const filePath = join(this.config.logDir, file);
+                try {
+                    const stats = statSync(filePath);
+                    if (now - stats.mtime.getTime() > maxAgeMs) {
+                        unlinkSync(filePath);
+                    }
+                }
+                catch {
+                    // Ignore errors for individual files
+                }
+            }
+        }
+        catch {
+            // Silently fail if directory doesn't exist yet
+        }
     }
     /**
      * Check if structured file logging is enabled
@@ -186,19 +271,32 @@ export class StructuredFileLogger {
         }
     }
     /**
-     * Check if log rotation is needed
+     * Check if log rotation is needed based on rotation policy
      */
     needsRotation() {
         if (!existsSync(this.currentLogFile)) {
             return false;
         }
-        try {
-            const stats = statSync(this.currentLogFile);
-            return stats.size >= this.config.maxFileSizeBytes;
+        // Check size-based rotation
+        const needsSizeRotation = this.config.rotationPolicy === 'size' || this.config.rotationPolicy === 'both';
+        if (needsSizeRotation) {
+            try {
+                const stats = statSync(this.currentLogFile);
+                if (stats.size >= this.config.maxFileSizeBytes) {
+                    return true;
+                }
+            }
+            catch {
+                return false;
+            }
         }
-        catch {
-            return false;
+        // Check time-based rotation (already handled by interval, but check on write as well)
+        const needsTimeRotation = this.config.rotationPolicy === 'time' || this.config.rotationPolicy === 'both';
+        if (needsTimeRotation && this.needsTimeBasedRotation()) {
+            this.lastRotationTime = new Date();
+            return true;
         }
+        return false;
     }
     /**
      * Rotate log files
@@ -1127,6 +1225,131 @@ class Logger {
         else {
             console.log(`${chalk.cyan(`[${step}/${total}]`)} ${message}`);
         }
+    }
+    /**
+     * Show a progress bar for batch operations
+     */
+    progressBar(current, total, label, etaMs) {
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', label);
+            entry.meta = { current, total, progress: total > 0 ? Math.round((current / total) * 100) : 0, etaMs };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            const bar = createProgressBar(current, { total, width: 25 });
+            let output = `${label}: ${bar}`;
+            if (etaMs !== undefined && etaMs > 0) {
+                output += ` ${chalk.gray(`ETA: ${formatETA(etaMs)}`)}`;
+            }
+            // Use carriage return to update in place
+            process.stdout.write(`\r${output}`);
+            if (current >= total) {
+                process.stdout.write('\n');
+            }
+        }
+    }
+    /**
+     * Clear the current progress line
+     */
+    clearProgress() {
+        if (this.format !== 'json') {
+            process.stdout.write('\r\x1b[K'); // Clear line
+        }
+    }
+    /**
+     * Log cycle phase change with visual indicator
+     */
+    cyclePhase(phase, step, total) {
+        const phaseLabels = {
+            'fetch-issues': 'Fetching existing issues',
+            'discover-tasks': 'Discovering new tasks',
+            'execute-tasks': 'Executing tasks',
+            'evaluate': 'Running evaluation pipeline',
+            'create-prs': 'Creating pull requests',
+            'merge-prs': 'Merging pull requests',
+            'waiting': 'Waiting for next cycle',
+        };
+        const phaseIcons = {
+            'fetch-issues': '📋',
+            'discover-tasks': '🔍',
+            'execute-tasks': '⚙️',
+            'evaluate': '🧪',
+            'create-prs': '📝',
+            'merge-prs': '🔀',
+            'waiting': '⏳',
+        };
+        const label = phaseLabels[phase];
+        const icon = phaseIcons[phase];
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', label);
+            entry.meta = { phase, step, total };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            console.log(`${icon} ${chalk.cyan(`[${step}/${total}]`)} ${label}`);
+        }
+    }
+    /**
+     * Log worker execution progress
+     */
+    workerProgress(workerId, issueNumber, status, progress, message) {
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', `Worker ${workerId}: ${status}`);
+            entry.meta = { workerId, issueNumber, status, progress, message };
+            entry.workerId = workerId;
+            console.log(this.formatJson(entry));
+        }
+        else {
+            const statusIcons = {
+                starting: chalk.blue('→'),
+                running: chalk.yellow('⚡'),
+                completed: chalk.green('✓'),
+                failed: chalk.red('✗'),
+            };
+            const icon = statusIcons[status] || '•';
+            let output = `  ${icon} ${chalk.gray(`[${workerId}]`)} Issue #${issueNumber}`;
+            if (progress !== undefined && status === 'running') {
+                const bar = createProgressBar(progress, { total: 100, width: 15, showPercentage: true, showCount: false });
+                output += ` ${bar}`;
+            }
+            if (message) {
+                output += ` ${chalk.gray(message)}`;
+            }
+            console.log(output);
+        }
+    }
+    /**
+     * Log estimated time remaining
+     */
+    estimatedTime(label, etaMs) {
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', label);
+            entry.meta = { etaMs, etaFormatted: formatETA(etaMs) };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            console.log(`${chalk.gray('⏱')} ${label}: ${chalk.yellow(formatETA(etaMs))}`);
+        }
+    }
+    /**
+     * Log waiting state with countdown
+     */
+    waitingCountdown(remainingMs) {
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', 'Waiting for next cycle');
+            entry.meta = { remainingMs, remainingFormatted: formatDuration(remainingMs) };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            const remaining = formatDuration(remainingMs);
+            process.stdout.write(`\r${chalk.gray('⏳')} Waiting for next cycle... ${chalk.yellow(remaining)}  `);
+        }
+    }
+    /**
+     * Get the progress manager for advanced progress tracking
+     */
+    getProgressManager() {
+        return getProgressManager(this.format === 'json');
     }
     divider() {
         if (this.format !== 'json') {

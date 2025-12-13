@@ -155,6 +155,9 @@ export declare class WorkerPool {
     private executionHistory;
     private maxHistoryEntries;
     private overflowEvents;
+    private progressManager;
+    private taskETACalculator;
+    private executionStartTime;
     private degradationStatus;
     private degradationCheckInterval;
     private consecutiveFailures;

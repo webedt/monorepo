@@ -1,15 +1,21 @@
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { config as loadEnv } from 'dotenv';
-import { ConfigSchema, defaultConfig, validateNoCredentialsInConfig } from './schema.js';
+import { ConfigSchema, defaultConfig, validateNoCredentialsInConfig, CURRENT_CONFIG_VERSION } from './schema.js';
 import { logger } from '../utils/logger.js';
 import { ConfigError, ErrorCode, } from '../utils/errors.js';
+import { migrateConfig, needsMigration, checkDeprecatedFields, detectConfigVersion, } from './migrations.js';
 // Load .env file
 loadEnv();
 /**
  * Configuration field metadata for help and validation suggestions
  */
 const configFieldHelp = {
+    'version': {
+        description: 'Configuration schema version for migration support',
+        suggestion: `Current version is ${CURRENT_CONFIG_VERSION}. Run "autonomous-dev config --upgrade" to migrate older configs.`,
+        example: String(CURRENT_CONFIG_VERSION),
+    },
     'repo.owner': {
         description: 'GitHub repository owner (username or organization)',
         envVar: 'REPO_OWNER',
@@ -198,11 +204,84 @@ const configFieldHelp = {
     },
 };
 /**
+ * Example values for common configuration types
+ */
+const exampleValues = {
+    'repo.owner': {
+        correct: '"myusername" or "my-organization"',
+        incorrect: '123 (must be a string)',
+        jsonExample: '{ "repo": { "owner": "myusername" } }',
+    },
+    'repo.name': {
+        correct: '"my-project" or "awesome-app"',
+        incorrect: 'empty string',
+        jsonExample: '{ "repo": { "name": "my-project" } }',
+    },
+    'repo.baseBranch': {
+        correct: '"main", "master", or "develop"',
+        jsonExample: '{ "repo": { "baseBranch": "main" } }',
+    },
+    'discovery.tasksPerCycle': {
+        correct: '5 (number between 1-10)',
+        incorrect: '"5" (string) or 15 (out of range)',
+        jsonExample: '{ "discovery": { "tasksPerCycle": 5 } }',
+    },
+    'discovery.maxOpenIssues': {
+        correct: '10 (number, minimum 1)',
+        incorrect: '0 or negative numbers',
+        jsonExample: '{ "discovery": { "maxOpenIssues": 10 } }',
+    },
+    'execution.parallelWorkers': {
+        correct: '4 (number between 1-10)',
+        incorrect: '"four" (string) or 20 (out of range)',
+        jsonExample: '{ "execution": { "parallelWorkers": 4 } }',
+    },
+    'execution.timeoutMinutes': {
+        correct: '30 (number between 5-120)',
+        incorrect: '2 (too small) or 200 (too large)',
+        jsonExample: '{ "execution": { "timeoutMinutes": 30 } }',
+    },
+    'merge.mergeMethod': {
+        correct: '"merge", "squash", or "rebase"',
+        incorrect: '"fast-forward" (not a valid option)',
+        jsonExample: '{ "merge": { "mergeMethod": "squash" } }',
+    },
+    'merge.conflictStrategy': {
+        correct: '"rebase", "merge", or "manual"',
+        jsonExample: '{ "merge": { "conflictStrategy": "rebase" } }',
+    },
+    'logging.level': {
+        correct: '"debug", "info", "warn", or "error"',
+        incorrect: '"verbose" or "trace" (not valid options)',
+        jsonExample: '{ "logging": { "level": "info" } }',
+    },
+    'logging.format': {
+        correct: '"pretty" (colored terminal) or "json" (structured)',
+        jsonExample: '{ "logging": { "format": "json" } }',
+    },
+    'version': {
+        correct: `${CURRENT_CONFIG_VERSION} (current version)`,
+        incorrect: '0 or versions higher than current',
+        jsonExample: `{ "version": ${CURRENT_CONFIG_VERSION} }`,
+    },
+    'evaluation.requireBuild': {
+        correct: 'true or false',
+        incorrect: '"yes" or "no" (must be boolean)',
+        jsonExample: '{ "evaluation": { "requireBuild": true } }',
+    },
+    'credentials.userEmail': {
+        correct: '"user@example.com"',
+        incorrect: '"not-an-email"',
+        jsonExample: '{ "credentials": { "userEmail": "user@example.com" } }',
+    },
+};
+/**
  * Get helpful suggestion for a validation error
  */
 function getValidationSuggestion(issue) {
     const path = issue.path.join('.');
     const help = configFieldHelp[path];
+    const examples = exampleValues[path];
     let suggestion = '';
     // Add field-specific help if available
     if (help) {
@@ -213,34 +292,90 @@ function getValidationSuggestion(issue) {
         if (help.suggestion) {
             suggestion += `\n    Suggestion: ${help.suggestion}`;
         }
-        if (help.example) {
-            suggestion += `\n    Example: ${help.example}`;
-        }
     }
-    // Add error-type specific suggestions
+    // Add error-type specific suggestions with detailed examples
     switch (issue.code) {
         case 'invalid_type':
             if (issue.expected === 'string' && issue.received === 'undefined') {
-                suggestion += '\n    This field is required but was not provided.';
+                suggestion += '\n    ❌ This field is required but was not provided.';
+                if (examples?.jsonExample) {
+                    suggestion += `\n    ✓ Add to your config file: ${examples.jsonExample}`;
+                }
             }
             else {
-                suggestion += `\n    Expected ${issue.expected}, but received ${issue.received}.`;
+                suggestion += `\n    ❌ Expected type "${issue.expected}", but received "${issue.received}".`;
+                if (examples?.correct) {
+                    suggestion += `\n    ✓ Correct value: ${examples.correct}`;
+                }
+                if (examples?.incorrect) {
+                    suggestion += `\n    ✗ Common mistake: ${examples.incorrect}`;
+                }
             }
             break;
         case 'too_small':
-            suggestion += `\n    Value is too small. Minimum: ${issue.minimum}`;
+            const minimum = issue.minimum;
+            const inclusiveMin = issue.inclusive;
+            suggestion += `\n    ❌ Value is too small. Minimum: ${minimum}${inclusiveMin ? ' (inclusive)' : ' (exclusive)'}`;
+            if (examples?.correct) {
+                suggestion += `\n    ✓ Valid range: ${examples.correct}`;
+            }
+            if (examples?.incorrect) {
+                suggestion += `\n    ✗ Invalid: ${examples.incorrect}`;
+            }
             break;
         case 'too_big':
-            suggestion += `\n    Value is too large. Maximum: ${issue.maximum}`;
+            const maximum = issue.maximum;
+            const inclusiveMax = issue.inclusive;
+            suggestion += `\n    ❌ Value is too large. Maximum: ${maximum}${inclusiveMax ? ' (inclusive)' : ' (exclusive)'}`;
+            if (examples?.correct) {
+                suggestion += `\n    ✓ Valid range: ${examples.correct}`;
+            }
             break;
         case 'invalid_enum_value':
-            suggestion += `\n    Valid options: ${issue.options?.join(', ') || 'see documentation'}`;
+            const options = issue.options || [];
+            suggestion += `\n    ❌ Invalid value. Valid options are: ${options.map((o) => `"${o}"`).join(', ')}`;
+            if (examples?.correct) {
+                suggestion += `\n    ✓ Example: ${examples.correct}`;
+            }
+            if (examples?.incorrect) {
+                suggestion += `\n    ✗ Not valid: ${examples.incorrect}`;
+            }
+            if (examples?.jsonExample) {
+                suggestion += `\n    ✓ Config example: ${examples.jsonExample}`;
+            }
             break;
         case 'invalid_string':
             if (issue.validation === 'email') {
-                suggestion += '\n    Please provide a valid email address.';
+                suggestion += '\n    ❌ Please provide a valid email address.';
+                suggestion += '\n    ✓ Example: "user@example.com"';
+                suggestion += '\n    ✗ Invalid: "not-an-email" or "user@" or "@domain.com"';
+            }
+            else if (issue.validation === 'url') {
+                suggestion += '\n    ❌ Please provide a valid URL.';
+                suggestion += '\n    ✓ Example: "https://example.com/webhook"';
+                suggestion += '\n    ✗ Invalid: "not-a-url" or "example.com" (missing protocol)';
             }
             break;
+        case 'custom':
+            // Handle custom refinement errors (like credential detection)
+            if (issue.message.includes('credential')) {
+                suggestion += '\n    ⚠️ Security: Credentials should not be stored in config files.';
+                suggestion += '\n    ✓ Use environment variables instead:';
+                suggestion += '\n      export GITHUB_TOKEN="your-token"';
+                suggestion += '\n      export CLAUDE_ACCESS_TOKEN="your-token"';
+            }
+            else {
+                suggestion += `\n    ${issue.message}`;
+            }
+            break;
+        default:
+            if (examples?.correct) {
+                suggestion += `\n    ✓ Expected: ${examples.correct}`;
+            }
+    }
+    // Add JSON example if available and not already added
+    if (examples?.jsonExample && !suggestion.includes('Config example:') && !suggestion.includes('Add to your config')) {
+        suggestion += `\n    ✓ Config example: ${examples.jsonExample}`;
     }
     return suggestion;
 }
@@ -428,8 +563,10 @@ function deepMerge(target, source) {
     }
     return result;
 }
-export function loadConfig(configPath) {
+export function loadConfig(configPath, options = {}) {
+    const { autoMigrate = true, showDeprecationWarnings = true } = options;
     let fileConfig = {};
+    let rawFileConfig = {};
     // Try to load config file
     const possiblePaths = configPath
         ? [configPath]
@@ -444,7 +581,8 @@ export function loadConfig(configPath) {
         if (existsSync(fullPath)) {
             try {
                 const content = readFileSync(fullPath, 'utf-8');
-                fileConfig = JSON.parse(content);
+                rawFileConfig = JSON.parse(content);
+                fileConfig = rawFileConfig;
                 configLoadPath = fullPath;
                 logger.info(`Loaded config from ${fullPath}`);
                 break;
@@ -470,6 +608,47 @@ export function loadConfig(configPath) {
                 });
                 logger.structuredError(parseError);
             }
+        }
+    }
+    // Check for deprecated fields and show warnings
+    if (showDeprecationWarnings && Object.keys(rawFileConfig).length > 0) {
+        const deprecationWarnings = checkDeprecatedFields(rawFileConfig);
+        if (deprecationWarnings.length > 0) {
+            logger.warn('Deprecated configuration options detected:');
+            for (const warning of deprecationWarnings) {
+                logger.warn(`  ⚠ ${warning}`);
+            }
+            console.log();
+        }
+    }
+    // Check if migration is needed
+    if (autoMigrate && Object.keys(rawFileConfig).length > 0 && needsMigration(rawFileConfig)) {
+        const currentVersion = detectConfigVersion(rawFileConfig);
+        logger.warn(`Configuration file is at version ${currentVersion}, current version is ${CURRENT_CONFIG_VERSION}`);
+        logger.warn('Automatically migrating configuration in memory...');
+        logger.info('Run "autonomous-dev config --upgrade" to save the migrated configuration to disk.');
+        console.log();
+        const migrationResult = migrateConfig(rawFileConfig);
+        if (migrationResult.success && migrationResult.config) {
+            fileConfig = migrationResult.config;
+            // Show migration warnings
+            if (migrationResult.warnings.length > 0) {
+                logger.warn('Migration warnings:');
+                for (const warning of migrationResult.warnings) {
+                    logger.warn(`  ⚠ ${warning}`);
+                }
+                console.log();
+            }
+        }
+        else {
+            // Migration failed - show errors but continue with original config
+            logger.error('Configuration migration failed:');
+            for (const error of migrationResult.errors) {
+                logger.error(`  ✗ ${error}`);
+            }
+            console.log();
+            logger.warn('Continuing with original configuration. Some features may not work correctly.');
+            console.log();
         }
     }
     // Build config from env vars (only include repo if set, use file config values as fallback)
@@ -524,6 +703,9 @@ export function loadConfig(configPath) {
         maxLogFileSizeBytes: parseInt(process.env.LOG_MAX_FILE_SIZE_BYTES || String(10 * 1024 * 1024), 10),
         maxLogFiles: parseInt(process.env.LOG_MAX_FILES || '5', 10),
         includeMetrics: process.env.LOG_INCLUDE_METRICS !== 'false',
+        rotationPolicy: process.env.LOG_ROTATION_POLICY || 'size',
+        rotationInterval: process.env.LOG_ROTATION_INTERVAL || 'daily',
+        maxLogAgeDays: parseInt(process.env.LOG_MAX_AGE_DAYS || '30', 10),
     };
     envConfig.credentials = {
         githubToken: process.env.GITHUB_TOKEN,
@@ -562,4 +744,109 @@ export function loadConfig(configPath) {
     }
     return result.data;
 }
+/**
+ * Upgrade a configuration file to the latest version
+ * Creates a backup of the original file before modifying
+ */
+export function upgradeConfig(configPath) {
+    // Find the config file
+    const possiblePaths = configPath
+        ? [configPath]
+        : [
+            './autonomous-dev.config.json',
+            './autonomous-dev.json',
+            './.autonomous-dev.json',
+        ];
+    let foundPath;
+    let rawConfig;
+    for (const path of possiblePaths) {
+        const fullPath = resolve(path);
+        if (existsSync(fullPath)) {
+            try {
+                const content = readFileSync(fullPath, 'utf-8');
+                rawConfig = JSON.parse(content);
+                foundPath = fullPath;
+                break;
+            }
+            catch (error) {
+                // Continue to next path
+            }
+        }
+    }
+    if (!foundPath || !rawConfig) {
+        return {
+            success: false,
+            configPath: configPath || '(not found)',
+            migrationResult: {
+                success: false,
+                fromVersion: 0,
+                toVersion: CURRENT_CONFIG_VERSION,
+                changes: [],
+                warnings: [],
+                errors: ['No configuration file found. Run "autonomous-dev init" to create one.'],
+            },
+        };
+    }
+    // Check if migration is needed
+    if (!needsMigration(rawConfig)) {
+        const version = detectConfigVersion(rawConfig);
+        return {
+            success: true,
+            configPath: foundPath,
+            migrationResult: {
+                success: true,
+                config: rawConfig,
+                fromVersion: version,
+                toVersion: version,
+                changes: [],
+                warnings: [],
+                errors: [],
+            },
+        };
+    }
+    // Perform migration
+    const migrationResult = migrateConfig(rawConfig);
+    if (!migrationResult.success || !migrationResult.config) {
+        return {
+            success: false,
+            configPath: foundPath,
+            migrationResult,
+        };
+    }
+    // Create backup
+    const backupPath = `${foundPath}.backup.${Date.now()}`;
+    try {
+        const originalContent = readFileSync(foundPath, 'utf-8');
+        writeFileSync(backupPath, originalContent);
+    }
+    catch (error) {
+        migrationResult.warnings.push(`Could not create backup at ${backupPath}. Proceeding without backup.`);
+    }
+    // Write migrated config
+    try {
+        writeFileSync(foundPath, JSON.stringify(migrationResult.config, null, 2) + '\n');
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return {
+            success: false,
+            configPath: foundPath,
+            migrationResult: {
+                ...migrationResult,
+                success: false,
+                errors: [...migrationResult.errors, `Failed to write migrated config: ${errorMessage}`],
+            },
+            backupPath,
+        };
+    }
+    return {
+        success: true,
+        configPath: foundPath,
+        migrationResult,
+        backupPath,
+    };
+}
+// Re-export migration utilities for use in CLI
+export { migrateConfig, needsMigration, checkDeprecatedFields, formatMigrationSummary, detectConfigVersion, CURRENT_CONFIG_VERSION, } from './migrations.js';
+export { CURRENT_CONFIG_VERSION as CONFIG_VERSION } from './schema.js';
 //# sourceMappingURL=index.js.map

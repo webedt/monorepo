@@ -2,7 +2,14 @@
 
 import { Command } from 'commander';
 import { createDaemon, type DaemonOptions } from './daemon.js';
-import { loadConfig, getConfigHelp } from './config/index.js';
+import {
+  loadConfig,
+  getConfigHelp,
+  upgradeConfig,
+  formatMigrationSummary,
+  detectConfigVersion,
+  CURRENT_CONFIG_VERSION,
+} from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
@@ -764,7 +771,7 @@ function formatUptime(seconds: number): string {
 program
   .command('config')
   .description(
-    'Show or validate configuration.\n\n' +
+    'Show, validate, or upgrade configuration.\n\n' +
     'Displays the current configuration with all settings merged\n' +
     'from defaults, config file, and environment variables.\n\n' +
     'Configuration precedence (highest to lowest):\n' +
@@ -774,6 +781,7 @@ program
     formatExamples([
       'autonomous-dev config',
       'autonomous-dev config --validate  # Validate without display',
+      'autonomous-dev config --upgrade   # Migrate config to latest version',
       'autonomous-dev config -c ./custom.json',
     ]) +
     formatAdditionalInfo(
@@ -785,16 +793,57 @@ program
       '  ✓ configured  - Credential is set and valid\n' +
       '  ✗ missing     - Required credential is not set\n' +
       '  not used      - Optional credential not configured\n\n' +
+      'Migration:\n' +
+      '  Use --upgrade to migrate older config files to the latest version.\n' +
+      '  A backup is created before modifying the original file.\n' +
+      `  Current config version: ${CURRENT_CONFIG_VERSION}\n\n` +
       'Run "autonomous-dev init" to create a new config file interactively.'
     )
   )
   .option('-c, --config <path>', 'Path to configuration file (JSON format)')
   .option('--validate', 'Only validate configuration, do not show details')
+  .option('--upgrade', 'Migrate configuration file to the latest version')
   .action(async (options) => {
     // Validate config path if provided
     validateCommonOptions({ config: options.config }, 'config');
 
     try {
+      // Handle --upgrade option
+      if (options.upgrade) {
+        logger.header('Configuration Migration');
+        console.log();
+
+        const result = upgradeConfig(options.config);
+
+        if (result.migrationResult.fromVersion === result.migrationResult.toVersion) {
+          logger.success(`Configuration is already at the latest version (v${result.migrationResult.toVersion})`);
+          console.log(chalk.gray(`Config file: ${result.configPath}`));
+          return;
+        }
+
+        console.log(formatMigrationSummary(result.migrationResult));
+
+        if (result.success) {
+          logger.success(`Configuration upgraded from v${result.migrationResult.fromVersion} to v${result.migrationResult.toVersion}`);
+          console.log(chalk.gray(`Config file: ${result.configPath}`));
+          if (result.backupPath) {
+            console.log(chalk.gray(`Backup: ${result.backupPath}`));
+          }
+          console.log();
+          console.log(chalk.bold('Next steps:'));
+          console.log('  1. Review the changes in your config file');
+          console.log('  2. Run "autonomous-dev config --validate" to verify');
+          console.log('  3. Delete the backup file once verified');
+        } else {
+          logger.error('Configuration upgrade failed');
+          for (const error of result.migrationResult.errors) {
+            console.error(chalk.red(`  ✗ ${error}`));
+          }
+          process.exit(1);
+        }
+        return;
+      }
+
       const config = loadConfig(options.config);
 
       // Validate repository info
@@ -829,6 +878,13 @@ program
       }
 
       logger.header('Configuration');
+
+      // Show config version
+      const versionStatus = config.version === CURRENT_CONFIG_VERSION
+        ? chalk.green(`v${config.version} (current)`)
+        : chalk.yellow(`v${config.version} (run --upgrade to migrate to v${CURRENT_CONFIG_VERSION})`);
+      console.log(chalk.bold('Version:'), versionStatus);
+      console.log();
 
       console.log(chalk.bold('Repository:'));
       console.log(`  Owner:       ${config.repo.owner || chalk.red('(not set)')}`);
@@ -1048,6 +1104,7 @@ program
 
       // Build config object (values already validated)
       const config = {
+        version: CURRENT_CONFIG_VERSION,
         repo: {
           owner: repoOwner,
           name: repoName,
