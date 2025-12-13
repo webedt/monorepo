@@ -58,6 +58,7 @@ export interface CodebaseAnalysis {
     recentChanges: string[];
     packages: PackageInfo[];
     configFiles: string[];
+    gitAnalysis?: GitAnalysis;
 }
 export interface DirectoryEntry {
     name: string;
@@ -78,6 +79,59 @@ export interface PackageInfo {
     scripts: Record<string, string>;
 }
 /**
+ * Information about a recent git commit
+ */
+export interface GitCommitInfo {
+    hash: string;
+    shortHash: string;
+    author: string;
+    email: string;
+    date: Date;
+    message: string;
+    filesChanged: string[];
+}
+/**
+ * File change statistics from git history
+ */
+export interface FileChangeStats {
+    file: string;
+    changeCount: number;
+    lastModified: Date;
+    authors: string[];
+    impactScore: number;
+}
+/**
+ * Dependency relationship between files
+ */
+export interface FileDependency {
+    source: string;
+    target: string;
+    type: 'import' | 'require' | 'dynamic';
+}
+/**
+ * Dependency graph for understanding file relationships
+ */
+export interface DependencyGraph {
+    files: string[];
+    dependencies: FileDependency[];
+    entryPoints: string[];
+    hotspots: string[];
+}
+/**
+ * Complete git analysis results
+ */
+export interface GitAnalysis {
+    recentCommits: GitCommitInfo[];
+    fileChangeStats: FileChangeStats[];
+    dependencyGraph: DependencyGraph;
+    summary: {
+        totalCommits: number;
+        activeFiles: number;
+        topContributors: string[];
+        mostChangedFiles: string[];
+    };
+}
+/**
  * Progress callback for reporting analysis progress
  */
 export type ProgressCallback = (progress: AnalysisProgress) => void;
@@ -85,7 +139,7 @@ export type ProgressCallback = (progress: AnalysisProgress) => void;
  * Progress information during analysis
  */
 export interface AnalysisProgress {
-    phase: 'scanning' | 'analyzing-todos' | 'analyzing-packages' | 'analyzing-config' | 'complete';
+    phase: 'scanning' | 'analyzing-todos' | 'analyzing-packages' | 'analyzing-config' | 'analyzing-git' | 'complete';
     filesScanned: number;
     totalFiles?: number;
     currentFile?: string;
@@ -101,6 +155,9 @@ export interface AnalyzerConfig {
     enableCache?: boolean;
     cache?: AnalysisCache;
     onProgress?: ProgressCallback;
+    enableGitAnalysis?: boolean;
+    gitAnalysisDays?: number;
+    gitMaxCommits?: number;
 }
 /**
  * Result type for validation operations
@@ -121,6 +178,10 @@ export declare class CodebaseAnalyzer {
     private cache;
     private config;
     private onProgress?;
+    private enableGitAnalysis;
+    private gitAnalysisDays;
+    private gitMaxCommits;
+    private git;
     constructor(repoPath: string, excludePaths?: string[], config?: AnalyzerConfig);
     /**
      * Report progress to the callback if registered
@@ -165,6 +226,26 @@ export declare class CodebaseAnalyzer {
     private findPackages;
     private findConfigFiles;
     generateSummary(analysis: CodebaseAnalysis): string;
+    /**
+     * Initialize the git instance for the repository
+     */
+    private initGit;
+    /**
+     * Get recent commits from git history
+     */
+    getRecentCommits(): Promise<GitCommitInfo[]>;
+    /**
+     * Calculate file change statistics from commit history
+     */
+    private calculateFileChangeStats;
+    /**
+     * Analyze dependency relationships between files
+     */
+    analyzeDependencyGraph(): Promise<DependencyGraph>;
+    /**
+     * Perform complete git analysis
+     */
+    analyzeGit(): Promise<GitAnalysis | undefined>;
 }
 export {};
 //# sourceMappingURL=analyzer.d.ts.map

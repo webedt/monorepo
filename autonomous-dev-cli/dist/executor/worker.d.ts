@@ -56,6 +56,8 @@ export interface WorkerOptions {
     repoOwner?: string;
     repoName?: string;
     enableDatabaseLogging?: boolean;
+    cycleCorrelationId?: string;
+    cycleNumber?: number;
     sparseCheckout?: {
         enabled: boolean;
         paths?: string[];
