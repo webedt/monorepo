@@ -89,6 +89,7 @@ import {
   generateSessionPath,
   type CreateChatSessionParams,
 } from '../db/index.js';
+import { loadSpecContext, type SpecContext } from '../discovery/spec-reader.js';
 
 /**
  * Default timeout for Claude execution (5 minutes as per issue requirements)
@@ -1372,7 +1373,7 @@ export class Worker {
       claudeRetryConfig: this.claudeRetryConfig,
     });
 
-    const prompt = this.buildPrompt(issue);
+    const prompt = this.buildPrompt(issue, repoDir);
 
     // Use createTimedAbortController for proper cleanup management
     // This ensures the timeout is always cleared even if an error occurs
@@ -1822,13 +1823,33 @@ export class Worker {
     return sanitized;
   }
 
-  private buildPrompt(issue: Issue): string {
-    const specContext = this.options.specContext;
+  private buildPrompt(issue: Issue, repoDir?: string): string {
+    // Try to load spec context from the cloned repo if available
+    let specContext = this.options.specContext;
+    if (repoDir) {
+      const repoSpecContext = loadSpecContext(repoDir, 5);
+      if (repoSpecContext && repoSpecContext.nextTasks.length > 0) {
+        // Build spec context from the cloned repo's SPEC.md/STATUS.md
+        const firstTask = repoSpecContext.nextTasks[0];
+        specContext = {
+          specContent: repoSpecContext.nextTasks.map(t => t.specContent).filter(Boolean).join('\n\n---\n\n').slice(0, 3000),
+          existingFiles: repoSpecContext.nextTasks.flatMap(t => t.existingFiles).filter(Boolean),
+          priorityTier: firstTask?.priority,
+          notes: 'This task is part of the spec-driven roadmap. Check SPEC.md for detailed requirements.',
+        };
+        this.log.info('Loaded spec context from cloned repository', {
+          tasksFound: repoSpecContext.nextTasks.length,
+          priorityTier: firstTask?.priority,
+        });
+      }
+    }
     const hasSpecContext = specContext && (specContext.specContent || specContext.existingFiles?.length);
 
     // Build spec context section if available
     let specSection = '';
-    if (hasSpecContext) {
+    let hasExistingFiles = false;
+    if (hasSpecContext && specContext) {
+      hasExistingFiles = !!(specContext.existingFiles?.length);
       specSection = `
 ## Specification Context
 ${specContext.priorityTier ? `**Priority:** ${specContext.priorityTier}` : ''}
@@ -1836,9 +1857,9 @@ ${specContext.priorityTier ? `**Priority:** ${specContext.priorityTier}` : ''}
 ${specContext.specContent ? `### From SPEC.md:
 ${specContext.specContent}
 ` : ''}
-${specContext.existingFiles?.length ? `### Existing Implementation Files:
+${hasExistingFiles ? `### Existing Implementation Files:
 Review these files before making changes:
-${specContext.existingFiles.map(f => `- ${f}`).join('\n')}
+${specContext.existingFiles!.map(f => `- ${f}`).join('\n')}
 ` : ''}
 ${specContext.notes ? `### Implementation Notes:
 ${specContext.notes}
@@ -1856,7 +1877,7 @@ ${specSection}
 
 1. First, explore the codebase to understand the structure and existing patterns
 2. Read CLAUDE.md if it exists for project-specific guidelines
-3. ${hasSpecContext && specContext.existingFiles?.length ? 'Review the existing implementation files listed above' : 'Identify related files that may need modification'}
+3. ${hasExistingFiles ? 'Review the existing implementation files listed above' : 'Identify related files that may need modification'}
 4. Implement the changes described in the issue
 5. Follow existing code style and conventions
 6. Make sure your changes are complete and working

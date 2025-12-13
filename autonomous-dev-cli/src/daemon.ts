@@ -13,12 +13,10 @@ import {
   getParallelSafeTasks,
   initPersistentCache,
   getPersistentCache,
-  loadSpecContext,
   updateStatusFile,
   type DiscoveredTask,
   type DeduplicatedTask,
   type CacheConfig,
-  type SpecContext,
 } from './discovery/index.js';
 import {
   createPreviewSession,
@@ -146,7 +144,6 @@ export class Daemon implements DaemonStateProvider {
     overallStatus: 'healthy',
     lastCheck: new Date(),
   };
-  private specContext: SpecContext | null = null;  // Spec-driven development context
 
   // Health monitoring state
   private startTime: Date = new Date();
@@ -1470,12 +1467,8 @@ export class Daemon implements DaemonStateProvider {
         const analysisDir = join(this.config.execution.workDir, 'analysis');
         // For now, we'll analyze the current directory if it's the target repo
         // In production, this would clone the repo first
-
-        // Load spec context for spec-driven discovery
-        this.specContext = loadSpecContext(process.cwd(), Math.min(this.config.discovery.tasksPerCycle, availableSlots));
-        if (this.specContext) {
-          logger.info(`Loaded spec context: ${this.specContext.nextTasks.length} priority tasks identified from SPEC.md/STATUS.md`);
-        }
+        // NOTE: Spec context (SPEC.md/STATUS.md) is loaded by each worker from the cloned repo
+        // since the daemon's working directory may not contain the target repository files
 
         try {
           const rawTasks = await discoverTasks({
@@ -1485,8 +1478,6 @@ export class Daemon implements DaemonStateProvider {
             tasksPerCycle: Math.min(this.config.discovery.tasksPerCycle, availableSlots),
             existingIssues,
             repoContext: `WebEDT - AI-powered coding assistant platform with React frontend, Express backend, and Claude Agent SDK integration.`,
-            // Pass spec context for spec-driven discovery
-            specContext: this.specContext || undefined,
           });
 
           logger.info(`Discovered ${rawTasks.length} raw tasks, running deduplication...`);
@@ -1649,16 +1640,7 @@ export class Daemon implements DaemonStateProvider {
         }
 
         // Create worker pool and execute
-        // Build spec context for workers if available
-        const workerSpecContext = this.specContext ? {
-          specContent: this.specContext.nextTasks.length > 0
-            ? this.specContext.nextTasks.map(t => t.specContent).filter(Boolean).join('\n\n---\n\n').slice(0, 3000)
-            : undefined,
-          existingFiles: this.specContext.nextTasks.flatMap(t => t.existingFiles).filter(Boolean),
-          priorityTier: this.specContext.nextTasks[0]?.priority,
-          notes: 'This task is part of the spec-driven roadmap. Check SPEC.md for detailed requirements.',
-        } : undefined;
-
+        // NOTE: Workers load spec context (SPEC.md/STATUS.md) from the cloned repo
         this.currentWorkerPool = createWorkerPool({
           maxWorkers: this.config.execution.parallelWorkers,
           workDir: this.config.execution.workDir,
@@ -1675,8 +1657,6 @@ export class Daemon implements DaemonStateProvider {
           // Correlation context for request tracing
           cycleCorrelationId: this.getCurrentCorrelationId(),
           cycleNumber: this.cycleCount,
-          // Spec-driven context for richer worker guidance
-          specContext: workerSpecContext,
         });
 
         const workerTasks: WorkerTask[] = issuesToWork.map((issue) => ({
