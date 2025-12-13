@@ -1,7 +1,8 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { isTextBlock, isToolUseBlock, isResultMessage, validateSDKMessage, extractToolUseInfo, extractTextContent, extractResultDuration, } from '../types/claude-sdk.js';
 import { simpleGit } from 'simple-git';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { join } from 'path';
 import { homedir } from 'os';
 import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, ClaudeExecutionLogger, getStructuredFileLogger, isClaudeLoggingEnabled, } from '../utils/logger.js';
@@ -42,6 +43,15 @@ export class Worker {
     repository;
     circuitBreaker;
     claudeRetryConfig;
+    // Progress checkpointing state
+    currentCheckpoint = null;
+    checkpointDir;
+    taskStartTime = 0;
+    currentPhase = 'setup';
+    toolsUsedInTask = 0;
+    turnsCompletedInTask = 0;
+    modifiedFilesInTask = [];
+    partialOutputBuffer = '';
     constructor(options, workerId) {
         this.options = options;
         this.workerId = workerId;
@@ -55,6 +65,249 @@ export class Worker {
             ...DEFAULT_CLAUDE_RETRY_CONFIG,
             ...options.claudeRetryConfig,
         };
+        // Initialize checkpoint directory
+        this.checkpointDir = join(options.workDir, 'checkpoints');
+        if (!existsSync(this.checkpointDir)) {
+            mkdirSync(this.checkpointDir, { recursive: true });
+        }
+    }
+    /**
+     * Create a progress checkpoint for the current task state.
+     * Checkpoints are saved to disk for recovery after timeout termination.
+     */
+    createCheckpoint(issue, branchName, chatSessionId) {
+        const checkpoint = {
+            id: randomUUID(),
+            taskId: `task-${issue.number}`,
+            issueNumber: issue.number,
+            branchName,
+            phase: this.currentPhase,
+            timestamp: new Date().toISOString(),
+            elapsedMs: Date.now() - this.taskStartTime,
+            toolsUsed: this.toolsUsedInTask,
+            turnsCompleted: this.turnsCompletedInTask,
+            hasChanges: this.modifiedFilesInTask.length > 0,
+            modifiedFiles: [...this.modifiedFilesInTask],
+            partialOutput: this.partialOutputBuffer.slice(-5000), // Keep last 5KB
+            workerId: this.workerId,
+            chatSessionId,
+            memoryUsageMB: getMemoryUsageMB(),
+            canResume: this.determineCanResume(),
+            resumeBlocker: this.getResumeBlocker(),
+        };
+        this.currentCheckpoint = checkpoint;
+        return checkpoint;
+    }
+    /**
+     * Save the current checkpoint to disk
+     */
+    async saveCheckpoint(issue, branchName, chatSessionId) {
+        const checkpoint = this.createCheckpoint(issue, branchName, chatSessionId);
+        const checkpointPath = join(this.checkpointDir, `${checkpoint.id}.json`);
+        try {
+            writeFileSync(checkpointPath, JSON.stringify(checkpoint, null, 2));
+            this.log.debug('Checkpoint saved', {
+                checkpointId: checkpoint.id,
+                phase: checkpoint.phase,
+                elapsedMs: checkpoint.elapsedMs,
+            });
+        }
+        catch (error) {
+            this.log.warn('Failed to save checkpoint', {
+                error: error.message,
+            });
+        }
+        return checkpoint;
+    }
+    /**
+     * Update the current phase and optionally save checkpoint
+     */
+    async updatePhase(phase, issue, branchName, chatSessionId, saveCheckpoint = false) {
+        this.currentPhase = phase;
+        this.log.debug(`Task phase: ${phase}`, { issueNumber: issue.number });
+        if (saveCheckpoint) {
+            await this.saveCheckpoint(issue, branchName, chatSessionId);
+        }
+    }
+    /**
+     * Track tool usage for checkpointing
+     */
+    recordToolUsage(toolName, input) {
+        this.toolsUsedInTask++;
+        // Track file modifications
+        if (['Write', 'Edit', 'MultiEdit'].includes(toolName) && input) {
+            const filePath = input.file_path || input.path;
+            if (filePath && !this.modifiedFilesInTask.includes(filePath)) {
+                this.modifiedFilesInTask.push(filePath);
+            }
+        }
+    }
+    /**
+     * Append to partial output buffer
+     */
+    appendPartialOutput(text) {
+        this.partialOutputBuffer += text;
+        // Keep buffer from growing too large (max 10KB)
+        if (this.partialOutputBuffer.length > 10000) {
+            this.partialOutputBuffer = this.partialOutputBuffer.slice(-10000);
+        }
+    }
+    /**
+     * Determine if the current state can be resumed
+     */
+    determineCanResume() {
+        // Can resume if we have changes and haven't pushed yet
+        if (this.currentPhase === 'push') {
+            return false; // Push in progress, can't safely resume
+        }
+        if (this.currentPhase === 'commit') {
+            return false; // Commit in progress, could be corrupted
+        }
+        // Can resume from most phases
+        return true;
+    }
+    /**
+     * Get the reason why task cannot be resumed
+     */
+    getResumeBlocker() {
+        if (this.currentPhase === 'push') {
+            return 'Push operation in progress - cannot determine if push completed';
+        }
+        if (this.currentPhase === 'commit') {
+            return 'Commit operation in progress - repository state may be inconsistent';
+        }
+        return undefined;
+    }
+    /**
+     * Load a checkpoint from disk
+     */
+    loadCheckpoint(checkpointId) {
+        const checkpointPath = join(this.checkpointDir, `${checkpointId}.json`);
+        if (!existsSync(checkpointPath)) {
+            return null;
+        }
+        try {
+            const data = readFileSync(checkpointPath, 'utf-8');
+            return JSON.parse(data);
+        }
+        catch (error) {
+            this.log.warn('Failed to load checkpoint', {
+                checkpointId,
+                error: error.message,
+            });
+            return null;
+        }
+    }
+    /**
+     * Get all checkpoints for a specific issue
+     */
+    getCheckpointsForIssue(issueNumber) {
+        const checkpoints = [];
+        if (!existsSync(this.checkpointDir)) {
+            return checkpoints;
+        }
+        try {
+            const files = require('fs').readdirSync(this.checkpointDir);
+            for (const file of files) {
+                if (file.endsWith('.json')) {
+                    const checkpointPath = join(this.checkpointDir, file);
+                    try {
+                        const data = readFileSync(checkpointPath, 'utf-8');
+                        const checkpoint = JSON.parse(data);
+                        if (checkpoint.issueNumber === issueNumber) {
+                            checkpoints.push(checkpoint);
+                        }
+                    }
+                    catch {
+                        // Skip invalid checkpoint files
+                    }
+                }
+            }
+        }
+        catch (error) {
+            this.log.warn('Failed to list checkpoints', {
+                error: error.message,
+            });
+        }
+        // Sort by timestamp, newest first
+        return checkpoints.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }
+    /**
+     * Clean up old checkpoints for an issue after successful completion
+     */
+    cleanupCheckpoints(issueNumber) {
+        const checkpoints = this.getCheckpointsForIssue(issueNumber);
+        for (const checkpoint of checkpoints) {
+            const checkpointPath = join(this.checkpointDir, `${checkpoint.id}.json`);
+            try {
+                rmSync(checkpointPath, { force: true });
+            }
+            catch {
+                // Ignore cleanup errors
+            }
+        }
+        this.log.debug('Cleaned up checkpoints', {
+            issueNumber,
+            count: checkpoints.length,
+        });
+    }
+    /**
+     * Reset task state for a new task
+     */
+    resetTaskState() {
+        this.currentCheckpoint = null;
+        this.taskStartTime = Date.now();
+        this.currentPhase = 'setup';
+        this.toolsUsedInTask = 0;
+        this.turnsCompletedInTask = 0;
+        this.modifiedFilesInTask = [];
+        this.partialOutputBuffer = '';
+    }
+    /**
+     * Handle graceful timeout - save progress before termination
+     */
+    async handleGracefulTimeout(issue, branchName, chatSessionId, repoDir) {
+        this.log.warn('Timeout approaching - saving partial progress', {
+            issueNumber: issue.number,
+            phase: this.currentPhase,
+            toolsUsed: this.toolsUsedInTask,
+        });
+        // If we have a repo directory, try to get list of modified files
+        if (repoDir && existsSync(repoDir)) {
+            try {
+                const git = simpleGit(repoDir);
+                const status = await git.status();
+                this.modifiedFilesInTask = [
+                    ...status.modified,
+                    ...status.created,
+                    ...status.renamed.map(r => r.to),
+                ];
+            }
+            catch {
+                // Continue with existing file list
+            }
+        }
+        // Save the checkpoint
+        const checkpoint = await this.saveCheckpoint(issue, branchName, chatSessionId);
+        // Log to database if session exists
+        if (chatSessionId) {
+            try {
+                await addEvent(chatSessionId, 'timeout_checkpoint', {
+                    type: 'timeout_checkpoint',
+                    checkpointId: checkpoint.id,
+                    phase: checkpoint.phase,
+                    toolsUsed: checkpoint.toolsUsed,
+                    hasChanges: checkpoint.hasChanges,
+                    modifiedFiles: checkpoint.modifiedFiles,
+                    canResume: checkpoint.canResume,
+                    message: 'Task timed out - progress checkpoint saved',
+                });
+            }
+            catch {
+                // Continue even if event logging fails
+            }
+        }
+        return checkpoint;
     }
     /**
      * Get the circuit breaker health status
@@ -126,7 +379,10 @@ export class Worker {
         return typedError;
     }
     async execute(task) {
+        // Reset task state for new task
+        this.resetTaskState();
         const startTime = Date.now();
+        this.taskStartTime = startTime;
         const startMemory = getMemoryUsageMB();
         const { issue, branchName } = task;
         // Generate correlation ID for this task execution
@@ -182,22 +438,26 @@ export class Worker {
                 taskLog.warn(`Failed to create chat session: ${getErrorMessage(error)}`);
             }
         }
+        let repoDir;
         try {
             // Setup workspace
+            await this.updatePhase('setup', issue, branchName, chatSessionId);
             await this.setupWorkspace(taskDir);
             if (chatSessionId) {
                 await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'workspace', message: 'Created workspace directory' });
             }
             // Clone repository
+            await this.updatePhase('clone', issue, branchName, chatSessionId, true);
             if (chatSessionId) {
                 await updateChatSession(chatSessionId, { status: 'running' });
                 await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'clone', message: 'Cloning repository...' });
             }
-            const repoDir = await this.cloneRepo(taskDir);
+            repoDir = await this.cloneRepo(taskDir);
             if (chatSessionId) {
                 await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'clone', message: 'Repository cloned successfully' });
             }
             // Create and checkout branch
+            await this.updatePhase('branch', issue, branchName, chatSessionId);
             await this.createBranch(repoDir, branchName);
             if (chatSessionId) {
                 await updateChatSession(chatSessionId, { branch: branchName, sessionPath: generateSessionPath(this.options.repoOwner, this.options.repoName, branchName) });
@@ -206,11 +466,13 @@ export class Worker {
             // Write Claude credentials
             this.writeClaudeCredentials();
             // Execute task with Claude
+            await this.updatePhase('claude_execution', issue, branchName, chatSessionId, true);
             if (chatSessionId) {
                 await addEvent(chatSessionId, 'claude_start', { type: 'claude_start', message: 'Starting Claude Agent SDK...' });
             }
             await this.executeWithClaude(repoDir, issue, chatSessionId);
             // Check if there are any changes
+            await this.updatePhase('validation', issue, branchName, chatSessionId);
             const hasChanges = await this.hasChanges(repoDir);
             if (!hasChanges) {
                 taskLog.warn('No changes made by Claude');
@@ -225,6 +487,8 @@ export class Worker {
                     taskType: 'issue',
                     workerId: this.workerId,
                 });
+                // Clean up checkpoints on completion (even without changes)
+                this.cleanupCheckpoints(issue.number);
                 return {
                     success: false,
                     issue,
@@ -235,10 +499,12 @@ export class Worker {
                 };
             }
             // Commit and push
+            await this.updatePhase('commit', issue, branchName, chatSessionId, true);
             if (chatSessionId) {
                 await addEvent(chatSessionId, 'commit_progress', { type: 'commit_progress', stage: 'committing', message: 'Committing changes...' });
             }
             const commitSha = await this.commitAndPush(repoDir, issue, branchName);
+            await this.updatePhase('push', issue, branchName, chatSessionId);
             if (chatSessionId) {
                 await addEvent(chatSessionId, 'commit_progress', { type: 'commit_progress', stage: 'pushed', message: `Pushed commit ${commitSha}`, data: { commitSha, branch: branchName } });
                 await addMessage(chatSessionId, 'assistant', `Successfully committed and pushed changes.\n\nCommit: ${commitSha}\nBranch: ${branchName}`);
@@ -277,6 +543,8 @@ export class Worker {
                 memoryDeltaMB: memoryDelta,
                 operations: correlationSummary?.operationCount,
             });
+            // Clean up checkpoints on successful completion
+            this.cleanupCheckpoints(issue.number);
             // Write to structured file log if enabled
             const structuredLogger = getStructuredFileLogger();
             if (structuredLogger.isEnabled()) {
@@ -301,7 +569,23 @@ export class Worker {
                 durationMs: Date.now() - startTime,
                 memoryUsageMB: getMemoryUsageMB(),
                 requiresCleanup: true,
+                phase: this.currentPhase,
+                toolsUsed: this.toolsUsedInTask,
             };
+            // Save checkpoint for timeout errors to enable recovery
+            const isTimeoutError = error instanceof TimeoutError ||
+                error.message?.toLowerCase().includes('timeout') ||
+                error.code === ErrorCode.CLAUDE_TIMEOUT;
+            if (isTimeoutError) {
+                try {
+                    await this.handleGracefulTimeout(issue, branchName, chatSessionId, repoDir);
+                }
+                catch (checkpointError) {
+                    this.log.warn('Failed to save timeout checkpoint', {
+                        error: checkpointError.message,
+                    });
+                }
+            }
             // Wrap the error with structured context using typed executor errors
             const structuredError = this.wrapExecutionError(error, ErrorCode.INTERNAL_ERROR, `Task execution failed: ${getErrorMessage(error)}`, task, executionState);
             const duration = Date.now() - startTime;

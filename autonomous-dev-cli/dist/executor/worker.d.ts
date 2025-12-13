@@ -33,6 +33,45 @@ export interface ClaudeExecutionResult {
     };
 }
 /**
+ * Progress checkpoint for graceful timeout recovery
+ */
+export interface ProgressCheckpoint {
+    /** Unique checkpoint ID */
+    id: string;
+    /** Task identifier */
+    taskId: string;
+    /** Issue number being worked on */
+    issueNumber: number;
+    /** Branch name */
+    branchName: string;
+    /** Current execution phase */
+    phase: 'setup' | 'clone' | 'branch' | 'claude_execution' | 'validation' | 'commit' | 'push';
+    /** Timestamp of checkpoint */
+    timestamp: string;
+    /** Duration since task start in ms */
+    elapsedMs: number;
+    /** Number of tools used so far */
+    toolsUsed: number;
+    /** Number of turns completed */
+    turnsCompleted: number;
+    /** Whether files have been modified */
+    hasChanges: boolean;
+    /** List of modified files */
+    modifiedFiles: string[];
+    /** Any partial output captured */
+    partialOutput?: string;
+    /** Worker ID */
+    workerId: string;
+    /** Chat session ID if available */
+    chatSessionId?: string;
+    /** Memory usage at checkpoint */
+    memoryUsageMB: number;
+    /** Whether this checkpoint can be resumed */
+    canResume: boolean;
+    /** Reason if not resumable */
+    resumeBlocker?: string;
+}
+/**
  * Validation result for Claude response
  */
 export interface ResponseValidation {
@@ -109,7 +148,64 @@ export declare class Worker {
     private repository;
     private circuitBreaker;
     private claudeRetryConfig;
+    private currentCheckpoint;
+    private checkpointDir;
+    private taskStartTime;
+    private currentPhase;
+    private toolsUsedInTask;
+    private turnsCompletedInTask;
+    private modifiedFilesInTask;
+    private partialOutputBuffer;
     constructor(options: WorkerOptions, workerId: string);
+    /**
+     * Create a progress checkpoint for the current task state.
+     * Checkpoints are saved to disk for recovery after timeout termination.
+     */
+    private createCheckpoint;
+    /**
+     * Save the current checkpoint to disk
+     */
+    private saveCheckpoint;
+    /**
+     * Update the current phase and optionally save checkpoint
+     */
+    private updatePhase;
+    /**
+     * Track tool usage for checkpointing
+     */
+    private recordToolUsage;
+    /**
+     * Append to partial output buffer
+     */
+    private appendPartialOutput;
+    /**
+     * Determine if the current state can be resumed
+     */
+    private determineCanResume;
+    /**
+     * Get the reason why task cannot be resumed
+     */
+    private getResumeBlocker;
+    /**
+     * Load a checkpoint from disk
+     */
+    loadCheckpoint(checkpointId: string): ProgressCheckpoint | null;
+    /**
+     * Get all checkpoints for a specific issue
+     */
+    getCheckpointsForIssue(issueNumber: number): ProgressCheckpoint[];
+    /**
+     * Clean up old checkpoints for an issue after successful completion
+     */
+    private cleanupCheckpoints;
+    /**
+     * Reset task state for a new task
+     */
+    private resetTaskState;
+    /**
+     * Handle graceful timeout - save progress before termination
+     */
+    private handleGracefulTimeout;
     /**
      * Get the circuit breaker health status
      */

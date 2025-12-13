@@ -48,10 +48,18 @@ export interface DiscoveredTask {
   relatedIssues?: number[];
 }
 
+/**
+ * Token refresh callback type for Claude authentication
+ */
+export type TokenRefreshCallback = (
+  refreshToken: string
+) => Promise<{ accessToken: string; refreshToken: string; expiresAt?: number }>;
+
 export interface TaskGeneratorOptions {
   claudeAuth: {
     accessToken: string;
     refreshToken: string;
+    expiresAt?: number;
   };
   repoPath: string;
   excludePaths: string[];
@@ -62,6 +70,8 @@ export interface TaskGeneratorOptions {
   circuitBreakerConfig?: Partial<CircuitBreakerConfig>; // Optional circuit breaker configuration
   /** Enable fallback task generation when Claude fails (default: true) */
   enableFallbackGeneration?: boolean;
+  /** Callback to refresh Claude tokens on 401/403 auth failures */
+  onTokenRefresh?: TokenRefreshCallback;
 }
 
 /**
@@ -80,7 +90,7 @@ export interface TaskGenerationResult {
 }
 
 export class TaskGenerator {
-  private claudeAuth: { accessToken: string; refreshToken: string };
+  private claudeAuth: { accessToken: string; refreshToken: string; expiresAt?: number };
   private repoPath: string;
   private excludePaths: string[];
   private tasksPerCycle: number;
@@ -89,6 +99,8 @@ export class TaskGenerator {
   private analyzerConfig: AnalyzerConfig;
   private circuitBreaker: CircuitBreaker;
   private enableFallbackGeneration: boolean;
+  private onTokenRefresh?: TokenRefreshCallback;
+  private tokenRefreshAttempted: boolean = false;
 
   constructor(options: TaskGeneratorOptions) {
     this.claudeAuth = options.claudeAuth;
@@ -102,6 +114,70 @@ export class TaskGenerator {
     this.circuitBreaker = getClaudeCircuitBreaker(options.circuitBreakerConfig);
     // Enable fallback generation by default
     this.enableFallbackGeneration = options.enableFallbackGeneration !== false;
+    // Store token refresh callback for auth failure recovery
+    this.onTokenRefresh = options.onTokenRefresh;
+  }
+
+  /**
+   * Attempt to refresh Claude tokens when authentication fails.
+   * Returns true if refresh was successful, false otherwise.
+   */
+  private async attemptTokenRefresh(): Promise<boolean> {
+    // Only attempt refresh once per request cycle to prevent infinite loops
+    if (this.tokenRefreshAttempted || !this.onTokenRefresh) {
+      return false;
+    }
+
+    this.tokenRefreshAttempted = true;
+
+    try {
+      logger.info('Attempting to refresh Claude tokens after auth failure');
+
+      const newTokens = await this.onTokenRefresh(this.claudeAuth.refreshToken);
+
+      // Update the stored tokens
+      this.claudeAuth = {
+        accessToken: newTokens.accessToken,
+        refreshToken: newTokens.refreshToken,
+        expiresAt: newTokens.expiresAt,
+      };
+
+      logger.info('Claude tokens refreshed successfully');
+      return true;
+    } catch (refreshError) {
+      logger.error('Failed to refresh Claude tokens', {
+        error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Reset the token refresh attempt flag for a new request cycle.
+   */
+  resetTokenRefreshState(): void {
+    this.tokenRefreshAttempted = false;
+  }
+
+  /**
+   * Check if tokens are about to expire and proactively refresh.
+   * Returns true if tokens are valid or were successfully refreshed.
+   */
+  async validateAndRefreshTokensIfNeeded(): Promise<boolean> {
+    // Check if we have expiration info and token is about to expire (within 5 minutes)
+    if (this.claudeAuth.expiresAt) {
+      const now = Date.now();
+      const expiresIn = this.claudeAuth.expiresAt - now;
+
+      if (expiresIn < 5 * 60 * 1000) {
+        logger.info('Claude token expiring soon, proactively refreshing', {
+          expiresIn: Math.round(expiresIn / 1000),
+        });
+        return this.attemptTokenRefresh();
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -556,6 +632,12 @@ Return ONLY the JSON array, no other text.`;
   }
 
   private async callClaude(prompt: string): Promise<DiscoveredTask[]> {
+    // Reset token refresh state for this new API call cycle
+    this.resetTokenRefreshState();
+
+    // Proactively refresh tokens if they're about to expire
+    await this.validateAndRefreshTokensIfNeeded();
+
     // Use circuit breaker with exponential backoff for resilience
     return this.circuitBreaker.executeWithRetry(
       async () => {
@@ -582,6 +664,25 @@ Return ONLY the JSON array, no other text.`;
           const errorText = await response.text();
           const statusCode = response.status;
 
+          // Handle 401/403 auth errors with token refresh
+          if (statusCode === 401 || statusCode === 403) {
+            const refreshed = await this.attemptTokenRefresh();
+            if (refreshed) {
+              // Retry with new tokens - throw a retryable error
+              throw new ClaudeError(
+                ErrorCode.CLAUDE_AUTH_FAILED,
+                `Claude API authentication failed (${statusCode}), tokens refreshed - retrying`,
+                {
+                  context: {
+                    statusCode,
+                    errorText,
+                    tokensRefreshed: true,
+                  },
+                }
+              );
+            }
+          }
+
           // Create a structured error with proper classification
           const error = this.createApiError(statusCode, errorText, response.headers);
           throw error;
@@ -600,7 +701,13 @@ Return ONLY the JSON array, no other text.`;
           component: 'TaskGenerator',
           operation: 'generateTasks',
         },
-        shouldRetry: (error) => isClaudeErrorRetryable(error),
+        shouldRetry: (error) => {
+          // Allow retry if tokens were just refreshed
+          if (error instanceof ClaudeError && error.context?.tokensRefreshed) {
+            return true;
+          }
+          return isClaudeErrorRetryable(error);
+        },
         onRetry: (error, attempt, delay) => {
           const statusCode = extractHttpStatus(error);
           logger.warn(`Claude API retry (attempt ${attempt})`, {
@@ -608,6 +715,7 @@ Return ONLY the JSON array, no other text.`;
             statusCode,
             retryInMs: Math.round(delay),
             circuitState: this.circuitBreaker.getState(),
+            tokensRefreshed: error instanceof ClaudeError ? error.context?.tokensRefreshed : false,
           });
         },
       }

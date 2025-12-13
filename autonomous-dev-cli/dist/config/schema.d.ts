@@ -464,6 +464,238 @@ export declare const ConfigSchema: z.ZodObject<{
         successThreshold?: number | undefined;
     }>>;
     /**
+     * Retry Policy Settings
+     * Configure retry behavior per service type for error recovery.
+     */
+    retryPolicies: z.ZodDefault<z.ZodObject<{
+        /** GitHub API retry policy */
+        github: z.ZodDefault<z.ZodObject<{
+            /** Maximum number of retry attempts (1-10, default: 3) */
+            maxRetries: z.ZodDefault<z.ZodNumber>;
+            /** Base delay in milliseconds for exponential backoff (100-5000, default: 1000) */
+            baseDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Maximum delay in milliseconds (5000-120000, default: 60000) */
+            maxDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Backoff multiplier (1.5-3, default: 2) */
+            backoffMultiplier: z.ZodDefault<z.ZodNumber>;
+            /** Enable jitter to prevent thundering herd (default: true) */
+            jitter: z.ZodDefault<z.ZodBoolean>;
+            /** Maximum rate limit retry wait time in ms (60000-600000, default: 300000 = 5 min) */
+            maxRateLimitWaitMs: z.ZodDefault<z.ZodNumber>;
+        }, "strip", z.ZodTypeAny, {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            backoffMultiplier: number;
+            jitter: boolean;
+            maxRateLimitWaitMs: number;
+        }, {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            backoffMultiplier?: number | undefined;
+            jitter?: boolean | undefined;
+            maxRateLimitWaitMs?: number | undefined;
+        }>>;
+        /** Claude API retry policy */
+        claude: z.ZodDefault<z.ZodObject<{
+            /** Maximum number of retry attempts (1-5, default: 3) */
+            maxRetries: z.ZodDefault<z.ZodNumber>;
+            /** Base delay in milliseconds for exponential backoff (1000-10000, default: 2000) */
+            baseDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Maximum delay in milliseconds (30000-120000, default: 60000) */
+            maxDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Backoff multiplier (1.5-3, default: 2) */
+            backoffMultiplier: z.ZodDefault<z.ZodNumber>;
+            /** Initial timeout in milliseconds (60000-300000, default: 120000 = 2 min) */
+            initialTimeoutMs: z.ZodDefault<z.ZodNumber>;
+            /** Maximum timeout in milliseconds (300000-900000, default: 600000 = 10 min) */
+            maxTimeoutMs: z.ZodDefault<z.ZodNumber>;
+            /** Enable progressive timeout increases per retry (default: true) */
+            progressiveTimeout: z.ZodDefault<z.ZodBoolean>;
+            /** Enable token refresh on 401/403 errors (default: true) */
+            enableTokenRefresh: z.ZodDefault<z.ZodBoolean>;
+        }, "strip", z.ZodTypeAny, {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            backoffMultiplier: number;
+            initialTimeoutMs: number;
+            maxTimeoutMs: number;
+            progressiveTimeout: boolean;
+            enableTokenRefresh: boolean;
+        }, {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            backoffMultiplier?: number | undefined;
+            initialTimeoutMs?: number | undefined;
+            maxTimeoutMs?: number | undefined;
+            progressiveTimeout?: boolean | undefined;
+            enableTokenRefresh?: boolean | undefined;
+        }>>;
+        /** Database retry policy */
+        database: z.ZodDefault<z.ZodObject<{
+            /** Maximum number of retry attempts (1-5, default: 3) */
+            maxRetries: z.ZodDefault<z.ZodNumber>;
+            /** Base delay in milliseconds for exponential backoff (100-2000, default: 500) */
+            baseDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Maximum delay in milliseconds (5000-30000, default: 10000) */
+            maxDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Query timeout in milliseconds (5000-60000, default: 30000) */
+            queryTimeoutMs: z.ZodDefault<z.ZodNumber>;
+            /** Enable automatic reconnection on network errors (default: true) */
+            reconnectOnError: z.ZodDefault<z.ZodBoolean>;
+            /** Health check interval in milliseconds (0 to disable, default: 30000) */
+            healthCheckIntervalMs: z.ZodDefault<z.ZodNumber>;
+        }, "strip", z.ZodTypeAny, {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            queryTimeoutMs: number;
+            reconnectOnError: boolean;
+            healthCheckIntervalMs: number;
+        }, {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            queryTimeoutMs?: number | undefined;
+            reconnectOnError?: boolean | undefined;
+            healthCheckIntervalMs?: number | undefined;
+        }>>;
+        /** Git operations retry policy */
+        git: z.ZodDefault<z.ZodObject<{
+            /** Maximum number of retry attempts (1-5, default: 3) */
+            maxRetries: z.ZodDefault<z.ZodNumber>;
+            /** Base delay in milliseconds for exponential backoff (1000-10000, default: 2000) */
+            baseDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Maximum delay in milliseconds (30000-120000, default: 60000) */
+            maxDelayMs: z.ZodDefault<z.ZodNumber>;
+            /** Initial timeout in milliseconds (30000-180000, default: 60000) */
+            initialTimeoutMs: z.ZodDefault<z.ZodNumber>;
+            /** Maximum timeout in milliseconds (120000-600000, default: 300000 = 5 min) */
+            maxTimeoutMs: z.ZodDefault<z.ZodNumber>;
+            /** Enable progressive timeout increases per retry (default: true) */
+            progressiveTimeout: z.ZodDefault<z.ZodBoolean>;
+        }, "strip", z.ZodTypeAny, {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            initialTimeoutMs: number;
+            maxTimeoutMs: number;
+            progressiveTimeout: boolean;
+        }, {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            initialTimeoutMs?: number | undefined;
+            maxTimeoutMs?: number | undefined;
+            progressiveTimeout?: boolean | undefined;
+        }>>;
+    }, "strip", z.ZodTypeAny, {
+        github: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            backoffMultiplier: number;
+            jitter: boolean;
+            maxRateLimitWaitMs: number;
+        };
+        claude: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            backoffMultiplier: number;
+            initialTimeoutMs: number;
+            maxTimeoutMs: number;
+            progressiveTimeout: boolean;
+            enableTokenRefresh: boolean;
+        };
+        database: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            queryTimeoutMs: number;
+            reconnectOnError: boolean;
+            healthCheckIntervalMs: number;
+        };
+        git: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            initialTimeoutMs: number;
+            maxTimeoutMs: number;
+            progressiveTimeout: boolean;
+        };
+    }, {
+        github?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            backoffMultiplier?: number | undefined;
+            jitter?: boolean | undefined;
+            maxRateLimitWaitMs?: number | undefined;
+        } | undefined;
+        claude?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            backoffMultiplier?: number | undefined;
+            initialTimeoutMs?: number | undefined;
+            maxTimeoutMs?: number | undefined;
+            progressiveTimeout?: boolean | undefined;
+            enableTokenRefresh?: boolean | undefined;
+        } | undefined;
+        database?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            queryTimeoutMs?: number | undefined;
+            reconnectOnError?: boolean | undefined;
+            healthCheckIntervalMs?: number | undefined;
+        } | undefined;
+        git?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            initialTimeoutMs?: number | undefined;
+            maxTimeoutMs?: number | undefined;
+            progressiveTimeout?: boolean | undefined;
+        } | undefined;
+    }>>;
+    /**
+     * Error Recovery Settings
+     * Configure how the system handles and recovers from errors.
+     */
+    errorRecovery: z.ZodDefault<z.ZodObject<{
+        /** Enable dead letter queue for failed tasks (default: true) */
+        enableDeadLetterQueue: z.ZodDefault<z.ZodBoolean>;
+        /** Maximum tasks to keep in dead letter queue (10-1000, default: 100) */
+        maxDeadLetterQueueSize: z.ZodDefault<z.ZodNumber>;
+        /** Dead letter queue retention in days (1-30, default: 7) */
+        deadLetterRetentionDays: z.ZodDefault<z.ZodNumber>;
+        /** Enable progress checkpointing for timeout recovery (default: true) */
+        enableProgressCheckpoints: z.ZodDefault<z.ZodBoolean>;
+        /** Checkpoint retention in hours (1-168, default: 24) */
+        checkpointRetentionHours: z.ZodDefault<z.ZodNumber>;
+        /** Enable automatic task retry from checkpoints (default: false) */
+        autoRetryFromCheckpoint: z.ZodDefault<z.ZodBoolean>;
+    }, "strip", z.ZodTypeAny, {
+        enableDeadLetterQueue: boolean;
+        maxDeadLetterQueueSize: number;
+        deadLetterRetentionDays: number;
+        enableProgressCheckpoints: boolean;
+        checkpointRetentionHours: number;
+        autoRetryFromCheckpoint: boolean;
+    }, {
+        enableDeadLetterQueue?: boolean | undefined;
+        maxDeadLetterQueueSize?: number | undefined;
+        deadLetterRetentionDays?: number | undefined;
+        enableProgressCheckpoints?: boolean | undefined;
+        checkpointRetentionHours?: number | undefined;
+        autoRetryFromCheckpoint?: boolean | undefined;
+    }>>;
+    /**
      * Credentials
      * Authentication credentials (MUST be set via environment variables, NOT config files).
      *
@@ -625,6 +857,50 @@ export declare const ConfigSchema: z.ZodObject<{
         maxDelayMs: number;
         successThreshold: number;
     };
+    retryPolicies: {
+        github: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            backoffMultiplier: number;
+            jitter: boolean;
+            maxRateLimitWaitMs: number;
+        };
+        claude: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            backoffMultiplier: number;
+            initialTimeoutMs: number;
+            maxTimeoutMs: number;
+            progressiveTimeout: boolean;
+            enableTokenRefresh: boolean;
+        };
+        database: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            queryTimeoutMs: number;
+            reconnectOnError: boolean;
+            healthCheckIntervalMs: number;
+        };
+        git: {
+            maxRetries: number;
+            baseDelayMs: number;
+            maxDelayMs: number;
+            initialTimeoutMs: number;
+            maxTimeoutMs: number;
+            progressiveTimeout: boolean;
+        };
+    };
+    errorRecovery: {
+        enableDeadLetterQueue: boolean;
+        maxDeadLetterQueueSize: number;
+        deadLetterRetentionDays: number;
+        enableProgressCheckpoints: boolean;
+        checkpointRetentionHours: number;
+        autoRetryFromCheckpoint: boolean;
+    };
     credentials: {
         githubToken?: string | undefined;
         claudeAuth?: {
@@ -753,6 +1029,50 @@ export declare const ConfigSchema: z.ZodObject<{
         baseDelayMs?: number | undefined;
         maxDelayMs?: number | undefined;
         successThreshold?: number | undefined;
+    } | undefined;
+    retryPolicies?: {
+        github?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            backoffMultiplier?: number | undefined;
+            jitter?: boolean | undefined;
+            maxRateLimitWaitMs?: number | undefined;
+        } | undefined;
+        claude?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            backoffMultiplier?: number | undefined;
+            initialTimeoutMs?: number | undefined;
+            maxTimeoutMs?: number | undefined;
+            progressiveTimeout?: boolean | undefined;
+            enableTokenRefresh?: boolean | undefined;
+        } | undefined;
+        database?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            queryTimeoutMs?: number | undefined;
+            reconnectOnError?: boolean | undefined;
+            healthCheckIntervalMs?: number | undefined;
+        } | undefined;
+        git?: {
+            maxRetries?: number | undefined;
+            baseDelayMs?: number | undefined;
+            maxDelayMs?: number | undefined;
+            initialTimeoutMs?: number | undefined;
+            maxTimeoutMs?: number | undefined;
+            progressiveTimeout?: boolean | undefined;
+        } | undefined;
+    } | undefined;
+    errorRecovery?: {
+        enableDeadLetterQueue?: boolean | undefined;
+        maxDeadLetterQueueSize?: number | undefined;
+        deadLetterRetentionDays?: number | undefined;
+        enableProgressCheckpoints?: boolean | undefined;
+        checkpointRetentionHours?: number | undefined;
+        autoRetryFromCheckpoint?: boolean | undefined;
     } | undefined;
 }>;
 export type Config = z.infer<typeof ConfigSchema>;
