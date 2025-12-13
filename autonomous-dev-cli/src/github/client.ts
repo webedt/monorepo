@@ -6,6 +6,7 @@ import {
   getMemoryUsageMB,
   recordPhaseOperation,
   recordPhaseError,
+  isApiLoggingEnabled,
   DEFAULT_TIMING_THRESHOLD_MS,
 } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
@@ -736,6 +737,13 @@ export class GitHubClient {
     const correlationId = getCorrelationId();
     const method = this.extractMethodFromEndpoint(endpoint);
     const repository = `${this.owner}/${this.repo}`;
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Log detailed API request (debug mode)
+    this.log.githubApiRequest(method, endpoint, {
+      correlationId,
+      requestId,
+    });
 
     // Record operation in github phase if tracking
     if (correlationId) {
@@ -838,6 +846,14 @@ export class GitHubClient {
       // Success - record it
       this.recordSuccess();
 
+      // Log detailed API response (debug mode)
+      this.log.githubApiResponse(method, endpoint, 200, timedResult.duration, {
+        correlationId,
+        requestId,
+        rateLimitRemaining: this.rateLimitState.remaining,
+        rateLimitReset: this.rateLimitResetAt,
+      });
+
       // Log successful API call
       logger.apiCall('GitHub', endpoint, method, {
         statusCode: 200,
@@ -855,11 +871,19 @@ export class GitHubClient {
       return timedResult.result;
     } catch (error) {
       const duration = Date.now() - startTime;
-      const statusCode = (error as any).status ?? (error as any).response?.status;
+      const statusCode = (error as any).status ?? (error as any).response?.status ?? 500;
 
       // Failure - record it and update rate limit state
       this.updateRateLimitState(error);
       this.recordFailure(error as Error);
+
+      // Log detailed API response (debug mode) - for failures too
+      this.log.githubApiResponse(method, endpoint, statusCode, duration, {
+        correlationId,
+        requestId,
+        rateLimitRemaining: this.rateLimitState.remaining,
+        rateLimitReset: this.rateLimitResetAt,
+      });
 
       // Record error in phase tracking
       if (correlationId) {

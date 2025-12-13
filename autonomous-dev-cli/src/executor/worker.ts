@@ -24,6 +24,8 @@ import {
   finalizeOperationContext,
   ClaudeExecutionLogger,
   getStructuredFileLogger,
+  isClaudeLoggingEnabled,
+  isDebugModeEnabled,
   type OperationMetadata,
 } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
@@ -1136,6 +1138,18 @@ export class Worker {
   ): Promise<ClaudeExecutionResult> {
     const attemptStartTime = Date.now();
     const startMemory = getMemoryUsageMB();
+    const correlationId = generateCorrelationId();
+
+    // Log internal state snapshot for debugging
+    this.log.debugState('ClaudeExecution', 'Starting execution attempt', {
+      issueNumber: issue.number,
+      repoDir,
+      timeoutMs,
+      startMemory,
+      workerId: this.workerId,
+      circuitBreakerState: this.circuitBreaker.getState(),
+      claudeRetryConfig: this.claudeRetryConfig,
+    });
 
     const prompt = this.buildPrompt(issue);
 
@@ -1202,10 +1216,22 @@ export class Worker {
                   hasWriteOperations = true;
                 }
 
-                this.log.debug(`Tool: ${toolName}`, {
-                  toolCount: toolUseCount,
+                // Enhanced debug logging for Claude tool use
+                this.log.claudeToolUse(toolName, toolInput as Record<string, unknown>, {
+                  correlationId,
+                  workerId: this.workerId,
+                  issueNumber: issue.number,
                   turnCount,
+                  toolCount: toolUseCount,
                 });
+
+                // Also log at debug level for standard logging
+                if (!isClaudeLoggingEnabled()) {
+                  this.log.debug(`Tool: ${toolName}`, {
+                    toolCount: toolUseCount,
+                    turnCount,
+                  });
+                }
 
                 metrics.recordToolUsage(toolName, {
                   repository: this.repository,
