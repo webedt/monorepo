@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Install Claude Code CLI globally (required for Claude Agent SDK)
 RUN npm install -g @anthropic-ai/claude-code
 
+# Create non-root user (required for Claude Code --dangerously-skip-permissions)
+RUN useradd -m -u 1001 worker
+
 # Set working directory
 WORKDIR /app
 
@@ -22,6 +25,16 @@ COPY bin ./bin
 
 # Build TypeScript
 RUN npm run build
+
+# Change ownership to worker user
+RUN chown -R worker:worker /app
+
+# Switch to non-root user
+USER worker
+
+# Configure git identity
+RUN git config --global user.email "autonomous-dev@webedt.com" && \
+    git config --global user.name "Autonomous Dev CLI"
 
 # Set environment variables
 ENV NODE_ENV=production
