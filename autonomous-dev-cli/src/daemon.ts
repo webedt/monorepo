@@ -38,6 +38,12 @@ import {
   type CorrelationContext,
   type StructuredFileLogger,
 } from './utils/logger.js';
+import {
+  getProgressManager,
+  formatDuration,
+  type ProgressManager,
+  type CyclePhase,
+} from './utils/progress.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer, type MonitoringServer } from './utils/monitoring.js';
 import {
@@ -123,9 +129,15 @@ export class Daemon implements DaemonStateProvider {
   // Structured file logging
   private structuredLogger: StructuredFileLogger | null = null;
 
+  // Progress tracking
+  private progressManager: ProgressManager;
+
   constructor(options: DaemonOptions = {}) {
     this.options = options;
     this.config = loadConfig(options.configPath);
+
+    // Initialize progress manager (will be updated with JSON mode after log format is set)
+    this.progressManager = getProgressManager(options.logFormat === 'json');
 
     // Configure logging from config (can be overridden by options)
     if (this.config.logging) {
@@ -228,6 +240,10 @@ export class Daemon implements DaemonStateProvider {
         startRequestLifecycle(cycleCorrelationId);
 
         logger.header(`Cycle #${this.cycleCount}`);
+
+        // Initialize progress tracking for this cycle
+        this.progressManager.startCycle(this.cycleCount, 6);
+
         logger.info(`Starting cycle`, {
           cycle: this.cycleCount,
           correlationId: cycleCorrelationId,
@@ -262,6 +278,9 @@ export class Daemon implements DaemonStateProvider {
         // Calculate memory delta for the cycle
         const cycleEndMemory = getMemoryUsageMB();
         const memoryDelta = Math.round((cycleEndMemory - cycleStartMemory) * 100) / 100;
+
+        // End progress tracking for this cycle
+        this.progressManager.endCycle(result.success);
 
         this.logCycleResult(result);
 
@@ -330,6 +349,7 @@ export class Daemon implements DaemonStateProvider {
         // Wait before next cycle
         if (this.config.daemon.pauseBetweenCycles) {
           logger.info(`Waiting ${this.config.daemon.loopIntervalMs / 1000}s before next cycle...`);
+          this.progressManager.showWaiting(this.config.daemon.loopIntervalMs);
           await this.sleep(this.config.daemon.loopIntervalMs);
         }
       }
@@ -951,7 +971,8 @@ export class Daemon implements DaemonStateProvider {
       }
 
       // STEP 1: Get existing issues with graceful degradation
-      logger.step(1, 5, 'Fetching existing issues');
+      logger.cyclePhase('fetch-issues', 1, 6);
+      this.progressManager.setPhase('fetch-issues', 1);
       metrics.recordCorrelationOperation(this.getCurrentCorrelationId(), 'fetch_issues');
 
       const { result: issueResult, duration: issueFetchDuration } = await timeOperation(
@@ -985,7 +1006,8 @@ export class Daemon implements DaemonStateProvider {
       let newIssues: Issue[] = [];
 
       if (availableSlots > 0 && !this.options.dryRun) {
-        logger.step(2, 5, 'Discovering new tasks');
+        logger.cyclePhase('discover-tasks', 2, 6);
+        this.progressManager.setPhase('discover-tasks', 2);
 
         // Clone repo for analysis
         const analysisDir = join(this.config.execution.workDir, 'analysis');
@@ -1082,7 +1104,8 @@ export class Daemon implements DaemonStateProvider {
       }
 
       // STEP 3: Execute tasks
-      logger.step(3, 5, 'Executing tasks');
+      logger.cyclePhase('execute-tasks', 3, 6);
+      this.progressManager.setPhase('execute-tasks', 3);
 
       // Get all issues to work on (prioritize user-created, then auto-created)
       const allIssues = [...existingIssues, ...newIssues];
@@ -1136,7 +1159,8 @@ export class Daemon implements DaemonStateProvider {
         tasksFailed = results.filter((r) => !r.success).length;
 
         // STEP 4: Run evaluation pipeline on successful tasks
-        logger.step(4, 6, 'Running evaluation pipeline');
+        logger.cyclePhase('evaluate', 4, 6);
+        this.progressManager.setPhase('evaluate', 4);
 
         // Track which results pass evaluation (for merge step)
         const evaluationResults: Map<string, EvaluationResult> = new Map();
@@ -1248,7 +1272,8 @@ export class Daemon implements DaemonStateProvider {
         }
 
         // STEP 5: Create PRs for tasks that passed evaluation
-        logger.step(5, 6, 'Creating PRs');
+        logger.cyclePhase('create-prs', 5, 6);
+        this.progressManager.setPhase('create-prs', 5);
 
         // Track created PRs for the merge step
         const createdPRs: Map<string, { prNumber: number; issueNumber: number }> = new Map();
@@ -1331,7 +1356,8 @@ export class Daemon implements DaemonStateProvider {
 
         // STEP 6: Merge successful PRs
         if (this.config.merge.autoMerge) {
-          logger.step(6, 6, 'Merging PRs');
+          logger.cyclePhase('merge-prs', 6, 6);
+          this.progressManager.setPhase('merge-prs', 6);
 
           const resolver = createConflictResolver({
             prManager: this.github.pulls,
