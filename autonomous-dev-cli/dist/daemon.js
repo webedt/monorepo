@@ -281,9 +281,9 @@ export class Daemon {
         return this.serviceHealth;
     }
     /**
-     * Get the current service health status
+     * Get the current internal service health status
      */
-    getServiceHealth() {
+    getInternalServiceHealth() {
         return this.serviceHealth;
     }
     /**
