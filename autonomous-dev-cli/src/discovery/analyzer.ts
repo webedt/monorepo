@@ -15,6 +15,14 @@ import {
 } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import { AnalyzerError, ErrorCode } from '../utils/errors.js';
+import {
+  PersistentAnalysisCache,
+  getPersistentCache,
+  initPersistentCache,
+  type CacheConfig,
+  type CacheLookupResult,
+  type CacheStats as PersistentCacheStats,
+} from './cache.js';
 
 // ============================================================================
 // Analysis Cache
@@ -312,11 +320,17 @@ export interface AnalyzerConfig {
   maxFiles?: number;
   maxFileSizeBytes?: number; // Maximum file size to read (default: 10MB)
   enableCache?: boolean; // Enable caching of analysis results (default: true)
-  cache?: AnalysisCache; // Custom cache instance
+  cache?: AnalysisCache; // Custom cache instance (in-memory)
   onProgress?: ProgressCallback; // Optional progress callback
   enableGitAnalysis?: boolean; // Enable git history analysis (default: true)
   gitAnalysisDays?: number; // Number of days of git history to analyze (default: 30)
   gitMaxCommits?: number; // Maximum commits to analyze (default: 500)
+  /** Enable persistent caching with git-based invalidation (default: true) */
+  enablePersistentCache?: boolean;
+  /** Custom persistent cache instance */
+  persistentCache?: PersistentAnalysisCache;
+  /** Persistent cache configuration */
+  persistentCacheConfig?: Partial<CacheConfig>;
 }
 
 /**
@@ -424,6 +438,10 @@ export class CodebaseAnalyzer {
   private gitAnalysisDays: number;
   private gitMaxCommits: number;
   private git: SimpleGit | null = null;
+  // Persistent cache integration
+  private enablePersistentCache: boolean;
+  private persistentCache: PersistentAnalysisCache | null = null;
+  private persistentCacheInitialized: boolean = false;
 
   constructor(repoPath: string, excludePaths: string[] = [], config: AnalyzerConfig = {}) {
     // Normalize and resolve the path
@@ -444,9 +462,16 @@ export class CodebaseAnalyzer {
     );
     this.maxFileSizeBytes = config.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
 
-    // Cache configuration
+    // In-memory cache configuration
     this.enableCache = config.enableCache !== false; // Default true
     this.cache = config.cache ?? getAnalysisCache();
+
+    // Persistent cache configuration
+    this.enablePersistentCache = config.enablePersistentCache !== false; // Default true
+    if (config.persistentCache) {
+      this.persistentCache = config.persistentCache;
+      this.persistentCacheInitialized = true;
+    }
 
     // Progress callback
     this.onProgress = config.onProgress;
@@ -455,6 +480,43 @@ export class CodebaseAnalyzer {
     this.enableGitAnalysis = config.enableGitAnalysis !== false; // Default true
     this.gitAnalysisDays = config.gitAnalysisDays ?? DEFAULT_GIT_ANALYSIS_DAYS;
     this.gitMaxCommits = config.gitMaxCommits ?? DEFAULT_GIT_MAX_COMMITS;
+  }
+
+  /**
+   * Initialize the persistent cache if not already done
+   */
+  private async initializePersistentCache(): Promise<void> {
+    if (this.persistentCacheInitialized || !this.enablePersistentCache) return;
+
+    try {
+      if (this.config.persistentCacheConfig) {
+        this.persistentCache = await initPersistentCache(this.config.persistentCacheConfig);
+      } else {
+        this.persistentCache = getPersistentCache();
+        await this.persistentCache.initialize();
+      }
+      this.persistentCacheInitialized = true;
+    } catch (error) {
+      logger.warn('Failed to initialize persistent cache, falling back to in-memory', { error });
+      this.enablePersistentCache = false;
+    }
+  }
+
+  /**
+   * Get the persistent cache instance
+   */
+  getPersistentCache(): PersistentAnalysisCache | null {
+    return this.persistentCache;
+  }
+
+  /**
+   * Get combined cache statistics (in-memory + persistent)
+   */
+  getCombinedCacheStats(): { inMemory: CacheStats & { size: number; hitRate: number }; persistent: PersistentCacheStats | null } {
+    return {
+      inMemory: this.cache.getStats(),
+      persistent: this.persistentCache?.getStats() ?? null,
+    };
   }
 
   /**
@@ -708,9 +770,81 @@ export class CodebaseAnalyzer {
       throw validationResult.error;
     }
 
-    // Check cache if enabled
+    // Initialize persistent cache if enabled
+    await this.initializePersistentCache();
+
+    // Track cache hit status and type
     let cacheHit = false;
-    if (this.enableCache) {
+    let persistentCacheHit = false;
+    let incrementalUpdate = false;
+    let changedFilesForIncremental: string[] | undefined;
+
+    // Check persistent cache first (if enabled)
+    if (this.enablePersistentCache && this.persistentCache) {
+      const persistentCacheKey = this.persistentCache.generateKey(
+        this.repoPath,
+        this.excludePaths,
+        JSON.stringify(this.config)
+      );
+      const currentCommitHash = await this.persistentCache.getGitCommitHash(this.repoPath);
+
+      const persistentResult = await this.persistentCache.get(
+        persistentCacheKey,
+        this.repoPath,
+        currentCommitHash || undefined
+      );
+
+      if (persistentResult.hit && persistentResult.data) {
+        if (!persistentResult.requiresFullAnalysis) {
+          // Full cache hit from persistent storage
+          persistentCacheHit = true;
+          cacheHit = true;
+          const duration = Date.now() - startTime;
+
+          // Record discovery metrics for cache hit
+          const repoName = this.repoPath.split('/').slice(-2).join('/');
+          metrics.recordDiscovery(0, duration, true, { repository: repoName });
+
+          const persistentStats = this.persistentCache.getStats();
+          logger.info('Using persistent cached codebase analysis', {
+            path: this.repoPath,
+            cacheType: 'persistent',
+            hitRate: persistentStats.hitRate,
+            duration,
+            cacheHit: true,
+          });
+
+          // Log operation completion
+          const operationMetadata = finalizeOperationContext(operationContext, true, {
+            cacheHit: true,
+            cacheType: 'persistent',
+            fileCount: persistentResult.data.fileCount,
+          });
+          logger.operationComplete('Analyzer', 'analyze', true, operationMetadata);
+
+          // Report progress complete
+          this.reportProgress({
+            phase: 'complete',
+            filesScanned: persistentResult.data.fileCount,
+            totalFiles: persistentResult.data.fileCount,
+            percentComplete: 100,
+          });
+
+          return persistentResult.data;
+        } else if (persistentResult.changedFiles && persistentResult.changedFiles.length > 0) {
+          // Incremental update possible
+          incrementalUpdate = true;
+          changedFilesForIncremental = persistentResult.changedFiles;
+          logger.info('Performing incremental analysis', {
+            changedFiles: changedFilesForIncremental.length,
+            reason: persistentResult.reason,
+          });
+        }
+      }
+    }
+
+    // Fall back to in-memory cache if persistent cache didn't hit
+    if (!cacheHit && this.enableCache) {
       const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
       const contentHash = await this.cache.generateContentHash(this.repoPath);
 
@@ -723,8 +857,9 @@ export class CodebaseAnalyzer {
         const repoName = this.repoPath.split('/').slice(-2).join('/');
         metrics.recordDiscovery(0, duration, true, { repository: repoName });
 
-        logger.info('Using cached codebase analysis', {
+        logger.info('Using in-memory cached codebase analysis', {
           path: this.repoPath,
+          cacheType: 'in-memory',
           stats: this.cache.getStats(),
           duration,
           cacheHit: true,
@@ -733,6 +868,7 @@ export class CodebaseAnalyzer {
         // Log operation completion
         const operationMetadata = finalizeOperationContext(operationContext, true, {
           cacheHit: true,
+          cacheType: 'in-memory',
           fileCount: cached.fileCount,
         });
         logger.operationComplete('Analyzer', 'analyze', true, operationMetadata);
@@ -855,11 +991,30 @@ export class CodebaseAnalyzer {
       gitAnalysis,
     };
 
-    // Store in cache if enabled
+    // Store in in-memory cache if enabled
     if (this.enableCache) {
       const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
       const contentHash = await this.cache.generateContentHash(this.repoPath);
       this.cache.set(cacheKey, result, contentHash);
+    }
+
+    // Store in persistent cache if enabled
+    if (this.enablePersistentCache && this.persistentCache) {
+      const persistentCacheKey = this.persistentCache.generateKey(
+        this.repoPath,
+        this.excludePaths,
+        JSON.stringify(this.config)
+      );
+      await this.persistentCache.set(
+        persistentCacheKey,
+        this.repoPath,
+        result,
+        this.excludePaths
+      );
+      logger.debug('Stored analysis in persistent cache', {
+        key: persistentCacheKey,
+        stats: this.persistentCache.getStats(),
+      });
     }
 
     // Record discovery metrics

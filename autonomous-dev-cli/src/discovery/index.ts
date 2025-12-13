@@ -38,3 +38,17 @@ export {
   type DeduplicatedTask,
   type DeduplicatorOptions,
 } from './deduplicator.js';
+// Persistent caching layer exports
+export {
+  PersistentAnalysisCache,
+  getPersistentCache,
+  initPersistentCache,
+  resetPersistentCache,
+  DEFAULT_CACHE_CONFIG,
+  type CacheConfig,
+  type CacheStats,
+  type CacheLookupResult,
+  type CachedFileInfo,
+  type FileCacheEntry,
+  type RepoCacheEntry,
+} from './cache.js';
