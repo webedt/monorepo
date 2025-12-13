@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import {
   logger,
@@ -28,6 +29,68 @@ export interface TestOptions {
   packages?: string[];
   timeout?: number; // Timeout in ms (default: 10 minutes)
   testPattern?: string; // Optional pattern to filter tests
+}
+
+// ============================================================================
+// Package.json Cache for async loading
+// ============================================================================
+
+interface PackageJson {
+  name?: string;
+  scripts?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+interface PackageJsonCacheEntry {
+  data: PackageJson;
+  timestamp: number;
+}
+
+const packageJsonCache = new Map<string, PackageJsonCacheEntry>();
+const PACKAGE_JSON_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+
+/**
+ * Asynchronously load and parse a package.json file with caching.
+ * Returns null if the file doesn't exist or contains malformed JSON.
+ */
+async function loadPackageJson(filePath: string): Promise<PackageJson | null> {
+  // Check cache first
+  const cached = packageJsonCache.get(filePath);
+  if (cached && Date.now() - cached.timestamp < PACKAGE_JSON_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  // Check if file exists
+  if (!existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    const data = JSON.parse(content) as PackageJson;
+
+    // Cache the result
+    packageJsonCache.set(filePath, {
+      data,
+      timestamp: Date.now(),
+    });
+
+    return data;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      logger.warn(`Malformed JSON in ${filePath}: ${error.message}`);
+    } else {
+      logger.debug(`Failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return null;
+  }
+}
+
+/**
+ * Clear the package.json cache. Useful for testing or when files are known to have changed.
+ */
+export function clearPackageJsonCache(): void {
+  packageJsonCache.clear();
 }
 
 export async function runTests(options: TestOptions): Promise<TestResult> {
@@ -236,20 +299,13 @@ async function determineTestCommands(repoPath: string, packages: string[]): Prom
 
   // Check for root package.json
   const rootPackageJson = join(repoPath, 'package.json');
+  const pkg = await loadPackageJson(rootPackageJson);
 
-  if (existsSync(rootPackageJson)) {
-    try {
-      const pkg = require(rootPackageJson);
-
-      if (pkg.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
-        commands.push({
-          command: 'npm test',
-          cwd: repoPath,
-        });
-      }
-    } catch {
-      // Ignore JSON parse errors
-    }
+  if (pkg?.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
+    commands.push({
+      command: 'npm test',
+      cwd: repoPath,
+    });
   }
 
   // If specific packages provided, add their test commands
@@ -257,19 +313,13 @@ async function determineTestCommands(repoPath: string, packages: string[]): Prom
     for (const pkgPath of packages) {
       const fullPath = join(repoPath, pkgPath);
       const pkgJsonPath = join(fullPath, 'package.json');
+      const subPkg = await loadPackageJson(pkgJsonPath);
 
-      if (existsSync(pkgJsonPath)) {
-        try {
-          const pkg = require(pkgJsonPath);
-          if (pkg.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
-            commands.push({
-              command: 'npm test',
-              cwd: fullPath,
-            });
-          }
-        } catch {
-          // Ignore
-        }
+      if (subPkg?.scripts?.test && subPkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
+        commands.push({
+          command: 'npm test',
+          cwd: fullPath,
+        });
       }
     }
   }

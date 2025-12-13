@@ -59,6 +59,10 @@ export declare function initBuildCache(options?: {
     maxEntries?: number;
     ttlMs?: number;
 }): BuildCache;
+/**
+ * Clear the package.json cache. Useful for testing or when files are known to have changed.
+ */
+export declare function clearPackageJsonCache(): void;
 export declare function runBuild(options: BuildOptions): Promise<BuildResult>;
 export declare function runTypeCheck(repoPath: string): Promise<BuildResult>;
 //# sourceMappingURL=build.d.ts.map

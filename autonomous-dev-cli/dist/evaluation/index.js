@@ -3,8 +3,8 @@ import { runTests } from './tests.js';
 import { runHealthChecks, generatePreviewUrl } from './health.js';
 import { logger, getCorrelationId, createOperationContext, finalizeOperationContext, startPhase, endPhase, recordPhaseError, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-export { runBuild, runTypeCheck, BuildCache, getBuildCache, initBuildCache } from './build.js';
-export { runTests } from './tests.js';
+export { runBuild, runTypeCheck, BuildCache, getBuildCache, initBuildCache, clearPackageJsonCache as clearBuildPackageJsonCache } from './build.js';
+export { runTests, clearPackageJsonCache as clearTestPackageJsonCache } from './tests.js';
 export { runHealthChecks, generatePreviewUrl } from './health.js';
 export async function runEvaluation(options) {
     const startTime = Date.now();

@@ -27,6 +27,15 @@ export interface WorkerProgressState {
     message?: string;
 }
 /**
+ * Phase timing information for breakdown
+ */
+export interface PhaseTimingInfo {
+    phase: CyclePhase;
+    startTime: number;
+    endTime?: number;
+    duration?: number;
+}
+/**
  * Cycle progress state
  */
 export interface CycleProgressState {
@@ -41,6 +50,35 @@ export interface CycleProgressState {
     tasksFailed: number;
     prsMerged: number;
     workers: Map<string, WorkerProgressState>;
+    /** Timing breakdown by phase */
+    phaseTimings: PhaseTimingInfo[];
+}
+/**
+ * Cycle summary for display and JSON output
+ */
+export interface CycleSummary {
+    cycleNumber: number;
+    success: boolean;
+    totalDuration: number;
+    phaseBreakdown: Array<{
+        phase: CyclePhase;
+        duration: number;
+        percentage: number;
+    }>;
+    tasks: {
+        discovered: number;
+        completed: number;
+        failed: number;
+        successRate: number;
+    };
+    prs: {
+        merged: number;
+    };
+    workers: {
+        total: number;
+        completed: number;
+        failed: number;
+    };
 }
 /**
  * Estimated time calculator
@@ -120,6 +158,18 @@ export declare class ProgressManager {
      * End the current cycle
      */
     endCycle(success: boolean): void;
+    /**
+     * Get cycle summary with timing breakdown
+     */
+    getCycleSummary(success: boolean): CycleSummary | null;
+    /**
+     * Display formatted cycle summary with color coding
+     */
+    displayCycleSummary(success: boolean): void;
+    /**
+     * Create a mini progress bar for timing breakdown
+     */
+    private createMiniBar;
     /**
      * Get estimated time remaining for current cycle
      */
