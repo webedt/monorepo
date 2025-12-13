@@ -60,9 +60,16 @@ export function getTimeoutFromEnv(
 }
 
 /**
+ * Timeout configuration type (allows number values from env vars)
+ */
+export type TimeoutConfig = {
+  [K in keyof typeof DEFAULT_TIMEOUTS]: number;
+};
+
+/**
  * Get all timeout configurations (from env vars or defaults)
  */
-export function getTimeoutConfig(): typeof DEFAULT_TIMEOUTS {
+export function getTimeoutConfig(): TimeoutConfig {
   return {
     GITHUB_API: getTimeoutFromEnv('GITHUB_API', DEFAULT_TIMEOUTS.GITHUB_API),
     GIT_OPERATION: getTimeoutFromEnv('GIT_OPERATION', DEFAULT_TIMEOUTS.GIT_OPERATION),
