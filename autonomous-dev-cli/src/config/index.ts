@@ -3,9 +3,311 @@ import { resolve } from 'path';
 import { config as loadEnv } from 'dotenv';
 import { ConfigSchema, defaultConfig, type Config } from './schema.js';
 import { logger } from '../utils/logger.js';
+import { ZodError, ZodIssue } from 'zod';
 
 // Load .env file
 loadEnv();
+
+/**
+ * Configuration field metadata for help and validation suggestions
+ */
+const configFieldHelp: Record<string, { description: string; envVar?: string; suggestion?: string; example?: string }> = {
+  'repo.owner': {
+    description: 'GitHub repository owner (username or organization)',
+    envVar: 'REPO_OWNER',
+    suggestion: 'Set the GitHub username or organization that owns the repository',
+    example: 'myusername',
+  },
+  'repo.name': {
+    description: 'GitHub repository name',
+    envVar: 'REPO_NAME',
+    suggestion: 'Set the name of your GitHub repository',
+    example: 'my-project',
+  },
+  'repo.baseBranch': {
+    description: 'Base branch for pull requests',
+    envVar: 'REPO_BASE_BRANCH',
+    suggestion: 'Typically "main" or "master"',
+    example: 'main',
+  },
+  'discovery.tasksPerCycle': {
+    description: 'Number of tasks to discover per cycle (1-10)',
+    envVar: 'TASKS_PER_CYCLE',
+    suggestion: 'Start with 3-5 tasks for balanced discovery',
+    example: '5',
+  },
+  'discovery.maxOpenIssues': {
+    description: 'Maximum number of open issues before pausing discovery',
+    envVar: 'MAX_OPEN_ISSUES',
+    suggestion: 'Set higher for faster development, lower for more control',
+    example: '10',
+  },
+  'discovery.excludePaths': {
+    description: 'Paths to exclude from analysis',
+    envVar: 'EXCLUDE_PATHS',
+    suggestion: 'Comma-separated list of paths/patterns to ignore',
+    example: 'node_modules,dist,.git',
+  },
+  'discovery.issueLabel': {
+    description: 'Label applied to auto-created issues',
+    envVar: 'ISSUE_LABEL',
+    suggestion: 'Use a unique label to track autonomous issues',
+    example: 'autonomous-dev',
+  },
+  'execution.parallelWorkers': {
+    description: 'Number of parallel task workers (1-10)',
+    envVar: 'PARALLEL_WORKERS',
+    suggestion: 'Match to available CPU cores, typically 2-4',
+    example: '4',
+  },
+  'execution.timeoutMinutes': {
+    description: 'Task execution timeout in minutes (5-120)',
+    envVar: 'TIMEOUT_MINUTES',
+    suggestion: 'Allow enough time for complex tasks, typically 30-60 minutes',
+    example: '30',
+  },
+  'execution.workDir': {
+    description: 'Working directory for task execution',
+    envVar: 'WORK_DIR',
+    suggestion: 'Use a temporary directory with sufficient space',
+    example: '/tmp/autonomous-dev',
+  },
+  'evaluation.requireBuild': {
+    description: 'Require build to pass before merging',
+    envVar: 'REQUIRE_BUILD',
+    suggestion: 'Set to "true" for production repos, "false" for experimentation',
+    example: 'true',
+  },
+  'evaluation.requireTests': {
+    description: 'Require tests to pass before merging',
+    envVar: 'REQUIRE_TESTS',
+    suggestion: 'Recommended to keep enabled for code quality',
+    example: 'true',
+  },
+  'evaluation.requireHealthCheck': {
+    description: 'Require health checks to pass',
+    envVar: 'REQUIRE_HEALTH_CHECK',
+    suggestion: 'Enable if you have health check endpoints configured',
+    example: 'false',
+  },
+  'merge.autoMerge': {
+    description: 'Automatically merge PRs that pass all checks',
+    envVar: 'AUTO_MERGE',
+    suggestion: 'Disable for manual review of all changes',
+    example: 'true',
+  },
+  'merge.mergeMethod': {
+    description: 'Git merge method (merge, squash, rebase)',
+    envVar: 'MERGE_METHOD',
+    suggestion: 'Use "squash" for clean history, "merge" for detailed commits',
+    example: 'squash',
+  },
+  'merge.conflictStrategy': {
+    description: 'Strategy for handling merge conflicts (rebase, merge, manual)',
+    envVar: 'CONFLICT_STRATEGY',
+    suggestion: 'Use "rebase" for automatic resolution, "manual" for complex repos',
+    example: 'rebase',
+  },
+  'credentials.githubToken': {
+    description: 'GitHub personal access token',
+    envVar: 'GITHUB_TOKEN',
+    suggestion: 'Create a token at https://github.com/settings/tokens with repo scope',
+    example: 'ghp_xxxxxxxxxxxx',
+  },
+  'credentials.claudeAuth': {
+    description: 'Claude API authentication credentials',
+    envVar: 'CLAUDE_ACCESS_TOKEN',
+    suggestion: 'Set CLAUDE_ACCESS_TOKEN and optionally CLAUDE_REFRESH_TOKEN',
+    example: 'sk-ant-xxxxxxxxxxxx',
+  },
+  'credentials.databaseUrl': {
+    description: 'Database connection URL (optional)',
+    envVar: 'DATABASE_URL',
+    suggestion: 'PostgreSQL connection string for credential storage',
+    example: 'postgresql://user:pass@host:5432/db',
+  },
+  'credentials.userEmail': {
+    description: 'User email for credential lookup',
+    envVar: 'USER_EMAIL',
+    suggestion: 'Email address associated with stored credentials',
+    example: 'user@example.com',
+  },
+  'daemon.loopIntervalMs': {
+    description: 'Interval between daemon cycles in milliseconds',
+    envVar: 'LOOP_INTERVAL_MS',
+    suggestion: 'Default is 60000 (1 minute), increase for less frequent runs',
+    example: '60000',
+  },
+  'daemon.pauseBetweenCycles': {
+    description: 'Whether to pause between development cycles',
+    envVar: 'PAUSE_BETWEEN_CYCLES',
+    suggestion: 'Enable to allow time for review between cycles',
+    example: 'true',
+  },
+};
+
+/**
+ * Get helpful suggestion for a validation error
+ */
+function getValidationSuggestion(issue: ZodIssue): string {
+  const path = issue.path.join('.');
+  const help = configFieldHelp[path];
+
+  let suggestion = '';
+
+  // Add field-specific help if available
+  if (help) {
+    suggestion += `\n    Description: ${help.description}`;
+    if (help.envVar) {
+      suggestion += `\n    Environment variable: ${help.envVar}`;
+    }
+    if (help.suggestion) {
+      suggestion += `\n    Suggestion: ${help.suggestion}`;
+    }
+    if (help.example) {
+      suggestion += `\n    Example: ${help.example}`;
+    }
+  }
+
+  // Add error-type specific suggestions
+  switch (issue.code) {
+    case 'invalid_type':
+      if (issue.expected === 'string' && issue.received === 'undefined') {
+        suggestion += '\n    This field is required but was not provided.';
+      } else {
+        suggestion += `\n    Expected ${issue.expected}, but received ${issue.received}.`;
+      }
+      break;
+    case 'too_small':
+      suggestion += `\n    Value is too small. Minimum: ${(issue as any).minimum}`;
+      break;
+    case 'too_big':
+      suggestion += `\n    Value is too large. Maximum: ${(issue as any).maximum}`;
+      break;
+    case 'invalid_enum_value':
+      suggestion += `\n    Valid options: ${(issue as any).options?.join(', ') || 'see documentation'}`;
+      break;
+    case 'invalid_string':
+      if ((issue as any).validation === 'email') {
+        suggestion += '\n    Please provide a valid email address.';
+      }
+      break;
+  }
+
+  return suggestion;
+}
+
+/**
+ * Format validation errors with helpful suggestions
+ */
+function formatValidationErrors(error: ZodError): void {
+  logger.error('Configuration validation failed:');
+  console.log();
+
+  for (const issue of error.errors) {
+    const path = issue.path.join('.') || 'root';
+    logger.error(`  ${path}: ${issue.message}`);
+
+    const suggestion = getValidationSuggestion(issue);
+    if (suggestion) {
+      console.log(suggestion);
+    }
+    console.log();
+  }
+
+  // Add general troubleshooting tips
+  console.log('Troubleshooting tips:');
+  console.log('  1. Run "autonomous-dev init" to create a new configuration file');
+  console.log('  2. Run "autonomous-dev help-config" for detailed configuration documentation');
+  console.log('  3. Check that environment variables are set correctly');
+  console.log('  4. Verify your config file is valid JSON');
+  console.log();
+}
+
+/**
+ * Generate comprehensive configuration help text
+ */
+export function getConfigHelp(): string {
+  const sections = [
+    {
+      title: 'REPOSITORY SETTINGS (repo.*)',
+      fields: ['repo.owner', 'repo.name', 'repo.baseBranch'],
+    },
+    {
+      title: 'DISCOVERY SETTINGS (discovery.*)',
+      fields: ['discovery.tasksPerCycle', 'discovery.maxOpenIssues', 'discovery.excludePaths', 'discovery.issueLabel'],
+    },
+    {
+      title: 'EXECUTION SETTINGS (execution.*)',
+      fields: ['execution.parallelWorkers', 'execution.timeoutMinutes', 'execution.workDir'],
+    },
+    {
+      title: 'EVALUATION SETTINGS (evaluation.*)',
+      fields: ['evaluation.requireBuild', 'evaluation.requireTests', 'evaluation.requireHealthCheck'],
+    },
+    {
+      title: 'MERGE SETTINGS (merge.*)',
+      fields: ['merge.autoMerge', 'merge.mergeMethod', 'merge.conflictStrategy'],
+    },
+    {
+      title: 'DAEMON SETTINGS (daemon.*)',
+      fields: ['daemon.loopIntervalMs', 'daemon.pauseBetweenCycles'],
+    },
+    {
+      title: 'CREDENTIALS (credentials.*)',
+      fields: ['credentials.githubToken', 'credentials.claudeAuth', 'credentials.databaseUrl', 'credentials.userEmail'],
+    },
+  ];
+
+  let output = '';
+
+  for (const section of sections) {
+    output += `${section.title}\n`;
+    output += '─'.repeat(60) + '\n\n';
+
+    for (const field of section.fields) {
+      const help = configFieldHelp[field];
+      if (help) {
+        const fieldName = field.split('.').pop();
+        output += `  ${fieldName}\n`;
+        output += `    ${help.description}\n`;
+        if (help.envVar) {
+          output += `    Environment: ${help.envVar}\n`;
+        }
+        if (help.suggestion) {
+          output += `    Tip: ${help.suggestion}\n`;
+        }
+        if (help.example) {
+          output += `    Example: ${help.example}\n`;
+        }
+        output += '\n';
+      }
+    }
+  }
+
+  output += 'CONFIGURATION FILES\n';
+  output += '─'.repeat(60) + '\n\n';
+  output += '  Config files are searched in this order:\n';
+  output += '    1. Path specified with -c/--config option\n';
+  output += '    2. ./autonomous-dev.config.json\n';
+  output += '    3. ./autonomous-dev.json\n';
+  output += '    4. ./.autonomous-dev.json\n\n';
+  output += '  Configuration precedence (highest to lowest):\n';
+  output += '    1. Environment variables\n';
+  output += '    2. Config file values\n';
+  output += '    3. Default values\n\n';
+
+  output += 'QUICK START\n';
+  output += '─'.repeat(60) + '\n\n';
+  output += '  1. Run "autonomous-dev init" to create a config file\n';
+  output += '  2. Set GITHUB_TOKEN environment variable\n';
+  output += '  3. Set CLAUDE_ACCESS_TOKEN environment variable\n';
+  output += '  4. Run "autonomous-dev config --validate" to verify\n';
+  output += '  5. Run "autonomous-dev discover" to test discovery\n';
+  output += '  6. Run "autonomous-dev start" to begin\n';
+
+  return output;
+}
 
 function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target };
@@ -126,10 +428,7 @@ export function loadConfig(configPath?: string): Config {
   // Validate
   const result = ConfigSchema.safeParse(mergedConfig);
   if (!result.success) {
-    logger.error('Invalid configuration:');
-    for (const error of result.error.errors) {
-      logger.error(`  ${error.path.join('.')}: ${error.message}`);
-    }
+    formatValidationErrors(result.error);
     throw new Error('Configuration validation failed');
   }
 
