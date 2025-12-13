@@ -54,7 +54,7 @@ export function createIssueManager(client) {
                 }, `GET /repos/${owner}/${repo}/issues`, { operation: 'listOpenIssues', label });
             }
             catch (error) {
-                handleError(error, 'list issues', { label });
+                return handleError(error, 'list issues', { label });
             }
         },
         async listOpenIssuesWithFallback(label, fallback = []) {
@@ -95,7 +95,7 @@ export function createIssueManager(client) {
                 if (error.status === 404) {
                     return null;
                 }
-                handleError(error, 'get issue', { issueNumber: number });
+                return handleError(error, 'get issue', { issueNumber: number });
             }
         },
         async createIssue(options) {
@@ -113,7 +113,7 @@ export function createIssueManager(client) {
                 }, `POST /repos/${owner}/${repo}/issues`, { operation: 'createIssue', title: options.title });
             }
             catch (error) {
-                handleError(error, 'create issue', { title: options.title });
+                return handleError(error, 'create issue', { title: options.title });
             }
         },
         async addLabels(issueNumber, labels) {

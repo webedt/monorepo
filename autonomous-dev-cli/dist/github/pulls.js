@@ -127,7 +127,7 @@ export function createPRManager(client) {
                 }, `GET /repos/${owner}/${repo}/pulls`, { operation: 'listOpenPRs' });
             }
             catch (error) {
-                handleError(error, 'list PRs');
+                return handleError(error, 'list PRs');
             }
         },
         async listOpenPRsWithFallback(fallback = []) {
@@ -162,7 +162,7 @@ export function createPRManager(client) {
                 if (error.status === 404) {
                     return null;
                 }
-                handleError(error, 'get PR', { prNumber: number });
+                return handleError(error, 'get PR', { prNumber: number });
             }
         },
         async findPRForBranch(branchName, base) {
@@ -185,7 +185,7 @@ export function createPRManager(client) {
                 }, `GET /repos/${owner}/${repo}/pulls`, { operation: 'findPRForBranch', branchName, base });
             }
             catch (error) {
-                handleError(error, 'find PR for branch', { branchName, base });
+                return handleError(error, 'find PR for branch', { branchName, base });
             }
         },
         async createPR(options) {
@@ -218,7 +218,7 @@ export function createPRManager(client) {
                         return existing;
                     }
                 }
-                handleError(error, 'create PR', { head: options.head, base: options.base });
+                return handleError(error, 'create PR', { head: options.head, base: options.base });
             }
         },
         async createPRWithFallback(options) {
@@ -350,7 +350,7 @@ export function createPRManager(client) {
                     logger.warn(`PR #${number} has merge conflicts`);
                     return false;
                 }
-                handleError(error, 'update PR from base', { prNumber: number });
+                return handleError(error, 'update PR from base', { prNumber: number });
             }
         },
         async waitForMergeable(number, maxAttempts = 30) {
