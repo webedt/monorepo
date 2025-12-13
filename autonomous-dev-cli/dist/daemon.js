@@ -4,7 +4,9 @@ import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
 import { createWorkerPool } from './executor/index.js';
 import { createConflictResolver } from './conflicts/index.js';
-import { logger } from './utils/logger.js';
+import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId, } from './utils/logger.js';
+import { metrics } from './utils/metrics.js';
+import { createMonitoringServer } from './utils/monitoring.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
 import { mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -16,11 +18,17 @@ export class Daemon {
     options;
     userId = null;
     enableDatabaseLogging = false;
+    monitoringServer = null;
+    repository = '';
     constructor(options = {}) {
         this.options = options;
         this.config = loadConfig(options.configPath);
         if (options.verbose) {
             logger.setLevel('debug');
+        }
+        // Set log format (default: pretty for terminal, json for production)
+        if (options.logFormat) {
+            logger.setFormat(options.logFormat);
         }
     }
     async start() {
@@ -29,13 +37,30 @@ export class Daemon {
         try {
             // Initialize
             await this.initialize();
+            // Start monitoring server if port is configured
+            if (this.options.monitoringPort) {
+                await this.startMonitoringServer();
+            }
+            // Update health status
+            metrics.updateHealthStatus(true);
             this.isRunning = true;
             // Main loop
             while (this.isRunning) {
                 this.cycleCount++;
+                // Generate correlation ID for this cycle
+                const cycleCorrelationId = generateCorrelationId();
+                setCorrelationId(cycleCorrelationId);
                 logger.header(`Cycle #${this.cycleCount}`);
+                logger.info(`Starting cycle`, {
+                    cycle: this.cycleCount,
+                    correlationId: cycleCorrelationId,
+                });
                 const result = await this.runCycle();
                 this.logCycleResult(result);
+                // Record cycle metrics
+                metrics.recordCycleCompletion(result.tasksDiscovered, result.tasksCompleted, result.tasksFailed, result.duration, { repository: this.repository });
+                // Clear correlation ID after cycle
+                clearCorrelationId();
                 if (this.options.singleCycle) {
                     logger.info('Single cycle mode - exiting');
                     break;
@@ -100,9 +125,40 @@ export class Daemon {
     async stop() {
         logger.info('Stop requested...');
         this.isRunning = false;
+        metrics.updateHealthStatus(false);
+    }
+    /**
+     * Start the monitoring server for health checks and metrics
+     */
+    async startMonitoringServer() {
+        if (!this.options.monitoringPort)
+            return;
+        this.monitoringServer = createMonitoringServer({
+            port: this.options.monitoringPort,
+            host: '0.0.0.0',
+        });
+        // Register health checks
+        this.monitoringServer.registerHealthCheck(async () => ({
+            name: 'github',
+            status: this.github ? 'pass' : 'fail',
+            message: this.github ? 'GitHub client initialized' : 'GitHub client not initialized',
+        }));
+        this.monitoringServer.registerHealthCheck(async () => ({
+            name: 'database',
+            status: this.enableDatabaseLogging ? 'pass' : 'pass', // Pass if DB not required
+            message: this.enableDatabaseLogging ? 'Database connected' : 'Database logging disabled',
+        }));
+        this.monitoringServer.registerHealthCheck(async () => ({
+            name: 'daemon',
+            status: this.isRunning ? 'pass' : 'fail',
+            message: this.isRunning ? `Running cycle ${this.cycleCount}` : 'Daemon not running',
+        }));
+        await this.monitoringServer.start();
     }
     async initialize() {
         logger.info('Initializing...');
+        // Set repository identifier for metrics
+        this.repository = `${this.config.repo.owner}/${this.config.repo.name}`;
         // Load credentials from database if configured
         if (this.config.credentials.databaseUrl && this.config.credentials.userEmail) {
             logger.info('Loading credentials from database...');
@@ -189,6 +245,12 @@ export class Daemon {
     }
     async shutdown() {
         logger.info('Shutting down...');
+        // Update health status
+        metrics.updateHealthStatus(false);
+        // Stop monitoring server
+        if (this.monitoringServer) {
+            await this.monitoringServer.stop();
+        }
         await closeDatabase();
         logger.info('Shutdown complete');
     }
@@ -326,12 +388,16 @@ export class Daemon {
                     }
                     // Create PR
                     try {
+                        // Track GitHub API call
+                        metrics.githubApiCallsTotal.inc({ repository: this.repository });
                         const pr = await this.github.pulls.createPR({
                             title: result.issue.title,
                             body: this.generatePRBody(result.issue),
                             head: result.branchName,
                             base: this.config.repo.baseBranch,
                         });
+                        // Track PR creation
+                        metrics.prsCreatedTotal.inc({ repository: this.repository });
                         logger.success(`Created PR #${pr.number} for issue #${result.issue.number}`);
                         // Link PR to issue
                         await this.github.issues.addComment(result.issue.number, `🔗 PR created: #${pr.number}`);
@@ -346,6 +412,17 @@ export class Daemon {
                                 },
                                 cause: error,
                             });
+                        // Track GitHub API error
+                        metrics.githubApiErrorsTotal.inc({ repository: this.repository });
+                        metrics.recordError({
+                            repository: this.repository,
+                            component: 'Daemon',
+                            operation: 'createPR',
+                            errorCode: structuredError.code,
+                            severity: structuredError.severity,
+                            issueNumber: result.issue.number,
+                            branchName: result.branchName,
+                        });
                         errors.push(`[${structuredError.code}] ${structuredError.message}`);
                         logger.structuredError(structuredError, {
                             context: {
@@ -376,6 +453,8 @@ export class Daemon {
                     for (const [branch, mergeResult] of mergeResults) {
                         if (mergeResult.merged) {
                             prsMerged++;
+                            // Track PR merge
+                            metrics.prsMergedTotal.inc({ repository: this.repository });
                             // Find and close the corresponding issue
                             const result = results.find((r) => r.branchName === branch);
                             if (result) {

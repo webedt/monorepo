@@ -1,0 +1,421 @@
+/**
+ * Metrics collection module for observability and monitoring.
+ * Provides Prometheus-compatible metrics for task success rates, timing, and errors.
+ */
+// Default histogram buckets for duration metrics (in milliseconds)
+const DEFAULT_DURATION_BUCKETS = [100, 500, 1000, 5000, 10000, 30000, 60000, 120000, 300000, 600000];
+class Counter {
+    name;
+    help;
+    values = new Map();
+    constructor(name, help) {
+        this.name = name;
+        this.help = help;
+    }
+    inc(labels = {}, value = 1) {
+        const key = this.labelsToKey(labels);
+        const current = this.values.get(key) || { value: 0, labels };
+        current.value += value;
+        this.values.set(key, current);
+    }
+    labelsToKey(labels) {
+        return Object.entries(labels)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => `${k}="${v}"`)
+            .join(',');
+    }
+    getMetrics() {
+        return Array.from(this.values.entries()).map(([_, data]) => ({
+            name: this.name,
+            help: this.help,
+            type: 'counter',
+            value: data.value,
+            labels: data.labels,
+        }));
+    }
+    getName() {
+        return this.name;
+    }
+    getHelp() {
+        return this.help;
+    }
+}
+class Gauge {
+    name;
+    help;
+    values = new Map();
+    constructor(name, help) {
+        this.name = name;
+        this.help = help;
+    }
+    set(labels = {}, value) {
+        const key = this.labelsToKey(labels);
+        this.values.set(key, { value, labels });
+    }
+    inc(labels = {}, value = 1) {
+        const key = this.labelsToKey(labels);
+        const current = this.values.get(key) || { value: 0, labels };
+        current.value += value;
+        this.values.set(key, current);
+    }
+    dec(labels = {}, value = 1) {
+        this.inc(labels, -value);
+    }
+    labelsToKey(labels) {
+        return Object.entries(labels)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => `${k}="${v}"`)
+            .join(',');
+    }
+    getMetrics() {
+        return Array.from(this.values.entries()).map(([_, data]) => ({
+            name: this.name,
+            help: this.help,
+            type: 'gauge',
+            value: data.value,
+            labels: data.labels,
+        }));
+    }
+    getName() {
+        return this.name;
+    }
+    getHelp() {
+        return this.help;
+    }
+}
+class Histogram {
+    name;
+    help;
+    bucketBoundaries;
+    data = new Map();
+    constructor(name, help, buckets = DEFAULT_DURATION_BUCKETS) {
+        this.name = name;
+        this.help = help;
+        this.bucketBoundaries = [...buckets].sort((a, b) => a - b);
+    }
+    observe(labels = {}, value) {
+        const key = this.labelsToKey(labels);
+        let data = this.data.get(key);
+        if (!data) {
+            data = {
+                buckets: new Array(this.bucketBoundaries.length + 1).fill(0),
+                sum: 0,
+                count: 0,
+                labels,
+            };
+            this.data.set(key, data);
+        }
+        // Increment buckets
+        for (let i = 0; i < this.bucketBoundaries.length; i++) {
+            if (value <= this.bucketBoundaries[i]) {
+                data.buckets[i]++;
+            }
+        }
+        // +Inf bucket
+        data.buckets[this.bucketBoundaries.length]++;
+        data.sum += value;
+        data.count++;
+    }
+    labelsToKey(labels) {
+        return Object.entries(labels)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => `${k}="${v}"`)
+            .join(',');
+    }
+    getMetrics() {
+        return Array.from(this.data.entries()).map(([_, data]) => {
+            const buckets = this.bucketBoundaries.map((le, i) => ({
+                le,
+                count: data.buckets.slice(0, i + 1).reduce((a, b) => a + b, 0),
+            }));
+            buckets.push({
+                le: '+Inf',
+                count: data.count,
+            });
+            return {
+                name: this.name,
+                help: this.help,
+                type: 'histogram',
+                buckets,
+                sum: data.sum,
+                count: data.count,
+                labels: data.labels,
+            };
+        });
+    }
+    getName() {
+        return this.name;
+    }
+    getHelp() {
+        return this.help;
+    }
+}
+/**
+ * MetricsRegistry collects and exports all metrics
+ */
+class MetricsRegistry {
+    // Task metrics
+    tasksTotal = new Counter('autonomous_dev_tasks_total', 'Total number of tasks processed');
+    tasksSuccessTotal = new Counter('autonomous_dev_tasks_success_total', 'Total number of successfully completed tasks');
+    tasksFailedTotal = new Counter('autonomous_dev_tasks_failed_total', 'Total number of failed tasks');
+    taskDurationMs = new Histogram('autonomous_dev_task_duration_ms', 'Task execution duration in milliseconds');
+    // Cycle metrics
+    cyclesTotal = new Counter('autonomous_dev_cycles_total', 'Total number of daemon cycles executed');
+    cycleTasksDiscovered = new Histogram('autonomous_dev_cycle_tasks_discovered', 'Number of tasks discovered per cycle', [0, 1, 2, 3, 5, 10, 20]);
+    cycleDurationMs = new Histogram('autonomous_dev_cycle_duration_ms', 'Cycle duration in milliseconds');
+    // Worker pool metrics
+    workersActive = new Gauge('autonomous_dev_workers_active', 'Number of currently active workers');
+    workersQueued = new Gauge('autonomous_dev_workers_queued', 'Number of tasks currently queued');
+    // Build/evaluation metrics
+    buildsTotal = new Counter('autonomous_dev_builds_total', 'Total number of builds executed');
+    buildsSuccessTotal = new Counter('autonomous_dev_builds_success_total', 'Total number of successful builds');
+    buildDurationMs = new Histogram('autonomous_dev_build_duration_ms', 'Build duration in milliseconds');
+    testsTotal = new Counter('autonomous_dev_tests_total', 'Total number of test runs');
+    testsSuccessTotal = new Counter('autonomous_dev_tests_success_total', 'Total number of successful test runs');
+    testDurationMs = new Histogram('autonomous_dev_test_duration_ms', 'Test execution duration in milliseconds');
+    // GitHub API metrics
+    githubApiCallsTotal = new Counter('autonomous_dev_github_api_calls_total', 'Total number of GitHub API calls');
+    githubApiErrorsTotal = new Counter('autonomous_dev_github_api_errors_total', 'Total number of GitHub API errors');
+    prsCreatedTotal = new Counter('autonomous_dev_prs_created_total', 'Total number of PRs created');
+    prsMergedTotal = new Counter('autonomous_dev_prs_merged_total', 'Total number of PRs merged');
+    // Error tracking
+    errorsTotal = new Counter('autonomous_dev_errors_total', 'Total number of errors by code and severity');
+    // Health status
+    healthStatus = new Gauge('autonomous_dev_health_status', 'Health status of the daemon (1 = healthy, 0 = unhealthy)');
+    uptimeSeconds = new Gauge('autonomous_dev_uptime_seconds', 'Time since daemon started in seconds');
+    // Claude API metrics
+    claudeApiCallsTotal = new Counter('autonomous_dev_claude_api_calls_total', 'Total number of Claude API calls');
+    claudeApiErrorsTotal = new Counter('autonomous_dev_claude_api_errors_total', 'Total number of Claude API errors');
+    claudeToolUsageTotal = new Counter('autonomous_dev_claude_tool_usage_total', 'Total number of tool uses by Claude');
+    startTime = Date.now();
+    /**
+     * Record a task completion
+     */
+    recordTaskCompletion(success, durationMs, labels) {
+        const baseLabels = { repository: labels.repository };
+        const fullLabels = {
+            ...baseLabels,
+            task_type: labels.taskType || 'unknown',
+            worker_id: labels.workerId || 'unknown',
+        };
+        this.tasksTotal.inc(baseLabels);
+        this.taskDurationMs.observe(fullLabels, durationMs);
+        if (success) {
+            this.tasksSuccessTotal.inc(baseLabels);
+        }
+        else {
+            this.tasksFailedTotal.inc(baseLabels);
+        }
+    }
+    /**
+     * Record a cycle completion
+     */
+    recordCycleCompletion(tasksDiscovered, tasksCompleted, tasksFailed, durationMs, labels) {
+        this.cyclesTotal.inc(labels);
+        this.cycleTasksDiscovered.observe(labels, tasksDiscovered);
+        this.cycleDurationMs.observe(labels, durationMs);
+    }
+    /**
+     * Record a build result
+     */
+    recordBuild(success, durationMs, labels) {
+        this.buildsTotal.inc(labels);
+        this.buildDurationMs.observe(labels, durationMs);
+        if (success) {
+            this.buildsSuccessTotal.inc(labels);
+        }
+    }
+    /**
+     * Record a test result
+     */
+    recordTests(success, durationMs, labels) {
+        this.testsTotal.inc(labels);
+        this.testDurationMs.observe(labels, durationMs);
+        if (success) {
+            this.testsSuccessTotal.inc(labels);
+        }
+    }
+    /**
+     * Record an error with full context
+     */
+    recordError(context) {
+        this.errorsTotal.inc({
+            repository: context.repository || 'unknown',
+            error_code: context.errorCode || 'unknown',
+            severity: context.severity || 'error',
+            component: context.component || 'unknown',
+            is_retryable: String(context.isRetryable ?? false),
+        });
+    }
+    /**
+     * Record Claude tool usage
+     */
+    recordToolUsage(toolName, labels) {
+        this.claudeToolUsageTotal.inc({
+            tool: toolName,
+            repository: labels.repository,
+            worker_id: labels.workerId || 'unknown',
+        });
+    }
+    /**
+     * Update worker pool status
+     */
+    updateWorkerPoolStatus(active, queued) {
+        this.workersActive.set({}, active);
+        this.workersQueued.set({}, queued);
+    }
+    /**
+     * Update health status
+     */
+    updateHealthStatus(healthy) {
+        this.healthStatus.set({}, healthy ? 1 : 0);
+        this.uptimeSeconds.set({}, Math.floor((Date.now() - this.startTime) / 1000));
+    }
+    /**
+     * Get all metrics in Prometheus format
+     */
+    getPrometheusMetrics() {
+        const lines = [];
+        const processedMetrics = new Set();
+        // Update uptime before exporting
+        this.uptimeSeconds.set({}, Math.floor((Date.now() - this.startTime) / 1000));
+        const allCollectors = [
+            this.tasksTotal,
+            this.tasksSuccessTotal,
+            this.tasksFailedTotal,
+            this.taskDurationMs,
+            this.cyclesTotal,
+            this.cycleTasksDiscovered,
+            this.cycleDurationMs,
+            this.workersActive,
+            this.workersQueued,
+            this.buildsTotal,
+            this.buildsSuccessTotal,
+            this.buildDurationMs,
+            this.testsTotal,
+            this.testsSuccessTotal,
+            this.testDurationMs,
+            this.githubApiCallsTotal,
+            this.githubApiErrorsTotal,
+            this.prsCreatedTotal,
+            this.prsMergedTotal,
+            this.errorsTotal,
+            this.healthStatus,
+            this.uptimeSeconds,
+            this.claudeApiCallsTotal,
+            this.claudeApiErrorsTotal,
+            this.claudeToolUsageTotal,
+        ];
+        for (const collector of allCollectors) {
+            const metrics = collector.getMetrics();
+            if (metrics.length === 0)
+                continue;
+            const name = collector.getName();
+            if (!processedMetrics.has(name)) {
+                lines.push(`# HELP ${name} ${collector.getHelp()}`);
+                // Determine type
+                const firstMetric = metrics[0];
+                if ('buckets' in firstMetric) {
+                    lines.push(`# TYPE ${name} histogram`);
+                }
+                else if (firstMetric.type === 'gauge') {
+                    lines.push(`# TYPE ${name} gauge`);
+                }
+                else {
+                    lines.push(`# TYPE ${name} counter`);
+                }
+                processedMetrics.add(name);
+            }
+            for (const metric of metrics) {
+                const labelsStr = this.formatLabels(metric.labels);
+                if ('buckets' in metric) {
+                    // Histogram
+                    for (const bucket of metric.buckets) {
+                        const bucketLabels = labelsStr
+                            ? `${labelsStr},le="${bucket.le}"`
+                            : `le="${bucket.le}"`;
+                        lines.push(`${name}_bucket{${bucketLabels}} ${bucket.count}`);
+                    }
+                    lines.push(`${name}_sum{${labelsStr}} ${metric.sum}`);
+                    lines.push(`${name}_count{${labelsStr}} ${metric.count}`);
+                }
+                else {
+                    // Counter or Gauge
+                    if (labelsStr) {
+                        lines.push(`${name}{${labelsStr}} ${metric.value}`);
+                    }
+                    else {
+                        lines.push(`${name} ${metric.value}`);
+                    }
+                }
+            }
+        }
+        return lines.join('\n');
+    }
+    /**
+     * Get metrics as JSON for API response
+     */
+    getMetricsJson() {
+        this.uptimeSeconds.set({}, Math.floor((Date.now() - this.startTime) / 1000));
+        const allCollectors = [
+            this.tasksTotal,
+            this.tasksSuccessTotal,
+            this.tasksFailedTotal,
+            this.taskDurationMs,
+            this.cyclesTotal,
+            this.cycleTasksDiscovered,
+            this.cycleDurationMs,
+            this.workersActive,
+            this.workersQueued,
+            this.buildsTotal,
+            this.buildsSuccessTotal,
+            this.buildDurationMs,
+            this.testsTotal,
+            this.testsSuccessTotal,
+            this.testDurationMs,
+            this.githubApiCallsTotal,
+            this.githubApiErrorsTotal,
+            this.prsCreatedTotal,
+            this.prsMergedTotal,
+            this.errorsTotal,
+            this.healthStatus,
+            this.uptimeSeconds,
+            this.claudeApiCallsTotal,
+            this.claudeApiErrorsTotal,
+            this.claudeToolUsageTotal,
+        ];
+        const result = {};
+        for (const collector of allCollectors) {
+            const metrics = collector.getMetrics();
+            if (metrics.length > 0) {
+                result[collector.getName()] = metrics;
+            }
+        }
+        return result;
+    }
+    formatLabels(labels) {
+        const entries = Object.entries(labels);
+        if (entries.length === 0)
+            return '';
+        return entries
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => `${k}="${this.escapeLabel(v)}"`)
+            .join(',');
+    }
+    escapeLabel(value) {
+        return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    }
+    /**
+     * Reset all metrics (useful for testing)
+     */
+    reset() {
+        this.startTime = Date.now();
+        // Note: Individual metric values would need to be cleared
+        // This is intentionally not implemented to preserve accumulated metrics
+    }
+}
+// Global metrics instance
+export const metrics = new MetricsRegistry();
+// Re-export classes for custom metrics
+export { Counter, Gauge, Histogram };
+//# sourceMappingURL=metrics.js.map

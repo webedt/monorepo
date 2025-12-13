@@ -3,17 +3,28 @@ import { simpleGit } from 'simple-git';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { logger } from '../utils/logger.js';
+import { logger, generateCorrelationId } from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
 import { StructuredError, ExecutionError, ErrorCode, withRetry, } from '../utils/errors.js';
 import { createChatSession, updateChatSession, addMessage, addEvent, generateSessionPath, } from '../db/index.js';
 export class Worker {
     options;
     workerId;
     log;
+    repository;
     constructor(options, workerId) {
         this.options = options;
         this.workerId = workerId;
         this.log = logger.child(`Worker-${workerId}`);
+        // Extract repository identifier from URL for metrics
+        this.repository = this.extractRepoName(options.repoUrl);
+    }
+    /**
+     * Extract repository name from URL for metrics labeling
+     */
+    extractRepoName(repoUrl) {
+        const match = repoUrl.match(/github\.com[\/:]([^\/]+\/[^\/]+?)(?:\.git)?$/);
+        return match ? match[1] : repoUrl;
     }
     /**
      * Get error context for debugging
@@ -47,7 +58,16 @@ export class Worker {
     async execute(task) {
         const startTime = Date.now();
         const { issue, branchName } = task;
-        this.log.info(`Starting task: ${issue.title}`);
+        // Generate correlation ID for this task execution
+        const correlationId = generateCorrelationId();
+        const taskLog = this.log.withCorrelationId(correlationId);
+        taskLog.info(`Starting task: ${issue.title}`, {
+            issueNumber: issue.number,
+            branchName,
+            workerId: this.workerId,
+        });
+        // Track Claude API call
+        metrics.claudeApiCallsTotal.inc({ repository: this.repository });
         // Create workspace directory for this task
         const taskDir = join(this.options.workDir, `task-${issue.number}-${Date.now()}`);
         // Create chat session if database logging is enabled
@@ -64,13 +84,18 @@ export class Worker {
                     provider: 'claude',
                 });
                 chatSessionId = session.id;
-                this.log.debug(`Created chat session: ${chatSessionId}`);
-                // Log initial user message
+                taskLog.debug(`Created chat session: ${chatSessionId}`);
+                // Log initial user message with correlation ID
                 await addMessage(chatSessionId, 'user', `Implement GitHub Issue #${issue.number}: ${issue.title}\n\n${issue.body || 'No description provided.'}`);
-                await addEvent(chatSessionId, 'session_start', { type: 'session_start', message: 'Autonomous worker starting task' });
+                await addEvent(chatSessionId, 'session_start', {
+                    type: 'session_start',
+                    message: 'Autonomous worker starting task',
+                    correlationId,
+                    workerId: this.workerId,
+                });
             }
             catch (error) {
-                this.log.warn(`Failed to create chat session: ${error.message}`);
+                taskLog.warn(`Failed to create chat session: ${error.message}`);
             }
         }
         try {
@@ -104,17 +129,24 @@ export class Worker {
             // Check if there are any changes
             const hasChanges = await this.hasChanges(repoDir);
             if (!hasChanges) {
-                this.log.warn('No changes made by Claude');
+                taskLog.warn('No changes made by Claude');
                 if (chatSessionId) {
                     await addMessage(chatSessionId, 'system', 'No changes were made by Claude');
                     await updateChatSession(chatSessionId, { status: 'completed', completedAt: new Date() });
                 }
+                const duration = Date.now() - startTime;
+                // Record task completion (failure - no changes)
+                metrics.recordTaskCompletion(false, duration, {
+                    repository: this.repository,
+                    taskType: 'issue',
+                    workerId: this.workerId,
+                });
                 return {
                     success: false,
                     issue,
                     branchName,
                     error: 'No changes were made',
-                    duration: Date.now() - startTime,
+                    duration,
                     chatSessionId,
                 };
             }
@@ -128,20 +160,56 @@ export class Worker {
                 await addMessage(chatSessionId, 'assistant', `Successfully committed and pushed changes.\n\nCommit: ${commitSha}\nBranch: ${branchName}`);
                 await updateChatSession(chatSessionId, { status: 'completed', completedAt: new Date() });
             }
-            this.log.success(`Task completed: ${issue.title}`);
+            const duration = Date.now() - startTime;
+            // Record successful task completion
+            metrics.recordTaskCompletion(true, duration, {
+                repository: this.repository,
+                taskType: 'issue',
+                workerId: this.workerId,
+            });
+            taskLog.success(`Task completed: ${issue.title}`);
+            taskLog.info(`Task metrics`, {
+                duration,
+                issueNumber: issue.number,
+                commitSha,
+            });
             return {
                 success: true,
                 issue,
                 branchName,
                 commitSha,
-                duration: Date.now() - startTime,
+                duration,
                 chatSessionId,
             };
         }
         catch (error) {
             // Wrap the error with structured context
             const structuredError = this.wrapExecutionError(error, ErrorCode.INTERNAL_ERROR, `Task execution failed: ${error.message}`, task);
-            this.log.structuredError(structuredError, {
+            const duration = Date.now() - startTime;
+            // Record error metrics
+            metrics.recordError({
+                repository: this.repository,
+                taskType: 'issue',
+                workerId: this.workerId,
+                issueNumber: issue.number,
+                branchName,
+                errorCode: structuredError.code,
+                severity: structuredError.severity,
+                isRetryable: structuredError.isRetryable,
+                component: 'Worker',
+                operation: 'execute',
+            });
+            // Record Claude API error if applicable
+            if (structuredError.code.startsWith('CLAUDE_')) {
+                metrics.claudeApiErrorsTotal.inc({ repository: this.repository });
+            }
+            // Record failed task completion
+            metrics.recordTaskCompletion(false, duration, {
+                repository: this.repository,
+                taskType: 'issue',
+                workerId: this.workerId,
+            });
+            taskLog.structuredError(structuredError, {
                 context: this.getErrorContext('execute', task),
                 includeStack: true,
                 includeRecovery: true,
@@ -156,6 +224,7 @@ export class Worker {
                     isRetryable: structuredError.isRetryable,
                     recoveryActions: structuredError.getRecoverySuggestions(),
                     stack: structuredError.stack,
+                    correlationId,
                 });
                 await updateChatSession(chatSessionId, { status: 'error', completedAt: new Date() });
             }
@@ -164,7 +233,7 @@ export class Worker {
                 issue,
                 branchName,
                 error: `[${structuredError.code}] ${structuredError.message}`,
-                duration: Date.now() - startTime,
+                duration,
                 chatSessionId,
             };
         }
@@ -287,6 +356,11 @@ export class Worker {
                                 const toolName = block.name;
                                 const toolInput = block.input;
                                 this.log.debug(`Tool: ${toolName}`);
+                                // Record tool usage in metrics
+                                metrics.recordToolUsage(toolName, {
+                                    repository: this.repository,
+                                    workerId: this.workerId,
+                                });
                                 // Log tool use event to database
                                 if (chatSessionId) {
                                     await addEvent(chatSessionId, 'tool_use', {

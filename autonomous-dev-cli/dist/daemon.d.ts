@@ -1,8 +1,11 @@
+import { type LogFormat } from './utils/logger.js';
 export interface DaemonOptions {
     configPath?: string;
     dryRun?: boolean;
     verbose?: boolean;
     singleCycle?: boolean;
+    logFormat?: LogFormat;
+    monitoringPort?: number;
 }
 export interface CycleResult {
     success: boolean;
@@ -21,6 +24,8 @@ export declare class Daemon {
     private options;
     private userId;
     private enableDatabaseLogging;
+    private monitoringServer;
+    private repository;
     constructor(options?: DaemonOptions);
     start(): Promise<void>;
     /**
@@ -32,6 +37,10 @@ export declare class Daemon {
      */
     private getErrorContext;
     stop(): Promise<void>;
+    /**
+     * Start the monitoring server for health checks and metrics
+     */
+    private startMonitoringServer;
     private initialize;
     private shutdown;
     private runCycle;

@@ -44,16 +44,24 @@ export declare const ConfigSchema: z.ZodObject<{
         excludePaths: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         /** Label applied to auto-created GitHub issues */
         issueLabel: z.ZodDefault<z.ZodString>;
+        /** Maximum directory depth for codebase scanning (1-20, default: 10) */
+        maxDepth: z.ZodDefault<z.ZodNumber>;
+        /** Maximum number of files to scan (100-50000, default: 10000) */
+        maxFiles: z.ZodDefault<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
         tasksPerCycle: number;
         maxOpenIssues: number;
         excludePaths: string[];
         issueLabel: string;
+        maxDepth: number;
+        maxFiles: number;
     }, {
         tasksPerCycle?: number | undefined;
         maxOpenIssues?: number | undefined;
         excludePaths?: string[] | undefined;
         issueLabel?: string | undefined;
+        maxDepth?: number | undefined;
+        maxFiles?: number | undefined;
     }>;
     /**
      * Execution Settings
@@ -213,6 +221,8 @@ export declare const ConfigSchema: z.ZodObject<{
         maxOpenIssues: number;
         excludePaths: string[];
         issueLabel: string;
+        maxDepth: number;
+        maxFiles: number;
     };
     execution: {
         parallelWorkers: number;
@@ -260,6 +270,8 @@ export declare const ConfigSchema: z.ZodObject<{
         maxOpenIssues?: number | undefined;
         excludePaths?: string[] | undefined;
         issueLabel?: string | undefined;
+        maxDepth?: number | undefined;
+        maxFiles?: number | undefined;
     };
     execution: {
         parallelWorkers?: number | undefined;

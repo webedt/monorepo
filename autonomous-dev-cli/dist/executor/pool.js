@@ -1,5 +1,30 @@
 import { Worker } from './worker.js';
 import { logger } from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
+import * as os from 'os';
+/** Priority weights for sorting tasks */
+const PRIORITY_WEIGHTS = {
+    critical: 100,
+    high: 75,
+    medium: 50,
+    low: 25,
+};
+/** Category-based priority adjustments */
+const CATEGORY_PRIORITY_BOOST = {
+    security: 30,
+    bugfix: 20,
+    feature: 0,
+    refactor: -5,
+    docs: -10,
+    test: -5,
+    chore: -15,
+};
+/** Timeout multipliers based on complexity */
+const COMPLEXITY_TIMEOUT_MULTIPLIER = {
+    simple: 0.5,
+    moderate: 1.0,
+    complex: 2.0,
+};
 export class WorkerPool {
     options;
     activeWorkers = new Map();
@@ -7,20 +32,262 @@ export class WorkerPool {
     results = [];
     isRunning = false;
     workerIdCounter = 0;
+    repository;
+    scalingConfig;
+    currentWorkerLimit;
+    scaleCheckInterval = null;
+    workerTaskMap = new Map(); // Maps worker ID to assigned task
+    taskGroupWorkers = new Map(); // Maps group ID to preferred worker ID
+    /** Default scaling configuration */
+    static DEFAULT_SCALING_CONFIG = {
+        minWorkers: 1,
+        maxWorkers: 10,
+        cpuThresholdHigh: 80,
+        cpuThresholdLow: 40,
+        memoryThresholdHigh: 85,
+        memoryThresholdLow: 50,
+        scaleCheckIntervalMs: 10000,
+    };
     constructor(options) {
         this.options = options;
-        logger.info(`Worker pool initialized with ${options.maxWorkers} max workers`);
+        this.repository = this.extractRepoName(options.repoUrl);
+        // Initialize scaling configuration
+        this.scalingConfig = {
+            ...WorkerPool.DEFAULT_SCALING_CONFIG,
+            maxWorkers: options.maxWorkers,
+            ...options.scalingConfig,
+        };
+        // Compute initial worker limit based on system resources
+        this.currentWorkerLimit = this.computeOptimalWorkerCount();
+        logger.info(`Worker pool initialized`, {
+            maxWorkers: options.maxWorkers,
+            initialWorkerLimit: this.currentWorkerLimit,
+            enableDynamicScaling: options.enableDynamicScaling ?? false,
+            repository: this.repository,
+        });
+        // Initialize worker pool metrics
+        metrics.updateWorkerPoolStatus(0, 0);
+    }
+    /**
+     * Extract repository name from URL for metrics labeling
+     */
+    extractRepoName(repoUrl) {
+        const match = repoUrl.match(/github\.com[\/:]([^\/]+\/[^\/]+?)(?:\.git)?$/);
+        return match ? match[1] : repoUrl;
+    }
+    /**
+     * Update worker pool metrics
+     */
+    updateMetrics() {
+        metrics.updateWorkerPoolStatus(this.activeWorkers.size, this.taskQueue.length);
+    }
+    /**
+     * Get current system resource utilization
+     */
+    getSystemResources() {
+        const cpuCores = os.cpus().length;
+        const totalMemoryMB = Math.round(os.totalmem() / (1024 * 1024));
+        const freeMemoryMB = Math.round(os.freemem() / (1024 * 1024));
+        const memoryUsagePercent = Math.round(((totalMemoryMB - freeMemoryMB) / totalMemoryMB) * 100);
+        // Calculate CPU usage from load average (1 minute)
+        const loadAvg = os.loadavg()[0];
+        const cpuUsagePercent = Math.round((loadAvg / cpuCores) * 100);
+        return {
+            cpuCores,
+            cpuUsagePercent,
+            freeMemoryMB,
+            totalMemoryMB,
+            memoryUsagePercent,
+        };
+    }
+    /**
+     * Compute optimal worker count based on system resources
+     */
+    computeOptimalWorkerCount() {
+        const resources = this.getSystemResources();
+        const { minWorkers, maxWorkers, cpuThresholdHigh, cpuThresholdLow, memoryThresholdHigh, memoryThresholdLow } = this.scalingConfig;
+        // Start with CPU-based scaling
+        let targetWorkers;
+        if (resources.cpuUsagePercent >= cpuThresholdHigh || resources.memoryUsagePercent >= memoryThresholdHigh) {
+            // High resource usage - use minimum workers
+            targetWorkers = minWorkers;
+        }
+        else if (resources.cpuUsagePercent <= cpuThresholdLow && resources.memoryUsagePercent <= memoryThresholdLow) {
+            // Low resource usage - can use more workers
+            // Scale based on available CPU cores, but cap at maxWorkers
+            targetWorkers = Math.min(resources.cpuCores, maxWorkers);
+        }
+        else {
+            // Medium resource usage - scale proportionally
+            const cpuFactor = 1 - (resources.cpuUsagePercent - cpuThresholdLow) / (cpuThresholdHigh - cpuThresholdLow);
+            const memFactor = 1 - (resources.memoryUsagePercent - memoryThresholdLow) / (memoryThresholdHigh - memoryThresholdLow);
+            const scaleFactor = Math.min(cpuFactor, memFactor);
+            targetWorkers = Math.round(minWorkers + (maxWorkers - minWorkers) * scaleFactor);
+        }
+        // Clamp to valid range
+        return Math.max(minWorkers, Math.min(maxWorkers, targetWorkers));
+    }
+    /**
+     * Start dynamic scaling monitor
+     */
+    startScalingMonitor() {
+        if (!this.options.enableDynamicScaling || this.scaleCheckInterval) {
+            return;
+        }
+        this.scaleCheckInterval = setInterval(() => {
+            const newLimit = this.computeOptimalWorkerCount();
+            if (newLimit !== this.currentWorkerLimit) {
+                const oldLimit = this.currentWorkerLimit;
+                this.currentWorkerLimit = newLimit;
+                logger.info(`Dynamic scaling: worker limit changed ${oldLimit} -> ${newLimit}`, {
+                    resources: this.getSystemResources(),
+                    activeWorkers: this.activeWorkers.size,
+                    queuedTasks: this.taskQueue.length,
+                });
+                // If we can add more workers and have tasks, start them
+                if (newLimit > oldLimit) {
+                    while (this.activeWorkers.size < this.currentWorkerLimit && this.taskQueue.length > 0 && this.isRunning) {
+                        this.startNextTask();
+                    }
+                }
+            }
+        }, this.scalingConfig.scaleCheckIntervalMs);
+    }
+    /**
+     * Stop dynamic scaling monitor
+     */
+    stopScalingMonitor() {
+        if (this.scaleCheckInterval) {
+            clearInterval(this.scaleCheckInterval);
+            this.scaleCheckInterval = null;
+        }
+    }
+    /**
+     * Calculate priority score for a task
+     */
+    calculatePriorityScore(task) {
+        const metadata = task.metadata;
+        if (!metadata) {
+            return PRIORITY_WEIGHTS.medium; // Default priority
+        }
+        let score = PRIORITY_WEIGHTS[metadata.priority ?? 'medium'];
+        // Apply category boost
+        if (metadata.category) {
+            score += CATEGORY_PRIORITY_BOOST[metadata.category] ?? 0;
+        }
+        // Boost complexity-adjusted tasks (simple tasks get slight boost for quick wins)
+        if (metadata.complexity === 'simple') {
+            score += 5;
+        }
+        else if (metadata.complexity === 'complex') {
+            score -= 5;
+        }
+        return score;
+    }
+    /**
+     * Generate a group ID for a task based on affected paths
+     */
+    generateGroupId(task) {
+        const paths = task.metadata?.affectedPaths;
+        if (!paths || paths.length === 0) {
+            return undefined;
+        }
+        // Find common directory prefix from affected paths
+        const directories = paths.map(p => {
+            // Extract directory from path (handle both file paths and directory paths)
+            const parts = p.split('/');
+            // Remove filename if present (has extension or is a known file pattern)
+            if (parts.length > 1 && (parts[parts.length - 1].includes('.') || !parts[parts.length - 1])) {
+                parts.pop();
+            }
+            return parts.slice(0, 2).join('/'); // Use first two path components
+        });
+        // Use the most common directory as group ID
+        const dirCounts = new Map();
+        for (const dir of directories) {
+            dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+        }
+        // Return the most common directory, or undefined if no clear winner
+        let maxCount = 0;
+        let groupDir;
+        for (const [dir, count] of dirCounts) {
+            if (count > maxCount && dir.length > 0) {
+                maxCount = count;
+                groupDir = dir;
+            }
+        }
+        return groupDir ? `group:${groupDir}` : undefined;
+    }
+    /**
+     * Sort task queue by priority (highest first)
+     */
+    sortTaskQueue() {
+        this.taskQueue.sort((a, b) => {
+            const scoreA = a.priorityScore ?? this.calculatePriorityScore(a);
+            const scoreB = b.priorityScore ?? this.calculatePriorityScore(b);
+            return scoreB - scoreA; // Higher score = higher priority
+        });
+    }
+    /**
+     * Select the next task, preferring tasks from the same group as a worker
+     */
+    selectNextTask(preferredGroupId) {
+        if (this.taskQueue.length === 0) {
+            return undefined;
+        }
+        // If we have a preferred group, try to find a task from that group
+        if (preferredGroupId) {
+            const groupTaskIndex = this.taskQueue.findIndex(t => t.groupId === preferredGroupId);
+            if (groupTaskIndex !== -1) {
+                return this.taskQueue.splice(groupTaskIndex, 1)[0];
+            }
+        }
+        // Otherwise, take the highest priority task
+        return this.taskQueue.shift();
+    }
+    /**
+     * Get task-specific timeout based on complexity
+     */
+    getTaskTimeout(task) {
+        const baseTimeout = this.options.timeoutMinutes * 60 * 1000;
+        const complexity = task.metadata?.complexity ?? 'moderate';
+        const multiplier = COMPLEXITY_TIMEOUT_MULTIPLIER[complexity];
+        return Math.round(baseTimeout * multiplier);
     }
     async executeTasks(tasks) {
         this.isRunning = true;
         this.results = [];
-        this.taskQueue = tasks.map((task, index) => ({
-            ...task,
-            id: `task-${index + 1}`,
-        }));
-        logger.info(`Executing ${tasks.length} tasks with up to ${this.options.maxWorkers} workers`);
+        this.workerTaskMap.clear();
+        this.taskGroupWorkers.clear();
+        // Convert tasks to PoolTasks with metadata enrichment
+        this.taskQueue = tasks.map((task, index) => {
+            const poolTask = {
+                ...task,
+                id: `task-${index + 1}`,
+                metadata: this.extractTaskMetadata(task),
+            };
+            // Calculate priority score and group ID
+            poolTask.priorityScore = this.calculatePriorityScore(poolTask);
+            poolTask.groupId = this.generateGroupId(poolTask);
+            return poolTask;
+        });
+        // Sort by priority (highest first)
+        this.sortTaskQueue();
+        // Get effective worker limit based on current resources
+        const effectiveWorkerLimit = Math.min(this.currentWorkerLimit, this.options.maxWorkers);
+        logger.info(`Executing ${tasks.length} tasks with up to ${effectiveWorkerLimit} workers`, {
+            taskCount: tasks.length,
+            maxWorkers: this.options.maxWorkers,
+            effectiveWorkerLimit,
+            enableDynamicScaling: this.options.enableDynamicScaling ?? false,
+            systemResources: this.getSystemResources(),
+        });
+        // Update initial metrics
+        this.updateMetrics();
+        // Start dynamic scaling monitor if enabled
+        this.startScalingMonitor();
         // Start initial workers
-        while (this.activeWorkers.size < this.options.maxWorkers && this.taskQueue.length > 0) {
+        while (this.activeWorkers.size < effectiveWorkerLimit && this.taskQueue.length > 0) {
             this.startNextTask();
         }
         // Wait for all tasks to complete
@@ -32,30 +299,112 @@ export class WorkerPool {
                     await promise;
                     return [id];
                 }));
-                // Remove completed worker
+                // Get the completed task's group for worker affinity
+                const completedTask = this.workerTaskMap.get(completedId);
+                const completedGroupId = completedTask?.groupId;
+                // Clean up worker tracking
                 this.activeWorkers.delete(completedId);
+                this.workerTaskMap.delete(completedId);
+                // Update metrics after worker completion
+                this.updateMetrics();
                 // Start next task if available
                 if (this.taskQueue.length > 0 && this.isRunning) {
-                    this.startNextTask();
+                    // Use worker affinity: try to assign same-group tasks to same worker
+                    this.startNextTask(completedGroupId);
                 }
             }
         }
-        logger.info(`All tasks completed: ${this.results.filter(r => r.success).length}/${this.results.length} succeeded`);
+        // Stop dynamic scaling monitor
+        this.stopScalingMonitor();
+        const succeeded = this.results.filter(r => r.success).length;
+        const failed = this.results.filter(r => !r.success).length;
+        logger.info(`All tasks completed: ${succeeded}/${this.results.length} succeeded`, {
+            succeeded,
+            failed,
+            total: this.results.length,
+        });
+        // Reset pool metrics
+        metrics.updateWorkerPoolStatus(0, 0);
         return this.results;
     }
-    startNextTask() {
-        const task = this.taskQueue.shift();
+    /**
+     * Extract task metadata from issue labels and body
+     */
+    extractTaskMetadata(task) {
+        const metadata = {};
+        const issue = task.issue;
+        // Extract priority from labels (priority:high, priority:medium, etc.)
+        const priorityLabel = issue.labels.find(l => l.startsWith('priority:'));
+        if (priorityLabel) {
+            const priority = priorityLabel.replace('priority:', '');
+            if (['critical', 'high', 'medium', 'low'].includes(priority)) {
+                metadata.priority = priority;
+            }
+        }
+        // Extract category from labels (type:bugfix, type:feature, etc.)
+        const typeLabel = issue.labels.find(l => l.startsWith('type:'));
+        if (typeLabel) {
+            const category = typeLabel.replace('type:', '');
+            if (['security', 'bugfix', 'feature', 'refactor', 'docs', 'test', 'chore'].includes(category)) {
+                metadata.category = category;
+            }
+        }
+        // Extract complexity from labels (complexity:simple, complexity:moderate, etc.)
+        const complexityLabel = issue.labels.find(l => l.startsWith('complexity:'));
+        if (complexityLabel) {
+            const complexity = complexityLabel.replace('complexity:', '');
+            if (['simple', 'moderate', 'complex'].includes(complexity)) {
+                metadata.complexity = complexity;
+            }
+        }
+        // Extract affected paths from issue body
+        if (issue.body) {
+            const pathsMatch = issue.body.match(/## Affected Paths\s*([\s\S]*?)(?=\n##|---|\n\n\n|$)/);
+            if (pathsMatch) {
+                const pathsSection = pathsMatch[1];
+                const paths = pathsSection.match(/`([^`]+)`/g);
+                if (paths) {
+                    metadata.affectedPaths = paths.map(p => p.replace(/`/g, ''));
+                }
+            }
+        }
+        return metadata;
+    }
+    startNextTask(preferredGroupId) {
+        // Select task with group affinity preference
+        const task = this.selectNextTask(preferredGroupId);
         if (!task)
             return;
         const workerId = `worker-${++this.workerIdCounter}`;
-        logger.info(`Starting ${task.id} with ${workerId}: ${task.issue.title}`);
+        // Track worker-task relationship for group affinity
+        this.workerTaskMap.set(task.id, task);
+        // Track group-worker relationship for future task assignment
+        if (task.groupId) {
+            this.taskGroupWorkers.set(task.groupId, workerId);
+        }
+        // Calculate task-specific timeout
+        const taskTimeoutMs = this.getTaskTimeout(task);
+        const taskTimeoutMinutes = Math.round(taskTimeoutMs / 60000);
+        logger.info(`Starting ${task.id} with ${workerId}: ${task.issue.title}`, {
+            taskId: task.id,
+            workerId,
+            issueNumber: task.issue.number,
+            priority: task.metadata?.priority ?? 'medium',
+            category: task.metadata?.category ?? 'unknown',
+            complexity: task.metadata?.complexity ?? 'moderate',
+            priorityScore: task.priorityScore,
+            groupId: task.groupId,
+            timeoutMinutes: taskTimeoutMinutes,
+        });
+        // Update metrics after task is dequeued
+        this.updateMetrics();
         const worker = new Worker({
             workDir: this.options.workDir,
             repoUrl: this.options.repoUrl,
             baseBranch: this.options.baseBranch,
             githubToken: this.options.githubToken,
             claudeAuth: this.options.claudeAuth,
-            timeoutMinutes: this.options.timeoutMinutes,
+            timeoutMinutes: taskTimeoutMinutes, // Use task-specific timeout
             // Database logging options
             userId: this.options.userId,
             repoOwner: this.options.repoOwner,
@@ -69,9 +418,21 @@ export class WorkerPool {
             });
             if (result.success) {
                 logger.success(`${task.id} completed: ${task.issue.title}`);
+                logger.debug(`Task completion details`, {
+                    taskId: task.id,
+                    priority: task.metadata?.priority,
+                    groupId: task.groupId,
+                    duration: result.duration,
+                });
             }
             else {
                 logger.failure(`${task.id} failed: ${result.error}`);
+                logger.debug(`Task failure details`, {
+                    taskId: task.id,
+                    priority: task.metadata?.priority,
+                    groupId: task.groupId,
+                    duration: result.duration,
+                });
             }
             return result;
         });
@@ -79,16 +440,39 @@ export class WorkerPool {
     }
     stop() {
         this.isRunning = false;
+        this.stopScalingMonitor();
         logger.warn('Worker pool stop requested');
     }
     getStatus() {
+        const groupIds = new Set(this.taskQueue.map(t => t.groupId).filter(Boolean));
         return {
             active: this.activeWorkers.size,
             queued: this.taskQueue.length,
             completed: this.results.length,
             succeeded: this.results.filter((r) => r.success).length,
             failed: this.results.filter((r) => !r.success).length,
+            currentWorkerLimit: this.currentWorkerLimit,
+            systemResources: this.getSystemResources(),
+            taskGroups: groupIds.size,
         };
+    }
+    /**
+     * Get the current scaling configuration
+     */
+    getScalingConfig() {
+        return { ...this.scalingConfig };
+    }
+    /**
+     * Update scaling configuration at runtime
+     */
+    updateScalingConfig(config) {
+        this.scalingConfig = { ...this.scalingConfig, ...config };
+        // Recompute worker limit with new config
+        this.currentWorkerLimit = this.computeOptimalWorkerCount();
+        logger.info('Scaling configuration updated', {
+            config: this.scalingConfig,
+            newWorkerLimit: this.currentWorkerLimit,
+        });
     }
 }
 export function createWorkerPool(options) {

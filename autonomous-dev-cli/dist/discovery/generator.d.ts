@@ -1,11 +1,20 @@
+import { type AnalyzerConfig } from './analyzer.js';
 import { type Issue } from '../github/issues.js';
+/** Task priority levels aligned with worker pool prioritization */
+export type DiscoveredTaskPriority = 'critical' | 'high' | 'medium' | 'low';
+/** Task category for classification - aligned with worker pool */
+export type DiscoveredTaskCategory = 'security' | 'bugfix' | 'feature' | 'refactor' | 'docs' | 'test' | 'chore';
+/** Task complexity - affects timeout and resource allocation */
+export type DiscoveredTaskComplexity = 'simple' | 'moderate' | 'complex';
 export interface DiscoveredTask {
     title: string;
     description: string;
-    priority: 'high' | 'medium' | 'low';
-    category: 'feature' | 'bugfix' | 'refactor' | 'docs' | 'test' | 'chore';
-    estimatedComplexity: 'simple' | 'moderate' | 'complex';
+    priority: DiscoveredTaskPriority;
+    category: DiscoveredTaskCategory;
+    estimatedComplexity: DiscoveredTaskComplexity;
     affectedPaths: string[];
+    /** Optional estimated duration in minutes for better scheduling */
+    estimatedDurationMinutes?: number;
 }
 export interface TaskGeneratorOptions {
     claudeAuth: {
@@ -17,6 +26,7 @@ export interface TaskGeneratorOptions {
     tasksPerCycle: number;
     existingIssues: Issue[];
     repoContext?: string;
+    analyzerConfig?: AnalyzerConfig;
 }
 export declare class TaskGenerator {
     private claudeAuth;
@@ -25,6 +35,7 @@ export declare class TaskGenerator {
     private tasksPerCycle;
     private existingIssues;
     private repoContext;
+    private analyzerConfig;
     constructor(options: TaskGeneratorOptions);
     generateTasks(): Promise<DiscoveredTask[]>;
     private buildPrompt;

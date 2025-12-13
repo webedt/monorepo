@@ -2,13 +2,24 @@ import { CodebaseAnalyzer, type CodebaseAnalysis, type AnalyzerConfig } from './
 import { type Issue } from '../github/issues.js';
 import { logger } from '../utils/logger.js';
 
+/** Task priority levels aligned with worker pool prioritization */
+export type DiscoveredTaskPriority = 'critical' | 'high' | 'medium' | 'low';
+
+/** Task category for classification - aligned with worker pool */
+export type DiscoveredTaskCategory = 'security' | 'bugfix' | 'feature' | 'refactor' | 'docs' | 'test' | 'chore';
+
+/** Task complexity - affects timeout and resource allocation */
+export type DiscoveredTaskComplexity = 'simple' | 'moderate' | 'complex';
+
 export interface DiscoveredTask {
   title: string;
   description: string;
-  priority: 'high' | 'medium' | 'low';
-  category: 'feature' | 'bugfix' | 'refactor' | 'docs' | 'test' | 'chore';
-  estimatedComplexity: 'simple' | 'moderate' | 'complex';
+  priority: DiscoveredTaskPriority;
+  category: DiscoveredTaskCategory;
+  estimatedComplexity: DiscoveredTaskComplexity;
   affectedPaths: string[];
+  /** Optional estimated duration in minutes for better scheduling */
+  estimatedDurationMinutes?: number;
 }
 
 export interface TaskGeneratorOptions {
@@ -87,17 +98,19 @@ Identify exactly ${this.tasksPerCycle} actionable improvements for this codebase
 4. **Incremental** - Build on existing patterns, don't require major rewrites
 
 ### Categories to consider:
-- **feature**: New functionality users will notice
+- **security**: Security vulnerabilities, auth issues, data protection
 - **bugfix**: Fix existing broken behavior
+- **feature**: New functionality users will notice
 - **refactor**: Improve code quality without changing behavior
 - **docs**: Improve documentation
 - **test**: Add or improve tests
 - **chore**: Maintenance tasks (dependencies, configs)
 
 ### Priorities:
-- **high**: Critical issues, user-facing bugs, security
+- **critical**: Security vulnerabilities, data loss risks, production blockers
+- **high**: User-facing bugs, important regressions
 - **medium**: Important improvements, new features
-- **low**: Nice-to-have, cleanup
+- **low**: Nice-to-have, cleanup, minor improvements
 
 ### Complexity:
 - **simple**: < 1 hour, few files
@@ -112,10 +125,11 @@ Return a JSON array of tasks. Each task should have:
   - Why it's important
   - Acceptance criteria
   - Any relevant file paths or code references
-- priority: "high" | "medium" | "low"
-- category: "feature" | "bugfix" | "refactor" | "docs" | "test" | "chore"
+- priority: "critical" | "high" | "medium" | "low"
+- category: "security" | "bugfix" | "feature" | "refactor" | "docs" | "test" | "chore"
 - estimatedComplexity: "simple" | "moderate" | "complex"
 - affectedPaths: Array of file/directory paths that will likely be modified
+- estimatedDurationMinutes: Optional number estimating how long the task will take
 
 Example:
 \`\`\`json
@@ -126,7 +140,8 @@ Example:
     "priority": "medium",
     "category": "feature",
     "estimatedComplexity": "simple",
-    "affectedPaths": ["src/components/dashboard/", "src/styles/loading.css"]
+    "affectedPaths": ["src/components/dashboard/", "src/styles/loading.css"],
+    "estimatedDurationMinutes": 30
   }
 ]
 \`\`\`
@@ -183,14 +198,16 @@ Return ONLY the JSON array, no other text.`;
 
       // Validate tasks
       const validTasks = tasks.filter((task) => {
-        return (
+        const isValid = (
           typeof task.title === 'string' &&
           typeof task.description === 'string' &&
-          ['high', 'medium', 'low'].includes(task.priority) &&
-          ['feature', 'bugfix', 'refactor', 'docs', 'test', 'chore'].includes(task.category) &&
+          ['critical', 'high', 'medium', 'low'].includes(task.priority) &&
+          ['security', 'bugfix', 'feature', 'refactor', 'docs', 'test', 'chore'].includes(task.category) &&
           ['simple', 'moderate', 'complex'].includes(task.estimatedComplexity) &&
-          Array.isArray(task.affectedPaths)
+          Array.isArray(task.affectedPaths) &&
+          (task.estimatedDurationMinutes === undefined || typeof task.estimatedDurationMinutes === 'number')
         );
+        return isValid;
       });
 
       if (validTasks.length !== tasks.length) {
