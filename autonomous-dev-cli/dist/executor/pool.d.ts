@@ -2,6 +2,7 @@ import { type WorkerOptions, type WorkerTask, type WorkerResult } from './worker
 import { getDeadLetterQueue, type DeadLetterEntry } from '../utils/dead-letter-queue.js';
 import { type CircuitBreakerHealth } from '../utils/circuit-breaker.js';
 import { getErrorAggregator, type RecoveryStrategy } from '../errors/executor-errors.js';
+import { EventEmitter } from 'events';
 /** Task priority levels - higher value = higher priority */
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 /** Task category for classification */
@@ -45,6 +46,23 @@ export interface QueueConfig {
     /** Enable queue persistence for graceful shutdown (default: true) */
     enablePersistence: boolean;
 }
+/** Concurrency configuration for fine-grained control */
+export interface ConcurrencyConfig {
+    /** Minimum number of concurrent workers (default: 1) */
+    minConcurrency: number;
+    /** Maximum number of concurrent workers (default: CPU cores) */
+    maxConcurrency: number;
+    /** Target concurrency when system is idle (default: maxConcurrency / 2) */
+    targetConcurrency: number;
+    /** Time in ms to wait before scaling up (default: 5000) */
+    scaleUpDelayMs: number;
+    /** Time in ms to wait before scaling down (default: 10000) */
+    scaleDownDelayMs: number;
+    /** Enable adaptive concurrency based on task success rate (default: true) */
+    enableAdaptiveConcurrency: boolean;
+    /** Reduce concurrency when success rate drops below this (default: 0.7) */
+    successRateThreshold: number;
+}
 /** Execution history entry for audit trail */
 export interface ExecutionHistoryEntry {
     taskId: string;
@@ -82,6 +100,10 @@ export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
     scalingConfig?: Partial<ScalingConfig>;
     /** Optional queue configuration for memory management */
     queueConfig?: Partial<QueueConfig>;
+    /** Optional concurrency configuration for fine-grained control */
+    concurrencyConfig?: Partial<ConcurrencyConfig>;
+    /** Optional memory configuration for automatic cleanup */
+    memoryConfig?: Partial<MemoryConfig>;
     /** Enable dynamic scaling based on system resources */
     enableDynamicScaling?: boolean;
     /** Enable graceful degradation when services fail */
@@ -137,7 +159,51 @@ export interface PoolTask extends WorkerTask {
 export interface PoolResult extends WorkerResult {
     taskId: string;
 }
-export declare class WorkerPool {
+/** Worker pool metrics for monitoring and observability */
+export interface WorkerPoolMetrics {
+    /** Number of currently active workers */
+    activeWorkers: number;
+    /** Number of tasks in queue */
+    queuedTasks: number;
+    /** Total tasks completed successfully */
+    completedTasks: number;
+    /** Total tasks failed */
+    failedTasks: number;
+    /** Total tasks processed (completed + failed) */
+    totalProcessed: number;
+    /** Success rate as percentage (0-100) */
+    successRate: number;
+    /** Average task duration in milliseconds */
+    avgTaskDurationMs: number;
+    /** Maximum concurrent workers reached */
+    peakConcurrency: number;
+    /** Current memory usage in MB */
+    memoryUsageMB: number;
+    /** Memory usage at peak concurrency in MB */
+    peakMemoryUsageMB: number;
+    /** Current worker limit (may be adjusted by scaling) */
+    currentWorkerLimit: number;
+    /** Configured max workers */
+    maxWorkers: number;
+    /** Worker utilization percentage (0-100) */
+    utilizationPercent: number;
+    /** Time since pool started in milliseconds */
+    uptimeMs: number;
+    /** Tasks per minute throughput */
+    tasksPerMinute: number;
+}
+/** Memory monitoring configuration */
+export interface MemoryConfig {
+    /** Memory usage threshold in MB to trigger cleanup (default: 80% of available) */
+    cleanupThresholdMB: number;
+    /** Interval for memory checks in milliseconds (default: 30000) */
+    checkIntervalMs: number;
+    /** Enable automatic memory cleanup between tasks (default: true) */
+    enableAutoCleanup: boolean;
+    /** Force garbage collection if available (default: false) */
+    forceGC: boolean;
+}
+export declare class WorkerPool extends EventEmitter {
     private options;
     private activeWorkers;
     private taskQueue;
@@ -162,10 +228,30 @@ export declare class WorkerPool {
     private degradationCheckInterval;
     private consecutiveFailures;
     private failureThreshold;
+    private completionQueue;
+    private completionResolver;
+    private poolStartTime;
+    private peakConcurrency;
+    private peakMemoryUsageMB;
+    private totalTaskDurationMs;
+    private completedTaskCount;
+    private failedTaskCount;
+    private memoryConfig;
+    private memoryCheckInterval;
+    private lastMemoryCleanup;
+    private concurrencyConfig;
+    private lastScaleUpTime;
+    private lastScaleDownTime;
+    private recentSuccessRate;
+    private adaptiveConcurrencyLimit;
     /** Default scaling configuration */
     private static readonly DEFAULT_SCALING_CONFIG;
     /** Default queue configuration */
     private static readonly DEFAULT_QUEUE_CONFIG;
+    /** Default memory configuration */
+    private static readonly DEFAULT_MEMORY_CONFIG;
+    /** Default concurrency configuration */
+    private static readonly DEFAULT_CONCURRENCY_CONFIG;
     constructor(options: WorkerPoolOptions);
     /**
      * Extract repository name from URL for metrics labeling
@@ -191,6 +277,40 @@ export declare class WorkerPool {
      * Stop dynamic scaling monitor
      */
     private stopScalingMonitor;
+    /**
+     * Start memory monitoring for automatic cleanup
+     */
+    private startMemoryMonitor;
+    /**
+     * Stop memory monitoring
+     */
+    private stopMemoryMonitor;
+    /**
+     * Check memory usage and trigger cleanup if needed
+     */
+    private checkMemoryUsage;
+    /**
+     * Perform memory cleanup operations
+     */
+    private performMemoryCleanup;
+    /**
+     * Signal that a worker has completed (event-based tracking)
+     * This replaces the O(n) Promise.race() pattern with O(1) event-based completion
+     */
+    private signalWorkerCompletion;
+    /**
+     * Wait for the next worker completion using event-based tracking
+     * This is O(1) complexity compared to O(n) Promise.race()
+     */
+    private waitForWorkerCompletion;
+    /**
+     * Get comprehensive worker pool metrics
+     */
+    getPoolMetrics(): WorkerPoolMetrics;
+    /**
+     * Update peak concurrency tracking
+     */
+    private updatePeakConcurrency;
     /**
      * Start degradation monitoring
      */

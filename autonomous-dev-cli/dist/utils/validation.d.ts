@@ -1,8 +1,15 @@
 /**
  * Input validation utilities for CLI commands
  * Provides validation for command options with user-friendly error messages
+ *
+ * Security features:
+ * - Path traversal prevention for file paths
+ * - Input sanitization for shell-safe operations
+ * - Format validation for emails, URLs, and identifiers
+ * - Bounds checking for numeric inputs
  */
 import { ValidationError } from './errors.js';
+import { z } from 'zod';
 /**
  * Validation result with error details
  */
@@ -48,7 +55,79 @@ export declare const NUMERIC_RANGES: {
         readonly max: 100;
         readonly default: 10;
     };
+    readonly loopIntervalMs: {
+        readonly min: 0;
+        readonly max: 86400000;
+        readonly default: 60000;
+    };
+    readonly maxRetries: {
+        readonly min: 1;
+        readonly max: 10;
+        readonly default: 3;
+    };
+    readonly maxDepth: {
+        readonly min: 1;
+        readonly max: 20;
+        readonly default: 10;
+    };
+    readonly maxFiles: {
+        readonly min: 100;
+        readonly max: 50000;
+        readonly default: 10000;
+    };
 };
+/**
+ * Zod schema for validating email format
+ */
+export declare const EmailSchema: z.ZodString;
+/**
+ * Zod schema for validating GitHub repository owner
+ * Must be alphanumeric with hyphens, cannot start/end with hyphen
+ */
+export declare const GitHubOwnerSchema: z.ZodString;
+/**
+ * Zod schema for validating GitHub repository name
+ * Allows alphanumeric, dots, underscores, and hyphens
+ */
+export declare const GitHubRepoNameSchema: z.ZodEffects<z.ZodString, string, string>;
+/**
+ * Zod schema for validating file paths (no traversal)
+ */
+export declare const SafePathSchema: z.ZodEffects<z.ZodString, string, string>;
+/**
+ * Zod schema for environment variable names
+ */
+export declare const EnvVarNameSchema: z.ZodString;
+/**
+ * Check if a path contains path traversal attempts
+ * @param inputPath - The path to check
+ * @returns true if path traversal is detected
+ */
+export declare function containsPathTraversal(inputPath: string): boolean;
+/**
+ * Validate and sanitize a path to prevent path traversal attacks
+ * @param inputPath - The path to validate
+ * @param allowedBase - Optional base directory the path must be within
+ * @returns ValidationResult with sanitized path or error
+ */
+export declare function validatePath(inputPath: string, allowedBase?: string): ValidationResult & {
+    sanitizedPath?: string;
+};
+/**
+ * Validate workDir path for security
+ * Ensures the path is within allowed directories and doesn't contain traversal attacks
+ * @param workDir - The working directory path
+ * @returns ValidationResult with sanitized path or error
+ */
+export declare function validateWorkDir(workDir: string): ValidationResult & {
+    sanitizedPath?: string;
+};
+/**
+ * Validate email format before database queries
+ * @param email - Email address to validate
+ * @returns ValidationResult with error details if invalid
+ */
+export declare function validateEmail(email: string | undefined): ValidationResult;
 /**
  * Validate a config file path
  * @param configPath - Path to the config file
@@ -66,7 +145,7 @@ export declare function validateNumericParam(value: string | number | undefined,
     parsedValue?: number;
 };
 /**
- * Validate repository information format (owner/name)
+ * Validate repository information format (owner/name) using Zod schemas
  * @param owner - Repository owner
  * @param name - Repository name
  * @returns ValidationResult with error details if invalid
@@ -133,4 +212,25 @@ export declare function validateCLIOptions(options: {
  * @returns Formatted error message string
  */
 export declare function createMissingCredentialMessage(credentialType: 'github' | 'claude' | 'database'): string;
+/**
+ * Validate environment variables used by the CLI
+ * @param envVars - Object with environment variable names and values (defaults to process.env)
+ * @returns Object with validation results
+ */
+export declare function validateEnvironmentVariables(envVars?: Record<string, string | undefined>): {
+    isValid: boolean;
+    errors: {
+        envVar: string;
+        error: ValidationError;
+    }[];
+    warnings: {
+        envVar: string;
+        message: string;
+    }[];
+};
+/**
+ * Display environment variable validation errors
+ * @param result - Validation result from validateEnvironmentVariables
+ */
+export declare function displayEnvValidationErrors(result: ReturnType<typeof validateEnvironmentVariables>): void;
 //# sourceMappingURL=validation.d.ts.map

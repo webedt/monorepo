@@ -6,7 +6,7 @@ import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
 import { logger } from './utils/logger.js';
-import { validateConfigPath, validateNumericParam, validatePort, validateHost, validateRepoInfo, displayValidationError, createMissingCredentialMessage, NUMERIC_RANGES, } from './utils/validation.js';
+import { validateConfigPath, validateNumericParam, validatePort, validateHost, validateRepoInfo, validateEmail, displayValidationError, createMissingCredentialMessage, NUMERIC_RANGES, } from './utils/validation.js';
 import { StructuredError } from './utils/errors.js';
 import chalk from 'chalk';
 import { runConfigWizard, validateConfiguration, displayValidationResults, generateExampleConfig, } from './utils/configWizard.js';
@@ -316,8 +316,14 @@ program
     }
     try {
         const config = loadConfig(options.config);
-        // Load credentials
+        // Load credentials from database if configured
         if (config.credentials.databaseUrl && config.credentials.userEmail) {
+            // Validate email format before database query to prevent injection
+            const emailResult = validateEmail(config.credentials.userEmail);
+            if (!emailResult.valid) {
+                displayValidationError(emailResult);
+                process.exit(1);
+            }
             await initDatabase(config.credentials.databaseUrl);
             const creds = await getUserCredentials(config.credentials.userEmail);
             if (creds) {
@@ -455,8 +461,14 @@ program
             displayValidationError(repoResult);
             process.exit(1);
         }
-        // Load credentials
+        // Load credentials from database if configured
         if (config.credentials.databaseUrl && config.credentials.userEmail) {
+            // Validate email format before database query to prevent injection
+            const emailResult = validateEmail(config.credentials.userEmail);
+            if (!emailResult.valid) {
+                displayValidationError(emailResult);
+                process.exit(1);
+            }
             await initDatabase(config.credentials.databaseUrl);
             const creds = await getUserCredentials(config.credentials.userEmail);
             if (creds?.githubAccessToken) {

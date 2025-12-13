@@ -83,10 +83,12 @@ export interface MergeReadiness {
 export interface BranchManager {
     listBranches(): Promise<Branch[]>;
     getBranch(name: string): Promise<Branch | null>;
+    /** Get multiple branches in a batch (reduces API calls) */
+    getBranchesBatch(names: string[]): Promise<Map<string, Branch | null>>;
     createBranch(name: string, baseBranch: string): Promise<Branch>;
     deleteBranch(name: string): Promise<void>;
     branchExists(name: string): Promise<boolean>;
-    /** Get detailed branch protection rules */
+    /** Get detailed branch protection rules (cached) */
     getBranchProtectionRules(branch: string): Promise<BranchProtectionRules>;
     /** Check if a branch is protected */
     isBranchProtected(branch: string): Promise<boolean>;
@@ -94,7 +96,7 @@ export interface BranchManager {
     checkProtectionCompliance(branch: string, options?: MergeReadinessOptions): Promise<BranchProtectionCompliance>;
     /** Check if a branch is ready to be merged (all checks pass, up to date, etc.) */
     checkMergeReadiness(headBranch: string, baseBranch: string, options?: MergeReadinessOptions): Promise<MergeReadiness>;
-    /** Get the default branch for the repository */
+    /** Get the default branch for the repository (cached) */
     getDefaultBranch(): Promise<string>;
     /** Compare two branches and get the diff stats */
     compareBranches(base: string, head: string): Promise<{
@@ -103,6 +105,10 @@ export interface BranchManager {
         files: string[];
         commits: number;
     }>;
+    /** Invalidate branch cache */
+    invalidateCache(): void;
+    /** Invalidate a specific branch from cache */
+    invalidateBranch(name: string): void;
 }
 export declare function createBranchManager(client: GitHubClient): BranchManager;
 //# sourceMappingURL=branches.d.ts.map

@@ -1,12 +1,13 @@
 import { loadConfig } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
+import { validateEmail, validateWorkDir, validateRepoInfo, validateEnvironmentVariables, } from './utils/validation.js';
 import { discoverTasks, createDeduplicator, getParallelSafeTasks, initPersistentCache, } from './discovery/index.js';
 import { createPreviewSession, runInteractivePreview, PreviewSessionManager, } from './preview/index.js';
 import { createWorkerPool } from './executor/index.js';
 import { runEvaluation } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
-import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, startRequestLifecycle, endRequestLifecycle, initStructuredFileLogging, } from './utils/logger.js';
+import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, startRequestLifecycle, endRequestLifecycle, initStructuredFileLogging, setDebugMode, } from './utils/logger.js';
 import { getProgressManager, } from './utils/progress.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
@@ -57,6 +58,25 @@ export class Daemon {
             logger.setLevel(this.config.logging.level);
             logger.setIncludeCorrelationId(this.config.logging.includeCorrelationId);
             logger.setIncludeTimestamp(this.config.logging.includeTimestamp);
+            // Initialize debug mode from configuration
+            // Debug mode can be enabled via config, env vars, or verbose flag
+            const debugModeEnabled = this.config.logging.debugMode ||
+                process.env.DEBUG_MODE === 'true' ||
+                process.env.AUTONOMOUS_DEV_DEBUG === 'true' ||
+                options.verbose === true;
+            setDebugMode({
+                enabled: debugModeEnabled,
+                logClaudeInteractions: this.config.logging.logClaudeInteractions || debugModeEnabled,
+                logApiDetails: this.config.logging.logApiDetails || debugModeEnabled,
+            });
+            if (debugModeEnabled) {
+                logger.info('Debug mode enabled', {
+                    debugMode: debugModeEnabled,
+                    logClaudeInteractions: this.config.logging.logClaudeInteractions || debugModeEnabled,
+                    logApiDetails: this.config.logging.logApiDetails || debugModeEnabled,
+                    source: options.verbose ? 'verbose-flag' : (process.env.DEBUG_MODE || process.env.AUTONOMOUS_DEV_DEBUG ? 'environment' : 'config'),
+                });
+            }
             // Initialize structured file logging if enabled
             if (this.config.logging.enableStructuredFileLogging) {
                 this.structuredLogger = initStructuredFileLogging({
@@ -72,9 +92,10 @@ export class Daemon {
                 });
             }
         }
-        // Override with verbose flag if set
+        // Override with verbose flag if set (also enables debug mode)
         if (options.verbose) {
             logger.setLevel('debug');
+            setDebugMode({ enabled: true, logClaudeInteractions: true, logApiDetails: true });
         }
         // Override log format if explicitly set in options
         if (options.logFormat) {
@@ -518,10 +539,52 @@ export class Daemon {
     }
     async initialize() {
         logger.info('Initializing...');
+        // Validate environment variables at startup
+        const envResult = validateEnvironmentVariables();
+        if (!envResult.isValid) {
+            logger.warn('Environment variable validation found issues:');
+            for (const { envVar, error } of envResult.errors) {
+                logger.warn(`  ${envVar}: ${error.message}`);
+            }
+        }
+        if (envResult.warnings.length > 0) {
+            for (const { envVar, message } of envResult.warnings) {
+                logger.warn(`  ${envVar}: ${message}`);
+            }
+        }
+        // Validate repository configuration
+        const repoResult = validateRepoInfo(this.config.repo.owner, this.config.repo.name);
+        if (!repoResult.valid) {
+            throw new ConfigError(ErrorCode.CONFIG_VALIDATION_FAILED, repoResult.error?.message || 'Invalid repository configuration', {
+                field: 'repo',
+                context: this.getErrorContext('initialize'),
+                recoveryActions: repoResult.error?.recoveryActions || [],
+            });
+        }
+        // Validate workDir for path traversal
+        const workDirResult = validateWorkDir(this.config.execution.workDir);
+        if (!workDirResult.valid) {
+            throw new ConfigError(ErrorCode.CONFIG_VALIDATION_FAILED, workDirResult.error?.message || 'Invalid working directory', {
+                field: 'execution.workDir',
+                value: this.config.execution.workDir,
+                context: this.getErrorContext('initialize'),
+                recoveryActions: workDirResult.error?.recoveryActions || [],
+            });
+        }
         // Set repository identifier for metrics
         this.repository = `${this.config.repo.owner}/${this.config.repo.name}`;
         // Load credentials from database if configured
         if (this.config.credentials.databaseUrl && this.config.credentials.userEmail) {
+            // Validate email format before database query to prevent injection
+            const emailResult = validateEmail(this.config.credentials.userEmail);
+            if (!emailResult.valid) {
+                throw new ConfigError(ErrorCode.CONFIG_VALIDATION_FAILED, emailResult.error?.message || 'Invalid email format', {
+                    field: 'credentials.userEmail',
+                    value: this.config.credentials.userEmail,
+                    context: this.getErrorContext('initialize'),
+                    recoveryActions: emailResult.error?.recoveryActions || [],
+                });
+            }
             logger.info('Loading credentials from database...');
             await initDatabase(this.config.credentials.databaseUrl);
             const creds = await getUserCredentials(this.config.credentials.userEmail);

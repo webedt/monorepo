@@ -12,7 +12,49 @@ import { z } from 'zod';
  *
  * SECURITY: Credentials should NEVER be stored in config files.
  * Use environment variables exclusively for production credentials.
+ *
+ * INPUT VALIDATION:
+ * - All user inputs are validated using Zod schemas
+ * - Path traversal attacks are prevented
+ * - Numeric bounds are enforced
+ * - Email format is validated
+ * - GitHub owner/name format is validated
  */
+/**
+ * Path traversal patterns to reject
+ */
+const PATH_TRAVERSAL_PATTERNS = [
+    /\.\.\//, // ../
+    /\.\.\\/, // ..\
+    /\.\.$/, // ends with ..
+    /%2e%2e/i, // URL encoded ..
+    /%2f/i, // URL encoded /
+    /%5c/i, // URL encoded \
+    /\0/, // null byte
+];
+/**
+ * Custom refinement for safe paths (no traversal)
+ */
+const safePathString = z.string().refine((val) => !PATH_TRAVERSAL_PATTERNS.some(pattern => pattern.test(val)), { message: 'Path contains potentially dangerous traversal patterns. Use absolute paths without ".." sequences.' });
+/**
+ * GitHub repository owner validation
+ * - Must be 1-39 characters
+ * - Alphanumeric with hyphens
+ * - Cannot start or end with hyphen
+ */
+const githubOwnerString = z.string()
+    .min(1, 'Repository owner is required')
+    .max(39, 'GitHub username cannot exceed 39 characters')
+    .regex(/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/, 'Repository owner must be alphanumeric with hyphens, cannot start or end with hyphen');
+/**
+ * GitHub repository name validation
+ * - Must be 1-100 characters
+ * - Alphanumeric, dots, underscores, and hyphens allowed
+ */
+const githubRepoNameString = z.string()
+    .min(1, 'Repository name is required')
+    .max(100, 'Repository name cannot exceed 100 characters')
+    .regex(/^[a-zA-Z0-9._-]+$/, 'Repository name must contain only alphanumeric characters, dots, underscores, and hyphens');
 /**
  * Patterns that indicate potential credentials that should not be in config files
  */
@@ -59,11 +101,14 @@ export const ConfigSchema = z.object({
      */
     repo: z.object({
         /** GitHub username or organization that owns the repository (required) */
-        owner: z.string().min(1, 'Repository owner is required'),
+        owner: githubOwnerString.describe('GitHub username or organization (1-39 chars, alphanumeric with hyphens)'),
         /** Repository name (required) */
-        name: z.string().min(1, 'Repository name is required'),
+        name: githubRepoNameString.describe('Repository name (1-100 chars, alphanumeric with dots, underscores, hyphens)'),
         /** Base branch for pull requests (default: 'main') */
-        baseBranch: z.string().default('main'),
+        baseBranch: z.string()
+            .max(255, 'Branch name cannot exceed 255 characters')
+            .regex(/^[a-zA-Z0-9._/-]+$/, 'Branch name contains invalid characters')
+            .default('main'),
     }).describe('GitHub repository settings'),
     /**
      * Task Discovery Settings
@@ -117,8 +162,8 @@ export const ConfigSchema = z.object({
             .min(10, 'maxSizeMB must be at least 10MB')
             .max(1000, 'maxSizeMB cannot exceed 1GB')
             .default(100),
-        /** Directory for persistent cache storage (default: .autonomous-dev-cache) */
-        cacheDir: z.string().default('.autonomous-dev-cache'),
+        /** Directory for persistent cache storage - validated for path traversal (default: .autonomous-dev-cache) */
+        cacheDir: safePathString.default('.autonomous-dev-cache'),
         /** Enable persistent file-based caching across restarts (default: true) */
         persistToDisk: z.boolean().default(true),
         /** Use git commit hash for cache invalidation (default: true) */
@@ -134,11 +179,19 @@ export const ConfigSchema = z.object({
      */
     execution: z.object({
         /** Number of parallel workers (1-10, default: 4) */
-        parallelWorkers: z.number().min(1, 'Must have at least 1 worker').max(10, 'Maximum 10 workers').default(4),
+        parallelWorkers: z.number()
+            .int('Worker count must be an integer')
+            .min(1, 'Must have at least 1 worker')
+            .max(10, 'Maximum 10 workers to prevent resource exhaustion')
+            .default(4),
         /** Task timeout in minutes (5-120, default: 30) */
-        timeoutMinutes: z.number().min(5, 'Timeout must be at least 5 minutes').max(120, 'Timeout cannot exceed 120 minutes').default(30),
-        /** Working directory for task execution */
-        workDir: z.string().default('/tmp/autonomous-dev'),
+        timeoutMinutes: z.number()
+            .int('Timeout must be an integer')
+            .min(5, 'Timeout must be at least 5 minutes')
+            .max(120, 'Timeout cannot exceed 120 minutes (2 hours)')
+            .default(30),
+        /** Working directory for task execution - validated for path traversal */
+        workDir: safePathString.default('/tmp/autonomous-dev'),
     }).describe('Task execution settings'),
     /**
      * Evaluation Settings
@@ -235,8 +288,8 @@ export const ConfigSchema = z.object({
         includeTimestamp: z.boolean().default(true),
         /** Enable structured JSON logging to file alongside console output (default: false) */
         enableStructuredFileLogging: z.boolean().default(false),
-        /** Directory path for structured log files (default: './logs') */
-        structuredLogDir: z.string().default('./logs'),
+        /** Directory path for structured log files - validated for path traversal (default: './logs') */
+        structuredLogDir: safePathString.default('./logs'),
         /** Maximum size of each log file in bytes before rotation (default: 10MB) */
         maxLogFileSizeBytes: z.number().min(1024 * 1024).max(1024 * 1024 * 1024).default(10 * 1024 * 1024),
         /** Number of rotated log files to retain (default: 5) */
@@ -249,6 +302,31 @@ export const ConfigSchema = z.object({
         rotationInterval: z.enum(['hourly', 'daily', 'weekly']).default('daily'),
         /** Maximum age of log files in days before cleanup (default: 30) */
         maxLogAgeDays: z.number().min(1).max(365).default(30),
+        /**
+         * Enable debug mode for detailed troubleshooting.
+         * When enabled, logs additional information including:
+         * - Claude SDK tool invocations and responses
+         * - GitHub API request/response details
+         * - Internal state snapshots at decision points
+         * - Timing data for all operations
+         * Can also be enabled via DEBUG_MODE or AUTONOMOUS_DEV_DEBUG environment variables.
+         * (default: false)
+         */
+        debugMode: z.boolean().default(false),
+        /**
+         * Log Claude SDK interactions in detail (tool use, responses, timing).
+         * Useful for debugging Claude execution issues.
+         * Automatically enabled when debugMode is true.
+         * (default: false)
+         */
+        logClaudeInteractions: z.boolean().default(false),
+        /**
+         * Log GitHub API request/response details including headers and timing.
+         * Useful for debugging GitHub integration issues.
+         * Automatically enabled when debugMode is true.
+         * (default: false)
+         */
+        logApiDetails: z.boolean().default(false),
     }).describe('Logging configuration').default({}),
     /**
      * Alerting Settings
@@ -259,8 +337,8 @@ export const ConfigSchema = z.object({
         enabled: z.boolean().default(true),
         /** Webhook URL for sending alerts (optional) */
         webhookUrl: z.string().url().optional(),
-        /** File path for alert logs (optional) */
-        alertLogPath: z.string().optional(),
+        /** File path for alert logs - validated for path traversal (optional) */
+        alertLogPath: safePathString.optional(),
         /** Minimum interval between repeated alerts in milliseconds (default: 60000 = 1 minute) */
         cooldownMs: z.number().min(1000).max(3600000).default(60000),
         /** Maximum alerts per minute for rate limiting (default: 30) */
@@ -445,6 +523,9 @@ export const defaultConfig = {
         rotationPolicy: 'size',
         rotationInterval: 'daily',
         maxLogAgeDays: 30,
+        debugMode: false,
+        logClaudeInteractions: false,
+        logApiDetails: false,
     },
     alerting: {
         enabled: true,
