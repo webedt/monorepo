@@ -1,0 +1,226 @@
+// Re-export utilities for convenient importing
+export {
+  logger,
+  type LogLevel,
+  type LogFormat,
+  type StructuredLogEntry,
+  type OperationMetadata,
+  type TimedOperationResult,
+  type PerformanceMetrics,
+  type OperationContext,
+  // Correlation ID management
+  generateCorrelationId,
+  setCorrelationId,
+  getCorrelationId,
+  clearCorrelationId,
+  // Memory and timing utilities
+  getMemoryUsageMB,
+  getMemoryStats,
+  timeOperation,
+  timeOperationSync,
+  // Operation context utilities
+  createOperationContext,
+  finalizeOperationContext,
+} from './logger.js';
+export {
+  // Error classes
+  StructuredError,
+  GitHubError,
+  ClaudeError,
+  ConfigError,
+  ExecutionError,
+  // Error codes and types
+  ErrorCode,
+  type ErrorSeverity,
+  type RecoveryAction,
+  type ErrorContext,
+  type RetryConfig,
+  // Utility functions
+  withRetry,
+  wrapError,
+  createGitHubErrorFromResponse,
+  formatError,
+  DEFAULT_RETRY_CONFIG,
+} from './errors.js';
+
+// Re-export enhanced retry utilities
+export {
+  // Configuration
+  type ExtendedRetryConfig,
+  type RetryWithBackoffOptions,
+  type RetryContext,
+  type RetryAttemptRecord,
+  type RetryErrorClassification,
+  type RetryWithBackoffResult,
+  API_RETRY_CONFIG,
+  NETWORK_RETRY_CONFIG,
+  RATE_LIMIT_RETRY_CONFIG,
+  CLAUDE_RETRY_CONFIG,
+  DATABASE_RETRY_CONFIG,
+  // Core retry functions
+  retryWithBackoff,
+  retryWithBackoffDetailed,
+  calculateBackoffDelay,
+  calculateProgressiveTimeout,
+  // Context management
+  createRetryContext,
+  updateRetryContext,
+  markContextFailed,
+  // Error classification
+  classifyError,
+  isErrorCodeRetryable,
+  isHttpStatusRetryable,
+  isNetworkErrorRetryable,
+  isClaudeErrorRetryable,
+  // Error extraction
+  extractHttpStatus,
+  extractNetworkErrorCode,
+  extractRetryAfterMs,
+  // Error creation
+  createClaudeErrorFromResponse,
+} from './retry.js';
+
+// Re-export dead letter queue utilities
+export {
+  DeadLetterQueue,
+  type DeadLetterEntry,
+  type RetryAttempt,
+  type DLQStats,
+  type DLQConfig,
+  getDeadLetterQueue,
+  resetDeadLetterQueue,
+} from './dead-letter-queue.js';
+
+// Re-export metrics utilities
+export {
+  metrics,
+  type MetricLabels,
+  type CounterMetric,
+  type GaugeMetric,
+  type HistogramMetric,
+  type HistogramBucket,
+  type Metric,
+  type ErrorContext as MetricsErrorContext,
+  Counter,
+  Gauge,
+  Histogram,
+} from './metrics.js';
+
+// Re-export circuit breaker utilities
+export {
+  CircuitBreaker,
+  type CircuitBreakerState,
+  type CircuitBreakerConfig,
+  type CircuitBreakerHealth,
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  getClaudeCircuitBreaker,
+  getClaudeSDKCircuitBreaker,
+  resetAllCircuitBreakers,
+  getAllCircuitBreakerHealth,
+} from './circuit-breaker.js';
+
+// Re-export timeout utilities
+export {
+  // Configuration
+  DEFAULT_TIMEOUTS,
+  TIMEOUT_ENV_VARS,
+  getTimeoutFromEnv,
+  getTimeoutConfig,
+  // Error class
+  TimeoutError,
+  // Types
+  type WithTimeoutOptions,
+  type WithTimeoutResult,
+  // Core timeout functions
+  withTimeout,
+  withTimeoutDetailed,
+  withTimeoutAll,
+  // Pre-configured timeout wrappers
+  withGitHubTimeout,
+  withGitTimeout,
+  withDatabaseTimeout,
+  withMergeTimeout,
+  // Utility functions
+  raceWithTimeout,
+  createTimedAbortController,
+  withCleanup,
+} from './timeout.js';
+
+// Re-export validation utilities
+export {
+  // Validation functions
+  validateConfigPath,
+  validateNumericParam,
+  validateRepoInfo,
+  validateGitHubToken,
+  validateClaudeAuth,
+  validatePort,
+  validateHost,
+  validateCLIOptions,
+  // Display utilities
+  displayValidationError,
+  formatCredentialSetupInstructions,
+  createMissingCredentialMessage,
+  // Types and constants
+  type ValidationResult,
+  type NumericRange,
+  NUMERIC_RANGES,
+} from './validation.js';
+
+// Re-export cache utilities
+export {
+  // Cache key generation
+  generateCacheKey,
+  generateShortCacheKey,
+  // File modification tracking
+  collectFileModifications,
+  generateContentHashFromModifications,
+  type FileModificationInfo,
+  type CollectModificationsOptions,
+  // Git-based change detection
+  getGitChangeInfo,
+  haveFilesChangedSinceCommit,
+  type GitChangeInfo,
+  // Cache performance metrics
+  calculateHitRate,
+  formatCacheMetrics,
+  formatBytes,
+  type CachePerformanceMetrics,
+  // Configuration-based invalidation
+  generateConfigHash,
+  hasConfigChanged,
+  type ConfigHash,
+  // Cache cleanup utilities
+  getEntriesToCleanup,
+  type CacheCleanupPolicy,
+  type CleanupCacheEntry,
+  // Cache debug logging
+  logCacheOperation,
+  logCachePerformanceSummary,
+  type CacheOperation,
+} from './cache.js';
+
+// Re-export GitHub-specific cache utilities
+export {
+  GitHubCache,
+  createGitHubCache,
+  getSharedGitHubCache,
+  resetSharedGitHubCache,
+  type GitHubCacheConfig,
+  type CacheKeyType,
+  type ConditionalHeaders,
+  type GitHubCacheStats,
+  DEFAULT_GITHUB_CACHE_CONFIG,
+} from './githubCache.js';
+
+// Re-export rate limiter utilities
+export {
+  GitHubRateLimiter,
+  createRateLimiter,
+  createEnterpriseRateLimiter,
+  type RateLimitResource,
+  type RateLimitStatus,
+  type RateLimiterConfig,
+  DEFAULT_RATE_LIMITER_CONFIG,
+  ENTERPRISE_RATE_LIMITER_CONFIG,
+} from './rateLimiter.js';

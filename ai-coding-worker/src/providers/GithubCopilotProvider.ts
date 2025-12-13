@@ -1,9 +1,10 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { BaseProvider, ProviderOptions, ProviderStreamEvent } from './BaseProvider';
 import { UserRequestContent, TextBlock } from '../types';
+import { CredentialManager } from '../utils/credentialManager';
+import { SecureCredentialManager } from '../utils/secureCredentialManager';
 
 /**
  * GitHub Copilot provider implementation
@@ -26,6 +27,7 @@ export class GithubCopilotProvider extends BaseProvider {
 
   /**
    * Write GitHub authentication for gh CLI
+   * Uses secure credential management to avoid leaking tokens in logs
    */
   private writeGitHubAuth(authentication: string): void {
     try {
@@ -38,25 +40,29 @@ export class GithubCopilotProvider extends BaseProvider {
         token = authentication;
       }
 
-      // Set environment variable for gh CLI
-      process.env.GH_TOKEN = token;
-      process.env.GITHUB_TOKEN = token;
+      // Set environment variable for gh CLI (using secure method)
+      SecureCredentialManager.setCredentialEnv('GH_TOKEN', token);
+      SecureCredentialManager.setCredentialEnv('GITHUB_TOKEN', token);
 
-      // Also write to gh hosts file for persistent auth
-      const ghConfigDir = path.join(os.homedir(), '.config', 'gh');
+      // Write to gh hosts file using session-specific home directory
+      const ghConfigDir = path.dirname(CredentialManager.getGitHubConfigPath());
       if (!fs.existsSync(ghConfigDir)) {
         fs.mkdirSync(ghConfigDir, { recursive: true, mode: 0o700 });
       }
+      // Enforce secure permissions on config directory
+      fs.chmodSync(ghConfigDir, 0o700);
 
-      const hostsFile = path.join(ghConfigDir, 'hosts.yml');
+      const hostsFile = CredentialManager.getGitHubConfigPath();
       const hostsContent = `github.com:
     oauth_token: ${token}
     user: github-actions
     git_protocol: https
 `;
       fs.writeFileSync(hostsFile, hostsContent, { mode: 0o600 });
+      // Enforce secure permissions on hosts file
+      fs.chmodSync(hostsFile, 0o600);
 
-      console.log('[GithubCopilotProvider] GitHub authentication configured');
+      console.log('[GithubCopilotProvider] GitHub authentication configured (token redacted)');
     } catch (error) {
       console.error('[GithubCopilotProvider] Failed to configure GitHub auth:', error);
       throw error;

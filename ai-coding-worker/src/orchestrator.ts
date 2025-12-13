@@ -1,11 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import { ExecuteRequest, SSEEvent, UserRequestContent } from './types';
 import { ProviderFactory } from './providers/ProviderFactory';
 import { Request, Response } from 'express';
 import { logger, getEventEmoji } from '@webedt/shared';
 import { CredentialManager } from './utils/credentialManager';
+import { SecureCredentialManager } from './utils/secureCredentialManager';
 import { enrichEventWithRelativePaths } from './utils/filePathHelper';
 import { StorageClient } from './storage/storageClient';
 
@@ -53,8 +55,14 @@ export class Orchestrator {
     const startTime = Date.now();
 
     const websiteSessionId = request.websiteSessionId || 'unknown';
-    // Local paths for this session
-    const sessionRoot = path.join(WORKSPACE_ROOT, `session-${websiteSessionId}`);
+    // Create secure session directory with restricted permissions (700)
+    // Use cryptographically random suffix to prevent predictable paths
+    const randomSuffix = crypto.randomBytes(8).toString('hex');
+    const sessionRoot = path.join(WORKSPACE_ROOT, `session-${websiteSessionId}-${randomSuffix}`);
+
+    // Create session-specific credential directory for isolation
+    const credentialSessionDir = SecureCredentialManager.createSecureSessionDir(websiteSessionId);
+    CredentialManager.setSessionHome(credentialSessionDir);
     // workspacePath tells us where the repo is within the session (e.g., /workspace/session-xxx/workspace/hello-world)
     // We need to extract just the relative repo path from it
     const repoRelativePath = this.extractRepoPath(request.workspacePath);
@@ -142,10 +150,14 @@ export class Orchestrator {
         timestamp: new Date().toISOString()
       });
 
-      // Clean up any existing local directory
+      // Clean up any existing local directory and create new one with secure permissions
       if (fs.existsSync(sessionRoot)) {
-        fs.rmSync(sessionRoot, { recursive: true, force: true });
+        // Securely delete existing session directory
+        SecureCredentialManager.secureDeleteDirectory(sessionRoot);
       }
+      // Create session directory with restricted permissions (700)
+      fs.mkdirSync(sessionRoot, { recursive: true, mode: 0o700 });
+      fs.chmodSync(sessionRoot, 0o700);
 
       // Download and extract session with progress callbacks
       const sessionDownloaded = await this.storageClient.downloadSession(
@@ -491,11 +503,14 @@ export class Orchestrator {
         durationMs: duration
       });
 
-      // Cleanup local session directory
+      // Cleanup local session directory and credentials
       try {
         if (fs.existsSync(sessionRoot)) {
-          fs.rmSync(sessionRoot, { recursive: true, force: true });
+          // Securely delete session directory
+          SecureCredentialManager.secureDeleteDirectory(sessionRoot);
         }
+        // Cleanup session-specific credentials
+        CredentialManager.cleanupSessionCredentials();
       } catch (cleanupError) {
         logger.warn('Failed to cleanup local session directory', {
           component: 'Orchestrator',
@@ -536,11 +551,12 @@ export class Orchestrator {
         });
       }
 
-      // Cleanup local session directory
+      // Cleanup local session directory and credentials
       try {
         if (fs.existsSync(sessionRoot)) {
-          fs.rmSync(sessionRoot, { recursive: true, force: true });
+          SecureCredentialManager.secureDeleteDirectory(sessionRoot);
         }
+        CredentialManager.cleanupSessionCredentials();
       } catch {
         // Ignore cleanup errors
       }
@@ -663,10 +679,8 @@ export class Orchestrator {
       promptLength: prompt.length
     });
 
-    // Create a temporary directory for the query
-    const queryId = `query-${Date.now()}`;
-    const queryDir = path.join('/tmp', queryId);
-    fs.mkdirSync(queryDir, { recursive: true });
+    // Create a secure temporary directory for the query
+    const queryDir = SecureCredentialManager.createSecureTempDir('query-');
 
     try {
       // Write credentials for the provider
@@ -692,13 +706,13 @@ export class Orchestrator {
       return result;
 
     } finally {
-      // Clean up temporary directory
+      // Securely clean up temporary directory
       try {
-        fs.rmSync(queryDir, { recursive: true, force: true });
+        SecureCredentialManager.secureDeleteDirectory(queryDir);
       } catch (cleanupError) {
         logger.warn('Failed to clean up query directory', {
           component: 'Orchestrator',
-          queryDir,
+          queryDir: SecureCredentialManager.redactPath(queryDir),
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
         });
       }

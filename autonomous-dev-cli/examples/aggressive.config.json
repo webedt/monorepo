@@ -1,0 +1,42 @@
+{
+  "repo": {
+    "owner": "your-username",
+    "name": "side-project",
+    "baseBranch": "main"
+  },
+  "discovery": {
+    "tasksPerCycle": 10,
+    "maxOpenIssues": 20,
+    "excludePaths": [
+      "node_modules",
+      "dist",
+      ".git"
+    ],
+    "issueLabel": "autonomous-dev"
+  },
+  "execution": {
+    "parallelWorkers": 8,
+    "timeoutMinutes": 60,
+    "workDir": "/tmp/autonomous-dev"
+  },
+  "evaluation": {
+    "requireBuild": true,
+    "requireTests": false,
+    "requireHealthCheck": false,
+    "requireSmokeTests": false,
+    "healthCheckUrls": [],
+    "smokeTestUrls": [],
+    "previewUrlPattern": "https://preview.your-domain.com/{owner}/{repo}/{branch}/"
+  },
+  "merge": {
+    "autoMerge": true,
+    "requireAllChecks": false,
+    "maxRetries": 5,
+    "conflictStrategy": "rebase",
+    "mergeMethod": "squash"
+  },
+  "daemon": {
+    "loopIntervalMs": 30000,
+    "pauseBetweenCycles": false
+  }
+}

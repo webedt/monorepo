@@ -1,0 +1,37 @@
+{
+  "key": "0eef99d9ccb957ce",
+  "repoPath": "/tmp/analyzer-test-1765639372656",
+  "gitCommitHash": "",
+  "gitBranch": "unknown",
+  "timestamp": 1765639372658,
+  "contentHash": "a941b95e8836a75429c3055efbbd86d4",
+  "data": {
+    "structure": [
+      {
+        "name": "package.json",
+        "path": "package.json",
+        "type": "file"
+      }
+    ],
+    "fileCount": 1,
+    "todoComments": [],
+    "recentChanges": [],
+    "packages": [
+      {
+        "name": "my-package",
+        "path": ".",
+        "dependencies": [],
+        "scripts": {
+          "build": "tsc"
+        }
+      }
+    ],
+    "configFiles": [
+      "package.json"
+    ]
+  },
+  "fileCache": [],
+  "sizeBytes": 247,
+  "accessCount": 1,
+  "lastAccessTime": 1765639372658
+}

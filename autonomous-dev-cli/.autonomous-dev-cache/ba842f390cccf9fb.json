@@ -1,0 +1,33 @@
+{
+  "key": "ba842f390cccf9fb",
+  "repoPath": "/tmp/entry-test-1765639372681",
+  "gitCommitHash": "",
+  "gitBranch": "unknown",
+  "timestamp": 1765639372684,
+  "contentHash": "964ceb6bbc7b0761d962ad82963cdb6a",
+  "data": {
+    "structure": [
+      {
+        "name": "src",
+        "path": "src",
+        "type": "directory",
+        "children": [
+          {
+            "name": "index.ts",
+            "path": "src/index.ts",
+            "type": "file"
+          }
+        ]
+      }
+    ],
+    "fileCount": 1,
+    "todoComments": [],
+    "recentChanges": [],
+    "packages": [],
+    "configFiles": []
+  },
+  "fileCache": [],
+  "sizeBytes": 213,
+  "accessCount": 1,
+  "lastAccessTime": 1765639372684
+}

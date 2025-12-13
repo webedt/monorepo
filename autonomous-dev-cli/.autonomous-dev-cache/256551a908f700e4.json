@@ -1,0 +1,70 @@
+{
+  "key": "256551a908f700e4",
+  "repoPath": "/tmp/analyzer-test-1765639372650",
+  "gitCommitHash": "",
+  "gitBranch": "unknown",
+  "timestamp": 1765639372653,
+  "contentHash": "1c1dc81b6b4718e48a46cceefbd3dc3a",
+  "data": {
+    "structure": [
+      {
+        "name": "index.ts",
+        "path": "index.ts",
+        "type": "file"
+      },
+      {
+        "name": "package.json",
+        "path": "package.json",
+        "type": "file"
+      }
+    ],
+    "fileCount": 2,
+    "todoComments": [
+      {
+        "file": "index.ts",
+        "line": 1,
+        "text": "Add main logic",
+        "type": "TODO"
+      }
+    ],
+    "recentChanges": [],
+    "packages": [
+      {
+        "name": "test-app",
+        "path": ".",
+        "dependencies": [],
+        "scripts": {
+          "test": "jest"
+        }
+      }
+    ],
+    "configFiles": [
+      "package.json"
+    ]
+  },
+  "fileCache": [
+    [
+      "index.ts",
+      {
+        "fileInfo": {
+          "path": "index.ts",
+          "mtimeMs": 1765639372649.3486,
+          "size": 34,
+          "contentHash": "8521843929a966643b0ea91cac43fa61"
+        },
+        "todos": [
+          {
+            "file": "index.ts",
+            "line": 1,
+            "text": "Add main logic",
+            "type": "TODO"
+          }
+        ],
+        "lastAnalyzed": 1765639372654
+      }
+    ]
+  ],
+  "sizeBytes": 363,
+  "accessCount": 1,
+  "lastAccessTime": 1765639372653
+}

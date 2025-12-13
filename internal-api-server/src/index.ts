@@ -37,11 +37,19 @@ import completionsRoutes from './routes/completions.js';
 import imageGenRoutes from './routes/imageGen.js';
 
 // Import database for orphan cleanup
-import { db, chatSessions, events } from './db/index.js';
+import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './db/index.js';
 import { eq, and, lt, sql, count } from 'drizzle-orm';
 
 // Import middleware
 import { authMiddleware } from './middleware/auth.js';
+
+// Import health monitoring and metrics utilities
+import {
+  healthMonitor,
+  createDatabaseHealthCheck,
+  metrics,
+  circuitBreakerRegistry,
+} from './utils/index.js';
 
 /**
  * Clean up orphaned sessions that are stuck in 'running' status
@@ -50,7 +58,10 @@ import { authMiddleware } from './middleware/auth.js';
  * 2. The worker crashed without sending a completion callback
  * 3. Network issues prevented the callback from reaching the server
  */
-async function cleanupOrphanedSessions(): Promise<void> {
+async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: number }> {
+  const startTime = Date.now();
+  let cleaned = 0;
+
   try {
     const timeoutThreshold = new Date(Date.now() - ORPHAN_SESSION_TIMEOUT_MINUTES * 60 * 1000);
 
@@ -66,7 +77,11 @@ async function cleanupOrphanedSessions(): Promise<void> {
       );
 
     if (stuckSessions.length === 0) {
-      return; // No orphaned sessions
+      // Record successful cycle even with no sessions cleaned
+      const durationMs = Date.now() - startTime;
+      metrics.recordCleanupCycle(true, 0, durationMs);
+      healthMonitor.updateCleanupStatus(true, 0);
+      return { success: true, cleaned: 0 };
     }
 
     logger.info(`[OrphanCleanup] Found ${stuckSessions.length} potentially orphaned session(s)`);
@@ -119,15 +134,28 @@ async function cleanupOrphanedSessions(): Promise<void> {
           })
           .where(eq(chatSessions.id, session.id));
 
+        cleaned++;
         logger.info(`[OrphanCleanup] Updated session ${session.id} from '${session.status}' to '${newStatus}' (${reason})`);
       } catch (sessionError) {
         logger.error(`[OrphanCleanup] Error processing session ${session.id}:`, sessionError);
+        metrics.recordError('cleanup_session_error', 'OrphanCleanup');
       }
     }
 
-    logger.info(`[OrphanCleanup] Cleanup completed for ${stuckSessions.length} session(s)`);
+    const durationMs = Date.now() - startTime;
+    metrics.recordCleanupCycle(true, cleaned, durationMs);
+    healthMonitor.updateCleanupStatus(true, cleaned);
+
+    logger.info(`[OrphanCleanup] Cleanup completed for ${stuckSessions.length} session(s), cleaned: ${cleaned}`);
+    return { success: true, cleaned };
   } catch (error) {
+    const durationMs = Date.now() - startTime;
+    metrics.recordCleanupCycle(false, cleaned, durationMs);
+    healthMonitor.updateCleanupStatus(false, cleaned);
+    metrics.recordError('cleanup_cycle_error', 'OrphanCleanup');
+
     logger.error('[OrphanCleanup] Error during orphan session cleanup:', error);
+    return { success: false, cleaned };
   }
 }
 
@@ -156,7 +184,32 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Add auth middleware
 app.use(authMiddleware);
 
-// Health check endpoint
+// Initialize health monitoring with database health check
+healthMonitor.registerCheck('database', createDatabaseHealthCheck(async () => {
+  const startTime = Date.now();
+  try {
+    const result = await checkDbHealth();
+    return {
+      healthy: result.healthy,
+      latencyMs: Date.now() - startTime,
+      error: result.healthy ? undefined : 'Database health check failed',
+    };
+  } catch (error) {
+    return {
+      healthy: false,
+      latencyMs: Date.now() - startTime,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}));
+
+// Set cleanup interval for status display
+healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
+
+// Start periodic health checks (every 30 seconds)
+healthMonitor.startPeriodicChecks(30000);
+
+// Basic health check endpoint (fast, for load balancers)
 app.get('/health', (req, res) => {
   res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({
@@ -172,6 +225,69 @@ app.get('/health', (req, res) => {
       },
       timestamp: new Date().toISOString(),
     }
+  });
+});
+
+// Detailed health status endpoint (comprehensive health information)
+app.get('/health/status', async (req, res) => {
+  try {
+    const status = await healthMonitor.getDetailedHealthStatus({
+      version: '1.0.0',
+      service: 'internal-api-server',
+      containerId: CONTAINER_ID,
+      build: {
+        commitSha: BUILD_COMMIT_SHA,
+        timestamp: BUILD_TIMESTAMP,
+        imageTag: BUILD_IMAGE_TAG,
+      },
+    });
+
+    const statusCode = status.status === 'healthy' ? 200 : status.status === 'degraded' ? 200 : 503;
+
+    res.setHeader('X-Container-ID', CONTAINER_ID);
+    res.status(statusCode).json({
+      success: status.status !== 'unhealthy',
+      data: status,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+// Kubernetes readiness probe
+app.get('/ready', async (req, res) => {
+  try {
+    const ready = await healthMonitor.isReady();
+    if (ready) {
+      res.status(200).json({ status: 'ready' });
+    } else {
+      res.status(503).json({ status: 'not_ready' });
+    }
+  } catch (error) {
+    res.status(503).json({ status: 'not_ready', error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+// Kubernetes liveness probe
+app.get('/live', (req, res) => {
+  res.status(200).json({ status: 'alive' });
+});
+
+// Metrics endpoint (JSON format)
+app.get('/metrics', (req, res) => {
+  // Update database connection stats
+  const dbStats = getConnectionStats();
+  if (dbStats) {
+    metrics.updateDbConnections(dbStats.totalCount, dbStats.idleCount, dbStats.waitingCount);
+  }
+
+  res.setHeader('Content-Type', 'application/json');
+  res.json({
+    success: true,
+    data: metrics.getMetricsJson(),
   });
 });
 
@@ -229,7 +345,12 @@ app.listen(PORT, () => {
 
   console.log('');
   console.log('Available endpoints:');
-  console.log('  GET  /health                           - Health check');
+  console.log('  GET  /health                           - Basic health check');
+  console.log('  GET  /health/status                    - Detailed health status');
+  console.log('  GET  /ready                            - Kubernetes readiness probe');
+  console.log('  GET  /live                             - Kubernetes liveness probe');
+  console.log('  GET  /metrics                          - Performance metrics (JSON)');
+  console.log('');
   console.log('  POST /api/execute                      - Execute AI request (SSE)');
   console.log('  GET  /api/resume/:sessionId            - Resume session (SSE)');
   console.log('');
@@ -267,6 +388,7 @@ app.listen(PORT, () => {
 
   // Schedule periodic orphan cleanup
   logger.info(`Scheduling orphan cleanup: timeout=${ORPHAN_SESSION_TIMEOUT_MINUTES}min, interval=${ORPHAN_CLEANUP_INTERVAL_MINUTES}min`);
+  logger.info('Health monitoring enabled with periodic checks every 30 seconds');
 
   // Run initial cleanup on startup
   cleanupOrphanedSessions();
@@ -280,10 +402,12 @@ app.listen(PORT, () => {
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down gracefully...');
+  healthMonitor.stopPeriodicChecks();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   logger.info('SIGINT received, shutting down gracefully...');
+  healthMonitor.stopPeriodicChecks();
   process.exit(0);
 });
