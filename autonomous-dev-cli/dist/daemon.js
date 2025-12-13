@@ -11,7 +11,7 @@ import { getProgressManager, } from './utils/progress.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
 import { createHealthServer, } from './monitoring/index.js';
-import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
+import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, getErrorMessage, normalizeError, } from './utils/errors.js';
 import { mkdirSync, existsSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 import chalk from 'chalk';
@@ -258,10 +258,7 @@ export class Daemon {
      * Wrap any error as a StructuredError with daemon-specific context
      */
     wrapDaemonError(error, operation) {
-        if (error instanceof StructuredError) {
-            return error;
-        }
-        return wrapError(error, ErrorCode.INTERNAL_ERROR, {
+        return normalizeError(error, ErrorCode.INTERNAL_ERROR, {
             operation: operation ?? 'daemon',
             component: 'Daemon',
         });
@@ -316,7 +313,7 @@ export class Daemon {
                 process.exit(0);
             }
             catch (error) {
-                logger.error(`Shutdown error: ${error.message}`);
+                logger.error(`Shutdown error: ${getErrorMessage(error)}`);
                 process.exit(1);
             }
         };
@@ -353,13 +350,14 @@ export class Daemon {
         }
         catch (error) {
             const duration = Date.now() - shutdownStart;
-            if (error.message.includes('Shutdown timeout')) {
+            const errorMsg = getErrorMessage(error);
+            if (errorMsg.includes('Shutdown timeout')) {
                 logger.error(`Shutdown timeout after ${duration}ms, forcing cleanup...`);
                 // Force cleanup even on timeout
                 await this.forceCleanup();
             }
             else {
-                logger.error(`Shutdown error after ${duration}ms: ${error.message}`);
+                logger.error(`Shutdown error after ${duration}ms: ${errorMsg}`);
                 throw error;
             }
         }
@@ -381,7 +379,7 @@ export class Daemon {
                 logger.info('Worker pool shutdown complete');
             }
             catch (error) {
-                logger.error(`Worker pool shutdown error: ${error.message}`);
+                logger.error(`Worker pool shutdown error: ${getErrorMessage(error)}`);
                 // Continue with other cleanup even if worker pool fails
             }
         }
@@ -405,14 +403,14 @@ export class Daemon {
             await this.cleanupWorkDirectories();
         }
         catch (error) {
-            logger.error(`Work directory cleanup error: ${error.message}`);
+            logger.error(`Work directory cleanup error: ${getErrorMessage(error)}`);
         }
         // Force close database
         try {
             await closeDatabase();
         }
         catch (error) {
-            logger.error(`Database close error: ${error.message}`);
+            logger.error(`Database close error: ${getErrorMessage(error)}`);
         }
         // Stop servers
         if (this.healthServer) {
@@ -420,7 +418,7 @@ export class Daemon {
                 await this.healthServer.stop();
             }
             catch (error) {
-                logger.error(`Health server stop error: ${error.message}`);
+                logger.error(`Health server stop error: ${getErrorMessage(error)}`);
             }
         }
         if (this.monitoringServer) {
@@ -428,7 +426,7 @@ export class Daemon {
                 await this.monitoringServer.stop();
             }
             catch (error) {
-                logger.error(`Monitoring server stop error: ${error.message}`);
+                logger.error(`Monitoring server stop error: ${getErrorMessage(error)}`);
             }
         }
         logger.warn('Forced cleanup completed');
@@ -458,7 +456,7 @@ export class Daemon {
                     }
                     catch (error) {
                         errorCount++;
-                        logger.warn(`Failed to clean up directory ${dirPath}: ${error.message}`);
+                        logger.warn(`Failed to clean up directory ${dirPath}: ${getErrorMessage(error)}`);
                     }
                 }
                 // Clean up old queue persistence files
@@ -477,7 +475,7 @@ export class Daemon {
                     }
                     catch (error) {
                         errorCount++;
-                        logger.warn(`Failed to clean up persist directory: ${error.message}`);
+                        logger.warn(`Failed to clean up persist directory: ${getErrorMessage(error)}`);
                     }
                 }
             }
@@ -486,7 +484,7 @@ export class Daemon {
             }
         }
         catch (error) {
-            logger.error(`Failed to read work directory for cleanup: ${error.message}`);
+            logger.error(`Failed to read work directory for cleanup: ${getErrorMessage(error)}`);
         }
     }
     /**
@@ -924,7 +922,7 @@ export class Daemon {
                 logger.debug('Health server stopped');
             }
             catch (error) {
-                logger.warn(`Failed to stop health server: ${error.message}`);
+                logger.warn(`Failed to stop health server: ${getErrorMessage(error)}`);
             }
             this.healthServer = null;
         }
@@ -935,7 +933,7 @@ export class Daemon {
                 logger.debug('Monitoring server stopped');
             }
             catch (error) {
-                logger.warn(`Failed to stop monitoring server: ${error.message}`);
+                logger.warn(`Failed to stop monitoring server: ${getErrorMessage(error)}`);
             }
             this.monitoringServer = null;
         }
@@ -947,7 +945,7 @@ export class Daemon {
             });
         }
         catch (error) {
-            logger.error(`Failed to close database: ${error.message}`);
+            logger.error(`Failed to close database: ${getErrorMessage(error)}`);
             // Don't throw - we want to complete shutdown even if database close fails
         }
         logger.info('Shutdown complete');
@@ -1116,7 +1114,7 @@ export class Daemon {
                             catch (error) {
                                 const structuredError = error instanceof StructuredError
                                     ? error
-                                    : new GitHubError(ErrorCode.GITHUB_API_ERROR, `Failed to create issue for "${task.title}": ${error.message}`, { context: { taskTitle: task.title }, cause: error });
+                                    : new GitHubError(ErrorCode.GITHUB_API_ERROR, `Failed to create issue for "${task.title}": ${getErrorMessage(error)}`, { context: { taskTitle: task.title }, cause: error instanceof Error ? error : undefined });
                                 errors.push(`[${structuredError.code}] ${structuredError.message}`);
                                 logger.structuredError(structuredError, { context: { taskTitle: task.title } });
                             }
@@ -1126,7 +1124,7 @@ export class Daemon {
                 catch (error) {
                     const structuredError = error instanceof StructuredError
                         ? error
-                        : new ClaudeError(ErrorCode.CLAUDE_API_ERROR, `Task discovery failed: ${error.message}`, { context: this.getErrorContext('discoverTasks'), cause: error });
+                        : new ClaudeError(ErrorCode.CLAUDE_API_ERROR, `Task discovery failed: ${getErrorMessage(error)}`, { context: this.getErrorContext('discoverTasks'), cause: error instanceof Error ? error : undefined });
                     errors.push(`[${structuredError.code}] ${structuredError.message}`);
                     logger.structuredError(structuredError, {
                         context: this.getErrorContext('discoverTasks'),
@@ -1412,7 +1410,7 @@ export class Daemon {
             };
         }
         catch (error) {
-            errors.push(error.message);
+            errors.push(getErrorMessage(error));
             const finalHealth = this.updateServiceHealth();
             return {
                 success: false,

@@ -391,7 +391,7 @@ export function createPRManager(client) {
                 }, `GET /repos/${owner}/${repo}/commits/${ref}/status`, { operation: 'getChecksStatus', ref });
             }
             catch (error) {
-                handleError(error, 'get checks status', { ref });
+                return handleError(error, 'get checks status', { ref });
             }
         },
         async createEnhancedPR(options) {
@@ -541,7 +541,7 @@ export function createPRManager(client) {
                 }, `PATCH /repos/${owner}/${repo}/pulls/${number}`, { operation: 'updatePR', prNumber: number });
             }
             catch (error) {
-                handleError(error, 'update PR', { prNumber: number, updates });
+                return handleError(error, 'update PR', { prNumber: number, updates });
             }
         },
         async addLabels(number, labels) {
@@ -595,13 +595,18 @@ export function createPRManager(client) {
             ];
             for (const path of locations) {
                 try {
-                    const { data } = await octokit.repos.getContent({
-                        owner,
-                        repo,
-                        path,
-                    });
-                    if ('content' in data && data.content) {
-                        const content = Buffer.from(data.content, 'base64').toString('utf-8');
+                    const content = await client.execute(async () => {
+                        const { data } = await octokit.repos.getContent({
+                            owner,
+                            repo,
+                            path,
+                        });
+                        if ('content' in data && data.content) {
+                            return Buffer.from(data.content, 'base64').toString('utf-8');
+                        }
+                        return null;
+                    }, `GET /repos/${owner}/${repo}/contents/${path}`, { operation: 'getCodeOwners', path });
+                    if (content) {
                         const entries = parseCodeOwners(content);
                         logger.debug(`Loaded CODEOWNERS from ${path}`, { entryCount: entries.length });
                         return entries;
@@ -650,13 +655,18 @@ export function createPRManager(client) {
             ];
             for (const path of locations) {
                 try {
-                    const { data } = await octokit.repos.getContent({
-                        owner,
-                        repo,
-                        path,
-                    });
-                    if ('content' in data && data.content) {
-                        const content = Buffer.from(data.content, 'base64').toString('utf-8');
+                    const content = await client.execute(async () => {
+                        const { data } = await octokit.repos.getContent({
+                            owner,
+                            repo,
+                            path,
+                        });
+                        if ('content' in data && data.content) {
+                            return Buffer.from(data.content, 'base64').toString('utf-8');
+                        }
+                        return null;
+                    }, `GET /repos/${owner}/${repo}/contents/${path}`, { operation: 'getPRTemplate', path });
+                    if (content) {
                         logger.debug(`Loaded PR template from ${path}`);
                         return content;
                     }
@@ -683,11 +693,14 @@ export function createPRManager(client) {
                 errors: [],
             };
             try {
-                const { data } = await octokit.repos.getBranchProtection({
-                    owner,
-                    repo,
-                    branch,
-                });
+                const data = await client.execute(async () => {
+                    const { data } = await octokit.repos.getBranchProtection({
+                        owner,
+                        repo,
+                        branch,
+                    });
+                    return data;
+                }, `GET /repos/${owner}/${repo}/branches/${branch}/protection`, { operation: 'getBranchProtection', branch });
                 status.isProtected = true;
                 // Check required reviews
                 if (data.required_pull_request_reviews) {

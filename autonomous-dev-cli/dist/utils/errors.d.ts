@@ -245,4 +245,109 @@ export declare function createGitHubErrorFromResponse(error: any, endpoint?: str
  * Format a StructuredError for display
  */
 export declare function formatError(error: StructuredError): string;
+/**
+ * Type guard to check if an error is a StructuredError
+ */
+export declare function isStructuredError(error: unknown): error is StructuredError;
+/**
+ * Type guard to check if an error is a GitHubError
+ */
+export declare function isGitHubError(error: unknown): error is GitHubError;
+/**
+ * Type guard to check if an error is a ClaudeError
+ */
+export declare function isClaudeError(error: unknown): error is ClaudeError;
+/**
+ * Type guard to check if an error is a ConfigError
+ */
+export declare function isConfigError(error: unknown): error is ConfigError;
+/**
+ * Type guard to check if an error is a DatabaseError
+ */
+export declare function isDatabaseError(error: unknown): error is DatabaseError;
+/**
+ * Type guard to check if an error is a ValidationError
+ */
+export declare function isValidationError(error: unknown): error is ValidationError;
+/**
+ * Type guard to check if an error is an ExecutionError
+ */
+export declare function isExecutionError(error: unknown): error is ExecutionError;
+/**
+ * Safely extract error message from unknown error type
+ */
+export declare function getErrorMessage(error: unknown): string;
+/**
+ * Safely extract error code from unknown error type
+ */
+export declare function getErrorCode(error: unknown): ErrorCode;
+/**
+ * Check if an error is retryable
+ */
+export declare function isRetryableError(error: unknown): boolean;
+/**
+ * Logger interface for withErrorLogging
+ */
+export interface ErrorLogger {
+    error(message: string, context?: Record<string, unknown>): void;
+    warn?(message: string, context?: Record<string, unknown>): void;
+    debug?(message: string, context?: Record<string, unknown>): void;
+    structuredError?(error: StructuredError, options?: {
+        context?: ErrorContext;
+        includeStack?: boolean;
+        includeRecovery?: boolean;
+    }): void;
+}
+/**
+ * Options for withErrorLogging higher-order function
+ */
+export interface WithErrorLoggingOptions {
+    /** Operation name for context */
+    operation: string;
+    /** Component/module name for context */
+    component?: string;
+    /** Default error code to use when wrapping non-structured errors */
+    defaultErrorCode?: ErrorCode;
+    /** Whether to rethrow the error after logging (default: true) */
+    rethrow?: boolean;
+    /** Custom error transformer to convert to specific error types */
+    errorTransformer?: (error: unknown, context: ErrorContext) => StructuredError;
+    /** Additional context to include in error logs */
+    additionalContext?: Record<string, unknown>;
+    /** Whether to include stack trace in logs (default: true for non-transient errors) */
+    includeStack?: boolean;
+    /** Whether to include recovery suggestions in logs (default: true) */
+    includeRecovery?: boolean;
+}
+/**
+ * Higher-order function to wrap async functions with consistent error logging
+ * Reduces duplicate error handling patterns across the codebase
+ *
+ * @example
+ * ```typescript
+ * const fetchData = withErrorLogging(
+ *   async () => {
+ *     const response = await api.get('/data');
+ *     return response.data;
+ *   },
+ *   logger,
+ *   { operation: 'fetchData', component: 'DataService' }
+ * );
+ * ```
+ */
+export declare function withErrorLogging<T>(fn: () => Promise<T>, logger: ErrorLogger, options: WithErrorLoggingOptions): Promise<T>;
+/**
+ * Synchronous version of withErrorLogging for non-async functions
+ */
+export declare function withErrorLoggingSync<T>(fn: () => T, logger: ErrorLogger, options: WithErrorLoggingOptions): T;
+/**
+ * Create a wrapped version of a function with automatic error logging
+ * Returns a new function that can be called multiple times
+ */
+export declare function createErrorLoggingWrapper<TArgs extends unknown[], TResult>(fn: (...args: TArgs) => Promise<TResult>, logger: ErrorLogger, options: WithErrorLoggingOptions): (...args: TArgs) => Promise<TResult>;
+/**
+ * Normalize an unknown error to a StructuredError
+ * Use this when you need to handle errors in catch blocks with proper typing
+ */
+export declare function normalizeError(error: unknown, defaultCode?: ErrorCode, context?: ErrorContext): StructuredError;
 //# sourceMappingURL=errors.d.ts.map
