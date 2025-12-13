@@ -1,4 +1,4 @@
-import { GitHubClient } from './client.js';
+import { GitHubClient, type ServiceHealth } from './client.js';
 export interface PullRequest {
     number: number;
     title: string;
@@ -29,12 +29,22 @@ export interface MergeResult {
     sha: string | null;
     message: string;
 }
+/**
+ * Result type for operations that support graceful degradation
+ */
+export interface DegradedResult<T> {
+    value: T;
+    degraded: boolean;
+}
 export interface PRManager {
     listOpenPRs(): Promise<PullRequest[]>;
+    listOpenPRsWithFallback(fallback?: PullRequest[]): Promise<DegradedResult<PullRequest[]>>;
     getPR(number: number): Promise<PullRequest | null>;
     findPRForBranch(branchName: string, base?: string): Promise<PullRequest | null>;
     createPR(options: CreatePROptions): Promise<PullRequest>;
+    createPRWithFallback(options: CreatePROptions): Promise<DegradedResult<PullRequest | null>>;
     mergePR(number: number, method?: 'merge' | 'squash' | 'rebase'): Promise<MergeResult>;
+    mergePRWithFallback(number: number, method?: 'merge' | 'squash' | 'rebase'): Promise<DegradedResult<MergeResult>>;
     closePR(number: number): Promise<void>;
     updatePRFromBase(number: number): Promise<boolean>;
     waitForMergeable(number: number, maxAttempts?: number): Promise<boolean>;
@@ -45,6 +55,8 @@ export interface PRManager {
             state: string;
         }>;
     }>;
+    getServiceHealth(): ServiceHealth;
+    isAvailable(): boolean;
 }
 export declare function createPRManager(client: GitHubClient): PRManager;
 //# sourceMappingURL=pulls.d.ts.map

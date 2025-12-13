@@ -16,6 +16,8 @@ export var ErrorCode;
     ErrorCode["GITHUB_BRANCH_NOT_FOUND"] = "GITHUB_BRANCH_NOT_FOUND";
     ErrorCode["GITHUB_PR_CONFLICT"] = "GITHUB_PR_CONFLICT";
     ErrorCode["GITHUB_ISSUE_NOT_FOUND"] = "GITHUB_ISSUE_NOT_FOUND";
+    ErrorCode["GITHUB_CIRCUIT_OPEN"] = "GITHUB_CIRCUIT_OPEN";
+    ErrorCode["GITHUB_SERVICE_DEGRADED"] = "GITHUB_SERVICE_DEGRADED";
     // Claude/AI errors (2000-2999)
     ErrorCode["CLAUDE_AUTH_FAILED"] = "CLAUDE_AUTH_FAILED";
     ErrorCode["CLAUDE_QUOTA_EXCEEDED"] = "CLAUDE_QUOTA_EXCEEDED";
@@ -54,6 +56,9 @@ export var ErrorCode;
     ErrorCode["NETWORK_ERROR"] = "NETWORK_ERROR";
     ErrorCode["NOT_INITIALIZED"] = "NOT_INITIALIZED";
     ErrorCode["UNKNOWN_ERROR"] = "UNKNOWN_ERROR";
+    ErrorCode["SERVICE_DEGRADED"] = "SERVICE_DEGRADED";
+    ErrorCode["CIRCUIT_BREAKER_OPEN"] = "CIRCUIT_BREAKER_OPEN";
+    ErrorCode["OFFLINE_MODE"] = "OFFLINE_MODE";
 })(ErrorCode || (ErrorCode = {}));
 /**
  * Base structured error class
@@ -89,9 +94,13 @@ export class StructuredError extends Error {
         const transientCodes = [
             ErrorCode.GITHUB_RATE_LIMITED,
             ErrorCode.GITHUB_NETWORK_ERROR,
+            ErrorCode.GITHUB_CIRCUIT_OPEN,
+            ErrorCode.GITHUB_SERVICE_DEGRADED,
             ErrorCode.NETWORK_ERROR,
             ErrorCode.CLAUDE_TIMEOUT,
             ErrorCode.DB_CONNECTION_FAILED,
+            ErrorCode.SERVICE_DEGRADED,
+            ErrorCode.CIRCUIT_BREAKER_OPEN,
         ];
         if (transientCodes.includes(code))
             return 'transient';
@@ -104,17 +113,24 @@ export class StructuredError extends Error {
         ];
         if (criticalCodes.includes(code))
             return 'critical';
+        // Warning for offline mode - not an error, just informational
+        if (code === ErrorCode.OFFLINE_MODE)
+            return 'warning';
         return 'error';
     }
     inferRetryable(code) {
         const retryableCodes = [
             ErrorCode.GITHUB_RATE_LIMITED,
             ErrorCode.GITHUB_NETWORK_ERROR,
+            ErrorCode.GITHUB_CIRCUIT_OPEN,
+            ErrorCode.GITHUB_SERVICE_DEGRADED,
             ErrorCode.NETWORK_ERROR,
             ErrorCode.CLAUDE_TIMEOUT,
             ErrorCode.DB_CONNECTION_FAILED,
             ErrorCode.EXEC_CLONE_FAILED,
             ErrorCode.EXEC_PUSH_FAILED,
+            ErrorCode.SERVICE_DEGRADED,
+            ErrorCode.CIRCUIT_BREAKER_OPEN,
         ];
         return retryableCodes.includes(code);
     }
@@ -242,6 +258,21 @@ function getGitHubRecoveryActions(code, statusCode) {
             actions.push({
                 description: 'Resolve conflicts manually if automatic rebase fails',
                 automatic: false,
+            });
+            break;
+        case ErrorCode.GITHUB_CIRCUIT_OPEN:
+        case ErrorCode.GITHUB_SERVICE_DEGRADED:
+            actions.push({
+                description: 'Wait for circuit breaker timeout to allow recovery attempts',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Check GitHub status at https://www.githubstatus.com/',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Operations will continue with graceful degradation',
+                automatic: true,
             });
             break;
     }

@@ -1,4 +1,4 @@
-export { GitHubClient, createGitHubClient } from './client.js';
+export { GitHubClient, createGitHubClient, } from './client.js';
 export { createIssueManager } from './issues.js';
 export { createBranchManager } from './branches.js';
 export { createPRManager } from './pulls.js';

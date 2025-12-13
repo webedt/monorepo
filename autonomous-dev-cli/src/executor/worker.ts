@@ -14,6 +14,13 @@ import {
   withRetry,
   type ErrorContext,
 } from '../utils/errors.js';
+import {
+  withTimeout,
+  isAbortError,
+  isTimeoutError,
+  TimeoutTracker,
+  createLinkedAbortController,
+} from '../utils/timeout.js';
 import { type Issue } from '../github/issues.js';
 import {
   createChatSession,
@@ -266,10 +273,18 @@ export class Worker {
         chatSessionId,
       };
     } catch (error: any) {
+      // Determine the appropriate error code based on error type
+      let errorCode = ErrorCode.INTERNAL_ERROR;
+      if (error instanceof ClaudeError && error.code === ErrorCode.CLAUDE_TIMEOUT) {
+        errorCode = ErrorCode.CLAUDE_TIMEOUT;
+      } else if (isTimeoutError(error)) {
+        errorCode = ErrorCode.EXEC_TIMEOUT;
+      }
+
       // Wrap the error with structured context
       const structuredError = this.wrapExecutionError(
         error,
-        ErrorCode.INTERNAL_ERROR,
+        errorCode,
         `Task execution failed: ${error.message}`,
         task
       );
@@ -368,55 +383,72 @@ export class Worker {
     const useShallow = this.options.useShallowClone !== false; // Default true
     const sparseConfig = this.options.sparseCheckout;
 
+    // Git clone timeout: 5 minutes max
+    const GIT_CLONE_TIMEOUT_MS = 5 * 60 * 1000;
+
     // Clone with retry for transient network failures
     return withRetry(
       async () => {
-        const git = simpleGit(taskDir);
-        const repoDir = join(taskDir, 'repo');
+        const { result } = await withTimeout(
+          async () => {
+            const git = simpleGit(taskDir);
+            const repoDir = join(taskDir, 'repo');
 
-        // Use sparse checkout for targeted cloning (faster for large repos)
-        if (sparseConfig?.enabled) {
-          this.log.info('Using sparse checkout for optimized cloning');
+            // Use sparse checkout for targeted cloning (faster for large repos)
+            if (sparseConfig?.enabled) {
+              this.log.info('Using sparse checkout for optimized cloning');
 
-          // Initialize empty repo
-          mkdirSync(repoDir, { recursive: true });
-          const repoGit = simpleGit(repoDir);
-          await repoGit.init();
-          await repoGit.addRemote('origin', urlWithAuth);
+              // Initialize empty repo
+              mkdirSync(repoDir, { recursive: true });
+              const repoGit = simpleGit(repoDir);
+              await repoGit.init();
+              await repoGit.addRemote('origin', urlWithAuth);
 
-          // Enable sparse checkout
-          await repoGit.raw(['config', 'core.sparseCheckout', 'true']);
+              // Enable sparse checkout
+              await repoGit.raw(['config', 'core.sparseCheckout', 'true']);
 
-          // Write sparse checkout patterns
-          const sparseCheckoutPath = join(repoDir, '.git', 'info', 'sparse-checkout');
-          const patterns = sparseConfig.paths?.length
-            ? sparseConfig.paths
-            : ['/*', '!/node_modules']; // Default: all except node_modules
-          writeFileSync(sparseCheckoutPath, patterns.join('\n'));
+              // Write sparse checkout patterns
+              const sparseCheckoutPath = join(repoDir, '.git', 'info', 'sparse-checkout');
+              const patterns = sparseConfig.paths?.length
+                ? sparseConfig.paths
+                : ['/*', '!/node_modules']; // Default: all except node_modules
+              writeFileSync(sparseCheckoutPath, patterns.join('\n'));
 
-          // Fetch and checkout with optional shallow clone
-          const fetchArgs = useShallow
-            ? ['fetch', '--depth', '1', 'origin', this.options.baseBranch]
-            : ['fetch', 'origin', this.options.baseBranch];
-          await repoGit.raw(fetchArgs);
-          await repoGit.raw(['checkout', this.options.baseBranch]);
+              // Fetch and checkout with optional shallow clone
+              const fetchArgs = useShallow
+                ? ['fetch', '--depth', '1', 'origin', this.options.baseBranch]
+                : ['fetch', 'origin', this.options.baseBranch];
+              await repoGit.raw(fetchArgs);
+              await repoGit.raw(['checkout', this.options.baseBranch]);
 
-          this.log.debug('Repository cloned with sparse checkout');
-        } else {
-          // Standard clone (shallow by default)
-          const cloneArgs = useShallow
-            ? ['--depth', '1', '--branch', this.options.baseBranch]
-            : ['--branch', this.options.baseBranch];
-          await git.clone(urlWithAuth, 'repo', cloneArgs);
-          this.log.debug('Repository cloned');
-        }
+              this.log.debug('Repository cloned with sparse checkout');
+            } else {
+              // Standard clone (shallow by default)
+              const cloneArgs = useShallow
+                ? ['--depth', '1', '--branch', this.options.baseBranch]
+                : ['--branch', this.options.baseBranch];
+              await git.clone(urlWithAuth, 'repo', cloneArgs);
+              this.log.debug('Repository cloned');
+            }
 
-        // Configure git identity
-        const repoGit = simpleGit(repoDir);
-        await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
-        await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
+            // Configure git identity
+            const repoGit = simpleGit(repoDir);
+            await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
+            await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
 
-        return repoDir;
+            return repoDir;
+          },
+          {
+            timeoutMs: GIT_CLONE_TIMEOUT_MS,
+            operation: 'cloneRepo',
+            component: 'Worker',
+            context: {
+              repoUrl: this.options.repoUrl,
+              baseBranch: this.options.baseBranch,
+            },
+          }
+        );
+        return result;
       },
       {
         config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
@@ -424,7 +456,8 @@ export class Worker {
           this.log.warn(`Clone retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
         },
         shouldRetry: (error) => {
-          // Retry network-related errors
+          // Retry network-related errors and timeouts
+          if (isTimeoutError(error)) return true;
           const message = error.message.toLowerCase();
           return (
             message.includes('network') ||
@@ -436,8 +469,10 @@ export class Worker {
         },
       }
     ).catch((error) => {
+      // Map timeout errors to EXEC_CLONE_FAILED for consistent handling
+      const errorCode = isTimeoutError(error) ? ErrorCode.EXEC_CLONE_FAILED : ErrorCode.EXEC_CLONE_FAILED;
       throw new ExecutionError(
-        ErrorCode.EXEC_CLONE_FAILED,
+        errorCode,
         `Failed to clone repository: ${error.message}`,
         {
           context: {
@@ -445,6 +480,7 @@ export class Worker {
             baseBranch: this.options.baseBranch,
             taskDir,
             sparseCheckout: sparseConfig?.enabled,
+            wasTimeout: isTimeoutError(error),
           },
           cause: error,
         }
@@ -484,10 +520,37 @@ export class Worker {
     this.log.info('Executing task with Claude Agent SDK...');
 
     const prompt = this.buildPrompt(issue);
-
     const timeoutMs = this.options.timeoutMinutes * 60 * 1000;
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+    // Create abort controller with timeout and tracking
+    const { controller: abortController, cleanup } = createLinkedAbortController(timeoutMs);
+
+    // Track timeout progress for warnings
+    const timeoutTracker = new TimeoutTracker({
+      timeoutMs,
+      warningThreshold: 0.75,
+      onWarning: (elapsedMs, remainingMs) => {
+        this.log.warn(`Claude execution approaching timeout`, {
+          elapsedSeconds: Math.round(elapsedMs / 1000),
+          remainingSeconds: Math.round(remainingMs / 1000),
+          issueNumber: issue.number,
+          progress: `${Math.round(timeoutTracker.getProgress())}%`,
+        });
+        if (chatSessionId) {
+          addEvent(chatSessionId, 'timeout_warning', {
+            type: 'timeout_warning',
+            message: `Operation at ${Math.round(timeoutTracker.getProgress())}% of timeout limit`,
+            elapsedMs,
+            remainingMs,
+          }).catch(() => {}); // Don't fail on event logging
+        }
+      },
+      warningCheckIntervalMs: 60000,
+    });
+
+    let lastToolUsed: string | undefined;
+    let toolsUsedCount = 0;
+    let assistantTextBuffer = '';
 
     try {
       const stream = query({
@@ -506,9 +569,34 @@ export class Worker {
       });
 
       let lastMessage: SDKMessage | undefined;
-      let assistantTextBuffer = '';
 
       for await (const message of stream) {
+        // Check if we've been aborted (timeout or external signal)
+        if (abortController.signal.aborted) {
+          const elapsedMs = timeoutTracker.getElapsed();
+          this.log.warn(`Claude execution aborted after ${Math.round(elapsedMs / 1000)}s`, {
+            lastToolUsed,
+            toolsUsedCount,
+            issueNumber: issue.number,
+          });
+          throw new ClaudeError(
+            ErrorCode.CLAUDE_TIMEOUT,
+            `Claude execution timed out after ${Math.round(elapsedMs / 1000)}s (limit: ${this.options.timeoutMinutes}min)`,
+            {
+              context: {
+                operation: 'executeWithClaude',
+                component: 'Worker',
+                workerId: this.workerId,
+                issueNumber: issue.number,
+                timeoutMs,
+                elapsedMs,
+                lastToolUsed,
+                toolsUsedCount,
+              },
+            }
+          );
+        }
+
         lastMessage = message;
         if (message.type === 'assistant') {
           // Log tool uses and collect assistant text
@@ -517,6 +605,8 @@ export class Worker {
               if (block.type === 'tool_use') {
                 const toolName = (block as any).name;
                 const toolInput = (block as any).input;
+                lastToolUsed = toolName;
+                toolsUsedCount++;
                 this.log.debug(`Tool: ${toolName}`);
 
                 // Record tool usage in metrics
@@ -557,12 +647,54 @@ export class Worker {
               type: 'claude_complete',
               message: `Claude completed in ${Math.round(duration / 1000)}s`,
               duration_ms: duration,
+              toolsUsedCount,
             });
           }
         }
       }
+    } catch (error) {
+      const elapsedMs = timeoutTracker.getElapsed();
+
+      // Check if this was an abort/timeout error
+      if (isAbortError(error) || abortController.signal.aborted) {
+        const timeoutError = new ClaudeError(
+          ErrorCode.CLAUDE_TIMEOUT,
+          `Claude execution timed out after ${Math.round(elapsedMs / 1000)}s (limit: ${this.options.timeoutMinutes}min)`,
+          {
+            context: {
+              operation: 'executeWithClaude',
+              component: 'Worker',
+              workerId: this.workerId,
+              issueNumber: issue.number,
+              timeoutMs,
+              elapsedMs,
+              lastToolUsed,
+              toolsUsedCount,
+            },
+            cause: error instanceof Error ? error : undefined,
+          }
+        );
+
+        // Log timeout event to database
+        if (chatSessionId) {
+          await addEvent(chatSessionId, 'timeout', {
+            type: 'timeout',
+            message: `Claude execution timed out after ${Math.round(elapsedMs / 1000)}s`,
+            timeoutMs,
+            elapsedMs,
+            lastToolUsed,
+            toolsUsedCount,
+          }).catch(() => {}); // Don't fail on event logging
+        }
+
+        throw timeoutError;
+      }
+
+      // Re-throw other errors as-is
+      throw error;
     } finally {
-      clearTimeout(timeoutId);
+      cleanup();
+      timeoutTracker.stop();
     }
   }
 
@@ -626,6 +758,9 @@ Start by exploring the codebase, then implement the required changes.`;
 
     const git = simpleGit(repoDir);
 
+    // Git push timeout: 2 minutes max
+    const GIT_PUSH_TIMEOUT_MS = 2 * 60 * 1000;
+
     // Stage all changes
     await git.add('.');
 
@@ -654,10 +789,24 @@ Implements #${issue.number}
       );
     }
 
-    // Push with retry for transient failures
+    // Push with retry and timeout for transient failures
     await withRetry(
       async () => {
-        await git.push(['-u', 'origin', branchName]);
+        const { result } = await withTimeout(
+          async () => {
+            await git.push(['-u', 'origin', branchName]);
+          },
+          {
+            timeoutMs: GIT_PUSH_TIMEOUT_MS,
+            operation: 'gitPush',
+            component: 'Worker',
+            context: {
+              branchName,
+              issueNumber: issue.number,
+            },
+          }
+        );
+        return result;
       },
       {
         config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
@@ -665,6 +814,8 @@ Implements #${issue.number}
           this.log.warn(`Push retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
         },
         shouldRetry: (error) => {
+          // Retry timeout errors
+          if (isTimeoutError(error)) return true;
           const message = error.message.toLowerCase();
           return (
             message.includes('network') ||
@@ -684,6 +835,7 @@ Implements #${issue.number}
           context: {
             repoDir,
             commitSha,
+            wasTimeout: isTimeoutError(error),
           },
           cause: error,
         }

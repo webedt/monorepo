@@ -20,3 +20,15 @@ export {
   formatError,
   DEFAULT_RETRY_CONFIG,
 } from './errors.js';
+export {
+  // Timeout utilities
+  withTimeout,
+  fetchWithTimeout,
+  createLinkedAbortController,
+  isAbortError,
+  isTimeoutError,
+  abortableDelay,
+  TimeoutTracker,
+  type TimeoutOptions,
+  type TimeoutResult,
+} from './timeout.js';
