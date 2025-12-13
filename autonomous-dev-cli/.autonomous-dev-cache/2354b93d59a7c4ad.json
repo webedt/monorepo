@@ -1,0 +1,63 @@
+{
+  "key": "2354b93d59a7c4ad",
+  "repoPath": "/tmp/analyzer-test-1765639372527",
+  "gitCommitHash": "",
+  "gitBranch": "unknown",
+  "timestamp": 1765639372545,
+  "contentHash": "25f008529482f41265b9a0851d2b9774",
+  "data": {
+    "structure": [
+      {
+        "name": "level0",
+        "path": "level0",
+        "type": "directory",
+        "children": [
+          {
+            "name": "file.ts",
+            "path": "level0/file.ts",
+            "type": "file"
+          },
+          {
+            "name": "level1",
+            "path": "level0/level1",
+            "type": "directory",
+            "children": [
+              {
+                "name": "file.ts",
+                "path": "level0/level1/file.ts",
+                "type": "file"
+              },
+              {
+                "name": "level2",
+                "path": "level0/level1/level2",
+                "type": "directory",
+                "children": [
+                  {
+                    "name": "file.ts",
+                    "path": "level0/level1/level2/file.ts",
+                    "type": "file"
+                  },
+                  {
+                    "name": "level3",
+                    "path": "level0/level1/level2/level3",
+                    "type": "directory",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "fileCount": 3,
+    "todoComments": [],
+    "recentChanges": [],
+    "packages": [],
+    "configFiles": []
+  },
+  "fileCache": [],
+  "sizeBytes": 596,
+  "accessCount": 1,
+  "lastAccessTime": 1765639372545
+}

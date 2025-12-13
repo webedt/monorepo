@@ -1,0 +1,31 @@
+{
+  "key": "314da9d5ebf006de",
+  "repoPath": "/tmp/analyzer-test-1765639372486",
+  "gitCommitHash": "",
+  "gitBranch": "unknown",
+  "timestamp": 1765639372498,
+  "contentHash": "89125a90403f288ddc324102c7f8f4b3",
+  "data": {
+    "structure": [
+      {
+        "name": "file1.ts",
+        "path": "file1.ts",
+        "type": "file"
+      },
+      {
+        "name": "file2.ts",
+        "path": "file2.ts",
+        "type": "file"
+      }
+    ],
+    "fileCount": 2,
+    "todoComments": [],
+    "recentChanges": [],
+    "packages": [],
+    "configFiles": []
+  },
+  "fileCache": [],
+  "sizeBytes": 201,
+  "accessCount": 1,
+  "lastAccessTime": 1765639372498
+}

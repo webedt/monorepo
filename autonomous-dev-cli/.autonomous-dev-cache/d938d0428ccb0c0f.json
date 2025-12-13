@@ -1,0 +1,66 @@
+{
+  "key": "d938d0428ccb0c0f",
+  "repoPath": "/tmp/analyzer-test-1765639372506",
+  "gitCommitHash": "",
+  "gitBranch": "unknown",
+  "timestamp": 1765639372508,
+  "contentHash": "0d9e40a408c714630f2c13145559992f",
+  "data": {
+    "structure": [
+      {
+        "name": "hacks.ts",
+        "path": "hacks.ts",
+        "type": "file"
+      }
+    ],
+    "fileCount": 1,
+    "todoComments": [
+      {
+        "file": "hacks.ts",
+        "line": 2,
+        "text": "Temporary workaround",
+        "type": "HACK"
+      },
+      {
+        "file": "hacks.ts",
+        "line": 4,
+        "text": "Needs attention",
+        "type": "XXX"
+      }
+    ],
+    "recentChanges": [],
+    "packages": [],
+    "configFiles": []
+  },
+  "fileCache": [
+    [
+      "hacks.ts",
+      {
+        "fileInfo": {
+          "path": "hacks.ts",
+          "mtimeMs": 1765639372505.108,
+          "size": 136,
+          "contentHash": "ab1b1e6a1423c782151ce7e3f53d8659"
+        },
+        "todos": [
+          {
+            "file": "hacks.ts",
+            "line": 2,
+            "text": "Temporary workaround",
+            "type": "HACK"
+          },
+          {
+            "file": "hacks.ts",
+            "line": 4,
+            "text": "Needs attention",
+            "type": "XXX"
+          }
+        ],
+        "lastAnalyzed": 1765639372508
+      }
+    ]
+  ],
+  "sizeBytes": 288,
+  "accessCount": 1,
+  "lastAccessTime": 1765639372508
+}

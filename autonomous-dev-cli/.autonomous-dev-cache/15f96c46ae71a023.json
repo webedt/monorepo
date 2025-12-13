@@ -1,0 +1,521 @@
+{
+  "key": "15f96c46ae71a023",
+  "repoPath": "/tmp/analyzer-test-1765639372548",
+  "gitCommitHash": "",
+  "gitBranch": "unknown",
+  "timestamp": 1765639372637,
+  "contentHash": "0d82c41332e1a331906d839534704777",
+  "data": {
+    "structure": [
+      {
+        "name": "file0.ts",
+        "path": "file0.ts",
+        "type": "file"
+      },
+      {
+        "name": "file1.ts",
+        "path": "file1.ts",
+        "type": "file"
+      },
+      {
+        "name": "file10.ts",
+        "path": "file10.ts",
+        "type": "file"
+      },
+      {
+        "name": "file100.ts",
+        "path": "file100.ts",
+        "type": "file"
+      },
+      {
+        "name": "file101.ts",
+        "path": "file101.ts",
+        "type": "file"
+      },
+      {
+        "name": "file102.ts",
+        "path": "file102.ts",
+        "type": "file"
+      },
+      {
+        "name": "file103.ts",
+        "path": "file103.ts",
+        "type": "file"
+      },
+      {
+        "name": "file104.ts",
+        "path": "file104.ts",
+        "type": "file"
+      },
+      {
+        "name": "file105.ts",
+        "path": "file105.ts",
+        "type": "file"
+      },
+      {
+        "name": "file106.ts",
+        "path": "file106.ts",
+        "type": "file"
+      },
+      {
+        "name": "file107.ts",
+        "path": "file107.ts",
+        "type": "file"
+      },
+      {
+        "name": "file108.ts",
+        "path": "file108.ts",
+        "type": "file"
+      },
+      {
+        "name": "file109.ts",
+        "path": "file109.ts",
+        "type": "file"
+      },
+      {
+        "name": "file11.ts",
+        "path": "file11.ts",
+        "type": "file"
+      },
+      {
+        "name": "file110.ts",
+        "path": "file110.ts",
+        "type": "file"
+      },
+      {
+        "name": "file111.ts",
+        "path": "file111.ts",
+        "type": "file"
+      },
+      {
+        "name": "file112.ts",
+        "path": "file112.ts",
+        "type": "file"
+      },
+      {
+        "name": "file113.ts",
+        "path": "file113.ts",
+        "type": "file"
+      },
+      {
+        "name": "file114.ts",
+        "path": "file114.ts",
+        "type": "file"
+      },
+      {
+        "name": "file115.ts",
+        "path": "file115.ts",
+        "type": "file"
+      },
+      {
+        "name": "file116.ts",
+        "path": "file116.ts",
+        "type": "file"
+      },
+      {
+        "name": "file117.ts",
+        "path": "file117.ts",
+        "type": "file"
+      },
+      {
+        "name": "file118.ts",
+        "path": "file118.ts",
+        "type": "file"
+      },
+      {
+        "name": "file119.ts",
+        "path": "file119.ts",
+        "type": "file"
+      },
+      {
+        "name": "file12.ts",
+        "path": "file12.ts",
+        "type": "file"
+      },
+      {
+        "name": "file120.ts",
+        "path": "file120.ts",
+        "type": "file"
+      },
+      {
+        "name": "file121.ts",
+        "path": "file121.ts",
+        "type": "file"
+      },
+      {
+        "name": "file122.ts",
+        "path": "file122.ts",
+        "type": "file"
+      },
+      {
+        "name": "file123.ts",
+        "path": "file123.ts",
+        "type": "file"
+      },
+      {
+        "name": "file124.ts",
+        "path": "file124.ts",
+        "type": "file"
+      },
+      {
+        "name": "file125.ts",
+        "path": "file125.ts",
+        "type": "file"
+      },
+      {
+        "name": "file126.ts",
+        "path": "file126.ts",
+        "type": "file"
+      },
+      {
+        "name": "file127.ts",
+        "path": "file127.ts",
+        "type": "file"
+      },
+      {
+        "name": "file128.ts",
+        "path": "file128.ts",
+        "type": "file"
+      },
+      {
+        "name": "file129.ts",
+        "path": "file129.ts",
+        "type": "file"
+      },
+      {
+        "name": "file13.ts",
+        "path": "file13.ts",
+        "type": "file"
+      },
+      {
+        "name": "file130.ts",
+        "path": "file130.ts",
+        "type": "file"
+      },
+      {
+        "name": "file131.ts",
+        "path": "file131.ts",
+        "type": "file"
+      },
+      {
+        "name": "file132.ts",
+        "path": "file132.ts",
+        "type": "file"
+      },
+      {
+        "name": "file133.ts",
+        "path": "file133.ts",
+        "type": "file"
+      },
+      {
+        "name": "file134.ts",
+        "path": "file134.ts",
+        "type": "file"
+      },
+      {
+        "name": "file135.ts",
+        "path": "file135.ts",
+        "type": "file"
+      },
+      {
+        "name": "file136.ts",
+        "path": "file136.ts",
+        "type": "file"
+      },
+      {
+        "name": "file137.ts",
+        "path": "file137.ts",
+        "type": "file"
+      },
+      {
+        "name": "file138.ts",
+        "path": "file138.ts",
+        "type": "file"
+      },
+      {
+        "name": "file139.ts",
+        "path": "file139.ts",
+        "type": "file"
+      },
+      {
+        "name": "file14.ts",
+        "path": "file14.ts",
+        "type": "file"
+      },
+      {
+        "name": "file140.ts",
+        "path": "file140.ts",
+        "type": "file"
+      },
+      {
+        "name": "file141.ts",
+        "path": "file141.ts",
+        "type": "file"
+      },
+      {
+        "name": "file142.ts",
+        "path": "file142.ts",
+        "type": "file"
+      },
+      {
+        "name": "file143.ts",
+        "path": "file143.ts",
+        "type": "file"
+      },
+      {
+        "name": "file144.ts",
+        "path": "file144.ts",
+        "type": "file"
+      },
+      {
+        "name": "file145.ts",
+        "path": "file145.ts",
+        "type": "file"
+      },
+      {
+        "name": "file146.ts",
+        "path": "file146.ts",
+        "type": "file"
+      },
+      {
+        "name": "file147.ts",
+        "path": "file147.ts",
+        "type": "file"
+      },
+      {
+        "name": "file148.ts",
+        "path": "file148.ts",
+        "type": "file"
+      },
+      {
+        "name": "file149.ts",
+        "path": "file149.ts",
+        "type": "file"
+      },
+      {
+        "name": "file15.ts",
+        "path": "file15.ts",
+        "type": "file"
+      },
+      {
+        "name": "file16.ts",
+        "path": "file16.ts",
+        "type": "file"
+      },
+      {
+        "name": "file17.ts",
+        "path": "file17.ts",
+        "type": "file"
+      },
+      {
+        "name": "file18.ts",
+        "path": "file18.ts",
+        "type": "file"
+      },
+      {
+        "name": "file19.ts",
+        "path": "file19.ts",
+        "type": "file"
+      },
+      {
+        "name": "file2.ts",
+        "path": "file2.ts",
+        "type": "file"
+      },
+      {
+        "name": "file20.ts",
+        "path": "file20.ts",
+        "type": "file"
+      },
+      {
+        "name": "file21.ts",
+        "path": "file21.ts",
+        "type": "file"
+      },
+      {
+        "name": "file22.ts",
+        "path": "file22.ts",
+        "type": "file"
+      },
+      {
+        "name": "file23.ts",
+        "path": "file23.ts",
+        "type": "file"
+      },
+      {
+        "name": "file24.ts",
+        "path": "file24.ts",
+        "type": "file"
+      },
+      {
+        "name": "file25.ts",
+        "path": "file25.ts",
+        "type": "file"
+      },
+      {
+        "name": "file26.ts",
+        "path": "file26.ts",
+        "type": "file"
+      },
+      {
+        "name": "file27.ts",
+        "path": "file27.ts",
+        "type": "file"
+      },
+      {
+        "name": "file28.ts",
+        "path": "file28.ts",
+        "type": "file"
+      },
+      {
+        "name": "file29.ts",
+        "path": "file29.ts",
+        "type": "file"
+      },
+      {
+        "name": "file3.ts",
+        "path": "file3.ts",
+        "type": "file"
+      },
+      {
+        "name": "file30.ts",
+        "path": "file30.ts",
+        "type": "file"
+      },
+      {
+        "name": "file31.ts",
+        "path": "file31.ts",
+        "type": "file"
+      },
+      {
+        "name": "file32.ts",
+        "path": "file32.ts",
+        "type": "file"
+      },
+      {
+        "name": "file33.ts",
+        "path": "file33.ts",
+        "type": "file"
+      },
+      {
+        "name": "file34.ts",
+        "path": "file34.ts",
+        "type": "file"
+      },
+      {
+        "name": "file35.ts",
+        "path": "file35.ts",
+        "type": "file"
+      },
+      {
+        "name": "file36.ts",
+        "path": "file36.ts",
+        "type": "file"
+      },
+      {
+        "name": "file37.ts",
+        "path": "file37.ts",
+        "type": "file"
+      },
+      {
+        "name": "file38.ts",
+        "path": "file38.ts",
+        "type": "file"
+      },
+      {
+        "name": "file39.ts",
+        "path": "file39.ts",
+        "type": "file"
+      },
+      {
+        "name": "file4.ts",
+        "path": "file4.ts",
+        "type": "file"
+      },
+      {
+        "name": "file40.ts",
+        "path": "file40.ts",
+        "type": "file"
+      },
+      {
+        "name": "file41.ts",
+        "path": "file41.ts",
+        "type": "file"
+      },
+      {
+        "name": "file42.ts",
+        "path": "file42.ts",
+        "type": "file"
+      },
+      {
+        "name": "file43.ts",
+        "path": "file43.ts",
+        "type": "file"
+      },
+      {
+        "name": "file44.ts",
+        "path": "file44.ts",
+        "type": "file"
+      },
+      {
+        "name": "file45.ts",
+        "path": "file45.ts",
+        "type": "file"
+      },
+      {
+        "name": "file46.ts",
+        "path": "file46.ts",
+        "type": "file"
+      },
+      {
+        "name": "file47.ts",
+        "path": "file47.ts",
+        "type": "file"
+      },
+      {
+        "name": "file48.ts",
+        "path": "file48.ts",
+        "type": "file"
+      },
+      {
+        "name": "file49.ts",
+        "path": "file49.ts",
+        "type": "file"
+      },
+      {
+        "name": "file5.ts",
+        "path": "file5.ts",
+        "type": "file"
+      },
+      {
+        "name": "file50.ts",
+        "path": "file50.ts",
+        "type": "file"
+      },
+      {
+        "name": "file51.ts",
+        "path": "file51.ts",
+        "type": "file"
+      },
+      {
+        "name": "file52.ts",
+        "path": "file52.ts",
+        "type": "file"
+      },
+      {
+        "name": "file53.ts",
+        "path": "file53.ts",
+        "type": "file"
+      }
+    ],
+    "fileCount": 100,
+    "todoComments": [],
+    "recentChanges": [],
+    "packages": [],
+    "configFiles": []
+  },
+  "fileCache": [],
+  "sizeBytes": 5587,
+  "accessCount": 1,
+  "lastAccessTime": 1765639372637
+}
