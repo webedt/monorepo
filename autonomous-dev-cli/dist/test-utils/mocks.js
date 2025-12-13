@@ -59,8 +59,9 @@ export function createMockServiceHealth(overrides = {}) {
         status: 'healthy',
         circuitState: 'closed',
         consecutiveFailures: 0,
+        consecutiveSuccesses: 0,
         rateLimitRemaining: 5000,
-        lastSuccessfulCall: new Date(),
+        lastSuccess: new Date(),
         ...overrides,
     };
 }
@@ -69,8 +70,8 @@ export function createMockServiceHealth(overrides = {}) {
  */
 export function createMockIssuesManager(overrides = {}) {
     return {
-        listOpenIssues: mock.fn(async () => [createMockIssue()]),
-        listOpenIssuesWithFallback: mock.fn(async () => ({
+        listOpenIssues: mock.fn(async (_label) => [createMockIssue()]),
+        listOpenIssuesWithFallback: mock.fn(async (_label, _fallback) => ({
             value: [createMockIssue()],
             degraded: false,
         })),
@@ -81,18 +82,20 @@ export function createMockIssuesManager(overrides = {}) {
             labels: params.labels,
         })),
         updateIssue: mock.fn(async () => createMockIssue()),
-        closeIssue: mock.fn(async () => { }),
-        addComment: mock.fn(async () => ({ id: 1, body: 'Comment' })),
-        addCommentWithFallback: mock.fn(async () => ({
-            value: { id: 1, body: 'Comment' },
+        closeIssue: mock.fn(async (_issueNumber, _comment) => { }),
+        addComment: mock.fn(async (_issueNumber, _body) => { }),
+        addCommentWithFallback: mock.fn(async (_issueNumber, _body) => ({
+            value: undefined,
             degraded: false,
         })),
-        addLabels: mock.fn(async () => []),
-        addLabelsWithFallback: mock.fn(async () => ({
-            value: [],
+        addLabels: mock.fn(async (_issueNumber, _labels) => { }),
+        addLabelsWithFallback: mock.fn(async (_issueNumber, _labels) => ({
+            value: undefined,
             degraded: false,
         })),
-        removeLabel: mock.fn(async () => { }),
+        removeLabel: mock.fn(async (_issueNumber, _label) => { }),
+        getServiceHealth: mock.fn(() => createMockServiceHealth()),
+        isAvailable: mock.fn(() => true),
         ...overrides,
     };
 }
@@ -103,20 +106,20 @@ export function createMockPullsManager(overrides = {}) {
     return {
         listOpenPRs: mock.fn(async () => [createMockPR()]),
         getPR: mock.fn(async (number) => createMockPR({ number })),
-        findPRForBranch: mock.fn(async () => createMockPR()),
+        findPRForBranch: mock.fn(async (_branch) => createMockPR()),
         createPR: mock.fn(async (params) => createMockPR({
             title: params.title,
             body: params.body,
         })),
-        createPRWithFallback: mock.fn(async () => ({
+        createPRWithFallback: mock.fn(async (_params) => ({
             value: createMockPR(),
             degraded: false,
         })),
-        mergePR: mock.fn(async () => createMockMergeResult()),
-        closePR: mock.fn(async () => { }),
-        updatePRFromBase: mock.fn(async () => true),
-        waitForMergeable: mock.fn(async () => true),
-        getChecksStatus: mock.fn(async () => ({ state: 'success', statuses: [] })),
+        mergePR: mock.fn(async (_prNumber, _mergeMethod) => createMockMergeResult()),
+        closePR: mock.fn(async (_prNumber) => { }),
+        updatePRFromBase: mock.fn(async (_prNumber) => true),
+        waitForMergeable: mock.fn(async (_prNumber) => true),
+        getChecksStatus: mock.fn(async (_prNumber) => ({ state: 'success', statuses: [] })),
         ...overrides,
     };
 }
@@ -305,7 +308,7 @@ export function createMockMergeAttemptResult(overrides = {}) {
  */
 export function createMockConflictResolver(overrides = {}) {
     return {
-        attemptMerge: mock.fn(async () => createMockMergeAttemptResult()),
+        attemptMerge: mock.fn(async (_branchName, _prNumber) => createMockMergeAttemptResult()),
         mergeSequentially: mock.fn(async (branches) => {
             const results = new Map();
             for (const { branchName } of branches) {

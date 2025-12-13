@@ -147,6 +147,16 @@ export const ConfigSchema = z.object({
         includeCorrelationId: z.boolean().default(true),
         /** Include timestamps in log entries (default: true) */
         includeTimestamp: z.boolean().default(true),
+        /** Enable structured JSON logging to file alongside console output (default: false) */
+        enableStructuredFileLogging: z.boolean().default(false),
+        /** Directory path for structured log files (default: './logs') */
+        structuredLogDir: z.string().default('./logs'),
+        /** Maximum size of each log file in bytes before rotation (default: 10MB) */
+        maxLogFileSizeBytes: z.number().min(1024 * 1024).max(1024 * 1024 * 1024).default(10 * 1024 * 1024),
+        /** Number of rotated log files to retain (default: 5) */
+        maxLogFiles: z.number().min(1).max(100).default(5),
+        /** Include performance metrics in structured logs (default: true when structured logging enabled) */
+        includeMetrics: z.boolean().default(true),
     }).describe('Logging configuration').default({}),
     /**
      * Circuit Breaker Settings
@@ -269,6 +279,11 @@ export const defaultConfig = {
         level: 'info',
         includeCorrelationId: true,
         includeTimestamp: true,
+        enableStructuredFileLogging: false,
+        structuredLogDir: './logs',
+        maxLogFileSizeBytes: 10 * 1024 * 1024,
+        maxLogFiles: 5,
+        includeMetrics: true,
     },
     circuitBreaker: {
         failureThreshold: 5,

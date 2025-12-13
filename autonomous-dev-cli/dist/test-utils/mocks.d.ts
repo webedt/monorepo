@@ -25,32 +25,28 @@ export declare function createMockServiceHealth(overrides?: Partial<ServiceHealt
  * Create mock GitHub Issues manager
  */
 export declare function createMockIssuesManager(overrides?: Record<string, any>): {
-    listOpenIssues: import("node:test").Mock<() => Promise<Issue[]>>;
-    listOpenIssuesWithFallback: import("node:test").Mock<() => Promise<{
+    listOpenIssues: import("node:test").Mock<(_label?: string) => Promise<Issue[]>>;
+    listOpenIssuesWithFallback: import("node:test").Mock<(_label?: string, _fallback?: Issue[]) => Promise<{
         value: Issue[];
         degraded: boolean;
     }>>;
     getIssue: import("node:test").Mock<(number: number) => Promise<Issue>>;
     createIssue: import("node:test").Mock<(params: any) => Promise<Issue>>;
     updateIssue: import("node:test").Mock<() => Promise<Issue>>;
-    closeIssue: import("node:test").Mock<() => Promise<void>>;
-    addComment: import("node:test").Mock<() => Promise<{
-        id: number;
-        body: string;
-    }>>;
-    addCommentWithFallback: import("node:test").Mock<() => Promise<{
-        value: {
-            id: number;
-            body: string;
-        };
+    closeIssue: import("node:test").Mock<(_issueNumber: number, _comment?: string) => Promise<void>>;
+    addComment: import("node:test").Mock<(_issueNumber: number, _body: string) => Promise<void>>;
+    addCommentWithFallback: import("node:test").Mock<(_issueNumber: number, _body: string) => Promise<{
+        value: undefined;
         degraded: boolean;
     }>>;
-    addLabels: import("node:test").Mock<() => Promise<never[]>>;
-    addLabelsWithFallback: import("node:test").Mock<() => Promise<{
-        value: never[];
+    addLabels: import("node:test").Mock<(_issueNumber: number, _labels: string[]) => Promise<void>>;
+    addLabelsWithFallback: import("node:test").Mock<(_issueNumber: number, _labels: string[]) => Promise<{
+        value: undefined;
         degraded: boolean;
     }>>;
-    removeLabel: import("node:test").Mock<() => Promise<void>>;
+    removeLabel: import("node:test").Mock<(_issueNumber: number, _label: string) => Promise<void>>;
+    getServiceHealth: import("node:test").Mock<() => ServiceHealth>;
+    isAvailable: import("node:test").Mock<() => boolean>;
 };
 /**
  * Create mock GitHub Pulls manager
@@ -58,17 +54,17 @@ export declare function createMockIssuesManager(overrides?: Record<string, any>)
 export declare function createMockPullsManager(overrides?: Record<string, any>): {
     listOpenPRs: import("node:test").Mock<() => Promise<PullRequest[]>>;
     getPR: import("node:test").Mock<(number: number) => Promise<PullRequest>>;
-    findPRForBranch: import("node:test").Mock<() => Promise<PullRequest>>;
+    findPRForBranch: import("node:test").Mock<(_branch: string) => Promise<PullRequest>>;
     createPR: import("node:test").Mock<(params: any) => Promise<PullRequest>>;
-    createPRWithFallback: import("node:test").Mock<() => Promise<{
+    createPRWithFallback: import("node:test").Mock<(_params?: any) => Promise<{
         value: PullRequest;
         degraded: boolean;
     }>>;
-    mergePR: import("node:test").Mock<() => Promise<MergeResult>>;
-    closePR: import("node:test").Mock<() => Promise<void>>;
-    updatePRFromBase: import("node:test").Mock<() => Promise<boolean>>;
-    waitForMergeable: import("node:test").Mock<() => Promise<boolean>>;
-    getChecksStatus: import("node:test").Mock<() => Promise<{
+    mergePR: import("node:test").Mock<(_prNumber: number, _mergeMethod?: string) => Promise<MergeResult>>;
+    closePR: import("node:test").Mock<(_prNumber: number) => Promise<void>>;
+    updatePRFromBase: import("node:test").Mock<(_prNumber: number) => Promise<boolean>>;
+    waitForMergeable: import("node:test").Mock<(_prNumber: number) => Promise<boolean>>;
+    getChecksStatus: import("node:test").Mock<(_prNumber: number) => Promise<{
         state: string;
         statuses: never[];
     }>>;
@@ -127,47 +123,43 @@ export declare function createMockGitHub(overrides?: Record<string, any>): {
         repo: string;
     };
     issues: {
-        listOpenIssues: import("node:test").Mock<() => Promise<Issue[]>>;
-        listOpenIssuesWithFallback: import("node:test").Mock<() => Promise<{
+        listOpenIssues: import("node:test").Mock<(_label?: string) => Promise<Issue[]>>;
+        listOpenIssuesWithFallback: import("node:test").Mock<(_label?: string, _fallback?: Issue[]) => Promise<{
             value: Issue[];
             degraded: boolean;
         }>>;
         getIssue: import("node:test").Mock<(number: number) => Promise<Issue>>;
         createIssue: import("node:test").Mock<(params: any) => Promise<Issue>>;
         updateIssue: import("node:test").Mock<() => Promise<Issue>>;
-        closeIssue: import("node:test").Mock<() => Promise<void>>;
-        addComment: import("node:test").Mock<() => Promise<{
-            id: number;
-            body: string;
-        }>>;
-        addCommentWithFallback: import("node:test").Mock<() => Promise<{
-            value: {
-                id: number;
-                body: string;
-            };
+        closeIssue: import("node:test").Mock<(_issueNumber: number, _comment?: string) => Promise<void>>;
+        addComment: import("node:test").Mock<(_issueNumber: number, _body: string) => Promise<void>>;
+        addCommentWithFallback: import("node:test").Mock<(_issueNumber: number, _body: string) => Promise<{
+            value: undefined;
             degraded: boolean;
         }>>;
-        addLabels: import("node:test").Mock<() => Promise<never[]>>;
-        addLabelsWithFallback: import("node:test").Mock<() => Promise<{
-            value: never[];
+        addLabels: import("node:test").Mock<(_issueNumber: number, _labels: string[]) => Promise<void>>;
+        addLabelsWithFallback: import("node:test").Mock<(_issueNumber: number, _labels: string[]) => Promise<{
+            value: undefined;
             degraded: boolean;
         }>>;
-        removeLabel: import("node:test").Mock<() => Promise<void>>;
+        removeLabel: import("node:test").Mock<(_issueNumber: number, _label: string) => Promise<void>>;
+        getServiceHealth: import("node:test").Mock<() => ServiceHealth>;
+        isAvailable: import("node:test").Mock<() => boolean>;
     };
     pulls: {
         listOpenPRs: import("node:test").Mock<() => Promise<PullRequest[]>>;
         getPR: import("node:test").Mock<(number: number) => Promise<PullRequest>>;
-        findPRForBranch: import("node:test").Mock<() => Promise<PullRequest>>;
+        findPRForBranch: import("node:test").Mock<(_branch: string) => Promise<PullRequest>>;
         createPR: import("node:test").Mock<(params: any) => Promise<PullRequest>>;
-        createPRWithFallback: import("node:test").Mock<() => Promise<{
+        createPRWithFallback: import("node:test").Mock<(_params?: any) => Promise<{
             value: PullRequest;
             degraded: boolean;
         }>>;
-        mergePR: import("node:test").Mock<() => Promise<MergeResult>>;
-        closePR: import("node:test").Mock<() => Promise<void>>;
-        updatePRFromBase: import("node:test").Mock<() => Promise<boolean>>;
-        waitForMergeable: import("node:test").Mock<() => Promise<boolean>>;
-        getChecksStatus: import("node:test").Mock<() => Promise<{
+        mergePR: import("node:test").Mock<(_prNumber: number, _mergeMethod?: string) => Promise<MergeResult>>;
+        closePR: import("node:test").Mock<(_prNumber: number) => Promise<void>>;
+        updatePRFromBase: import("node:test").Mock<(_prNumber: number) => Promise<boolean>>;
+        waitForMergeable: import("node:test").Mock<(_prNumber: number) => Promise<boolean>>;
+        getChecksStatus: import("node:test").Mock<(_prNumber: number) => Promise<{
             state: string;
             statuses: never[];
         }>>;
@@ -335,7 +327,7 @@ export declare function createMockMergeAttemptResult(overrides?: Record<string, 
  * Create mock conflict resolver
  */
 export declare function createMockConflictResolver(overrides?: Record<string, any>): {
-    attemptMerge: import("node:test").Mock<() => Promise<{
+    attemptMerge: import("node:test").Mock<(_branchName: string, _prNumber: number) => Promise<{
         success: boolean;
         pr: PullRequest;
         merged: boolean;

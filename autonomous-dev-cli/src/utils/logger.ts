@@ -2,6 +2,8 @@ import chalk from 'chalk';
 import { StructuredError, type ErrorContext, formatError } from './errors.js';
 import { randomUUID } from 'crypto';
 import { memoryUsage } from 'process';
+import { existsSync, mkdirSync, appendFileSync, statSync, renameSync, readdirSync, unlinkSync } from 'fs';
+import { join, basename } from 'path';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -131,6 +133,562 @@ export interface CorrelationContext {
   workerId?: string;
   component?: string;
   startTime?: number;
+}
+
+/**
+ * Configuration for structured file logging
+ */
+export interface StructuredFileLoggerConfig {
+  /** Directory path for log files */
+  logDir: string;
+  /** Maximum file size in bytes before rotation (default: 10MB) */
+  maxFileSizeBytes: number;
+  /** Number of rotated files to keep (default: 5) */
+  maxFiles: number;
+  /** Include performance metrics in logs (default: true) */
+  includeMetrics: boolean;
+}
+
+/**
+ * Aggregated metrics for tracking operational statistics
+ */
+export interface AggregatedMetrics {
+  /** Total number of cycles executed */
+  totalCycles: number;
+  /** Successful cycles count */
+  successfulCycles: number;
+  /** Failed cycles count */
+  failedCycles: number;
+  /** Total tasks discovered */
+  totalTasksDiscovered: number;
+  /** Total tasks completed */
+  totalTasksCompleted: number;
+  /** Total tasks failed */
+  totalTasksFailed: number;
+  /** Total errors recorded */
+  totalErrors: number;
+  /** Total PRs merged */
+  totalPRsMerged: number;
+  /** Array of cycle durations for average calculation */
+  cycleDurations: number[];
+  /** Timestamp when tracking started */
+  startTime: number;
+  /** Last cycle timestamp */
+  lastCycleTime?: number;
+  /** Error counts by error code */
+  errorsByCode: Record<string, number>;
+  /** Success rate percentage (0-100) */
+  successRate: number;
+  /** Average cycle duration in ms */
+  avgCycleDurationMs: number;
+  /** Cycles per hour rate */
+  cyclesPerHour: number;
+}
+
+/**
+ * Structured log entry with extended fields for file logging
+ */
+export interface ExtendedLogEntry extends StructuredLogEntry {
+  /** Operation type for categorization */
+  operationType?: 'cycle' | 'task' | 'discovery' | 'evaluation' | 'merge' | 'api' | 'system';
+  /** Duration of operation in ms */
+  durationMs?: number;
+  /** Issue number if applicable */
+  issueNumber?: number;
+  /** Memory usage at time of log */
+  memoryUsageMB?: number;
+  /** Performance metrics snapshot */
+  metrics?: Partial<AggregatedMetrics>;
+}
+
+/**
+ * Aggregated metrics tracker for observability
+ */
+export class MetricsAggregator {
+  private metrics: AggregatedMetrics;
+
+  constructor() {
+    this.metrics = this.createInitialMetrics();
+  }
+
+  private createInitialMetrics(): AggregatedMetrics {
+    return {
+      totalCycles: 0,
+      successfulCycles: 0,
+      failedCycles: 0,
+      totalTasksDiscovered: 0,
+      totalTasksCompleted: 0,
+      totalTasksFailed: 0,
+      totalErrors: 0,
+      totalPRsMerged: 0,
+      cycleDurations: [],
+      startTime: Date.now(),
+      errorsByCode: {},
+      successRate: 0,
+      avgCycleDurationMs: 0,
+      cyclesPerHour: 0,
+    };
+  }
+
+  /**
+   * Record a cycle completion
+   */
+  recordCycle(
+    success: boolean,
+    durationMs: number,
+    tasksDiscovered: number,
+    tasksCompleted: number,
+    tasksFailed: number,
+    prsMerged: number
+  ): void {
+    this.metrics.totalCycles++;
+    if (success) {
+      this.metrics.successfulCycles++;
+    } else {
+      this.metrics.failedCycles++;
+    }
+    this.metrics.totalTasksDiscovered += tasksDiscovered;
+    this.metrics.totalTasksCompleted += tasksCompleted;
+    this.metrics.totalTasksFailed += tasksFailed;
+    this.metrics.totalPRsMerged += prsMerged;
+    this.metrics.cycleDurations.push(durationMs);
+    this.metrics.lastCycleTime = Date.now();
+
+    // Keep only last 100 durations for average calculation
+    if (this.metrics.cycleDurations.length > 100) {
+      this.metrics.cycleDurations = this.metrics.cycleDurations.slice(-100);
+    }
+
+    this.recalculateRates();
+  }
+
+  /**
+   * Record an error occurrence
+   */
+  recordError(errorCode: string): void {
+    this.metrics.totalErrors++;
+    this.metrics.errorsByCode[errorCode] = (this.metrics.errorsByCode[errorCode] || 0) + 1;
+  }
+
+  /**
+   * Recalculate derived metrics
+   */
+  private recalculateRates(): void {
+    // Calculate success rate
+    if (this.metrics.totalCycles > 0) {
+      this.metrics.successRate = Math.round(
+        (this.metrics.successfulCycles / this.metrics.totalCycles) * 100
+      );
+    }
+
+    // Calculate average duration
+    if (this.metrics.cycleDurations.length > 0) {
+      const sum = this.metrics.cycleDurations.reduce((a, b) => a + b, 0);
+      this.metrics.avgCycleDurationMs = Math.round(sum / this.metrics.cycleDurations.length);
+    }
+
+    // Calculate cycles per hour
+    const elapsedHours = (Date.now() - this.metrics.startTime) / (1000 * 60 * 60);
+    if (elapsedHours > 0) {
+      this.metrics.cyclesPerHour = Math.round((this.metrics.totalCycles / elapsedHours) * 100) / 100;
+    }
+  }
+
+  /**
+   * Get current aggregated metrics
+   */
+  getMetrics(): AggregatedMetrics {
+    this.recalculateRates();
+    return { ...this.metrics };
+  }
+
+  /**
+   * Get a summary suitable for logging
+   */
+  getMetricsSummary(): Record<string, any> {
+    const m = this.getMetrics();
+    return {
+      cycles: {
+        total: m.totalCycles,
+        successful: m.successfulCycles,
+        failed: m.failedCycles,
+        successRate: `${m.successRate}%`,
+        avgDurationMs: m.avgCycleDurationMs,
+        perHour: m.cyclesPerHour,
+      },
+      tasks: {
+        discovered: m.totalTasksDiscovered,
+        completed: m.totalTasksCompleted,
+        failed: m.totalTasksFailed,
+        completionRate: m.totalTasksDiscovered > 0
+          ? `${Math.round((m.totalTasksCompleted / m.totalTasksDiscovered) * 100)}%`
+          : '0%',
+      },
+      errors: {
+        total: m.totalErrors,
+        byCode: m.errorsByCode,
+      },
+      prsMerged: m.totalPRsMerged,
+      uptimeMs: Date.now() - m.startTime,
+    };
+  }
+
+  /**
+   * Reset metrics (useful for testing)
+   */
+  reset(): void {
+    this.metrics = this.createInitialMetrics();
+  }
+}
+
+/**
+ * Structured file logger that writes JSON logs to files with rotation
+ */
+export class StructuredFileLogger {
+  private config: StructuredFileLoggerConfig;
+  private currentLogFile: string;
+  private metricsAggregator: MetricsAggregator;
+  private enabled: boolean = false;
+
+  constructor(config: Partial<StructuredFileLoggerConfig> = {}) {
+    this.config = {
+      logDir: config.logDir || './logs',
+      maxFileSizeBytes: config.maxFileSizeBytes || 10 * 1024 * 1024,
+      maxFiles: config.maxFiles || 5,
+      includeMetrics: config.includeMetrics !== false,
+    };
+    this.currentLogFile = this.getLogFilePath();
+    this.metricsAggregator = new MetricsAggregator();
+  }
+
+  /**
+   * Enable structured file logging
+   */
+  enable(): void {
+    this.ensureLogDirectory();
+    this.enabled = true;
+  }
+
+  /**
+   * Disable structured file logging
+   */
+  disable(): void {
+    this.enabled = false;
+  }
+
+  /**
+   * Check if structured file logging is enabled
+   */
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  /**
+   * Get the metrics aggregator for recording metrics
+   */
+  getMetricsAggregator(): MetricsAggregator {
+    return this.metricsAggregator;
+  }
+
+  /**
+   * Get current log file path
+   */
+  private getLogFilePath(): string {
+    return join(this.config.logDir, 'autonomous-dev.log');
+  }
+
+  /**
+   * Ensure log directory exists
+   */
+  private ensureLogDirectory(): void {
+    if (!existsSync(this.config.logDir)) {
+      mkdirSync(this.config.logDir, { recursive: true });
+    }
+  }
+
+  /**
+   * Check if log rotation is needed
+   */
+  private needsRotation(): boolean {
+    if (!existsSync(this.currentLogFile)) {
+      return false;
+    }
+    try {
+      const stats = statSync(this.currentLogFile);
+      return stats.size >= this.config.maxFileSizeBytes;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Rotate log files
+   */
+  private rotateLogFiles(): void {
+    // Delete oldest file if at max
+    const oldestFile = `${this.currentLogFile}.${this.config.maxFiles}`;
+    if (existsSync(oldestFile)) {
+      unlinkSync(oldestFile);
+    }
+
+    // Rotate existing files
+    for (let i = this.config.maxFiles - 1; i >= 1; i--) {
+      const current = `${this.currentLogFile}.${i}`;
+      const next = `${this.currentLogFile}.${i + 1}`;
+      if (existsSync(current)) {
+        renameSync(current, next);
+      }
+    }
+
+    // Move current log to .1
+    if (existsSync(this.currentLogFile)) {
+      renameSync(this.currentLogFile, `${this.currentLogFile}.1`);
+    }
+  }
+
+  /**
+   * Write a structured log entry to file
+   */
+  writeLog(entry: ExtendedLogEntry): void {
+    if (!this.enabled) {
+      return;
+    }
+
+    try {
+      // Check for rotation
+      if (this.needsRotation()) {
+        this.rotateLogFiles();
+      }
+
+      // Add metrics if configured
+      if (this.config.includeMetrics && !entry.metrics) {
+        entry.metrics = this.metricsAggregator.getMetrics();
+      }
+
+      // Add memory usage if not present
+      if (entry.memoryUsageMB === undefined) {
+        entry.memoryUsageMB = getMemoryUsageMB();
+      }
+
+      const logLine = JSON.stringify(entry) + '\n';
+      appendFileSync(this.currentLogFile, logLine);
+    } catch (error) {
+      // Silently fail to avoid disrupting main operation
+      console.error(`[StructuredFileLogger] Failed to write log: ${error}`);
+    }
+  }
+
+  /**
+   * Write a cycle completion log with all metrics
+   */
+  writeCycleLog(
+    cycleNumber: number,
+    correlationId: string,
+    success: boolean,
+    tasksDiscovered: number,
+    tasksCompleted: number,
+    tasksFailed: number,
+    prsMerged: number,
+    durationMs: number,
+    errors: string[]
+  ): void {
+    // Record in aggregator
+    this.metricsAggregator.recordCycle(
+      success,
+      durationMs,
+      tasksDiscovered,
+      tasksCompleted,
+      tasksFailed,
+      prsMerged
+    );
+
+    // Record errors
+    for (const error of errors) {
+      const codeMatch = error.match(/\[([^\]]+)\]/);
+      if (codeMatch) {
+        this.metricsAggregator.recordError(codeMatch[1]);
+      }
+    }
+
+    const entry: ExtendedLogEntry = {
+      timestamp: new Date().toISOString(),
+      level: success ? 'info' : 'error',
+      message: `Cycle #${cycleNumber} ${success ? 'completed' : 'failed'}`,
+      correlationId,
+      cycleNumber,
+      operationType: 'cycle',
+      durationMs,
+      meta: {
+        tasksDiscovered,
+        tasksCompleted,
+        tasksFailed,
+        prsMerged,
+        errors: errors.length > 0 ? errors : undefined,
+      },
+      metrics: this.metricsAggregator.getMetrics(),
+    };
+
+    this.writeLog(entry);
+  }
+
+  /**
+   * Write a task completion log
+   */
+  writeTaskLog(
+    issueNumber: number,
+    correlationId: string,
+    workerId: string,
+    success: boolean,
+    durationMs: number,
+    branchName?: string,
+    commitSha?: string,
+    error?: string
+  ): void {
+    const entry: ExtendedLogEntry = {
+      timestamp: new Date().toISOString(),
+      level: success ? 'info' : 'error',
+      message: `Task #${issueNumber} ${success ? 'completed' : 'failed'}`,
+      correlationId,
+      workerId,
+      issueNumber,
+      operationType: 'task',
+      durationMs,
+      meta: {
+        branchName,
+        commitSha,
+        error,
+      },
+    };
+
+    this.writeLog(entry);
+  }
+
+  /**
+   * Write a discovery log
+   */
+  writeDiscoveryLog(
+    correlationId: string,
+    cycleNumber: number,
+    tasksFound: number,
+    durationMs: number,
+    existingIssues: number
+  ): void {
+    const entry: ExtendedLogEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message: `Discovery completed: ${tasksFound} tasks found`,
+      correlationId,
+      cycleNumber,
+      operationType: 'discovery',
+      durationMs,
+      meta: {
+        tasksFound,
+        existingIssues,
+      },
+    };
+
+    this.writeLog(entry);
+  }
+
+  /**
+   * Write an API call log
+   */
+  writeApiLog(
+    service: 'github' | 'claude',
+    endpoint: string,
+    correlationId: string,
+    success: boolean,
+    durationMs: number,
+    statusCode?: number,
+    error?: string
+  ): void {
+    const entry: ExtendedLogEntry = {
+      timestamp: new Date().toISOString(),
+      level: success ? 'debug' : 'warn',
+      message: `${service.toUpperCase()} API call: ${endpoint}`,
+      correlationId,
+      operationType: 'api',
+      durationMs,
+      meta: {
+        service,
+        endpoint,
+        success,
+        statusCode,
+        error,
+      },
+    };
+
+    this.writeLog(entry);
+  }
+
+  /**
+   * Write a system event log
+   */
+  writeSystemLog(
+    level: LogLevel,
+    message: string,
+    meta?: Record<string, any>
+  ): void {
+    const entry: ExtendedLogEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      operationType: 'system',
+      meta,
+    };
+
+    this.writeLog(entry);
+  }
+
+  /**
+   * Get list of log files in the log directory
+   */
+  getLogFiles(): string[] {
+    if (!existsSync(this.config.logDir)) {
+      return [];
+    }
+
+    return readdirSync(this.config.logDir)
+      .filter(f => f.startsWith('autonomous-dev.log'))
+      .map(f => join(this.config.logDir, f))
+      .sort();
+  }
+
+  /**
+   * Get current metrics summary
+   */
+  getMetricsSummary(): Record<string, any> {
+    return this.metricsAggregator.getMetricsSummary();
+  }
+}
+
+// Global structured file logger instance
+let structuredFileLogger: StructuredFileLogger | null = null;
+
+/**
+ * Get or create the global structured file logger
+ */
+export function getStructuredFileLogger(): StructuredFileLogger {
+  if (!structuredFileLogger) {
+    structuredFileLogger = new StructuredFileLogger();
+  }
+  return structuredFileLogger;
+}
+
+/**
+ * Initialize structured file logging with config
+ */
+export function initStructuredFileLogging(config: Partial<StructuredFileLoggerConfig>): StructuredFileLogger {
+  structuredFileLogger = new StructuredFileLogger(config);
+  structuredFileLogger.enable();
+  return structuredFileLogger;
+}
+
+/**
+ * Get the metrics aggregator from the structured logger
+ */
+export function getMetricsAggregator(): MetricsAggregator {
+  return getStructuredFileLogger().getMetricsAggregator();
 }
 
 const levelPriority: Record<LogLevel, number> = {

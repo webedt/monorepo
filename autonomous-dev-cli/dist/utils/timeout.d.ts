@@ -41,9 +41,15 @@ export declare const TIMEOUT_ENV_VARS: {
  */
 export declare function getTimeoutFromEnv(envVar: keyof typeof TIMEOUT_ENV_VARS, defaultValue: number): number;
 /**
+ * Timeout configuration type (allows number values from env vars)
+ */
+export type TimeoutConfig = {
+    [K in keyof typeof DEFAULT_TIMEOUTS]: number;
+};
+/**
  * Get all timeout configurations (from env vars or defaults)
  */
-export declare function getTimeoutConfig(): typeof DEFAULT_TIMEOUTS;
+export declare function getTimeoutConfig(): TimeoutConfig;
 /**
  * Timeout error with operation context
  */

@@ -18,9 +18,18 @@
  *   ├── AnalyzerError - Codebase analysis errors
  *   ├── DatabaseError - Database operation errors
  *   ├── ValidationError - Input/data validation errors
- *   └── ConflictError - Merge and concurrent edit conflicts
+ *   ├── ConflictError - Merge and concurrent edit conflicts
+ *   └── ExecutorError (with recovery strategies)
+ *       ├── NetworkExecutorError - Network-related executor failures
+ *       ├── TimeoutExecutorError - Timeout-related executor failures
+ *       ├── ConfigurationExecutorError - Configuration-related executor failures
+ *       ├── ResourceExhaustionError - Resource exhaustion failures
+ *       ├── GitExecutorError - Git operation failures
+ *       ├── ClaudeExecutorError - Claude API executor failures
+ *       └── WorkspaceExecutorError - Workspace/filesystem failures
  */
 export { type ErrorSeverity, ErrorCode, type RecoveryAction, type ErrorContext, StructuredError, GitHubError, ClaudeError, ConfigError, ExecutionError, AnalyzerError, DatabaseError, ValidationError, ConflictError, type RetryConfig, DEFAULT_RETRY_CONFIG, withRetry, wrapError, createGitHubErrorFromResponse, formatError, } from '../utils/errors.js';
+export { type RecoveryStrategy, type RecoveryStrategyConfig, type TaskExecutionState, type ExecutionPhase, type ExecutorErrorContext, ExecutorError, NetworkExecutorError, TimeoutExecutorError, ConfigurationExecutorError, ResourceExhaustionError, GitExecutorError, ClaudeExecutorError, WorkspaceExecutorError, ErrorAggregator, getErrorAggregator, createExecutorError, isExecutorError, isNetworkExecutorError, isTimeoutExecutorError, isClaudeExecutorError, isGitExecutorError, } from './executor-errors.js';
 /**
  * Type guard to check if an error is a StructuredError
  */
