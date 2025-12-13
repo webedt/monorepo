@@ -153,6 +153,78 @@ export declare const ConfigSchema: z.ZodObject<{
         pauseBetweenCycles?: boolean | undefined;
     }>;
     /**
+     * Circuit Breaker Settings
+     * Configure resilience for Claude API calls.
+     */
+    circuitBreaker: z.ZodDefault<z.ZodObject<{
+        /** Number of consecutive failures before opening circuit (1-20, default: 5) */
+        failureThreshold: z.ZodDefault<z.ZodNumber>;
+        /** Time in milliseconds to keep circuit open before testing (10000-300000, default: 60000 = 60s) */
+        resetTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        /** Base delay for exponential backoff in milliseconds (50-1000, default: 100) */
+        baseDelayMs: z.ZodDefault<z.ZodNumber>;
+        /** Maximum delay for exponential backoff in milliseconds (5000-60000, default: 30000 = 30s) */
+        maxDelayMs: z.ZodDefault<z.ZodNumber>;
+        /** Number of successful requests in half-open to close circuit (1-5, default: 1) */
+        successThreshold: z.ZodDefault<z.ZodNumber>;
+        /** Enable circuit breaker for Claude API calls (default: true) */
+        enabled: z.ZodDefault<z.ZodBoolean>;
+    }, "strip", z.ZodTypeAny, {
+        failureThreshold: number;
+        resetTimeoutMs: number;
+        baseDelayMs: number;
+        maxDelayMs: number;
+        successThreshold: number;
+        enabled: boolean;
+    }, {
+        failureThreshold?: number | undefined;
+        resetTimeoutMs?: number | undefined;
+        baseDelayMs?: number | undefined;
+        maxDelayMs?: number | undefined;
+        successThreshold?: number | undefined;
+        enabled?: boolean | undefined;
+    }>>;
+    /**
+     * Retry Strategy Settings
+     * Configure exponential backoff retry behavior for worker execution and API calls.
+     */
+    retryStrategy: z.ZodDefault<z.ZodObject<{
+        /** Maximum number of retry attempts (1-10, default: 3) */
+        maxRetries: z.ZodDefault<z.ZodNumber>;
+        /** Base delay for exponential backoff in milliseconds (500-5000, default: 1000) */
+        baseDelayMs: z.ZodDefault<z.ZodNumber>;
+        /** Maximum delay cap in milliseconds (10000-300000, default: 60000 = 60s) */
+        maxDelayMs: z.ZodDefault<z.ZodNumber>;
+        /** Backoff multiplier for exponential growth (1.5-4, default: 2) */
+        backoffMultiplier: z.ZodDefault<z.ZodNumber>;
+        /** Enable jitter to prevent thundering herd (default: true) */
+        jitterEnabled: z.ZodDefault<z.ZodBoolean>;
+        /** Jitter factor as percentage of delay (0.05-0.5, default: 0.25 for ±25%) */
+        jitterFactor: z.ZodDefault<z.ZodNumber>;
+        /** Enable retry for worker task execution (default: true) */
+        enableWorkerRetry: z.ZodDefault<z.ZodBoolean>;
+        /** Enable retry for GitHub API calls (default: true) */
+        enableGitHubRetry: z.ZodDefault<z.ZodBoolean>;
+    }, "strip", z.ZodTypeAny, {
+        maxRetries: number;
+        baseDelayMs: number;
+        maxDelayMs: number;
+        backoffMultiplier: number;
+        jitterEnabled: boolean;
+        jitterFactor: number;
+        enableWorkerRetry: boolean;
+        enableGitHubRetry: boolean;
+    }, {
+        maxRetries?: number | undefined;
+        baseDelayMs?: number | undefined;
+        maxDelayMs?: number | undefined;
+        backoffMultiplier?: number | undefined;
+        jitterEnabled?: boolean | undefined;
+        jitterFactor?: number | undefined;
+        enableWorkerRetry?: boolean | undefined;
+        enableGitHubRetry?: boolean | undefined;
+    }>>;
+    /**
      * Credentials
      * Authentication credentials (MUST be set via environment variables, NOT config files).
      *
@@ -244,6 +316,24 @@ export declare const ConfigSchema: z.ZodObject<{
         loopIntervalMs: number;
         pauseBetweenCycles: boolean;
     };
+    circuitBreaker: {
+        failureThreshold: number;
+        resetTimeoutMs: number;
+        baseDelayMs: number;
+        maxDelayMs: number;
+        successThreshold: number;
+        enabled: boolean;
+    };
+    retryStrategy: {
+        maxRetries: number;
+        baseDelayMs: number;
+        maxDelayMs: number;
+        backoffMultiplier: number;
+        jitterEnabled: boolean;
+        jitterFactor: number;
+        enableWorkerRetry: boolean;
+        enableGitHubRetry: boolean;
+    };
     credentials: {
         githubToken?: string | undefined;
         claudeAuth?: {
@@ -303,6 +393,24 @@ export declare const ConfigSchema: z.ZodObject<{
         databaseUrl?: string | undefined;
         userEmail?: string | undefined;
     };
+    circuitBreaker?: {
+        failureThreshold?: number | undefined;
+        resetTimeoutMs?: number | undefined;
+        baseDelayMs?: number | undefined;
+        maxDelayMs?: number | undefined;
+        successThreshold?: number | undefined;
+        enabled?: boolean | undefined;
+    } | undefined;
+    retryStrategy?: {
+        maxRetries?: number | undefined;
+        baseDelayMs?: number | undefined;
+        maxDelayMs?: number | undefined;
+        backoffMultiplier?: number | undefined;
+        jitterEnabled?: boolean | undefined;
+        jitterFactor?: number | undefined;
+        enableWorkerRetry?: boolean | undefined;
+        enableGitHubRetry?: boolean | undefined;
+    } | undefined;
 }>;
 export type Config = z.infer<typeof ConfigSchema>;
 /**

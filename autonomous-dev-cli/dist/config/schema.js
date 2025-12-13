@@ -135,6 +135,76 @@ export const ConfigSchema = z.object({
         pauseBetweenCycles: z.boolean().default(true),
     }).describe('Daemon mode settings'),
     /**
+     * Circuit Breaker Settings
+     * Configure resilience for Claude API calls.
+     */
+    circuitBreaker: z.object({
+        /** Number of consecutive failures before opening circuit (1-20, default: 5) */
+        failureThreshold: z.number()
+            .min(1, 'Failure threshold must be at least 1')
+            .max(20, 'Failure threshold cannot exceed 20')
+            .default(5),
+        /** Time in milliseconds to keep circuit open before testing (10000-300000, default: 60000 = 60s) */
+        resetTimeoutMs: z.number()
+            .min(10000, 'Reset timeout must be at least 10 seconds')
+            .max(300000, 'Reset timeout cannot exceed 5 minutes')
+            .default(60000),
+        /** Base delay for exponential backoff in milliseconds (50-1000, default: 100) */
+        baseDelayMs: z.number()
+            .min(50, 'Base delay must be at least 50ms')
+            .max(1000, 'Base delay cannot exceed 1 second')
+            .default(100),
+        /** Maximum delay for exponential backoff in milliseconds (5000-60000, default: 30000 = 30s) */
+        maxDelayMs: z.number()
+            .min(5000, 'Max delay must be at least 5 seconds')
+            .max(60000, 'Max delay cannot exceed 1 minute')
+            .default(30000),
+        /** Number of successful requests in half-open to close circuit (1-5, default: 1) */
+        successThreshold: z.number()
+            .min(1, 'Success threshold must be at least 1')
+            .max(5, 'Success threshold cannot exceed 5')
+            .default(1),
+        /** Enable circuit breaker for Claude API calls (default: true) */
+        enabled: z.boolean().default(true),
+    }).describe('Circuit breaker resilience settings').default({}),
+    /**
+     * Retry Strategy Settings
+     * Configure exponential backoff retry behavior for worker execution and API calls.
+     */
+    retryStrategy: z.object({
+        /** Maximum number of retry attempts (1-10, default: 3) */
+        maxRetries: z.number()
+            .min(1, 'Max retries must be at least 1')
+            .max(10, 'Max retries cannot exceed 10')
+            .default(3),
+        /** Base delay for exponential backoff in milliseconds (500-5000, default: 1000) */
+        baseDelayMs: z.number()
+            .min(500, 'Base delay must be at least 500ms')
+            .max(5000, 'Base delay cannot exceed 5 seconds')
+            .default(1000),
+        /** Maximum delay cap in milliseconds (10000-300000, default: 60000 = 60s) */
+        maxDelayMs: z.number()
+            .min(10000, 'Max delay must be at least 10 seconds')
+            .max(300000, 'Max delay cannot exceed 5 minutes')
+            .default(60000),
+        /** Backoff multiplier for exponential growth (1.5-4, default: 2) */
+        backoffMultiplier: z.number()
+            .min(1.5, 'Backoff multiplier must be at least 1.5')
+            .max(4, 'Backoff multiplier cannot exceed 4')
+            .default(2),
+        /** Enable jitter to prevent thundering herd (default: true) */
+        jitterEnabled: z.boolean().default(true),
+        /** Jitter factor as percentage of delay (0.05-0.5, default: 0.25 for ±25%) */
+        jitterFactor: z.number()
+            .min(0.05, 'Jitter factor must be at least 0.05 (5%)')
+            .max(0.5, 'Jitter factor cannot exceed 0.5 (50%)')
+            .default(0.25),
+        /** Enable retry for worker task execution (default: true) */
+        enableWorkerRetry: z.boolean().default(true),
+        /** Enable retry for GitHub API calls (default: true) */
+        enableGitHubRetry: z.boolean().default(true),
+    }).describe('Exponential backoff retry strategy settings').default({}),
+    /**
      * Credentials
      * Authentication credentials (MUST be set via environment variables, NOT config files).
      *
@@ -216,6 +286,24 @@ export const defaultConfig = {
     daemon: {
         loopIntervalMs: 60000,
         pauseBetweenCycles: true,
+    },
+    circuitBreaker: {
+        failureThreshold: 5,
+        resetTimeoutMs: 60000,
+        baseDelayMs: 100,
+        maxDelayMs: 30000,
+        successThreshold: 1,
+        enabled: true,
+    },
+    retryStrategy: {
+        maxRetries: 3,
+        baseDelayMs: 1000,
+        maxDelayMs: 60000,
+        backoffMultiplier: 2,
+        jitterEnabled: true,
+        jitterFactor: 0.25,
+        enableWorkerRetry: true,
+        enableGitHubRetry: true,
     },
 };
 //# sourceMappingURL=schema.js.map

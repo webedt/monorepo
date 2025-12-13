@@ -3,6 +3,36 @@ import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId } f
 import { metrics } from '../utils/metrics.js';
 import * as os from 'os';
 
+/** Retry strategy configuration for worker pool */
+export interface RetryStrategyConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  backoffMultiplier: number;
+  jitterEnabled: boolean;
+  jitterFactor: number;
+  enableWorkerRetry: boolean;
+}
+
+/** Default retry strategy configuration */
+export const DEFAULT_RETRY_STRATEGY: RetryStrategyConfig = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  maxDelayMs: 60000,
+  backoffMultiplier: 2,
+  jitterEnabled: true,
+  jitterFactor: 0.25,
+  enableWorkerRetry: true,
+};
+
+/** Task retry state tracking */
+interface TaskRetryState {
+  taskId: string;
+  retryCount: number;
+  lastError?: string;
+  nextRetryTime?: number;
+}
+
 /** Task priority levels - higher value = higher priority */
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -74,6 +104,8 @@ export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
   scalingConfig?: Partial<ScalingConfig>;
   /** Enable dynamic scaling based on system resources */
   enableDynamicScaling?: boolean;
+  /** Retry strategy configuration for failed tasks */
+  retryStrategy?: Partial<RetryStrategyConfig>;
 }
 
 export interface PoolTask extends WorkerTask {
@@ -84,6 +116,12 @@ export interface PoolTask extends WorkerTask {
   priorityScore?: number;
   /** Group ID for related tasks */
   groupId?: string;
+  /** Current retry count for this task */
+  retryCount?: number;
+  /** Last error message if task failed */
+  lastError?: string;
+  /** Timestamp when task can be retried */
+  nextRetryTime?: number;
 }
 
 export interface PoolResult extends WorkerResult {
@@ -94,13 +132,16 @@ export class WorkerPool {
   private options: WorkerPoolOptions;
   private activeWorkers: Map<string, Promise<WorkerResult>> = new Map();
   private taskQueue: PoolTask[] = [];
+  private retryQueue: PoolTask[] = []; // Queue for tasks waiting for retry
   private results: PoolResult[] = [];
   private isRunning: boolean = false;
   private workerIdCounter: number = 0;
   private repository: string;
   private scalingConfig: ScalingConfig;
+  private retryStrategy: RetryStrategyConfig;
   private currentWorkerLimit: number;
   private scaleCheckInterval: NodeJS.Timeout | null = null;
+  private retryCheckInterval: NodeJS.Timeout | null = null;
   private workerTaskMap: Map<string, PoolTask> = new Map(); // Maps worker ID to assigned task
   private taskGroupWorkers: Map<string, string> = new Map(); // Maps group ID to preferred worker ID
 
@@ -126,6 +167,12 @@ export class WorkerPool {
       ...options.scalingConfig,
     };
 
+    // Initialize retry strategy configuration
+    this.retryStrategy = {
+      ...DEFAULT_RETRY_STRATEGY,
+      ...options.retryStrategy,
+    };
+
     // Compute initial worker limit based on system resources
     this.currentWorkerLimit = this.computeOptimalWorkerCount();
 
@@ -133,6 +180,12 @@ export class WorkerPool {
       maxWorkers: options.maxWorkers,
       initialWorkerLimit: this.currentWorkerLimit,
       enableDynamicScaling: options.enableDynamicScaling ?? false,
+      retryStrategy: {
+        maxRetries: this.retryStrategy.maxRetries,
+        baseDelayMs: this.retryStrategy.baseDelayMs,
+        maxDelayMs: this.retryStrategy.maxDelayMs,
+        jitterEnabled: this.retryStrategy.jitterEnabled,
+      },
       repository: this.repository,
     });
 
@@ -247,6 +300,210 @@ export class WorkerPool {
   }
 
   /**
+   * Calculate exponential backoff delay with optional jitter
+   * Formula: delay = baseDelay * (multiplier ^ retryCount) + jitter
+   */
+  private calculateRetryDelay(retryCount: number): number {
+    const { baseDelayMs, maxDelayMs, backoffMultiplier, jitterEnabled, jitterFactor } = this.retryStrategy;
+
+    // Calculate base exponential delay
+    const exponentialDelay = baseDelayMs * Math.pow(backoffMultiplier, retryCount);
+
+    // Apply jitter if enabled (prevents thundering herd)
+    let delay = exponentialDelay;
+    if (jitterEnabled) {
+      // Jitter adds/subtracts up to jitterFactor of the delay
+      const jitter = exponentialDelay * jitterFactor * (Math.random() * 2 - 1);
+      delay = exponentialDelay + jitter;
+    }
+
+    // Cap at maximum delay
+    return Math.min(Math.max(0, Math.round(delay)), maxDelayMs);
+  }
+
+  /**
+   * Determine if a task failure is retryable based on error type
+   */
+  private isRetryableError(error: string): boolean {
+    const errorLower = error.toLowerCase();
+
+    // Network-related transient errors are retryable
+    const retryablePatterns = [
+      'network',
+      'timeout',
+      'connection',
+      'etimedout',
+      'enotfound',
+      'econnreset',
+      'econnrefused',
+      'rate limit',
+      'rate_limit',
+      'too many requests',
+      '429',
+      '500',
+      '502',
+      '503',
+      '504',
+      'service unavailable',
+      'temporarily unavailable',
+      'circuit breaker',
+      'circuit_breaker_open',
+    ];
+
+    // Non-retryable errors (permanent failures)
+    const nonRetryablePatterns = [
+      'auth',
+      'unauthorized',
+      'forbidden',
+      '401',
+      '403',
+      'permission denied',
+      'invalid token',
+      'not found',
+      '404',
+      'validation',
+      'invalid request',
+    ];
+
+    // Check for non-retryable patterns first
+    if (nonRetryablePatterns.some(pattern => errorLower.includes(pattern))) {
+      return false;
+    }
+
+    // Check for retryable patterns
+    return retryablePatterns.some(pattern => errorLower.includes(pattern));
+  }
+
+  /**
+   * Schedule a failed task for retry with exponential backoff
+   */
+  private scheduleRetry(task: PoolTask, error: string): boolean {
+    if (!this.retryStrategy.enableWorkerRetry) {
+      logger.debug(`Retry disabled for task ${task.id}`, { error });
+      return false;
+    }
+
+    const currentRetryCount = task.retryCount ?? 0;
+
+    if (currentRetryCount >= this.retryStrategy.maxRetries) {
+      logger.warn(`Task ${task.id} exceeded max retries (${this.retryStrategy.maxRetries})`, {
+        taskId: task.id,
+        issueNumber: task.issue.number,
+        totalRetries: currentRetryCount,
+        lastError: error,
+      });
+      return false;
+    }
+
+    if (!this.isRetryableError(error)) {
+      logger.info(`Task ${task.id} failed with non-retryable error`, {
+        taskId: task.id,
+        issueNumber: task.issue.number,
+        error,
+      });
+      return false;
+    }
+
+    // Calculate retry delay
+    const delay = this.calculateRetryDelay(currentRetryCount);
+    const nextRetryTime = Date.now() + delay;
+
+    // Update task retry state
+    task.retryCount = currentRetryCount + 1;
+    task.lastError = error;
+    task.nextRetryTime = nextRetryTime;
+
+    // Add to retry queue
+    this.retryQueue.push(task);
+
+    logger.warn(`Scheduling retry for task ${task.id}`, {
+      taskId: task.id,
+      issueNumber: task.issue.number,
+      retryCount: task.retryCount,
+      maxRetries: this.retryStrategy.maxRetries,
+      delayMs: delay,
+      nextRetryTime: new Date(nextRetryTime).toISOString(),
+      error,
+      backoffFormula: `${this.retryStrategy.baseDelayMs} * ${this.retryStrategy.backoffMultiplier}^${currentRetryCount}`,
+    });
+
+    return true;
+  }
+
+  /**
+   * Check and process tasks ready for retry
+   */
+  private processRetryQueue(): void {
+    const now = Date.now();
+    const readyTasks: PoolTask[] = [];
+    const stillWaiting: PoolTask[] = [];
+
+    for (const task of this.retryQueue) {
+      if (task.nextRetryTime && task.nextRetryTime <= now) {
+        readyTasks.push(task);
+      } else {
+        stillWaiting.push(task);
+      }
+    }
+
+    this.retryQueue = stillWaiting;
+
+    // Add ready tasks back to the main queue
+    for (const task of readyTasks) {
+      logger.info(`Task ${task.id} ready for retry (attempt ${task.retryCount}/${this.retryStrategy.maxRetries})`, {
+        taskId: task.id,
+        issueNumber: task.issue.number,
+        retryCount: task.retryCount,
+        lastError: task.lastError,
+      });
+
+      // Re-add to task queue (with current retry state)
+      this.taskQueue.push(task);
+    }
+
+    // Re-sort queue if tasks were added
+    if (readyTasks.length > 0) {
+      this.sortTaskQueue();
+      this.updateMetrics();
+    }
+  }
+
+  /**
+   * Start retry queue monitor
+   */
+  private startRetryMonitor(): void {
+    if (this.retryCheckInterval) {
+      return;
+    }
+
+    // Check retry queue every second
+    this.retryCheckInterval = setInterval(() => {
+      if (this.retryQueue.length > 0) {
+        this.processRetryQueue();
+
+        // Start workers for newly available tasks
+        while (
+          this.activeWorkers.size < this.currentWorkerLimit &&
+          this.taskQueue.length > 0 &&
+          this.isRunning
+        ) {
+          this.startNextTask();
+        }
+      }
+    }, 1000);
+  }
+
+  /**
+   * Stop retry queue monitor
+   */
+  private stopRetryMonitor(): void {
+    if (this.retryCheckInterval) {
+      clearInterval(this.retryCheckInterval);
+      this.retryCheckInterval = null;
+    }
+  }
+
+  /**
    * Calculate priority score for a task
    */
   private calculatePriorityScore(task: PoolTask): number {
@@ -355,6 +612,7 @@ export class WorkerPool {
   async executeTasks(tasks: WorkerTask[]): Promise<PoolResult[]> {
     this.isRunning = true;
     this.results = [];
+    this.retryQueue = []; // Reset retry queue
     this.workerTaskMap.clear();
     this.taskGroupWorkers.clear();
 
@@ -364,6 +622,7 @@ export class WorkerPool {
         ...task,
         id: `task-${index + 1}`,
         metadata: this.extractTaskMetadata(task),
+        retryCount: 0, // Initialize retry count
       };
 
       // Calculate priority score and group ID
@@ -384,6 +643,12 @@ export class WorkerPool {
       maxWorkers: this.options.maxWorkers,
       effectiveWorkerLimit,
       enableDynamicScaling: this.options.enableDynamicScaling ?? false,
+      retryStrategy: this.retryStrategy.enableWorkerRetry ? {
+        maxRetries: this.retryStrategy.maxRetries,
+        baseDelayMs: this.retryStrategy.baseDelayMs,
+        maxDelayMs: this.retryStrategy.maxDelayMs,
+        jitterEnabled: this.retryStrategy.jitterEnabled,
+      } : 'disabled',
       systemResources: this.getSystemResources(),
     });
 
@@ -393,13 +658,16 @@ export class WorkerPool {
     // Start dynamic scaling monitor if enabled
     this.startScalingMonitor();
 
+    // Start retry queue monitor for progressive retry strategy
+    this.startRetryMonitor();
+
     // Start initial workers
     while (this.activeWorkers.size < effectiveWorkerLimit && this.taskQueue.length > 0) {
       this.startNextTask();
     }
 
-    // Wait for all tasks to complete
-    while (this.activeWorkers.size > 0 || this.taskQueue.length > 0) {
+    // Wait for all tasks to complete (including retry queue)
+    while (this.activeWorkers.size > 0 || this.taskQueue.length > 0 || this.retryQueue.length > 0) {
       if (this.activeWorkers.size > 0) {
         // Wait for any worker to complete
         const completedPromises = Array.from(this.activeWorkers.entries());
@@ -426,19 +694,25 @@ export class WorkerPool {
           // Use worker affinity: try to assign same-group tasks to same worker
           this.startNextTask(completedGroupId);
         }
+      } else if (this.retryQueue.length > 0) {
+        // No active workers but tasks waiting for retry - wait a bit
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
 
-    // Stop dynamic scaling monitor
+    // Stop monitors
     this.stopScalingMonitor();
+    this.stopRetryMonitor();
 
     const succeeded = this.results.filter(r => r.success).length;
     const failed = this.results.filter(r => !r.success).length;
+    const retriedTasks = this.results.filter(r => (r as any).retryCount && (r as any).retryCount > 0);
 
     logger.info(`All tasks completed: ${succeeded}/${this.results.length} succeeded`, {
       succeeded,
       failed,
       total: this.results.length,
+      tasksRetried: retriedTasks.length,
     });
 
     // Reset pool metrics
@@ -502,6 +776,7 @@ export class WorkerPool {
     if (!task) return;
 
     const workerId = `worker-${++this.workerIdCounter}`;
+    const isRetry = (task.retryCount ?? 0) > 0;
 
     // Track worker-task relationship for group affinity
     this.workerTaskMap.set(task.id, task);
@@ -515,7 +790,7 @@ export class WorkerPool {
     const taskTimeoutMs = this.getTaskTimeout(task);
     const taskTimeoutMinutes = Math.round(taskTimeoutMs / 60000);
 
-    logger.info(`Starting ${task.id} with ${workerId}: ${task.issue.title}`, {
+    logger.info(`${isRetry ? 'Retrying' : 'Starting'} ${task.id} with ${workerId}: ${task.issue.title}`, {
       taskId: task.id,
       workerId,
       issueNumber: task.issue.number,
@@ -525,6 +800,9 @@ export class WorkerPool {
       priorityScore: task.priorityScore,
       groupId: task.groupId,
       timeoutMinutes: taskTimeoutMinutes,
+      retryCount: task.retryCount ?? 0,
+      isRetry,
+      lastError: isRetry ? task.lastError : undefined,
     });
 
     // Update metrics after task is dequeued
@@ -548,26 +826,48 @@ export class WorkerPool {
     );
 
     const promise = worker.execute(task).then((result) => {
-      this.results.push({
-        ...result,
-        taskId: task.id,
-      });
-
       if (result.success) {
-        logger.success(`${task.id} completed: ${task.issue.title}`);
+        // Task succeeded - add to results
+        this.results.push({
+          ...result,
+          taskId: task.id,
+        });
+
+        logger.success(`${task.id} completed: ${task.issue.title} (retries: ${task.retryCount ?? 0})`);
         logger.debug(`Task completion details`, {
           taskId: task.id,
           priority: task.metadata?.priority,
           groupId: task.groupId,
           duration: result.duration,
+          retryCount: task.retryCount ?? 0,
+          wasRetried: isRetry,
         });
       } else {
-        logger.failure(`${task.id} failed: ${result.error}`);
+        // Task failed - attempt retry if eligible
+        const errorMessage = result.error ?? 'Unknown error';
+        const scheduled = this.scheduleRetry(task, errorMessage);
+
+        if (!scheduled) {
+          // No retry possible - add failure to results
+          this.results.push({
+            ...result,
+            taskId: task.id,
+          });
+
+          logger.failure(`${task.id} failed (no retry): ${errorMessage}`, {
+            retryCount: task.retryCount ?? 0,
+            maxRetries: this.retryStrategy.maxRetries,
+          });
+        }
+
         logger.debug(`Task failure details`, {
           taskId: task.id,
           priority: task.metadata?.priority,
           groupId: task.groupId,
           duration: result.duration,
+          error: errorMessage,
+          retryScheduled: scheduled,
+          retryCount: task.retryCount ?? 0,
         });
       }
 
@@ -580,29 +880,38 @@ export class WorkerPool {
   stop(): void {
     this.isRunning = false;
     this.stopScalingMonitor();
-    logger.warn('Worker pool stop requested');
+    this.stopRetryMonitor();
+    logger.warn('Worker pool stop requested', {
+      activeWorkers: this.activeWorkers.size,
+      queuedTasks: this.taskQueue.length,
+      pendingRetries: this.retryQueue.length,
+    });
   }
 
   getStatus(): {
     active: number;
     queued: number;
+    pendingRetries: number;
     completed: number;
     succeeded: number;
     failed: number;
     currentWorkerLimit: number;
     systemResources: SystemResources;
     taskGroups: number;
+    retryStrategy: RetryStrategyConfig;
   } {
     const groupIds = new Set(this.taskQueue.map(t => t.groupId).filter(Boolean));
     return {
       active: this.activeWorkers.size,
       queued: this.taskQueue.length,
+      pendingRetries: this.retryQueue.length,
       completed: this.results.length,
       succeeded: this.results.filter((r) => r.success).length,
       failed: this.results.filter((r) => !r.success).length,
       currentWorkerLimit: this.currentWorkerLimit,
       systemResources: this.getSystemResources(),
       taskGroups: groupIds.size,
+      retryStrategy: this.retryStrategy,
     };
   }
 
@@ -611,6 +920,23 @@ export class WorkerPool {
    */
   getScalingConfig(): ScalingConfig {
     return { ...this.scalingConfig };
+  }
+
+  /**
+   * Get the current retry strategy configuration
+   */
+  getRetryStrategy(): RetryStrategyConfig {
+    return { ...this.retryStrategy };
+  }
+
+  /**
+   * Update retry strategy configuration at runtime
+   */
+  updateRetryStrategy(config: Partial<RetryStrategyConfig>): void {
+    this.retryStrategy = { ...this.retryStrategy, ...config };
+    logger.info('Retry strategy configuration updated', {
+      config: this.retryStrategy,
+    });
   }
 
   /**

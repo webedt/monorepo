@@ -121,6 +121,11 @@ declare class MetricsRegistry {
     readonly discoveryDurationMs: Histogram;
     readonly analysisCacheHits: Counter;
     readonly analysisCacheMisses: Counter;
+    readonly circuitBreakerState: Gauge;
+    readonly circuitBreakerSuccesses: Counter;
+    readonly circuitBreakerFailures: Counter;
+    readonly circuitBreakerStateChanges: Counter;
+    readonly circuitBreakerRejections: Counter;
     private correlationMetrics;
     private startTime;
     /**
@@ -203,6 +208,26 @@ declare class MetricsRegistry {
     recordDiscovery(tasksFound: number, durationMs: number, cacheHit: boolean, labels: {
         repository: string;
     }): void;
+    /**
+     * Record circuit breaker success
+     */
+    recordCircuitBreakerSuccess(name: string): void;
+    /**
+     * Record circuit breaker failure
+     */
+    recordCircuitBreakerFailure(name: string, errorMessage: string): void;
+    /**
+     * Record circuit breaker state change
+     */
+    recordCircuitBreakerStateChange(name: string, fromState: string, toState: string): void;
+    /**
+     * Record circuit breaker rejection (request blocked by open circuit)
+     */
+    recordCircuitBreakerRejection(name: string): void;
+    /**
+     * Categorize error message for circuit breaker metrics
+     */
+    private categorizeCircuitBreakerError;
     /**
      * Start tracking a correlation ID
      */

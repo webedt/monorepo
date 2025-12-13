@@ -1,7 +1,8 @@
 import { CodebaseAnalyzer } from './analyzer.js';
 import { logger } from '../utils/logger.js';
 import { ClaudeError, ErrorCode } from '../utils/errors.js';
-import { retryWithBackoff, RATE_LIMIT_RETRY_CONFIG, extractRetryAfterMs, extractHttpStatus, isClaudeErrorRetryable, } from '../utils/retry.js';
+import { extractHttpStatus, isClaudeErrorRetryable, } from '../utils/retry.js';
+import { getClaudeCircuitBreaker, } from '../utils/circuit-breaker.js';
 export class TaskGenerator {
     claudeAuth;
     repoPath;
@@ -10,6 +11,7 @@ export class TaskGenerator {
     existingIssues;
     repoContext;
     analyzerConfig;
+    circuitBreaker;
     constructor(options) {
         this.claudeAuth = options.claudeAuth;
         this.repoPath = options.repoPath;
@@ -18,6 +20,14 @@ export class TaskGenerator {
         this.existingIssues = options.existingIssues;
         this.repoContext = options.repoContext || '';
         this.analyzerConfig = options.analyzerConfig || {};
+        // Get or create the Claude API circuit breaker with optional config overrides
+        this.circuitBreaker = getClaudeCircuitBreaker(options.circuitBreakerConfig);
+    }
+    /**
+     * Get the circuit breaker health status
+     */
+    getCircuitBreakerHealth() {
+        return this.circuitBreaker.getHealth();
     }
     async generateTasks() {
         logger.info('Generating tasks with Claude...');
@@ -114,8 +124,8 @@ Remember:
 Return ONLY the JSON array, no other text.`;
     }
     async callClaude(prompt) {
-        // Use retry with exponential backoff for transient failures
-        return retryWithBackoff(async () => {
+        // Use circuit breaker with exponential backoff for resilience
+        return this.circuitBreaker.executeWithRetry(async () => {
             const response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
@@ -146,16 +156,20 @@ Return ONLY the JSON array, no other text.`;
             // Parse JSON from response
             return this.parseClaudeResponse(content);
         }, {
-            config: RATE_LIMIT_RETRY_CONFIG,
-            operationName: 'Claude API call',
+            maxRetries: 5,
+            operationName: 'Claude API call (discovery)',
+            context: {
+                component: 'TaskGenerator',
+                operation: 'generateTasks',
+            },
             shouldRetry: (error) => isClaudeErrorRetryable(error),
-            getRetryAfterMs: (error) => extractRetryAfterMs(error),
             onRetry: (error, attempt, delay) => {
                 const statusCode = extractHttpStatus(error);
                 logger.warn(`Claude API retry (attempt ${attempt})`, {
                     error: error.message,
                     statusCode,
                     retryInMs: Math.round(delay),
+                    circuitState: this.circuitBreaker.getState(),
                 });
             },
         });

@@ -1,4 +1,16 @@
+import { type CircuitBreakerConfig } from '../utils/circuit-breaker.js';
 import { type Issue } from '../github/issues.js';
+/** Retry strategy configuration for worker operations */
+export interface WorkerRetryConfig {
+    maxRetries: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
+    backoffMultiplier: number;
+    jitterEnabled: boolean;
+    jitterFactor: number;
+}
+/** Default retry configuration for worker operations */
+export declare const DEFAULT_WORKER_RETRY_CONFIG: WorkerRetryConfig;
 export interface WorkerOptions {
     workDir: string;
     repoUrl: string;
@@ -19,6 +31,8 @@ export interface WorkerOptions {
         paths?: string[];
     };
     useShallowClone?: boolean;
+    circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
+    retryConfig?: Partial<WorkerRetryConfig>;
 }
 export interface WorkerTask {
     issue: Issue;
@@ -38,7 +52,13 @@ export declare class Worker {
     private workerId;
     private log;
     private repository;
+    private circuitBreaker;
+    private retryConfig;
     constructor(options: WorkerOptions, workerId: string);
+    /**
+     * Get the circuit breaker health status
+     */
+    getCircuitBreakerHealth(): import("../utils/circuit-breaker.js").CircuitBreakerHealth;
     /**
      * Extract repository name from URL for metrics labeling
      */
@@ -47,6 +67,10 @@ export declare class Worker {
      * Get error context for debugging
      */
     private getErrorContext;
+    /**
+     * Convert worker retry config to extended retry config format
+     */
+    private getExtendedRetryConfig;
     /**
      * Wrap an error with execution context
      */

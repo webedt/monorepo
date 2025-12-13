@@ -1,4 +1,16 @@
 import { type WorkerOptions, type WorkerTask, type WorkerResult } from './worker.js';
+/** Retry strategy configuration for worker pool */
+export interface RetryStrategyConfig {
+    maxRetries: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
+    backoffMultiplier: number;
+    jitterEnabled: boolean;
+    jitterFactor: number;
+    enableWorkerRetry: boolean;
+}
+/** Default retry strategy configuration */
+export declare const DEFAULT_RETRY_STRATEGY: RetryStrategyConfig;
 /** Task priority levels - higher value = higher priority */
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 /** Task category for classification */
@@ -38,6 +50,8 @@ export interface WorkerPoolOptions extends Omit<WorkerOptions, 'workDir'> {
     scalingConfig?: Partial<ScalingConfig>;
     /** Enable dynamic scaling based on system resources */
     enableDynamicScaling?: boolean;
+    /** Retry strategy configuration for failed tasks */
+    retryStrategy?: Partial<RetryStrategyConfig>;
 }
 export interface PoolTask extends WorkerTask {
     id: string;
@@ -47,6 +61,12 @@ export interface PoolTask extends WorkerTask {
     priorityScore?: number;
     /** Group ID for related tasks */
     groupId?: string;
+    /** Current retry count for this task */
+    retryCount?: number;
+    /** Last error message if task failed */
+    lastError?: string;
+    /** Timestamp when task can be retried */
+    nextRetryTime?: number;
 }
 export interface PoolResult extends WorkerResult {
     taskId: string;
@@ -55,13 +75,16 @@ export declare class WorkerPool {
     private options;
     private activeWorkers;
     private taskQueue;
+    private retryQueue;
     private results;
     private isRunning;
     private workerIdCounter;
     private repository;
     private scalingConfig;
+    private retryStrategy;
     private currentWorkerLimit;
     private scaleCheckInterval;
+    private retryCheckInterval;
     private workerTaskMap;
     private taskGroupWorkers;
     /** Default scaling configuration */
@@ -92,6 +115,31 @@ export declare class WorkerPool {
      */
     private stopScalingMonitor;
     /**
+     * Calculate exponential backoff delay with optional jitter
+     * Formula: delay = baseDelay * (multiplier ^ retryCount) + jitter
+     */
+    private calculateRetryDelay;
+    /**
+     * Determine if a task failure is retryable based on error type
+     */
+    private isRetryableError;
+    /**
+     * Schedule a failed task for retry with exponential backoff
+     */
+    private scheduleRetry;
+    /**
+     * Check and process tasks ready for retry
+     */
+    private processRetryQueue;
+    /**
+     * Start retry queue monitor
+     */
+    private startRetryMonitor;
+    /**
+     * Stop retry queue monitor
+     */
+    private stopRetryMonitor;
+    /**
      * Calculate priority score for a task
      */
     private calculatePriorityScore;
@@ -121,17 +169,27 @@ export declare class WorkerPool {
     getStatus(): {
         active: number;
         queued: number;
+        pendingRetries: number;
         completed: number;
         succeeded: number;
         failed: number;
         currentWorkerLimit: number;
         systemResources: SystemResources;
         taskGroups: number;
+        retryStrategy: RetryStrategyConfig;
     };
     /**
      * Get the current scaling configuration
      */
     getScalingConfig(): ScalingConfig;
+    /**
+     * Get the current retry strategy configuration
+     */
+    getRetryStrategy(): RetryStrategyConfig;
+    /**
+     * Update retry strategy configuration at runtime
+     */
+    updateRetryStrategy(config: Partial<RetryStrategyConfig>): void;
     /**
      * Update scaling configuration at runtime
      */

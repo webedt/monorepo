@@ -5,19 +5,45 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-import { StructuredError, ExecutionError, ErrorCode, withRetry, } from '../utils/errors.js';
+import { StructuredError, ExecutionError, ErrorCode, } from '../utils/errors.js';
+import { retryWithBackoff, } from '../utils/retry.js';
+import { getClaudeSDKCircuitBreaker, } from '../utils/circuit-breaker.js';
 import { createChatSession, updateChatSession, addMessage, addEvent, generateSessionPath, } from '../db/index.js';
+/** Default retry configuration for worker operations */
+export const DEFAULT_WORKER_RETRY_CONFIG = {
+    maxRetries: 3,
+    baseDelayMs: 2000,
+    maxDelayMs: 60000,
+    backoffMultiplier: 2,
+    jitterEnabled: true,
+    jitterFactor: 0.25,
+};
 export class Worker {
     options;
     workerId;
     log;
     repository;
+    circuitBreaker;
+    retryConfig;
     constructor(options, workerId) {
         this.options = options;
         this.workerId = workerId;
         this.log = logger.child(`Worker-${workerId}`);
         // Extract repository identifier from URL for metrics
         this.repository = this.extractRepoName(options.repoUrl);
+        // Get or create the Claude SDK circuit breaker with optional config overrides
+        this.circuitBreaker = getClaudeSDKCircuitBreaker(options.circuitBreakerConfig);
+        // Initialize retry configuration
+        this.retryConfig = {
+            ...DEFAULT_WORKER_RETRY_CONFIG,
+            ...options.retryConfig,
+        };
+    }
+    /**
+     * Get the circuit breaker health status
+     */
+    getCircuitBreakerHealth() {
+        return this.circuitBreaker.getHealth();
     }
     /**
      * Extract repository name from URL for metrics labeling
@@ -39,6 +65,19 @@ export class Worker {
             timeoutMinutes: this.options.timeoutMinutes,
             issueNumber: task?.issue.number,
             branchName: task?.branchName,
+        };
+    }
+    /**
+     * Convert worker retry config to extended retry config format
+     */
+    getExtendedRetryConfig() {
+        return {
+            maxRetries: this.retryConfig.maxRetries,
+            baseDelayMs: this.retryConfig.baseDelayMs,
+            maxDelayMs: this.retryConfig.maxDelayMs,
+            backoffMultiplier: this.retryConfig.backoffMultiplier,
+            jitter: this.retryConfig.jitterEnabled,
+            jitterFactor: this.retryConfig.jitterFactor,
         };
     }
     /**
@@ -318,13 +357,21 @@ export class Worker {
         }
     }
     async cloneRepo(taskDir) {
-        this.log.info('Cloning repository...');
+        this.log.info('Cloning repository...', {
+            retryConfig: {
+                maxRetries: this.retryConfig.maxRetries,
+                baseDelayMs: this.retryConfig.baseDelayMs,
+                maxDelayMs: this.retryConfig.maxDelayMs,
+                jitterEnabled: this.retryConfig.jitterEnabled,
+            },
+        });
         // Add token to URL for authentication
         const urlWithAuth = this.options.repoUrl.replace('https://github.com', `https://${this.options.githubToken}@github.com`);
         const useShallow = this.options.useShallowClone !== false; // Default true
         const sparseConfig = this.options.sparseCheckout;
-        // Clone with retry for transient network failures
-        return withRetry(async () => {
+        const retryConfig = this.getExtendedRetryConfig();
+        // Clone with progressive retry strategy using exponential backoff
+        return retryWithBackoff(async () => {
             const git = simpleGit(taskDir);
             const repoDir = join(taskDir, 'repo');
             // Use sparse checkout for targeted cloning (faster for large repos)
@@ -365,26 +412,47 @@ export class Worker {
             await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
             return repoDir;
         }, {
-            config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
+            config: retryConfig,
+            operationName: 'git-clone',
             onRetry: (error, attempt, delay) => {
-                this.log.warn(`Clone retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
+                this.log.warn(`Clone retry with exponential backoff`, {
+                    attempt,
+                    maxRetries: retryConfig.maxRetries,
+                    delayMs: Math.round(delay),
+                    error: error.message,
+                    backoffFormula: `${retryConfig.baseDelayMs} * ${retryConfig.backoffMultiplier}^${attempt - 1}`,
+                    jitterApplied: retryConfig.jitter,
+                });
             },
             shouldRetry: (error) => {
                 // Retry network-related errors
                 const message = error.message.toLowerCase();
-                return (message.includes('network') ||
+                const isRetryable = (message.includes('network') ||
                     message.includes('timeout') ||
                     message.includes('connection') ||
                     message.includes('enotfound') ||
-                    message.includes('etimedout'));
+                    message.includes('etimedout') ||
+                    message.includes('econnreset') ||
+                    message.includes('econnrefused') ||
+                    message.includes('temporarily unavailable'));
+                this.log.debug(`Clone error retryability check`, {
+                    error: error.message,
+                    isRetryable,
+                });
+                return isRetryable;
             },
         }).catch((error) => {
-            throw new ExecutionError(ErrorCode.EXEC_CLONE_FAILED, `Failed to clone repository: ${error.message}`, {
+            throw new ExecutionError(ErrorCode.EXEC_CLONE_FAILED, `Failed to clone repository after ${retryConfig.maxRetries} retries: ${error.message}`, {
                 context: {
                     repoUrl: this.options.repoUrl,
                     baseBranch: this.options.baseBranch,
                     taskDir,
                     sparseCheckout: sparseConfig?.enabled,
+                    retryConfig: {
+                        maxRetries: retryConfig.maxRetries,
+                        baseDelayMs: retryConfig.baseDelayMs,
+                        maxDelayMs: retryConfig.maxDelayMs,
+                    },
                 },
                 cause: error,
             });
@@ -419,7 +487,25 @@ export class Worker {
         this.log.info('Executing task with Claude Agent SDK...', {
             issueNumber: issue.number,
             repoDir,
+            circuitState: this.circuitBreaker.getState(),
         });
+        // Check circuit breaker before starting execution
+        if (!this.circuitBreaker.canExecute()) {
+            const error = this.circuitBreaker.createCircuitOpenError({
+                component: 'Worker',
+                operation: 'executeWithClaude',
+                issueNumber: issue.number,
+                workerId: this.workerId,
+            });
+            this.log.warn('Claude Agent SDK execution blocked by circuit breaker', {
+                circuitState: this.circuitBreaker.getState(),
+                issueNumber: issue.number,
+                circuitHealth: this.circuitBreaker.getHealth(),
+            });
+            // Record rejection in metrics
+            metrics.recordCircuitBreakerRejection('claude-sdk');
+            throw error;
+        }
         const prompt = this.buildPrompt(issue);
         const timeoutMs = this.options.timeoutMinutes * 60 * 1000;
         const abortController = new AbortController();
@@ -494,7 +580,10 @@ export class Worker {
                         toolUseCount,
                         turnCount,
                         memoryDeltaMB: Math.round((endMemory - startMemory) * 100) / 100,
+                        circuitState: this.circuitBreaker.getState(),
                     });
+                    // Record success in circuit breaker
+                    this.circuitBreaker.recordSuccess();
                     // Record Claude API call metrics
                     metrics.recordClaudeApiCall('executeTask', true, duration, {
                         repository: this.repository,
@@ -519,6 +608,8 @@ export class Worker {
         catch (error) {
             claudeSuccess = false;
             const duration = Date.now() - claudeStartTime;
+            // Record failure in circuit breaker
+            this.circuitBreaker.recordFailure(error);
             // Record failed Claude API call
             metrics.recordClaudeApiCall('executeTask', false, duration, {
                 repository: this.repository,
@@ -529,6 +620,8 @@ export class Worker {
                 toolUseCount,
                 turnCount,
                 error: error.message,
+                circuitState: this.circuitBreaker.getState(),
+                circuitHealth: this.circuitBreaker.getHealth(),
             });
             throw error;
         }
@@ -586,8 +679,16 @@ Start by exploring the codebase, then implement the required changes.`;
         return !status.isClean();
     }
     async commitAndPush(repoDir, issue, branchName) {
-        this.log.info('Committing and pushing changes...');
+        this.log.info('Committing and pushing changes...', {
+            retryConfig: {
+                maxRetries: this.retryConfig.maxRetries,
+                baseDelayMs: this.retryConfig.baseDelayMs,
+                maxDelayMs: this.retryConfig.maxDelayMs,
+                jitterEnabled: this.retryConfig.jitterEnabled,
+            },
+        });
         const git = simpleGit(repoDir);
+        const retryConfig = this.getExtendedRetryConfig();
         // Stage all changes
         await git.add('.');
         // Create commit message
@@ -610,33 +711,63 @@ Implements #${issue.number}
                 cause: error,
             });
         }
-        // Push with retry for transient failures
-        await withRetry(async () => {
+        // Push with progressive retry strategy using exponential backoff
+        await retryWithBackoff(async () => {
             await git.push(['-u', 'origin', branchName]);
         }, {
-            config: { maxRetries: 3, baseDelayMs: 2000, maxDelayMs: 30000, backoffMultiplier: 2 },
+            config: retryConfig,
+            operationName: 'git-push',
             onRetry: (error, attempt, delay) => {
-                this.log.warn(`Push retry (attempt ${attempt}): ${error.message}, waiting ${delay}ms`);
+                this.log.warn(`Push retry with exponential backoff`, {
+                    attempt,
+                    maxRetries: retryConfig.maxRetries,
+                    delayMs: Math.round(delay),
+                    error: error.message,
+                    backoffFormula: `${retryConfig.baseDelayMs} * ${retryConfig.backoffMultiplier}^${attempt - 1}`,
+                    jitterApplied: retryConfig.jitter,
+                    commitSha,
+                    branchName,
+                });
             },
             shouldRetry: (error) => {
                 const message = error.message.toLowerCase();
-                return (message.includes('network') ||
+                const isRetryable = (message.includes('network') ||
                     message.includes('timeout') ||
                     message.includes('connection') ||
-                    message.includes('could not read from remote'));
+                    message.includes('could not read from remote') ||
+                    message.includes('enotfound') ||
+                    message.includes('etimedout') ||
+                    message.includes('econnreset') ||
+                    message.includes('econnrefused') ||
+                    message.includes('temporarily unavailable') ||
+                    message.includes('service unavailable'));
+                this.log.debug(`Push error retryability check`, {
+                    error: error.message,
+                    isRetryable,
+                });
+                return isRetryable;
             },
         }).catch((error) => {
-            throw new ExecutionError(ErrorCode.EXEC_PUSH_FAILED, `Failed to push changes: ${error.message}`, {
+            throw new ExecutionError(ErrorCode.EXEC_PUSH_FAILED, `Failed to push changes after ${retryConfig.maxRetries} retries: ${error.message}`, {
                 issueNumber: issue.number,
                 branchName,
                 context: {
                     repoDir,
                     commitSha,
+                    retryConfig: {
+                        maxRetries: retryConfig.maxRetries,
+                        baseDelayMs: retryConfig.baseDelayMs,
+                        maxDelayMs: retryConfig.maxDelayMs,
+                    },
                 },
                 cause: error,
             });
         });
-        this.log.info(`Pushed commit ${commitSha} to ${branchName}`);
+        this.log.info(`Pushed commit ${commitSha} to ${branchName}`, {
+            commitSha,
+            branchName,
+            issueNumber: issue.number,
+        });
         return commitSha;
     }
 }
