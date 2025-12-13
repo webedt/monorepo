@@ -10,6 +10,7 @@ import {
   getTimeoutFromEnv,
   TimeoutError,
 } from '../utils/timeout.js';
+import { getErrorMessage } from '../utils/errors.js';
 
 const { Pool } = pg;
 
@@ -399,8 +400,8 @@ export async function closeDatabase(options: CloseDatabaseOptions = {}): Promise
   // Flush any pending activity updates before closing
   try {
     await flushActivityUpdates();
-  } catch (error: any) {
-    logger.warn(`Failed to flush activity updates: ${error.message}`);
+  } catch (error: unknown) {
+    logger.warn(`Failed to flush activity updates: ${getErrorMessage(error)}`);
   }
 
   const stats = getPoolStats();
@@ -427,8 +428,9 @@ export async function closeDatabase(options: CloseDatabaseOptions = {}): Promise
     pool = null;
     db = null;
     logger.info('Database connection closed gracefully');
-  } catch (error: any) {
-    if (error.message.includes('timeout')) {
+  } catch (error: unknown) {
+    const errorMsg = getErrorMessage(error);
+    if (errorMsg.includes('timeout')) {
       logger.warn(`Database close timed out after ${timeoutMs}ms`);
 
       if (force) {
@@ -451,7 +453,7 @@ export async function closeDatabase(options: CloseDatabaseOptions = {}): Promise
         throw error;
       }
     } else {
-      logger.error(`Database close error: ${error.message}`);
+      logger.error(`Database close error: ${errorMsg}`);
       throw error;
     }
   }
