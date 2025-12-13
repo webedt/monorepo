@@ -378,7 +378,11 @@ npm run test:coverage
 
 | Type | Location |
 |------|----------|
-| General docs | `docs/README.md` |
+| Documentation Hub | `docs/README.md` |
+| Architecture Guide | `docs/architecture.md` |
+| Configuration Guide | `docs/configuration.md` |
+| API Reference | `docs/api-reference.md` |
+| Troubleshooting Guide | `docs/troubleshooting.md` |
 | CLI docs | `autonomous-dev-cli/README.md` |
 | API docs | `ai-coding-worker/API.md` |
 | Config examples | `examples/` |
