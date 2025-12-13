@@ -1,3 +1,7 @@
+import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { CodebaseAnalyzer, type CodebaseAnalysis } from './analyzer.js';
 import { type Issue } from '../github/issues.js';
 import { logger } from '../utils/logger.js';
@@ -15,12 +19,39 @@ export interface TaskGeneratorOptions {
   claudeAuth: {
     accessToken: string;
     refreshToken: string;
+    expiresAt?: number;
   };
   repoPath: string;
   excludePaths: string[];
   tasksPerCycle: number;
   existingIssues: Issue[];
   repoContext?: string; // Optional context about what the repo does
+}
+
+/**
+ * Write Claude credentials to ~/.claude/.credentials.json for SDK usage
+ */
+function ensureClaudeCredentials(claudeAuth: { accessToken: string; refreshToken: string; expiresAt?: number }): void {
+  const claudeDir = path.join(os.homedir(), '.claude');
+  const credentialPath = path.join(claudeDir, '.credentials.json');
+
+  // Create directory if it doesn't exist
+  if (!fs.existsSync(claudeDir)) {
+    fs.mkdirSync(claudeDir, { recursive: true, mode: 0o700 });
+  }
+
+  // Write credentials in the format the SDK expects
+  const credentials = {
+    claudeAiOauth: {
+      accessToken: claudeAuth.accessToken,
+      refreshToken: claudeAuth.refreshToken,
+      expiresAt: claudeAuth.expiresAt || (Date.now() + 86400000), // Default to 24h
+      scopes: ['user:inference', 'user:profile'],
+    }
+  };
+
+  fs.writeFileSync(credentialPath, JSON.stringify(credentials, null, 2), { mode: 0o600 });
+  logger.info('Claude credentials written to ~/.claude/.credentials.json');
 }
 
 export class TaskGenerator {
@@ -138,34 +169,49 @@ Return ONLY the JSON array, no other text.`;
   }
 
   private async callClaude(prompt: string): Promise<DiscoveredTask[]> {
-    // Use direct API with OAuth tokens (Bearer auth, not x-api-key)
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.claudeAuth.accessToken}`,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      }),
-    });
+    // Ensure credentials are written for the SDK
+    ensureClaudeCredentials(this.claudeAuth);
 
-    if (!response.ok) {
-      const error = await response.text();
-      logger.error('Claude API error', { status: response.status, error });
-      throw new Error(`Claude API error: ${response.status} - ${error}`);
+    // Use Claude Agent SDK which handles OAuth automatically
+    const options: Options = {
+      model: 'claude-sonnet-4-20250514',
+      cwd: this.repoPath,
+      maxTurns: 1,
+      allowDangerouslySkipPermissions: true,
+      permissionMode: 'bypassPermissions',
+    };
+
+    let content = '';
+
+    try {
+      const queryStream = query({ prompt, options });
+
+      for await (const message of queryStream) {
+        // Capture the final result
+        if (message.type === 'result' && message.subtype === 'success') {
+          content = message.result;
+        }
+        // Also capture assistant text messages
+        else if (message.type === 'assistant' && message.message?.content) {
+          const msgContent = message.message.content;
+          if (Array.isArray(msgContent)) {
+            for (const item of msgContent) {
+              if (item.type === 'text' && item.text) {
+                content = item.text;
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Claude SDK error', { error });
+      throw new Error(`Claude SDK error: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    const data = await response.json() as { content: Array<{ text?: string }> };
-    const content = data.content[0]?.text || '';
+    if (!content) {
+      logger.error('No response from Claude SDK');
+      throw new Error('No response from Claude');
+    }
 
     // Parse JSON from response
     try {
