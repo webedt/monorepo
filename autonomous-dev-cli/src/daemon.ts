@@ -74,6 +74,11 @@ import {
   normalizeError,
   type ErrorContext,
 } from './utils/errors.js';
+import {
+  ClaudeExecutorError,
+  isClaudeExecutorError,
+  type ClaudeExecutionContext,
+} from './errors/executor-errors.js';
 import { mkdirSync, existsSync, writeFileSync, readFileSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 import chalk from 'chalk';
@@ -969,6 +974,97 @@ export class Daemon implements DaemonStateProvider {
     if (error.toLowerCase().includes('timeout')) return 'TIMEOUT_ERROR';
     if (error.toLowerCase().includes('network')) return 'NETWORK_ERROR';
     return 'UNKNOWN_ERROR';
+  }
+
+  /**
+   * Format Claude execution context for display in logs
+   */
+  private formatClaudeExecutionContext(ctx: ClaudeExecutionContext): string {
+    const lines: string[] = [];
+
+    lines.push('');
+    lines.push(chalk.cyan('  === Claude Execution Context ==='));
+
+    if (ctx.taskDescription) {
+      lines.push(`    Task: ${ctx.taskDescription}`);
+    }
+
+    lines.push(`    Phase: ${chalk.yellow(ctx.executionPhase)}`);
+    lines.push(`    Duration: ${formatDuration(ctx.executionDurationMs)}`);
+    lines.push(`    Turns: ${ctx.turnsCompleted} | Tools Used: ${ctx.totalToolsUsed}`);
+
+    if (ctx.currentTool) {
+      lines.push('');
+      lines.push(chalk.cyan('  === Tool at Error ==='));
+      lines.push(`    Tool: ${chalk.red(ctx.currentTool)}`);
+      if (ctx.currentToolInput) {
+        const inputStr = JSON.stringify(ctx.currentToolInput);
+        const truncatedInput = inputStr.length > 200 ? inputStr.slice(0, 200) + '...' : inputStr;
+        lines.push(`    Input: ${chalk.gray(truncatedInput)}`);
+      }
+    }
+
+    if (ctx.recentToolCalls.length > 0) {
+      lines.push('');
+      lines.push(chalk.cyan(`  === Recent Tool Calls (last ${ctx.recentToolCalls.length}) ===`));
+      for (const call of ctx.recentToolCalls.slice(-5)) {
+        const writeMarker = call.isWriteOperation ? chalk.yellow(' [WRITE]') : '';
+        const pathInfo = call.filePath ? chalk.gray(` -> ${call.filePath}`) : '';
+        lines.push(`    • ${call.toolName}${writeMarker}${pathInfo}`);
+      }
+    }
+
+    if (ctx.fileChangesSummary.totalOperations > 0) {
+      lines.push('');
+      lines.push(chalk.cyan('  === File Changes Summary ==='));
+      if (ctx.fileChangesSummary.created.length > 0) {
+        lines.push(`    Created (${ctx.fileChangesSummary.created.length}):`);
+        ctx.fileChangesSummary.created.slice(0, 5).forEach(f => lines.push(`      ${chalk.green('+')} ${f}`));
+        if (ctx.fileChangesSummary.created.length > 5) {
+          lines.push(`      ... and ${ctx.fileChangesSummary.created.length - 5} more`);
+        }
+      }
+      if (ctx.fileChangesSummary.modified.length > 0) {
+        lines.push(`    Modified (${ctx.fileChangesSummary.modified.length}):`);
+        ctx.fileChangesSummary.modified.slice(0, 5).forEach(f => lines.push(`      ${chalk.yellow('~')} ${f}`));
+        if (ctx.fileChangesSummary.modified.length > 5) {
+          lines.push(`      ... and ${ctx.fileChangesSummary.modified.length - 5} more`);
+        }
+      }
+      if (ctx.fileChangesSummary.deleted.length > 0) {
+        lines.push(`    Deleted (${ctx.fileChangesSummary.deleted.length}):`);
+        ctx.fileChangesSummary.deleted.slice(0, 5).forEach(f => lines.push(`      ${chalk.red('-')} ${f}`));
+        if (ctx.fileChangesSummary.deleted.length > 5) {
+          lines.push(`      ... and ${ctx.fileChangesSummary.deleted.length - 5} more`);
+        }
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Log enhanced error context for Claude execution failures
+   */
+  private logClaudeExecutorError(error: ClaudeExecutorError, issueNumber?: number): void {
+    // Log structured error details
+    logger.error(`Claude execution failed for issue #${issueNumber}`, {
+      errorType: error.claudeErrorType,
+      toolsUsed: error.toolsUsed,
+      turnsCompleted: error.turnsCompleted,
+      hasExecutionContext: !!error.claudeExecutionContext,
+    });
+
+    // If we have execution context, display it formatted
+    if (error.claudeExecutionContext) {
+      console.log(this.formatClaudeExecutionContext(error.claudeExecutionContext));
+    }
+
+    // Also log the detailed context summary from the error itself
+    if (isDebugModeEnabled()) {
+      console.log(chalk.gray('\n  --- Full Error Context Summary ---'));
+      console.log(chalk.gray(error.getErrorContextSummary().split('\n').map(l => '  ' + l).join('\n')));
+    }
   }
 
   /**

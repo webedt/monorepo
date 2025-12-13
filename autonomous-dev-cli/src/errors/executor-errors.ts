@@ -44,6 +44,65 @@ export interface RecoveryStrategyConfig {
 }
 
 /**
+ * Information about a single tool call during Claude execution
+ */
+export interface ToolCallInfo {
+  /** Name of the tool (e.g., 'Write', 'Edit', 'Bash') */
+  toolName: string;
+  /** Tool input parameters (sanitized for logging) */
+  input: Record<string, unknown>;
+  /** Timestamp when tool was called */
+  timestamp: number;
+  /** File path if the tool operates on a file */
+  filePath?: string;
+  /** Whether this tool modifies files */
+  isWriteOperation: boolean;
+}
+
+/**
+ * Summary of file changes attempted during Claude execution
+ */
+export interface FileChangesSummary {
+  /** Files that were created */
+  created: string[];
+  /** Files that were modified */
+  modified: string[];
+  /** Files that were deleted */
+  deleted: string[];
+  /** Total number of file operations attempted */
+  totalOperations: number;
+}
+
+/**
+ * Comprehensive context for Claude execution errors
+ * Tracks tool execution state for debugging failed executions
+ */
+export interface ClaudeExecutionContext {
+  /** Description of the task being executed */
+  taskDescription?: string;
+  /** Current execution phase when error occurred */
+  executionPhase: ExecutionPhase;
+  /** Tool that was executing when error occurred */
+  currentTool?: string;
+  /** Input to the current tool when error occurred */
+  currentToolInput?: Record<string, unknown>;
+  /** Last N tool calls before the error (for debugging) */
+  recentToolCalls: ToolCallInfo[];
+  /** Summary of file changes attempted */
+  fileChangesSummary: FileChangesSummary;
+  /** Number of turns completed before error */
+  turnsCompleted: number;
+  /** Total tools used before error */
+  totalToolsUsed: number;
+  /** Time spent in Claude execution (ms) */
+  executionDurationMs: number;
+  /** Last assistant text output before error */
+  lastAssistantText?: string;
+  /** Whether any write operations were attempted */
+  hadWriteOperations: boolean;
+}
+
+/**
  * Task execution state preserved in error context
  */
 export interface TaskExecutionState {
@@ -73,6 +132,8 @@ export interface TaskExecutionState {
   commitSha?: string;
   /** Whether cleanup is required */
   requiresCleanup?: boolean;
+  /** Claude execution context for detailed debugging */
+  claudeExecutionContext?: ClaudeExecutionContext;
 }
 
 /**
@@ -466,7 +527,7 @@ export class GitExecutorError extends ExecutorError {
 }
 
 /**
- * Claude API executor error
+ * Claude API executor error with comprehensive execution context
  */
 export class ClaudeExecutorError extends ExecutorError {
   /** Claude-specific error type */
@@ -475,6 +536,8 @@ export class ClaudeExecutorError extends ExecutorError {
   public readonly toolsUsed?: number;
   /** Turns completed before error */
   public readonly turnsCompleted?: number;
+  /** Comprehensive Claude execution context for debugging */
+  public readonly claudeExecutionContext?: ClaudeExecutionContext;
 
   constructor(
     message: string,
@@ -485,6 +548,7 @@ export class ClaudeExecutorError extends ExecutorError {
       recoveryStrategy?: RecoveryStrategyConfig;
       context?: ExecutorErrorContext;
       executionState?: TaskExecutionState;
+      claudeExecutionContext?: ClaudeExecutionContext;
       cause?: Error;
     }
   ) {
@@ -517,6 +581,95 @@ export class ClaudeExecutorError extends ExecutorError {
     this.claudeErrorType = options.claudeErrorType;
     this.toolsUsed = options.toolsUsed;
     this.turnsCompleted = options.turnsCompleted;
+    this.claudeExecutionContext = options.claudeExecutionContext;
+  }
+
+  /**
+   * Get a formatted summary of the error context for logging
+   */
+  getErrorContextSummary(): string {
+    const lines: string[] = [];
+
+    lines.push(`Claude Execution Error: ${this.claudeErrorType}`);
+    lines.push(`Message: ${this.message}`);
+
+    if (this.claudeExecutionContext) {
+      const ctx = this.claudeExecutionContext;
+
+      lines.push('');
+      lines.push('=== Execution Context ===');
+
+      if (ctx.taskDescription) {
+        lines.push(`Task: ${ctx.taskDescription}`);
+      }
+
+      lines.push(`Phase: ${ctx.executionPhase}`);
+      lines.push(`Duration: ${ctx.executionDurationMs}ms`);
+      lines.push(`Turns Completed: ${ctx.turnsCompleted}`);
+      lines.push(`Total Tools Used: ${ctx.totalToolsUsed}`);
+
+      if (ctx.currentTool) {
+        lines.push('');
+        lines.push('=== Tool at Error ===');
+        lines.push(`Tool: ${ctx.currentTool}`);
+        if (ctx.currentToolInput) {
+          lines.push(`Input: ${JSON.stringify(ctx.currentToolInput, null, 2)}`);
+        }
+      }
+
+      if (ctx.recentToolCalls.length > 0) {
+        lines.push('');
+        lines.push(`=== Recent Tool Calls (last ${ctx.recentToolCalls.length}) ===`);
+        for (const call of ctx.recentToolCalls) {
+          const timestamp = new Date(call.timestamp).toISOString();
+          const writeMarker = call.isWriteOperation ? ' [WRITE]' : '';
+          const pathInfo = call.filePath ? ` -> ${call.filePath}` : '';
+          lines.push(`  ${timestamp}: ${call.toolName}${writeMarker}${pathInfo}`);
+        }
+      }
+
+      if (ctx.fileChangesSummary.totalOperations > 0) {
+        lines.push('');
+        lines.push('=== File Changes Summary ===');
+        if (ctx.fileChangesSummary.created.length > 0) {
+          lines.push(`Created (${ctx.fileChangesSummary.created.length}):`);
+          ctx.fileChangesSummary.created.forEach(f => lines.push(`  + ${f}`));
+        }
+        if (ctx.fileChangesSummary.modified.length > 0) {
+          lines.push(`Modified (${ctx.fileChangesSummary.modified.length}):`);
+          ctx.fileChangesSummary.modified.forEach(f => lines.push(`  ~ ${f}`));
+        }
+        if (ctx.fileChangesSummary.deleted.length > 0) {
+          lines.push(`Deleted (${ctx.fileChangesSummary.deleted.length}):`);
+          ctx.fileChangesSummary.deleted.forEach(f => lines.push(`  - ${f}`));
+        }
+      }
+
+      if (ctx.lastAssistantText) {
+        lines.push('');
+        lines.push('=== Last Assistant Output ===');
+        // Truncate to avoid huge logs
+        const truncatedText = ctx.lastAssistantText.length > 500
+          ? ctx.lastAssistantText.substring(0, 500) + '...'
+          : ctx.lastAssistantText;
+        lines.push(truncatedText);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Convert to JSON with execution context
+   */
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      claudeErrorType: this.claudeErrorType,
+      toolsUsed: this.toolsUsed,
+      turnsCompleted: this.turnsCompleted,
+      claudeExecutionContext: this.claudeExecutionContext,
+    };
   }
 }
 

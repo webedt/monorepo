@@ -52,6 +52,9 @@ import {
   type TaskExecutionState,
   type ExecutionPhase,
   type ExecutorErrorContext,
+  type ClaudeExecutionContext,
+  type ToolCallInfo,
+  type FileChangesSummary,
 } from '../errors/executor-errors.js';
 import {
   CircuitBreaker,
@@ -91,6 +94,187 @@ import {
  * Default timeout for Claude execution (5 minutes as per issue requirements)
  */
 const DEFAULT_CLAUDE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Maximum number of recent tool calls to track for error context
+ */
+const MAX_RECENT_TOOL_CALLS = 10;
+
+/**
+ * Tracker for Claude execution context to provide comprehensive error debugging
+ */
+class ClaudeExecutionTracker {
+  private taskDescription: string;
+  private startTime: number;
+  private currentTool: string | null = null;
+  private currentToolInput: Record<string, unknown> | null = null;
+  private recentToolCalls: ToolCallInfo[] = [];
+  private createdFiles: Set<string> = new Set();
+  private modifiedFiles: Set<string> = new Set();
+  private deletedFiles: Set<string> = new Set();
+  private turnsCompleted: number = 0;
+  private totalToolsUsed: number = 0;
+  private lastAssistantText: string = '';
+  private hadWriteOperations: boolean = false;
+
+  constructor(taskDescription: string) {
+    this.taskDescription = taskDescription;
+    this.startTime = Date.now();
+  }
+
+  /**
+   * Record a tool call for tracking
+   */
+  recordToolCall(toolName: string, input: Record<string, unknown>): void {
+    this.currentTool = toolName;
+    this.currentToolInput = input;
+    this.totalToolsUsed++;
+
+    // Determine if this is a write operation and extract file path
+    const isWriteOperation = ['Write', 'Edit', 'MultiEdit'].includes(toolName);
+    const filePath = this.extractFilePath(toolName, input);
+
+    if (isWriteOperation) {
+      this.hadWriteOperations = true;
+
+      // Track file changes
+      if (filePath) {
+        if (toolName === 'Write') {
+          // Write could be create or modify - we'll track as create if new
+          this.createdFiles.add(filePath);
+        } else {
+          // Edit/MultiEdit modify existing files
+          this.modifiedFiles.add(filePath);
+        }
+      }
+    }
+
+    // Track deletion through Bash commands
+    if (toolName === 'Bash') {
+      const command = (input.command as string) || '';
+      const deletePaths = this.extractDeletePaths(command);
+      deletePaths.forEach(path => this.deletedFiles.add(path));
+    }
+
+    // Add to recent tool calls (keep last N)
+    const toolCallInfo: ToolCallInfo = {
+      toolName,
+      input: this.sanitizeInput(toolName, input),
+      timestamp: Date.now(),
+      filePath,
+      isWriteOperation,
+    };
+
+    this.recentToolCalls.push(toolCallInfo);
+    if (this.recentToolCalls.length > MAX_RECENT_TOOL_CALLS) {
+      this.recentToolCalls.shift();
+    }
+  }
+
+  /**
+   * Record a turn completion
+   */
+  recordTurn(): void {
+    this.turnsCompleted++;
+    // Clear current tool after turn
+    this.currentTool = null;
+    this.currentToolInput = null;
+  }
+
+  /**
+   * Record assistant text output
+   */
+  recordAssistantText(text: string): void {
+    this.lastAssistantText = text;
+  }
+
+  /**
+   * Get the current execution context for error reporting
+   */
+  getContext(phase: ExecutionPhase): ClaudeExecutionContext {
+    return {
+      taskDescription: this.taskDescription,
+      executionPhase: phase,
+      currentTool: this.currentTool || undefined,
+      currentToolInput: this.currentToolInput || undefined,
+      recentToolCalls: [...this.recentToolCalls],
+      fileChangesSummary: this.getFileChangesSummary(),
+      turnsCompleted: this.turnsCompleted,
+      totalToolsUsed: this.totalToolsUsed,
+      executionDurationMs: Date.now() - this.startTime,
+      lastAssistantText: this.lastAssistantText || undefined,
+      hadWriteOperations: this.hadWriteOperations,
+    };
+  }
+
+  /**
+   * Get summary of file changes
+   */
+  private getFileChangesSummary(): FileChangesSummary {
+    return {
+      created: Array.from(this.createdFiles),
+      modified: Array.from(this.modifiedFiles),
+      deleted: Array.from(this.deletedFiles),
+      totalOperations: this.createdFiles.size + this.modifiedFiles.size + this.deletedFiles.size,
+    };
+  }
+
+  /**
+   * Extract file path from tool input
+   */
+  private extractFilePath(toolName: string, input: Record<string, unknown>): string | undefined {
+    switch (toolName) {
+      case 'Write':
+      case 'Edit':
+      case 'Read':
+        return (input.file_path as string) || (input.path as string);
+      case 'MultiEdit':
+        // MultiEdit operates on multiple files, return first one
+        const edits = input.edits as Array<{ file_path?: string }>;
+        return edits?.[0]?.file_path;
+      case 'Glob':
+      case 'Grep':
+        return (input.path as string);
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Extract delete paths from Bash commands
+   */
+  private extractDeletePaths(command: string): string[] {
+    const paths: string[] = [];
+    // Match rm commands
+    const rmMatch = command.match(/rm\s+(?:-[rf]+\s+)?([^\s&|;]+)/g);
+    if (rmMatch) {
+      rmMatch.forEach(match => {
+        const pathMatch = match.match(/rm\s+(?:-[rf]+\s+)?(.+)/);
+        if (pathMatch) {
+          paths.push(pathMatch[1].trim());
+        }
+      });
+    }
+    return paths;
+  }
+
+  /**
+   * Sanitize tool input for logging (truncate large content)
+   */
+  private sanitizeInput(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
+    const sanitized: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(input)) {
+      if (typeof value === 'string' && value.length > 200) {
+        sanitized[key] = value.slice(0, 200) + `... (${value.length} chars)`;
+      } else {
+        sanitized[key] = value;
+      }
+    }
+
+    return sanitized;
+  }
+}
 
 /**
  * Maximum retries for Claude execution (3 attempts as per issue requirements)
@@ -1082,11 +1266,15 @@ export class Worker {
 
     const summary = executionLogger.getSummary();
 
+    // Extract Claude execution context from last error if available
+    const lastClaudeError = lastError instanceof ClaudeExecutorError ? lastError : undefined;
+    const lastExecutionContext = lastClaudeError?.claudeExecutionContext;
+
     // Use typed ClaudeExecutorError for final failure after retries exhausted
     const finalError = new ClaudeExecutorError(
       `Claude execution failed after ${summary.totalAttempts} attempts: ${lastError?.message || 'Unknown error'}`,
       {
-        claudeErrorType: 'api',
+        claudeErrorType: lastClaudeError?.claudeErrorType ?? 'api',
         toolsUsed: summary.totalToolUses,
         turnsCompleted: summary.totalTurns,
         context: {
@@ -1101,7 +1289,9 @@ export class Worker {
           retryAttempt: summary.totalAttempts,
           maxRetries: maxRetries,
           workerId: this.workerId,
+          claudeExecutionContext: lastExecutionContext,
         },
+        claudeExecutionContext: lastExecutionContext,
         recoveryStrategy: {
           strategy: 'escalate',
           escalateAfterRetries: true,
@@ -1114,6 +1304,19 @@ export class Worker {
         cause: lastError,
       }
     );
+
+    // Log comprehensive error context if available
+    if (lastExecutionContext) {
+      this.log.error('Claude execution failed after all retries with context', {
+        issueNumber: issue.number,
+        totalAttempts: summary.totalAttempts,
+        totalToolUses: summary.totalToolUses,
+        currentTool: lastExecutionContext.currentTool,
+        recentToolCount: lastExecutionContext.recentToolCalls.length,
+        fileChanges: lastExecutionContext.fileChangesSummary,
+        hadWriteOperations: lastExecutionContext.hadWriteOperations,
+      });
+    }
 
     if (chatSessionId) {
       await addMessage(chatSessionId, 'error', finalError.message);
@@ -1140,6 +1343,12 @@ export class Worker {
     const attemptStartTime = Date.now();
     const startMemory = getMemoryUsageMB();
     const correlationId = generateCorrelationId();
+
+    // Create task description for error context
+    const taskDescription = `Issue #${issue.number}: ${issue.title}`;
+
+    // Initialize execution tracker for comprehensive error context
+    const executionTracker = new ClaudeExecutionTracker(taskDescription);
 
     // Log internal state snapshot for debugging
     this.log.debugState('ClaudeExecution', 'Starting execution attempt', {
@@ -1203,6 +1412,7 @@ export class Worker {
 
         if (typedMessage.type === 'assistant') {
           turnCount++;
+          executionTracker.recordTurn();
 
           if (typedMessage.message?.content) {
             for (const block of typedMessage.message.content) {
@@ -1216,6 +1426,9 @@ export class Worker {
                 if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
                   hasWriteOperations = true;
                 }
+
+                // Record in execution tracker for error context
+                executionTracker.recordToolCall(toolName, toolInput as Record<string, unknown>);
 
                 // Enhanced debug logging for Claude tool use
                 this.log.claudeToolUse(toolName, toolInput as Record<string, unknown>, {
@@ -1255,6 +1468,7 @@ export class Worker {
                 const text = extractTextContent(typedBlock);
                 assistantTextBuffer += text + '\n';
                 executionLogger.recordAssistantText(text);
+                executionTracker.recordAssistantText(text);
               }
             }
           }
@@ -1318,9 +1532,12 @@ export class Worker {
     } catch (error) {
       const duration = Date.now() - attemptStartTime;
 
+      // Get comprehensive execution context for error reporting
+      const claudeExecutionContext = executionTracker.getContext('claude_execution');
+
       // Check if this was a timeout (using both tracking methods for reliability)
       if (timeoutTriggered || isTimedOut()) {
-        // Use typed ClaudeExecutorError for timeout failures
+        // Use typed ClaudeExecutorError for timeout failures with comprehensive context
         const timeoutError = new ClaudeExecutorError(
           `Claude execution timed out after ${Math.round(timeoutMs / 1000)} seconds (5-minute limit). The task may be too complex or Claude may be experiencing delays.`,
           {
@@ -1337,9 +1554,22 @@ export class Worker {
               toolsUsed: toolUseCount,
               durationMs: duration,
               workerId: this.workerId,
+              claudeExecutionContext,
             },
+            claudeExecutionContext,
           }
         );
+
+        // Log comprehensive error context for debugging
+        this.log.error('Claude execution timeout with context', {
+          issueNumber: issue.number,
+          duration,
+          toolUseCount,
+          turnCount,
+          currentTool: claudeExecutionContext.currentTool,
+          recentToolCount: claudeExecutionContext.recentToolCalls.length,
+          fileChanges: claudeExecutionContext.fileChangesSummary,
+        });
 
         metrics.recordClaudeApiCall('executeTask', false, duration, {
           repository: this.repository,
@@ -1349,13 +1579,49 @@ export class Worker {
         throw timeoutError;
       }
 
+      // For non-timeout errors, wrap with comprehensive context
+      const wrappedError = new ClaudeExecutorError(
+        `Claude execution failed: ${getErrorMessage(error)}`,
+        {
+          claudeErrorType: 'api',
+          toolsUsed: toolUseCount,
+          turnsCompleted: turnCount,
+          context: {
+            operation: 'claude_execution',
+            issueNumber: issue.number,
+          },
+          executionState: {
+            phase: 'claude_execution',
+            issueNumber: issue.number,
+            toolsUsed: toolUseCount,
+            durationMs: duration,
+            workerId: this.workerId,
+            claudeExecutionContext,
+          },
+          claudeExecutionContext,
+          cause: error instanceof Error ? error : undefined,
+        }
+      );
+
+      // Log comprehensive error context for debugging
+      this.log.error('Claude execution failed with context', {
+        issueNumber: issue.number,
+        duration,
+        toolUseCount,
+        turnCount,
+        currentTool: claudeExecutionContext.currentTool,
+        recentToolCount: claudeExecutionContext.recentToolCalls.length,
+        fileChanges: claudeExecutionContext.fileChangesSummary,
+        originalError: getErrorMessage(error),
+      });
+
       // Record failed API call
       metrics.recordClaudeApiCall('executeTask', false, duration, {
         repository: this.repository,
         workerId: this.workerId,
       });
 
-      throw error;
+      throw wrappedError;
     } finally {
       // Always clean up both timeouts to prevent leaks
       // This ensures cleanup happens even when errors occur
