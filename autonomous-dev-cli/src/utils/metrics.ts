@@ -375,6 +375,60 @@ class MetricsRegistry {
     'Total number of tool uses by Claude'
   );
 
+  // GitHub API timing metrics
+  readonly githubApiDurationMs = new Histogram(
+    'autonomous_dev_github_api_duration_ms',
+    'GitHub API call duration in milliseconds',
+    [50, 100, 250, 500, 1000, 2500, 5000, 10000]
+  );
+
+  // Claude SDK timing metrics
+  readonly claudeApiDurationMs = new Histogram(
+    'autonomous_dev_claude_api_duration_ms',
+    'Claude API call duration in milliseconds',
+    [1000, 5000, 10000, 30000, 60000, 120000, 300000, 600000]
+  );
+
+  // Worker utilization metrics
+  readonly workerUtilization = new Gauge(
+    'autonomous_dev_worker_utilization',
+    'Worker utilization percentage (0-100)'
+  );
+
+  readonly workerTasksTotal = new Counter(
+    'autonomous_dev_worker_tasks_total',
+    'Total tasks processed by worker'
+  );
+
+  // Memory metrics
+  readonly memoryUsageMb = new Gauge(
+    'autonomous_dev_memory_usage_mb',
+    'Current memory usage in megabytes'
+  );
+
+  // Discovery metrics
+  readonly discoveryDurationMs = new Histogram(
+    'autonomous_dev_discovery_duration_ms',
+    'Task discovery duration in milliseconds'
+  );
+
+  readonly analysisCacheHits = new Counter(
+    'autonomous_dev_analysis_cache_hits_total',
+    'Number of analysis cache hits'
+  );
+
+  readonly analysisCacheMisses = new Counter(
+    'autonomous_dev_analysis_cache_misses_total',
+    'Number of analysis cache misses'
+  );
+
+  // Correlation tracking for debugging
+  private correlationMetrics: Map<string, {
+    startTime: number;
+    operations: string[];
+    errors: number;
+  }> = new Map();
+
   private startTime: number = Date.now();
 
   /**
@@ -480,6 +534,214 @@ class MetricsRegistry {
   }
 
   /**
+   * Record a GitHub API call with timing
+   */
+  recordGitHubApiCall(
+    endpoint: string,
+    method: string,
+    success: boolean,
+    durationMs: number,
+    labels: { repository: string; statusCode?: number }
+  ): void {
+    this.githubApiCallsTotal.inc({
+      repository: labels.repository,
+      endpoint,
+      method,
+    });
+
+    this.githubApiDurationMs.observe(
+      {
+        repository: labels.repository,
+        endpoint,
+        method,
+        status: labels.statusCode?.toString() ?? 'unknown',
+      },
+      durationMs
+    );
+
+    if (!success) {
+      this.githubApiErrorsTotal.inc({
+        repository: labels.repository,
+        endpoint,
+        status_code: labels.statusCode?.toString() ?? 'unknown',
+      });
+    }
+  }
+
+  /**
+   * Record a Claude SDK call with timing
+   */
+  recordClaudeApiCall(
+    operation: string,
+    success: boolean,
+    durationMs: number,
+    labels: { repository: string; workerId?: string }
+  ): void {
+    this.claudeApiCallsTotal.inc({
+      repository: labels.repository,
+      operation,
+    });
+
+    this.claudeApiDurationMs.observe(
+      {
+        repository: labels.repository,
+        operation,
+        worker_id: labels.workerId ?? 'unknown',
+        success: String(success),
+      },
+      durationMs
+    );
+
+    if (!success) {
+      this.claudeApiErrorsTotal.inc({
+        repository: labels.repository,
+        operation,
+      });
+    }
+  }
+
+  /**
+   * Update worker utilization
+   */
+  updateWorkerUtilization(
+    activeWorkers: number,
+    maxWorkers: number,
+    queuedTasks: number
+  ): void {
+    const utilization = maxWorkers > 0
+      ? Math.round((activeWorkers / maxWorkers) * 100)
+      : 0;
+
+    this.workerUtilization.set({}, utilization);
+    this.workersActive.set({}, activeWorkers);
+    this.workersQueued.set({}, queuedTasks);
+  }
+
+  /**
+   * Record a worker task execution
+   */
+  recordWorkerTask(
+    workerId: string,
+    success: boolean,
+    durationMs: number,
+    labels: { repository: string; issueNumber?: number }
+  ): void {
+    this.workerTasksTotal.inc({
+      worker_id: workerId,
+      repository: labels.repository,
+      success: String(success),
+    });
+
+    this.taskDurationMs.observe(
+      {
+        worker_id: workerId,
+        repository: labels.repository,
+      },
+      durationMs
+    );
+  }
+
+  /**
+   * Update memory usage metrics
+   */
+  updateMemoryUsage(heapUsedMB: number): void {
+    this.memoryUsageMb.set({}, heapUsedMB);
+  }
+
+  /**
+   * Record discovery operation
+   */
+  recordDiscovery(
+    tasksFound: number,
+    durationMs: number,
+    cacheHit: boolean,
+    labels: { repository: string }
+  ): void {
+    this.discoveryDurationMs.observe(labels, durationMs);
+    this.cycleTasksDiscovered.observe(labels, tasksFound);
+
+    if (cacheHit) {
+      this.analysisCacheHits.inc(labels);
+    } else {
+      this.analysisCacheMisses.inc(labels);
+    }
+  }
+
+  /**
+   * Start tracking a correlation ID
+   */
+  startCorrelation(correlationId: string): void {
+    this.correlationMetrics.set(correlationId, {
+      startTime: Date.now(),
+      operations: [],
+      errors: 0,
+    });
+  }
+
+  /**
+   * Record an operation for a correlation ID
+   */
+  recordCorrelationOperation(correlationId: string, operation: string): void {
+    const metrics = this.correlationMetrics.get(correlationId);
+    if (metrics) {
+      metrics.operations.push(operation);
+    }
+  }
+
+  /**
+   * Record an error for a correlation ID
+   */
+  recordCorrelationError(correlationId: string): void {
+    const metrics = this.correlationMetrics.get(correlationId);
+    if (metrics) {
+      metrics.errors++;
+    }
+  }
+
+  /**
+   * End tracking a correlation ID and return summary
+   */
+  endCorrelation(correlationId: string): {
+    duration: number;
+    operationCount: number;
+    errorCount: number;
+  } | null {
+    const metrics = this.correlationMetrics.get(correlationId);
+    if (!metrics) {
+      return null;
+    }
+
+    this.correlationMetrics.delete(correlationId);
+    return {
+      duration: Date.now() - metrics.startTime,
+      operationCount: metrics.operations.length,
+      errorCount: metrics.errors,
+    };
+  }
+
+  /**
+   * Get correlation metrics summary (for debugging)
+   */
+  getCorrelationSummary(correlationId: string): {
+    correlationId: string;
+    duration: number;
+    operations: string[];
+    errors: number;
+  } | null {
+    const metrics = this.correlationMetrics.get(correlationId);
+    if (!metrics) {
+      return null;
+    }
+
+    return {
+      correlationId,
+      duration: Date.now() - metrics.startTime,
+      operations: [...metrics.operations],
+      errors: metrics.errors,
+    };
+  }
+
+  /**
    * Get all metrics in Prometheus format
    */
   getPrometheusMetrics(): string {
@@ -507,6 +769,7 @@ class MetricsRegistry {
       this.testDurationMs,
       this.githubApiCallsTotal,
       this.githubApiErrorsTotal,
+      this.githubApiDurationMs,
       this.prsCreatedTotal,
       this.prsMergedTotal,
       this.errorsTotal,
@@ -514,7 +777,14 @@ class MetricsRegistry {
       this.uptimeSeconds,
       this.claudeApiCallsTotal,
       this.claudeApiErrorsTotal,
+      this.claudeApiDurationMs,
       this.claudeToolUsageTotal,
+      this.workerUtilization,
+      this.workerTasksTotal,
+      this.memoryUsageMb,
+      this.discoveryDurationMs,
+      this.analysisCacheHits,
+      this.analysisCacheMisses,
     ];
 
     for (const collector of allCollectors) {
@@ -589,6 +859,7 @@ class MetricsRegistry {
       this.testDurationMs,
       this.githubApiCallsTotal,
       this.githubApiErrorsTotal,
+      this.githubApiDurationMs,
       this.prsCreatedTotal,
       this.prsMergedTotal,
       this.errorsTotal,
@@ -596,7 +867,14 @@ class MetricsRegistry {
       this.uptimeSeconds,
       this.claudeApiCallsTotal,
       this.claudeApiErrorsTotal,
+      this.claudeApiDurationMs,
       this.claudeToolUsageTotal,
+      this.workerUtilization,
+      this.workerTasksTotal,
+      this.memoryUsageMb,
+      this.discoveryDurationMs,
+      this.analysisCacheHits,
+      this.analysisCacheMisses,
     ];
 
     const result: Record<string, any> = {};

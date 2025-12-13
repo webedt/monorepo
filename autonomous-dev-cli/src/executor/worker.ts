@@ -3,7 +3,15 @@ import { simpleGit } from 'simple-git';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { logger, generateCorrelationId } from '../utils/logger.js';
+import {
+  logger,
+  generateCorrelationId,
+  getMemoryUsageMB,
+  timeOperation,
+  createOperationContext,
+  finalizeOperationContext,
+  type OperationMetadata,
+} from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import {
   StructuredError,
@@ -123,20 +131,37 @@ export class Worker {
 
   async execute(task: WorkerTask): Promise<WorkerResult> {
     const startTime = Date.now();
+    const startMemory = getMemoryUsageMB();
     const { issue, branchName } = task;
 
     // Generate correlation ID for this task execution
     const correlationId = generateCorrelationId();
     const taskLog = this.log.withCorrelationId(correlationId);
 
-    taskLog.info(`Starting task: ${issue.title}`, {
+    // Start correlation tracking in metrics
+    metrics.startCorrelation(correlationId);
+
+    // Create operation context for structured logging
+    const operationContext = createOperationContext('Worker', 'executeTask', {
       issueNumber: issue.number,
       branchName,
       workerId: this.workerId,
     });
 
+    taskLog.info(`Starting task: ${issue.title}`, {
+      issueNumber: issue.number,
+      branchName,
+      workerId: this.workerId,
+      correlationId,
+      startMemoryMB: startMemory,
+    });
+
+    // Log memory snapshot at start
+    taskLog.memorySnapshot('Worker', `Task start: Issue #${issue.number}`);
+
     // Track Claude API call
     metrics.claudeApiCallsTotal.inc({ repository: this.repository });
+    metrics.recordCorrelationOperation(correlationId, 'task_start');
 
     // Create workspace directory for this task
     const taskDir = join(this.options.workDir, `task-${issue.number}-${Date.now()}`);
@@ -242,6 +267,8 @@ export class Worker {
       }
 
       const duration = Date.now() - startTime;
+      const endMemory = getMemoryUsageMB();
+      const memoryDelta = Math.round((endMemory - startMemory) * 100) / 100;
 
       // Record successful task completion
       metrics.recordTaskCompletion(true, duration, {
@@ -250,11 +277,34 @@ export class Worker {
         workerId: this.workerId,
       });
 
+      // Record worker-specific metrics
+      metrics.recordWorkerTask(this.workerId, true, duration, {
+        repository: this.repository,
+        issueNumber: issue.number,
+      });
+
+      // End correlation tracking and log summary
+      const correlationSummary = metrics.endCorrelation(correlationId);
+
+      // Log operation completion with full metrics
+      const operationMetadata = finalizeOperationContext(operationContext, true, {
+        commitSha,
+        memoryDeltaMB: memoryDelta,
+        correlationSummary,
+      });
+
+      taskLog.operationComplete('Worker', 'executeTask', true, operationMetadata);
       taskLog.success(`Task completed: ${issue.title}`);
+
+      // Log memory snapshot at end
+      taskLog.memorySnapshot('Worker', `Task complete: Issue #${issue.number}`);
+
       taskLog.info(`Task metrics`, {
         duration,
         issueNumber: issue.number,
         commitSha,
+        memoryDeltaMB: memoryDelta,
+        operations: correlationSummary?.operationCount,
       });
 
       return {
@@ -275,6 +325,11 @@ export class Worker {
       );
 
       const duration = Date.now() - startTime;
+      const endMemory = getMemoryUsageMB();
+      const memoryDelta = Math.round((endMemory - startMemory) * 100) / 100;
+
+      // Record error in correlation tracking
+      metrics.recordCorrelationError(correlationId);
 
       // Record error metrics
       metrics.recordError({
@@ -302,6 +357,28 @@ export class Worker {
         workerId: this.workerId,
       });
 
+      // Record worker-specific metrics
+      metrics.recordWorkerTask(this.workerId, false, duration, {
+        repository: this.repository,
+        issueNumber: issue.number,
+      });
+
+      // End correlation tracking
+      const correlationSummary = metrics.endCorrelation(correlationId);
+
+      // Log operation failure with full metrics
+      const operationMetadata = finalizeOperationContext(operationContext, false, {
+        errorCode: structuredError.code,
+        errorMessage: structuredError.message,
+        memoryDeltaMB: memoryDelta,
+        correlationSummary,
+      });
+
+      taskLog.operationComplete('Worker', 'executeTask', false, operationMetadata);
+
+      // Log memory snapshot at error
+      taskLog.memorySnapshot('Worker', `Task failed: Issue #${issue.number}`);
+
       taskLog.structuredError(structuredError, {
         context: this.getErrorContext('execute', task),
         includeStack: true,
@@ -319,6 +396,8 @@ export class Worker {
           recoveryActions: structuredError.getRecoverySuggestions(),
           stack: structuredError.stack,
           correlationId,
+          duration,
+          memoryDeltaMB: memoryDelta,
         });
         await updateChatSession(chatSessionId, { status: 'error', completedAt: new Date() });
       }
@@ -481,13 +560,22 @@ export class Worker {
   }
 
   private async executeWithClaude(repoDir: string, issue: Issue, chatSessionId?: string): Promise<void> {
-    this.log.info('Executing task with Claude Agent SDK...');
+    const claudeStartTime = Date.now();
+    const startMemory = getMemoryUsageMB();
+    this.log.info('Executing task with Claude Agent SDK...', {
+      issueNumber: issue.number,
+      repoDir,
+    });
 
     const prompt = this.buildPrompt(issue);
 
     const timeoutMs = this.options.timeoutMinutes * 60 * 1000;
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
+    let toolUseCount = 0;
+    let turnCount = 0;
+    let claudeSuccess = true;
 
     try {
       const stream = query({
@@ -511,13 +599,18 @@ export class Worker {
       for await (const message of stream) {
         lastMessage = message;
         if (message.type === 'assistant') {
+          turnCount++;
           // Log tool uses and collect assistant text
           if (message.message?.content) {
             for (const block of message.message.content) {
               if (block.type === 'tool_use') {
+                toolUseCount++;
                 const toolName = (block as any).name;
                 const toolInput = (block as any).input;
-                this.log.debug(`Tool: ${toolName}`);
+                this.log.debug(`Tool: ${toolName}`, {
+                  toolCount: toolUseCount,
+                  turnCount,
+                });
 
                 // Record tool usage in metrics
                 metrics.recordToolUsage(toolName, {
@@ -531,6 +624,8 @@ export class Worker {
                     type: 'tool_use',
                     tool: toolName,
                     input: this.sanitizeToolInput(toolName, toolInput),
+                    toolCount,
+                    turnCount,
                   });
                 }
               } else if (block.type === 'text') {
@@ -545,8 +640,21 @@ export class Worker {
             assistantTextBuffer = '';
           }
         } else if (message.type === 'result') {
-          const duration = (message as any).duration_ms;
-          this.log.info(`Claude execution completed in ${duration}ms`);
+          const duration = (message as any).duration_ms || (Date.now() - claudeStartTime);
+          const endMemory = getMemoryUsageMB();
+
+          this.log.info(`Claude execution completed`, {
+            duration,
+            toolUseCount,
+            turnCount,
+            memoryDeltaMB: Math.round((endMemory - startMemory) * 100) / 100,
+          });
+
+          // Record Claude API call metrics
+          metrics.recordClaudeApiCall('executeTask', true, duration, {
+            repository: this.repository,
+            workerId: this.workerId,
+          });
 
           // Log final assistant message and completion event
           if (chatSessionId) {
@@ -557,10 +665,30 @@ export class Worker {
               type: 'claude_complete',
               message: `Claude completed in ${Math.round(duration / 1000)}s`,
               duration_ms: duration,
+              toolUseCount,
+              turnCount,
             });
           }
         }
       }
+    } catch (error) {
+      claudeSuccess = false;
+      const duration = Date.now() - claudeStartTime;
+
+      // Record failed Claude API call
+      metrics.recordClaudeApiCall('executeTask', false, duration, {
+        repository: this.repository,
+        workerId: this.workerId,
+      });
+
+      this.log.error('Claude execution failed', {
+        duration,
+        toolUseCount,
+        turnCount,
+        error: (error as Error).message,
+      });
+
+      throw error;
     } finally {
       clearTimeout(timeoutId);
     }

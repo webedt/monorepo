@@ -1,7 +1,15 @@
 import { readFileSync, readdirSync, statSync, existsSync, accessSync, constants } from 'fs';
 import { join, relative, extname, isAbsolute, resolve } from 'path';
 import { createHash } from 'crypto';
-import { logger } from '../utils/logger.js';
+import {
+  logger,
+  getCorrelationId,
+  getMemoryUsageMB,
+  timeOperationSync,
+  createOperationContext,
+  finalizeOperationContext,
+} from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
 import { AnalyzerError, ErrorCode } from '../utils/errors.js';
 
 // ============================================================================
@@ -552,7 +560,23 @@ export class CodebaseAnalyzer {
   }
 
   async analyze(): Promise<CodebaseAnalysis> {
-    logger.info('Analyzing codebase...', { path: this.repoPath });
+    const startTime = Date.now();
+    const startMemory = getMemoryUsageMB();
+    const correlationId = getCorrelationId();
+
+    // Create operation context for structured logging
+    const operationContext = createOperationContext('Analyzer', 'analyze', {
+      repoPath: this.repoPath,
+      excludePaths: this.excludePaths.length,
+      maxDepth: this.maxDepth,
+      maxFiles: this.maxFiles,
+    });
+
+    logger.info('Analyzing codebase...', {
+      path: this.repoPath,
+      correlationId,
+      startMemoryMB: startMemory,
+    });
 
     // Validate inputs before processing
     const validationResult = this.validateBeforeAnalysis();
@@ -562,16 +586,34 @@ export class CodebaseAnalyzer {
     }
 
     // Check cache if enabled
+    let cacheHit = false;
     if (this.enableCache) {
       const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
       const contentHash = this.cache.generateContentHash(this.repoPath);
 
       const cached = this.cache.get(cacheKey, contentHash);
       if (cached) {
+        cacheHit = true;
+        const duration = Date.now() - startTime;
+
+        // Record discovery metrics for cache hit
+        const repoName = this.repoPath.split('/').slice(-2).join('/');
+        metrics.recordDiscovery(0, duration, true, { repository: repoName });
+
         logger.info('Using cached codebase analysis', {
           path: this.repoPath,
           stats: this.cache.getStats(),
+          duration,
+          cacheHit: true,
         });
+
+        // Log operation completion
+        const operationMetadata = finalizeOperationContext(operationContext, true, {
+          cacheHit: true,
+          fileCount: cached.fileCount,
+        });
+        logger.operationComplete('Analyzer', 'analyze', true, operationMetadata);
+
         return cached;
       }
     }
@@ -580,7 +622,16 @@ export class CodebaseAnalyzer {
     this.fileCount = 0;
     this.validationErrors = [];
 
-    const structure = this.scanDirectory(this.repoPath);
+    // Time directory scanning
+    const { result: structure, duration: scanDuration } = timeOperationSync(
+      () => this.scanDirectory(this.repoPath),
+      'scanDirectory'
+    );
+
+    logger.debug('Directory scan complete', {
+      duration: scanDuration,
+      fileCount: this.fileCount,
+    });
 
     // Check if we hit the file limit
     if (this.fileCount >= this.maxFiles) {
@@ -592,8 +643,18 @@ export class CodebaseAnalyzer {
     const configFiles = this.findConfigFiles();
 
     const fileCount = this.countFiles(structure);
+    const duration = Date.now() - startTime;
+    const endMemory = getMemoryUsageMB();
+    const memoryDelta = Math.round((endMemory - startMemory) * 100) / 100;
 
-    logger.info(`Found ${fileCount} files, ${todoComments.length} TODOs, ${packages.length} packages`);
+    logger.info(`Analysis complete`, {
+      fileCount,
+      todoCount: todoComments.length,
+      packageCount: packages.length,
+      configFileCount: configFiles.length,
+      duration,
+      memoryDeltaMB: memoryDelta,
+    });
 
     // Log any validation warnings collected during analysis
     if (this.validationErrors.length > 0) {
@@ -615,6 +676,21 @@ export class CodebaseAnalyzer {
       const contentHash = this.cache.generateContentHash(this.repoPath);
       this.cache.set(cacheKey, result, contentHash);
     }
+
+    // Record discovery metrics
+    const repoName = this.repoPath.split('/').slice(-2).join('/');
+    metrics.recordDiscovery(todoComments.length, duration, cacheHit, { repository: repoName });
+
+    // Log operation completion with full metrics
+    const operationMetadata = finalizeOperationContext(operationContext, true, {
+      cacheHit: false,
+      fileCount,
+      todoCount: todoComments.length,
+      packageCount: packages.length,
+      memoryDeltaMB: memoryDelta,
+      scanDuration,
+    });
+    logger.operationComplete('Analyzer', 'analyze', true, operationMetadata);
 
     return result;
   }
