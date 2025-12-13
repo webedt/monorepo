@@ -405,6 +405,12 @@ export class WorkerPool extends EventEmitter {
       ...WorkerPool.DEFAULT_MEMORY_CONFIG,
     };
 
+    // Initialize concurrency configuration
+    this.concurrencyConfig = {
+      ...WorkerPool.DEFAULT_CONCURRENCY_CONFIG,
+      ...options.concurrencyConfig,
+    };
+
     // Compute initial worker limit based on system resources
     this.currentWorkerLimit = this.computeOptimalWorkerCount();
 

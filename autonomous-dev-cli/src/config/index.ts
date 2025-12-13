@@ -783,6 +783,9 @@ export function loadConfig(configPath?: string, options: Omit<LoadConfigOptions,
     rotationPolicy: (process.env.LOG_ROTATION_POLICY as 'size' | 'time' | 'both') || 'size',
     rotationInterval: (process.env.LOG_ROTATION_INTERVAL as 'hourly' | 'daily' | 'weekly') || 'daily',
     maxLogAgeDays: parseInt(process.env.LOG_MAX_AGE_DAYS || '30', 10),
+    debugMode: process.env.DEBUG_MODE === 'true' || process.env.AUTONOMOUS_DEV_DEBUG === 'true',
+    logClaudeInteractions: process.env.LOG_CLAUDE_INTERACTIONS === 'true',
+    logApiDetails: process.env.LOG_API_DETAILS === 'true',
   };
 
   envConfig.credentials = {

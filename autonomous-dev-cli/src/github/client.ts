@@ -1013,9 +1013,17 @@ export class GitHubClient {
         success: false,
         error: (error as Error).message,
         correlationId,
-        circuitState: this.circuitState,
-        consecutiveFailures: this.consecutiveFailures,
       });
+
+      // Log circuit breaker state separately for debugging
+      if (this.consecutiveFailures > 0) {
+        logger.debug('Circuit breaker state', {
+          circuitState: this.circuitState,
+          consecutiveFailures: this.consecutiveFailures,
+          endpoint,
+          correlationId,
+        });
+      }
 
       // Log slow failed operations for debugging
       if (duration > DEFAULT_TIMING_THRESHOLD_MS) {
