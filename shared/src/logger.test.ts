@@ -29,10 +29,10 @@ describe('Logger Module', () => {
     consoleWarnSpy = mock.fn();
     consoleErrorSpy = mock.fn();
 
-    // Replace console methods
-    console.log = consoleLogSpy;
-    console.warn = consoleWarnSpy;
-    console.error = consoleErrorSpy;
+    // Replace console methods (cast to any to bypass strict type checking for mocks)
+    console.log = consoleLogSpy as any;
+    console.warn = consoleWarnSpy as any;
+    console.error = consoleErrorSpy as any;
   });
 
   afterEach(() => {
