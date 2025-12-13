@@ -1,4 +1,16 @@
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import {
+  type ContentBlock,
+  type ClaudeSDKMessage,
+  type ResultMessage,
+  isTextBlock,
+  isToolUseBlock,
+  isResultMessage,
+  validateSDKMessage,
+  extractToolUseInfo,
+  extractTextContent,
+  extractResultDuration,
+} from '../types/claude-sdk.js';
 import { simpleGit } from 'simple-git';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -637,15 +649,31 @@ export class Worker {
 
       for await (const message of stream) {
         lastMessage = message;
-        if (message.type === 'assistant') {
+
+        // Cast SDK message to our typed interface for type-safe access
+        const typedMessage = message as unknown as ClaudeSDKMessage;
+
+        // Validate message structure at runtime for external API safety
+        if (!validateSDKMessage(typedMessage)) {
+          this.log.warn('Received invalid SDK message structure', {
+            messageType: typeof message === 'object' && message !== null
+              ? (message as Record<string, unknown>).type
+              : 'unknown',
+          });
+          continue;
+        }
+
+        if (typedMessage.type === 'assistant') {
           turnCount++;
           // Log tool uses and collect assistant text
-          if (message.message?.content) {
-            for (const block of message.message.content) {
-              if (block.type === 'tool_use') {
+          if (typedMessage.message?.content) {
+            for (const block of typedMessage.message.content) {
+              // Cast to our ContentBlock type for type-safe access
+              const typedBlock = block as ContentBlock;
+
+              if (isToolUseBlock(typedBlock)) {
                 toolUseCount++;
-                const toolName = (block as any).name;
-                const toolInput = (block as any).input;
+                const { name: toolName, input: toolInput } = extractToolUseInfo(typedBlock);
                 this.log.debug(`Tool: ${toolName}`, {
                   toolCount: toolUseCount,
                   turnCount,
@@ -663,12 +691,12 @@ export class Worker {
                     type: 'tool_use',
                     tool: toolName,
                     input: this.sanitizeToolInput(toolName, toolInput),
-                    toolCount,
+                    toolCount: toolUseCount,
                     turnCount,
                   });
                 }
-              } else if (block.type === 'text') {
-                assistantTextBuffer += (block as any).text + '\n';
+              } else if (isTextBlock(typedBlock)) {
+                assistantTextBuffer += extractTextContent(typedBlock) + '\n';
               }
             }
           }
@@ -678,8 +706,8 @@ export class Worker {
             await addMessage(chatSessionId, 'assistant', assistantTextBuffer.trim());
             assistantTextBuffer = '';
           }
-        } else if (message.type === 'result') {
-          const duration = (message as any).duration_ms || (Date.now() - claudeStartTime);
+        } else if (isResultMessage(typedMessage)) {
+          const duration = extractResultDuration(typedMessage, Date.now() - claudeStartTime);
           const endMemory = getMemoryUsageMB();
 
           this.log.info(`Claude execution completed`, {
@@ -742,23 +770,26 @@ export class Worker {
     }
   }
 
-  private sanitizeToolInput(toolName: string, input: any): any {
+  private sanitizeToolInput(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
     // Truncate large inputs for logging
     if (!input) return input;
 
-    const sanitized = { ...input };
+    const sanitized: Record<string, unknown> = { ...input };
 
     // Truncate file contents
-    if (sanitized.content && typeof sanitized.content === 'string' && sanitized.content.length > 500) {
-      sanitized.content = sanitized.content.slice(0, 500) + `... (${sanitized.content.length} chars total)`;
+    const content = sanitized.content;
+    if (typeof content === 'string' && content.length > 500) {
+      sanitized.content = content.slice(0, 500) + `... (${content.length} chars total)`;
     }
 
     // Truncate new_string/old_string for Edit tools
-    if (sanitized.new_string && sanitized.new_string.length > 200) {
-      sanitized.new_string = sanitized.new_string.slice(0, 200) + '...';
+    const newString = sanitized.new_string;
+    if (typeof newString === 'string' && newString.length > 200) {
+      sanitized.new_string = newString.slice(0, 200) + '...';
     }
-    if (sanitized.old_string && sanitized.old_string.length > 200) {
-      sanitized.old_string = sanitized.old_string.slice(0, 200) + '...';
+    const oldString = sanitized.old_string;
+    if (typeof oldString === 'string' && oldString.length > 200) {
+      sanitized.old_string = oldString.slice(0, 200) + '...';
     }
 
     return sanitized;

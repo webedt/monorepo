@@ -40,6 +40,23 @@ export interface HistogramMetric {
 
 export type Metric = CounterMetric | GaugeMetric | HistogramMetric;
 
+/**
+ * Summary returned when ending correlation tracking
+ */
+export interface CorrelationSummary {
+  duration: number;
+  operationCount: number;
+  errorCount: number;
+}
+
+/**
+ * Detailed correlation summary with additional context (for debugging)
+ */
+export interface DetailedCorrelationSummary extends CorrelationSummary {
+  correlationId: string;
+  operations: string[];
+}
+
 // Default histogram buckets for duration metrics (in milliseconds)
 const DEFAULT_DURATION_BUCKETS = [100, 500, 1000, 5000, 10000, 30000, 60000, 120000, 300000, 600000];
 
@@ -793,11 +810,7 @@ class MetricsRegistry {
   /**
    * End tracking a correlation ID and return summary
    */
-  endCorrelation(correlationId: string): {
-    duration: number;
-    operationCount: number;
-    errorCount: number;
-  } | null {
+  endCorrelation(correlationId: string): CorrelationSummary | null {
     const metrics = this.correlationMetrics.get(correlationId);
     if (!metrics) {
       return null;
@@ -814,12 +827,7 @@ class MetricsRegistry {
   /**
    * Get correlation metrics summary (for debugging)
    */
-  getCorrelationSummary(correlationId: string): {
-    correlationId: string;
-    duration: number;
-    operations: string[];
-    errors: number;
-  } | null {
+  getCorrelationSummary(correlationId: string): DetailedCorrelationSummary | null {
     const metrics = this.correlationMetrics.get(correlationId);
     if (!metrics) {
       return null;
@@ -829,7 +837,8 @@ class MetricsRegistry {
       correlationId,
       duration: Date.now() - metrics.startTime,
       operations: [...metrics.operations],
-      errors: metrics.errors,
+      operationCount: metrics.operations.length,
+      errorCount: metrics.errors,
     };
   }
 

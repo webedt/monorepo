@@ -33,6 +33,21 @@ export interface HistogramMetric {
     labels: MetricLabels;
 }
 export type Metric = CounterMetric | GaugeMetric | HistogramMetric;
+/**
+ * Summary returned when ending correlation tracking
+ */
+export interface CorrelationSummary {
+    duration: number;
+    operationCount: number;
+    errorCount: number;
+}
+/**
+ * Detailed correlation summary with additional context (for debugging)
+ */
+export interface DetailedCorrelationSummary extends CorrelationSummary {
+    correlationId: string;
+    operations: string[];
+}
 declare class Counter {
     private name;
     private help;
@@ -243,20 +258,11 @@ declare class MetricsRegistry {
     /**
      * End tracking a correlation ID and return summary
      */
-    endCorrelation(correlationId: string): {
-        duration: number;
-        operationCount: number;
-        errorCount: number;
-    } | null;
+    endCorrelation(correlationId: string): CorrelationSummary | null;
     /**
      * Get correlation metrics summary (for debugging)
      */
-    getCorrelationSummary(correlationId: string): {
-        correlationId: string;
-        duration: number;
-        operations: string[];
-        errors: number;
-    } | null;
+    getCorrelationSummary(correlationId: string): DetailedCorrelationSummary | null;
     /**
      * Get all metrics in Prometheus format
      */

@@ -541,6 +541,7 @@ describe('Credential Validation', () => {
                 repo: {
                     owner: 'myuser',
                     name: 'myrepo',
+                    baseBranch: 'main',
                 },
             };
             const warnings = validateNoCredentialsInConfig(config);
@@ -555,9 +556,16 @@ describe('Credential Validation', () => {
                 },
                 execution: {
                     workDir: '/tmp/autonomous-dev',
+                    parallelWorkers: 4,
+                    timeoutMinutes: 30,
                 },
                 discovery: {
                     issueLabel: 'autonomous-dev',
+                    tasksPerCycle: 5,
+                    maxOpenIssues: 10,
+                    excludePaths: ['node_modules'],
+                    maxDepth: 10,
+                    maxFiles: 10000,
                 },
             };
             const warnings = validateNoCredentialsInConfig(config);
