@@ -196,29 +196,45 @@ Return ONLY the JSON array, no other text.`;
         messageCount++;
         const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-        // Log all messages for debugging with elapsed time
-        logger.info(`[${elapsed}s] Claude SDK message #${messageCount}`, {
-          type: message.type,
-          subtype: (message as any).subtype
-        });
-
         // Capture the final result
         if (message.type === 'result' && message.subtype === 'success') {
           content = message.result;
-          logger.info(`[${elapsed}s] Got result from Claude SDK`, { resultLength: content.length });
+          logger.info(`[${elapsed}s] ✅ Got final result`, { resultLength: content.length });
         }
-        // Also capture assistant text messages
+        // Log assistant text messages with actual content
         else if (message.type === 'assistant' && message.message?.content) {
           const msgContent = message.message.content;
           if (Array.isArray(msgContent)) {
             for (const item of msgContent) {
               if (item.type === 'text' && item.text) {
                 content = item.text;
-                // Log partial content for progress visibility
-                logger.info(`[${elapsed}s] Claude responding...`, { chars: item.text.length });
+                // Show first 200 chars of response
+                const preview = item.text.slice(0, 200).replace(/\n/g, ' ');
+                logger.info(`[${elapsed}s] 🤖 Claude: ${preview}${item.text.length > 200 ? '...' : ''}`);
+              } else if (item.type === 'tool_use') {
+                logger.info(`[${elapsed}s] 🔧 Tool: ${(item as any).name || 'unknown'}`);
               }
             }
           }
+        }
+        // Log tool results
+        else if (message.type === 'user' && message.message?.content) {
+          const msgContent = message.message.content;
+          if (Array.isArray(msgContent)) {
+            for (const item of msgContent) {
+              if ((item as any).type === 'tool_result') {
+                const result = (item as any).content;
+                if (typeof result === 'string') {
+                  const preview = result.slice(0, 100).replace(/\n/g, ' ');
+                  logger.info(`[${elapsed}s] 📄 Result: ${preview}${result.length > 100 ? '...' : ''}`);
+                }
+              }
+            }
+          }
+        }
+        // Log system messages
+        else if (message.type === 'system') {
+          logger.info(`[${elapsed}s] ⚙️ System: ${(message as any).subtype || 'init'}`);
         }
       }
 
