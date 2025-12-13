@@ -32,7 +32,12 @@ export declare class Worker {
     private options;
     private workerId;
     private log;
+    private repository;
     constructor(options: WorkerOptions, workerId: string);
+    /**
+     * Extract repository name from URL for metrics labeling
+     */
+    private extractRepoName;
     /**
      * Get error context for debugging
      */

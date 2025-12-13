@@ -44,16 +44,57 @@ export declare const ConfigSchema: z.ZodObject<{
         excludePaths: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         /** Label applied to auto-created GitHub issues */
         issueLabel: z.ZodDefault<z.ZodString>;
+        /** Maximum directory depth for codebase scanning (1-20, default: 10) */
+        maxDepth: z.ZodDefault<z.ZodNumber>;
+        /** Maximum number of files to scan (100-50000, default: 10000) */
+        maxFiles: z.ZodDefault<z.ZodNumber>;
+        /** Analysis cache settings for incremental updates */
+        cache: z.ZodDefault<z.ZodObject<{
+            /** Whether caching is enabled (default: true) */
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            /** Directory to store cache files relative to repo (default: .autonomous-dev-cache) */
+            cacheDir: z.ZodOptional<z.ZodString>;
+            /** Maximum age of cache in milliseconds before forced refresh (default: 3600000 = 1 hour) */
+            maxAgeMs: z.ZodDefault<z.ZodNumber>;
+            /** Whether to use git-based cache invalidation (default: true) */
+            useGitInvalidation: z.ZodDefault<z.ZodBoolean>;
+        }, "strip", z.ZodTypeAny, {
+            enabled: boolean;
+            maxAgeMs: number;
+            useGitInvalidation: boolean;
+            cacheDir?: string | undefined;
+        }, {
+            enabled?: boolean | undefined;
+            cacheDir?: string | undefined;
+            maxAgeMs?: number | undefined;
+            useGitInvalidation?: boolean | undefined;
+        }>>;
     }, "strip", z.ZodTypeAny, {
         tasksPerCycle: number;
         maxOpenIssues: number;
         excludePaths: string[];
         issueLabel: string;
+        maxDepth: number;
+        maxFiles: number;
+        cache: {
+            enabled: boolean;
+            maxAgeMs: number;
+            useGitInvalidation: boolean;
+            cacheDir?: string | undefined;
+        };
     }, {
         tasksPerCycle?: number | undefined;
         maxOpenIssues?: number | undefined;
         excludePaths?: string[] | undefined;
         issueLabel?: string | undefined;
+        maxDepth?: number | undefined;
+        maxFiles?: number | undefined;
+        cache?: {
+            enabled?: boolean | undefined;
+            cacheDir?: string | undefined;
+            maxAgeMs?: number | undefined;
+            useGitInvalidation?: boolean | undefined;
+        } | undefined;
     }>;
     /**
      * Execution Settings
@@ -213,6 +254,14 @@ export declare const ConfigSchema: z.ZodObject<{
         maxOpenIssues: number;
         excludePaths: string[];
         issueLabel: string;
+        maxDepth: number;
+        maxFiles: number;
+        cache: {
+            enabled: boolean;
+            maxAgeMs: number;
+            useGitInvalidation: boolean;
+            cacheDir?: string | undefined;
+        };
     };
     execution: {
         parallelWorkers: number;
@@ -260,6 +309,14 @@ export declare const ConfigSchema: z.ZodObject<{
         maxOpenIssues?: number | undefined;
         excludePaths?: string[] | undefined;
         issueLabel?: string | undefined;
+        maxDepth?: number | undefined;
+        maxFiles?: number | undefined;
+        cache?: {
+            enabled?: boolean | undefined;
+            cacheDir?: string | undefined;
+            maxAgeMs?: number | undefined;
+            useGitInvalidation?: boolean | undefined;
+        } | undefined;
     };
     execution: {
         parallelWorkers?: number | undefined;

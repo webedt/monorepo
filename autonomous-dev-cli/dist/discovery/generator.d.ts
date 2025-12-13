@@ -1,3 +1,5 @@
+import { type AnalyzerConfig } from './analyzer.js';
+import { type CacheConfig } from './cache.js';
 import { type Issue } from '../github/issues.js';
 export interface DiscoveredTask {
     title: string;
@@ -17,6 +19,8 @@ export interface TaskGeneratorOptions {
     tasksPerCycle: number;
     existingIssues: Issue[];
     repoContext?: string;
+    analyzerConfig?: AnalyzerConfig;
+    cacheConfig?: CacheConfig;
 }
 export declare class TaskGenerator {
     private claudeAuth;
@@ -25,6 +29,7 @@ export declare class TaskGenerator {
     private tasksPerCycle;
     private existingIssues;
     private repoContext;
+    private analyzerConfig;
     constructor(options: TaskGeneratorOptions);
     generateTasks(): Promise<DiscoveredTask[]>;
     private buildPrompt;

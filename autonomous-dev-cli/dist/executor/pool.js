@@ -1,5 +1,6 @@
 import { Worker } from './worker.js';
 import { logger } from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
 export class WorkerPool {
     options;
     activeWorkers = new Map();
@@ -7,9 +8,29 @@ export class WorkerPool {
     results = [];
     isRunning = false;
     workerIdCounter = 0;
+    repository;
     constructor(options) {
         this.options = options;
-        logger.info(`Worker pool initialized with ${options.maxWorkers} max workers`);
+        this.repository = this.extractRepoName(options.repoUrl);
+        logger.info(`Worker pool initialized with ${options.maxWorkers} max workers`, {
+            maxWorkers: options.maxWorkers,
+            repository: this.repository,
+        });
+        // Initialize worker pool metrics
+        metrics.updateWorkerPoolStatus(0, 0);
+    }
+    /**
+     * Extract repository name from URL for metrics labeling
+     */
+    extractRepoName(repoUrl) {
+        const match = repoUrl.match(/github\.com[\/:]([^\/]+\/[^\/]+?)(?:\.git)?$/);
+        return match ? match[1] : repoUrl;
+    }
+    /**
+     * Update worker pool metrics
+     */
+    updateMetrics() {
+        metrics.updateWorkerPoolStatus(this.activeWorkers.size, this.taskQueue.length);
     }
     async executeTasks(tasks) {
         this.isRunning = true;
@@ -18,7 +39,12 @@ export class WorkerPool {
             ...task,
             id: `task-${index + 1}`,
         }));
-        logger.info(`Executing ${tasks.length} tasks with up to ${this.options.maxWorkers} workers`);
+        logger.info(`Executing ${tasks.length} tasks with up to ${this.options.maxWorkers} workers`, {
+            taskCount: tasks.length,
+            maxWorkers: this.options.maxWorkers,
+        });
+        // Update initial metrics
+        this.updateMetrics();
         // Start initial workers
         while (this.activeWorkers.size < this.options.maxWorkers && this.taskQueue.length > 0) {
             this.startNextTask();
@@ -34,13 +60,23 @@ export class WorkerPool {
                 }));
                 // Remove completed worker
                 this.activeWorkers.delete(completedId);
+                // Update metrics after worker completion
+                this.updateMetrics();
                 // Start next task if available
                 if (this.taskQueue.length > 0 && this.isRunning) {
                     this.startNextTask();
                 }
             }
         }
-        logger.info(`All tasks completed: ${this.results.filter(r => r.success).length}/${this.results.length} succeeded`);
+        const succeeded = this.results.filter(r => r.success).length;
+        const failed = this.results.filter(r => !r.success).length;
+        logger.info(`All tasks completed: ${succeeded}/${this.results.length} succeeded`, {
+            succeeded,
+            failed,
+            total: this.results.length,
+        });
+        // Reset pool metrics
+        metrics.updateWorkerPoolStatus(0, 0);
         return this.results;
     }
     startNextTask() {
@@ -48,7 +84,13 @@ export class WorkerPool {
         if (!task)
             return;
         const workerId = `worker-${++this.workerIdCounter}`;
-        logger.info(`Starting ${task.id} with ${workerId}: ${task.issue.title}`);
+        logger.info(`Starting ${task.id} with ${workerId}: ${task.issue.title}`, {
+            taskId: task.id,
+            workerId,
+            issueNumber: task.issue.number,
+        });
+        // Update metrics after task is dequeued
+        this.updateMetrics();
         const worker = new Worker({
             workDir: this.options.workDir,
             repoUrl: this.options.repoUrl,

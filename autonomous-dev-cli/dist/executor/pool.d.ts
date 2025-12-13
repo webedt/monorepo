@@ -16,7 +16,16 @@ export declare class WorkerPool {
     private results;
     private isRunning;
     private workerIdCounter;
+    private repository;
     constructor(options: WorkerPoolOptions);
+    /**
+     * Extract repository name from URL for metrics labeling
+     */
+    private extractRepoName;
+    /**
+     * Update worker pool metrics
+     */
+    private updateMetrics;
     executeTasks(tasks: WorkerTask[]): Promise<PoolResult[]>;
     private startNextTask;
     stop(): void;

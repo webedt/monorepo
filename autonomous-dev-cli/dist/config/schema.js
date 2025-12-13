@@ -42,6 +42,34 @@ export const ConfigSchema = z.object({
         ]),
         /** Label applied to auto-created GitHub issues */
         issueLabel: z.string().default('autonomous-dev'),
+        /** Maximum directory depth for codebase scanning (1-20, default: 10) */
+        maxDepth: z.number()
+            .min(1, 'maxDepth must be at least 1')
+            .max(20, 'maxDepth cannot exceed 20 to prevent excessive recursion')
+            .default(10),
+        /** Maximum number of files to scan (100-50000, default: 10000) */
+        maxFiles: z.number()
+            .min(100, 'maxFiles must be at least 100')
+            .max(50000, 'maxFiles cannot exceed 50000 to prevent memory issues')
+            .default(10000),
+        /** Analysis cache settings for incremental updates */
+        cache: z.object({
+            /** Whether caching is enabled (default: true) */
+            enabled: z.boolean().default(true),
+            /** Directory to store cache files relative to repo (default: .autonomous-dev-cache) */
+            cacheDir: z.string().optional(),
+            /** Maximum age of cache in milliseconds before forced refresh (default: 3600000 = 1 hour) */
+            maxAgeMs: z.number()
+                .min(0, 'maxAgeMs cannot be negative')
+                .max(86400000, 'maxAgeMs cannot exceed 24 hours')
+                .default(3600000),
+            /** Whether to use git-based cache invalidation (default: true) */
+            useGitInvalidation: z.boolean().default(true),
+        }).default({
+            enabled: true,
+            maxAgeMs: 3600000,
+            useGitInvalidation: true,
+        }),
     }).describe('Task discovery configuration'),
     /**
      * Execution Settings
@@ -129,6 +157,13 @@ export const defaultConfig = {
         maxOpenIssues: 10,
         excludePaths: ['node_modules', 'dist', '.git', 'coverage', '*.lock'],
         issueLabel: 'autonomous-dev',
+        maxDepth: 10,
+        maxFiles: 10000,
+        cache: {
+            enabled: true,
+            maxAgeMs: 3600000,
+            useGitInvalidation: true,
+        },
     },
     execution: {
         parallelWorkers: 4,

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync, existsSync, accessSync, constants 
 import { join, relative, extname, isAbsolute, resolve } from 'path';
 import { logger } from '../utils/logger.js';
 import { AnalyzerError, ErrorCode } from '../utils/errors.js';
+import { AnalysisCache, type CacheConfig, type CacheValidationResult } from './cache.js';
 
 export interface CodebaseAnalysis {
   structure: DirectoryEntry[];
@@ -39,6 +40,8 @@ export interface PackageInfo {
 export interface AnalyzerConfig {
   maxDepth?: number;
   maxFiles?: number;
+  /** Cache configuration options */
+  cache?: CacheConfig;
 }
 
 /**
@@ -130,6 +133,8 @@ export class CodebaseAnalyzer {
   private maxFiles: number;
   private fileCount: number = 0;
   private validationErrors: AnalyzerError[] = [];
+  private cache: AnalysisCache;
+  private cacheEnabled: boolean;
 
   constructor(repoPath: string, excludePaths: string[] = [], config: AnalyzerConfig = {}) {
     // Normalize and resolve the path
@@ -147,6 +152,10 @@ export class CodebaseAnalyzer {
       MIN_MAX_FILES,
       MAX_MAX_FILES
     );
+
+    // Initialize cache
+    this.cacheEnabled = config.cache?.enabled ?? true;
+    this.cache = new AnalysisCache(this.repoPath, config.cache);
   }
 
   /**
@@ -362,13 +371,39 @@ export class CodebaseAnalyzer {
   }
 
   async analyze(): Promise<CodebaseAnalysis> {
-    logger.info('Analyzing codebase...', { path: this.repoPath });
+    const startTime = Date.now();
+    logger.info('Analyzing codebase...', { path: this.repoPath, cacheEnabled: this.cacheEnabled });
 
     // Validate inputs before processing
     const validationResult = this.validateBeforeAnalysis();
     if (!validationResult.valid && validationResult.error) {
       logger.structuredError(validationResult.error);
       throw validationResult.error;
+    }
+
+    const analyzerConfig = { maxDepth: this.maxDepth, maxFiles: this.maxFiles };
+
+    // Try to get cached analysis
+    if (this.cacheEnabled) {
+      const cachedAnalysis = this.cache.getCachedAnalysis(this.excludePaths, analyzerConfig);
+      if (cachedAnalysis) {
+        const elapsed = Date.now() - startTime;
+        logger.info('Using cached analysis', {
+          elapsed: `${elapsed}ms`,
+          fileCount: cachedAnalysis.fileCount,
+          todoCount: cachedAnalysis.todoComments.length,
+        });
+        return cachedAnalysis;
+      }
+
+      // Log why cache was invalid
+      const cacheValidation = this.cache.validateCache(this.excludePaths, analyzerConfig);
+      if (!cacheValidation.valid) {
+        logger.debug('Cache invalid, performing full analysis', {
+          reason: cacheValidation.reason,
+          changedFiles: cacheValidation.changedFiles?.slice(0, 5),
+        });
+      }
     }
 
     // Reset file count for this analysis
@@ -388,14 +423,20 @@ export class CodebaseAnalyzer {
 
     const fileCount = this.countFiles(structure);
 
-    logger.info(`Found ${fileCount} files, ${todoComments.length} TODOs, ${packages.length} packages`);
+    const elapsed = Date.now() - startTime;
+    logger.info(`Analysis complete`, {
+      elapsed: `${elapsed}ms`,
+      fileCount,
+      todoCount: todoComments.length,
+      packageCount: packages.length,
+    });
 
     // Log any validation warnings collected during analysis
     if (this.validationErrors.length > 0) {
       logger.warn(`Encountered ${this.validationErrors.length} validation issues during analysis`);
     }
 
-    return {
+    const analysis: CodebaseAnalysis = {
       structure,
       fileCount,
       todoComments,
@@ -403,6 +444,35 @@ export class CodebaseAnalyzer {
       packages,
       configFiles,
     };
+
+    // Save to cache for next time
+    if (this.cacheEnabled) {
+      this.cache.saveCache(analysis, this.excludePaths, analyzerConfig);
+    }
+
+    return analysis;
+  }
+
+  /**
+   * Invalidate the analysis cache, forcing a full re-analysis on next call
+   */
+  invalidateCache(): void {
+    this.cache.invalidate();
+  }
+
+  /**
+   * Get cache statistics for monitoring and debugging
+   */
+  getCacheStats(): { exists: boolean; age: number | null; fileCount: number | null; gitSha: string | null } {
+    return this.cache.getStats();
+  }
+
+  /**
+   * Check if the cache is valid without loading the full analysis
+   */
+  isCacheValid(): CacheValidationResult {
+    const analyzerConfig = { maxDepth: this.maxDepth, maxFiles: this.maxFiles };
+    return this.cache.validateCache(this.excludePaths, analyzerConfig);
   }
 
   /**

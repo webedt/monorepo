@@ -428,6 +428,14 @@ export function loadConfig(configPath) {
         maxOpenIssues: parseInt(process.env.MAX_OPEN_ISSUES || '10', 10),
         excludePaths: process.env.EXCLUDE_PATHS?.split(',') || defaultConfig.discovery?.excludePaths || [],
         issueLabel: process.env.ISSUE_LABEL || 'autonomous-dev',
+        maxDepth: parseInt(process.env.MAX_DEPTH || '10', 10),
+        maxFiles: parseInt(process.env.MAX_FILES || '10000', 10),
+        cache: {
+            enabled: process.env.CACHE_ENABLED !== 'false',
+            cacheDir: process.env.CACHE_DIR,
+            maxAgeMs: parseInt(process.env.CACHE_MAX_AGE_MS || '3600000', 10),
+            useGitInvalidation: process.env.CACHE_USE_GIT !== 'false',
+        },
     };
     envConfig.execution = {
         parallelWorkers: parseInt(process.env.PARALLEL_WORKERS || '4', 10),

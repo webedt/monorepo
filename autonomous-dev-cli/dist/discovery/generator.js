@@ -7,6 +7,7 @@ export class TaskGenerator {
     tasksPerCycle;
     existingIssues;
     repoContext;
+    analyzerConfig;
     constructor(options) {
         this.claudeAuth = options.claudeAuth;
         this.repoPath = options.repoPath;
@@ -14,11 +15,16 @@ export class TaskGenerator {
         this.tasksPerCycle = options.tasksPerCycle;
         this.existingIssues = options.existingIssues;
         this.repoContext = options.repoContext || '';
+        // Merge cache config into analyzer config
+        this.analyzerConfig = {
+            ...options.analyzerConfig,
+            cache: options.cacheConfig ?? options.analyzerConfig?.cache,
+        };
     }
     async generateTasks() {
         logger.info('Generating tasks with Claude...');
         // First, analyze the codebase
-        const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths);
+        const analyzer = new CodebaseAnalyzer(this.repoPath, this.excludePaths, this.analyzerConfig);
         const analysis = await analyzer.analyze();
         const summary = analyzer.generateSummary(analysis);
         // Format existing issues to avoid duplicates

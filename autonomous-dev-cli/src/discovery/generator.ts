@@ -1,4 +1,5 @@
 import { CodebaseAnalyzer, type CodebaseAnalysis, type AnalyzerConfig } from './analyzer.js';
+import { type CacheConfig } from './cache.js';
 import { type Issue } from '../github/issues.js';
 import { logger } from '../utils/logger.js';
 
@@ -21,7 +22,8 @@ export interface TaskGeneratorOptions {
   tasksPerCycle: number;
   existingIssues: Issue[];
   repoContext?: string; // Optional context about what the repo does
-  analyzerConfig?: AnalyzerConfig; // Optional analyzer configuration (maxDepth, maxFiles)
+  analyzerConfig?: AnalyzerConfig; // Optional analyzer configuration (maxDepth, maxFiles, cache)
+  cacheConfig?: CacheConfig; // Optional cache configuration for analysis caching
 }
 
 export class TaskGenerator {
@@ -40,7 +42,11 @@ export class TaskGenerator {
     this.tasksPerCycle = options.tasksPerCycle;
     this.existingIssues = options.existingIssues;
     this.repoContext = options.repoContext || '';
-    this.analyzerConfig = options.analyzerConfig || {};
+    // Merge cache config into analyzer config
+    this.analyzerConfig = {
+      ...options.analyzerConfig,
+      cache: options.cacheConfig ?? options.analyzerConfig?.cache,
+    };
   }
 
   async generateTasks(): Promise<DiscoveredTask[]> {

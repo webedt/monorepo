@@ -38,6 +38,14 @@ export declare enum ErrorCode {
     EXEC_COMMIT_FAILED = "EXEC_COMMIT_FAILED",
     EXEC_PUSH_FAILED = "EXEC_PUSH_FAILED",
     EXEC_TIMEOUT = "EXEC_TIMEOUT",
+    ANALYZER_PATH_NOT_FOUND = "ANALYZER_PATH_NOT_FOUND",
+    ANALYZER_PATH_NOT_READABLE = "ANALYZER_PATH_NOT_READABLE",
+    ANALYZER_PATH_NOT_DIRECTORY = "ANALYZER_PATH_NOT_DIRECTORY",
+    ANALYZER_INVALID_GLOB_PATTERN = "ANALYZER_INVALID_GLOB_PATTERN",
+    ANALYZER_INVALID_REGEX_PATTERN = "ANALYZER_INVALID_REGEX_PATTERN",
+    ANALYZER_MAX_DEPTH_EXCEEDED = "ANALYZER_MAX_DEPTH_EXCEEDED",
+    ANALYZER_MAX_FILES_EXCEEDED = "ANALYZER_MAX_FILES_EXCEEDED",
+    ANALYZER_INVALID_CONFIG = "ANALYZER_INVALID_CONFIG",
     INTERNAL_ERROR = "INTERNAL_ERROR",
     NETWORK_ERROR = "NETWORK_ERROR",
     NOT_INITIALIZED = "NOT_INITIALIZED",
@@ -128,6 +136,19 @@ export declare class ExecutionError extends StructuredError {
     constructor(code: ErrorCode, message: string, options?: {
         issueNumber?: number;
         branchName?: string;
+        recoveryActions?: RecoveryAction[];
+        context?: ErrorContext;
+        cause?: Error;
+    });
+}
+/**
+ * Analyzer-specific error
+ */
+export declare class AnalyzerError extends StructuredError {
+    constructor(code: ErrorCode, message: string, options?: {
+        path?: string;
+        pattern?: string;
+        limit?: number;
         recoveryActions?: RecoveryAction[];
         context?: ErrorContext;
         cause?: Error;
