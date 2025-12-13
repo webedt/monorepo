@@ -117,6 +117,15 @@ export declare class Daemon implements DaemonStateProvider {
      */
     getHealthServerPort(): number | null;
     private initialize;
+    /**
+     * Initialize the persistent analysis cache with configuration from config file
+     * and optionally warm the cache on startup
+     */
+    private initializeAnalysisCache;
+    /**
+     * Warm the analysis cache by pre-validating cached entries
+     */
+    private warmAnalysisCache;
     private shutdown;
     private runCycle;
     private createIssueForTask;

@@ -1,4 +1,5 @@
 export { CodebaseAnalyzer, AnalysisCache, getAnalysisCache, initAnalysisCache, type CodebaseAnalysis, type DirectoryEntry, type TodoComment, type PackageInfo, type AnalyzerConfig, type ValidationResult, type ProgressCallback, type AnalysisProgress, type GitCommitInfo, type FileChangeStats, type FileDependency, type DependencyGraph, type GitAnalysis, } from './analyzer.js';
 export { TaskGenerator, discoverTasks, type DiscoveredTask, type DiscoveredTaskPriority, type DiscoveredTaskCategory, type DiscoveredTaskComplexity, type TaskGeneratorOptions, } from './generator.js';
 export { TaskDeduplicator, createDeduplicator, hasConflictingTasks, getParallelSafeTasks, groupTasksByConflict, type SimilarityResult, type ConflictPrediction, type DeduplicatedTask, type DeduplicatorOptions, } from './deduplicator.js';
+export { PersistentAnalysisCache, getPersistentCache, initPersistentCache, resetPersistentCache, DEFAULT_CACHE_CONFIG, type CacheConfig, type CacheStats, type CacheLookupResult, type CachedFileInfo, type FileCacheEntry, type RepoCacheEntry, } from './cache.js';
 //# sourceMappingURL=index.d.ts.map

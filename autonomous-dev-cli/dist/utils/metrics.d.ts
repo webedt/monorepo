@@ -98,6 +98,7 @@ export interface ErrorContext {
     isRetryable?: boolean;
     component?: string;
     operation?: string;
+    recoveryStrategy?: string;
 }
 /**
  * MetricsRegistry collects and exports all metrics

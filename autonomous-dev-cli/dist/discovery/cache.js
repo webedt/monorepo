@@ -1,0 +1,689 @@
+/**
+ * Persistent Caching Layer for Codebase Analysis
+ *
+ * Provides intelligent caching with:
+ * - Git commit hash invalidation for repository-level changes
+ * - File modification time (mtime) tracking for file-level invalidation
+ * - LRU eviction policy with configurable size limits
+ * - File-based persistence for cache survival across daemon restarts
+ * - Cache hit/miss metrics and logging
+ * - Incremental analysis support for changed files only
+ */
+import { readFile, writeFile, stat, mkdir, readdir, unlink } from 'fs/promises';
+import { existsSync } from 'fs';
+import { join } from 'path';
+import { createHash } from 'crypto';
+import { simpleGit } from 'simple-git';
+import { logger, } from '../utils/logger.js';
+/**
+ * Default cache configuration
+ */
+export const DEFAULT_CACHE_CONFIG = {
+    enabled: true,
+    maxEntries: 100,
+    ttlMs: 30 * 60 * 1000, // 30 minutes
+    maxSizeBytes: 100 * 1024 * 1024, // 100MB
+    cacheDir: '.autonomous-dev-cache',
+    persistToDisk: true,
+    useGitInvalidation: true,
+    enableIncrementalAnalysis: true,
+};
+// ============================================================================
+// Persistent Analysis Cache
+// ============================================================================
+/**
+ * Advanced caching layer with persistence, git-based invalidation,
+ * and incremental analysis support.
+ */
+export class PersistentAnalysisCache {
+    cache = new Map();
+    config;
+    stats;
+    accessTimeHistory = [];
+    initialized = false;
+    constructor(config = {}) {
+        this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
+        this.stats = {
+            hits: 0,
+            misses: 0,
+            invalidations: 0,
+            evictions: 0,
+            persistWrites: 0,
+            persistReads: 0,
+            incrementalUpdates: 0,
+            totalEntries: 0,
+            totalSizeBytes: 0,
+            hitRate: 0,
+            averageAccessTime: 0,
+        };
+    }
+    /**
+     * Initialize the cache, loading persisted entries from disk
+     */
+    async initialize() {
+        if (this.initialized)
+            return;
+        if (this.config.persistToDisk) {
+            await this.loadFromDisk();
+        }
+        this.initialized = true;
+        logger.debug('Persistent analysis cache initialized', {
+            entriesLoaded: this.cache.size,
+            config: {
+                maxEntries: this.config.maxEntries,
+                maxSizeBytes: this.config.maxSizeBytes,
+                ttlMs: this.config.ttlMs,
+            },
+        });
+    }
+    /**
+     * Generate a unique cache key for a repository + configuration combination
+     */
+    generateKey(repoPath, excludePaths, configHash) {
+        const keyData = JSON.stringify({
+            repoPath,
+            excludePaths: excludePaths.sort(),
+            configHash,
+        });
+        return createHash('sha256').update(keyData).digest('hex').substring(0, 16);
+    }
+    /**
+     * Get the current git commit hash for a repository
+     */
+    async getGitCommitHash(repoPath) {
+        try {
+            const gitDir = join(repoPath, '.git');
+            if (!existsSync(gitDir)) {
+                return null;
+            }
+            const git = simpleGit(repoPath);
+            const log = await git.log({ maxCount: 1 });
+            return log.latest?.hash || null;
+        }
+        catch (error) {
+            logger.debug('Failed to get git commit hash', { error, repoPath });
+            return null;
+        }
+    }
+    /**
+     * Get the current git branch name
+     */
+    async getGitBranch(repoPath) {
+        try {
+            const git = simpleGit(repoPath);
+            const branchResult = await git.branch();
+            return branchResult.current || 'unknown';
+        }
+        catch {
+            return 'unknown';
+        }
+    }
+    /**
+     * Generate a content hash based on file modification times
+     */
+    async generateContentHash(repoPath, maxSamples = 100) {
+        const hashData = [];
+        let sampleCount = 0;
+        const ignoredDirs = new Set([
+            'node_modules', '.git', 'dist', 'build', 'coverage',
+            '.next', '.cache', '.turbo', '__pycache__',
+        ]);
+        const collectSamples = async (dirPath, depth = 0) => {
+            if (depth > 4 || sampleCount >= maxSamples)
+                return;
+            try {
+                const items = await readdir(dirPath);
+                for (const item of items) {
+                    if (sampleCount >= maxSamples)
+                        break;
+                    if (ignoredDirs.has(item))
+                        continue;
+                    const fullPath = join(dirPath, item);
+                    try {
+                        const fileStat = await stat(fullPath);
+                        if (fileStat.isFile()) {
+                            hashData.push(`${fullPath}:${fileStat.mtimeMs}:${fileStat.size}`);
+                            sampleCount++;
+                        }
+                        else if (fileStat.isDirectory()) {
+                            await collectSamples(fullPath, depth + 1);
+                        }
+                    }
+                    catch {
+                        // Skip inaccessible files
+                    }
+                }
+            }
+            catch {
+                // Skip inaccessible directories
+            }
+        };
+        await collectSamples(repoPath);
+        hashData.sort(); // Ensure consistent ordering
+        return createHash('sha256').update(hashData.join('|')).digest('hex').substring(0, 32);
+    }
+    /**
+     * Get cached analysis if valid, with support for incremental updates
+     */
+    async get(key, repoPath, currentCommitHash) {
+        const startTime = Date.now();
+        if (!this.config.enabled) {
+            return { hit: false, requiresFullAnalysis: true, reason: 'Cache disabled' };
+        }
+        const entry = this.cache.get(key);
+        if (!entry) {
+            this.stats.misses++;
+            this.recordAccessTime(Date.now() - startTime);
+            return { hit: false, requiresFullAnalysis: true, reason: 'No cache entry found' };
+        }
+        // Check TTL expiration
+        if (Date.now() - entry.timestamp > this.config.ttlMs) {
+            this.cache.delete(key);
+            this.stats.invalidations++;
+            this.stats.misses++;
+            this.recordAccessTime(Date.now() - startTime);
+            logger.debug('Cache entry expired', { key, age: Date.now() - entry.timestamp });
+            return { hit: false, requiresFullAnalysis: true, reason: 'Cache entry expired' };
+        }
+        // Git-based invalidation if enabled
+        if (this.config.useGitInvalidation && currentCommitHash) {
+            if (entry.gitCommitHash !== currentCommitHash) {
+                // Check if we can do an incremental update
+                if (this.config.enableIncrementalAnalysis) {
+                    const changedFiles = await this.getChangedFilesSinceCommit(repoPath, entry.gitCommitHash, currentCommitHash);
+                    if (changedFiles && changedFiles.length > 0) {
+                        this.stats.hits++;
+                        this.recordAccessTime(Date.now() - startTime);
+                        this.updateAccessStats(entry);
+                        logger.debug('Cache hit with incremental update needed', {
+                            key,
+                            changedFiles: changedFiles.length,
+                        });
+                        return {
+                            hit: true,
+                            data: entry.data,
+                            changedFiles,
+                            requiresFullAnalysis: false,
+                            reason: 'Incremental update available',
+                        };
+                    }
+                }
+                // Full invalidation required
+                this.cache.delete(key);
+                this.stats.invalidations++;
+                this.stats.misses++;
+                this.recordAccessTime(Date.now() - startTime);
+                logger.debug('Cache invalidated due to git changes', {
+                    key,
+                    oldCommit: entry.gitCommitHash,
+                    newCommit: currentCommitHash,
+                });
+                return { hit: false, requiresFullAnalysis: true, reason: 'Git commit changed' };
+            }
+        }
+        // Content hash validation (fallback for non-git repos or when git validation disabled)
+        if (!this.config.useGitInvalidation) {
+            const currentContentHash = await this.generateContentHash(repoPath);
+            if (entry.contentHash !== currentContentHash) {
+                this.cache.delete(key);
+                this.stats.invalidations++;
+                this.stats.misses++;
+                this.recordAccessTime(Date.now() - startTime);
+                logger.debug('Cache invalidated due to content changes', { key });
+                return { hit: false, requiresFullAnalysis: true, reason: 'Content hash changed' };
+            }
+        }
+        // Cache hit!
+        this.stats.hits++;
+        this.recordAccessTime(Date.now() - startTime);
+        this.updateAccessStats(entry);
+        logger.debug('Cache hit', { key, age: Date.now() - entry.timestamp });
+        return {
+            hit: true,
+            data: entry.data,
+            requiresFullAnalysis: false,
+        };
+    }
+    /**
+     * Get list of files changed between two git commits
+     */
+    async getChangedFilesSinceCommit(repoPath, fromCommit, toCommit) {
+        try {
+            const git = simpleGit(repoPath);
+            const diff = await git.diff([
+                '--name-only',
+                fromCommit,
+                toCommit,
+            ]);
+            return diff
+                .split('\n')
+                .map(f => f.trim())
+                .filter(f => f.length > 0);
+        }
+        catch (error) {
+            logger.debug('Failed to get changed files from git', { error, fromCommit, toCommit });
+            return null;
+        }
+    }
+    /**
+     * Store analysis in cache with automatic eviction if needed
+     */
+    async set(key, repoPath, data, excludePaths) {
+        if (!this.config.enabled)
+            return;
+        const startTime = Date.now();
+        // Get git information
+        const [gitCommitHash, gitBranch, contentHash] = await Promise.all([
+            this.getGitCommitHash(repoPath),
+            this.getGitBranch(repoPath),
+            this.generateContentHash(repoPath),
+        ]);
+        // Calculate size of serialized data
+        const serialized = JSON.stringify(data);
+        const sizeBytes = Buffer.byteLength(serialized, 'utf8');
+        // Check if we need to evict entries
+        await this.evictIfNeeded(sizeBytes);
+        const entry = {
+            key,
+            repoPath,
+            gitCommitHash: gitCommitHash || '',
+            gitBranch,
+            timestamp: Date.now(),
+            contentHash,
+            data,
+            fileCache: new Map(),
+            sizeBytes,
+            accessCount: 1,
+            lastAccessTime: Date.now(),
+        };
+        // Build file cache for incremental updates
+        if (this.config.enableIncrementalAnalysis && data.todoComments) {
+            await this.buildFileCache(entry, repoPath, data.todoComments);
+        }
+        this.cache.set(key, entry);
+        this.updateStats();
+        // Persist to disk if enabled
+        if (this.config.persistToDisk) {
+            await this.persistEntry(entry);
+        }
+        logger.debug('Cached analysis', {
+            key,
+            sizeBytes,
+            gitCommitHash,
+            duration: Date.now() - startTime,
+        });
+    }
+    /**
+     * Build file-level cache for incremental analysis
+     */
+    async buildFileCache(entry, repoPath, todos) {
+        const fileMap = new Map();
+        // Group TODOs by file
+        for (const todo of todos) {
+            if (!fileMap.has(todo.file)) {
+                fileMap.set(todo.file, []);
+            }
+            fileMap.get(todo.file).push(todo);
+        }
+        // Build file cache entries
+        for (const [filePath, fileTodos] of fileMap) {
+            try {
+                const fullPath = join(repoPath, filePath);
+                const fileStat = await stat(fullPath);
+                const content = await readFile(fullPath, 'utf-8');
+                const contentHash = createHash('md5').update(content).digest('hex');
+                entry.fileCache.set(filePath, {
+                    fileInfo: {
+                        path: filePath,
+                        mtimeMs: fileStat.mtimeMs,
+                        size: fileStat.size,
+                        contentHash,
+                    },
+                    todos: fileTodos,
+                    lastAnalyzed: Date.now(),
+                });
+            }
+            catch {
+                // Skip files that can't be accessed
+            }
+        }
+    }
+    /**
+     * Update analysis with incremental changes for specific files
+     */
+    async updateIncremental(key, changedFiles, updatedData) {
+        const entry = this.cache.get(key);
+        if (!entry)
+            return;
+        // Update the cached data with new information
+        if (updatedData.todoComments) {
+            // Remove TODOs from changed files
+            entry.data.todoComments = entry.data.todoComments.filter(todo => !changedFiles.includes(todo.file));
+            // Add new TODOs
+            entry.data.todoComments.push(...updatedData.todoComments);
+            // Update file cache
+            for (const file of changedFiles) {
+                const fileTodos = updatedData.todoComments.filter(t => t.file === file);
+                if (fileTodos.length > 0 || entry.fileCache.has(file)) {
+                    // Remove or update
+                    if (fileTodos.length === 0) {
+                        entry.fileCache.delete(file);
+                    }
+                    // File cache will be updated on next set
+                }
+            }
+        }
+        if (updatedData.packages) {
+            entry.data.packages = updatedData.packages;
+        }
+        if (updatedData.configFiles) {
+            entry.data.configFiles = updatedData.configFiles;
+        }
+        if (updatedData.gitAnalysis) {
+            entry.data.gitAnalysis = updatedData.gitAnalysis;
+        }
+        // Update metadata
+        entry.timestamp = Date.now();
+        entry.gitCommitHash = await this.getGitCommitHash(entry.repoPath) || entry.gitCommitHash;
+        entry.contentHash = await this.generateContentHash(entry.repoPath);
+        this.stats.incrementalUpdates++;
+        this.updateStats();
+        // Persist updated entry
+        if (this.config.persistToDisk) {
+            await this.persistEntry(entry);
+        }
+        logger.debug('Incremental cache update', {
+            key,
+            changedFiles: changedFiles.length,
+        });
+    }
+    /**
+     * Evict entries if needed to stay within limits
+     */
+    async evictIfNeeded(newEntrySizeBytes) {
+        // Check entry count limit
+        while (this.cache.size >= this.config.maxEntries) {
+            this.evictLRU();
+        }
+        // Check size limit
+        let totalSize = this.getTotalSizeBytes();
+        while (totalSize + newEntrySizeBytes > this.config.maxSizeBytes && this.cache.size > 0) {
+            this.evictLRU();
+            totalSize = this.getTotalSizeBytes();
+        }
+    }
+    /**
+     * Evict the least recently used entry
+     */
+    evictLRU() {
+        let lruKey = null;
+        let lruTime = Infinity;
+        for (const [key, entry] of this.cache) {
+            if (entry.lastAccessTime < lruTime) {
+                lruTime = entry.lastAccessTime;
+                lruKey = key;
+            }
+        }
+        if (lruKey) {
+            const entry = this.cache.get(lruKey);
+            this.cache.delete(lruKey);
+            this.stats.evictions++;
+            // Delete persisted file
+            if (this.config.persistToDisk && entry) {
+                this.deletePersistedEntry(entry.key).catch(() => { });
+            }
+            logger.debug('Evicted LRU cache entry', { key: lruKey });
+        }
+    }
+    /**
+     * Get total size of all cached entries
+     */
+    getTotalSizeBytes() {
+        let total = 0;
+        for (const entry of this.cache.values()) {
+            total += entry.sizeBytes;
+        }
+        return total;
+    }
+    /**
+     * Update access statistics for an entry
+     */
+    updateAccessStats(entry) {
+        entry.accessCount++;
+        entry.lastAccessTime = Date.now();
+    }
+    /**
+     * Record access time for performance metrics
+     */
+    recordAccessTime(timeMs) {
+        this.accessTimeHistory.push(timeMs);
+        if (this.accessTimeHistory.length > 1000) {
+            this.accessTimeHistory = this.accessTimeHistory.slice(-500);
+        }
+    }
+    /**
+     * Update overall statistics
+     */
+    updateStats() {
+        this.stats.totalEntries = this.cache.size;
+        this.stats.totalSizeBytes = this.getTotalSizeBytes();
+        const totalLookups = this.stats.hits + this.stats.misses;
+        this.stats.hitRate = totalLookups > 0 ? this.stats.hits / totalLookups : 0;
+        if (this.accessTimeHistory.length > 0) {
+            this.stats.averageAccessTime =
+                this.accessTimeHistory.reduce((a, b) => a + b, 0) / this.accessTimeHistory.length;
+        }
+    }
+    /**
+     * Get current cache statistics
+     */
+    getStats() {
+        this.updateStats();
+        return { ...this.stats };
+    }
+    /**
+     * Clear all cache entries
+     */
+    async clear() {
+        this.cache.clear();
+        this.stats = {
+            hits: 0,
+            misses: 0,
+            invalidations: 0,
+            evictions: 0,
+            persistWrites: 0,
+            persistReads: 0,
+            incrementalUpdates: 0,
+            totalEntries: 0,
+            totalSizeBytes: 0,
+            hitRate: 0,
+            averageAccessTime: 0,
+        };
+        if (this.config.persistToDisk) {
+            await this.clearPersistedCache();
+        }
+        logger.debug('Cache cleared');
+    }
+    /**
+     * Invalidate entries for a specific repository
+     */
+    async invalidate(repoPath) {
+        let invalidated = 0;
+        const keysToDelete = [];
+        for (const [key, entry] of this.cache) {
+            if (entry.repoPath === repoPath) {
+                keysToDelete.push(key);
+            }
+        }
+        for (const key of keysToDelete) {
+            const entry = this.cache.get(key);
+            this.cache.delete(key);
+            this.stats.invalidations++;
+            invalidated++;
+            if (this.config.persistToDisk && entry) {
+                await this.deletePersistedEntry(entry.key).catch(() => { });
+            }
+        }
+        logger.debug('Invalidated cache entries for repo', { repoPath, count: invalidated });
+        return invalidated;
+    }
+    /**
+     * Warm the cache by pre-loading entries
+     */
+    async warmCache(repoPaths, excludePaths = []) {
+        logger.info('Warming cache', { repoPaths: repoPaths.length });
+        for (const repoPath of repoPaths) {
+            const key = this.generateKey(repoPath, excludePaths);
+            const entry = this.cache.get(key);
+            if (entry) {
+                // Validate existing entry
+                const currentCommitHash = await this.getGitCommitHash(repoPath);
+                if (currentCommitHash && entry.gitCommitHash === currentCommitHash) {
+                    logger.debug('Cache warm: entry valid', { repoPath, key });
+                    continue;
+                }
+            }
+            // Entry needs refresh - will be populated on next analysis
+            logger.debug('Cache warm: entry needs refresh', { repoPath, key });
+        }
+    }
+    // ============================================================================
+    // Persistence Methods
+    // ============================================================================
+    /**
+     * Get the cache directory path
+     */
+    getCacheDir() {
+        return this.config.cacheDir;
+    }
+    /**
+     * Get the file path for a cached entry
+     */
+    getCacheFilePath(key) {
+        return join(this.getCacheDir(), `${key}.json`);
+    }
+    /**
+     * Load cached entries from disk
+     */
+    async loadFromDisk() {
+        const cacheDir = this.getCacheDir();
+        if (!existsSync(cacheDir)) {
+            return;
+        }
+        try {
+            const files = await readdir(cacheDir);
+            const jsonFiles = files.filter(f => f.endsWith('.json'));
+            for (const file of jsonFiles) {
+                try {
+                    const filePath = join(cacheDir, file);
+                    const content = await readFile(filePath, 'utf-8');
+                    const serialized = JSON.parse(content);
+                    // Convert to RepoCacheEntry
+                    const entry = {
+                        ...serialized,
+                        fileCache: new Map(serialized.fileCache),
+                    };
+                    // Check if entry is still valid (TTL)
+                    if (Date.now() - entry.timestamp <= this.config.ttlMs) {
+                        this.cache.set(entry.key, entry);
+                        this.stats.persistReads++;
+                    }
+                    else {
+                        // Delete expired entry
+                        await unlink(filePath).catch(() => { });
+                    }
+                }
+                catch (error) {
+                    logger.debug('Failed to load cache entry', { file, error });
+                }
+            }
+            this.updateStats();
+            logger.debug('Loaded cache from disk', { entriesLoaded: this.cache.size });
+        }
+        catch (error) {
+            logger.debug('Failed to load cache from disk', { error });
+        }
+    }
+    /**
+     * Persist a cache entry to disk
+     */
+    async persistEntry(entry) {
+        const cacheDir = this.getCacheDir();
+        try {
+            // Ensure cache directory exists
+            if (!existsSync(cacheDir)) {
+                await mkdir(cacheDir, { recursive: true });
+            }
+            // Convert to serializable format
+            const serialized = {
+                ...entry,
+                fileCache: Array.from(entry.fileCache.entries()),
+            };
+            const filePath = this.getCacheFilePath(entry.key);
+            await writeFile(filePath, JSON.stringify(serialized, null, 2), 'utf-8');
+            this.stats.persistWrites++;
+            logger.debug('Persisted cache entry', { key: entry.key });
+        }
+        catch (error) {
+            logger.debug('Failed to persist cache entry', { key: entry.key, error });
+        }
+    }
+    /**
+     * Delete a persisted cache entry
+     */
+    async deletePersistedEntry(key) {
+        const filePath = this.getCacheFilePath(key);
+        try {
+            await unlink(filePath);
+        }
+        catch {
+            // Ignore errors
+        }
+    }
+    /**
+     * Clear all persisted cache entries
+     */
+    async clearPersistedCache() {
+        const cacheDir = this.getCacheDir();
+        if (!existsSync(cacheDir)) {
+            return;
+        }
+        try {
+            const files = await readdir(cacheDir);
+            const jsonFiles = files.filter(f => f.endsWith('.json'));
+            await Promise.all(jsonFiles.map(file => unlink(join(cacheDir, file)).catch(() => { })));
+            logger.debug('Cleared persisted cache', { filesDeleted: jsonFiles.length });
+        }
+        catch (error) {
+            logger.debug('Failed to clear persisted cache', { error });
+        }
+    }
+}
+// ============================================================================
+// Global Cache Instance
+// ============================================================================
+let globalPersistentCache = null;
+/**
+ * Get the global persistent cache instance
+ */
+export function getPersistentCache() {
+    if (!globalPersistentCache) {
+        globalPersistentCache = new PersistentAnalysisCache();
+    }
+    return globalPersistentCache;
+}
+/**
+ * Initialize the global persistent cache with custom configuration
+ */
+export async function initPersistentCache(config) {
+    globalPersistentCache = new PersistentAnalysisCache(config);
+    await globalPersistentCache.initialize();
+    return globalPersistentCache;
+}
+/**
+ * Reset the global persistent cache (mainly for testing)
+ */
+export function resetPersistentCache() {
+    globalPersistentCache = null;
+}
+//# sourceMappingURL=cache.js.map

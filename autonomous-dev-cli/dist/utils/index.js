@@ -43,4 +43,10 @@ withTimeout, withTimeoutDetailed, withTimeoutAll,
 withGitHubTimeout, withGitTimeout, withDatabaseTimeout, withMergeTimeout, 
 // Utility functions
 raceWithTimeout, createTimedAbortController, withCleanup, } from './timeout.js';
+// Re-export validation utilities
+export { 
+// Validation functions
+validateConfigPath, validateNumericParam, validateRepoInfo, validateGitHubToken, validateClaudeAuth, validatePort, validateHost, validateCLIOptions, 
+// Display utilities
+displayValidationError, formatCredentialSetupInstructions, createMissingCredentialMessage, NUMERIC_RANGES, } from './validation.js';
 //# sourceMappingURL=index.js.map
