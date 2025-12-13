@@ -1166,14 +1166,6 @@ export function getRequestLifecycle(correlationId: string): RequestLifecycle | u
 }
 
 /**
- * Get current memory usage in megabytes
- */
-export function getMemoryUsageMB(): number {
-  const usage = memoryUsage();
-  return Math.round((usage.heapUsed / 1024 / 1024) * 100) / 100;
-}
-
-/**
  * Get detailed memory statistics
  */
 export function getMemoryStats(): { heapUsedMB: number; heapTotalMB: number; externalMB: number; rssMB: number } {
