@@ -185,16 +185,27 @@ Return ONLY the JSON array, no other text.`;
 
     try {
       logger.info('Starting Claude SDK query...');
+      logger.info(`Prompt length: ${prompt.length} chars`);
+      logger.info(`Working directory: ${this.repoPath}`);
+
+      const startTime = Date.now();
       const queryStream = query({ prompt, options });
+      let messageCount = 0;
 
       for await (const message of queryStream) {
-        // Log all messages for debugging
-        logger.info('Claude SDK message', { type: message.type, subtype: (message as any).subtype });
+        messageCount++;
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        // Log all messages for debugging with elapsed time
+        logger.info(`[${elapsed}s] Claude SDK message #${messageCount}`, {
+          type: message.type,
+          subtype: (message as any).subtype
+        });
 
         // Capture the final result
         if (message.type === 'result' && message.subtype === 'success') {
           content = message.result;
-          logger.info('Got result from Claude SDK', { resultLength: content.length });
+          logger.info(`[${elapsed}s] Got result from Claude SDK`, { resultLength: content.length });
         }
         // Also capture assistant text messages
         else if (message.type === 'assistant' && message.message?.content) {
@@ -204,13 +215,15 @@ Return ONLY the JSON array, no other text.`;
               if (item.type === 'text' && item.text) {
                 content = item.text;
                 // Log partial content for progress visibility
-                logger.info('Claude responding...', { chars: item.text.length });
+                logger.info(`[${elapsed}s] Claude responding...`, { chars: item.text.length });
               }
             }
           }
         }
       }
-      logger.info('Claude SDK query complete');
+
+      const totalTime = Math.round((Date.now() - startTime) / 1000);
+      logger.info(`Claude SDK query complete in ${totalTime}s (${messageCount} messages)`);
     } catch (error) {
       logger.error('Claude SDK error', { error });
       throw new Error(`Claude SDK error: ${error instanceof Error ? error.message : String(error)}`);

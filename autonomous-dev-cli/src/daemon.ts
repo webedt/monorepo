@@ -144,6 +144,7 @@ export class Daemon {
     // Verify repository access
     const repo = await this.github.client.getRepo();
     logger.success(`Repository: ${repo.fullName} (default branch: ${repo.defaultBranch})`);
+    logger.info(`Base branch for PRs: ${this.config.repo.baseBranch}`);
 
     // Create work directory
     if (!existsSync(this.config.execution.workDir)) {
