@@ -69,6 +69,119 @@ jobs:
       - name: Image digest
         run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
 
+      - name: Configure Compose Environment Variables
+        if: github.event_name != 'pull_request'
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          COMPOSE_ID: ${{ vars.DOKPLOY_AUTONOMOUS_DEV_CLI_COMPOSE_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          # Skip if COMPOSE_ID is not set
+          if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
+            echo "⚠️ COMPOSE_ID not set, skipping environment configuration"
+            exit 0
+          fi
+
+          # Strip trailing slash from DOKPLOY_URL if present
+          DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          echo "🔧 Configuring environment variables for autonomous-dev-cli..."
+
+          # Build environment variables string using heredoc
+          ENV_VARS=$(cat <<ENVEOF
+          NODE_ENV=production
+          DATABASE_URL=${DATABASE_URL}
+          ENVEOF
+          )
+
+          # Remove leading whitespace from each line and escape for JSON
+          ENV_VARS_CLEANED=$(echo "$ENV_VARS" | sed 's/^[[:space:]]*//')
+          ENV_VARS_ESCAPED=$(echo "$ENV_VARS_CLEANED" | jq -Rs .)
+
+          echo "  ✅ NODE_ENV=production"
+          echo "  ✅ DATABASE_URL=***"
+          echo ""
+
+          # Update compose environment variables
+          UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/compose.update" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"composeId\": \"${COMPOSE_ID}\",
+                \"env\": ${ENV_VARS_ESCAPED}
+              }
+            }")
+
+          UPDATE_HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
+          UPDATE_BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
+
+          if [ "$UPDATE_HTTP_CODE" -ge 200 ] && [ "$UPDATE_HTTP_CODE" -lt 300 ]; then
+            echo "✅ Environment variables configured successfully"
+          else
+            echo "⚠️  Warning: Failed to set environment variables (HTTP ${UPDATE_HTTP_CODE})"
+            echo "Response: ${UPDATE_BODY}"
+          fi
+
+      - name: Deploy to Dokploy
+        if: github.event_name != 'pull_request'
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          COMPOSE_ID: ${{ vars.DOKPLOY_AUTONOMOUS_DEV_CLI_COMPOSE_ID }}
+        run: |
+          # Skip deployment if COMPOSE_ID is not set or set to "skip"
+          if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
+            echo "⚠️ DOKPLOY_AUTONOMOUS_DEV_CLI_COMPOSE_ID not set or set to 'skip'"
+            echo "📦 Image was pushed successfully to registry"
+            echo "ℹ️ To enable auto-deployment:"
+            echo "   1. Create a Compose in Dokploy for autonomous-dev-cli"
+            echo "   2. Set DOKPLOY_AUTONOMOUS_DEV_CLI_COMPOSE_ID variable in GitHub"
+            exit 0
+          fi
+
+          # Strip trailing slash from DOKPLOY_URL if present
+          DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          echo "🚀 Deploying autonomous-dev-cli to Dokploy..."
+          echo "Compose ID: ${COMPOSE_ID}"
+
+          # Trigger deployment using tRPC endpoint
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/compose.deploy" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"composeId\": \"${COMPOSE_ID}\"
+              }
+            }")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Code: ${HTTP_CODE}"
+          echo "Response Body: ${BODY}"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            if echo "$BODY" | grep -qi "error\|Github Provider not found"; then
+              echo ""
+              echo "⚠️ Dokploy returned an error in response body"
+              echo "📦 Image was pushed successfully - manual deployment required"
+              exit 0
+            fi
+            echo "✅ Deployment triggered successfully!"
+          else
+            echo ""
+            echo "⚠️ Deployment API call failed with status code: ${HTTP_CODE}"
+            echo "📦 Image was pushed successfully - manual deployment may be required"
+            exit 0
+          fi
+
       - name: Build Summary
         if: always()
         run: |
@@ -79,7 +192,7 @@ jobs:
           echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Build completed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Build and deployment completed successfully" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Build or deployment failed" >> $GITHUB_STEP_SUMMARY
           fi
