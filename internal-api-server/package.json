@@ -12,6 +12,9 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "db:check": "tsx src/scripts/db-check.ts",
+    "db:backup": "tsx src/scripts/db-backup.ts",
+    "db:validate": "tsx src/scripts/db-validate.ts",
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "node --import tsx --test src/**/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts"
