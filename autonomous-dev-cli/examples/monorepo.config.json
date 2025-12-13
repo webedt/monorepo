@@ -1,0 +1,55 @@
+{
+  "repo": {
+    "owner": "your-org",
+    "name": "monorepo",
+    "baseBranch": "main"
+  },
+  "discovery": {
+    "tasksPerCycle": 5,
+    "maxOpenIssues": 15,
+    "excludePaths": [
+      "node_modules",
+      "**/node_modules/**",
+      "dist",
+      "**/dist/**",
+      ".git",
+      "coverage",
+      "**/coverage/**",
+      "*.lock",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "packages/legacy/**",
+      "packages/deprecated/**",
+      "apps/old-*/**",
+      "*.min.js",
+      "*.bundle.js"
+    ],
+    "issueLabel": "autonomous-dev"
+  },
+  "execution": {
+    "parallelWorkers": 4,
+    "timeoutMinutes": 45,
+    "workDir": "/tmp/autonomous-dev"
+  },
+  "evaluation": {
+    "requireBuild": true,
+    "requireTests": true,
+    "requireHealthCheck": true,
+    "requireSmokeTests": false,
+    "healthCheckUrls": [],
+    "smokeTestUrls": [],
+    "previewUrlPattern": "https://preview.your-domain.com/{owner}/{repo}/{branch}/"
+  },
+  "merge": {
+    "autoMerge": true,
+    "requireAllChecks": true,
+    "maxRetries": 3,
+    "conflictStrategy": "rebase",
+    "mergeMethod": "squash"
+  },
+  "daemon": {
+    "loopIntervalMs": 120000,
+    "pauseBetweenCycles": true
+  }
+}

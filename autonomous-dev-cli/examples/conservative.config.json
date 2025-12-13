@@ -1,0 +1,46 @@
+{
+  "repo": {
+    "owner": "your-org",
+    "name": "production-app",
+    "baseBranch": "develop"
+  },
+  "discovery": {
+    "tasksPerCycle": 2,
+    "maxOpenIssues": 5,
+    "excludePaths": [
+      "node_modules",
+      "dist",
+      ".git",
+      "coverage",
+      "*.lock",
+      "*.min.js",
+      "vendor/**"
+    ],
+    "issueLabel": "ai-assisted"
+  },
+  "execution": {
+    "parallelWorkers": 2,
+    "timeoutMinutes": 45,
+    "workDir": "/tmp/autonomous-dev"
+  },
+  "evaluation": {
+    "requireBuild": true,
+    "requireTests": true,
+    "requireHealthCheck": true,
+    "requireSmokeTests": false,
+    "healthCheckUrls": [],
+    "smokeTestUrls": [],
+    "previewUrlPattern": "https://preview.your-domain.com/{owner}/{repo}/{branch}/"
+  },
+  "merge": {
+    "autoMerge": false,
+    "requireAllChecks": true,
+    "maxRetries": 3,
+    "conflictStrategy": "manual",
+    "mergeMethod": "merge"
+  },
+  "daemon": {
+    "loopIntervalMs": 300000,
+    "pauseBetweenCycles": true
+  }
+}
