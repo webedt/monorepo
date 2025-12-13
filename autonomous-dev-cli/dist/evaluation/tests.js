@@ -173,7 +173,7 @@ function parseTestOutput(output) {
         return tapResult;
     }
     // Mocha format: X passing, Y failing
-    const mochaMatch = output.match(/(\d+)\s+passing.*?(\d+)\s+failing/is);
+    const mochaMatch = output.match(/(\d+)\s+passing[\s\S]*?(\d+)\s+failing/i);
     if (mochaMatch) {
         passed = parseInt(mochaMatch[1], 10) || 0;
         failed = parseInt(mochaMatch[2], 10) || 0;
@@ -220,7 +220,7 @@ function parseNodeTestRunnerOutput(output) {
         return { total, passed, failed };
     }
     // Also support inline format: # tests X # pass Y # fail Z (backwards compatibility)
-    const inlineMatch = output.match(/# tests (\d+).*# pass (\d+).*# fail (\d+)/is);
+    const inlineMatch = output.match(/# tests (\d+)[\s\S]*?# pass (\d+)[\s\S]*?# fail (\d+)/i);
     if (inlineMatch) {
         return {
             total: parseInt(inlineMatch[1], 10) || 0,

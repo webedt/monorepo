@@ -20,8 +20,8 @@ const levelIcons = {
     warn: '⚠️',
     error: '❌',
 };
-// Global correlation ID for request tracing across components
-let globalCorrelationId;
+// Global correlation context for request tracing across components
+let globalCorrelationContext;
 /**
  * Generate a new correlation ID
  */
@@ -32,19 +32,75 @@ export function generateCorrelationId() {
  * Set the global correlation ID for the current execution context
  */
 export function setCorrelationId(id) {
-    globalCorrelationId = id;
+    if (globalCorrelationContext) {
+        globalCorrelationContext.correlationId = id;
+    }
+    else {
+        globalCorrelationContext = { correlationId: id };
+    }
 }
 /**
  * Get the current global correlation ID
  */
 export function getCorrelationId() {
-    return globalCorrelationId;
+    return globalCorrelationContext?.correlationId;
 }
 /**
  * Clear the global correlation ID
  */
 export function clearCorrelationId() {
-    globalCorrelationId = undefined;
+    globalCorrelationContext = undefined;
+}
+/**
+ * Set the full global correlation context (including cycle number and worker ID)
+ */
+export function setCorrelationContext(context) {
+    globalCorrelationContext = context;
+}
+/**
+ * Get the current global correlation context
+ */
+export function getCorrelationContext() {
+    return globalCorrelationContext;
+}
+/**
+ * Update the global correlation context with additional fields
+ */
+export function updateCorrelationContext(updates) {
+    if (globalCorrelationContext) {
+        globalCorrelationContext = { ...globalCorrelationContext, ...updates };
+    }
+    else if (updates.correlationId) {
+        globalCorrelationContext = { correlationId: updates.correlationId, ...updates };
+    }
+}
+/**
+ * Set the cycle number in the global correlation context
+ */
+export function setCycleNumber(cycleNumber) {
+    if (globalCorrelationContext) {
+        globalCorrelationContext.cycleNumber = cycleNumber;
+    }
+}
+/**
+ * Get the current cycle number from the global correlation context
+ */
+export function getCycleNumber() {
+    return globalCorrelationContext?.cycleNumber;
+}
+/**
+ * Set the worker ID in the global correlation context
+ */
+export function setWorkerId(workerId) {
+    if (globalCorrelationContext) {
+        globalCorrelationContext.workerId = workerId;
+    }
+}
+/**
+ * Get the current worker ID from the global correlation context
+ */
+export function getWorkerId() {
+    return globalCorrelationContext?.workerId;
 }
 /**
  * Get current memory usage in megabytes
@@ -156,11 +212,19 @@ class Logger {
     prefix;
     format;
     correlationId;
+    cycleNumber;
+    workerId;
+    includeCorrelationId;
+    includeTimestamp;
     constructor(options = { level: 'info' }) {
         this.level = options.level;
         this.prefix = options.prefix || '';
         this.format = options.format || 'pretty';
         this.correlationId = options.correlationId;
+        this.cycleNumber = options.cycleNumber;
+        this.workerId = options.workerId;
+        this.includeCorrelationId = options.includeCorrelationId ?? true;
+        this.includeTimestamp = options.includeTimestamp ?? true;
     }
     setLevel(level) {
         this.level = level;
@@ -175,10 +239,48 @@ class Logger {
         this.correlationId = id;
     }
     /**
+     * Set the cycle number for this logger instance
+     */
+    setCycleNumber(cycleNumber) {
+        this.cycleNumber = cycleNumber;
+    }
+    /**
+     * Set the worker ID for this logger instance
+     */
+    setWorkerId(workerId) {
+        this.workerId = workerId;
+    }
+    /**
+     * Configure whether to include correlation ID in logs
+     */
+    setIncludeCorrelationId(include) {
+        this.includeCorrelationId = include;
+    }
+    /**
+     * Configure whether to include timestamp in logs
+     */
+    setIncludeTimestamp(include) {
+        this.includeTimestamp = include;
+    }
+    /**
      * Get the effective correlation ID (instance or global)
      */
     getEffectiveCorrelationId() {
-        return this.correlationId || globalCorrelationId;
+        if (!this.includeCorrelationId)
+            return undefined;
+        return this.correlationId || globalCorrelationContext?.correlationId;
+    }
+    /**
+     * Get the effective cycle number (instance or global)
+     */
+    getEffectiveCycleNumber() {
+        return this.cycleNumber ?? globalCorrelationContext?.cycleNumber;
+    }
+    /**
+     * Get the effective worker ID (instance or global)
+     */
+    getEffectiveWorkerId() {
+        return this.workerId || globalCorrelationContext?.workerId;
     }
     shouldLog(level) {
         return levelPriority[level] >= levelPriority[this.level];
@@ -188,16 +290,28 @@ class Logger {
      */
     createLogEntry(level, message, meta) {
         const entry = {
-            timestamp: new Date().toISOString(),
+            timestamp: this.includeTimestamp ? new Date().toISOString() : '',
             level,
             message,
         };
+        // Remove empty timestamp for cleaner JSON output
+        if (!this.includeTimestamp) {
+            delete entry.timestamp;
+        }
         const correlationId = this.getEffectiveCorrelationId();
         if (correlationId) {
             entry.correlationId = correlationId;
         }
         if (this.prefix) {
             entry.component = this.prefix;
+        }
+        const cycleNumber = this.getEffectiveCycleNumber();
+        if (cycleNumber !== undefined) {
+            entry.cycleNumber = cycleNumber;
+        }
+        const workerId = this.getEffectiveWorkerId();
+        if (workerId) {
+            entry.workerId = workerId;
         }
         if (meta && Object.keys(meta).length > 0) {
             entry.meta = meta;
@@ -208,13 +322,27 @@ class Logger {
      * Format a log entry as pretty output for terminal
      */
     formatPretty(level, message, meta) {
-        const timestamp = new Date().toISOString();
+        const timestamp = this.includeTimestamp ? new Date().toISOString() : '';
         const icon = levelIcons[level];
         const colorFn = levelColors[level];
         const prefix = this.prefix ? `[${this.prefix}] ` : '';
         const correlationId = this.getEffectiveCorrelationId();
-        const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
-        let formatted = `${chalk.gray(timestamp)} ${icon} ${colorFn(level.toUpperCase().padEnd(5))} ${prefix}${message}${correlationStr}`;
+        const cycleNumber = this.getEffectiveCycleNumber();
+        const workerId = this.getEffectiveWorkerId();
+        // Build context string with cycle, worker, and correlation info
+        const contextParts = [];
+        if (cycleNumber !== undefined) {
+            contextParts.push(`c${cycleNumber}`);
+        }
+        if (workerId) {
+            contextParts.push(workerId);
+        }
+        if (correlationId) {
+            contextParts.push(correlationId.slice(0, 8));
+        }
+        const contextStr = contextParts.length > 0 ? chalk.gray(` [${contextParts.join(':')}]`) : '';
+        const timestampStr = timestamp ? `${chalk.gray(timestamp)} ` : '';
+        let formatted = `${timestampStr}${icon} ${colorFn(level.toUpperCase().padEnd(5))} ${prefix}${message}${contextStr}`;
         if (meta && Object.keys(meta).length > 0) {
             formatted += ` ${chalk.gray(JSON.stringify(meta))}`;
         }
@@ -641,7 +769,7 @@ class Logger {
         }
     }
     /**
-     * Create a child logger with a prefix and optionally inherit correlation ID
+     * Create a child logger with a prefix and optionally inherit correlation context
      */
     child(prefix) {
         const child = new Logger({
@@ -649,6 +777,10 @@ class Logger {
             prefix,
             format: this.format,
             correlationId: this.correlationId,
+            cycleNumber: this.cycleNumber,
+            workerId: this.workerId,
+            includeCorrelationId: this.includeCorrelationId,
+            includeTimestamp: this.includeTimestamp,
         });
         return child;
     }
@@ -661,6 +793,58 @@ class Logger {
             prefix: this.prefix,
             format: this.format,
             correlationId,
+            cycleNumber: this.cycleNumber,
+            workerId: this.workerId,
+            includeCorrelationId: this.includeCorrelationId,
+            includeTimestamp: this.includeTimestamp,
+        });
+        return child;
+    }
+    /**
+     * Create a child logger with a specific worker ID for worker context tracking
+     */
+    withWorkerId(workerId) {
+        const child = new Logger({
+            level: this.level,
+            prefix: this.prefix,
+            format: this.format,
+            correlationId: this.correlationId,
+            cycleNumber: this.cycleNumber,
+            workerId,
+            includeCorrelationId: this.includeCorrelationId,
+            includeTimestamp: this.includeTimestamp,
+        });
+        return child;
+    }
+    /**
+     * Create a child logger with a specific cycle number for cycle context tracking
+     */
+    withCycleNumber(cycleNumber) {
+        const child = new Logger({
+            level: this.level,
+            prefix: this.prefix,
+            format: this.format,
+            correlationId: this.correlationId,
+            cycleNumber,
+            workerId: this.workerId,
+            includeCorrelationId: this.includeCorrelationId,
+            includeTimestamp: this.includeTimestamp,
+        });
+        return child;
+    }
+    /**
+     * Create a child logger with full correlation context
+     */
+    withContext(context) {
+        const child = new Logger({
+            level: this.level,
+            prefix: this.prefix,
+            format: this.format,
+            correlationId: context.correlationId ?? this.correlationId,
+            cycleNumber: context.cycleNumber ?? this.cycleNumber,
+            workerId: context.workerId ?? this.workerId,
+            includeCorrelationId: this.includeCorrelationId,
+            includeTimestamp: this.includeTimestamp,
         });
         return child;
     }

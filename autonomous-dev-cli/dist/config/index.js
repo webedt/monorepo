@@ -142,6 +142,30 @@ const configFieldHelp = {
         suggestion: 'Enable to allow time for review between cycles',
         example: 'true',
     },
+    'logging.format': {
+        description: 'Log output format: pretty (colored text) or json (structured)',
+        envVar: 'LOG_FORMAT',
+        suggestion: 'Use "json" for production environments with log aggregation systems',
+        example: 'json',
+    },
+    'logging.level': {
+        description: 'Minimum log level to output (debug, info, warn, error)',
+        envVar: 'LOG_LEVEL',
+        suggestion: 'Use "info" for production, "debug" for development',
+        example: 'info',
+    },
+    'logging.includeCorrelationId': {
+        description: 'Include correlation ID in log entries for request tracing',
+        envVar: 'LOG_INCLUDE_CORRELATION_ID',
+        suggestion: 'Keep enabled for production environments to trace requests',
+        example: 'true',
+    },
+    'logging.includeTimestamp': {
+        description: 'Include timestamps in log entries',
+        envVar: 'LOG_INCLUDE_TIMESTAMP',
+        suggestion: 'Keep enabled unless external logging adds timestamps',
+        example: 'true',
+    },
 };
 /**
  * Get helpful suggestion for a validation error
@@ -306,6 +330,10 @@ export function getConfigHelp() {
             fields: ['daemon.loopIntervalMs', 'daemon.pauseBetweenCycles'],
         },
         {
+            title: 'LOGGING SETTINGS (logging.*)',
+            fields: ['logging.format', 'logging.level', 'logging.includeCorrelationId', 'logging.includeTimestamp'],
+        },
+        {
             title: 'CREDENTIALS (credentials.*)',
             fields: ['credentials.githubToken', 'credentials.claudeAuth', 'credentials.databaseUrl', 'credentials.userEmail'],
         },
@@ -455,6 +483,12 @@ export function loadConfig(configPath) {
     envConfig.daemon = {
         loopIntervalMs: parseInt(process.env.LOOP_INTERVAL_MS || '60000', 10),
         pauseBetweenCycles: process.env.PAUSE_BETWEEN_CYCLES !== 'false',
+    };
+    envConfig.logging = {
+        format: process.env.LOG_FORMAT || 'pretty',
+        level: process.env.LOG_LEVEL || 'info',
+        includeCorrelationId: process.env.LOG_INCLUDE_CORRELATION_ID !== 'false',
+        includeTimestamp: process.env.LOG_INCLUDE_TIMESTAMP !== 'false',
     };
     envConfig.credentials = {
         githubToken: process.env.GITHUB_TOKEN,
