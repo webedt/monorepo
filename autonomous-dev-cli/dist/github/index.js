@@ -1,7 +1,7 @@
 export { GitHubClient, createGitHubClient, } from './client.js';
 export { createIssueManager } from './issues.js';
-export { createBranchManager } from './branches.js';
-export { createPRManager } from './pulls.js';
+export { createBranchManager, } from './branches.js';
+export { createPRManager, } from './pulls.js';
 import { createGitHubClient } from './client.js';
 import { createIssueManager } from './issues.js';
 import { createBranchManager } from './branches.js';
