@@ -146,6 +146,21 @@ export const ConfigSchema = z.object({
   }).describe('Daemon mode settings'),
 
   /**
+   * Logging Settings
+   * Configure log output format and level for production/development environments.
+   */
+  logging: z.object({
+    /** Log output format: 'pretty' for human-readable colored output, 'json' for structured JSON logs */
+    format: z.enum(['pretty', 'json']).default('pretty'),
+    /** Minimum log level to output: 'debug' (most verbose), 'info', 'warn', 'error' (least verbose) */
+    level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    /** Include correlation ID prefix in all log entries (default: true) */
+    includeCorrelationId: z.boolean().default(true),
+    /** Include timestamps in log entries (default: true) */
+    includeTimestamp: z.boolean().default(true),
+  }).describe('Logging configuration').default({}),
+
+  /**
    * Circuit Breaker Settings
    * Configure resilience for Claude API calls.
    */
@@ -266,6 +281,12 @@ export const defaultConfig: Partial<Config> = {
   daemon: {
     loopIntervalMs: 60000,
     pauseBetweenCycles: true,
+  },
+  logging: {
+    format: 'pretty',
+    level: 'info',
+    includeCorrelationId: true,
+    includeTimestamp: true,
   },
   circuitBreaker: {
     failureThreshold: 5,
