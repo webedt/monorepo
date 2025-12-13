@@ -84,6 +84,40 @@ export const ConfigSchema = z.object({
   }).describe('Task discovery configuration'),
 
   /**
+   * Analysis Cache Settings
+   * Control caching of codebase analysis results for improved performance.
+   */
+  cache: z.object({
+    /** Enable caching of analysis results (default: true) */
+    enabled: z.boolean().default(true),
+    /** Maximum number of cached analysis entries (1-1000, default: 100) */
+    maxEntries: z.number()
+      .min(1, 'maxEntries must be at least 1')
+      .max(1000, 'maxEntries cannot exceed 1000')
+      .default(100),
+    /** Time-to-live for cache entries in minutes (1-1440, default: 30) */
+    ttlMinutes: z.number()
+      .min(1, 'ttlMinutes must be at least 1')
+      .max(1440, 'ttlMinutes cannot exceed 24 hours (1440 minutes)')
+      .default(30),
+    /** Maximum total cache size in megabytes (10-1000, default: 100) */
+    maxSizeMB: z.number()
+      .min(10, 'maxSizeMB must be at least 10MB')
+      .max(1000, 'maxSizeMB cannot exceed 1GB')
+      .default(100),
+    /** Directory for persistent cache storage (default: .autonomous-dev-cache) */
+    cacheDir: z.string().default('.autonomous-dev-cache'),
+    /** Enable persistent file-based caching across restarts (default: true) */
+    persistToDisk: z.boolean().default(true),
+    /** Use git commit hash for cache invalidation (default: true) */
+    useGitInvalidation: z.boolean().default(true),
+    /** Enable incremental analysis for changed files only (default: true) */
+    enableIncrementalAnalysis: z.boolean().default(true),
+    /** Warm cache during daemon startup (default: true) */
+    warmOnStartup: z.boolean().default(true),
+  }).describe('Analysis cache configuration').default({}),
+
+  /**
    * Execution Settings
    * Control how tasks are executed.
    */
@@ -266,6 +300,17 @@ export const defaultConfig: Partial<Config> = {
     issueLabel: 'autonomous-dev',
     maxDepth: 10,
     maxFiles: 10000,
+  },
+  cache: {
+    enabled: true,
+    maxEntries: 100,
+    ttlMinutes: 30,
+    maxSizeMB: 100,
+    cacheDir: '.autonomous-dev-cache',
+    persistToDisk: true,
+    useGitInvalidation: true,
+    enableIncrementalAnalysis: true,
+    warmOnStartup: true,
   },
   execution: {
     parallelWorkers: 4,
