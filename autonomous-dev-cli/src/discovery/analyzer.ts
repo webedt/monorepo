@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
-import { join, relative, extname } from 'path';
+import { readFileSync, readdirSync, statSync, existsSync, accessSync, constants } from 'fs';
+import { join, relative, extname, isAbsolute, resolve } from 'path';
 import { logger } from '../utils/logger.js';
+import { AnalyzerError, ErrorCode } from '../utils/errors.js';
 
 export interface CodebaseAnalysis {
   structure: DirectoryEntry[];
@@ -31,6 +32,44 @@ export interface PackageInfo {
   dependencies: string[];
   scripts: Record<string, string>;
 }
+
+/**
+ * Configuration options for the analyzer
+ */
+export interface AnalyzerConfig {
+  maxDepth?: number;
+  maxFiles?: number;
+}
+
+/**
+ * Result type for validation operations
+ */
+export interface ValidationResult {
+  valid: boolean;
+  error?: AnalyzerError;
+}
+
+// Analyzer configuration bounds
+const MIN_MAX_DEPTH = 1;
+const MAX_MAX_DEPTH = 20;
+const DEFAULT_MAX_DEPTH = 10;
+
+const MIN_MAX_FILES = 100;
+const MAX_MAX_FILES = 50000;
+const DEFAULT_MAX_FILES = 10000;
+
+// Patterns known to cause ReDoS vulnerabilities
+const REDOS_PATTERNS = [
+  /\(\.\*\)\+/,           // (.*)+
+  /\(\.\+\)\+/,           // (.+)+
+  /\(\[^\\s\]\*\)\+/,     // ([^\s]*)+
+  /\(\.\*\)\{\d+,\}/,     // (.*){\d+,}
+  /\(\[^\\]\]\*\)\+/,     // ([^]]*)+
+  /\(\.\*\?\)\+/,         // (.*?)+
+];
+
+// Maximum length for glob patterns to prevent excessive processing
+const MAX_PATTERN_LENGTH = 500;
 
 const IGNORED_DIRS = new Set([
   'node_modules',
@@ -87,16 +126,262 @@ const CONFIG_EXTENSIONS = new Set([
 export class CodebaseAnalyzer {
   private repoPath: string;
   private excludePaths: string[];
+  private maxDepth: number;
+  private maxFiles: number;
+  private fileCount: number = 0;
+  private validationErrors: AnalyzerError[] = [];
 
-  constructor(repoPath: string, excludePaths: string[] = []) {
-    this.repoPath = repoPath;
+  constructor(repoPath: string, excludePaths: string[] = [], config: AnalyzerConfig = {}) {
+    // Normalize and resolve the path
+    this.repoPath = isAbsolute(repoPath) ? repoPath : resolve(repoPath);
     this.excludePaths = excludePaths;
+
+    // Apply bounds to configuration
+    this.maxDepth = this.clampValue(
+      config.maxDepth ?? DEFAULT_MAX_DEPTH,
+      MIN_MAX_DEPTH,
+      MAX_MAX_DEPTH
+    );
+    this.maxFiles = this.clampValue(
+      config.maxFiles ?? DEFAULT_MAX_FILES,
+      MIN_MAX_FILES,
+      MAX_MAX_FILES
+    );
+  }
+
+  /**
+   * Clamp a value between min and max bounds
+   */
+  private clampValue(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  /**
+   * Validate that a directory path exists and is readable
+   */
+  validateDirectoryPath(dirPath: string): ValidationResult {
+    // Check if path exists
+    if (!existsSync(dirPath)) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_PATH_NOT_FOUND,
+          `Directory path does not exist: ${dirPath}`,
+          { path: dirPath }
+        ),
+      };
+    }
+
+    // Check if path is a directory
+    try {
+      const stat = statSync(dirPath);
+      if (!stat.isDirectory()) {
+        return {
+          valid: false,
+          error: new AnalyzerError(
+            ErrorCode.ANALYZER_PATH_NOT_DIRECTORY,
+            `Path is not a directory: ${dirPath}`,
+            { path: dirPath }
+          ),
+        };
+      }
+    } catch (err) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_PATH_NOT_READABLE,
+          `Cannot access path: ${dirPath}`,
+          { path: dirPath, cause: err as Error }
+        ),
+      };
+    }
+
+    // Check if path is readable
+    try {
+      accessSync(dirPath, constants.R_OK);
+    } catch (err) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_PATH_NOT_READABLE,
+          `Directory is not readable: ${dirPath}`,
+          { path: dirPath, cause: err as Error }
+        ),
+      };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Validate and sanitize a glob pattern to prevent ReDoS attacks
+   */
+  validateGlobPattern(pattern: string): ValidationResult {
+    // Check pattern length
+    if (pattern.length > MAX_PATTERN_LENGTH) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_INVALID_GLOB_PATTERN,
+          `Glob pattern exceeds maximum length of ${MAX_PATTERN_LENGTH} characters`,
+          { pattern: pattern.substring(0, 50) + '...' }
+        ),
+      };
+    }
+
+    // Check for potentially dangerous patterns
+    for (const redosPattern of REDOS_PATTERNS) {
+      if (redosPattern.test(pattern)) {
+        return {
+          valid: false,
+          error: new AnalyzerError(
+            ErrorCode.ANALYZER_INVALID_GLOB_PATTERN,
+            `Glob pattern contains potentially dangerous regex sequence that could cause ReDoS`,
+            { pattern }
+          ),
+        };
+      }
+    }
+
+    // Check for excessive wildcards (more than 10 ** or * sequences)
+    const wildcardCount = (pattern.match(/\*+/g) || []).length;
+    if (wildcardCount > 10) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_INVALID_GLOB_PATTERN,
+          `Glob pattern contains too many wildcards (${wildcardCount}), maximum is 10`,
+          { pattern }
+        ),
+      };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Validate that a pattern compiles as valid regex
+   */
+  validateRegexPattern(pattern: string): ValidationResult {
+    // Check pattern length
+    if (pattern.length > MAX_PATTERN_LENGTH) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_INVALID_REGEX_PATTERN,
+          `Regex pattern exceeds maximum length of ${MAX_PATTERN_LENGTH} characters`,
+          { pattern: pattern.substring(0, 50) + '...' }
+        ),
+      };
+    }
+
+    // Check for ReDoS patterns before attempting to compile
+    for (const redosPattern of REDOS_PATTERNS) {
+      if (redosPattern.test(pattern)) {
+        return {
+          valid: false,
+          error: new AnalyzerError(
+            ErrorCode.ANALYZER_INVALID_REGEX_PATTERN,
+            `Regex pattern contains potentially dangerous sequence that could cause ReDoS`,
+            { pattern }
+          ),
+        };
+      }
+    }
+
+    // Try to compile the pattern
+    try {
+      new RegExp(pattern);
+    } catch (err) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_INVALID_REGEX_PATTERN,
+          `Invalid regex pattern: ${(err as Error).message}`,
+          { pattern, cause: err as Error }
+        ),
+      };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Validate analyzer configuration
+   */
+  validateConfig(): ValidationResult {
+    const errors: string[] = [];
+
+    if (this.maxDepth < MIN_MAX_DEPTH || this.maxDepth > MAX_MAX_DEPTH) {
+      errors.push(`maxDepth must be between ${MIN_MAX_DEPTH} and ${MAX_MAX_DEPTH}, got ${this.maxDepth}`);
+    }
+
+    if (this.maxFiles < MIN_MAX_FILES || this.maxFiles > MAX_MAX_FILES) {
+      errors.push(`maxFiles must be between ${MIN_MAX_FILES} and ${MAX_MAX_FILES}, got ${this.maxFiles}`);
+    }
+
+    // Validate exclude paths
+    for (const pattern of this.excludePaths) {
+      const result = this.validateGlobPattern(pattern);
+      if (!result.valid) {
+        errors.push(`Invalid exclude pattern "${pattern}": ${result.error?.message}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return {
+        valid: false,
+        error: new AnalyzerError(
+          ErrorCode.ANALYZER_INVALID_CONFIG,
+          `Invalid analyzer configuration: ${errors.join('; ')}`,
+          { context: { errors } }
+        ),
+      };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Perform all validations before analysis
+   */
+  private validateBeforeAnalysis(): ValidationResult {
+    // Validate configuration
+    const configResult = this.validateConfig();
+    if (!configResult.valid) {
+      return configResult;
+    }
+
+    // Validate repository path
+    const pathResult = this.validateDirectoryPath(this.repoPath);
+    if (!pathResult.valid) {
+      return pathResult;
+    }
+
+    return { valid: true };
   }
 
   async analyze(): Promise<CodebaseAnalysis> {
     logger.info('Analyzing codebase...', { path: this.repoPath });
 
+    // Validate inputs before processing
+    const validationResult = this.validateBeforeAnalysis();
+    if (!validationResult.valid && validationResult.error) {
+      logger.structuredError(validationResult.error);
+      throw validationResult.error;
+    }
+
+    // Reset file count for this analysis
+    this.fileCount = 0;
+    this.validationErrors = [];
+
     const structure = this.scanDirectory(this.repoPath);
+
+    // Check if we hit the file limit
+    if (this.fileCount >= this.maxFiles) {
+      logger.warn(`File limit reached (${this.maxFiles}). Some files may not be included in analysis.`);
+    }
+
     const todoComments = await this.findTodoComments();
     const packages = await this.findPackages();
     const configFiles = this.findConfigFiles();
@@ -104,6 +389,11 @@ export class CodebaseAnalyzer {
     const fileCount = this.countFiles(structure);
 
     logger.info(`Found ${fileCount} files, ${todoComments.length} TODOs, ${packages.length} packages`);
+
+    // Log any validation warnings collected during analysis
+    if (this.validationErrors.length > 0) {
+      logger.warn(`Encountered ${this.validationErrors.length} validation issues during analysis`);
+    }
 
     return {
       structure,
@@ -115,9 +405,37 @@ export class CodebaseAnalyzer {
     };
   }
 
+  /**
+   * Check if a path should be excluded based on exclude patterns
+   */
+  private shouldExclude(relativePath: string): boolean {
+    for (const pattern of this.excludePaths) {
+      try {
+        // First try as a simple prefix match
+        if (relativePath.startsWith(pattern)) {
+          return true;
+        }
+        // Then try as a regex pattern (with safety check already done in validateConfig)
+        if (relativePath.match(pattern)) {
+          return true;
+        }
+      } catch {
+        // If the pattern fails to match, skip it and log a warning
+        logger.debug(`Skipping invalid exclude pattern: ${pattern}`);
+      }
+    }
+    return false;
+  }
+
   private scanDirectory(dirPath: string, depth: number = 0): DirectoryEntry[] {
-    if (depth > 5) {
-      return []; // Limit recursion depth
+    // Enforce depth limit
+    if (depth > this.maxDepth) {
+      return [];
+    }
+
+    // Check file count limit
+    if (this.fileCount >= this.maxFiles) {
+      return [];
     }
 
     const entries: DirectoryEntry[] = [];
@@ -126,6 +444,11 @@ export class CodebaseAnalyzer {
       const items = readdirSync(dirPath);
 
       for (const item of items) {
+        // Check file count limit on each iteration
+        if (this.fileCount >= this.maxFiles) {
+          break;
+        }
+
         if (IGNORED_DIRS.has(item) || IGNORED_FILES.has(item)) {
           continue;
         }
@@ -133,8 +456,8 @@ export class CodebaseAnalyzer {
         const fullPath = join(dirPath, item);
         const relativePath = relative(this.repoPath, fullPath);
 
-        // Check exclude paths
-        if (this.excludePaths.some((p) => relativePath.startsWith(p) || relativePath.match(p))) {
+        // Check exclude paths using safe matching
+        if (this.shouldExclude(relativePath)) {
           continue;
         }
 
@@ -149,6 +472,7 @@ export class CodebaseAnalyzer {
               children: this.scanDirectory(fullPath, depth + 1),
             });
           } else if (stat.isFile()) {
+            this.fileCount++;
             entries.push({
               name: item,
               path: relativePath,
@@ -181,8 +505,14 @@ export class CodebaseAnalyzer {
   private async findTodoComments(): Promise<TodoComment[]> {
     const todos: TodoComment[] = [];
     const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)/gi;
+    let scannedFiles = 0;
 
     const scanFile = (filePath: string) => {
+      // Enforce a reasonable limit on scanned files for TODO comments
+      if (scannedFiles >= this.maxFiles) {
+        return;
+      }
+
       const ext = extname(filePath);
       if (!CODE_EXTENSIONS.has(ext)) {
         return;
@@ -191,6 +521,7 @@ export class CodebaseAnalyzer {
       try {
         const content = readFileSync(filePath, 'utf-8');
         const lines = content.split('\n');
+        scannedFiles++;
 
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
@@ -210,22 +541,41 @@ export class CodebaseAnalyzer {
       }
     };
 
-    const scanDir = (dirPath: string) => {
+    const scanDir = (dirPath: string, depth: number = 0) => {
+      // Enforce depth limit
+      if (depth > this.maxDepth) {
+        return;
+      }
+
+      if (scannedFiles >= this.maxFiles) {
+        return;
+      }
+
       try {
         const items = readdirSync(dirPath);
 
         for (const item of items) {
+          if (scannedFiles >= this.maxFiles) {
+            break;
+          }
+
           if (IGNORED_DIRS.has(item)) {
             continue;
           }
 
           const fullPath = join(dirPath, item);
+          const relativePath = relative(this.repoPath, fullPath);
+
+          // Check exclude paths
+          if (this.shouldExclude(relativePath)) {
+            continue;
+          }
 
           try {
             const stat = statSync(fullPath);
 
             if (stat.isDirectory()) {
-              scanDir(fullPath);
+              scanDir(fullPath, depth + 1);
             } else if (stat.isFile()) {
               scanFile(fullPath);
             }
@@ -245,8 +595,19 @@ export class CodebaseAnalyzer {
 
   private async findPackages(): Promise<PackageInfo[]> {
     const packages: PackageInfo[] = [];
+    let scannedDirs = 0;
+    const maxDirsToScan = Math.min(this.maxFiles, 1000); // Limit package.json searching
 
-    const findPackageJson = (dirPath: string) => {
+    const findPackageJson = (dirPath: string, depth: number = 0) => {
+      // Enforce depth limit
+      if (depth > this.maxDepth) {
+        return;
+      }
+
+      if (scannedDirs >= maxDirsToScan) {
+        return;
+      }
+
       const packageJsonPath = join(dirPath, 'package.json');
 
       if (existsSync(packageJsonPath)) {
@@ -265,21 +626,33 @@ export class CodebaseAnalyzer {
         }
       }
 
+      scannedDirs++;
+
       // Check subdirectories
       try {
         const items = readdirSync(dirPath);
 
         for (const item of items) {
+          if (scannedDirs >= maxDirsToScan) {
+            break;
+          }
+
           if (IGNORED_DIRS.has(item)) {
             continue;
           }
 
           const fullPath = join(dirPath, item);
+          const relativePath = relative(this.repoPath, fullPath);
+
+          // Check exclude paths
+          if (this.shouldExclude(relativePath)) {
+            continue;
+          }
 
           try {
             const stat = statSync(fullPath);
             if (stat.isDirectory()) {
-              findPackageJson(fullPath);
+              findPackageJson(fullPath, depth + 1);
             }
           } catch {
             // Skip inaccessible
@@ -309,8 +682,11 @@ export class CodebaseAnalyzer {
       /^\.github/,
     ];
 
+    // Only scan top-level config files (depth 2)
+    const maxConfigDepth = Math.min(2, this.maxDepth);
+
     const scanDir = (dirPath: string, depth: number = 0) => {
-      if (depth > 2) return; // Only top-level config files
+      if (depth > maxConfigDepth) return;
 
       try {
         const items = readdirSync(dirPath);

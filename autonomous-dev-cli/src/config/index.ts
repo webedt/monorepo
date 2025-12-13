@@ -478,6 +478,8 @@ export function loadConfig(configPath?: string): Config {
     maxOpenIssues: parseInt(process.env.MAX_OPEN_ISSUES || '10', 10),
     excludePaths: process.env.EXCLUDE_PATHS?.split(',') || defaultConfig.discovery?.excludePaths || [],
     issueLabel: process.env.ISSUE_LABEL || 'autonomous-dev',
+    maxDepth: parseInt(process.env.MAX_DEPTH || '10', 10),
+    maxFiles: parseInt(process.env.MAX_FILES || '10000', 10),
   };
 
   envConfig.execution = {
