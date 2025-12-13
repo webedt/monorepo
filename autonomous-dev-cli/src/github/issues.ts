@@ -5,6 +5,7 @@ import {
   ErrorCode,
   createGitHubErrorFromResponse,
 } from '../utils/errors.js';
+import type { CacheKeyType } from '../utils/githubCache.js';
 
 export interface Issue {
   number: number;
@@ -35,6 +36,8 @@ export interface IssueManager {
   listOpenIssues(label?: string): Promise<Issue[]>;
   listOpenIssuesWithFallback(label?: string, fallback?: Issue[]): Promise<DegradedResult<Issue[]>>;
   getIssue(number: number): Promise<Issue | null>;
+  /** Get multiple issues in a batch (reduces API calls) */
+  getIssuesBatch(numbers: number[]): Promise<Map<number, Issue | null>>;
   createIssue(options: CreateIssueOptions): Promise<Issue>;
   addLabels(issueNumber: number, labels: string[]): Promise<void>;
   addLabelsWithFallback(issueNumber: number, labels: string[]): Promise<DegradedResult<void>>;
@@ -44,6 +47,10 @@ export interface IssueManager {
   addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<void>>;
   getServiceHealth(): ServiceHealth;
   isAvailable(): boolean;
+  /** Invalidate cached issue data */
+  invalidateCache(): void;
+  /** Invalidate a specific issue from cache */
+  invalidateIssue(number: number): void;
 }
 
 export function createIssueManager(client: GitHubClient): IssueManager {
@@ -87,37 +94,41 @@ export function createIssueManager(client: GitHubClient): IssueManager {
     },
 
     async listOpenIssues(label?: string): Promise<Issue[]> {
-      const params: {
-        owner: string;
-        repo: string;
-        state: 'open';
-        per_page: number;
-        labels?: string;
-      } = {
-        owner,
-        repo,
-        state: 'open',
-        per_page: 100,
-      };
+      const cacheKey = `list-open-${label ?? 'all'}`;
 
-      if (label) {
-        params.labels = label;
-      }
+      return client.getCachedOrFetch('issue-list', cacheKey, async () => {
+        const params: {
+          owner: string;
+          repo: string;
+          state: 'open';
+          per_page: number;
+          labels?: string;
+        } = {
+          owner,
+          repo,
+          state: 'open',
+          per_page: 100,
+        };
 
-      try {
-        return await client.execute(
-          async () => {
-            const { data } = await octokit.issues.listForRepo(params);
-            // Filter out pull requests (GitHub API returns PRs as issues)
-            const issues = data.filter((item) => !item.pull_request);
-            return issues.map(mapIssue);
-          },
-          `GET /repos/${owner}/${repo}/issues`,
-          { operation: 'listOpenIssues', label }
-        );
-      } catch (error) {
-        return handleError(error, 'list issues', { label });
-      }
+        if (label) {
+          params.labels = label;
+        }
+
+        try {
+          return await client.execute(
+            async () => {
+              const { data } = await octokit.issues.listForRepo(params);
+              // Filter out pull requests (GitHub API returns PRs as issues)
+              const issues = data.filter((item) => !item.pull_request);
+              return issues.map(mapIssue);
+            },
+            `GET /repos/${owner}/${repo}/issues`,
+            { operation: 'listOpenIssues', label }
+          );
+        } catch (error) {
+          return handleError(error, 'list issues', { label });
+        }
+      });
     },
 
     async listOpenIssuesWithFallback(label?: string, fallback: Issue[] = []): Promise<DegradedResult<Issue[]>> {
@@ -160,25 +171,77 @@ export function createIssueManager(client: GitHubClient): IssueManager {
     },
 
     async getIssue(number: number): Promise<Issue | null> {
+      const cacheKey = `issue-${number}`;
+
       try {
-        return await client.execute(
-          async () => {
-            const { data } = await octokit.issues.get({
-              owner,
-              repo,
-              issue_number: number,
-            });
-            return mapIssue(data);
-          },
-          `GET /repos/${owner}/${repo}/issues/${number}`,
-          { operation: 'getIssue', issueNumber: number }
-        );
+        return await client.getCachedOrFetch('issue', cacheKey, async () => {
+          return await client.execute(
+            async () => {
+              const { data } = await octokit.issues.get({
+                owner,
+                repo,
+                issue_number: number,
+              });
+              return mapIssue(data);
+            },
+            `GET /repos/${owner}/${repo}/issues/${number}`,
+            { operation: 'getIssue', issueNumber: number }
+          );
+        });
       } catch (error: any) {
         if (error.status === 404) {
           return null;
         }
         return handleError(error, 'get issue', { issueNumber: number });
       }
+    },
+
+    async getIssuesBatch(numbers: number[]): Promise<Map<number, Issue | null>> {
+      const results = new Map<number, Issue | null>();
+      const uncached: number[] = [];
+      const cache = client.getCache();
+
+      // Check cache first
+      for (const num of numbers) {
+        const cacheKey = cache.generateKey('issue', owner, repo, `issue-${num}`);
+        const cached = cache.get<Issue>(cacheKey, 'issue');
+        if (cached !== undefined) {
+          results.set(num, cached);
+        } else {
+          uncached.push(num);
+        }
+      }
+
+      // Fetch uncached issues in parallel (batched)
+      if (uncached.length > 0) {
+        const batchSize = 10; // Process in batches of 10
+        for (let i = 0; i < uncached.length; i += batchSize) {
+          const batch = uncached.slice(i, i + batchSize);
+          const batchResults = await Promise.all(
+            batch.map(async (num) => {
+              try {
+                const issue = await this.getIssue(num);
+                return { num, issue };
+              } catch (error) {
+                logger.warn(`Failed to fetch issue #${num}`, { error: (error as Error).message });
+                return { num, issue: null };
+              }
+            })
+          );
+
+          for (const { num, issue } of batchResults) {
+            results.set(num, issue);
+          }
+        }
+      }
+
+      logger.debug('Batch fetched issues', {
+        requested: numbers.length,
+        cached: numbers.length - uncached.length,
+        fetched: uncached.length,
+      });
+
+      return results;
     },
 
     async createIssue(options: CreateIssueOptions): Promise<Issue> {
@@ -341,6 +404,21 @@ export function createIssueManager(client: GitHubClient): IssueManager {
       }
 
       return result;
+    },
+
+    invalidateCache(): void {
+      client.invalidateCacheType('issue');
+      client.invalidateCacheType('issue-list');
+      logger.debug('Invalidated issue cache');
+    },
+
+    invalidateIssue(number: number): void {
+      const cache = client.getCache();
+      const cacheKey = cache.generateKey('issue', owner, repo, `issue-${number}`);
+      cache.invalidate(cacheKey);
+      // Also invalidate the list cache since it may contain stale data
+      client.invalidateCacheType('issue-list');
+      logger.debug(`Invalidated cache for issue #${number}`);
     },
   };
 }

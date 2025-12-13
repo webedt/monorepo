@@ -5,6 +5,8 @@ export {
   type CircuitBreakerConfig,
   type CircuitState,
   type ServiceHealth,
+  type RateLimitConfig,
+  type RateLimitState,
 } from './client.js';
 export { createIssueManager, type IssueManager, type Issue, type CreateIssueOptions } from './issues.js';
 export {

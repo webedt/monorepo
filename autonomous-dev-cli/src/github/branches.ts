@@ -1,5 +1,6 @@
 import { GitHubClient } from './client.js';
 import { logger } from '../utils/logger.js';
+import type { CacheKeyType } from '../utils/githubCache.js';
 
 export interface Branch {
   name: string;
@@ -90,10 +91,12 @@ export interface MergeReadiness {
 export interface BranchManager {
   listBranches(): Promise<Branch[]>;
   getBranch(name: string): Promise<Branch | null>;
+  /** Get multiple branches in a batch (reduces API calls) */
+  getBranchesBatch(names: string[]): Promise<Map<string, Branch | null>>;
   createBranch(name: string, baseBranch: string): Promise<Branch>;
   deleteBranch(name: string): Promise<void>;
   branchExists(name: string): Promise<boolean>;
-  /** Get detailed branch protection rules */
+  /** Get detailed branch protection rules (cached) */
   getBranchProtectionRules(branch: string): Promise<BranchProtectionRules>;
   /** Check if a branch is protected */
   isBranchProtected(branch: string): Promise<boolean>;
@@ -101,7 +104,7 @@ export interface BranchManager {
   checkProtectionCompliance(branch: string, options?: MergeReadinessOptions): Promise<BranchProtectionCompliance>;
   /** Check if a branch is ready to be merged (all checks pass, up to date, etc.) */
   checkMergeReadiness(headBranch: string, baseBranch: string, options?: MergeReadinessOptions): Promise<MergeReadiness>;
-  /** Get the default branch for the repository */
+  /** Get the default branch for the repository (cached) */
   getDefaultBranch(): Promise<string>;
   /** Compare two branches and get the diff stats */
   compareBranches(base: string, head: string): Promise<{
@@ -110,6 +113,10 @@ export interface BranchManager {
     files: string[];
     commits: number;
   }>;
+  /** Invalidate branch cache */
+  invalidateCache(): void;
+  /** Invalidate a specific branch from cache */
+  invalidateBranch(name: string): void;
 }
 
 export function createBranchManager(client: GitHubClient): BranchManager {
@@ -118,43 +125,95 @@ export function createBranchManager(client: GitHubClient): BranchManager {
 
   return {
     async listBranches(): Promise<Branch[]> {
-      try {
-        const { data } = await octokit.repos.listBranches({
-          owner,
-          repo,
-          per_page: 100,
-        });
+      return client.getCachedOrFetch('branch-list', 'all', async () => {
+        try {
+          const { data } = await octokit.repos.listBranches({
+            owner,
+            repo,
+            per_page: 100,
+          });
 
-        return data.map((branch) => ({
-          name: branch.name,
-          sha: branch.commit.sha,
-          protected: branch.protected,
-        }));
-      } catch (error) {
-        logger.error('Failed to list branches', { error });
-        throw error;
-      }
+          return data.map((branch) => ({
+            name: branch.name,
+            sha: branch.commit.sha,
+            protected: branch.protected,
+          }));
+        } catch (error) {
+          logger.error('Failed to list branches', { error });
+          throw error;
+        }
+      });
     },
 
     async getBranch(name: string): Promise<Branch | null> {
-      try {
-        const { data } = await octokit.repos.getBranch({
-          owner,
-          repo,
-          branch: name,
-        });
+      return client.getCachedOrFetch('branch', `branch-${name}`, async () => {
+        try {
+          const { data } = await octokit.repos.getBranch({
+            owner,
+            repo,
+            branch: name,
+          });
 
-        return {
-          name: data.name,
-          sha: data.commit.sha,
-          protected: data.protected,
-        };
-      } catch (error: any) {
-        if (error.status === 404) {
-          return null;
+          return {
+            name: data.name,
+            sha: data.commit.sha,
+            protected: data.protected,
+          };
+        } catch (error: any) {
+          if (error.status === 404) {
+            return null;
+          }
+          throw error;
         }
-        throw error;
+      });
+    },
+
+    async getBranchesBatch(names: string[]): Promise<Map<string, Branch | null>> {
+      const results = new Map<string, Branch | null>();
+      const uncached: string[] = [];
+      const cache = client.getCache();
+
+      // Check cache first
+      for (const name of names) {
+        const cacheKey = cache.generateKey('branch', owner, repo, `branch-${name}`);
+        const cached = cache.get<Branch | null>(cacheKey, 'branch');
+        if (cached !== undefined) {
+          results.set(name, cached);
+        } else {
+          uncached.push(name);
+        }
       }
+
+      // Fetch uncached branches in parallel (batched)
+      if (uncached.length > 0) {
+        const batchSize = 10;
+        for (let i = 0; i < uncached.length; i += batchSize) {
+          const batch = uncached.slice(i, i + batchSize);
+          const batchResults = await Promise.all(
+            batch.map(async (name) => {
+              try {
+                const branch = await this.getBranch(name);
+                return { name, branch };
+              } catch (error) {
+                logger.warn(`Failed to fetch branch '${name}'`, { error: (error as Error).message });
+                return { name, branch: null };
+              }
+            })
+          );
+
+          for (const { name, branch } of batchResults) {
+            results.set(name, branch);
+          }
+        }
+      }
+
+      logger.debug('Batch fetched branches', {
+        requested: names.length,
+        cached: names.length - uncached.length,
+        fetched: uncached.length,
+      });
+
+      return results;
     },
 
     async createBranch(name: string, baseBranch: string): Promise<Branch> {
@@ -237,42 +296,44 @@ export function createBranchManager(client: GitHubClient): BranchManager {
         lockBranch: false,
       };
 
-      try {
-        const { data } = await octokit.repos.getBranchProtection({
-          owner,
-          repo,
-          branch,
-        });
+      return client.getCachedOrFetch('branch-protection', `protection-${branch}`, async () => {
+        try {
+          const { data } = await octokit.repos.getBranchProtection({
+            owner,
+            repo,
+            branch,
+          });
 
-        const rules: BranchProtectionRules = {
-          enabled: true,
-          requirePullRequestReviews: !!data.required_pull_request_reviews,
-          requiredApprovingReviewCount: data.required_pull_request_reviews?.required_approving_review_count ?? 0,
-          dismissStaleReviews: data.required_pull_request_reviews?.dismiss_stale_reviews ?? false,
-          requireCodeOwnerReviews: data.required_pull_request_reviews?.require_code_owner_reviews ?? false,
-          requireStatusChecks: !!data.required_status_checks,
-          requireUpToDateBranch: data.required_status_checks?.strict ?? false,
-          requiredStatusCheckContexts: data.required_status_checks?.contexts ?? [],
-          requireSignedCommits: !!data.required_signatures,
-          requireLinearHistory: !!data.required_linear_history?.enabled,
-          allowForcePushes: data.allow_force_pushes?.enabled ?? false,
-          allowDeletions: data.allow_deletions?.enabled ?? false,
-          blockCreations: data.block_creations?.enabled ?? false,
-          enforceAdmins: data.enforce_admins?.enabled ?? false,
-          lockBranch: data.lock_branch?.enabled ?? false,
-        };
+          const rules: BranchProtectionRules = {
+            enabled: true,
+            requirePullRequestReviews: !!data.required_pull_request_reviews,
+            requiredApprovingReviewCount: data.required_pull_request_reviews?.required_approving_review_count ?? 0,
+            dismissStaleReviews: data.required_pull_request_reviews?.dismiss_stale_reviews ?? false,
+            requireCodeOwnerReviews: data.required_pull_request_reviews?.require_code_owner_reviews ?? false,
+            requireStatusChecks: !!data.required_status_checks,
+            requireUpToDateBranch: data.required_status_checks?.strict ?? false,
+            requiredStatusCheckContexts: data.required_status_checks?.contexts ?? [],
+            requireSignedCommits: !!data.required_signatures,
+            requireLinearHistory: !!data.required_linear_history?.enabled,
+            allowForcePushes: data.allow_force_pushes?.enabled ?? false,
+            allowDeletions: data.allow_deletions?.enabled ?? false,
+            blockCreations: data.block_creations?.enabled ?? false,
+            enforceAdmins: data.enforce_admins?.enabled ?? false,
+            lockBranch: data.lock_branch?.enabled ?? false,
+          };
 
-        logger.debug(`Retrieved protection rules for branch '${branch}'`, { rules });
-        return rules;
-      } catch (error: any) {
-        if (error.status === 404) {
-          // No protection rules exist
-          logger.debug(`No protection rules found for branch '${branch}'`);
-          return defaultRules;
+          logger.debug(`Retrieved protection rules for branch '${branch}'`, { rules });
+          return rules;
+        } catch (error: any) {
+          if (error.status === 404) {
+            // No protection rules exist
+            logger.debug(`No protection rules found for branch '${branch}'`);
+            return defaultRules;
+          }
+          logger.error('Failed to get branch protection rules', { error, branch });
+          throw error;
         }
-        logger.error('Failed to get branch protection rules', { error, branch });
-        throw error;
-      }
+      });
     },
 
     async isBranchProtected(branch: string): Promise<boolean> {
@@ -490,16 +551,9 @@ export function createBranchManager(client: GitHubClient): BranchManager {
     },
 
     async getDefaultBranch(): Promise<string> {
-      try {
-        const { data } = await octokit.repos.get({
-          owner,
-          repo,
-        });
-        return data.default_branch;
-      } catch (error) {
-        logger.error('Failed to get default branch', { error });
-        throw error;
-      }
+      // Use the client's cached getRepo method
+      const repoInfo = await client.getRepo();
+      return repoInfo.defaultBranch;
     },
 
     async compareBranches(base: string, head: string): Promise<{
@@ -536,6 +590,24 @@ export function createBranchManager(client: GitHubClient): BranchManager {
         logger.error('Failed to compare branches', { error, base, head });
         throw error;
       }
+    },
+
+    invalidateCache(): void {
+      client.invalidateCacheType('branch');
+      client.invalidateCacheType('branch-list');
+      client.invalidateCacheType('branch-protection');
+      logger.debug('Invalidated branch cache');
+    },
+
+    invalidateBranch(name: string): void {
+      const cache = client.getCache();
+      const branchKey = cache.generateKey('branch', owner, repo, `branch-${name}`);
+      const protectionKey = cache.generateKey('branch-protection', owner, repo, `protection-${name}`);
+      cache.invalidate(branchKey);
+      cache.invalidate(protectionKey);
+      // Also invalidate the list cache since it may contain stale data
+      client.invalidateCacheType('branch-list');
+      logger.debug(`Invalidated cache for branch '${name}'`);
     },
   };
 }

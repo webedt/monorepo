@@ -5,6 +5,7 @@ import {
   ErrorCode,
   createGitHubErrorFromResponse,
 } from '../utils/errors.js';
+import type { CacheKeyType } from '../utils/githubCache.js';
 
 export interface PullRequest {
   number: number;
