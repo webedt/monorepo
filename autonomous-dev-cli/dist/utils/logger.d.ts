@@ -39,6 +39,10 @@ interface LoggerOptions {
     prefix?: string;
     format?: LogFormat;
     correlationId?: string;
+    cycleNumber?: number;
+    workerId?: string;
+    includeCorrelationId?: boolean;
+    includeTimestamp?: boolean;
 }
 interface ErrorLogOptions {
     context?: ErrorContext;
@@ -54,6 +58,8 @@ export interface StructuredLogEntry {
     message: string;
     correlationId?: string;
     component?: string;
+    cycleNumber?: number;
+    workerId?: string;
     meta?: Record<string, any>;
     error?: {
         code?: string;
@@ -68,6 +74,16 @@ export interface StructuredLogEntry {
             automatic: boolean;
         }>;
     };
+}
+/**
+ * Correlation context for tracking requests across the daemon lifecycle
+ */
+export interface CorrelationContext {
+    correlationId: string;
+    cycleNumber?: number;
+    workerId?: string;
+    component?: string;
+    startTime?: number;
 }
 /**
  * Generate a new correlation ID
@@ -85,6 +101,34 @@ export declare function getCorrelationId(): string | undefined;
  * Clear the global correlation ID
  */
 export declare function clearCorrelationId(): void;
+/**
+ * Set the full global correlation context (including cycle number and worker ID)
+ */
+export declare function setCorrelationContext(context: CorrelationContext): void;
+/**
+ * Get the current global correlation context
+ */
+export declare function getCorrelationContext(): CorrelationContext | undefined;
+/**
+ * Update the global correlation context with additional fields
+ */
+export declare function updateCorrelationContext(updates: Partial<CorrelationContext>): void;
+/**
+ * Set the cycle number in the global correlation context
+ */
+export declare function setCycleNumber(cycleNumber: number): void;
+/**
+ * Get the current cycle number from the global correlation context
+ */
+export declare function getCycleNumber(): number | undefined;
+/**
+ * Set the worker ID in the global correlation context
+ */
+export declare function setWorkerId(workerId: string): void;
+/**
+ * Get the current worker ID from the global correlation context
+ */
+export declare function getWorkerId(): string | undefined;
 /**
  * Get current memory usage in megabytes
  */
@@ -129,6 +173,10 @@ declare class Logger {
     private prefix;
     private format;
     private correlationId?;
+    private cycleNumber?;
+    private workerId?;
+    private includeCorrelationId;
+    private includeTimestamp;
     constructor(options?: LoggerOptions);
     setLevel(level: LogLevel): void;
     setFormat(format: LogFormat): void;
@@ -137,9 +185,33 @@ declare class Logger {
      */
     setCorrelationId(id: string): void;
     /**
+     * Set the cycle number for this logger instance
+     */
+    setCycleNumber(cycleNumber: number): void;
+    /**
+     * Set the worker ID for this logger instance
+     */
+    setWorkerId(workerId: string): void;
+    /**
+     * Configure whether to include correlation ID in logs
+     */
+    setIncludeCorrelationId(include: boolean): void;
+    /**
+     * Configure whether to include timestamp in logs
+     */
+    setIncludeTimestamp(include: boolean): void;
+    /**
      * Get the effective correlation ID (instance or global)
      */
     private getEffectiveCorrelationId;
+    /**
+     * Get the effective cycle number (instance or global)
+     */
+    private getEffectiveCycleNumber;
+    /**
+     * Get the effective worker ID (instance or global)
+     */
+    private getEffectiveWorkerId;
     private shouldLog;
     /**
      * Create a structured log entry
@@ -218,13 +290,29 @@ declare class Logger {
     }): void;
     header(title: string): void;
     /**
-     * Create a child logger with a prefix and optionally inherit correlation ID
+     * Create a child logger with a prefix and optionally inherit correlation context
      */
     child(prefix: string): Logger;
     /**
      * Create a child logger with a specific correlation ID for request tracing
      */
     withCorrelationId(correlationId: string): Logger;
+    /**
+     * Create a child logger with a specific worker ID for worker context tracking
+     */
+    withWorkerId(workerId: string): Logger;
+    /**
+     * Create a child logger with a specific cycle number for cycle context tracking
+     */
+    withCycleNumber(cycleNumber: number): Logger;
+    /**
+     * Create a child logger with full correlation context
+     */
+    withContext(context: {
+        correlationId?: string;
+        cycleNumber?: number;
+        workerId?: string;
+    }): Logger;
     /**
      * Get the current log entry as a structured object (for testing/inspection)
      */

@@ -153,6 +153,30 @@ export declare const ConfigSchema: z.ZodObject<{
         pauseBetweenCycles?: boolean | undefined;
     }>;
     /**
+     * Logging Settings
+     * Configure log output format and level for production/development environments.
+     */
+    logging: z.ZodDefault<z.ZodObject<{
+        /** Log output format: 'pretty' for human-readable colored output, 'json' for structured JSON logs */
+        format: z.ZodDefault<z.ZodEnum<["pretty", "json"]>>;
+        /** Minimum log level to output: 'debug' (most verbose), 'info', 'warn', 'error' (least verbose) */
+        level: z.ZodDefault<z.ZodEnum<["debug", "info", "warn", "error"]>>;
+        /** Include correlation ID prefix in all log entries (default: true) */
+        includeCorrelationId: z.ZodDefault<z.ZodBoolean>;
+        /** Include timestamps in log entries (default: true) */
+        includeTimestamp: z.ZodDefault<z.ZodBoolean>;
+    }, "strip", z.ZodTypeAny, {
+        format: "pretty" | "json";
+        level: "debug" | "info" | "warn" | "error";
+        includeCorrelationId: boolean;
+        includeTimestamp: boolean;
+    }, {
+        format?: "pretty" | "json" | undefined;
+        level?: "debug" | "info" | "warn" | "error" | undefined;
+        includeCorrelationId?: boolean | undefined;
+        includeTimestamp?: boolean | undefined;
+    }>>;
+    /**
      * Circuit Breaker Settings
      * Configure resilience for Claude API calls.
      */
@@ -276,6 +300,12 @@ export declare const ConfigSchema: z.ZodObject<{
         loopIntervalMs: number;
         pauseBetweenCycles: boolean;
     };
+    logging: {
+        format: "pretty" | "json";
+        level: "debug" | "info" | "warn" | "error";
+        includeCorrelationId: boolean;
+        includeTimestamp: boolean;
+    };
     circuitBreaker: {
         failureThreshold: number;
         resetTimeoutMs: number;
@@ -343,6 +373,12 @@ export declare const ConfigSchema: z.ZodObject<{
         databaseUrl?: string | undefined;
         userEmail?: string | undefined;
     };
+    logging?: {
+        format?: "pretty" | "json" | undefined;
+        level?: "debug" | "info" | "warn" | "error" | undefined;
+        includeCorrelationId?: boolean | undefined;
+        includeTimestamp?: boolean | undefined;
+    } | undefined;
     circuitBreaker?: {
         failureThreshold?: number | undefined;
         resetTimeoutMs?: number | undefined;
