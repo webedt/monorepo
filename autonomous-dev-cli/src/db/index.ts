@@ -122,6 +122,34 @@ export const events = pgTable('events', {
   timestamp: timestamp('timestamp').defaultNow().notNull(),
 });
 
+// Execution history for task audit trail
+export const taskExecutionHistory = pgTable('task_execution_history', {
+  id: serial('id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  issueNumber: integer('issue_number'),
+  branchName: text('branch_name'),
+  repository: text('repository').notNull(),
+  priority: text('priority').notNull().default('medium'),
+  category: text('category'),
+  complexity: text('complexity'),
+  status: text('status').notNull(), // 'queued' | 'started' | 'completed' | 'failed' | 'dropped' | 'retrying'
+  workerId: text('worker_id'),
+  queuedAt: timestamp('queued_at').notNull(),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+  duration: integer('duration'), // milliseconds
+  retryCount: integer('retry_count').default(0).notNull(),
+  maxRetries: integer('max_retries').default(3).notNull(),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  isRetryable: boolean('is_retryable'),
+  priorityScore: integer('priority_score'),
+  groupId: text('group_id'),
+  metadata: json('metadata').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -130,6 +158,51 @@ export type User = typeof users.$inferSelect;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type DbEvent = typeof events.$inferSelect;
+export type TaskExecutionHistoryEntry = typeof taskExecutionHistory.$inferSelect;
+
+/** Status values for task execution */
+export type TaskExecutionStatus = 'queued' | 'started' | 'completed' | 'failed' | 'dropped' | 'retrying';
+
+/** Priority levels for tasks */
+export type TaskPriorityLevel = 'critical' | 'high' | 'medium' | 'low';
+
+/** Parameters for recording task execution history */
+export interface RecordExecutionHistoryParams {
+  taskId: string;
+  repository: string;
+  status: TaskExecutionStatus;
+  issueNumber?: number;
+  branchName?: string;
+  priority?: TaskPriorityLevel;
+  category?: string;
+  complexity?: string;
+  workerId?: string;
+  queuedAt?: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  duration?: number;
+  retryCount?: number;
+  maxRetries?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  isRetryable?: boolean;
+  priorityScore?: number;
+  groupId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Query options for execution history */
+export interface ExecutionHistoryQueryOptions {
+  repository?: string;
+  status?: TaskExecutionStatus;
+  priority?: TaskPriorityLevel;
+  workerId?: string;
+  since?: Date;
+  until?: Date;
+  issueNumber?: number;
+  limit?: number;
+  offset?: number;
+}
 
 export interface UserCredentials {
   userId: string;
@@ -232,7 +305,7 @@ export async function initDatabase(databaseUrl: string, config: PoolConfig = {})
     logger.error('Pool: unexpected error', { error: err.message });
   });
 
-  db = drizzle(pool, { schema: { users, chatSessions, messages, events } });
+  db = drizzle(pool, { schema: { users, chatSessions, messages, events, taskExecutionHistory } });
 
   try {
     await pool.query('SELECT 1');
@@ -671,4 +744,318 @@ export async function flushActivityUpdates(chatSessionId?: string): Promise<void
     }
     activityUpdateTimers.clear();
   }
+}
+
+// ============================================================================
+// Task Execution History Operations
+// ============================================================================
+
+/**
+ * Record a task execution event in the history.
+ * This creates or updates a history entry for audit trail purposes.
+ */
+export async function recordExecutionHistory(
+  params: RecordExecutionHistoryParams
+): Promise<TaskExecutionHistoryEntry> {
+  const database = getDb();
+
+  const [entry] = await withQueryTimeout(
+    () => database
+      .insert(taskExecutionHistory)
+      .values({
+        taskId: params.taskId,
+        repository: params.repository,
+        status: params.status,
+        issueNumber: params.issueNumber,
+        branchName: params.branchName,
+        priority: params.priority ?? 'medium',
+        category: params.category,
+        complexity: params.complexity,
+        workerId: params.workerId,
+        queuedAt: params.queuedAt ?? new Date(),
+        startedAt: params.startedAt,
+        completedAt: params.completedAt,
+        duration: params.duration,
+        retryCount: params.retryCount ?? 0,
+        maxRetries: params.maxRetries ?? 3,
+        errorCode: params.errorCode,
+        errorMessage: params.errorMessage,
+        isRetryable: params.isRetryable,
+        priorityScore: params.priorityScore,
+        groupId: params.groupId,
+        metadata: params.metadata,
+      })
+      .returning(),
+    'recordExecutionHistory'
+  );
+
+  logger.debug(`Recorded execution history: ${params.taskId} - ${params.status}`);
+  return entry;
+}
+
+/**
+ * Update an existing execution history entry
+ */
+export async function updateExecutionHistory(
+  taskId: string,
+  updates: Partial<Omit<RecordExecutionHistoryParams, 'taskId' | 'repository'>>
+): Promise<void> {
+  const database = getDb();
+
+  await withQueryTimeout(
+    () => database
+      .update(taskExecutionHistory)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(eq(taskExecutionHistory.taskId, taskId)),
+    'updateExecutionHistory'
+  );
+
+  logger.debug(`Updated execution history: ${taskId}`);
+}
+
+/**
+ * Query execution history with optional filters
+ */
+export async function queryExecutionHistory(
+  options: ExecutionHistoryQueryOptions = {}
+): Promise<TaskExecutionHistoryEntry[]> {
+  const database = getDb();
+
+  return withQueryTimeout(
+    async () => {
+      // Build where conditions dynamically
+      const whereConditions: ReturnType<typeof sql>[] = [];
+
+      if (options.repository) {
+        whereConditions.push(sql`${taskExecutionHistory.repository} = ${options.repository}`);
+      }
+      if (options.status) {
+        whereConditions.push(sql`${taskExecutionHistory.status} = ${options.status}`);
+      }
+      if (options.priority) {
+        whereConditions.push(sql`${taskExecutionHistory.priority} = ${options.priority}`);
+      }
+      if (options.workerId) {
+        whereConditions.push(sql`${taskExecutionHistory.workerId} = ${options.workerId}`);
+      }
+      if (options.issueNumber) {
+        whereConditions.push(sql`${taskExecutionHistory.issueNumber} = ${options.issueNumber}`);
+      }
+      if (options.since) {
+        whereConditions.push(sql`${taskExecutionHistory.queuedAt} >= ${options.since}`);
+      }
+      if (options.until) {
+        whereConditions.push(sql`${taskExecutionHistory.queuedAt} <= ${options.until}`);
+      }
+
+      // Build the query with all conditions
+      if (whereConditions.length === 0) {
+        return database
+          .select()
+          .from(taskExecutionHistory)
+          .orderBy(sql`${taskExecutionHistory.createdAt} DESC`)
+          .limit(options.limit ?? 100)
+          .offset(options.offset ?? 0);
+      }
+
+      // Combine all conditions with AND
+      const combinedCondition = whereConditions.reduce((acc, cond, idx) => {
+        if (idx === 0) return cond;
+        return sql`${acc} AND ${cond}`;
+      });
+
+      return database
+        .select()
+        .from(taskExecutionHistory)
+        .where(combinedCondition)
+        .orderBy(sql`${taskExecutionHistory.createdAt} DESC`)
+        .limit(options.limit ?? 100)
+        .offset(options.offset ?? 0);
+    },
+    'queryExecutionHistory'
+  );
+}
+
+/**
+ * Get execution statistics for a repository
+ */
+export async function getExecutionStatistics(
+  repository: string,
+  since?: Date
+): Promise<{
+  total: number;
+  byStatus: Record<string, number>;
+  byPriority: Record<string, number>;
+  avgDuration: number;
+  successRate: number;
+  totalRetries: number;
+  failedTasks: number;
+}> {
+  const database = getDb();
+
+  return withQueryTimeout(
+    async () => {
+      // Build where condition
+      const whereCondition = since
+        ? sql`${taskExecutionHistory.repository} = ${repository} AND ${taskExecutionHistory.queuedAt} >= ${since}`
+        : sql`${taskExecutionHistory.repository} = ${repository}`;
+
+      // Get all entries for the repository in the time window
+      const entries = await database
+        .select()
+        .from(taskExecutionHistory)
+        .where(whereCondition);
+
+      const stats = {
+        total: entries.length,
+        byStatus: {} as Record<string, number>,
+        byPriority: {} as Record<string, number>,
+        avgDuration: 0,
+        successRate: 0,
+        totalRetries: 0,
+        failedTasks: 0,
+      };
+
+      let totalDuration = 0;
+      let durationCount = 0;
+      let successCount = 0;
+
+      for (const entry of entries) {
+        // Count by status
+        stats.byStatus[entry.status] = (stats.byStatus[entry.status] || 0) + 1;
+
+        // Count by priority
+        stats.byPriority[entry.priority] = (stats.byPriority[entry.priority] || 0) + 1;
+
+        // Sum durations
+        if (entry.duration) {
+          totalDuration += entry.duration;
+          durationCount++;
+        }
+
+        // Count successes and failures
+        if (entry.status === 'completed') {
+          successCount++;
+        } else if (entry.status === 'failed') {
+          stats.failedTasks++;
+        }
+
+        // Sum retries
+        stats.totalRetries += entry.retryCount;
+      }
+
+      stats.avgDuration = durationCount > 0 ? totalDuration / durationCount : 0;
+      stats.successRate = stats.total > 0 ? (successCount / stats.total) * 100 : 0;
+
+      return stats;
+    },
+    'getExecutionStatistics'
+  );
+}
+
+/**
+ * Get recent failed tasks that are retryable
+ */
+export async function getRetryableTasks(
+  repository: string,
+  limit: number = 10
+): Promise<TaskExecutionHistoryEntry[]> {
+  const database = getDb();
+
+  return withQueryTimeout(
+    () => database
+      .select()
+      .from(taskExecutionHistory)
+      .where(
+        sql`${taskExecutionHistory.repository} = ${repository}
+            AND ${taskExecutionHistory.status} = 'failed'
+            AND ${taskExecutionHistory.isRetryable} = true
+            AND ${taskExecutionHistory.retryCount} < ${taskExecutionHistory.maxRetries}`
+      )
+      .orderBy(sql`${taskExecutionHistory.priorityScore} DESC, ${taskExecutionHistory.createdAt} DESC`)
+      .limit(limit),
+    'getRetryableTasks'
+  );
+}
+
+/**
+ * Record batch execution history entries efficiently
+ */
+export async function recordExecutionHistoryBatch(
+  entries: RecordExecutionHistoryParams[]
+): Promise<TaskExecutionHistoryEntry[]> {
+  if (entries.length === 0) return [];
+
+  const database = getDb();
+
+  const values = entries.map(params => ({
+    taskId: params.taskId,
+    repository: params.repository,
+    status: params.status,
+    issueNumber: params.issueNumber,
+    branchName: params.branchName,
+    priority: params.priority ?? 'medium',
+    category: params.category,
+    complexity: params.complexity,
+    workerId: params.workerId,
+    queuedAt: params.queuedAt ?? new Date(),
+    startedAt: params.startedAt,
+    completedAt: params.completedAt,
+    duration: params.duration,
+    retryCount: params.retryCount ?? 0,
+    maxRetries: params.maxRetries ?? 3,
+    errorCode: params.errorCode,
+    errorMessage: params.errorMessage,
+    isRetryable: params.isRetryable,
+    priorityScore: params.priorityScore,
+    groupId: params.groupId,
+    metadata: params.metadata,
+  }));
+
+  const insertedEntries = await withQueryTimeout(
+    () => database
+      .insert(taskExecutionHistory)
+      .values(values)
+      .returning(),
+    'recordExecutionHistoryBatch'
+  );
+
+  logger.debug(`Batch recorded ${insertedEntries.length} execution history entries`);
+  return insertedEntries;
+}
+
+/**
+ * Clean up old execution history entries
+ */
+export async function cleanupExecutionHistory(
+  repository: string,
+  retentionDays: number = 30
+): Promise<number> {
+  const database = getDb();
+  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+  const result = await withQueryTimeout(
+    () => database
+      .delete(taskExecutionHistory)
+      .where(
+        sql`${taskExecutionHistory.repository} = ${repository}
+            AND ${taskExecutionHistory.createdAt} < ${cutoffDate}`
+      )
+      .returning({ id: taskExecutionHistory.id }),
+    'cleanupExecutionHistory'
+  );
+
+  const deletedCount = result.length;
+  if (deletedCount > 0) {
+    logger.info(`Cleaned up ${deletedCount} old execution history entries`, {
+      repository,
+      retentionDays,
+      cutoffDate: cutoffDate.toISOString(),
+    });
+  }
+
+  return deletedCount;
 }
