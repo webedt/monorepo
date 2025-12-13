@@ -1,17 +1,40 @@
 import { z } from 'zod';
 
+/**
+ * Configuration Schema for Autonomous Dev CLI
+ *
+ * This schema defines all configuration options available for the CLI.
+ * Configuration can be provided via:
+ *   1. JSON config file (autonomous-dev.config.json)
+ *   2. Environment variables
+ *   3. Default values
+ *
+ * Priority: Environment variables > Config file > Defaults
+ */
 export const ConfigSchema = z.object({
-  // Target repository
+  /**
+   * Target Repository Settings
+   * Configure the GitHub repository that autonomous-dev will work with.
+   */
   repo: z.object({
-    owner: z.string().min(1),
-    name: z.string().min(1),
+    /** GitHub username or organization that owns the repository (required) */
+    owner: z.string().min(1, 'Repository owner is required'),
+    /** Repository name (required) */
+    name: z.string().min(1, 'Repository name is required'),
+    /** Base branch for pull requests (default: 'main') */
     baseBranch: z.string().default('main'),
-  }),
+  }).describe('GitHub repository settings'),
 
-  // Task discovery
+  /**
+   * Task Discovery Settings
+   * Control how tasks are discovered and managed.
+   */
   discovery: z.object({
-    tasksPerCycle: z.number().min(1).max(10).default(5),
-    maxOpenIssues: z.number().min(1).default(10),
+    /** Number of tasks to discover per cycle (1-10, default: 5) */
+    tasksPerCycle: z.number().min(1, 'Must discover at least 1 task').max(10, 'Maximum 10 tasks per cycle').default(5),
+    /** Maximum open issues before pausing discovery (min: 1, default: 10) */
+    maxOpenIssues: z.number().min(1, 'Must allow at least 1 open issue').default(10),
+    /** File paths/patterns to exclude from analysis */
     excludePaths: z.array(z.string()).default([
       'node_modules',
       'dist',
@@ -19,53 +42,93 @@ export const ConfigSchema = z.object({
       'coverage',
       '*.lock',
     ]),
+    /** Label applied to auto-created GitHub issues */
     issueLabel: z.string().default('autonomous-dev'),
-  }),
+  }).describe('Task discovery configuration'),
 
-  // Execution
+  /**
+   * Execution Settings
+   * Control how tasks are executed.
+   */
   execution: z.object({
-    parallelWorkers: z.number().min(1).max(10).default(4),
-    timeoutMinutes: z.number().min(5).max(120).default(30),
+    /** Number of parallel workers (1-10, default: 4) */
+    parallelWorkers: z.number().min(1, 'Must have at least 1 worker').max(10, 'Maximum 10 workers').default(4),
+    /** Task timeout in minutes (5-120, default: 30) */
+    timeoutMinutes: z.number().min(5, 'Timeout must be at least 5 minutes').max(120, 'Timeout cannot exceed 120 minutes').default(30),
+    /** Working directory for task execution */
     workDir: z.string().default('/tmp/autonomous-dev'),
-  }),
+  }).describe('Task execution settings'),
 
-  // Evaluation
+  /**
+   * Evaluation Settings
+   * Control quality checks before merging.
+   */
   evaluation: z.object({
+    /** Require build to pass before merging (default: true) */
     requireBuild: z.boolean().default(true),
+    /** Require tests to pass before merging (default: true) */
     requireTests: z.boolean().default(true),
+    /** Require health checks to pass (default: true) */
     requireHealthCheck: z.boolean().default(true),
+    /** Require smoke tests to pass (default: false) */
     requireSmokeTests: z.boolean().default(false),
+    /** URLs to check for health (array of URLs) */
     healthCheckUrls: z.array(z.string()).default([]),
+    /** URLs for smoke tests (array of URLs) */
     smokeTestUrls: z.array(z.string()).default([]),
+    /** URL pattern for preview deployments. Use {owner}, {repo}, {branch} placeholders */
     previewUrlPattern: z.string().default('https://github.etdofresh.com/{owner}/{repo}/{branch}/'),
-  }),
+  }).describe('Quality evaluation settings'),
 
-  // Auto-merge
+  /**
+   * Auto-merge Settings
+   * Control how pull requests are merged.
+   */
   merge: z.object({
+    /** Automatically merge PRs that pass all checks (default: true) */
     autoMerge: z.boolean().default(true),
+    /** Require all status checks to pass before merging (default: true) */
     requireAllChecks: z.boolean().default(true),
-    maxRetries: z.number().min(1).max(5).default(3),
+    /** Maximum merge retry attempts (1-5, default: 3) */
+    maxRetries: z.number().min(1, 'Must retry at least once').max(5, 'Maximum 5 retries').default(3),
+    /** Strategy for handling merge conflicts: 'rebase', 'merge', or 'manual' */
     conflictStrategy: z.enum(['rebase', 'merge', 'manual']).default('rebase'),
+    /** Git merge method: 'merge', 'squash', or 'rebase' */
     mergeMethod: z.enum(['merge', 'squash', 'rebase']).default('squash'),
-  }),
+  }).describe('Pull request merge settings'),
 
-  // Daemon
+  /**
+   * Daemon Settings
+   * Control the continuous daemon mode.
+   */
   daemon: z.object({
-    loopIntervalMs: z.number().min(0).default(60000),
+    /** Interval between daemon cycles in milliseconds (min: 0, default: 60000 = 1 minute) */
+    loopIntervalMs: z.number().min(0, 'Interval cannot be negative').default(60000),
+    /** Pause between development cycles (default: true) */
     pauseBetweenCycles: z.boolean().default(true),
-  }),
+  }).describe('Daemon mode settings'),
 
-  // Credentials (populated from DB or env)
+  /**
+   * Credentials
+   * Authentication credentials (typically set via environment variables).
+   */
   credentials: z.object({
+    /** GitHub personal access token (env: GITHUB_TOKEN) */
     githubToken: z.string().optional(),
+    /** Claude API authentication */
     claudeAuth: z.object({
+      /** Claude access token (env: CLAUDE_ACCESS_TOKEN) */
       accessToken: z.string(),
+      /** Claude refresh token (env: CLAUDE_REFRESH_TOKEN) */
       refreshToken: z.string(),
+      /** Token expiration timestamp */
       expiresAt: z.number().optional(),
     }).optional(),
+    /** Database URL for credential storage (env: DATABASE_URL) */
     databaseUrl: z.string().optional(),
-    userEmail: z.string().email().optional(),
-  }),
+    /** User email for credential lookup (env: USER_EMAIL) */
+    userEmail: z.string().email('Invalid email format').optional(),
+  }).describe('Authentication credentials'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
