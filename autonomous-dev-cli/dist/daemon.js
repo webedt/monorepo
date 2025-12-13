@@ -10,6 +10,7 @@ import { createMonitoringServer } from './utils/monitoring.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
 import { mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import { validateWorkDirectory, sanitizeForDisplay } from './config/validation.js';
 export class Daemon {
     config;
     github = null;
@@ -237,9 +238,56 @@ export class Daemon {
         // Verify repository access
         const repo = await this.github.client.getRepo();
         logger.success(`Repository: ${repo.fullName} (default branch: ${repo.defaultBranch})`);
-        // Create work directory
+        // Validate and create work directory
+        const workDirValidation = validateWorkDirectory(this.config.execution.workDir, {
+            mustExist: false,
+            checkWriteAccess: true,
+        });
+        if (!workDirValidation.valid) {
+            throw new ConfigError(ErrorCode.CONFIG_INVALID, `Invalid work directory: ${workDirValidation.error}`, {
+                field: 'execution.workDir',
+                value: sanitizeForDisplay(this.config.execution.workDir),
+                recoveryActions: [
+                    {
+                        description: 'Provide a valid directory path for execution.workDir',
+                        automatic: false,
+                    },
+                    {
+                        description: 'Ensure the path does not point to a system directory',
+                        automatic: false,
+                    },
+                    {
+                        description: 'Check that parent directory exists and is writable',
+                        automatic: false,
+                    },
+                ],
+                context: this.getErrorContext('initialize'),
+            });
+        }
+        // Create work directory if it doesn't exist
         if (!existsSync(this.config.execution.workDir)) {
-            mkdirSync(this.config.execution.workDir, { recursive: true });
+            try {
+                mkdirSync(this.config.execution.workDir, { recursive: true });
+                logger.info(`Created work directory: ${this.config.execution.workDir}`);
+            }
+            catch (error) {
+                throw new ConfigError(ErrorCode.CONFIG_INVALID, `Failed to create work directory: ${error.message}`, {
+                    field: 'execution.workDir',
+                    value: sanitizeForDisplay(this.config.execution.workDir),
+                    recoveryActions: [
+                        {
+                            description: 'Ensure you have write permissions to the parent directory',
+                            automatic: false,
+                        },
+                        {
+                            description: 'Try using a different work directory path',
+                            automatic: false,
+                        },
+                    ],
+                    context: this.getErrorContext('initialize'),
+                    cause: error,
+                });
+            }
         }
         logger.success('Initialization complete');
     }

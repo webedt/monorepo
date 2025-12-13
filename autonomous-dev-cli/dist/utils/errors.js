@@ -28,6 +28,9 @@ export var ErrorCode;
     ErrorCode["CONFIG_FILE_NOT_FOUND"] = "CONFIG_FILE_NOT_FOUND";
     ErrorCode["CONFIG_PARSE_ERROR"] = "CONFIG_PARSE_ERROR";
     ErrorCode["CONFIG_VALIDATION_FAILED"] = "CONFIG_VALIDATION_FAILED";
+    ErrorCode["CONFIG_PATH_TRAVERSAL"] = "CONFIG_PATH_TRAVERSAL";
+    ErrorCode["CONFIG_INVALID_PATH"] = "CONFIG_INVALID_PATH";
+    ErrorCode["CONFIG_UNSAFE_INPUT"] = "CONFIG_UNSAFE_INPUT";
     // Database errors (4000-4999)
     ErrorCode["DB_CONNECTION_FAILED"] = "DB_CONNECTION_FAILED";
     ErrorCode["DB_USER_NOT_FOUND"] = "DB_USER_NOT_FOUND";
@@ -101,6 +104,9 @@ export class StructuredError extends Error {
             ErrorCode.CLAUDE_AUTH_FAILED,
             ErrorCode.CONFIG_INVALID,
             ErrorCode.CONFIG_MISSING_REQUIRED,
+            ErrorCode.CONFIG_PATH_TRAVERSAL,
+            ErrorCode.CONFIG_INVALID_PATH,
+            ErrorCode.CONFIG_UNSAFE_INPUT,
         ];
         if (criticalCodes.includes(code))
             return 'critical';
@@ -340,6 +346,44 @@ export class ConfigError extends StructuredError {
 }
 function getConfigRecoveryActions(code, field) {
     const actions = [];
+    // Add code-specific recovery actions first
+    switch (code) {
+        case ErrorCode.CONFIG_PATH_TRAVERSAL:
+            actions.push({
+                description: 'Remove path traversal sequences like ".." from the path',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Use absolute paths to avoid ambiguity',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.CONFIG_INVALID_PATH:
+            actions.push({
+                description: 'Verify the path exists and is accessible',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check file permissions for the specified path',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Ensure the path points to the expected file or directory type',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.CONFIG_UNSAFE_INPUT:
+            actions.push({
+                description: 'Remove special characters or escape sequences from the input',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Verify the input matches the expected format',
+                automatic: false,
+            });
+            break;
+    }
+    // Add general recovery actions
     actions.push({
         description: 'Run "autonomous-dev help-config" for configuration documentation',
         automatic: false,

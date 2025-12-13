@@ -4,6 +4,7 @@ import { config as loadEnv } from 'dotenv';
 import { ConfigSchema, defaultConfig } from './schema.js';
 import { logger } from '../utils/logger.js';
 import { ConfigError, ErrorCode, } from '../utils/errors.js';
+import { validateConfigPath, sanitizeForDisplay, containsPathTraversal, } from './validation.js';
 // Load .env file
 loadEnv();
 /**
@@ -372,6 +373,40 @@ function deepMerge(target, source) {
 }
 export function loadConfig(configPath) {
     let fileConfig = {};
+    // Validate user-provided config path before use
+    if (configPath) {
+        const pathValidation = validateConfigPath(configPath, {
+            allowRelative: true,
+            mustExist: true,
+            mustBeFile: true,
+            allowedExtensions: ['.json'],
+            checkReadAccess: true,
+        });
+        if (!pathValidation.valid) {
+            throw new ConfigError(ErrorCode.CONFIG_INVALID, `Invalid configuration path: ${pathValidation.error}`, {
+                field: 'configPath',
+                value: sanitizeForDisplay(configPath),
+                recoveryActions: [
+                    {
+                        description: 'Provide a valid path to a JSON configuration file',
+                        automatic: false,
+                    },
+                    {
+                        description: 'Ensure the file exists and is readable',
+                        automatic: false,
+                    },
+                    {
+                        description: 'Avoid using path traversal sequences like ".."',
+                        automatic: false,
+                    },
+                    {
+                        description: 'Run "autonomous-dev init" to create a new configuration file',
+                        automatic: false,
+                    },
+                ],
+            });
+        }
+    }
     // Try to load config file
     const possiblePaths = configPath
         ? [configPath]
@@ -382,17 +417,61 @@ export function loadConfig(configPath) {
         ];
     let configLoadPath;
     for (const path of possiblePaths) {
+        // Skip paths that contain path traversal sequences (for default paths)
+        if (!configPath && containsPathTraversal(path)) {
+            logger.warn(`Skipping potentially unsafe config path: ${sanitizeForDisplay(path)}`);
+            continue;
+        }
         const fullPath = resolve(path);
         if (existsSync(fullPath)) {
             try {
                 const content = readFileSync(fullPath, 'utf-8');
-                fileConfig = JSON.parse(content);
+                // Validate JSON structure before parsing
+                try {
+                    fileConfig = JSON.parse(content);
+                }
+                catch (jsonError) {
+                    throw new ConfigError(ErrorCode.CONFIG_PARSE_ERROR, `Invalid JSON in config file ${sanitizeForDisplay(fullPath)}: ${jsonError.message}`, {
+                        context: { configPath: fullPath },
+                        recoveryActions: [
+                            {
+                                description: 'Verify your config file is valid JSON',
+                                automatic: false,
+                            },
+                            {
+                                description: 'Use a JSON validator to check for syntax errors',
+                                automatic: false,
+                            },
+                        ],
+                        cause: jsonError,
+                    });
+                }
+                // Validate that fileConfig is an object
+                if (typeof fileConfig !== 'object' || fileConfig === null || Array.isArray(fileConfig)) {
+                    throw new ConfigError(ErrorCode.CONFIG_INVALID, 'Configuration file must contain a JSON object', {
+                        context: { configPath: fullPath },
+                        recoveryActions: [
+                            {
+                                description: 'Ensure your config file starts with { and ends with }',
+                                automatic: false,
+                            },
+                            {
+                                description: 'Run "autonomous-dev init" to create a new configuration file',
+                                automatic: false,
+                            },
+                        ],
+                    });
+                }
                 configLoadPath = fullPath;
                 logger.info(`Loaded config from ${fullPath}`);
                 break;
             }
             catch (error) {
-                const parseError = new ConfigError(ErrorCode.CONFIG_PARSE_ERROR, `Failed to parse config file ${fullPath}: ${error.message}`, {
+                // Re-throw ConfigErrors directly
+                if (error instanceof ConfigError) {
+                    throw error;
+                }
+                const parseError = new ConfigError(ErrorCode.CONFIG_PARSE_ERROR, `Failed to parse config file ${sanitizeForDisplay(fullPath)}: ${error.message}`, {
                     context: { configPath: fullPath },
                     recoveryActions: [
                         {

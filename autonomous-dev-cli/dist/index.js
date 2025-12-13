@@ -9,6 +9,8 @@ import { logger } from './utils/logger.js';
 import chalk from 'chalk';
 import * as readline from 'readline';
 import { writeFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
+import { validateRepoOwner, validateRepoName, validateBranchName, validateIssueLabel, sanitizeForDisplay, containsPathTraversal, sanitizePath, } from './config/validation.js';
 const program = new Command();
 // Helper to format examples section
 function formatExamples(examples) {
@@ -426,10 +428,25 @@ program
     .option('--force', 'Overwrite existing configuration file')
     .option('-o, --output <path>', 'Output path for config file', './autonomous-dev.config.json')
     .action(async (options) => {
-    const configPath = options.output;
+    // Validate output path before proceeding
+    const outputPath = options.output;
+    // Check for path traversal attempts
+    if (containsPathTraversal(outputPath)) {
+        logger.error('Output path contains invalid path traversal sequences');
+        logger.info('Please provide a valid file path without ".." or other traversal sequences');
+        process.exit(1);
+    }
+    // Sanitize and resolve the path
+    const sanitizedPath = sanitizePath(outputPath);
+    const configPath = resolve(sanitizedPath);
+    // Validate it's a JSON file
+    if (!configPath.toLowerCase().endsWith('.json')) {
+        logger.error('Output path must have a .json extension');
+        process.exit(1);
+    }
     // Check for existing config
     if (existsSync(configPath) && !options.force) {
-        logger.error(`Configuration file already exists at ${configPath}`);
+        logger.error(`Configuration file already exists at ${sanitizeForDisplay(configPath)}`);
         logger.info('Use --force to overwrite or -o to specify a different path');
         process.exit(1);
     }
@@ -463,26 +480,70 @@ program
         // Repository settings
         console.log(chalk.bold.cyan('Repository Settings'));
         console.log(chalk.gray('─'.repeat(40)));
-        const repoOwner = await question('GitHub repository owner (username or org): ');
-        if (!repoOwner) {
-            logger.error('Repository owner is required');
-            rl.close();
-            process.exit(1);
+        // Validate repository owner with retry
+        let repoOwner = '';
+        while (true) {
+            repoOwner = await question('GitHub repository owner (username or org): ');
+            if (!repoOwner) {
+                logger.error('Repository owner is required');
+                rl.close();
+                process.exit(1);
+            }
+            const ownerValidation = validateRepoOwner(repoOwner);
+            if (ownerValidation.valid) {
+                repoOwner = ownerValidation.sanitizedValue || repoOwner;
+                break;
+            }
+            console.log(chalk.red(`Invalid: ${ownerValidation.error}`));
+            console.log(chalk.gray('Please try again.'));
         }
-        const repoName = await question('Repository name: ');
-        if (!repoName) {
-            logger.error('Repository name is required');
-            rl.close();
-            process.exit(1);
+        // Validate repository name with retry
+        let repoName = '';
+        while (true) {
+            repoName = await question('Repository name: ');
+            if (!repoName) {
+                logger.error('Repository name is required');
+                rl.close();
+                process.exit(1);
+            }
+            const nameValidation = validateRepoName(repoName);
+            if (nameValidation.valid) {
+                repoName = nameValidation.sanitizedValue || repoName;
+                break;
+            }
+            console.log(chalk.red(`Invalid: ${nameValidation.error}`));
+            console.log(chalk.gray('Please try again.'));
         }
-        const baseBranch = await questionWithDefault('Base branch', 'main');
+        // Validate branch name with retry
+        let baseBranch = '';
+        while (true) {
+            baseBranch = await questionWithDefault('Base branch', 'main');
+            const branchValidation = validateBranchName(baseBranch);
+            if (branchValidation.valid) {
+                baseBranch = branchValidation.sanitizedValue || baseBranch;
+                break;
+            }
+            console.log(chalk.red(`Invalid: ${branchValidation.error}`));
+            console.log(chalk.gray('Please try again.'));
+        }
         console.log();
         // Discovery settings
         console.log(chalk.bold.cyan('Discovery Settings'));
         console.log(chalk.gray('─'.repeat(40)));
         const tasksPerCycle = parseInt(await questionWithDefault('Tasks to discover per cycle (1-10)', '5'), 10);
         const maxOpenIssues = parseInt(await questionWithDefault('Maximum open issues before pausing', '10'), 10);
-        const issueLabel = await questionWithDefault('Label for auto-created issues', 'autonomous-dev');
+        // Validate issue label with retry
+        let issueLabel = '';
+        while (true) {
+            issueLabel = await questionWithDefault('Label for auto-created issues', 'autonomous-dev');
+            const labelValidation = validateIssueLabel(issueLabel);
+            if (labelValidation.valid) {
+                issueLabel = labelValidation.sanitizedValue || issueLabel;
+                break;
+            }
+            console.log(chalk.red(`Invalid: ${labelValidation.error}`));
+            console.log(chalk.gray('Please try again.'));
+        }
         console.log();
         // Execution settings
         console.log(chalk.bold.cyan('Execution Settings'));

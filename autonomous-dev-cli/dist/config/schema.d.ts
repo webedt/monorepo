@@ -9,6 +9,12 @@ import { z } from 'zod';
  *   3. Default values
  *
  * Priority: Environment variables > Config file > Defaults
+ *
+ * Security features:
+ *   - Path traversal prevention for file paths
+ *   - Input sanitization for user-provided values
+ *   - Format validation for GitHub identifiers
+ *   - URL validation for health check endpoints
  */
 export declare const ConfigSchema: z.ZodObject<{
     /**
@@ -17,11 +23,11 @@ export declare const ConfigSchema: z.ZodObject<{
      */
     repo: z.ZodObject<{
         /** GitHub username or organization that owns the repository (required) */
-        owner: z.ZodString;
+        owner: z.ZodEffects<z.ZodString, string, string>;
         /** Repository name (required) */
-        name: z.ZodString;
+        name: z.ZodEffects<z.ZodString, string, string>;
         /** Base branch for pull requests (default: 'main') */
-        baseBranch: z.ZodDefault<z.ZodString>;
+        baseBranch: z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>;
     }, "strip", z.ZodTypeAny, {
         owner: string;
         name: string;
@@ -40,10 +46,10 @@ export declare const ConfigSchema: z.ZodObject<{
         tasksPerCycle: z.ZodDefault<z.ZodNumber>;
         /** Maximum open issues before pausing discovery (min: 1, default: 10) */
         maxOpenIssues: z.ZodDefault<z.ZodNumber>;
-        /** File paths/patterns to exclude from analysis */
-        excludePaths: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-        /** Label applied to auto-created GitHub issues */
-        issueLabel: z.ZodDefault<z.ZodString>;
+        /** File paths/patterns to exclude from analysis (sanitized for security) */
+        excludePaths: z.ZodDefault<z.ZodEffects<z.ZodEffects<z.ZodArray<z.ZodString, "many">, string[], string[]>, string[], string[]>>;
+        /** Label applied to auto-created GitHub issues (validated for GitHub compatibility) */
+        issueLabel: z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>;
         /** Maximum directory depth for codebase scanning (1-20, default: 10) */
         maxDepth: z.ZodDefault<z.ZodNumber>;
         /** Maximum number of files to scan (100-50000, default: 10000) */
@@ -72,8 +78,8 @@ export declare const ConfigSchema: z.ZodObject<{
         parallelWorkers: z.ZodDefault<z.ZodNumber>;
         /** Task timeout in minutes (5-120, default: 30) */
         timeoutMinutes: z.ZodDefault<z.ZodNumber>;
-        /** Working directory for task execution */
-        workDir: z.ZodDefault<z.ZodString>;
+        /** Working directory for task execution (validated to prevent path traversal) */
+        workDir: z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>;
     }, "strip", z.ZodTypeAny, {
         parallelWorkers: number;
         timeoutMinutes: number;
@@ -96,10 +102,10 @@ export declare const ConfigSchema: z.ZodObject<{
         requireHealthCheck: z.ZodDefault<z.ZodBoolean>;
         /** Require smoke tests to pass (default: false) */
         requireSmokeTests: z.ZodDefault<z.ZodBoolean>;
-        /** URLs to check for health (array of URLs) */
-        healthCheckUrls: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-        /** URLs for smoke tests (array of URLs) */
-        smokeTestUrls: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** URLs to check for health (validated URL format) */
+        healthCheckUrls: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
+        /** URLs for smoke tests (validated URL format) */
+        smokeTestUrls: z.ZodDefault<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
         /** URL pattern for preview deployments. Use {owner}, {repo}, {branch} placeholders */
         previewUrlPattern: z.ZodDefault<z.ZodString>;
     }, "strip", z.ZodTypeAny, {

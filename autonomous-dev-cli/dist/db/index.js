@@ -399,7 +399,11 @@ export async function flushActivityUpdates(chatSessionId) {
     }
     else {
         // Flush all pending updates
-        for (const [sessionId, timer] of activityUpdateTimers.entries()) {
+        const entries = [];
+        activityUpdateTimers.forEach((timer, sessionId) => {
+            entries.push([sessionId, timer]);
+        });
+        for (const [sessionId, timer] of entries) {
             clearTimeout(timer);
             try {
                 await database
