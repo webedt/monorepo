@@ -1,11 +1,14 @@
-import { readFileSync, readdirSync, statSync, existsSync, accessSync, constants } from 'fs';
+import { readFile, readdir, stat, access, constants } from 'fs/promises';
+import { existsSync } from 'fs';
+import { createReadStream } from 'fs';
 import { join, relative, extname, isAbsolute, resolve } from 'path';
 import { createHash } from 'crypto';
+import { createInterface } from 'readline';
 import {
   logger,
   getCorrelationId,
   getMemoryUsageMB,
-  timeOperationSync,
+  timeOperation,
   createOperationContext,
   finalizeOperationContext,
 } from '../utils/logger.js';
@@ -51,27 +54,27 @@ export class AnalysisCache {
    * Generate a content hash based on file modification times
    * This allows for invalidation when files change
    */
-  generateContentHash(repoPath: string, maxSamples: number = 50): string {
+  async generateContentHash(repoPath: string, maxSamples: number = 50): Promise<string> {
     const hashData: string[] = [];
     let sampleCount = 0;
 
-    const collectSamples = (dirPath: string, depth: number = 0) => {
+    const collectSamples = async (dirPath: string, depth: number = 0): Promise<void> => {
       if (depth > 3 || sampleCount >= maxSamples) return;
 
       try {
-        const items = readdirSync(dirPath);
+        const items = await readdir(dirPath);
         for (const item of items) {
           if (sampleCount >= maxSamples) break;
           if (['node_modules', '.git', 'dist', 'build', '.next'].includes(item)) continue;
 
           const fullPath = join(dirPath, item);
           try {
-            const stat = statSync(fullPath);
-            if (stat.isFile()) {
-              hashData.push(`${fullPath}:${stat.mtimeMs}`);
+            const fileStat = await stat(fullPath);
+            if (fileStat.isFile()) {
+              hashData.push(`${fullPath}:${fileStat.mtimeMs}`);
               sampleCount++;
-            } else if (stat.isDirectory()) {
-              collectSamples(fullPath, depth + 1);
+            } else if (fileStat.isDirectory()) {
+              await collectSamples(fullPath, depth + 1);
             }
           } catch {
             // Skip inaccessible files
@@ -82,7 +85,7 @@ export class AnalysisCache {
       }
     };
 
-    collectSamples(repoPath);
+    await collectSamples(repoPath);
     return createHash('md5').update(hashData.join('|')).digest('hex');
   }
 
@@ -222,13 +225,31 @@ export interface PackageInfo {
 }
 
 /**
+ * Progress callback for reporting analysis progress
+ */
+export type ProgressCallback = (progress: AnalysisProgress) => void;
+
+/**
+ * Progress information during analysis
+ */
+export interface AnalysisProgress {
+  phase: 'scanning' | 'analyzing-todos' | 'analyzing-packages' | 'analyzing-config' | 'complete';
+  filesScanned: number;
+  totalFiles?: number;
+  currentFile?: string;
+  percentComplete?: number;
+}
+
+/**
  * Configuration options for the analyzer
  */
 export interface AnalyzerConfig {
   maxDepth?: number;
   maxFiles?: number;
+  maxFileSizeBytes?: number; // Maximum file size to read (default: 10MB)
   enableCache?: boolean; // Enable caching of analysis results (default: true)
   cache?: AnalysisCache; // Custom cache instance
+  onProgress?: ProgressCallback; // Optional progress callback
 }
 
 /**
@@ -247,6 +268,9 @@ const DEFAULT_MAX_DEPTH = 10;
 const MIN_MAX_FILES = 100;
 const MAX_MAX_FILES = 50000;
 const DEFAULT_MAX_FILES = 10000;
+
+// Default maximum file size (10MB) - files larger than this will be skipped or streamed
+const DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 // Patterns known to cause ReDoS vulnerabilities
 const REDOS_PATTERNS = [
@@ -318,11 +342,13 @@ export class CodebaseAnalyzer {
   private excludePaths: string[];
   private maxDepth: number;
   private maxFiles: number;
+  private maxFileSizeBytes: number;
   private fileCount: number = 0;
   private validationErrors: AnalyzerError[] = [];
   private enableCache: boolean;
   private cache: AnalysisCache;
   private config: AnalyzerConfig;
+  private onProgress?: ProgressCallback;
 
   constructor(repoPath: string, excludePaths: string[] = [], config: AnalyzerConfig = {}) {
     // Normalize and resolve the path
@@ -341,10 +367,27 @@ export class CodebaseAnalyzer {
       MIN_MAX_FILES,
       MAX_MAX_FILES
     );
+    this.maxFileSizeBytes = config.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
 
     // Cache configuration
     this.enableCache = config.enableCache !== false; // Default true
     this.cache = config.cache ?? getAnalysisCache();
+
+    // Progress callback
+    this.onProgress = config.onProgress;
+  }
+
+  /**
+   * Report progress to the callback if registered
+   */
+  private reportProgress(progress: AnalysisProgress): void {
+    if (this.onProgress) {
+      try {
+        this.onProgress(progress);
+      } catch {
+        // Ignore errors from progress callback
+      }
+    }
   }
 
   /**
@@ -357,7 +400,7 @@ export class CodebaseAnalyzer {
   /**
    * Validate that a directory path exists and is readable
    */
-  validateDirectoryPath(dirPath: string): ValidationResult {
+  async validateDirectoryPath(dirPath: string): Promise<ValidationResult> {
     // Check if path exists
     if (!existsSync(dirPath)) {
       return {
@@ -372,8 +415,8 @@ export class CodebaseAnalyzer {
 
     // Check if path is a directory
     try {
-      const stat = statSync(dirPath);
-      if (!stat.isDirectory()) {
+      const fileStat = await stat(dirPath);
+      if (!fileStat.isDirectory()) {
         return {
           valid: false,
           error: new AnalyzerError(
@@ -396,7 +439,7 @@ export class CodebaseAnalyzer {
 
     // Check if path is readable
     try {
-      accessSync(dirPath, constants.R_OK);
+      await access(dirPath, constants.R_OK);
     } catch (err) {
       return {
         valid: false,
@@ -543,7 +586,7 @@ export class CodebaseAnalyzer {
   /**
    * Perform all validations before analysis
    */
-  private validateBeforeAnalysis(): ValidationResult {
+  private async validateBeforeAnalysis(): Promise<ValidationResult> {
     // Validate configuration
     const configResult = this.validateConfig();
     if (!configResult.valid) {
@@ -551,7 +594,7 @@ export class CodebaseAnalyzer {
     }
 
     // Validate repository path
-    const pathResult = this.validateDirectoryPath(this.repoPath);
+    const pathResult = await this.validateDirectoryPath(this.repoPath);
     if (!pathResult.valid) {
       return pathResult;
     }
@@ -579,7 +622,7 @@ export class CodebaseAnalyzer {
     });
 
     // Validate inputs before processing
-    const validationResult = this.validateBeforeAnalysis();
+    const validationResult = await this.validateBeforeAnalysis();
     if (!validationResult.valid && validationResult.error) {
       logger.structuredError(validationResult.error);
       throw validationResult.error;
@@ -589,7 +632,7 @@ export class CodebaseAnalyzer {
     let cacheHit = false;
     if (this.enableCache) {
       const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
-      const contentHash = this.cache.generateContentHash(this.repoPath);
+      const contentHash = await this.cache.generateContentHash(this.repoPath);
 
       const cached = this.cache.get(cacheKey, contentHash);
       if (cached) {
@@ -614,6 +657,14 @@ export class CodebaseAnalyzer {
         });
         logger.operationComplete('Analyzer', 'analyze', true, operationMetadata);
 
+        // Report progress complete
+        this.reportProgress({
+          phase: 'complete',
+          filesScanned: cached.fileCount,
+          totalFiles: cached.fileCount,
+          percentComplete: 100,
+        });
+
         return cached;
       }
     }
@@ -622,8 +673,14 @@ export class CodebaseAnalyzer {
     this.fileCount = 0;
     this.validationErrors = [];
 
-    // Time directory scanning
-    const { result: structure, duration: scanDuration } = timeOperationSync(
+    // Report progress: starting scan
+    this.reportProgress({
+      phase: 'scanning',
+      filesScanned: 0,
+    });
+
+    // Time directory scanning (async)
+    const { result: structure, duration: scanDuration } = await timeOperation(
       () => this.scanDirectory(this.repoPath),
       'scanDirectory'
     );
@@ -638,9 +695,35 @@ export class CodebaseAnalyzer {
       logger.warn(`File limit reached (${this.maxFiles}). Some files may not be included in analysis.`);
     }
 
+    // Report progress: analyzing TODOs
+    this.reportProgress({
+      phase: 'analyzing-todos',
+      filesScanned: this.fileCount,
+      totalFiles: this.fileCount,
+      percentComplete: 25,
+    });
+
     const todoComments = await this.findTodoComments();
+
+    // Report progress: analyzing packages
+    this.reportProgress({
+      phase: 'analyzing-packages',
+      filesScanned: this.fileCount,
+      totalFiles: this.fileCount,
+      percentComplete: 50,
+    });
+
     const packages = await this.findPackages();
-    const configFiles = this.findConfigFiles();
+
+    // Report progress: analyzing config
+    this.reportProgress({
+      phase: 'analyzing-config',
+      filesScanned: this.fileCount,
+      totalFiles: this.fileCount,
+      percentComplete: 75,
+    });
+
+    const configFiles = await this.findConfigFiles();
 
     const fileCount = this.countFiles(structure);
     const duration = Date.now() - startTime;
@@ -673,7 +756,7 @@ export class CodebaseAnalyzer {
     // Store in cache if enabled
     if (this.enableCache) {
       const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
-      const contentHash = this.cache.generateContentHash(this.repoPath);
+      const contentHash = await this.cache.generateContentHash(this.repoPath);
       this.cache.set(cacheKey, result, contentHash);
     }
 
@@ -691,6 +774,14 @@ export class CodebaseAnalyzer {
       scanDuration,
     });
     logger.operationComplete('Analyzer', 'analyze', true, operationMetadata);
+
+    // Report progress: complete
+    this.reportProgress({
+      phase: 'complete',
+      filesScanned: fileCount,
+      totalFiles: fileCount,
+      percentComplete: 100,
+    });
 
     return result;
   }
@@ -717,7 +808,7 @@ export class CodebaseAnalyzer {
     return false;
   }
 
-  private scanDirectory(dirPath: string, depth: number = 0): DirectoryEntry[] {
+  private async scanDirectory(dirPath: string, depth: number = 0): Promise<DirectoryEntry[]> {
     // Enforce depth limit
     if (depth > this.maxDepth) {
       return [];
@@ -731,7 +822,7 @@ export class CodebaseAnalyzer {
     const entries: DirectoryEntry[] = [];
 
     try {
-      const items = readdirSync(dirPath);
+      const items = await readdir(dirPath);
 
       for (const item of items) {
         // Check file count limit on each iteration
@@ -752,22 +843,31 @@ export class CodebaseAnalyzer {
         }
 
         try {
-          const stat = statSync(fullPath);
+          const fileStat = await stat(fullPath);
 
-          if (stat.isDirectory()) {
+          if (fileStat.isDirectory()) {
             entries.push({
               name: item,
               path: relativePath,
               type: 'directory',
-              children: this.scanDirectory(fullPath, depth + 1),
+              children: await this.scanDirectory(fullPath, depth + 1),
             });
-          } else if (stat.isFile()) {
+          } else if (fileStat.isFile()) {
             this.fileCount++;
             entries.push({
               name: item,
               path: relativePath,
               type: 'file',
             });
+
+            // Report progress periodically during scan
+            if (this.fileCount % 100 === 0) {
+              this.reportProgress({
+                phase: 'scanning',
+                filesScanned: this.fileCount,
+                currentFile: relativePath,
+              });
+            }
           }
         } catch {
           // Skip files we can't access
@@ -797,7 +897,10 @@ export class CodebaseAnalyzer {
     const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)/gi;
     let scannedFiles = 0;
 
-    const scanFile = (filePath: string) => {
+    /**
+     * Scan a file for TODO comments using streaming for large files
+     */
+    const scanFile = async (filePath: string): Promise<void> => {
       // Enforce a reasonable limit on scanned files for TODO comments
       if (scannedFiles >= this.maxFiles) {
         return;
@@ -809,21 +912,37 @@ export class CodebaseAnalyzer {
       }
 
       try {
-        const content = readFileSync(filePath, 'utf-8');
-        const lines = content.split('\n');
+        // Check file size before reading
+        const fileStat = await stat(filePath);
+
+        // Skip files larger than max size limit
+        if (fileStat.size > this.maxFileSizeBytes) {
+          logger.debug(`Skipping large file for TODO scan: ${filePath} (${Math.round(fileStat.size / 1024 / 1024)}MB)`);
+          return;
+        }
+
         scannedFiles++;
 
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const matches = line.matchAll(todoPattern);
+        // Use streaming with readline for memory efficiency on moderately large files (>1MB)
+        if (fileStat.size > 1024 * 1024) {
+          await this.scanFileWithStream(filePath, todoPattern, todos);
+        } else {
+          // For smaller files, read entire content (more efficient for small files)
+          const content = await readFile(filePath, 'utf-8');
+          const lines = content.split('\n');
 
-          for (const match of matches) {
-            todos.push({
-              file: relative(this.repoPath, filePath),
-              line: i + 1,
-              text: match[2]?.trim() || '',
-              type: match[1].toUpperCase() as 'TODO' | 'FIXME' | 'HACK' | 'XXX',
-            });
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const matches = line.matchAll(todoPattern);
+
+            for (const match of matches) {
+              todos.push({
+                file: relative(this.repoPath, filePath),
+                line: i + 1,
+                text: match[2]?.trim() || '',
+                type: match[1].toUpperCase() as 'TODO' | 'FIXME' | 'HACK' | 'XXX',
+              });
+            }
           }
         }
       } catch {
@@ -831,7 +950,10 @@ export class CodebaseAnalyzer {
       }
     };
 
-    const scanDir = (dirPath: string, depth: number = 0) => {
+    /**
+     * Scan directory recursively for files with TODO comments
+     */
+    const scanDir = async (dirPath: string, depth: number = 0): Promise<void> => {
       // Enforce depth limit
       if (depth > this.maxDepth) {
         return;
@@ -842,7 +964,7 @@ export class CodebaseAnalyzer {
       }
 
       try {
-        const items = readdirSync(dirPath);
+        const items = await readdir(dirPath);
 
         for (const item of items) {
           if (scannedFiles >= this.maxFiles) {
@@ -862,12 +984,12 @@ export class CodebaseAnalyzer {
           }
 
           try {
-            const stat = statSync(fullPath);
+            const fileStat = await stat(fullPath);
 
-            if (stat.isDirectory()) {
-              scanDir(fullPath, depth + 1);
-            } else if (stat.isFile()) {
-              scanFile(fullPath);
+            if (fileStat.isDirectory()) {
+              await scanDir(fullPath, depth + 1);
+            } else if (fileStat.isFile()) {
+              await scanFile(fullPath);
             }
           } catch {
             // Skip inaccessible files
@@ -878,9 +1000,59 @@ export class CodebaseAnalyzer {
       }
     };
 
-    scanDir(this.repoPath);
+    await scanDir(this.repoPath);
 
     return todos;
+  }
+
+  /**
+   * Scan a file using streaming (readline) for memory-efficient TODO detection
+   */
+  private async scanFileWithStream(
+    filePath: string,
+    todoPattern: RegExp,
+    todos: TodoComment[]
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const fileStream = createReadStream(filePath, { encoding: 'utf-8' });
+      const rl = createInterface({
+        input: fileStream,
+        crlfDelay: Infinity,
+      });
+
+      let lineNumber = 0;
+
+      rl.on('line', (line) => {
+        lineNumber++;
+        // Reset regex lastIndex for global patterns
+        todoPattern.lastIndex = 0;
+        const matches = line.matchAll(todoPattern);
+
+        for (const match of matches) {
+          todos.push({
+            file: relative(this.repoPath, filePath),
+            line: lineNumber,
+            text: match[2]?.trim() || '',
+            type: match[1].toUpperCase() as 'TODO' | 'FIXME' | 'HACK' | 'XXX',
+          });
+        }
+      });
+
+      rl.on('close', () => {
+        resolve();
+      });
+
+      rl.on('error', (error) => {
+        // Log but don't reject - just skip the file
+        logger.debug(`Error streaming file ${filePath}`, { error });
+        resolve();
+      });
+
+      fileStream.on('error', (error) => {
+        logger.debug(`Error reading file stream ${filePath}`, { error });
+        resolve();
+      });
+    });
   }
 
   private async findPackages(): Promise<PackageInfo[]> {
@@ -888,7 +1060,7 @@ export class CodebaseAnalyzer {
     let scannedDirs = 0;
     const maxDirsToScan = Math.min(this.maxFiles, 1000); // Limit package.json searching
 
-    const findPackageJson = (dirPath: string, depth: number = 0) => {
+    const findPackageJson = async (dirPath: string, depth: number = 0): Promise<void> => {
       // Enforce depth limit
       if (depth > this.maxDepth) {
         return;
@@ -900,9 +1072,11 @@ export class CodebaseAnalyzer {
 
       const packageJsonPath = join(dirPath, 'package.json');
 
-      if (existsSync(packageJsonPath)) {
-        try {
-          const content = readFileSync(packageJsonPath, 'utf-8');
+      try {
+        // Check if package.json exists and read it
+        const fileStat = await stat(packageJsonPath);
+        if (fileStat.isFile()) {
+          const content = await readFile(packageJsonPath, 'utf-8');
           const pkg = JSON.parse(content);
 
           packages.push({
@@ -911,16 +1085,16 @@ export class CodebaseAnalyzer {
             dependencies: Object.keys(pkg.dependencies || {}),
             scripts: pkg.scripts || {},
           });
-        } catch {
-          // Skip invalid package.json
         }
+      } catch {
+        // package.json doesn't exist or is invalid - continue
       }
 
       scannedDirs++;
 
       // Check subdirectories
       try {
-        const items = readdirSync(dirPath);
+        const items = await readdir(dirPath);
 
         for (const item of items) {
           if (scannedDirs >= maxDirsToScan) {
@@ -940,9 +1114,9 @@ export class CodebaseAnalyzer {
           }
 
           try {
-            const stat = statSync(fullPath);
-            if (stat.isDirectory()) {
-              findPackageJson(fullPath, depth + 1);
+            const fileStat = await stat(fullPath);
+            if (fileStat.isDirectory()) {
+              await findPackageJson(fullPath, depth + 1);
             }
           } catch {
             // Skip inaccessible
@@ -953,12 +1127,12 @@ export class CodebaseAnalyzer {
       }
     };
 
-    findPackageJson(this.repoPath);
+    await findPackageJson(this.repoPath);
 
     return packages;
   }
 
-  private findConfigFiles(): string[] {
+  private async findConfigFiles(): Promise<string[]> {
     const configFiles: string[] = [];
     const configPatterns = [
       /^\..*rc$/,
@@ -975,11 +1149,11 @@ export class CodebaseAnalyzer {
     // Only scan top-level config files (depth 2)
     const maxConfigDepth = Math.min(2, this.maxDepth);
 
-    const scanDir = (dirPath: string, depth: number = 0) => {
+    const scanDir = async (dirPath: string, depth: number = 0): Promise<void> => {
       if (depth > maxConfigDepth) return;
 
       try {
-        const items = readdirSync(dirPath);
+        const items = await readdir(dirPath);
 
         for (const item of items) {
           if (IGNORED_DIRS.has(item)) {
@@ -990,14 +1164,14 @@ export class CodebaseAnalyzer {
           const relativePath = relative(this.repoPath, fullPath);
 
           try {
-            const stat = statSync(fullPath);
+            const fileStat = await stat(fullPath);
 
-            if (stat.isFile()) {
+            if (fileStat.isFile()) {
               const isConfig = configPatterns.some((pattern) => pattern.test(item));
               if (isConfig) {
                 configFiles.push(relativePath);
               }
-            } else if (stat.isDirectory() && item === '.github') {
+            } else if (fileStat.isDirectory() && item === '.github') {
               // Include .github directory
               configFiles.push(relativePath);
             }
@@ -1010,7 +1184,7 @@ export class CodebaseAnalyzer {
       }
     };
 
-    scanDir(this.repoPath);
+    await scanDir(this.repoPath);
 
     return configFiles;
   }

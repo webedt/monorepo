@@ -9,6 +9,8 @@ export {
   type PackageInfo,
   type AnalyzerConfig,
   type ValidationResult,
+  type ProgressCallback,
+  type AnalysisProgress,
 } from './analyzer.js';
 export {
   TaskGenerator,

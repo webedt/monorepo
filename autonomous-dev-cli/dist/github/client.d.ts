@@ -77,6 +77,10 @@ export declare class GitHubClient {
      */
     private executeWithRetry;
     /**
+     * Extract HTTP method from endpoint string
+     */
+    private extractMethodFromEndpoint;
+    /**
      * Execute a GitHub API request with graceful degradation support.
      * Returns the fallback value if the circuit breaker is open or all retries fail.
      */

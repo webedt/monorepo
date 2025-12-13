@@ -4,7 +4,7 @@ import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
 import { createWorkerPool } from './executor/index.js';
 import { createConflictResolver } from './conflicts/index.js';
-import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId, } from './utils/logger.js';
+import { logger, generateCorrelationId, setCorrelationId, clearCorrelationId, getCorrelationId, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, } from './utils/logger.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
@@ -56,15 +56,46 @@ export class Daemon {
                 // Generate correlation ID for this cycle
                 const cycleCorrelationId = generateCorrelationId();
                 setCorrelationId(cycleCorrelationId);
+                // Start correlation tracking in metrics
+                metrics.startCorrelation(cycleCorrelationId);
+                // Create operation context for the cycle
+                const cycleContext = createOperationContext('Daemon', 'executeCycle', {
+                    cycleNumber: this.cycleCount,
+                });
+                const cycleStartMemory = getMemoryUsageMB();
                 logger.header(`Cycle #${this.cycleCount}`);
                 logger.info(`Starting cycle`, {
                     cycle: this.cycleCount,
                     correlationId: cycleCorrelationId,
+                    memoryUsageMB: cycleStartMemory,
                 });
+                // Log memory snapshot at cycle start
+                logger.memorySnapshot('Daemon', `Cycle #${this.cycleCount} start`);
                 const result = await this.runCycle();
+                // Calculate memory delta for the cycle
+                const cycleEndMemory = getMemoryUsageMB();
+                const memoryDelta = Math.round((cycleEndMemory - cycleStartMemory) * 100) / 100;
                 this.logCycleResult(result);
                 // Record cycle metrics
                 metrics.recordCycleCompletion(result.tasksDiscovered, result.tasksCompleted, result.tasksFailed, result.duration, { repository: this.repository });
+                // Update memory metrics
+                metrics.updateMemoryUsage(cycleEndMemory);
+                // End correlation tracking and get summary
+                const correlationSummary = metrics.endCorrelation(cycleCorrelationId);
+                // Log cycle completion with metrics
+                const cycleMetadata = finalizeOperationContext(cycleContext, result.success, {
+                    tasksDiscovered: result.tasksDiscovered,
+                    tasksCompleted: result.tasksCompleted,
+                    tasksFailed: result.tasksFailed,
+                    prsMerged: result.prsMerged,
+                    memoryDeltaMB: memoryDelta,
+                    degraded: result.degraded,
+                    operationCount: correlationSummary?.operationCount,
+                    errorCount: correlationSummary?.errorCount,
+                });
+                logger.operationComplete('Daemon', 'executeCycle', result.success, cycleMetadata);
+                // Log memory snapshot at cycle end
+                logger.memorySnapshot('Daemon', `Cycle #${this.cycleCount} end`);
                 // Clear correlation ID after cycle
                 clearCorrelationId();
                 if (this.options.singleCycle) {
@@ -132,6 +163,12 @@ export class Daemon {
         logger.info('Stop requested...');
         this.isRunning = false;
         metrics.updateHealthStatus(false);
+    }
+    /**
+     * Get the current correlation ID from the global context
+     */
+    getCurrentCorrelationId() {
+        return getCorrelationId() || 'unknown';
     }
     /**
      * Update and return the current service health status
@@ -347,18 +384,25 @@ export class Daemon {
             }
             // STEP 1: Get existing issues with graceful degradation
             logger.step(1, 5, 'Fetching existing issues');
-            const issueResult = await this.github.issues.listOpenIssuesWithFallback(this.config.discovery.issueLabel, this.lastKnownIssues // Use cached issues as fallback
-            );
+            metrics.recordCorrelationOperation(this.getCurrentCorrelationId(), 'fetch_issues');
+            const { result: issueResult, duration: issueFetchDuration } = await timeOperation(() => this.github.issues.listOpenIssuesWithFallback(this.config.discovery.issueLabel, this.lastKnownIssues // Use cached issues as fallback
+            ), 'fetchIssues');
             const existingIssues = issueResult.value;
             if (issueResult.degraded) {
                 degraded = true;
-                logger.warn(`Using ${this.lastKnownIssues.length} cached issues due to GitHub API degradation`);
+                metrics.recordCorrelationError(this.getCurrentCorrelationId());
+                logger.warn(`Using ${this.lastKnownIssues.length} cached issues due to GitHub API degradation`, {
+                    fetchDuration: issueFetchDuration,
+                });
             }
             else {
                 // Update cache with fresh data
                 this.lastKnownIssues = existingIssues;
             }
-            logger.info(`Found ${existingIssues.length} existing issues with label '${this.config.discovery.issueLabel}'${issueResult.degraded ? ' (cached)' : ''}`);
+            logger.info(`Found ${existingIssues.length} existing issues with label '${this.config.discovery.issueLabel}'${issueResult.degraded ? ' (cached)' : ''}`, {
+                duration: issueFetchDuration,
+                issueCount: existingIssues.length,
+            });
             // Check if we have capacity for more issues
             const availableSlots = this.config.discovery.maxOpenIssues - existingIssues.length;
             // STEP 2: Discover new tasks (if we have capacity)
