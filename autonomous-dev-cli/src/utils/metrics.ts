@@ -422,6 +422,32 @@ class MetricsRegistry {
     'Number of analysis cache misses'
   );
 
+  // Circuit breaker metrics
+  readonly circuitBreakerState = new Gauge(
+    'autonomous_dev_circuit_breaker_state',
+    'Circuit breaker state (0=closed, 1=half_open, 2=open)'
+  );
+
+  readonly circuitBreakerSuccesses = new Counter(
+    'autonomous_dev_circuit_breaker_successes_total',
+    'Total successful requests through circuit breaker'
+  );
+
+  readonly circuitBreakerFailures = new Counter(
+    'autonomous_dev_circuit_breaker_failures_total',
+    'Total failed requests through circuit breaker'
+  );
+
+  readonly circuitBreakerStateChanges = new Counter(
+    'autonomous_dev_circuit_breaker_state_changes_total',
+    'Total circuit breaker state transitions'
+  );
+
+  readonly circuitBreakerRejections = new Counter(
+    'autonomous_dev_circuit_breaker_rejections_total',
+    'Total requests rejected by open circuit breaker'
+  );
+
   // Correlation tracking for debugging
   private correlationMetrics: Map<string, {
     startTime: number;
@@ -668,6 +694,72 @@ class MetricsRegistry {
   }
 
   /**
+   * Record circuit breaker success
+   */
+  recordCircuitBreakerSuccess(name: string): void {
+    this.circuitBreakerSuccesses.inc({ circuit_name: name });
+  }
+
+  /**
+   * Record circuit breaker failure
+   */
+  recordCircuitBreakerFailure(name: string, errorMessage: string): void {
+    this.circuitBreakerFailures.inc({
+      circuit_name: name,
+      error_type: this.categorizeCircuitBreakerError(errorMessage),
+    });
+  }
+
+  /**
+   * Record circuit breaker state change
+   */
+  recordCircuitBreakerStateChange(
+    name: string,
+    fromState: string,
+    toState: string
+  ): void {
+    this.circuitBreakerStateChanges.inc({
+      circuit_name: name,
+      from_state: fromState,
+      to_state: toState,
+    });
+
+    // Update current state gauge
+    const stateValue = toState === 'closed' ? 0 : toState === 'half_open' ? 1 : 2;
+    this.circuitBreakerState.set({ circuit_name: name }, stateValue);
+  }
+
+  /**
+   * Record circuit breaker rejection (request blocked by open circuit)
+   */
+  recordCircuitBreakerRejection(name: string): void {
+    this.circuitBreakerRejections.inc({ circuit_name: name });
+  }
+
+  /**
+   * Categorize error message for circuit breaker metrics
+   */
+  private categorizeCircuitBreakerError(errorMessage: string): string {
+    const message = errorMessage.toLowerCase();
+    if (message.includes('rate limit') || message.includes('429')) {
+      return 'rate_limit';
+    }
+    if (message.includes('timeout') || message.includes('408') || message.includes('504')) {
+      return 'timeout';
+    }
+    if (message.includes('network') || message.includes('connection')) {
+      return 'network';
+    }
+    if (message.includes('auth') || message.includes('401') || message.includes('403')) {
+      return 'auth';
+    }
+    if (message.includes('500') || message.includes('502') || message.includes('503')) {
+      return 'server_error';
+    }
+    return 'other';
+  }
+
+  /**
    * Start tracking a correlation ID
    */
   startCorrelation(correlationId: string): void {
@@ -785,6 +877,11 @@ class MetricsRegistry {
       this.discoveryDurationMs,
       this.analysisCacheHits,
       this.analysisCacheMisses,
+      this.circuitBreakerState,
+      this.circuitBreakerSuccesses,
+      this.circuitBreakerFailures,
+      this.circuitBreakerStateChanges,
+      this.circuitBreakerRejections,
     ];
 
     for (const collector of allCollectors) {
@@ -875,6 +972,11 @@ class MetricsRegistry {
       this.discoveryDurationMs,
       this.analysisCacheHits,
       this.analysisCacheMisses,
+      this.circuitBreakerState,
+      this.circuitBreakerSuccesses,
+      this.circuitBreakerFailures,
+      this.circuitBreakerStateChanges,
+      this.circuitBreakerRejections,
     ];
 
     const result: Record<string, any> = {};

@@ -82,3 +82,16 @@ export {
   Gauge,
   Histogram,
 } from './metrics.js';
+
+// Re-export circuit breaker utilities
+export {
+  CircuitBreaker,
+  type CircuitBreakerState,
+  type CircuitBreakerConfig,
+  type CircuitBreakerHealth,
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  getClaudeCircuitBreaker,
+  getClaudeSDKCircuitBreaker,
+  resetAllCircuitBreakers,
+  getAllCircuitBreakerHealth,
+} from './circuit-breaker.js';
