@@ -1,5 +1,27 @@
 // Re-export utilities for convenient importing
-export { logger, type LogLevel } from './logger.js';
+export {
+  logger,
+  type LogLevel,
+  type LogFormat,
+  type StructuredLogEntry,
+  type OperationMetadata,
+  type TimedOperationResult,
+  type PerformanceMetrics,
+  type OperationContext,
+  // Correlation ID management
+  generateCorrelationId,
+  setCorrelationId,
+  getCorrelationId,
+  clearCorrelationId,
+  // Memory and timing utilities
+  getMemoryUsageMB,
+  getMemoryStats,
+  timeOperation,
+  timeOperationSync,
+  // Operation context utilities
+  createOperationContext,
+  finalizeOperationContext,
+} from './logger.js';
 export {
   // Error classes
   StructuredError,
@@ -45,3 +67,18 @@ export {
   // Error creation
   createClaudeErrorFromResponse,
 } from './retry.js';
+
+// Re-export metrics utilities
+export {
+  metrics,
+  type MetricLabels,
+  type CounterMetric,
+  type GaugeMetric,
+  type HistogramMetric,
+  type HistogramBucket,
+  type Metric,
+  type ErrorContext as MetricsErrorContext,
+  Counter,
+  Gauge,
+  Histogram,
+} from './metrics.js';

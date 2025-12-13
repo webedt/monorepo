@@ -1,5 +1,11 @@
 import { Octokit } from '@octokit/rest';
-import { logger } from '../utils/logger.js';
+import {
+  logger,
+  getCorrelationId,
+  timeOperation,
+  getMemoryUsageMB,
+} from '../utils/logger.js';
+import { metrics } from '../utils/metrics.js';
 import {
   GitHubError,
   ErrorCode,
@@ -219,6 +225,11 @@ export class GitHubClient {
     endpoint: string,
     context?: ErrorContext
   ): Promise<T> {
+    const startTime = Date.now();
+    const correlationId = getCorrelationId();
+    const method = this.extractMethodFromEndpoint(endpoint);
+    const repository = `${this.owner}/${this.repo}`;
+
     // Check circuit breaker state
     if (!this.canMakeRequest()) {
       const error = new GitHubError(
@@ -234,6 +245,22 @@ export class GitHubClient {
           },
         }
       );
+
+      // Log the blocked request
+      logger.apiCall('GitHub', endpoint, method, {
+        statusCode: 503,
+        duration: Date.now() - startTime,
+        success: false,
+        error: 'Circuit breaker open',
+        correlationId,
+      });
+
+      // Record metrics for blocked request
+      metrics.recordGitHubApiCall(endpoint, method, false, Date.now() - startTime, {
+        repository,
+        statusCode: 503,
+      });
+
       logger.warn('GitHub API request blocked by circuit breaker', {
         endpoint,
         circuitState: this.circuitState,
@@ -243,43 +270,98 @@ export class GitHubClient {
     }
 
     try {
-      const result = await withRetry(operation, {
-        config: this.retryConfig,
-        onRetry: (error, attempt, delay) => {
-          this.updateRateLimitState(error);
-          logger.warn(`GitHub API retry (attempt ${attempt}): ${endpoint}`, {
-            error: error.message,
-            retryInMs: delay,
-            circuitState: this.circuitState,
-          });
-        },
-        shouldRetry: (error) => {
-          // Check if it's a StructuredError with retry flag
-          if (error instanceof StructuredError) {
-            return error.isRetryable;
-          }
-          // Check for common retryable HTTP status codes
-          const statusCode = (error as any).status ?? (error as any).response?.status;
-          if (statusCode === 429) return true; // Rate limited
-          if (statusCode >= 500) return true; // Server errors
-          // Network errors
-          const code = (error as any).code;
-          if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
-            return true;
-          }
-          return false;
-        },
-      });
+      const timedResult = await timeOperation(
+        () => withRetry(operation, {
+          config: this.retryConfig,
+          onRetry: (error, attempt, delay) => {
+            this.updateRateLimitState(error);
+            const statusCode = (error as any).status ?? (error as any).response?.status;
+
+            logger.apiCall('GitHub', endpoint, method, {
+              statusCode,
+              duration: Date.now() - startTime,
+              success: false,
+              error: `Retry ${attempt}: ${error.message}`,
+              correlationId,
+            });
+
+            logger.warn(`GitHub API retry (attempt ${attempt}): ${endpoint}`, {
+              error: error.message,
+              retryInMs: delay,
+              circuitState: this.circuitState,
+            });
+          },
+          shouldRetry: (error) => {
+            // Check if it's a StructuredError with retry flag
+            if (error instanceof StructuredError) {
+              return error.isRetryable;
+            }
+            // Check for common retryable HTTP status codes
+            const statusCode = (error as any).status ?? (error as any).response?.status;
+            if (statusCode === 429) return true; // Rate limited
+            if (statusCode >= 500) return true; // Server errors
+            // Network errors
+            const code = (error as any).code;
+            if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
+              return true;
+            }
+            return false;
+          },
+        }),
+        `github:${endpoint}`
+      );
 
       // Success - record it
       this.recordSuccess();
-      return result;
+
+      // Log successful API call
+      logger.apiCall('GitHub', endpoint, method, {
+        statusCode: 200,
+        duration: timedResult.duration,
+        success: true,
+        correlationId,
+      });
+
+      // Record metrics
+      metrics.recordGitHubApiCall(endpoint, method, true, timedResult.duration, {
+        repository,
+        statusCode: 200,
+      });
+
+      return timedResult.result;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      const statusCode = (error as any).status ?? (error as any).response?.status;
+
       // Failure - record it and update rate limit state
       this.updateRateLimitState(error);
       this.recordFailure(error as Error);
+
+      // Log failed API call
+      logger.apiCall('GitHub', endpoint, method, {
+        statusCode,
+        duration,
+        success: false,
+        error: (error as Error).message,
+        correlationId,
+      });
+
+      // Record metrics
+      metrics.recordGitHubApiCall(endpoint, method, false, duration, {
+        repository,
+        statusCode,
+      });
+
       throw this.handleError(error, endpoint, context);
     }
+  }
+
+  /**
+   * Extract HTTP method from endpoint string
+   */
+  private extractMethodFromEndpoint(endpoint: string): string {
+    const match = endpoint.match(/^(GET|POST|PUT|PATCH|DELETE)\s/);
+    return match ? match[1] : 'GET';
   }
 
   /**
