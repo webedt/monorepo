@@ -386,6 +386,44 @@ export const ConfigSchema = z.object({
   }).describe('Circuit breaker resilience settings').default({}),
 
   /**
+   * Retry Strategy Settings
+   * Configure exponential backoff retry behavior for worker execution and API calls.
+   */
+  retryStrategy: z.object({
+    /** Maximum number of retry attempts (1-10, default: 3) */
+    maxRetries: z.number()
+      .min(1, 'Max retries must be at least 1')
+      .max(10, 'Max retries cannot exceed 10')
+      .default(3),
+    /** Base delay for exponential backoff in milliseconds (500-5000, default: 1000) */
+    baseDelayMs: z.number()
+      .min(500, 'Base delay must be at least 500ms')
+      .max(5000, 'Base delay cannot exceed 5 seconds')
+      .default(1000),
+    /** Maximum delay cap in milliseconds (10000-300000, default: 60000 = 60s) */
+    maxDelayMs: z.number()
+      .min(10000, 'Max delay must be at least 10 seconds')
+      .max(300000, 'Max delay cannot exceed 5 minutes')
+      .default(60000),
+    /** Backoff multiplier for exponential growth (1.5-4, default: 2) */
+    backoffMultiplier: z.number()
+      .min(1.5, 'Backoff multiplier must be at least 1.5')
+      .max(4, 'Backoff multiplier cannot exceed 4')
+      .default(2),
+    /** Enable jitter to prevent thundering herd (default: true) */
+    jitterEnabled: z.boolean().default(true),
+    /** Jitter factor as percentage of delay (0.05-0.5, default: 0.25 for ±25%) */
+    jitterFactor: z.number()
+      .min(0.05, 'Jitter factor must be at least 0.05 (5%)')
+      .max(0.5, 'Jitter factor cannot exceed 0.5 (50%)')
+      .default(0.25),
+    /** Enable retry for worker task execution (default: true) */
+    enableWorkerRetry: z.boolean().default(true),
+    /** Enable retry for GitHub API calls (default: true) */
+    enableGitHubRetry: z.boolean().default(true),
+  }).describe('Exponential backoff retry strategy settings').default({}),
+
+  /**
    * Credentials
    * Authentication credentials (MUST be set via environment variables, NOT config files).
    *
@@ -545,5 +583,15 @@ export const defaultConfig: Partial<Config> = {
     maxDelayMs: 30000,
     successThreshold: 1,
     enabled: true,
+  },
+  retryStrategy: {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    maxDelayMs: 60000,
+    backoffMultiplier: 2,
+    jitterEnabled: true,
+    jitterFactor: 0.25,
+    enableWorkerRetry: true,
+    enableGitHubRetry: true,
   },
 };
