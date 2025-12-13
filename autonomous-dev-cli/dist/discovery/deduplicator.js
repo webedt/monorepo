@@ -320,7 +320,7 @@ export class TaskDeduplicator {
             }
         }
         // Deduplicate
-        return [...new Set(paths)];
+        return Array.from(new Set(paths));
     }
     /**
      * Check if a string looks like a file path
@@ -359,8 +359,10 @@ export class TaskDeduplicator {
             return 1;
         if (words1.size === 0 || words2.size === 0)
             return 0;
-        const intersection = new Set([...words1].filter(w => words2.has(w)));
-        const union = new Set([...words1, ...words2]);
+        const words1Array = Array.from(words1);
+        const words2Array = Array.from(words2);
+        const intersection = new Set(words1Array.filter(w => words2.has(w)));
+        const union = new Set([...words1Array, ...words2Array]);
         return intersection.size / union.size;
     }
     /**
@@ -405,8 +407,8 @@ export class TaskDeduplicator {
             }
         }
         // Calculate Jaccard-like overlap
-        const uniqueOverlapping = [...new Set(overlappingPaths)];
-        const allPaths = new Set([...normalized1, ...normalized2]);
+        const uniqueOverlapping = Array.from(new Set(overlappingPaths));
+        const allPaths = new Set(normalized1.concat(normalized2));
         const overlap = allPaths.size > 0
             ? uniqueOverlapping.length / allPaths.size
             : 0;
@@ -433,7 +435,7 @@ export class TaskDeduplicator {
                 }
             }
         }
-        return [...new Set(common)];
+        return Array.from(new Set(common));
     }
     /**
      * Check if a path is a critical file

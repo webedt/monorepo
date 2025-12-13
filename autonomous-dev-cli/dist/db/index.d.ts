@@ -1063,6 +1063,29 @@ export declare function getPoolStats(): {
  */
 export declare function checkPoolHealth(): boolean;
 export declare function closeDatabase(): Promise<void>;
+/**
+ * Get the configured database query timeout from environment or defaults
+ */
+export declare function getDatabaseTimeout(): number;
+/**
+ * Execute a database query with timeout protection.
+ * Wraps any async database operation to ensure it doesn't hang indefinitely.
+ *
+ * @param queryFn - The async function containing the database query
+ * @param operationName - Name of the operation for error messages
+ * @param timeoutMs - Optional custom timeout in ms (defaults to DATABASE_QUERY timeout)
+ * @returns The result of the query
+ * @throws TimeoutError if the query times out
+ *
+ * @example
+ * ```typescript
+ * const user = await withQueryTimeout(
+ *   () => db.select().from(users).where(eq(users.id, id)),
+ *   'getUserById'
+ * );
+ * ```
+ */
+export declare function withQueryTimeout<T>(queryFn: () => Promise<T>, operationName: string, timeoutMs?: number): Promise<T>;
 export declare function getUserCredentials(email: string): Promise<UserCredentials | null>;
 export declare function createChatSession(params: CreateChatSessionParams): Promise<ChatSession>;
 export declare function updateChatSession(sessionId: string, updates: Partial<{

@@ -2,6 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { logger, getCorrelationId, timeOperation, recordPhaseOperation, recordPhaseError, DEFAULT_TIMING_THRESHOLD_MS, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import { GitHubError, ErrorCode, createGitHubErrorFromResponse, withRetry, StructuredError, } from '../utils/errors.js';
+import { withTimeout, DEFAULT_TIMEOUTS, getTimeoutFromEnv, TimeoutError, } from '../utils/timeout.js';
 const DEFAULT_GITHUB_RETRY_CONFIG = {
     maxRetries: 3,
     baseDelayMs: 1000,
@@ -20,6 +21,7 @@ export class GitHubClient {
     repo;
     retryConfig;
     circuitBreakerConfig;
+    requestTimeoutMs;
     // Circuit breaker state
     circuitState = 'closed';
     consecutiveFailures = 0;
@@ -45,6 +47,9 @@ export class GitHubClient {
         this.repo = options.repo;
         this.retryConfig = { ...DEFAULT_GITHUB_RETRY_CONFIG, ...options.retryConfig };
         this.circuitBreakerConfig = { ...DEFAULT_CIRCUIT_BREAKER_CONFIG, ...options.circuitBreakerConfig };
+        // Configure request timeout from options or environment variable or default
+        this.requestTimeoutMs = options.requestTimeoutMs
+            ?? getTimeoutFromEnv('GITHUB_API', DEFAULT_TIMEOUTS.GITHUB_API);
     }
     get client() {
         return this.octokit;
@@ -301,7 +306,8 @@ export class GitHubClient {
             throw error;
         }
         try {
-            const timedResult = await timeOperation(() => withRetry(operation, {
+            // Wrap the operation with timeout protection
+            const timedResult = await timeOperation(() => withTimeout(async () => withRetry(operation, {
                 config: this.retryConfig,
                 onRetry: (error, attempt, delay) => {
                     this.updateRateLimitState(error);
@@ -320,6 +326,10 @@ export class GitHubClient {
                     });
                 },
                 shouldRetry: (error) => {
+                    // Timeout errors are retryable
+                    if (error instanceof TimeoutError) {
+                        return true;
+                    }
                     // Check if it's a StructuredError with retry flag
                     if (error instanceof StructuredError) {
                         return error.isRetryable;
@@ -337,6 +347,10 @@ export class GitHubClient {
                     }
                     return false;
                 },
+            }), {
+                timeoutMs: this.requestTimeoutMs,
+                operationName: `GitHub API: ${endpoint}`,
+                context: { endpoint, method, owner: this.owner, repo: this.repo },
             }), `github:${endpoint}`);
             // Success - record it
             this.recordSuccess();

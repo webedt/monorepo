@@ -4,19 +4,43 @@ import { simpleGit } from 'simple-git';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, } from '../utils/logger.js';
+import { logger, generateCorrelationId, getMemoryUsageMB, createOperationContext, finalizeOperationContext, ClaudeExecutionLogger, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
-import { StructuredError, ExecutionError, ErrorCode, } from '../utils/errors.js';
+import { StructuredError, ExecutionError, ClaudeError, ErrorCode, } from '../utils/errors.js';
 import { getClaudeSDKCircuitBreaker, } from '../utils/circuit-breaker.js';
 import { retryWithBackoff, NETWORK_RETRY_CONFIG, } from '../utils/retry.js';
+import { withTimeout, createTimedAbortController, DEFAULT_TIMEOUTS, getTimeoutFromEnv, TimeoutError, } from '../utils/timeout.js';
 import { getDeadLetterQueue, } from '../utils/dead-letter-queue.js';
 import { createChatSession, updateChatSession, addMessage, addEvent, generateSessionPath, } from '../db/index.js';
+/**
+ * Default timeout for Claude execution (5 minutes as per issue requirements)
+ */
+const DEFAULT_CLAUDE_TIMEOUT_MS = 5 * 60 * 1000;
+/**
+ * Maximum retries for Claude execution (3 attempts as per issue requirements)
+ */
+const DEFAULT_MAX_CLAUDE_RETRIES = 3;
+/**
+ * Exponential backoff delays for retries (2s, 4s, 8s as per issue requirements)
+ */
+const CLAUDE_RETRY_DELAYS_MS = [2000, 4000, 8000];
+/**
+ * Default Claude retry configuration aligned with issue requirements
+ */
+const DEFAULT_CLAUDE_RETRY_CONFIG = {
+    maxRetries: DEFAULT_MAX_CLAUDE_RETRIES,
+    baseDelayMs: 2000,
+    maxDelayMs: 8000,
+    backoffMultiplier: 2,
+    timeoutMs: DEFAULT_CLAUDE_TIMEOUT_MS,
+};
 export class Worker {
     options;
     workerId;
     log;
     repository;
     circuitBreaker;
+    claudeRetryConfig;
     constructor(options, workerId) {
         this.options = options;
         this.workerId = workerId;
@@ -25,6 +49,11 @@ export class Worker {
         this.repository = this.extractRepoName(options.repoUrl);
         // Get or create the Claude SDK circuit breaker with optional config overrides
         this.circuitBreaker = getClaudeSDKCircuitBreaker(options.circuitBreakerConfig);
+        // Initialize Claude retry configuration
+        this.claudeRetryConfig = {
+            ...DEFAULT_CLAUDE_RETRY_CONFIG,
+            ...options.claudeRetryConfig,
+        };
     }
     /**
      * Get the circuit breaker health status
@@ -371,7 +400,10 @@ export class Worker {
         const useShallow = this.options.useShallowClone !== false; // Default true
         const sparseConfig = this.options.sparseCheckout;
         const maxRetries = this.options.retryConfig?.maxRetries ?? 3;
+        // Get git operation timeout from environment or use default (30 seconds)
+        const gitTimeoutMs = getTimeoutFromEnv('GIT_OPERATION', DEFAULT_TIMEOUTS.GIT_OPERATION);
         // Clone with retry for transient network failures using enhanced retry
+        // Each individual clone attempt is wrapped with timeout protection
         return retryWithBackoff(async (retryContext) => {
             const git = simpleGit(taskDir);
             const repoDir = join(taskDir, 'repo');
@@ -382,43 +414,60 @@ export class Worker {
                     currentTimeoutMs: retryContext.currentTimeoutMs,
                 });
             }
-            // Use sparse checkout for targeted cloning (faster for large repos)
-            if (sparseConfig?.enabled) {
-                this.log.info('Using sparse checkout for optimized cloning');
-                // Initialize empty repo
-                mkdirSync(repoDir, { recursive: true });
+            // Wrap the clone operation with timeout protection
+            return withTimeout(async () => {
+                // Use sparse checkout for targeted cloning (faster for large repos)
+                if (sparseConfig?.enabled) {
+                    this.log.info('Using sparse checkout for optimized cloning');
+                    // Initialize empty repo
+                    mkdirSync(repoDir, { recursive: true });
+                    const repoGit = simpleGit(repoDir);
+                    await repoGit.init();
+                    await repoGit.addRemote('origin', urlWithAuth);
+                    // Enable sparse checkout
+                    await repoGit.raw(['config', 'core.sparseCheckout', 'true']);
+                    // Write sparse checkout patterns
+                    const sparseCheckoutPath = join(repoDir, '.git', 'info', 'sparse-checkout');
+                    const patterns = sparseConfig.paths?.length
+                        ? sparseConfig.paths
+                        : ['/*', '!/node_modules']; // Default: all except node_modules
+                    writeFileSync(sparseCheckoutPath, patterns.join('\n'));
+                    // Fetch and checkout with optional shallow clone
+                    const fetchArgs = useShallow
+                        ? ['fetch', '--depth', '1', 'origin', this.options.baseBranch]
+                        : ['fetch', 'origin', this.options.baseBranch];
+                    await repoGit.raw(fetchArgs);
+                    await repoGit.raw(['checkout', this.options.baseBranch]);
+                    this.log.debug('Repository cloned with sparse checkout');
+                }
+                else {
+                    // Standard clone (shallow by default)
+                    const cloneArgs = useShallow
+                        ? ['--depth', '1', '--branch', this.options.baseBranch]
+                        : ['--branch', this.options.baseBranch];
+                    await git.clone(urlWithAuth, 'repo', cloneArgs);
+                    this.log.debug('Repository cloned');
+                }
+                // Configure git identity
                 const repoGit = simpleGit(repoDir);
-                await repoGit.init();
-                await repoGit.addRemote('origin', urlWithAuth);
-                // Enable sparse checkout
-                await repoGit.raw(['config', 'core.sparseCheckout', 'true']);
-                // Write sparse checkout patterns
-                const sparseCheckoutPath = join(repoDir, '.git', 'info', 'sparse-checkout');
-                const patterns = sparseConfig.paths?.length
-                    ? sparseConfig.paths
-                    : ['/*', '!/node_modules']; // Default: all except node_modules
-                writeFileSync(sparseCheckoutPath, patterns.join('\n'));
-                // Fetch and checkout with optional shallow clone
-                const fetchArgs = useShallow
-                    ? ['fetch', '--depth', '1', 'origin', this.options.baseBranch]
-                    : ['fetch', 'origin', this.options.baseBranch];
-                await repoGit.raw(fetchArgs);
-                await repoGit.raw(['checkout', this.options.baseBranch]);
-                this.log.debug('Repository cloned with sparse checkout');
-            }
-            else {
-                // Standard clone (shallow by default)
-                const cloneArgs = useShallow
-                    ? ['--depth', '1', '--branch', this.options.baseBranch]
-                    : ['--branch', this.options.baseBranch];
-                await git.clone(urlWithAuth, 'repo', cloneArgs);
-                this.log.debug('Repository cloned');
-            }
-            // Configure git identity
-            const repoGit = simpleGit(repoDir);
-            await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
-            await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
-            return repoDir;
+                await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
+                await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
+                return repoDir;
+            }, {
+                timeoutMs: gitTimeoutMs,
+                operationName: 'git-clone',
+                context: {
+                    repoUrl: this.options.repoUrl,
+                    baseBranch: this.options.baseBranch,
+                    attempt: retryContext.attempt,
+                },
+                onTimeout: (timeoutMs, operationName) => {
+                    this.log.warn(`Git clone timed out after ${timeoutMs}ms`, {
+                        attempt: retryContext.attempt,
+                        repoUrl: this.options.repoUrl,
+                    });
+                },
+            });
         }, {
             config: {
                 ...NETWORK_RETRY_CONFIG,
@@ -435,7 +484,7 @@ export class Worker {
                 // Record retry metrics
                 metrics.recordError({
                     repository: this.repository,
-                    errorCode: 'EXEC_CLONE_RETRY',
+                    errorCode: error instanceof TimeoutError ? 'EXEC_CLONE_TIMEOUT' : 'EXEC_CLONE_RETRY',
                     severity: 'transient',
                     isRetryable: true,
                     component: 'Worker',
@@ -450,6 +499,10 @@ export class Worker {
                 });
             },
             shouldRetry: (error) => {
+                // Timeout errors are retryable
+                if (error instanceof TimeoutError) {
+                    return true;
+                }
                 // Retry network-related errors
                 const message = error.message.toLowerCase();
                 return (message.includes('network') ||
@@ -467,6 +520,7 @@ export class Worker {
                     baseBranch: this.options.baseBranch,
                     taskDir,
                     sparseCheckout: sparseConfig?.enabled,
+                    wasTimeout: error instanceof TimeoutError,
                 },
                 cause: error,
             });
@@ -495,15 +549,18 @@ export class Worker {
         writeFileSync(credentialsPath, JSON.stringify(credentials), { mode: 0o600 });
         this.log.debug('Claude credentials written');
     }
+    /**
+     * Execute task with Claude Agent SDK with retry mechanism and error recovery.
+     * Implements:
+     * - Exponential backoff retry (3 attempts with 2s, 4s, 8s delays)
+     * - Timeout handling with 5-minute limit
+     * - Conversation history logging for debugging
+     * - Response validation to detect incomplete implementations
+     */
     async executeWithClaude(repoDir, issue, chatSessionId) {
-        const claudeStartTime = Date.now();
-        const startMemory = getMemoryUsageMB();
-        this.log.info('Executing task with Claude Agent SDK...', {
-            issueNumber: issue.number,
-            repoDir,
-            circuitState: this.circuitBreaker.getState(),
-        });
-        // Check circuit breaker before starting execution
+        const correlationId = generateCorrelationId();
+        const executionLogger = new ClaudeExecutionLogger(correlationId, `issue-${issue.number}`);
+        // Check circuit breaker before starting
         if (!this.circuitBreaker.canExecute()) {
             const error = this.circuitBreaker.createCircuitOpenError({
                 component: 'Worker',
@@ -516,17 +573,155 @@ export class Worker {
                 issueNumber: issue.number,
                 circuitHealth: this.circuitBreaker.getHealth(),
             });
-            // Record rejection in metrics
             metrics.recordCircuitBreakerRejection('claude-sdk');
             throw error;
         }
+        const { maxRetries, timeoutMs } = this.claudeRetryConfig;
+        let lastError;
+        let attemptResult;
+        // Retry loop with exponential backoff
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const isLastAttempt = attempt === maxRetries;
+            this.log.info(`Claude execution attempt ${attempt}/${maxRetries}`, {
+                issueNumber: issue.number,
+                repoDir,
+                timeoutMs,
+                circuitState: this.circuitBreaker.getState(),
+            });
+            executionLogger.startAttempt(attempt);
+            if (chatSessionId) {
+                await addEvent(chatSessionId, 'claude_attempt', {
+                    type: 'claude_attempt',
+                    attempt,
+                    maxRetries,
+                    timeoutMs,
+                    message: `Starting Claude execution attempt ${attempt}/${maxRetries}`,
+                });
+            }
+            try {
+                attemptResult = await this.executeSingleClaudeAttempt(repoDir, issue, timeoutMs, chatSessionId, executionLogger);
+                // Validate the response
+                const validation = this.validateClaudeResponse(attemptResult, repoDir);
+                if (validation.severity === 'error' && !isLastAttempt) {
+                    // Response validation failed - retry if possible
+                    const validationError = new ClaudeError(ErrorCode.CLAUDE_INVALID_RESPONSE, `Claude response validation failed: ${validation.issues.join(', ')}`, {
+                        context: {
+                            issueNumber: issue.number,
+                            toolUseCount: attemptResult.toolUseCount,
+                            turnCount: attemptResult.turnCount,
+                            validationIssues: validation.issues,
+                        },
+                    });
+                    executionLogger.recordError(ErrorCode.CLAUDE_INVALID_RESPONSE, validationError.message, true);
+                    executionLogger.endAttempt(false);
+                    lastError = validationError;
+                    await this.handleRetryDelay(attempt, chatSessionId);
+                    continue;
+                }
+                // Success or acceptable response
+                executionLogger.endAttempt(true);
+                this.circuitBreaker.recordSuccess();
+                // Log validation warnings if any
+                if (validation.issues.length > 0) {
+                    this.log.warn('Claude execution completed with warnings', {
+                        issueNumber: issue.number,
+                        warnings: validation.issues,
+                        toolUseCount: attemptResult.toolUseCount,
+                        turnCount: attemptResult.turnCount,
+                    });
+                }
+                // Log successful execution history
+                executionLogger.logFullHistory('debug');
+                return;
+            }
+            catch (error) {
+                lastError = error;
+                const errorCode = this.extractErrorCode(lastError);
+                const isRetryable = this.isClaudeErrorRetryable(lastError);
+                executionLogger.recordError(errorCode, lastError.message, isRetryable);
+                executionLogger.endAttempt(false);
+                this.circuitBreaker.recordFailure(lastError);
+                this.log.warn(`Claude execution attempt ${attempt} failed`, {
+                    issueNumber: issue.number,
+                    error: lastError.message,
+                    errorCode,
+                    isRetryable,
+                    isLastAttempt,
+                });
+                if (chatSessionId) {
+                    await addEvent(chatSessionId, 'claude_error', {
+                        type: 'claude_error',
+                        attempt,
+                        error: lastError.message,
+                        errorCode,
+                        isRetryable,
+                    });
+                }
+                if (!isRetryable || isLastAttempt) {
+                    // Non-retryable error or exhausted retries
+                    break;
+                }
+                await this.handleRetryDelay(attempt, chatSessionId);
+            }
+        }
+        // All retries exhausted - log full history for debugging
+        executionLogger.logFullHistory('warn');
+        const summary = executionLogger.getSummary();
+        const finalError = new ClaudeError(ErrorCode.CLAUDE_API_ERROR, `Claude execution failed after ${summary.totalAttempts} attempts: ${lastError?.message || 'Unknown error'}`, {
+            context: {
+                issueNumber: issue.number,
+                totalAttempts: summary.totalAttempts,
+                totalDurationMs: summary.totalDurationMs,
+                totalToolUses: summary.totalToolUses,
+                totalTurns: summary.totalTurns,
+                lastErrorCode: summary.lastError?.code,
+            },
+            cause: lastError,
+            recoveryActions: [
+                {
+                    description: 'Check Claude API status at https://status.anthropic.com',
+                    automatic: false,
+                },
+                {
+                    description: 'Review issue description for clarity and completeness',
+                    automatic: false,
+                },
+                {
+                    description: 'Task will be added to dead letter queue for manual review',
+                    automatic: true,
+                },
+            ],
+        });
+        if (chatSessionId) {
+            await addMessage(chatSessionId, 'error', finalError.message);
+            await addEvent(chatSessionId, 'claude_failed', {
+                type: 'claude_failed',
+                summary,
+                error: finalError.message,
+            });
+        }
+        throw finalError;
+    }
+    /**
+     * Execute a single Claude attempt with timeout handling
+     */
+    async executeSingleClaudeAttempt(repoDir, issue, timeoutMs, chatSessionId, executionLogger) {
+        const attemptStartTime = Date.now();
+        const startMemory = getMemoryUsageMB();
         const prompt = this.buildPrompt(issue);
-        const timeoutMs = this.options.timeoutMinutes * 60 * 1000;
-        const abortController = new AbortController();
-        const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+        // Use createTimedAbortController for proper cleanup management
+        // This ensures the timeout is always cleared even if an error occurs
+        const { controller: abortController, cleanup: cleanupAbort, isTimedOut } = createTimedAbortController(timeoutMs, `Claude execution for issue #${issue.number}`);
+        // Track timeout separately for logging
+        let timeoutTriggered = false;
+        const timeoutId = setTimeout(() => {
+            timeoutTriggered = true;
+            executionLogger.recordTimeout(timeoutMs);
+        }, timeoutMs);
         let toolUseCount = 0;
         let turnCount = 0;
-        let claudeSuccess = true;
+        let assistantTextBuffer = '';
+        let hasWriteOperations = false;
         try {
             const stream = query({
                 prompt,
@@ -542,13 +737,8 @@ export class Worker {
                     abortController,
                 },
             });
-            let lastMessage;
-            let assistantTextBuffer = '';
             for await (const message of stream) {
-                lastMessage = message;
-                // Cast SDK message to our typed interface for type-safe access
                 const typedMessage = message;
-                // Validate message structure at runtime for external API safety
                 if (!validateSDKMessage(typedMessage)) {
                     this.log.warn('Received invalid SDK message structure', {
                         messageType: typeof message === 'object' && message !== null
@@ -559,24 +749,26 @@ export class Worker {
                 }
                 if (typedMessage.type === 'assistant') {
                     turnCount++;
-                    // Log tool uses and collect assistant text
                     if (typedMessage.message?.content) {
                         for (const block of typedMessage.message.content) {
-                            // Cast to our ContentBlock type for type-safe access
                             const typedBlock = block;
                             if (isToolUseBlock(typedBlock)) {
                                 toolUseCount++;
                                 const { name: toolName, input: toolInput } = extractToolUseInfo(typedBlock);
+                                // Track write operations for validation
+                                if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
+                                    hasWriteOperations = true;
+                                }
                                 this.log.debug(`Tool: ${toolName}`, {
                                     toolCount: toolUseCount,
                                     turnCount,
                                 });
-                                // Record tool usage in metrics
                                 metrics.recordToolUsage(toolName, {
                                     repository: this.repository,
                                     workerId: this.workerId,
                                 });
-                                // Log tool use event to database
+                                // Record in execution logger
+                                executionLogger.recordToolUse(toolName, toolInput);
                                 if (chatSessionId) {
                                     await addEvent(chatSessionId, 'tool_use', {
                                         type: 'tool_use',
@@ -588,18 +780,20 @@ export class Worker {
                                 }
                             }
                             else if (isTextBlock(typedBlock)) {
-                                assistantTextBuffer += extractTextContent(typedBlock) + '\n';
+                                const text = extractTextContent(typedBlock);
+                                assistantTextBuffer += text + '\n';
+                                executionLogger.recordAssistantText(text);
                             }
                         }
                     }
-                    // Periodically flush assistant text to database as messages
+                    // Periodically flush assistant text
                     if (chatSessionId && assistantTextBuffer.length > 500) {
                         await addMessage(chatSessionId, 'assistant', assistantTextBuffer.trim());
                         assistantTextBuffer = '';
                     }
                 }
                 else if (isResultMessage(typedMessage)) {
-                    const duration = extractResultDuration(typedMessage, Date.now() - claudeStartTime);
+                    const duration = extractResultDuration(typedMessage, Date.now() - attemptStartTime);
                     const endMemory = getMemoryUsageMB();
                     this.log.info(`Claude execution completed`, {
                         duration,
@@ -608,14 +802,10 @@ export class Worker {
                         memoryDeltaMB: Math.round((endMemory - startMemory) * 100) / 100,
                         circuitState: this.circuitBreaker.getState(),
                     });
-                    // Record success in circuit breaker
-                    this.circuitBreaker.recordSuccess();
-                    // Record Claude API call metrics
                     metrics.recordClaudeApiCall('executeTask', true, duration, {
                         repository: this.repository,
                         workerId: this.workerId,
                     });
-                    // Log final assistant message and completion event
                     if (chatSessionId) {
                         if (assistantTextBuffer.trim()) {
                             await addMessage(chatSessionId, 'assistant', assistantTextBuffer.trim());
@@ -628,32 +818,183 @@ export class Worker {
                             turnCount,
                         });
                     }
+                    return {
+                        success: true,
+                        toolUseCount,
+                        turnCount,
+                        durationMs: duration,
+                        hasChanges: hasWriteOperations,
+                        validationIssues: [],
+                    };
                 }
             }
+            // Stream ended without explicit result
+            const duration = Date.now() - attemptStartTime;
+            return {
+                success: true,
+                toolUseCount,
+                turnCount,
+                durationMs: duration,
+                hasChanges: hasWriteOperations,
+                validationIssues: ['Stream ended without explicit completion'],
+            };
         }
         catch (error) {
-            claudeSuccess = false;
-            const duration = Date.now() - claudeStartTime;
-            // Record failure in circuit breaker
-            this.circuitBreaker.recordFailure(error);
-            // Record failed Claude API call
+            const duration = Date.now() - attemptStartTime;
+            // Check if this was a timeout (using both tracking methods for reliability)
+            if (timeoutTriggered || isTimedOut()) {
+                const timeoutError = new ClaudeError(ErrorCode.CLAUDE_TIMEOUT, `Claude execution timed out after ${Math.round(timeoutMs / 1000)} seconds (5-minute limit). The task may be too complex or Claude may be experiencing delays.`, {
+                    context: {
+                        issueNumber: issue.number,
+                        timeoutMs,
+                        toolUseCount,
+                        turnCount,
+                        durationMs: duration,
+                    },
+                    recoveryActions: [
+                        {
+                            description: 'Retry with exponential backoff',
+                            automatic: true,
+                        },
+                        {
+                            description: 'Break down the task into smaller issues',
+                            automatic: false,
+                        },
+                        {
+                            description: 'Increase timeout configuration if tasks are consistently timing out',
+                            automatic: false,
+                        },
+                    ],
+                });
+                metrics.recordClaudeApiCall('executeTask', false, duration, {
+                    repository: this.repository,
+                    workerId: this.workerId,
+                });
+                throw timeoutError;
+            }
+            // Record failed API call
             metrics.recordClaudeApiCall('executeTask', false, duration, {
                 repository: this.repository,
                 workerId: this.workerId,
             });
-            this.log.error('Claude execution failed', {
-                duration,
-                toolUseCount,
-                turnCount,
-                error: error.message,
-                circuitState: this.circuitBreaker.getState(),
-                circuitHealth: this.circuitBreaker.getHealth(),
-            });
             throw error;
         }
         finally {
+            // Always clean up both timeouts to prevent leaks
+            // This ensures cleanup happens even when errors occur
             clearTimeout(timeoutId);
+            cleanupAbort();
         }
+    }
+    /**
+     * Validate Claude response to detect incomplete implementations
+     */
+    validateClaudeResponse(result, repoDir) {
+        const issues = [];
+        let severity = 'none';
+        // Check if Claude made any changes
+        if (!result.hasChanges && result.toolUseCount === 0) {
+            issues.push('Claude made no file changes and used no tools');
+            severity = 'error';
+        }
+        else if (!result.hasChanges) {
+            issues.push('Claude used tools but made no file changes');
+            severity = 'warning';
+        }
+        // Check for very short execution (might indicate immediate failure)
+        if (result.durationMs < 5000 && result.turnCount < 2) {
+            issues.push('Execution was very short, might indicate early failure');
+            severity = severity === 'error' ? 'error' : 'warning';
+        }
+        // Check for excessive tool use without changes (might indicate stuck loop)
+        if (result.toolUseCount > 20 && !result.hasChanges) {
+            issues.push('Many tool uses but no changes made, possible stuck loop');
+            severity = 'warning';
+        }
+        // Add any validation issues from the result itself
+        issues.push(...result.validationIssues);
+        return {
+            isValid: severity !== 'error',
+            hasChanges: result.hasChanges,
+            issues,
+            severity,
+        };
+    }
+    /**
+     * Handle retry delay with exponential backoff
+     */
+    async handleRetryDelay(attempt, chatSessionId) {
+        // Calculate delay: 2s, 4s, 8s (as per issue requirements)
+        const delayIndex = Math.min(attempt - 1, CLAUDE_RETRY_DELAYS_MS.length - 1);
+        const delay = CLAUDE_RETRY_DELAYS_MS[delayIndex];
+        this.log.info(`Waiting ${delay}ms before retry attempt ${attempt + 1}`, {
+            attempt,
+            delay,
+        });
+        if (chatSessionId) {
+            await addEvent(chatSessionId, 'retry_delay', {
+                type: 'retry_delay',
+                attempt,
+                delayMs: delay,
+                message: `Waiting ${delay / 1000}s before retry`,
+            });
+        }
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    /**
+     * Extract error code from an error
+     */
+    extractErrorCode(error) {
+        if (error instanceof StructuredError) {
+            return error.code;
+        }
+        // Check for common error patterns
+        const message = error.message.toLowerCase();
+        if (message.includes('timeout') || message.includes('abort')) {
+            return ErrorCode.CLAUDE_TIMEOUT;
+        }
+        if (message.includes('rate limit') || message.includes('429')) {
+            return ErrorCode.CLAUDE_RATE_LIMITED;
+        }
+        if (message.includes('network') || message.includes('connection')) {
+            return ErrorCode.CLAUDE_NETWORK_ERROR;
+        }
+        if (message.includes('auth') || message.includes('unauthorized')) {
+            return ErrorCode.CLAUDE_AUTH_FAILED;
+        }
+        return ErrorCode.CLAUDE_API_ERROR;
+    }
+    /**
+     * Determine if a Claude error is retryable
+     */
+    isClaudeErrorRetryable(error) {
+        if (error instanceof StructuredError) {
+            return error.isRetryable;
+        }
+        const message = error.message.toLowerCase();
+        // Retryable errors
+        if (message.includes('timeout') ||
+            message.includes('rate limit') ||
+            message.includes('429') ||
+            message.includes('503') ||
+            message.includes('502') ||
+            message.includes('504') ||
+            message.includes('network') ||
+            message.includes('connection') ||
+            message.includes('temporarily unavailable') ||
+            message.includes('overloaded')) {
+            return true;
+        }
+        // Non-retryable errors
+        if (message.includes('auth') ||
+            message.includes('unauthorized') ||
+            message.includes('forbidden') ||
+            message.includes('invalid token') ||
+            message.includes('quota exceeded')) {
+            return false;
+        }
+        // Default to retryable for unknown errors
+        return true;
     }
     sanitizeToolInput(toolName, input) {
         // Truncate large inputs for logging
