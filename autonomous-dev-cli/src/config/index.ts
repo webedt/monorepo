@@ -1,11 +1,30 @@
 import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, dirname, basename, join } from 'path';
 import { config as loadEnv } from 'dotenv';
-import { ConfigSchema, defaultConfig, type Config } from './schema.js';
+import { ConfigSchema, defaultConfig, ProfileSchema, type Config, type ConfigProfile } from './schema.js';
+import { formatZodErrors, printValidationErrors } from './validation.js';
 import { logger } from '../utils/logger.js';
 
 // Load .env file
 loadEnv();
+
+export interface ConfigSource {
+  source: 'default' | 'file' | 'profile' | 'env' | 'database';
+  path?: string;
+  profile?: string;
+}
+
+export interface LoadConfigOptions {
+  configPath?: string;
+  profile?: string;
+  silent?: boolean;
+}
+
+export interface LoadConfigResult {
+  config: Config;
+  sources: ConfigSource[];
+  profileChain: string[];
+}
 
 function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target };
@@ -28,11 +47,107 @@ function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   return result;
 }
 
-export function loadConfig(configPath?: string): Config {
+function getEnvironment(): string {
+  return process.env.NODE_ENV || process.env.APP_ENV || 'development';
+}
+
+function getProfilePaths(basePath: string, profile?: string): string[] {
+  const dir = dirname(basePath);
+  const ext = '.json';
+  const baseFileName = basename(basePath, ext);
+
+  // Determine which profile to use
+  const env = getEnvironment();
+  const targetProfile = profile || env;
+
+  const paths: string[] = [];
+
+  // Profile-specific paths (e.g., dev.config.json, prod.config.json)
+  if (targetProfile !== 'development') {
+    // Short profile name
+    const shortProfile = targetProfile.replace('development', 'dev').replace('production', 'prod');
+    paths.push(join(dir, `${shortProfile}.config.json`));
+    paths.push(join(dir, `${shortProfile}${ext}`));
+
+    // Full profile name
+    if (shortProfile !== targetProfile) {
+      paths.push(join(dir, `${targetProfile}.config.json`));
+      paths.push(join(dir, `${targetProfile}${ext}`));
+    }
+  }
+
+  return paths;
+}
+
+function loadProfileChain(
+  startPath: string,
+  visited: Set<string> = new Set()
+): { configs: ConfigProfile[]; chain: string[] } {
+  const configs: ConfigProfile[] = [];
+  const chain: string[] = [];
+
+  const fullPath = resolve(startPath);
+
+  // Prevent circular references
+  if (visited.has(fullPath)) {
+    logger.warn(`Circular config reference detected: ${fullPath}`);
+    return { configs, chain };
+  }
+  visited.add(fullPath);
+
+  if (!existsSync(fullPath)) {
+    return { configs, chain };
+  }
+
+  try {
+    const content = readFileSync(fullPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    const result = ProfileSchema.safeParse(parsed);
+
+    if (!result.success) {
+      logger.warn(`Invalid profile config at ${fullPath}`);
+      return { configs, chain };
+    }
+
+    const profile = result.data;
+    chain.push(fullPath);
+
+    // Load parent profile if extends is specified
+    if (profile.extends) {
+      const parentPath = resolve(dirname(fullPath), profile.extends);
+      const parentResult = loadProfileChain(parentPath, visited);
+      configs.push(...parentResult.configs);
+      chain.unshift(...parentResult.chain);
+    }
+
+    // Add this profile's config (without extends property)
+    const { extends: _, ...profileConfig } = profile;
+    configs.push(profileConfig);
+  } catch (error) {
+    logger.warn(`Failed to parse profile ${fullPath}: ${error}`);
+  }
+
+  return { configs, chain };
+}
+
+export function loadConfig(configPath?: string): Config;
+export function loadConfig(options: LoadConfigOptions): LoadConfigResult;
+export function loadConfig(
+  configPathOrOptions?: string | LoadConfigOptions
+): Config | LoadConfigResult {
+  const options: LoadConfigOptions =
+    typeof configPathOrOptions === 'string'
+      ? { configPath: configPathOrOptions }
+      : configPathOrOptions || {};
+
+  const { configPath, profile, silent } = options;
+  const sources: ConfigSource[] = [{ source: 'default' }];
+  const profileChain: string[] = [];
+
   let fileConfig: Partial<Config> = {};
 
-  // Try to load config file
-  const possiblePaths = configPath
+  // Determine base config paths
+  const basePaths = configPath
     ? [configPath]
     : [
         './autonomous-dev.config.json',
@@ -40,16 +155,57 @@ export function loadConfig(configPath?: string): Config {
         './.autonomous-dev.json',
       ];
 
-  for (const path of possiblePaths) {
+  // Try to load base config file
+  let baseConfigPath: string | null = null;
+  for (const path of basePaths) {
     const fullPath = resolve(path);
     if (existsSync(fullPath)) {
-      try {
-        const content = readFileSync(fullPath, 'utf-8');
-        fileConfig = JSON.parse(content);
-        logger.info(`Loaded config from ${fullPath}`);
-        break;
-      } catch (error) {
-        logger.warn(`Failed to parse config file ${fullPath}: ${error}`);
+      baseConfigPath = fullPath;
+      break;
+    }
+  }
+
+  if (baseConfigPath) {
+    // Load with profile chain support
+    const { configs, chain } = loadProfileChain(baseConfigPath);
+    if (configs.length > 0) {
+      fileConfig = configs.reduce(
+        (acc, cfg) => deepMerge(acc as Config, cfg),
+        {} as Partial<Config>
+      );
+      profileChain.push(...chain);
+      sources.push({ source: 'file', path: baseConfigPath });
+      if (!silent) {
+        logger.info(`Loaded config from ${baseConfigPath}`);
+      }
+    }
+  }
+
+  // Try to load environment-specific profile
+  if (baseConfigPath || basePaths.length > 0) {
+    const searchBase = baseConfigPath || resolve(basePaths[0]);
+    const profilePaths = getProfilePaths(searchBase, profile);
+
+    for (const profilePath of profilePaths) {
+      const fullPath = resolve(profilePath);
+      if (existsSync(fullPath) && !profileChain.includes(fullPath)) {
+        const { configs, chain } = loadProfileChain(fullPath);
+        if (configs.length > 0) {
+          fileConfig = configs.reduce(
+            (acc, cfg) => deepMerge(acc, cfg),
+            fileConfig
+          );
+          profileChain.push(...chain.filter((p) => !profileChain.includes(p)));
+          sources.push({
+            source: 'profile',
+            path: fullPath,
+            profile: profile || getEnvironment(),
+          });
+          if (!silent) {
+            logger.info(`Loaded profile config from ${fullPath}`);
+          }
+          break;
+        }
       }
     }
   }
@@ -84,8 +240,8 @@ export function loadConfig(configPath?: string): Config {
     requireTests: process.env.REQUIRE_TESTS !== 'false',
     requireHealthCheck: process.env.REQUIRE_HEALTH_CHECK !== 'false',
     requireSmokeTests: process.env.REQUIRE_SMOKE_TESTS === 'true',
-    healthCheckUrls: process.env.HEALTH_CHECK_URLS?.split(',') || [],
-    smokeTestUrls: process.env.SMOKE_TEST_URLS?.split(',') || [],
+    healthCheckUrls: process.env.HEALTH_CHECK_URLS?.split(',').filter(Boolean) || [],
+    smokeTestUrls: process.env.SMOKE_TEST_URLS?.split(',').filter(Boolean) || [],
     previewUrlPattern: process.env.PREVIEW_URL_PATTERN || defaultConfig.evaluation?.previewUrlPattern || '',
   };
 
@@ -117,6 +273,8 @@ export function loadConfig(configPath?: string): Config {
     userEmail: process.env.USER_EMAIL,
   };
 
+  sources.push({ source: 'env' });
+
   // Merge configs: defaults < file < env
   const mergedConfig = deepMerge(
     deepMerge(defaultConfig as Config, fileConfig),
@@ -126,14 +284,34 @@ export function loadConfig(configPath?: string): Config {
   // Validate
   const result = ConfigSchema.safeParse(mergedConfig);
   if (!result.success) {
-    logger.error('Invalid configuration:');
-    for (const error of result.error.errors) {
-      logger.error(`  ${error.path.join('.')}: ${error.message}`);
-    }
+    const formattedErrors = formatZodErrors(result.error, mergedConfig);
+    printValidationErrors(formattedErrors);
     throw new Error('Configuration validation failed');
+  }
+
+  // Return based on call signature
+  if (typeof configPathOrOptions === 'object') {
+    return {
+      config: result.data,
+      sources,
+      profileChain,
+    };
   }
 
   return result.data;
 }
 
 export { Config } from './schema.js';
+export { fieldMetadata } from './schema.js';
+export type { ConfigSource, LoadConfigOptions, LoadConfigResult };
+export {
+  formatZodErrors,
+  printValidationErrors,
+  validateDependencies,
+  validateGitHubToken,
+  validateClaudeAuth,
+  printDependencyValidation,
+  type FormattedError,
+  type ValidationResult,
+  type DependencyValidationResult,
+} from './validation.js';

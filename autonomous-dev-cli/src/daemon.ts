@@ -1,4 +1,4 @@
-import { loadConfig, type Config } from './config/index.js';
+import { loadConfig, type Config, type LoadConfigResult } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub, type GitHub, type Issue } from './github/index.js';
 import { discoverTasks, type DiscoveredTask } from './discovery/index.js';
@@ -11,6 +11,7 @@ import { join } from 'path';
 
 export interface DaemonOptions {
   configPath?: string;
+  profile?: string;
   dryRun?: boolean;
   verbose?: boolean;
   singleCycle?: boolean;
@@ -37,7 +38,13 @@ export class Daemon {
 
   constructor(options: DaemonOptions = {}) {
     this.options = options;
-    this.config = loadConfig(options.configPath);
+
+    // Load config with profile support
+    const loadResult = loadConfig({
+      configPath: options.configPath,
+      profile: options.profile,
+    });
+    this.config = 'config' in loadResult ? loadResult.config : loadResult;
 
     if (options.verbose) {
       logger.setLevel('debug');

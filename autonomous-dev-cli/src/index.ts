@@ -2,7 +2,12 @@
 
 import { Command } from 'commander';
 import { createDaemon, type DaemonOptions } from './daemon.js';
-import { loadConfig } from './config/index.js';
+import {
+  loadConfig,
+  validateDependencies,
+  printDependencyValidation,
+  type LoadConfigResult,
+} from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
@@ -21,11 +26,13 @@ program
   .command('start')
   .description('Start the autonomous development daemon (continuous mode)')
   .option('-c, --config <path>', 'Path to config file')
+  .option('-p, --profile <name>', 'Config profile to use (e.g., dev, staging, prod)')
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--dry-run', 'Discover tasks but do not execute or create issues')
   .action(async (options) => {
     const daemon = createDaemon({
       configPath: options.config,
+      profile: options.profile,
       verbose: options.verbose,
       dryRun: options.dryRun,
       singleCycle: false,
@@ -56,11 +63,13 @@ program
   .command('run')
   .description('Run a single development cycle and exit')
   .option('-c, --config <path>', 'Path to config file')
+  .option('-p, --profile <name>', 'Config profile to use (e.g., dev, staging, prod)')
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--dry-run', 'Discover tasks but do not execute or create issues')
   .action(async (options) => {
     const daemon = createDaemon({
       configPath: options.config,
+      profile: options.profile,
       verbose: options.verbose,
       dryRun: options.dryRun,
       singleCycle: true,
@@ -79,6 +88,7 @@ program
   .command('discover')
   .description('Discover tasks without executing them')
   .option('-c, --config <path>', 'Path to config file')
+  .option('-p, --profile <name>', 'Config profile to use (e.g., dev, staging, prod)')
   .option('-v, --verbose', 'Enable verbose logging')
   .option('-n, --count <number>', 'Number of tasks to discover', '5')
   .option('--create-issues', 'Create GitHub issues for discovered tasks')
@@ -188,6 +198,7 @@ program
   .command('status')
   .description('Show current status of autonomous development')
   .option('-c, --config <path>', 'Path to config file')
+  .option('-p, --profile <name>', 'Config profile to use (e.g., dev, staging, prod)')
   .action(async (options) => {
     try {
       const config = loadConfig(options.config);
@@ -270,17 +281,79 @@ program
   .command('config')
   .description('Show or validate configuration')
   .option('-c, --config <path>', 'Path to config file')
-  .option('--validate', 'Only validate, do not show')
+  .option('-p, --profile <name>', 'Config profile to use (e.g., dev, staging, prod)')
+  .option('--validate', 'Validate configuration without running daemon')
+  .option('--check-deps', 'Check external dependencies (GitHub, Claude API)')
+  .option('--show-sources', 'Show where each config value comes from')
   .action(async (options) => {
     try {
-      const config = loadConfig(options.config);
+      // Use the extended loadConfig to get source information
+      const result = loadConfig({
+        configPath: options.config,
+        profile: options.profile,
+        silent: !options.showSources,
+      }) as LoadConfigResult;
 
-      if (options.validate) {
+      const config = result.config;
+
+      // If checking dependencies, validate them
+      if (options.checkDeps) {
+        logger.info('Validating external dependencies...\n');
+
+        const depResult = await validateDependencies(config);
+        printDependencyValidation(depResult);
+
+        // Check if all dependencies are valid
+        const allValid = depResult.github.valid && depResult.claude.valid;
+
+        if (!allValid) {
+          logger.error('Some dependencies failed validation');
+          process.exit(1);
+        }
+
+        if (options.validate) {
+          logger.success('Configuration and dependencies are valid');
+          return;
+        }
+      } else if (options.validate) {
         logger.success('Configuration is valid');
         return;
       }
 
       logger.header('Configuration');
+
+      // Show config sources if requested
+      if (options.showSources) {
+        console.log(chalk.bold('Config Sources:'));
+        for (const source of result.sources) {
+          if (source.source === 'default') {
+            console.log(`  ${chalk.gray('•')} Default values`);
+          } else if (source.source === 'file') {
+            console.log(`  ${chalk.blue('•')} File: ${source.path}`);
+          } else if (source.source === 'profile') {
+            console.log(`  ${chalk.magenta('•')} Profile [${source.profile}]: ${source.path}`);
+          } else if (source.source === 'env') {
+            console.log(`  ${chalk.cyan('•')} Environment variables`);
+          } else if (source.source === 'database') {
+            console.log(`  ${chalk.yellow('•')} Database credentials`);
+          }
+        }
+
+        if (result.profileChain.length > 0) {
+          console.log();
+          console.log(chalk.bold('Profile Chain:'));
+          for (let i = 0; i < result.profileChain.length; i++) {
+            const prefix = i === result.profileChain.length - 1 ? '└─' : '├─';
+            console.log(`  ${chalk.gray(prefix)} ${result.profileChain[i]}`);
+          }
+        }
+        console.log();
+      }
+
+      // Show current environment
+      const env = process.env.NODE_ENV || process.env.APP_ENV || 'development';
+      console.log(chalk.bold('Environment:'), chalk.cyan(env));
+      console.log();
 
       console.log(chalk.bold('Repository:'));
       console.log(`  Owner:       ${config.repo.owner || chalk.red('(not set)')}`);
@@ -317,6 +390,20 @@ program
       console.log(`  Claude:      ${config.credentials.claudeAuth ? chalk.green('✓ configured') : chalk.red('✗ missing')}`);
       console.log(`  Database:    ${config.credentials.databaseUrl ? chalk.green('✓ configured') : chalk.gray('not used')}`);
       console.log(`  User Email:  ${config.credentials.userEmail || chalk.gray('not set')}`);
+      console.log();
+
+      // Provide helpful hints
+      if (!config.credentials.githubToken || !config.credentials.claudeAuth) {
+        console.log(chalk.yellow('Hints:'));
+        if (!config.credentials.githubToken) {
+          console.log(chalk.gray('  • Set GITHUB_TOKEN environment variable or add to config file'));
+        }
+        if (!config.credentials.claudeAuth) {
+          console.log(chalk.gray('  • Set CLAUDE_ACCESS_TOKEN environment variable or configure database credentials'));
+        }
+        console.log(chalk.gray('  • Use --check-deps to validate credentials'));
+        console.log();
+      }
     } catch (error: any) {
       logger.error('Configuration error', { error: error.message });
       process.exit(1);
