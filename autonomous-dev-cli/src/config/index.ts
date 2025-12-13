@@ -136,4 +136,4 @@ export function loadConfig(configPath?: string): Config {
   return result.data;
 }
 
-export { Config } from './schema.js';
+export type { Config } from './schema.js';
