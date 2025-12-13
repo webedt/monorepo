@@ -14,6 +14,7 @@ import { createHealthServer, } from './monitoring/index.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
 import { mkdirSync, existsSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
+import chalk from 'chalk';
 export class Daemon {
     config;
     github = null;
@@ -191,9 +192,12 @@ export class Daemon {
                 // Calculate memory delta for the cycle
                 const cycleEndMemory = getMemoryUsageMB();
                 const memoryDelta = Math.round((cycleEndMemory - cycleStartMemory) * 100) / 100;
+                // Update progress manager with final task counts before ending the cycle
+                this.progressManager.updateTaskCounts(result.tasksDiscovered, result.tasksCompleted, result.tasksFailed, result.prsMerged);
+                // Log cycle result (this calls displayCycleSummary internally)
+                this.logCycleResult(result);
                 // End progress tracking for this cycle
                 this.progressManager.endCycle(result.success);
-                this.logCycleResult(result);
                 // Write to structured file log if enabled
                 if (this.structuredLogger?.isEnabled()) {
                     this.structuredLogger.writeCycleLog(this.cycleCount, cycleCorrelationId, result.success, result.tasksDiscovered, result.tasksCompleted, result.tasksFailed, result.prsMerged, result.duration, result.errors);
@@ -1491,38 +1495,78 @@ ${evaluationSection}
 `;
     }
     logCycleResult(result) {
-        logger.divider();
-        logger.header('Cycle Summary');
-        console.log(`  Tasks discovered: ${result.tasksDiscovered}`);
-        console.log(`  Tasks completed:  ${result.tasksCompleted}`);
-        console.log(`  Tasks failed:     ${result.tasksFailed}`);
-        console.log(`  PRs merged:       ${result.prsMerged}`);
-        console.log(`  Duration:         ${(result.duration / 1000).toFixed(1)}s`);
-        // Show service health status
+        // First display the progress manager's cycle summary with timing breakdown
+        this.progressManager.displayCycleSummary(result.success);
+        // Additional status information
+        console.log(chalk.bold('  Service Health:'));
+        // Show service health status with color coding
         if (result.degraded) {
-            console.log(`\n  ⚡ Service Status: DEGRADED`);
+            console.log(`    Status:        ${chalk.yellow('⚡')} ${chalk.yellow('DEGRADED')}`);
         }
         else {
-            console.log(`\n  ✓ Service Status: Healthy`);
+            console.log(`    Status:        ${chalk.green('✓')} ${chalk.green('Healthy')}`);
         }
         // Show GitHub service health details if available
         if (result.serviceHealth.github) {
             const gh = result.serviceHealth.github;
-            console.log(`    GitHub: ${gh.status} (circuit: ${gh.circuitState})`);
+            const statusColor = gh.status === 'healthy' ? chalk.green :
+                gh.status === 'degraded' ? chalk.yellow : chalk.red;
+            const statusIcon = gh.status === 'healthy' ? '🟢' :
+                gh.status === 'degraded' ? '🟡' : '🔴';
+            console.log(`    GitHub:        ${statusIcon} ${statusColor(gh.status)} ${chalk.gray(`(circuit: ${gh.circuitState})`)}`);
             if (gh.consecutiveFailures > 0) {
-                console.log(`    Consecutive failures: ${gh.consecutiveFailures}`);
+                console.log(`    Failures:      ${chalk.red(gh.consecutiveFailures.toString())}`);
             }
             if (gh.rateLimitRemaining !== undefined) {
-                console.log(`    Rate limit remaining: ${gh.rateLimitRemaining}`);
+                const rateColor = gh.rateLimitRemaining > 100 ? chalk.green :
+                    gh.rateLimitRemaining > 20 ? chalk.yellow : chalk.red;
+                console.log(`    Rate Limit:    ${rateColor(gh.rateLimitRemaining.toString())} remaining`);
             }
         }
+        console.log();
+        // Show errors with improved formatting
         if (result.errors.length > 0) {
-            console.log(`\n  Errors:`);
+            console.log(chalk.bold.red('  Errors:'));
             for (const error of result.errors) {
-                console.log(`    - ${error}`);
+                // Extract error code if present
+                const codeMatch = error.match(/\[([^\]]+)\]/);
+                if (codeMatch) {
+                    const code = codeMatch[1];
+                    const message = error.replace(`[${code}]`, '').trim();
+                    console.log(`    ${chalk.red('✗')} ${chalk.yellow(`[${code}]`)} ${message}`);
+                }
+                else {
+                    console.log(`    ${chalk.red('✗')} ${error}`);
+                }
             }
+            console.log();
         }
         logger.divider();
+        // Output JSON summary if in JSON mode
+        if (this.options.logFormat === 'json') {
+            const cycleSummary = {
+                type: 'cycle_result',
+                cycleNumber: this.cycleCount,
+                success: result.success,
+                tasksDiscovered: result.tasksDiscovered,
+                tasksCompleted: result.tasksCompleted,
+                tasksFailed: result.tasksFailed,
+                prsMerged: result.prsMerged,
+                duration: result.duration,
+                degraded: result.degraded,
+                serviceHealth: {
+                    overall: result.serviceHealth.overallStatus,
+                    github: result.serviceHealth.github ? {
+                        status: result.serviceHealth.github.status,
+                        circuitState: result.serviceHealth.github.circuitState,
+                        rateLimitRemaining: result.serviceHealth.github.rateLimitRemaining,
+                    } : null,
+                },
+                errors: result.errors,
+                timestamp: new Date().toISOString(),
+            };
+            console.log(JSON.stringify(cycleSummary));
+        }
     }
     sleep(ms) {
         return new Promise((resolve) => {

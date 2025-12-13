@@ -1,7 +1,50 @@
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { logger, getCorrelationId, createOperationContext, finalizeOperationContext, startPhase, endPhase, recordPhaseOperation, recordPhaseError, } from '../utils/logger.js';
+const packageJsonCache = new Map();
+const PACKAGE_JSON_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+/**
+ * Asynchronously load and parse a package.json file with caching.
+ * Returns null if the file doesn't exist or contains malformed JSON.
+ */
+async function loadPackageJson(filePath) {
+    // Check cache first
+    const cached = packageJsonCache.get(filePath);
+    if (cached && Date.now() - cached.timestamp < PACKAGE_JSON_CACHE_TTL_MS) {
+        return cached.data;
+    }
+    // Check if file exists
+    if (!existsSync(filePath)) {
+        return null;
+    }
+    try {
+        const content = await readFile(filePath, 'utf-8');
+        const data = JSON.parse(content);
+        // Cache the result
+        packageJsonCache.set(filePath, {
+            data,
+            timestamp: Date.now(),
+        });
+        return data;
+    }
+    catch (error) {
+        if (error instanceof SyntaxError) {
+            logger.warn(`Malformed JSON in ${filePath}: ${error.message}`);
+        }
+        else {
+            logger.debug(`Failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return null;
+    }
+}
+/**
+ * Clear the package.json cache. Useful for testing or when files are known to have changed.
+ */
+export function clearPackageJsonCache() {
+    packageJsonCache.clear();
+}
 export async function runTests(options) {
     const { repoPath, packages = [], timeout = 10 * 60 * 1000, testPattern } = options;
     const startTime = Date.now();
@@ -178,38 +221,24 @@ async function determineTestCommands(repoPath, packages) {
     const commands = [];
     // Check for root package.json
     const rootPackageJson = join(repoPath, 'package.json');
-    if (existsSync(rootPackageJson)) {
-        try {
-            const pkg = require(rootPackageJson);
-            if (pkg.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
-                commands.push({
-                    command: 'npm test',
-                    cwd: repoPath,
-                });
-            }
-        }
-        catch {
-            // Ignore JSON parse errors
-        }
+    const pkg = await loadPackageJson(rootPackageJson);
+    if (pkg?.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
+        commands.push({
+            command: 'npm test',
+            cwd: repoPath,
+        });
     }
     // If specific packages provided, add their test commands
     if (packages.length > 0) {
         for (const pkgPath of packages) {
             const fullPath = join(repoPath, pkgPath);
             const pkgJsonPath = join(fullPath, 'package.json');
-            if (existsSync(pkgJsonPath)) {
-                try {
-                    const pkg = require(pkgJsonPath);
-                    if (pkg.scripts?.test && pkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
-                        commands.push({
-                            command: 'npm test',
-                            cwd: fullPath,
-                        });
-                    }
-                }
-                catch {
-                    // Ignore
-                }
+            const subPkg = await loadPackageJson(pkgJsonPath);
+            if (subPkg?.scripts?.test && subPkg.scripts.test !== 'echo "Error: no test specified" && exit 1') {
+                commands.push({
+                    command: 'npm test',
+                    cwd: fullPath,
+                });
             }
         }
     }

@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import {
@@ -240,6 +241,69 @@ export function initBuildCache(options?: { maxEntries?: number; ttlMs?: number }
   return globalBuildCache;
 }
 
+// ============================================================================
+// Package.json Cache for async loading
+// ============================================================================
+
+interface PackageJson {
+  name?: string;
+  scripts?: Record<string, string>;
+  workspaces?: string[];
+  [key: string]: unknown;
+}
+
+interface PackageJsonCacheEntry {
+  data: PackageJson;
+  timestamp: number;
+}
+
+const packageJsonCache = new Map<string, PackageJsonCacheEntry>();
+const PACKAGE_JSON_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+
+/**
+ * Asynchronously load and parse a package.json file with caching.
+ * Returns null if the file doesn't exist or contains malformed JSON.
+ */
+async function loadPackageJson(filePath: string): Promise<PackageJson | null> {
+  // Check cache first
+  const cached = packageJsonCache.get(filePath);
+  if (cached && Date.now() - cached.timestamp < PACKAGE_JSON_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  // Check if file exists
+  if (!existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    const data = JSON.parse(content) as PackageJson;
+
+    // Cache the result
+    packageJsonCache.set(filePath, {
+      data,
+      timestamp: Date.now(),
+    });
+
+    return data;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      logger.warn(`Malformed JSON in ${filePath}: ${error.message}`);
+    } else {
+      logger.debug(`Failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return null;
+  }
+}
+
+/**
+ * Clear the package.json cache. Useful for testing or when files are known to have changed.
+ */
+export function clearPackageJsonCache(): void {
+  packageJsonCache.clear();
+}
+
 export async function runBuild(options: BuildOptions): Promise<BuildResult> {
   const {
     repoPath,
@@ -423,37 +487,32 @@ async function determineBuildCommands(repoPath: string, packages: string[]): Pro
 
   // Check for root package.json
   const rootPackageJson = join(repoPath, 'package.json');
+  const pkg = await loadPackageJson(rootPackageJson);
 
-  if (existsSync(rootPackageJson)) {
-    try {
-      const pkg = require(rootPackageJson);
+  if (pkg) {
+    // Check if it's a monorepo with workspaces
+    const hasWorkspaces = pkg.workspaces && pkg.workspaces.length > 0;
 
-      // Check if it's a monorepo with workspaces
-      const hasWorkspaces = pkg.workspaces && pkg.workspaces.length > 0;
+    if (hasWorkspaces && pkg.scripts?.build) {
+      // Monorepo with root build script (e.g., turbo, nx, lerna)
+      commands.push({
+        command: 'npm run build',
+        cwd: repoPath,
+      });
+    } else if (pkg.scripts?.build) {
+      // Simple project with build script
+      commands.push({
+        command: 'npm run build',
+        cwd: repoPath,
+      });
+    }
 
-      if (hasWorkspaces && pkg.scripts?.build) {
-        // Monorepo with root build script (e.g., turbo, nx, lerna)
-        commands.push({
-          command: 'npm run build',
-          cwd: repoPath,
-        });
-      } else if (pkg.scripts?.build) {
-        // Simple project with build script
-        commands.push({
-          command: 'npm run build',
-          cwd: repoPath,
-        });
-      }
-
-      // Check for TypeScript
-      if (existsSync(join(repoPath, 'tsconfig.json')) && !pkg.scripts?.build) {
-        commands.push({
-          command: 'npx tsc --noEmit',
-          cwd: repoPath,
-        });
-      }
-    } catch {
-      // Ignore JSON parse errors
+    // Check for TypeScript
+    if (existsSync(join(repoPath, 'tsconfig.json')) && !pkg.scripts?.build) {
+      commands.push({
+        command: 'npx tsc --noEmit',
+        cwd: repoPath,
+      });
     }
   }
 
@@ -462,19 +521,13 @@ async function determineBuildCommands(repoPath: string, packages: string[]): Pro
     for (const pkgPath of packages) {
       const fullPath = join(repoPath, pkgPath);
       const pkgJsonPath = join(fullPath, 'package.json');
+      const subPkg = await loadPackageJson(pkgJsonPath);
 
-      if (existsSync(pkgJsonPath)) {
-        try {
-          const pkg = require(pkgJsonPath);
-          if (pkg.scripts?.build) {
-            commands.push({
-              command: 'npm run build',
-              cwd: fullPath,
-            });
-          }
-        } catch {
-          // Ignore
-        }
+      if (subPkg?.scripts?.build) {
+        commands.push({
+          command: 'npm run build',
+          cwd: fullPath,
+        });
       }
     }
   }
