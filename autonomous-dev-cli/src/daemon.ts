@@ -8,7 +8,7 @@ import {
   type DiscoveredTask,
   type DeduplicatedTask,
 } from './discovery/index.js';
-import { createWorkerPool, type WorkerTask, type PoolResult } from './executor/index.js';
+import { createWorkerPool, type WorkerTask, type PoolResult, type WorkerPool } from './executor/index.js';
 import { runEvaluation, type EvaluationResult } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
 import {
@@ -34,6 +34,14 @@ import {
 } from './utils/logger.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer, type MonitoringServer } from './utils/monitoring.js';
+import {
+  createHealthServer,
+  type HealthServer,
+  type DaemonStateProvider,
+  type DaemonStatus,
+  type WorkerPoolStatus,
+  type ErrorMetrics,
+} from './monitoring/index.js';
 import {
   StructuredError,
   ErrorCode,
@@ -76,7 +84,7 @@ export interface CycleResult {
   serviceHealth: DaemonServiceHealth;
 }
 
-export class Daemon {
+export class Daemon implements DaemonStateProvider {
   private config: Config;
   private github: GitHub | null = null;
   private isRunning: boolean = false;
@@ -85,6 +93,7 @@ export class Daemon {
   private userId: string | null = null;
   private enableDatabaseLogging: boolean = false;
   private monitoringServer: MonitoringServer | null = null;
+  private healthServer: HealthServer | null = null;
   private repository: string = '';
   private lastKnownIssues: Issue[] = [];  // Cache for graceful degradation
   private serviceHealth: DaemonServiceHealth = {
@@ -92,6 +101,18 @@ export class Daemon {
     overallStatus: 'healthy',
     lastCheck: new Date(),
   };
+
+  // Health monitoring state
+  private startTime: Date = new Date();
+  private lastCycleTime: Date | null = null;
+  private lastCycleSuccess: boolean | null = null;
+  private lastCycleDuration: number | null = null;
+  private currentWorkerPool: WorkerPool | null = null;
+  private totalErrors: number = 0;
+  private lastErrorTime: Date | null = null;
+  private errorsByType: Record<string, number> = {};
+  private recentErrors: { time: Date; type: string }[] = [];
+  private daemonStatus: 'running' | 'stopped' | 'starting' | 'stopping' = 'stopped';
 
   constructor(options: DaemonOptions = {}) {
     this.options = options;
@@ -120,6 +141,9 @@ export class Daemon {
     logger.header('Autonomous Dev CLI');
     logger.info('Starting daemon...');
 
+    this.daemonStatus = 'starting';
+    this.startTime = new Date();
+
     try {
       // Initialize
       await this.initialize();
@@ -127,12 +151,14 @@ export class Daemon {
       // Start monitoring server if port is configured
       if (this.options.monitoringPort) {
         await this.startMonitoringServer();
+        await this.startHealthServer();
       }
 
       // Update health status
       metrics.updateHealthStatus(true);
 
       this.isRunning = true;
+      this.daemonStatus = 'running';
 
       // Main loop
       while (this.isRunning) {
@@ -174,6 +200,26 @@ export class Daemon {
         logger.memorySnapshot('Daemon', `Cycle #${this.cycleCount} start`);
 
         const result = await this.runCycle();
+
+        // Update last cycle tracking for health monitoring
+        this.lastCycleTime = new Date();
+        this.lastCycleSuccess = result.success;
+        this.lastCycleDuration = result.duration;
+
+        // Track errors for health monitoring
+        if (result.errors.length > 0) {
+          this.totalErrors += result.errors.length;
+          this.lastErrorTime = new Date();
+          for (const error of result.errors) {
+            const errorType = this.extractErrorType(error);
+            this.errorsByType[errorType] = (this.errorsByType[errorType] || 0) + 1;
+            this.recentErrors.push({ time: new Date(), type: errorType });
+          }
+          // Keep only last 100 recent errors for rate calculation
+          if (this.recentErrors.length > 100) {
+            this.recentErrors = this.recentErrors.slice(-100);
+          }
+        }
 
         // Calculate memory delta for the cycle
         const cycleEndMemory = getMemoryUsageMB();
@@ -285,6 +331,7 @@ export class Daemon {
 
   async stop(): Promise<void> {
     logger.info('Stop requested...');
+    this.daemonStatus = 'stopping';
     this.isRunning = false;
     metrics.updateHealthStatus(false);
   }
@@ -399,6 +446,195 @@ export class Daemon {
     }));
 
     await this.monitoringServer.start();
+  }
+
+  /**
+   * Start the health server for external monitoring
+   */
+  private async startHealthServer(): Promise<void> {
+    if (!this.options.monitoringPort) return;
+
+    // Use port + 1 for health server to avoid conflict with monitoring server
+    const healthPort = this.options.monitoringPort + 1;
+
+    this.healthServer = createHealthServer({
+      port: healthPort,
+      host: '0.0.0.0',
+    });
+
+    // Set this daemon as the state provider
+    this.healthServer.setStateProvider(this);
+
+    // Register health checks
+    this.healthServer.registerHealthCheck(async () => {
+      if (!this.github) {
+        return {
+          name: 'github',
+          status: 'fail',
+          message: 'GitHub client not initialized',
+        };
+      }
+
+      const health = this.github.client.getServiceHealth();
+      const statusMap: Record<string, 'pass' | 'fail' | 'warn'> = {
+        healthy: 'pass',
+        degraded: 'warn',
+        unavailable: 'fail',
+      };
+
+      return {
+        name: 'github',
+        status: statusMap[health.status] ?? 'fail',
+        message: `GitHub API ${health.status} (circuit: ${health.circuitState})`,
+      };
+    });
+
+    this.healthServer.registerHealthCheck(async () => ({
+      name: 'database',
+      status: this.enableDatabaseLogging ? 'pass' : 'pass',
+      message: this.enableDatabaseLogging ? 'Database connected' : 'Database logging disabled',
+    }));
+
+    this.healthServer.registerHealthCheck(async () => ({
+      name: 'daemon',
+      status: this.isRunning ? 'pass' : 'fail',
+      message: this.isRunning ? `Running cycle ${this.cycleCount}` : 'Daemon not running',
+    }));
+
+    await this.healthServer.start();
+  }
+
+  /**
+   * DaemonStateProvider implementation: Get current daemon status
+   */
+  getDaemonStatus(): DaemonStatus {
+    return {
+      status: this.daemonStatus,
+      cycleCount: this.cycleCount,
+      lastCycleTime: this.lastCycleTime,
+      lastCycleSuccess: this.lastCycleSuccess,
+      lastCycleDuration: this.lastCycleDuration,
+      startTime: this.startTime,
+      uptime: Math.floor((Date.now() - this.startTime.getTime()) / 1000),
+      version: '0.1.0',
+    };
+  }
+
+  /**
+   * DaemonStateProvider implementation: Get worker pool status
+   */
+  getWorkerPoolStatus(): WorkerPoolStatus | null {
+    if (!this.currentWorkerPool) {
+      return {
+        activeWorkers: 0,
+        queuedTasks: 0,
+        completedTasks: 0,
+        failedTasks: 0,
+        maxWorkers: this.config.execution.parallelWorkers,
+        isRunning: false,
+      };
+    }
+
+    const status = this.currentWorkerPool.getStatus();
+    return {
+      activeWorkers: status.active,
+      queuedTasks: status.queued,
+      completedTasks: status.succeeded,
+      failedTasks: status.failed,
+      maxWorkers: this.config.execution.parallelWorkers,
+      isRunning: status.active > 0 || status.queued > 0,
+    };
+  }
+
+  /**
+   * DaemonStateProvider implementation: Get error metrics
+   */
+  getErrorMetrics(): ErrorMetrics {
+    // Calculate recent error rate (errors in last 5 minutes)
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    const recentErrorCount = this.recentErrors.filter(
+      (e) => e.time.getTime() > fiveMinutesAgo
+    ).length;
+    const recentErrorRate = recentErrorCount / 5; // errors per minute
+
+    return {
+      totalErrors: this.totalErrors,
+      recentErrorRate,
+      lastErrorTime: this.lastErrorTime,
+      errorsByType: { ...this.errorsByType },
+    };
+  }
+
+  /**
+   * DaemonStateProvider implementation: Get service health
+   */
+  getServiceHealth(): {
+    name: string;
+    status: 'available' | 'degraded' | 'unavailable';
+    latency?: number;
+    details?: Record<string, any>;
+  }[] {
+    const services: {
+      name: string;
+      status: 'available' | 'degraded' | 'unavailable';
+      latency?: number;
+      details?: Record<string, any>;
+    }[] = [];
+
+    // GitHub service health
+    if (this.github) {
+      const health = this.github.client.getServiceHealth();
+      const statusMap: Record<string, 'available' | 'degraded' | 'unavailable'> = {
+        healthy: 'available',
+        degraded: 'degraded',
+        unavailable: 'unavailable',
+      };
+
+      services.push({
+        name: 'github',
+        status: statusMap[health.status] ?? 'unavailable',
+        details: {
+          circuitState: health.circuitState,
+          consecutiveFailures: health.consecutiveFailures,
+          rateLimitRemaining: health.rateLimitRemaining,
+        },
+      });
+    }
+
+    // Database service (if enabled)
+    if (this.enableDatabaseLogging) {
+      services.push({
+        name: 'database',
+        status: 'available',
+        details: {
+          userId: this.userId,
+        },
+      });
+    }
+
+    return services;
+  }
+
+  /**
+   * Extract error type from error message for categorization
+   */
+  private extractErrorType(error: string): string {
+    const errorMatch = error.match(/\[([^\]]+)\]/);
+    if (errorMatch) {
+      return errorMatch[1];
+    }
+    if (error.toLowerCase().includes('github')) return 'GITHUB_ERROR';
+    if (error.toLowerCase().includes('claude')) return 'CLAUDE_ERROR';
+    if (error.toLowerCase().includes('timeout')) return 'TIMEOUT_ERROR';
+    if (error.toLowerCase().includes('network')) return 'NETWORK_ERROR';
+    return 'UNKNOWN_ERROR';
+  }
+
+  /**
+   * Get the health server port (for CLI status command)
+   */
+  getHealthServerPort(): number | null {
+    return this.healthServer?.getPort() ?? null;
   }
 
   private async initialize(): Promise<void> {
@@ -517,6 +753,12 @@ export class Daemon {
 
     // Update health status
     metrics.updateHealthStatus(false);
+    this.daemonStatus = 'stopped';
+
+    // Stop health server
+    if (this.healthServer) {
+      await this.healthServer.stop();
+    }
 
     // Stop monitoring server
     if (this.monitoringServer) {
@@ -715,7 +957,7 @@ export class Daemon {
         }
 
         // Create worker pool and execute
-        const workerPool = createWorkerPool({
+        this.currentWorkerPool = createWorkerPool({
           maxWorkers: this.config.execution.parallelWorkers,
           workDir: this.config.execution.workDir,
           repoUrl: `https://github.com/${this.config.repo.owner}/${this.config.repo.name}`,
@@ -738,7 +980,10 @@ export class Daemon {
           branchName: this.generateBranchName(issue),
         }));
 
-        const results = await workerPool.executeTasks(workerTasks);
+        const results = await this.currentWorkerPool.executeTasks(workerTasks);
+
+        // Clear worker pool reference after execution
+        this.currentWorkerPool = null;
 
         tasksCompleted = results.filter((r) => r.success).length;
         tasksFailed = results.filter((r) => !r.success).length;

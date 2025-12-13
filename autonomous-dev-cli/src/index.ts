@@ -294,25 +294,42 @@ program
     '  • Repository information\n' +
     '  • Open issues count and status\n' +
     '  • Active pull requests\n' +
-    '  • Pending tasks ready for implementation' +
+    '  • Pending tasks ready for implementation\n' +
+    '  • Running daemon status (with --daemon flag)' +
     formatExamples([
       'autonomous-dev status',
       'autonomous-dev status -c ./production.json',
+      'autonomous-dev status --daemon --port 9091',
     ]) +
     formatAdditionalInfo(
       'Status Indicators:\n' +
-      '  ✓ (green)   PR is mergeable\n' +
-      '  ✗ (red)     PR has conflicts or failed checks\n' +
+      '  ✓ (green)   PR is mergeable / daemon healthy\n' +
+      '  ✗ (red)     PR has conflicts or daemon unhealthy\n' +
       '  ? (yellow)  Merge status pending/unknown\n\n' +
       'Issue Categories:\n' +
       '  • Total open    - All issues with autonomous-dev label\n' +
       '  • In progress   - Issues currently being worked on\n' +
-      '  • Pending       - Issues awaiting implementation'
+      '  • Pending       - Issues awaiting implementation\n\n' +
+      'Daemon Status (--daemon):\n' +
+      '  Connect to running daemon health endpoint to check:\n' +
+      '  • Daemon uptime and cycle count\n' +
+      '  • Worker pool status\n' +
+      '  • Last cycle execution time\n' +
+      '  • Service health (GitHub, database)'
     )
   )
   .option('-c, --config <path>', 'Path to configuration file (JSON format)')
+  .option('--daemon', 'Check running daemon status via health endpoint')
+  .option('-p, --port <port>', 'Daemon health server port (default: 9091)', '9091')
+  .option('-H, --host <host>', 'Daemon health server host (default: localhost)', 'localhost')
   .action(async (options) => {
     try {
+      // If daemon flag is set, check daemon status
+      if (options.daemon) {
+        await checkDaemonStatus(options.host, parseInt(options.port, 10));
+        return;
+      }
+
       const config = loadConfig(options.config);
 
       // Load credentials
@@ -387,6 +404,147 @@ program
       process.exit(1);
     }
   });
+
+/**
+ * Check daemon status by connecting to its health endpoint
+ */
+async function checkDaemonStatus(host: string, port: number): Promise<void> {
+  const http = await import('http');
+
+  logger.header('Daemon Status Check');
+  console.log(chalk.gray(`Connecting to http://${host}:${port}/health...`));
+  console.log();
+
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+
+    const req = http.request(
+      {
+        hostname: host,
+        port: port,
+        path: '/health',
+        method: 'GET',
+        timeout: 5000,
+      },
+      (res) => {
+        const responseTime = Date.now() - startTime;
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            const health = JSON.parse(data);
+            displayDaemonHealth(health, responseTime);
+            resolve();
+          } catch (error) {
+            logger.error('Failed to parse health response', { data });
+            process.exit(1);
+          }
+        });
+      }
+    );
+
+    req.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ECONNREFUSED') {
+        console.log(chalk.red('✗ Daemon not running'));
+        console.log(chalk.gray(`  No daemon found at http://${host}:${port}`));
+        console.log();
+        console.log(chalk.bold('To start the daemon:'));
+        console.log(chalk.gray(`  autonomous-dev start --monitoring-port ${port - 1}`));
+      } else {
+        logger.error('Failed to connect to daemon', { error: error.message });
+      }
+      process.exit(1);
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      logger.error('Connection to daemon timed out');
+      process.exit(1);
+    });
+
+    req.end();
+  });
+}
+
+/**
+ * Display daemon health information
+ */
+function displayDaemonHealth(health: any, responseTime: number): void {
+  const statusIcon = health.status === 'healthy'
+    ? chalk.green('✓')
+    : health.status === 'degraded'
+      ? chalk.yellow('⚠')
+      : chalk.red('✗');
+
+  console.log(chalk.bold('Daemon Status:'));
+  console.log(`  ${statusIcon} ${health.status.toUpperCase()} (${responseTime}ms response)`);
+  console.log();
+
+  // Daemon info
+  if (health.daemon) {
+    console.log(chalk.bold('Daemon Info:'));
+    console.log(`  Status:      ${health.daemon.status}`);
+    console.log(`  Version:     ${health.daemon.version}`);
+    console.log(`  Uptime:      ${formatUptime(health.daemon.uptime)}`);
+    console.log(`  Cycle Count: ${health.daemon.cycleCount}`);
+
+    if (health.daemon.lastCycleTime) {
+      const lastCycle = new Date(health.daemon.lastCycleTime);
+      const ago = Math.floor((Date.now() - lastCycle.getTime()) / 1000);
+      const successIcon = health.daemon.lastCycleSuccess ? chalk.green('✓') : chalk.red('✗');
+      console.log(`  Last Cycle:  ${successIcon} ${formatUptime(ago)} ago (${health.daemon.lastCycleDuration}ms)`);
+    }
+    console.log();
+  }
+
+  // Worker pool
+  if (health.workerPool) {
+    console.log(chalk.bold('Worker Pool:'));
+    console.log(`  Active:     ${health.workerPool.activeWorkers}/${health.workerPool.maxWorkers}`);
+    console.log(`  Queued:     ${health.workerPool.queuedTasks}`);
+    console.log(`  Completed:  ${health.workerPool.completedTasks}`);
+    console.log(`  Failed:     ${health.workerPool.failedTasks}`);
+    console.log();
+  }
+
+  // Health checks
+  if (health.checks && health.checks.length > 0) {
+    console.log(chalk.bold('Health Checks:'));
+    for (const check of health.checks) {
+      const icon = check.status === 'pass'
+        ? chalk.green('✓')
+        : check.status === 'warn'
+          ? chalk.yellow('⚠')
+          : chalk.red('✗');
+      const time = check.responseTime ? chalk.gray(` (${check.responseTime}ms)`) : '';
+      console.log(`  ${icon} ${check.name}: ${check.message || check.status}${time}`);
+    }
+    console.log();
+  }
+
+  console.log(chalk.gray(`Timestamp: ${health.timestamp}`));
+}
+
+/**
+ * Format uptime in human-readable format
+ */
+function formatUptime(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  if (seconds < 3600) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  }
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${mins}m`;
+}
 
 // Config command - show/validate config
 program
