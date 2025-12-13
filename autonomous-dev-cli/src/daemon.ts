@@ -70,6 +70,8 @@ import {
   ClaudeError,
   ConfigError,
   wrapError,
+  getErrorMessage,
+  normalizeError,
   type ErrorContext,
 } from './utils/errors.js';
 import { mkdirSync, existsSync, writeFileSync, readFileSync, rmSync, readdirSync } from 'fs';
@@ -409,7 +411,7 @@ export class Daemon implements DaemonStateProvider {
           await this.sleep(this.config.daemon.loopIntervalMs);
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       const structuredError = this.wrapDaemonError(error);
       logger.structuredError(structuredError, {
         context: this.getErrorContext('start'),
@@ -425,11 +427,8 @@ export class Daemon implements DaemonStateProvider {
   /**
    * Wrap any error as a StructuredError with daemon-specific context
    */
-  private wrapDaemonError(error: any, operation?: string): StructuredError {
-    if (error instanceof StructuredError) {
-      return error;
-    }
-    return wrapError(error, ErrorCode.INTERNAL_ERROR, {
+  private wrapDaemonError(error: unknown, operation?: string): StructuredError {
+    return normalizeError(error, ErrorCode.INTERNAL_ERROR, {
       operation: operation ?? 'daemon',
       component: 'Daemon',
     });
@@ -488,8 +487,8 @@ export class Daemon implements DaemonStateProvider {
         await this.gracefulShutdown();
         logger.info('Graceful shutdown completed successfully');
         process.exit(0);
-      } catch (error: any) {
-        logger.error(`Shutdown error: ${error.message}`);
+      } catch (error: unknown) {
+        logger.error(`Shutdown error: ${getErrorMessage(error)}`);
         process.exit(1);
       }
     };
@@ -529,14 +528,15 @@ export class Daemon implements DaemonStateProvider {
 
       const duration = Date.now() - shutdownStart;
       logger.info(`Graceful shutdown completed in ${duration}ms`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       const duration = Date.now() - shutdownStart;
-      if (error.message.includes('Shutdown timeout')) {
+      const errorMsg = getErrorMessage(error);
+      if (errorMsg.includes('Shutdown timeout')) {
         logger.error(`Shutdown timeout after ${duration}ms, forcing cleanup...`);
         // Force cleanup even on timeout
         await this.forceCleanup();
       } else {
-        logger.error(`Shutdown error after ${duration}ms: ${error.message}`);
+        logger.error(`Shutdown error after ${duration}ms: ${errorMsg}`);
         throw error;
       }
     }
@@ -558,8 +558,8 @@ export class Daemon implements DaemonStateProvider {
         }
         this.currentWorkerPool = null;
         logger.info('Worker pool shutdown complete');
-      } catch (error: any) {
-        logger.error(`Worker pool shutdown error: ${error.message}`);
+      } catch (error: unknown) {
+        logger.error(`Worker pool shutdown error: ${getErrorMessage(error)}`);
         // Continue with other cleanup even if worker pool fails
       }
     }
@@ -586,31 +586,31 @@ export class Daemon implements DaemonStateProvider {
     // Clean up work directories
     try {
       await this.cleanupWorkDirectories();
-    } catch (error: any) {
-      logger.error(`Work directory cleanup error: ${error.message}`);
+    } catch (error: unknown) {
+      logger.error(`Work directory cleanup error: ${getErrorMessage(error)}`);
     }
 
     // Force close database
     try {
       await closeDatabase();
-    } catch (error: any) {
-      logger.error(`Database close error: ${error.message}`);
+    } catch (error: unknown) {
+      logger.error(`Database close error: ${getErrorMessage(error)}`);
     }
 
     // Stop servers
     if (this.healthServer) {
       try {
         await this.healthServer.stop();
-      } catch (error: any) {
-        logger.error(`Health server stop error: ${error.message}`);
+      } catch (error: unknown) {
+        logger.error(`Health server stop error: ${getErrorMessage(error)}`);
       }
     }
 
     if (this.monitoringServer) {
       try {
         await this.monitoringServer.stop();
-      } catch (error: any) {
-        logger.error(`Monitoring server stop error: ${error.message}`);
+      } catch (error: unknown) {
+        logger.error(`Monitoring server stop error: ${getErrorMessage(error)}`);
       }
     }
 
@@ -643,9 +643,9 @@ export class Daemon implements DaemonStateProvider {
             rmSync(dirPath, { recursive: true, force: true });
             cleanedCount++;
             logger.debug(`Cleaned up directory: ${dirPath}`);
-          } catch (error: any) {
+          } catch (error: unknown) {
             errorCount++;
-            logger.warn(`Failed to clean up directory ${dirPath}: ${error.message}`);
+            logger.warn(`Failed to clean up directory ${dirPath}: ${getErrorMessage(error)}`);
           }
         }
 
@@ -662,9 +662,9 @@ export class Daemon implements DaemonStateProvider {
               }
             }
             cleanedCount++;
-          } catch (error: any) {
+          } catch (error: unknown) {
             errorCount++;
-            logger.warn(`Failed to clean up persist directory: ${error.message}`);
+            logger.warn(`Failed to clean up persist directory: ${getErrorMessage(error)}`);
           }
         }
       }
@@ -672,8 +672,8 @@ export class Daemon implements DaemonStateProvider {
       if (cleanedCount > 0 || errorCount > 0) {
         logger.info(`Work directory cleanup: ${cleanedCount} directories cleaned, ${errorCount} errors`);
       }
-    } catch (error: any) {
-      logger.error(`Failed to read work directory for cleanup: ${error.message}`);
+    } catch (error: unknown) {
+      logger.error(`Failed to read work directory for cleanup: ${getErrorMessage(error)}`);
     }
   }
 
@@ -1195,8 +1195,8 @@ export class Daemon implements DaemonStateProvider {
       try {
         await this.healthServer.stop();
         logger.debug('Health server stopped');
-      } catch (error: any) {
-        logger.warn(`Failed to stop health server: ${error.message}`);
+      } catch (error: unknown) {
+        logger.warn(`Failed to stop health server: ${getErrorMessage(error)}`);
       }
       this.healthServer = null;
     }
@@ -1206,8 +1206,8 @@ export class Daemon implements DaemonStateProvider {
       try {
         await this.monitoringServer.stop();
         logger.debug('Monitoring server stopped');
-      } catch (error: any) {
-        logger.warn(`Failed to stop monitoring server: ${error.message}`);
+      } catch (error: unknown) {
+        logger.warn(`Failed to stop monitoring server: ${getErrorMessage(error)}`);
       }
       this.monitoringServer = null;
     }
@@ -1218,8 +1218,8 @@ export class Daemon implements DaemonStateProvider {
         timeoutMs: 10000, // 10 second timeout for database close
         force: this.isShuttingDown, // Force close during signal-triggered shutdown
       });
-    } catch (error: any) {
-      logger.error(`Failed to close database: ${error.message}`);
+    } catch (error: unknown) {
+      logger.error(`Failed to close database: ${getErrorMessage(error)}`);
       // Don't throw - we want to complete shutdown even if database close fails
     }
 
@@ -1415,26 +1415,26 @@ export class Daemon implements DaemonStateProvider {
                 const issue = await this.createIssueForTask(task);
                 newIssues.push(issue);
                 logger.success(`Created issue #${issue.number}: ${issue.title}`);
-              } catch (error: any) {
+              } catch (error: unknown) {
                 const structuredError = error instanceof StructuredError
                   ? error
                   : new GitHubError(
                       ErrorCode.GITHUB_API_ERROR,
-                      `Failed to create issue for "${task.title}": ${error.message}`,
-                      { context: { taskTitle: task.title }, cause: error }
+                      `Failed to create issue for "${task.title}": ${getErrorMessage(error)}`,
+                      { context: { taskTitle: task.title }, cause: error instanceof Error ? error : undefined }
                     );
                 errors.push(`[${structuredError.code}] ${structuredError.message}`);
                 logger.structuredError(structuredError, { context: { taskTitle: task.title } });
               }
             }
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           const structuredError = error instanceof StructuredError
             ? error
             : new ClaudeError(
                 ErrorCode.CLAUDE_API_ERROR,
-                `Task discovery failed: ${error.message}`,
-                { context: this.getErrorContext('discoverTasks'), cause: error }
+                `Task discovery failed: ${getErrorMessage(error)}`,
+                { context: this.getErrorContext('discoverTasks'), cause: error instanceof Error ? error : undefined }
               );
           errors.push(`[${structuredError.code}] ${structuredError.message}`);
           logger.structuredError(structuredError, {
@@ -1773,8 +1773,8 @@ export class Daemon implements DaemonStateProvider {
         degraded,
         serviceHealth: finalHealth,
       };
-    } catch (error: any) {
-      errors.push(error.message);
+    } catch (error: unknown) {
+      errors.push(getErrorMessage(error));
       const finalHealth = this.updateServiceHealth();
 
       return {

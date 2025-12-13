@@ -1326,3 +1326,347 @@ export function formatError(error: StructuredError): string {
 
   return lines.join('\n');
 }
+
+/**
+ * Type guard to check if an error is a StructuredError
+ */
+export function isStructuredError(error: unknown): error is StructuredError {
+  return error instanceof StructuredError;
+}
+
+/**
+ * Type guard to check if an error is a GitHubError
+ */
+export function isGitHubError(error: unknown): error is GitHubError {
+  return error instanceof GitHubError;
+}
+
+/**
+ * Type guard to check if an error is a ClaudeError
+ */
+export function isClaudeError(error: unknown): error is ClaudeError {
+  return error instanceof ClaudeError;
+}
+
+/**
+ * Type guard to check if an error is a ConfigError
+ */
+export function isConfigError(error: unknown): error is ConfigError {
+  return error instanceof ConfigError;
+}
+
+/**
+ * Type guard to check if an error is a DatabaseError
+ */
+export function isDatabaseError(error: unknown): error is DatabaseError {
+  return error instanceof DatabaseError;
+}
+
+/**
+ * Type guard to check if an error is a ValidationError
+ */
+export function isValidationError(error: unknown): error is ValidationError {
+  return error instanceof ValidationError;
+}
+
+/**
+ * Type guard to check if an error is an ExecutionError
+ */
+export function isExecutionError(error: unknown): error is ExecutionError {
+  return error instanceof ExecutionError;
+}
+
+/**
+ * Safely extract error message from unknown error type
+ */
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return String(error);
+}
+
+/**
+ * Safely extract error code from unknown error type
+ */
+export function getErrorCode(error: unknown): ErrorCode {
+  if (error instanceof StructuredError) {
+    return error.code;
+  }
+  return ErrorCode.UNKNOWN_ERROR;
+}
+
+/**
+ * Check if an error is retryable
+ */
+export function isRetryableError(error: unknown): boolean {
+  if (error instanceof StructuredError) {
+    return error.isRetryable;
+  }
+  return false;
+}
+
+/**
+ * Logger interface for withErrorLogging
+ */
+export interface ErrorLogger {
+  error(message: string, context?: Record<string, unknown>): void;
+  warn?(message: string, context?: Record<string, unknown>): void;
+  debug?(message: string, context?: Record<string, unknown>): void;
+  structuredError?(error: StructuredError, options?: {
+    context?: ErrorContext;
+    includeStack?: boolean;
+    includeRecovery?: boolean;
+  }): void;
+}
+
+/**
+ * Options for withErrorLogging higher-order function
+ */
+export interface WithErrorLoggingOptions {
+  /** Operation name for context */
+  operation: string;
+  /** Component/module name for context */
+  component?: string;
+  /** Default error code to use when wrapping non-structured errors */
+  defaultErrorCode?: ErrorCode;
+  /** Whether to rethrow the error after logging (default: true) */
+  rethrow?: boolean;
+  /** Custom error transformer to convert to specific error types */
+  errorTransformer?: (error: unknown, context: ErrorContext) => StructuredError;
+  /** Additional context to include in error logs */
+  additionalContext?: Record<string, unknown>;
+  /** Whether to include stack trace in logs (default: true for non-transient errors) */
+  includeStack?: boolean;
+  /** Whether to include recovery suggestions in logs (default: true) */
+  includeRecovery?: boolean;
+}
+
+/**
+ * Higher-order function to wrap async functions with consistent error logging
+ * Reduces duplicate error handling patterns across the codebase
+ *
+ * @example
+ * ```typescript
+ * const fetchData = withErrorLogging(
+ *   async () => {
+ *     const response = await api.get('/data');
+ *     return response.data;
+ *   },
+ *   logger,
+ *   { operation: 'fetchData', component: 'DataService' }
+ * );
+ * ```
+ */
+export function withErrorLogging<T>(
+  fn: () => Promise<T>,
+  logger: ErrorLogger,
+  options: WithErrorLoggingOptions
+): Promise<T> {
+  const {
+    operation,
+    component = 'Unknown',
+    defaultErrorCode = ErrorCode.INTERNAL_ERROR,
+    rethrow = true,
+    errorTransformer,
+    additionalContext = {},
+    includeStack,
+    includeRecovery = true,
+  } = options;
+
+  const context: ErrorContext = {
+    operation,
+    component,
+    timestamp: new Date().toISOString(),
+    ...additionalContext,
+  };
+
+  return fn().catch((error: unknown) => {
+    let structuredError: StructuredError;
+
+    if (errorTransformer) {
+      structuredError = errorTransformer(error, context);
+    } else if (error instanceof StructuredError) {
+      // Preserve existing structured error, but add context
+      structuredError = new StructuredError(error.code, error.message, {
+        severity: error.severity,
+        recoveryActions: error.recoveryActions,
+        context: { ...error.context, ...context },
+        cause: error.cause,
+        isRetryable: error.isRetryable,
+      });
+    } else {
+      structuredError = wrapError(error, defaultErrorCode, context);
+    }
+
+    // Use structured logging if available
+    if (logger.structuredError) {
+      logger.structuredError(structuredError, {
+        context,
+        includeStack: includeStack ?? structuredError.severity !== 'transient',
+        includeRecovery,
+      });
+    } else {
+      // Fall back to standard error logging
+      const errorDetails: Record<string, unknown> = {
+        code: structuredError.code,
+        severity: structuredError.severity,
+        isRetryable: structuredError.isRetryable,
+        ...context,
+      };
+
+      if (includeStack ?? structuredError.severity !== 'transient') {
+        errorDetails.stack = structuredError.stack;
+      }
+
+      if (includeRecovery && structuredError.recoveryActions.length > 0) {
+        errorDetails.recoveryActions = structuredError.getRecoverySuggestions();
+      }
+
+      logger.error(`[${structuredError.code}] ${structuredError.message}`, errorDetails);
+    }
+
+    if (rethrow) {
+      throw structuredError;
+    }
+
+    return undefined as T;
+  });
+}
+
+/**
+ * Synchronous version of withErrorLogging for non-async functions
+ */
+export function withErrorLoggingSync<T>(
+  fn: () => T,
+  logger: ErrorLogger,
+  options: WithErrorLoggingOptions
+): T {
+  const {
+    operation,
+    component = 'Unknown',
+    defaultErrorCode = ErrorCode.INTERNAL_ERROR,
+    rethrow = true,
+    errorTransformer,
+    additionalContext = {},
+    includeStack,
+    includeRecovery = true,
+  } = options;
+
+  const context: ErrorContext = {
+    operation,
+    component,
+    timestamp: new Date().toISOString(),
+    ...additionalContext,
+  };
+
+  try {
+    return fn();
+  } catch (error: unknown) {
+    let structuredError: StructuredError;
+
+    if (errorTransformer) {
+      structuredError = errorTransformer(error, context);
+    } else if (error instanceof StructuredError) {
+      structuredError = new StructuredError(error.code, error.message, {
+        severity: error.severity,
+        recoveryActions: error.recoveryActions,
+        context: { ...error.context, ...context },
+        cause: error.cause,
+        isRetryable: error.isRetryable,
+      });
+    } else {
+      structuredError = wrapError(error, defaultErrorCode, context);
+    }
+
+    if (logger.structuredError) {
+      logger.structuredError(structuredError, {
+        context,
+        includeStack: includeStack ?? structuredError.severity !== 'transient',
+        includeRecovery,
+      });
+    } else {
+      const errorDetails: Record<string, unknown> = {
+        code: structuredError.code,
+        severity: structuredError.severity,
+        isRetryable: structuredError.isRetryable,
+        ...context,
+      };
+
+      if (includeStack ?? structuredError.severity !== 'transient') {
+        errorDetails.stack = structuredError.stack;
+      }
+
+      if (includeRecovery && structuredError.recoveryActions.length > 0) {
+        errorDetails.recoveryActions = structuredError.getRecoverySuggestions();
+      }
+
+      logger.error(`[${structuredError.code}] ${structuredError.message}`, errorDetails);
+    }
+
+    if (rethrow) {
+      throw structuredError;
+    }
+
+    return undefined as T;
+  }
+}
+
+/**
+ * Create a wrapped version of a function with automatic error logging
+ * Returns a new function that can be called multiple times
+ */
+export function createErrorLoggingWrapper<TArgs extends unknown[], TResult>(
+  fn: (...args: TArgs) => Promise<TResult>,
+  logger: ErrorLogger,
+  options: WithErrorLoggingOptions
+): (...args: TArgs) => Promise<TResult> {
+  return (...args: TArgs) => withErrorLogging(() => fn(...args), logger, options);
+}
+
+/**
+ * Normalize an unknown error to a StructuredError
+ * Use this when you need to handle errors in catch blocks with proper typing
+ */
+export function normalizeError(
+  error: unknown,
+  defaultCode: ErrorCode = ErrorCode.UNKNOWN_ERROR,
+  context?: ErrorContext
+): StructuredError {
+  // Already a structured error
+  if (error instanceof StructuredError) {
+    if (context) {
+      return new StructuredError(error.code, error.message, {
+        severity: error.severity,
+        recoveryActions: error.recoveryActions,
+        context: { ...error.context, ...context },
+        cause: error.cause,
+        isRetryable: error.isRetryable,
+      });
+    }
+    return error;
+  }
+
+  // Standard Error object
+  if (error instanceof Error) {
+    return new StructuredError(defaultCode, error.message, {
+      context,
+      cause: error,
+    });
+  }
+
+  // String error
+  if (typeof error === 'string') {
+    return new StructuredError(defaultCode, error, { context });
+  }
+
+  // Unknown error type
+  return new StructuredError(
+    defaultCode,
+    `Unknown error: ${String(error)}`,
+    { context }
+  );
+}

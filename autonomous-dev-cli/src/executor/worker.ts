@@ -36,6 +36,7 @@ import {
   ErrorCode,
   wrapError,
   withRetry,
+  getErrorMessage,
   type ErrorContext,
   type RecoveryAction,
 } from '../utils/errors.js';
@@ -398,8 +399,8 @@ export class Worker {
           correlationId,
           workerId: this.workerId,
         });
-      } catch (error: any) {
-        taskLog.warn(`Failed to create chat session: ${error.message}`);
+      } catch (error: unknown) {
+        taskLog.warn(`Failed to create chat session: ${getErrorMessage(error)}`);
       }
     }
 
@@ -537,7 +538,7 @@ export class Worker {
         duration,
         chatSessionId,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Track execution state at time of failure
       const executionState: Partial<TaskExecutionState> = {
         taskId: `task-${issue.number}`,
@@ -553,7 +554,7 @@ export class Worker {
       const structuredError = this.wrapExecutionError(
         error,
         ErrorCode.INTERNAL_ERROR,
-        `Task execution failed: ${error.message}`,
+        `Task execution failed: ${getErrorMessage(error)}`,
         task,
         executionState
       );
