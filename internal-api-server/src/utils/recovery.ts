@@ -172,8 +172,7 @@ export async function attemptRecovery(
   metrics.recordRetryAttempt(
     context.operation,
     context.attempt,
-    false,
-    { errorType: classification.type }
+    false
   );
 
   // Apply recovery strategy
@@ -359,7 +358,7 @@ export async function withRecovery<T>(
 
       // Record successful recovery if we had to retry
       if (attempt > 1) {
-        metrics.recordRetryAttempt(operationName, attempt, true, {});
+        metrics.recordRetryAttempt(operationName, attempt, true);
         logger.info(`Operation succeeded after ${attempt} attempts`, {
           component: 'Recovery',
           operation: operationName,

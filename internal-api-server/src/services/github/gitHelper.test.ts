@@ -223,7 +223,7 @@ index abc123..def456 100644
     });
 
     it('should return commit hash', async () => {
-      const mockCommitAll = mock.fn(async () => 'def5678');
+      const mockCommitAll = mock.fn(async (_message: string) => 'def5678');
 
       const hash = await mockCommitAll('Fix bug');
 
@@ -231,7 +231,7 @@ index abc123..def456 100644
     });
 
     it('should throw if nothing to commit', async () => {
-      const mockCommitAll = mock.fn(async () => {
+      const mockCommitAll = mock.fn(async (_message: string) => {
         throw new Error('nothing to commit');
       });
 

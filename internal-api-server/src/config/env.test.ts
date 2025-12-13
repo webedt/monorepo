@@ -361,7 +361,7 @@ describe('Validation Logic', () => {
       if (NODE_ENV === 'production') {
         if (!MINIO_ROOT_USER) errors.push('MINIO_ROOT_USER is required in production');
         if (!MINIO_ROOT_PASSWORD) errors.push('MINIO_ROOT_PASSWORD is required in production');
-        if (SESSION_SECRET === 'development-secret-change-in-production') {
+        if ((SESSION_SECRET as string) === 'development-secret-change-in-production') {
           errors.push('SESSION_SECRET must be changed in production');
         }
       }
@@ -371,7 +371,7 @@ describe('Validation Logic', () => {
 
     it('should not validate in development mode', () => {
       const errors: string[] = [];
-      const NODE_ENV = 'development';
+      const NODE_ENV = 'development' as string;
       const MINIO_ROOT_USER = '';
       const MINIO_ROOT_PASSWORD = '';
       const SESSION_SECRET = 'development-secret-change-in-production';
