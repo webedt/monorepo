@@ -46,10 +46,12 @@ export function createIssueManager(client) {
                 params.labels = label;
             }
             try {
-                const { data } = await octokit.issues.listForRepo(params);
-                // Filter out pull requests (GitHub API returns PRs as issues)
-                const issues = data.filter((item) => !item.pull_request);
-                return issues.map(mapIssue);
+                return await client.execute(async () => {
+                    const { data } = await octokit.issues.listForRepo(params);
+                    // Filter out pull requests (GitHub API returns PRs as issues)
+                    const issues = data.filter((item) => !item.pull_request);
+                    return issues.map(mapIssue);
+                }, `GET /repos/${owner}/${repo}/issues`, { operation: 'listOpenIssues', label });
             }
             catch (error) {
                 handleError(error, 'list issues', { label });
@@ -80,12 +82,14 @@ export function createIssueManager(client) {
         },
         async getIssue(number) {
             try {
-                const { data } = await octokit.issues.get({
-                    owner,
-                    repo,
-                    issue_number: number,
-                });
-                return mapIssue(data);
+                return await client.execute(async () => {
+                    const { data } = await octokit.issues.get({
+                        owner,
+                        repo,
+                        issue_number: number,
+                    });
+                    return mapIssue(data);
+                }, `GET /repos/${owner}/${repo}/issues/${number}`, { operation: 'getIssue', issueNumber: number });
             }
             catch (error) {
                 if (error.status === 404) {
@@ -96,15 +100,17 @@ export function createIssueManager(client) {
         },
         async createIssue(options) {
             try {
-                const { data } = await octokit.issues.create({
-                    owner,
-                    repo,
-                    title: options.title,
-                    body: options.body,
-                    labels: options.labels,
-                });
-                logger.info(`Created issue #${data.number}: ${data.title}`);
-                return mapIssue(data);
+                return await client.execute(async () => {
+                    const { data } = await octokit.issues.create({
+                        owner,
+                        repo,
+                        title: options.title,
+                        body: options.body,
+                        labels: options.labels,
+                    });
+                    logger.info(`Created issue #${data.number}: ${data.title}`);
+                    return mapIssue(data);
+                }, `POST /repos/${owner}/${repo}/issues`, { operation: 'createIssue', title: options.title });
             }
             catch (error) {
                 handleError(error, 'create issue', { title: options.title });
@@ -112,13 +118,15 @@ export function createIssueManager(client) {
         },
         async addLabels(issueNumber, labels) {
             try {
-                await octokit.issues.addLabels({
-                    owner,
-                    repo,
-                    issue_number: issueNumber,
-                    labels,
-                });
-                logger.debug(`Added labels to issue #${issueNumber}`, { labels });
+                await client.execute(async () => {
+                    await octokit.issues.addLabels({
+                        owner,
+                        repo,
+                        issue_number: issueNumber,
+                        labels,
+                    });
+                    logger.debug(`Added labels to issue #${issueNumber}`, { labels });
+                }, `POST /repos/${owner}/${repo}/issues/${issueNumber}/labels`, { operation: 'addLabels', issueNumber, labels });
             }
             catch (error) {
                 handleError(error, 'add labels', { issueNumber, labels });
@@ -141,13 +149,15 @@ export function createIssueManager(client) {
         },
         async removeLabel(issueNumber, label) {
             try {
-                await octokit.issues.removeLabel({
-                    owner,
-                    repo,
-                    issue_number: issueNumber,
-                    name: label,
-                });
-                logger.debug(`Removed label '${label}' from issue #${issueNumber}`);
+                await client.execute(async () => {
+                    await octokit.issues.removeLabel({
+                        owner,
+                        repo,
+                        issue_number: issueNumber,
+                        name: label,
+                    });
+                    logger.debug(`Removed label '${label}' from issue #${issueNumber}`);
+                }, `DELETE /repos/${owner}/${repo}/issues/${issueNumber}/labels/${label}`, { operation: 'removeLabel', issueNumber, label });
             }
             catch (error) {
                 // Ignore if label doesn't exist
@@ -158,21 +168,23 @@ export function createIssueManager(client) {
         },
         async closeIssue(issueNumber, comment) {
             try {
-                if (comment) {
-                    await octokit.issues.createComment({
+                await client.execute(async () => {
+                    if (comment) {
+                        await octokit.issues.createComment({
+                            owner,
+                            repo,
+                            issue_number: issueNumber,
+                            body: comment,
+                        });
+                    }
+                    await octokit.issues.update({
                         owner,
                         repo,
                         issue_number: issueNumber,
-                        body: comment,
+                        state: 'closed',
                     });
-                }
-                await octokit.issues.update({
-                    owner,
-                    repo,
-                    issue_number: issueNumber,
-                    state: 'closed',
-                });
-                logger.info(`Closed issue #${issueNumber}`);
+                    logger.info(`Closed issue #${issueNumber}`);
+                }, `PATCH /repos/${owner}/${repo}/issues/${issueNumber}`, { operation: 'closeIssue', issueNumber });
             }
             catch (error) {
                 handleError(error, 'close issue', { issueNumber });
@@ -180,13 +192,15 @@ export function createIssueManager(client) {
         },
         async addComment(issueNumber, body) {
             try {
-                await octokit.issues.createComment({
-                    owner,
-                    repo,
-                    issue_number: issueNumber,
-                    body,
-                });
-                logger.debug(`Added comment to issue #${issueNumber}`);
+                await client.execute(async () => {
+                    await octokit.issues.createComment({
+                        owner,
+                        repo,
+                        issue_number: issueNumber,
+                        body,
+                    });
+                    logger.debug(`Added comment to issue #${issueNumber}`);
+                }, `POST /repos/${owner}/${repo}/issues/${issueNumber}/comments`, { operation: 'addComment', issueNumber });
             }
             catch (error) {
                 handleError(error, 'add comment', { issueNumber });

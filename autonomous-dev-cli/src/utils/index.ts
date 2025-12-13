@@ -166,3 +166,36 @@ export {
   type NumericRange,
   NUMERIC_RANGES,
 } from './validation.js';
+
+// Re-export cache utilities
+export {
+  // Cache key generation
+  generateCacheKey,
+  generateShortCacheKey,
+  // File modification tracking
+  collectFileModifications,
+  generateContentHashFromModifications,
+  type FileModificationInfo,
+  type CollectModificationsOptions,
+  // Git-based change detection
+  getGitChangeInfo,
+  haveFilesChangedSinceCommit,
+  type GitChangeInfo,
+  // Cache performance metrics
+  calculateHitRate,
+  formatCacheMetrics,
+  formatBytes,
+  type CachePerformanceMetrics,
+  // Configuration-based invalidation
+  generateConfigHash,
+  hasConfigChanged,
+  type ConfigHash,
+  // Cache cleanup utilities
+  getEntriesToCleanup,
+  type CacheCleanupPolicy,
+  type CleanupCacheEntry,
+  // Cache debug logging
+  logCacheOperation,
+  logCachePerformanceSummary,
+  type CacheOperation,
+} from './cache.js';

@@ -8,6 +8,7 @@ import { simpleGit } from 'simple-git';
 import { logger, getCorrelationId, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, } from '../utils/logger.js';
 import { metrics } from '../utils/metrics.js';
 import { AnalyzerError, ErrorCode } from '../utils/errors.js';
+import { logCacheOperation, logCachePerformanceSummary, generateConfigHash, formatBytes, } from '../utils/cache.js';
 import { getPersistentCache, initPersistentCache, } from './cache.js';
 export class AnalysisCache {
     cache = new Map();
@@ -248,6 +249,8 @@ export class CodebaseAnalyzer {
     enablePersistentCache;
     persistentCache = null;
     persistentCacheInitialized = false;
+    // Configuration hash for cache invalidation
+    configHash;
     constructor(repoPath, excludePaths = [], config = {}) {
         // Normalize and resolve the path
         this.repoPath = isAbsolute(repoPath) ? repoPath : resolve(repoPath);
@@ -272,6 +275,22 @@ export class CodebaseAnalyzer {
         this.enableGitAnalysis = config.enableGitAnalysis !== false; // Default true
         this.gitAnalysisDays = config.gitAnalysisDays ?? DEFAULT_GIT_ANALYSIS_DAYS;
         this.gitMaxCommits = config.gitMaxCommits ?? DEFAULT_GIT_MAX_COMMITS;
+        // Generate configuration hash for cache invalidation on config changes
+        this.configHash = generateConfigHash({
+            maxDepth: this.maxDepth,
+            maxFiles: this.maxFiles,
+            maxFileSizeBytes: this.maxFileSizeBytes,
+            excludePaths: this.excludePaths,
+            enableGitAnalysis: this.enableGitAnalysis,
+            gitAnalysisDays: this.gitAnalysisDays,
+            gitMaxCommits: this.gitMaxCommits,
+        }).hash;
+        logger.debug('CodebaseAnalyzer initialized', {
+            repoPath: this.repoPath,
+            configHash: this.configHash,
+            enableCache: this.enableCache,
+            enablePersistentCache: this.enablePersistentCache,
+        });
     }
     /**
      * Initialize the persistent cache if not already done
@@ -308,6 +327,42 @@ export class CodebaseAnalyzer {
             inMemory: this.cache.getStats(),
             persistent: this.persistentCache?.getStats() ?? null,
         };
+    }
+    /**
+     * Get cache performance metrics for monitoring and reporting
+     */
+    getCachePerformanceMetrics() {
+        const inMemoryStats = this.cache.getStats();
+        const persistentStats = this.persistentCache?.getStats();
+        // Combine in-memory and persistent cache stats
+        const totalHits = inMemoryStats.hits + (persistentStats?.hits ?? 0);
+        const totalMisses = inMemoryStats.misses + (persistentStats?.misses ?? 0);
+        const totalLookups = totalHits + totalMisses;
+        return {
+            hitRate: totalLookups > 0 ? totalHits / totalLookups : 0,
+            missRate: totalLookups > 0 ? totalMisses / totalLookups : 0,
+            averageAccessTimeMs: persistentStats?.averageAccessTime ?? 0,
+            totalLookups,
+            totalHits,
+            totalMisses,
+            evictions: persistentStats?.evictions ?? 0,
+            invalidations: inMemoryStats.invalidations + (persistentStats?.invalidations ?? 0),
+            sizeBytes: persistentStats?.totalSizeBytes ?? 0,
+            entryCount: inMemoryStats.size + (persistentStats?.totalEntries ?? 0),
+        };
+    }
+    /**
+     * Log cache performance summary for debugging and monitoring
+     */
+    logCachePerformance() {
+        const metrics = this.getCachePerformanceMetrics();
+        logCachePerformanceSummary('CodebaseAnalyzer', metrics);
+    }
+    /**
+     * Get the configuration hash used for cache invalidation
+     */
+    getConfigHash() {
+        return this.configHash;
     }
     /**
      * Report progress to the callback if registered
@@ -502,15 +557,34 @@ export class CodebaseAnalyzer {
         let changedFilesForIncremental;
         // Check persistent cache first (if enabled)
         if (this.enablePersistentCache && this.persistentCache) {
-            const persistentCacheKey = this.persistentCache.generateKey(this.repoPath, this.excludePaths, JSON.stringify(this.config));
+            const persistentCacheKey = this.persistentCache.generateKey(this.repoPath, this.excludePaths, this.configHash // Use config hash for better cache invalidation on config changes
+            );
             const currentCommitHash = await this.persistentCache.getGitCommitHash(this.repoPath);
+            logCacheOperation('lookup', {
+                key: persistentCacheKey,
+                repoPath: this.repoPath,
+                cacheType: 'persistent',
+                configHash: this.configHash,
+                commitHash: currentCommitHash || 'unknown',
+            });
+            const lookupStartTime = Date.now();
             const persistentResult = await this.persistentCache.get(persistentCacheKey, this.repoPath, currentCommitHash || undefined);
+            const lookupDuration = Date.now() - lookupStartTime;
             if (persistentResult.hit && persistentResult.data) {
                 if (!persistentResult.requiresFullAnalysis) {
                     // Full cache hit from persistent storage
                     persistentCacheHit = true;
                     cacheHit = true;
                     const duration = Date.now() - startTime;
+                    // Log cache hit with detailed metrics
+                    logCacheOperation('hit', {
+                        key: persistentCacheKey,
+                        repoPath: this.repoPath,
+                        duration: lookupDuration,
+                        cacheType: 'persistent',
+                        fileCount: persistentResult.data.fileCount,
+                        stats: this.getCachePerformanceMetrics(),
+                    });
                     // Record discovery metrics for cache hit
                     const repoName = this.repoPath.split('/').slice(-2).join('/');
                     metrics.recordDiscovery(0, duration, true, { repository: repoName });
@@ -518,9 +592,11 @@ export class CodebaseAnalyzer {
                     logger.info('Using persistent cached codebase analysis', {
                         path: this.repoPath,
                         cacheType: 'persistent',
-                        hitRate: persistentStats.hitRate,
+                        hitRate: `${(persistentStats.hitRate * 100).toFixed(1)}%`,
                         duration,
                         cacheHit: true,
+                        fileCount: persistentResult.data.fileCount,
+                        todoCount: persistentResult.data.todoComments?.length ?? 0,
                     });
                     // Log operation completion
                     const operationMetadata = finalizeOperationContext(operationContext, true, {
@@ -542,30 +618,65 @@ export class CodebaseAnalyzer {
                     // Incremental update possible
                     incrementalUpdate = true;
                     changedFilesForIncremental = persistentResult.changedFiles;
-                    logger.info('Performing incremental analysis', {
+                    logCacheOperation('incremental-update', {
+                        key: persistentCacheKey,
+                        repoPath: this.repoPath,
                         changedFiles: changedFilesForIncremental.length,
                         reason: persistentResult.reason,
                     });
+                    logger.info('Performing incremental analysis', {
+                        changedFiles: changedFilesForIncremental.length,
+                        changedFilesList: changedFilesForIncremental.slice(0, 10),
+                        reason: persistentResult.reason,
+                    });
                 }
+            }
+            else {
+                // Log cache miss
+                logCacheOperation('miss', {
+                    key: persistentCacheKey,
+                    repoPath: this.repoPath,
+                    duration: lookupDuration,
+                    reason: persistentResult.reason || 'No cache entry found',
+                    cacheType: 'persistent',
+                });
             }
         }
         // Fall back to in-memory cache if persistent cache didn't hit
         if (!cacheHit && this.enableCache) {
             const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
             const contentHash = await this.cache.generateContentHash(this.repoPath);
+            logCacheOperation('lookup', {
+                key: cacheKey,
+                repoPath: this.repoPath,
+                cacheType: 'in-memory',
+                contentHash,
+            });
+            const inMemoryLookupStart = Date.now();
             const cached = this.cache.get(cacheKey, contentHash);
+            const inMemoryLookupDuration = Date.now() - inMemoryLookupStart;
             if (cached) {
                 cacheHit = true;
                 const duration = Date.now() - startTime;
+                logCacheOperation('hit', {
+                    key: cacheKey,
+                    repoPath: this.repoPath,
+                    duration: inMemoryLookupDuration,
+                    cacheType: 'in-memory',
+                    fileCount: cached.fileCount,
+                });
                 // Record discovery metrics for cache hit
                 const repoName = this.repoPath.split('/').slice(-2).join('/');
                 metrics.recordDiscovery(0, duration, true, { repository: repoName });
+                const inMemoryStats = this.cache.getStats();
                 logger.info('Using in-memory cached codebase analysis', {
                     path: this.repoPath,
                     cacheType: 'in-memory',
-                    stats: this.cache.getStats(),
+                    hitRate: `${(inMemoryStats.hitRate * 100).toFixed(1)}%`,
+                    cacheSize: inMemoryStats.size,
                     duration,
                     cacheHit: true,
+                    fileCount: cached.fileCount,
                 });
                 // Log operation completion
                 const operationMetadata = finalizeOperationContext(operationContext, true, {
@@ -583,6 +694,15 @@ export class CodebaseAnalyzer {
                 });
                 return cached;
             }
+            else {
+                logCacheOperation('miss', {
+                    key: cacheKey,
+                    repoPath: this.repoPath,
+                    duration: inMemoryLookupDuration,
+                    cacheType: 'in-memory',
+                    reason: 'Cache entry not found or expired',
+                });
+            }
         }
         // Reset file count for this analysis
         this.fileCount = 0;
@@ -592,49 +712,115 @@ export class CodebaseAnalyzer {
             phase: 'scanning',
             filesScanned: 0,
         });
-        // Time directory scanning (async)
-        const { result: structure, duration: scanDuration } = await timeOperation(() => this.scanDirectory(this.repoPath), 'scanDirectory');
-        logger.debug('Directory scan complete', {
-            duration: scanDuration,
-            fileCount: this.fileCount,
-        });
-        // Check if we hit the file limit
-        if (this.fileCount >= this.maxFiles) {
-            logger.warn(`File limit reached (${this.maxFiles}). Some files may not be included in analysis.`);
+        let structure = [];
+        let scanDuration = 0;
+        let todoComments = [];
+        let packages = [];
+        let configFiles = [];
+        let gitAnalysis;
+        // Check if we can perform incremental analysis
+        if (incrementalUpdate && changedFilesForIncremental && this.persistentCache) {
+            // Incremental analysis: only re-analyze changed files
+            const incrementalStartTime = Date.now();
+            logger.info('Starting incremental analysis', {
+                changedFileCount: changedFilesForIncremental.length,
+            });
+            // Get cached data as base
+            const persistentCacheKey = this.persistentCache.generateKey(this.repoPath, this.excludePaths, this.configHash);
+            const currentCommitHash = await this.persistentCache.getGitCommitHash(this.repoPath);
+            const cachedResult = await this.persistentCache.get(persistentCacheKey, this.repoPath, currentCommitHash || undefined);
+            if (cachedResult.data) {
+                // Use cached structure as base
+                structure = cachedResult.data.structure;
+                this.fileCount = cachedResult.data.fileCount;
+                // Incrementally update TODOs for changed files only
+                const changedFileSet = new Set(changedFilesForIncremental);
+                // Remove TODOs from changed files
+                const unchangedTodos = cachedResult.data.todoComments.filter(todo => !changedFileSet.has(todo.file));
+                // Re-analyze changed files for TODOs
+                const newTodos = await this.findTodoCommentsInFiles(changedFilesForIncremental);
+                todoComments = [...unchangedTodos, ...newTodos];
+                // For packages and config, do a quick check if any changed files affect them
+                const packageFilesChanged = changedFilesForIncremental.some(f => f.endsWith('package.json'));
+                const configFilesChanged = changedFilesForIncremental.some(f => f.includes('config') || f.startsWith('.') || f.endsWith('.json'));
+                if (packageFilesChanged) {
+                    packages = await this.findPackages();
+                }
+                else {
+                    packages = cachedResult.data.packages;
+                }
+                if (configFilesChanged) {
+                    configFiles = await this.findConfigFiles();
+                }
+                else {
+                    configFiles = cachedResult.data.configFiles;
+                }
+                // Always refresh git analysis for incremental updates
+                gitAnalysis = await this.analyzeGit();
+                scanDuration = Date.now() - incrementalStartTime;
+                logger.info('Incremental analysis complete', {
+                    duration: scanDuration,
+                    changedFiles: changedFilesForIncremental.length,
+                    newTodos: newTodos.length,
+                    totalTodos: todoComments.length,
+                    packagesRefreshed: packageFilesChanged,
+                    configRefreshed: configFilesChanged,
+                });
+            }
+            else {
+                // Fall back to full analysis if cached data not available
+                logger.warn('Incremental analysis failed, falling back to full analysis');
+                incrementalUpdate = false;
+            }
         }
-        // Report progress: analyzing TODOs
-        this.reportProgress({
-            phase: 'analyzing-todos',
-            filesScanned: this.fileCount,
-            totalFiles: this.fileCount,
-            percentComplete: 25,
-        });
-        const todoComments = await this.findTodoComments();
-        // Report progress: analyzing packages
-        this.reportProgress({
-            phase: 'analyzing-packages',
-            filesScanned: this.fileCount,
-            totalFiles: this.fileCount,
-            percentComplete: 50,
-        });
-        const packages = await this.findPackages();
-        // Report progress: analyzing config
-        this.reportProgress({
-            phase: 'analyzing-config',
-            filesScanned: this.fileCount,
-            totalFiles: this.fileCount,
-            percentComplete: 60,
-        });
-        const configFiles = await this.findConfigFiles();
-        // Report progress: analyzing git
-        this.reportProgress({
-            phase: 'analyzing-git',
-            filesScanned: this.fileCount,
-            totalFiles: this.fileCount,
-            percentComplete: 75,
-        });
-        // Perform git analysis
-        const gitAnalysis = await this.analyzeGit();
+        // Full analysis (when not doing incremental)
+        if (!incrementalUpdate) {
+            // Time directory scanning (async)
+            const scanResult = await timeOperation(() => this.scanDirectory(this.repoPath), 'scanDirectory');
+            structure = scanResult.result;
+            scanDuration = scanResult.duration;
+            logger.debug('Directory scan complete', {
+                duration: scanDuration,
+                fileCount: this.fileCount,
+            });
+            // Check if we hit the file limit
+            if (this.fileCount >= this.maxFiles) {
+                logger.warn(`File limit reached (${this.maxFiles}). Some files may not be included in analysis.`);
+            }
+            // Report progress: analyzing TODOs
+            this.reportProgress({
+                phase: 'analyzing-todos',
+                filesScanned: this.fileCount,
+                totalFiles: this.fileCount,
+                percentComplete: 25,
+            });
+            todoComments = await this.findTodoComments();
+            // Report progress: analyzing packages
+            this.reportProgress({
+                phase: 'analyzing-packages',
+                filesScanned: this.fileCount,
+                totalFiles: this.fileCount,
+                percentComplete: 50,
+            });
+            packages = await this.findPackages();
+            // Report progress: analyzing config
+            this.reportProgress({
+                phase: 'analyzing-config',
+                filesScanned: this.fileCount,
+                totalFiles: this.fileCount,
+                percentComplete: 60,
+            });
+            configFiles = await this.findConfigFiles();
+            // Report progress: analyzing git
+            this.reportProgress({
+                phase: 'analyzing-git',
+                filesScanned: this.fileCount,
+                totalFiles: this.fileCount,
+                percentComplete: 75,
+            });
+            // Perform git analysis
+            gitAnalysis = await this.analyzeGit();
+        }
         // Generate recentChanges from git analysis for backward compatibility
         const recentChanges = [];
         if (gitAnalysis) {
@@ -674,14 +860,39 @@ export class CodebaseAnalyzer {
             const cacheKey = this.cache.generateKey(this.repoPath, this.excludePaths, this.config);
             const contentHash = await this.cache.generateContentHash(this.repoPath);
             this.cache.set(cacheKey, result, contentHash);
+            logCacheOperation('set', {
+                key: cacheKey,
+                repoPath: this.repoPath,
+                cacheType: 'in-memory',
+                fileCount: result.fileCount,
+                todoCount: result.todoComments.length,
+            });
         }
         // Store in persistent cache if enabled
         if (this.enablePersistentCache && this.persistentCache) {
-            const persistentCacheKey = this.persistentCache.generateKey(this.repoPath, this.excludePaths, JSON.stringify(this.config));
+            const persistentCacheKey = this.persistentCache.generateKey(this.repoPath, this.excludePaths, this.configHash // Use config hash for consistency with lookup
+            );
             await this.persistentCache.set(persistentCacheKey, this.repoPath, result, this.excludePaths);
+            const persistentStats = this.persistentCache.getStats();
+            logCacheOperation('set', {
+                key: persistentCacheKey,
+                repoPath: this.repoPath,
+                cacheType: 'persistent',
+                fileCount: result.fileCount,
+                todoCount: result.todoComments.length,
+                stats: {
+                    hitRate: persistentStats.hitRate,
+                    totalHits: persistentStats.hits,
+                    totalMisses: persistentStats.misses,
+                    entryCount: persistentStats.totalEntries,
+                    sizeBytes: persistentStats.totalSizeBytes,
+                },
+            });
             logger.debug('Stored analysis in persistent cache', {
                 key: persistentCacheKey,
-                stats: this.persistentCache.getStats(),
+                totalEntries: persistentStats.totalEntries,
+                totalSize: formatBytes(persistentStats.totalSizeBytes),
+                hitRate: `${(persistentStats.hitRate * 100).toFixed(1)}%`,
             });
         }
         // Record discovery metrics
@@ -901,6 +1112,68 @@ export class CodebaseAnalyzer {
             }
         };
         await scanDir(this.repoPath);
+        return todos;
+    }
+    /**
+     * Find TODO comments in a specific list of files (for incremental analysis)
+     * This is more efficient than scanning the entire codebase when only
+     * a few files have changed.
+     */
+    async findTodoCommentsInFiles(filePaths) {
+        const todos = [];
+        const todoPattern = /\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)/gi;
+        logger.debug('Scanning specific files for TODOs', {
+            fileCount: filePaths.length,
+        });
+        for (const relativePath of filePaths) {
+            const fullPath = join(this.repoPath, relativePath);
+            const ext = extname(fullPath);
+            // Skip non-code files
+            if (!CODE_EXTENSIONS.has(ext)) {
+                continue;
+            }
+            try {
+                // Check if file exists and get stats
+                const fileStat = await stat(fullPath);
+                // Skip files larger than max size limit
+                if (fileStat.size > this.maxFileSizeBytes) {
+                    logger.debug(`Skipping large file for TODO scan: ${fullPath}`);
+                    continue;
+                }
+                // Use streaming for large files (>1MB)
+                if (fileStat.size > 1024 * 1024) {
+                    await this.scanFileWithStream(fullPath, todoPattern, todos);
+                }
+                else {
+                    // For smaller files, read entire content
+                    const content = await readFile(fullPath, 'utf-8');
+                    const lines = content.split('\n');
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i];
+                        // Reset lastIndex for global regex
+                        todoPattern.lastIndex = 0;
+                        const matches = line.matchAll(todoPattern);
+                        for (const match of matches) {
+                            todos.push({
+                                file: relativePath,
+                                line: i + 1,
+                                text: match[2]?.trim() || '',
+                                type: match[1].toUpperCase(),
+                            });
+                        }
+                    }
+                }
+            }
+            catch {
+                // Skip files that don't exist or can't be read
+                // This is expected for deleted files
+                logger.debug(`Skipping inaccessible file: ${relativePath}`);
+            }
+        }
+        logger.debug('Incremental TODO scan complete', {
+            filesScanned: filePaths.length,
+            todosFound: todos.length,
+        });
         return todos;
     }
     /**
