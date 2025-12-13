@@ -602,12 +602,30 @@ export async function updateChatSession(
 ): Promise<void> {
   const database = getDb();
 
-  await database
-    .update(chatSessions)
-    .set(updates)
-    .where(eq(chatSessions.id, sessionId));
+  try {
+    await database
+      .update(chatSessions)
+      .set(updates)
+      .where(eq(chatSessions.id, sessionId));
 
-  logger.debug(`Updated chat session: ${sessionId}`, { updates });
+    logger.debug(`Updated chat session: ${sessionId}`, { updates });
+  } catch (error: any) {
+    // Handle unique constraint violation on session_path (PostgreSQL error code 23505)
+    if (error.code === '23505' && updates.sessionPath) {
+      logger.warn(`Duplicate session_path, updating without it: ${updates.sessionPath}`);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { sessionPath, ...otherUpdates } = updates;
+      if (Object.keys(otherUpdates).length > 0) {
+        await database
+          .update(chatSessions)
+          .set(otherUpdates)
+          .where(eq(chatSessions.id, sessionId));
+        logger.debug(`Updated chat session without session_path: ${sessionId}`, { otherUpdates });
+      }
+    } else {
+      throw error;
+    }
+  }
 }
 
 export async function getChatSession(sessionId: string): Promise<ChatSession | null> {

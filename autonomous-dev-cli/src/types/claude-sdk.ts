@@ -239,7 +239,8 @@ export function validateSDKMessage(message: unknown): message is ClaudeSDKMessag
       }
       return true;
     case 'user':
-      return typeof obj.content === 'string' || Array.isArray(obj.content);
+      // User messages can have content or message property, both are valid
+      return true;
     case 'error':
       return (
         typeof obj.error === 'object' &&
