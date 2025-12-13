@@ -1,9 +1,9 @@
 import { type BuildResult } from './build.js';
 import { type TestResult } from './tests.js';
 import { type HealthCheckResult } from './health.js';
-export { runBuild, runTypeCheck, type BuildResult } from './build.js';
+export { runBuild, runTypeCheck, BuildCache, getBuildCache, initBuildCache, type BuildResult, type BuildOptions } from './build.js';
 export { runTests, type TestResult } from './tests.js';
-export { runHealthChecks, generatePreviewUrl, type HealthCheckResult, type HealthCheck } from './health.js';
+export { runHealthChecks, generatePreviewUrl, type HealthCheckResult, type HealthCheck, type HealthCheckOptions } from './health.js';
 export interface EvaluationResult {
     success: boolean;
     build?: BuildResult;

@@ -1,11 +1,209 @@
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import { logger } from '../utils/logger.js';
+export class BuildCache {
+    cache = new Map();
+    maxEntries;
+    ttlMs;
+    stats = { hits: 0, misses: 0, invalidations: 0 };
+    constructor(options = {}) {
+        this.maxEntries = options.maxEntries ?? 50;
+        this.ttlMs = options.ttlMs ?? 10 * 60 * 1000; // 10 minutes default
+    }
+    /**
+     * Generate a content hash based on source files to detect changes
+     */
+    generateContentHash(repoPath, packages = []) {
+        const hashData = [];
+        // Include package.json files
+        const packageJsonPaths = packages.length > 0
+            ? packages.map(p => join(repoPath, p, 'package.json'))
+            : [join(repoPath, 'package.json')];
+        for (const pkgPath of packageJsonPaths) {
+            if (existsSync(pkgPath)) {
+                try {
+                    const stat = statSync(pkgPath);
+                    const content = readFileSync(pkgPath, 'utf-8');
+                    hashData.push(`${pkgPath}:${stat.mtimeMs}:${content.length}`);
+                }
+                catch {
+                    // Skip inaccessible files
+                }
+            }
+        }
+        // Include source file modifications (sample)
+        const srcDirs = packages.length > 0
+            ? packages.map(p => join(repoPath, p, 'src'))
+            : [join(repoPath, 'src')];
+        for (const srcDir of srcDirs) {
+            if (existsSync(srcDir)) {
+                const sourceHashes = this.collectSourceHashes(srcDir, 100);
+                hashData.push(...sourceHashes);
+            }
+        }
+        // Include tsconfig if exists
+        const tsconfigPath = join(repoPath, 'tsconfig.json');
+        if (existsSync(tsconfigPath)) {
+            try {
+                const stat = statSync(tsconfigPath);
+                hashData.push(`${tsconfigPath}:${stat.mtimeMs}`);
+            }
+            catch {
+                // Skip
+            }
+        }
+        return createHash('md5').update(hashData.join('|')).digest('hex');
+    }
+    collectSourceHashes(dirPath, maxFiles) {
+        const hashes = [];
+        let count = 0;
+        const scanDir = (path, depth = 0) => {
+            if (depth > 5 || count >= maxFiles)
+                return;
+            try {
+                const items = readdirSync(path);
+                for (const item of items) {
+                    if (count >= maxFiles)
+                        break;
+                    if (['node_modules', 'dist', 'build', '.git'].includes(item))
+                        continue;
+                    const fullPath = join(path, item);
+                    try {
+                        const stat = statSync(fullPath);
+                        if (stat.isFile() && /\.(ts|tsx|js|jsx|json)$/.test(item)) {
+                            hashes.push(`${fullPath}:${stat.mtimeMs}`);
+                            count++;
+                        }
+                        else if (stat.isDirectory()) {
+                            scanDir(fullPath, depth + 1);
+                        }
+                    }
+                    catch {
+                        // Skip inaccessible
+                    }
+                }
+            }
+            catch {
+                // Skip inaccessible directories
+            }
+        };
+        scanDir(dirPath);
+        return hashes;
+    }
+    /**
+     * Generate a cache key from build options
+     */
+    generateKey(repoPath, packages) {
+        const keyData = JSON.stringify({ repoPath, packages });
+        return createHash('md5').update(keyData).digest('hex');
+    }
+    /**
+     * Get cached build result if valid
+     */
+    get(key, currentContentHash) {
+        const entry = this.cache.get(key);
+        if (!entry) {
+            this.stats.misses++;
+            return null;
+        }
+        // Check TTL
+        if (Date.now() - entry.timestamp > this.ttlMs) {
+            this.cache.delete(key);
+            this.stats.invalidations++;
+            this.stats.misses++;
+            logger.debug('Build cache entry expired', { key });
+            return null;
+        }
+        // Check content hash
+        if (entry.contentHash !== currentContentHash) {
+            this.cache.delete(key);
+            this.stats.invalidations++;
+            this.stats.misses++;
+            logger.debug('Build cache invalidated due to source changes', { key });
+            return null;
+        }
+        this.stats.hits++;
+        logger.debug('Build cache hit', { key });
+        return { ...entry.result, cached: true, cacheKey: key };
+    }
+    /**
+     * Store build result in cache
+     */
+    set(key, result, contentHash) {
+        // Only cache successful builds
+        if (!result.success) {
+            logger.debug('Skipping cache for failed build', { key });
+            return;
+        }
+        // Enforce max entries
+        if (this.cache.size >= this.maxEntries) {
+            const oldestKey = this.cache.keys().next().value;
+            if (oldestKey) {
+                this.cache.delete(oldestKey);
+            }
+        }
+        this.cache.set(key, {
+            result: { ...result, cached: false },
+            timestamp: Date.now(),
+            contentHash,
+        });
+        logger.debug('Cached build result', { key });
+    }
+    /**
+     * Clear all cache entries
+     */
+    clear() {
+        this.cache.clear();
+    }
+    /**
+     * Get cache statistics
+     */
+    getStats() {
+        const total = this.stats.hits + this.stats.misses;
+        return {
+            ...this.stats,
+            size: this.cache.size,
+            hitRate: total > 0 ? this.stats.hits / total : 0,
+        };
+    }
+}
+// Global build cache instance
+let globalBuildCache = null;
+export function getBuildCache() {
+    if (!globalBuildCache) {
+        globalBuildCache = new BuildCache();
+    }
+    return globalBuildCache;
+}
+export function initBuildCache(options) {
+    globalBuildCache = new BuildCache(options);
+    return globalBuildCache;
+}
 export async function runBuild(options) {
-    const { repoPath, packages = [], timeout = 5 * 60 * 1000 } = options;
+    const { repoPath, packages = [], timeout = 5 * 60 * 1000, enableCache = true, cache: customCache, } = options;
     const startTime = Date.now();
     logger.info('Running build verification...');
+    const buildCache = customCache ?? getBuildCache();
+    // Check cache if enabled
+    if (enableCache) {
+        const cacheKey = buildCache.generateKey(repoPath, packages);
+        const contentHash = buildCache.generateContentHash(repoPath, packages);
+        const cached = buildCache.get(cacheKey, contentHash);
+        if (cached) {
+            logger.info('Using cached build result', {
+                repoPath,
+                stats: buildCache.getStats(),
+            });
+            return {
+                ...cached,
+                duration: 0, // Cached builds are instant
+                cached: true,
+                cacheKey,
+            };
+        }
+    }
     try {
         // Determine build commands based on project structure
         const buildCommands = await determineBuildCommands(repoPath, packages);
@@ -47,11 +245,18 @@ export async function runBuild(options) {
             }
         }
         logger.success('Build completed successfully');
-        return {
+        const result = {
             success: true,
             output: combinedOutput,
             duration: Date.now() - startTime,
         };
+        // Cache the successful result
+        if (enableCache) {
+            const cacheKey = buildCache.generateKey(repoPath, packages);
+            const contentHash = buildCache.generateContentHash(repoPath, packages);
+            buildCache.set(cacheKey, result, contentHash);
+        }
+        return result;
     }
     catch (error) {
         logger.error('Build verification failed', { error: error.message });

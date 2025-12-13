@@ -1,3 +1,11 @@
+export interface PoolConfig {
+    max?: number;
+    min?: number;
+    idleTimeoutMillis?: number;
+    connectionTimeoutMillis?: number;
+    acquireTimeoutMillis?: number;
+    statementTimeout?: number;
+}
 export declare const users: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "users";
     schema: undefined;
@@ -1033,10 +1041,27 @@ export interface EventData {
     data?: unknown;
     [key: string]: unknown;
 }
-export declare function initDatabase(databaseUrl: string): Promise<void>;
+/**
+ * Initialize database with optimized connection pool settings
+ * Supports configuration for concurrent worker scenarios
+ */
+export declare function initDatabase(databaseUrl: string, config?: PoolConfig): Promise<void>;
 export declare function getDb(): import("drizzle-orm/node-postgres").NodePgDatabase<Record<string, unknown>> & {
     $client: import("pg").Pool;
 };
+/**
+ * Get current pool status for monitoring
+ */
+export declare function getPoolStats(): {
+    totalCount: number;
+    idleCount: number;
+    waitingCount: number;
+    maxConnections: number;
+};
+/**
+ * Check pool health and log warnings if connections are exhausted
+ */
+export declare function checkPoolHealth(): boolean;
 export declare function closeDatabase(): Promise<void>;
 export declare function getUserCredentials(email: string): Promise<UserCredentials | null>;
 export declare function createChatSession(params: CreateChatSessionParams): Promise<ChatSession>;
@@ -1052,4 +1077,24 @@ export declare function getChatSession(sessionId: string): Promise<ChatSession |
 export declare function addMessage(chatSessionId: string, type: 'user' | 'assistant' | 'system' | 'error', content: string): Promise<Message>;
 export declare function addEvent(chatSessionId: string, eventType: string, eventData: EventData): Promise<DbEvent>;
 export declare function generateSessionPath(owner: string, repo: string, branch: string): string;
+/**
+ * Add multiple messages in a single batch operation
+ * More efficient than individual inserts for high-volume scenarios
+ */
+export declare function addMessagesBatch(chatSessionId: string, msgs: Array<{
+    type: 'user' | 'assistant' | 'system' | 'error';
+    content: string;
+}>): Promise<Message[]>;
+/**
+ * Add multiple events in a single batch operation
+ */
+export declare function addEventsBatch(chatSessionId: string, evts: Array<{
+    eventType: string;
+    eventData: EventData;
+}>): Promise<DbEvent[]>;
+export declare function addEventOptimized(chatSessionId: string, eventType: string, eventData: EventData): Promise<DbEvent>;
+/**
+ * Flush pending activity updates (call before closing session)
+ */
+export declare function flushActivityUpdates(chatSessionId?: string): Promise<void>;
 //# sourceMappingURL=index.d.ts.map
