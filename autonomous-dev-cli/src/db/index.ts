@@ -4,6 +4,12 @@ import { eq, sql } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'crypto';
+import {
+  withTimeout,
+  DEFAULT_TIMEOUTS,
+  getTimeoutFromEnv,
+  TimeoutError,
+} from '../utils/timeout.js';
 
 const { Pool } = pg;
 
@@ -305,6 +311,60 @@ export async function closeDatabase(): Promise<void> {
 }
 
 // ============================================================================
+// Query Timeout Utilities
+// ============================================================================
+
+/**
+ * Get the configured database query timeout from environment or defaults
+ */
+export function getDatabaseTimeout(): number {
+  return getTimeoutFromEnv('DATABASE_QUERY', DEFAULT_TIMEOUTS.DATABASE_QUERY);
+}
+
+/**
+ * Execute a database query with timeout protection.
+ * Wraps any async database operation to ensure it doesn't hang indefinitely.
+ *
+ * @param queryFn - The async function containing the database query
+ * @param operationName - Name of the operation for error messages
+ * @param timeoutMs - Optional custom timeout in ms (defaults to DATABASE_QUERY timeout)
+ * @returns The result of the query
+ * @throws TimeoutError if the query times out
+ *
+ * @example
+ * ```typescript
+ * const user = await withQueryTimeout(
+ *   () => db.select().from(users).where(eq(users.id, id)),
+ *   'getUserById'
+ * );
+ * ```
+ */
+export async function withQueryTimeout<T>(
+  queryFn: () => Promise<T>,
+  operationName: string,
+  timeoutMs?: number
+): Promise<T> {
+  const timeout = timeoutMs ?? getDatabaseTimeout();
+
+  return withTimeout(
+    async () => queryFn(),
+    {
+      timeoutMs: timeout,
+      operationName: `Database: ${operationName}`,
+      context: {
+        poolStats: getPoolStats(),
+      },
+      onTimeout: (ms, opName) => {
+        logger.warn(`Database query timed out: ${opName}`, {
+          timeoutMs: ms,
+          poolStats: getPoolStats(),
+        });
+      },
+    }
+  );
+}
+
+// ============================================================================
 // User Operations
 // ============================================================================
 
@@ -312,17 +372,21 @@ export async function getUserCredentials(email: string): Promise<UserCredentials
   const database = getDb();
 
   try {
-    const result = await database
-      .select({
-        userId: users.id,
-        githubAccessToken: users.githubAccessToken,
-        claudeAuth: users.claudeAuth,
-        codexAuth: users.codexAuth,
-        geminiAuth: users.geminiAuth,
-      })
-      .from(users)
-      .where(eq(users.email, email))
-      .limit(1);
+    // Wrap the query with timeout protection
+    const result = await withQueryTimeout(
+      () => database
+        .select({
+          userId: users.id,
+          githubAccessToken: users.githubAccessToken,
+          claudeAuth: users.claudeAuth,
+          codexAuth: users.codexAuth,
+          geminiAuth: users.geminiAuth,
+        })
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1),
+      'getUserCredentials'
+    );
 
     if (result.length === 0) {
       logger.warn(`User not found: ${email}`);
@@ -338,7 +402,12 @@ export async function getUserCredentials(email: string): Promise<UserCredentials
       geminiAuth: user.geminiAuth,
     };
   } catch (error) {
-    logger.error(`Failed to get user credentials for ${email}`, { error });
+    // Provide more context for timeout errors
+    if (error instanceof TimeoutError) {
+      logger.error(`Database query timed out while getting user credentials for ${email}`, { error });
+    } else {
+      logger.error(`Failed to get user credentials for ${email}`, { error });
+    }
     throw error;
   }
 }

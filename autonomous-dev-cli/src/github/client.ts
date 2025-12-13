@@ -24,6 +24,12 @@ import {
   extractRetryAfterMs,
   type RetryContext,
 } from '../utils/retry.js';
+import {
+  withTimeout,
+  DEFAULT_TIMEOUTS,
+  getTimeoutFromEnv,
+  TimeoutError,
+} from '../utils/timeout.js';
 
 export interface GitHubClientOptions {
   token: string;
@@ -31,6 +37,8 @@ export interface GitHubClientOptions {
   repo: string;
   retryConfig?: Partial<RetryConfig>;
   circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
+  /** Timeout for individual API calls in milliseconds (default: 30000) */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -102,6 +110,7 @@ export class GitHubClient {
   public readonly repo: string;
   private retryConfig: Partial<RetryConfig>;
   private circuitBreakerConfig: CircuitBreakerConfig;
+  private requestTimeoutMs: number;
 
   // Circuit breaker state
   private circuitState: CircuitState = 'closed';
@@ -130,6 +139,9 @@ export class GitHubClient {
     this.repo = options.repo;
     this.retryConfig = { ...DEFAULT_GITHUB_RETRY_CONFIG, ...options.retryConfig };
     this.circuitBreakerConfig = { ...DEFAULT_CIRCUIT_BREAKER_CONFIG, ...options.circuitBreakerConfig };
+    // Configure request timeout from options or environment variable or default
+    this.requestTimeoutMs = options.requestTimeoutMs
+      ?? getTimeoutFromEnv('GITHUB_API', DEFAULT_TIMEOUTS.GITHUB_API);
   }
 
   get client(): Octokit {
@@ -428,44 +440,56 @@ export class GitHubClient {
     }
 
     try {
+      // Wrap the operation with timeout protection
       const timedResult = await timeOperation(
-        () => withRetry(operation, {
-          config: this.retryConfig,
-          onRetry: (error, attempt, delay) => {
-            this.updateRateLimitState(error);
-            const statusCode = (error as any).status ?? (error as any).response?.status;
+        () => withTimeout(
+          async () => withRetry(operation, {
+            config: this.retryConfig,
+            onRetry: (error, attempt, delay) => {
+              this.updateRateLimitState(error);
+              const statusCode = (error as any).status ?? (error as any).response?.status;
 
-            logger.apiCall('GitHub', endpoint, method, {
-              statusCode,
-              duration: Date.now() - startTime,
-              success: false,
-              error: `Retry ${attempt}: ${error.message}`,
-              correlationId,
-            });
+              logger.apiCall('GitHub', endpoint, method, {
+                statusCode,
+                duration: Date.now() - startTime,
+                success: false,
+                error: `Retry ${attempt}: ${error.message}`,
+                correlationId,
+              });
 
-            logger.warn(`GitHub API retry (attempt ${attempt}): ${endpoint}`, {
-              error: error.message,
-              retryInMs: delay,
-              circuitState: this.circuitState,
-            });
-          },
-          shouldRetry: (error) => {
-            // Check if it's a StructuredError with retry flag
-            if (error instanceof StructuredError) {
-              return error.isRetryable;
-            }
-            // Check for common retryable HTTP status codes
-            const statusCode = (error as any).status ?? (error as any).response?.status;
-            if (statusCode === 429) return true; // Rate limited
-            if (statusCode >= 500) return true; // Server errors
-            // Network errors
-            const code = (error as any).code;
-            if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
-              return true;
-            }
-            return false;
-          },
-        }),
+              logger.warn(`GitHub API retry (attempt ${attempt}): ${endpoint}`, {
+                error: error.message,
+                retryInMs: delay,
+                circuitState: this.circuitState,
+              });
+            },
+            shouldRetry: (error) => {
+              // Timeout errors are retryable
+              if (error instanceof TimeoutError) {
+                return true;
+              }
+              // Check if it's a StructuredError with retry flag
+              if (error instanceof StructuredError) {
+                return error.isRetryable;
+              }
+              // Check for common retryable HTTP status codes
+              const statusCode = (error as any).status ?? (error as any).response?.status;
+              if (statusCode === 429) return true; // Rate limited
+              if (statusCode >= 500) return true; // Server errors
+              // Network errors
+              const code = (error as any).code;
+              if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
+                return true;
+              }
+              return false;
+            },
+          }),
+          {
+            timeoutMs: this.requestTimeoutMs,
+            operationName: `GitHub API: ${endpoint}`,
+            context: { endpoint, method, owner: this.owner, repo: this.repo },
+          }
+        ),
         `github:${endpoint}`
       );
 

@@ -49,6 +49,14 @@ import {
   type RetryAttemptRecord,
 } from '../utils/retry.js';
 import {
+  withTimeout,
+  createTimedAbortController,
+  withCleanup,
+  DEFAULT_TIMEOUTS,
+  getTimeoutFromEnv,
+  TimeoutError,
+} from '../utils/timeout.js';
+import {
   getDeadLetterQueue,
   type RetryAttempt,
 } from '../utils/dead-letter-queue.js';
@@ -635,8 +643,11 @@ export class Worker {
     const useShallow = this.options.useShallowClone !== false; // Default true
     const sparseConfig = this.options.sparseCheckout;
     const maxRetries = this.options.retryConfig?.maxRetries ?? 3;
+    // Get git operation timeout from environment or use default (30 seconds)
+    const gitTimeoutMs = getTimeoutFromEnv('GIT_OPERATION', DEFAULT_TIMEOUTS.GIT_OPERATION);
 
     // Clone with retry for transient network failures using enhanced retry
+    // Each individual clone attempt is wrapped with timeout protection
     return retryWithBackoff(
       async (retryContext: RetryContext) => {
         const git = simpleGit(taskDir);
@@ -650,49 +661,69 @@ export class Worker {
           });
         }
 
-        // Use sparse checkout for targeted cloning (faster for large repos)
-        if (sparseConfig?.enabled) {
-          this.log.info('Using sparse checkout for optimized cloning');
+        // Wrap the clone operation with timeout protection
+        return withTimeout(
+          async () => {
+            // Use sparse checkout for targeted cloning (faster for large repos)
+            if (sparseConfig?.enabled) {
+              this.log.info('Using sparse checkout for optimized cloning');
 
-          // Initialize empty repo
-          mkdirSync(repoDir, { recursive: true });
-          const repoGit = simpleGit(repoDir);
-          await repoGit.init();
-          await repoGit.addRemote('origin', urlWithAuth);
+              // Initialize empty repo
+              mkdirSync(repoDir, { recursive: true });
+              const repoGit = simpleGit(repoDir);
+              await repoGit.init();
+              await repoGit.addRemote('origin', urlWithAuth);
 
-          // Enable sparse checkout
-          await repoGit.raw(['config', 'core.sparseCheckout', 'true']);
+              // Enable sparse checkout
+              await repoGit.raw(['config', 'core.sparseCheckout', 'true']);
 
-          // Write sparse checkout patterns
-          const sparseCheckoutPath = join(repoDir, '.git', 'info', 'sparse-checkout');
-          const patterns = sparseConfig.paths?.length
-            ? sparseConfig.paths
-            : ['/*', '!/node_modules']; // Default: all except node_modules
-          writeFileSync(sparseCheckoutPath, patterns.join('\n'));
+              // Write sparse checkout patterns
+              const sparseCheckoutPath = join(repoDir, '.git', 'info', 'sparse-checkout');
+              const patterns = sparseConfig.paths?.length
+                ? sparseConfig.paths
+                : ['/*', '!/node_modules']; // Default: all except node_modules
+              writeFileSync(sparseCheckoutPath, patterns.join('\n'));
 
-          // Fetch and checkout with optional shallow clone
-          const fetchArgs = useShallow
-            ? ['fetch', '--depth', '1', 'origin', this.options.baseBranch]
-            : ['fetch', 'origin', this.options.baseBranch];
-          await repoGit.raw(fetchArgs);
-          await repoGit.raw(['checkout', this.options.baseBranch]);
+              // Fetch and checkout with optional shallow clone
+              const fetchArgs = useShallow
+                ? ['fetch', '--depth', '1', 'origin', this.options.baseBranch]
+                : ['fetch', 'origin', this.options.baseBranch];
+              await repoGit.raw(fetchArgs);
+              await repoGit.raw(['checkout', this.options.baseBranch]);
 
-          this.log.debug('Repository cloned with sparse checkout');
-        } else {
-          // Standard clone (shallow by default)
-          const cloneArgs = useShallow
-            ? ['--depth', '1', '--branch', this.options.baseBranch]
-            : ['--branch', this.options.baseBranch];
-          await git.clone(urlWithAuth, 'repo', cloneArgs);
-          this.log.debug('Repository cloned');
-        }
+              this.log.debug('Repository cloned with sparse checkout');
+            } else {
+              // Standard clone (shallow by default)
+              const cloneArgs = useShallow
+                ? ['--depth', '1', '--branch', this.options.baseBranch]
+                : ['--branch', this.options.baseBranch];
+              await git.clone(urlWithAuth, 'repo', cloneArgs);
+              this.log.debug('Repository cloned');
+            }
 
-        // Configure git identity
-        const repoGit = simpleGit(repoDir);
-        await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
-        await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
+            // Configure git identity
+            const repoGit = simpleGit(repoDir);
+            await repoGit.addConfig('user.name', 'Autonomous Dev Bot');
+            await repoGit.addConfig('user.email', 'bot@autonomous-dev.local');
 
-        return repoDir;
+            return repoDir;
+          },
+          {
+            timeoutMs: gitTimeoutMs,
+            operationName: 'git-clone',
+            context: {
+              repoUrl: this.options.repoUrl,
+              baseBranch: this.options.baseBranch,
+              attempt: retryContext.attempt,
+            },
+            onTimeout: (timeoutMs, operationName) => {
+              this.log.warn(`Git clone timed out after ${timeoutMs}ms`, {
+                attempt: retryContext.attempt,
+                repoUrl: this.options.repoUrl,
+              });
+            },
+          }
+        );
       },
       {
         config: {
@@ -711,7 +742,7 @@ export class Worker {
           // Record retry metrics
           metrics.recordError({
             repository: this.repository,
-            errorCode: 'EXEC_CLONE_RETRY',
+            errorCode: error instanceof TimeoutError ? 'EXEC_CLONE_TIMEOUT' : 'EXEC_CLONE_RETRY',
             severity: 'transient',
             isRetryable: true,
             component: 'Worker',
@@ -726,6 +757,10 @@ export class Worker {
           });
         },
         shouldRetry: (error) => {
+          // Timeout errors are retryable
+          if (error instanceof TimeoutError) {
+            return true;
+          }
           // Retry network-related errors
           const message = error.message.toLowerCase();
           return (
@@ -749,6 +784,7 @@ export class Worker {
             baseBranch: this.options.baseBranch,
             taskDir,
             sparseCheckout: sparseConfig?.enabled,
+            wasTimeout: error instanceof TimeoutError,
           },
           cause: error,
         }
@@ -995,13 +1031,18 @@ export class Worker {
     const startMemory = getMemoryUsageMB();
 
     const prompt = this.buildPrompt(issue);
-    const abortController = new AbortController();
 
-    // Set up timeout with clear error messaging
+    // Use createTimedAbortController for proper cleanup management
+    // This ensures the timeout is always cleared even if an error occurs
+    const { controller: abortController, cleanup: cleanupAbort, isTimedOut } = createTimedAbortController(
+      timeoutMs,
+      `Claude execution for issue #${issue.number}`
+    );
+
+    // Track timeout separately for logging
     let timeoutTriggered = false;
     const timeoutId = setTimeout(() => {
       timeoutTriggered = true;
-      abortController.abort();
       executionLogger.recordTimeout(timeoutMs);
     }, timeoutMs);
 
@@ -1143,8 +1184,8 @@ export class Worker {
     } catch (error) {
       const duration = Date.now() - attemptStartTime;
 
-      // Check if this was a timeout
-      if (timeoutTriggered) {
+      // Check if this was a timeout (using both tracking methods for reliability)
+      if (timeoutTriggered || isTimedOut()) {
         const timeoutError = new ClaudeError(
           ErrorCode.CLAUDE_TIMEOUT,
           `Claude execution timed out after ${Math.round(timeoutMs / 1000)} seconds (5-minute limit). The task may be too complex or Claude may be experiencing delays.`,
@@ -1189,7 +1230,10 @@ export class Worker {
 
       throw error;
     } finally {
+      // Always clean up both timeouts to prevent leaks
+      // This ensures cleanup happens even when errors occur
       clearTimeout(timeoutId);
+      cleanupAbort();
     }
   }
 
