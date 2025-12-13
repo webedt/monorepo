@@ -52,3 +52,23 @@ export {
   type FileCacheEntry,
   type RepoCacheEntry,
 } from './cache.js';
+// Spec-driven discovery exports
+export {
+  parseSpecFile,
+  parseStatusFile,
+  loadSpecContext,
+  updateStatusFile,
+  getSpecSection,
+  determineNextTasks,
+  formatSpecContextForPrompt,
+  formatTaskSpecContext,
+  type PriorityTier,
+  type ImplementationStatus,
+  type StatusFeature,
+  type PriorityFeature,
+  type ParsedStatus,
+  type SpecSection,
+  type ParsedSpec,
+  type SpecContext,
+  type NextTask,
+} from './spec-reader.js';

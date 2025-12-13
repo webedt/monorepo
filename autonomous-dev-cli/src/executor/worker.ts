@@ -378,6 +378,17 @@ export interface WorkerOptions {
   };
   // Claude execution retry configuration
   claudeRetryConfig?: Partial<ClaudeRetryConfig>;
+  // Spec-driven context for richer implementation guidance
+  specContext?: {
+    /** Relevant SPEC.md content for this task */
+    specContent?: string;
+    /** Existing implementation files to reference */
+    existingFiles?: string[];
+    /** Priority tier (P0-P3) */
+    priorityTier?: string;
+    /** Additional implementation notes */
+    notes?: string;
+  };
 }
 
 /**
@@ -1812,28 +1823,76 @@ export class Worker {
   }
 
   private buildPrompt(issue: Issue): string {
+    const specContext = this.options.specContext;
+    const hasSpecContext = specContext && (specContext.specContent || specContext.existingFiles?.length);
+
+    // Build spec context section if available
+    let specSection = '';
+    if (hasSpecContext) {
+      specSection = `
+## Specification Context
+${specContext.priorityTier ? `**Priority:** ${specContext.priorityTier}` : ''}
+
+${specContext.specContent ? `### From SPEC.md:
+${specContext.specContent}
+` : ''}
+${specContext.existingFiles?.length ? `### Existing Implementation Files:
+Review these files before making changes:
+${specContext.existingFiles.map(f => `- ${f}`).join('\n')}
+` : ''}
+${specContext.notes ? `### Implementation Notes:
+${specContext.notes}
+` : ''}
+`;
+    }
+
     return `You are an expert developer working on implementing a GitHub issue.
 
 ## Issue #${issue.number}: ${issue.title}
 
 ${issue.body || 'No description provided.'}
-
+${specSection}
 ## Instructions
 
 1. First, explore the codebase to understand the structure and existing patterns
-2. Implement the changes described in the issue
-3. Follow existing code style and conventions
-4. Make sure your changes are complete and working
-5. Do NOT create or modify test files unless specifically asked
-6. Do NOT modify unrelated files
-7. Keep changes focused and minimal
+2. Read CLAUDE.md if it exists for project-specific guidelines
+3. ${hasSpecContext && specContext.existingFiles?.length ? 'Review the existing implementation files listed above' : 'Identify related files that may need modification'}
+4. Implement the changes described in the issue
+5. Follow existing code style and conventions
+6. Make sure your changes are complete and working
+7. Do NOT create or modify test files unless specifically asked
+8. Do NOT modify unrelated files
+9. Keep changes focused and minimal
+
+## Build Verification (REQUIRED)
+
+After making your changes, you MUST verify the code compiles:
+
+1. Run \`npm install\` to ensure dependencies are up to date
+2. Run \`npm run build\` to verify no compilation errors
+3. If the build fails, fix the errors before completing
+
+This is a monorepo, so run these commands in the appropriate project directory:
+- For website changes: \`cd website && npm install && npm run build\`
+- For internal-api-server changes: \`cd internal-api-server && npm install && npm run build\`
+- For ai-coding-worker changes: \`cd ai-coding-worker && npm install && npm run build\`
+- For autonomous-dev-cli changes: \`cd autonomous-dev-cli && npm install && npm run build\`
 
 ## Important
 
 - Make real, working changes - not placeholder code
-- Ensure the code compiles/builds successfully
+- Ensure the code compiles/builds successfully (run the build commands above!)
 - Follow TypeScript best practices if the project uses TypeScript
 - Add appropriate comments only where they add value
+- Do NOT update STATUS.md - this will be done automatically after successful implementation
+
+## Completion Checklist
+
+Before finishing, verify:
+- [ ] All changes implement the issue requirements
+- [ ] \`npm install && npm run build\` passes without errors
+- [ ] No unrelated files were modified
+- [ ] Code follows existing patterns and conventions
 
 Start by exploring the codebase, then implement the required changes.`;
   }

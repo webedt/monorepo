@@ -25,6 +25,13 @@ import {
   getClaudeCircuitBreaker,
   type CircuitBreakerConfig,
 } from '../utils/circuit-breaker.js';
+import {
+  loadSpecContext,
+  formatSpecContextForPrompt,
+  type SpecContext,
+  type NextTask,
+  type PriorityTier,
+} from './spec-reader.js';
 
 /** Task priority levels aligned with worker pool prioritization */
 export type DiscoveredTaskPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -72,6 +79,10 @@ export interface TaskGeneratorOptions {
   enableFallbackGeneration?: boolean;
   /** Callback to refresh Claude tokens on 401/403 auth failures */
   onTokenRefresh?: TokenRefreshCallback;
+  /** Enable spec-driven task discovery from SPEC.md and STATUS.md (default: true if files exist) */
+  enableSpecDriven?: boolean;
+  /** Pre-loaded spec context (optional - will load from repoPath if not provided) */
+  specContext?: SpecContext;
 }
 
 /**
@@ -101,6 +112,8 @@ export class TaskGenerator {
   private enableFallbackGeneration: boolean;
   private onTokenRefresh?: TokenRefreshCallback;
   private tokenRefreshAttempted: boolean = false;
+  private enableSpecDriven: boolean;
+  private specContext: SpecContext | null = null;
 
   constructor(options: TaskGeneratorOptions) {
     this.claudeAuth = options.claudeAuth;
@@ -116,6 +129,10 @@ export class TaskGenerator {
     this.enableFallbackGeneration = options.enableFallbackGeneration !== false;
     // Store token refresh callback for auth failure recovery
     this.onTokenRefresh = options.onTokenRefresh;
+    // Spec-driven mode: enabled by default, will check for SPEC.md/STATUS.md
+    this.enableSpecDriven = options.enableSpecDriven !== false;
+    // Use provided spec context or load from repo
+    this.specContext = options.specContext || null;
   }
 
   /**
@@ -199,6 +216,13 @@ export class TaskGenerator {
     const correlationId = getCorrelationId();
     const startTime = Date.now();
 
+    // Try to load spec context if spec-driven mode is enabled
+    if (this.enableSpecDriven && !this.specContext) {
+      this.specContext = loadSpecContext(this.repoPath, this.tasksPerCycle);
+    }
+
+    const isSpecDriven = this.enableSpecDriven && this.specContext !== null;
+
     // Start discovery phase tracking
     if (correlationId) {
       startPhase(correlationId, 'discovery', {
@@ -206,6 +230,7 @@ export class TaskGenerator {
         existingIssueCount: this.existingIssues.length,
         tasksPerCycle: this.tasksPerCycle,
         fallbackEnabled: this.enableFallbackGeneration,
+        specDriven: isSpecDriven,
       });
     }
 
@@ -214,13 +239,16 @@ export class TaskGenerator {
       repoPath: this.repoPath,
       excludePathCount: this.excludePaths.length,
       existingIssueCount: this.existingIssues.length,
+      specDriven: isSpecDriven,
     });
 
-    logger.info('Generating tasks with Claude...', {
+    logger.info(`Generating tasks with Claude (${isSpecDriven ? 'spec-driven' : 'code-analysis'} mode)...`, {
       correlationId,
       repoPath: this.repoPath,
       existingIssueCount: this.existingIssues.length,
       fallbackEnabled: this.enableFallbackGeneration,
+      specDriven: isSpecDriven,
+      specTasksAvailable: this.specContext?.nextTasks.length ?? 0,
     });
 
     let analysis: CodebaseAnalysis | undefined;
@@ -260,8 +288,10 @@ export class TaskGenerator {
         .map((i) => `- #${i.number}: ${i.title}`)
         .join('\n') || 'None';
 
-      // Build the prompt
-      const prompt = this.buildPrompt(summary, existingIssuesList, analysis);
+      // Build the prompt (spec-driven or code-analysis based)
+      const prompt = isSpecDriven
+        ? this.buildSpecDrivenPrompt(summary, existingIssuesList, analysis)
+        : this.buildPrompt(summary, existingIssuesList, analysis);
 
       // Call Claude API with timing
       if (correlationId) {
@@ -629,6 +659,139 @@ Remember:
 - Focus on practical improvements, not theoretical best practices
 
 Return ONLY the JSON array, no other text.`;
+  }
+
+  /**
+   * Build a spec-driven prompt that uses SPEC.md and STATUS.md to guide task generation.
+   * This prioritizes implementing features from the roadmap based on priority tiers.
+   */
+  private buildSpecDrivenPrompt(codebaseSummary: string, existingIssues: string, analysis: CodebaseAnalysis): string {
+    if (!this.specContext) {
+      // Fall back to standard prompt if no spec context
+      return this.buildPrompt(codebaseSummary, existingIssues, analysis);
+    }
+
+    const { spec, status, nextTasks } = this.specContext;
+
+    // Build the priority tasks section
+    const priorityTasksSection = nextTasks.map((task, idx) => {
+      const statusLabel = task.currentStatus === 'not_started' ? '❌ Not Started' :
+                         task.currentStatus === 'partial' ? '🟡 Partial' : '✅ Complete';
+      return `
+### ${idx + 1}. ${task.feature} (${task.priority})
+**Spec Section:** ${task.specSection}
+**Current Status:** ${statusLabel}
+${task.existingFiles.length > 0 ? `**Existing Files:** ${task.existingFiles.join(', ')}` : ''}
+${task.notes ? `**Notes:** ${task.notes}` : ''}
+
+**From SPEC.md:**
+${task.specContent.slice(0, 1500)}${task.specContent.length > 1500 ? '...' : ''}
+`;
+    }).join('\n');
+
+    // Build git analysis section if available
+    let gitAnalysisSection = '';
+    if (analysis.gitAnalysis) {
+      const { summary, fileChangeStats } = analysis.gitAnalysis;
+      gitAnalysisSection = `
+## Recent Development Activity (Last ${summary.totalCommits} commits)
+**Frequently Changed Files:**
+${fileChangeStats.slice(0, 5).map(s => `- ${s.file} (${s.changeCount} changes)`).join('\n')}
+`;
+    }
+
+    return `You are an expert software developer implementing features from a project specification.
+
+## Project Overview
+${spec.overview.slice(0, 800)}
+
+## Current Implementation Status
+This project tracks implementation progress in STATUS.md with priority tiers:
+- **P0 (Core MVP):** Essential features for a functional platform
+- **P1 (Important):** Build after core MVP is stable
+- **P2 (Nice to Have):** Enhance the platform experience
+- **P3 (Future):** Long-term vision features
+
+## Priority Features to Implement
+The following features need implementation, in priority order:
+${priorityTasksSection}
+
+## Codebase Structure
+${codebaseSummary}
+${gitAnalysisSection}
+
+## Existing Open Issues (DO NOT DUPLICATE)
+${existingIssues}
+
+## Your Task
+Generate exactly ${this.tasksPerCycle} implementation tasks based on the SPEC requirements above.
+
+**IMPORTANT GUIDELINES:**
+1. **Follow the Priority Order** - Generate tasks for P0 features first, then P1, etc.
+2. **Match Spec Requirements** - Tasks should directly implement features described in SPEC.md
+3. **Build Incrementally** - Break large features into smaller, independently mergeable PRs
+4. **Follow Existing Patterns** - Reference existing implementation files when extending features
+5. **Verify Your Work** - Each task MUST include running \`npm install && npm run build\` to verify the code compiles
+
+**For Partial Features (🟡):**
+- Review existing files before adding new functionality
+- Extend existing components rather than creating new ones
+- Ensure backward compatibility
+
+**For Not Started Features (❌):**
+- Follow patterns from similar existing features
+- Create minimal working implementation first
+- Reference the SPEC section for acceptance criteria
+
+### Categories:
+- **feature**: New functionality from the spec
+- **bugfix**: Fix broken behavior
+- **refactor**: Improve existing code
+- **docs**: Update documentation
+- **test**: Add tests
+- **chore**: Maintenance tasks
+
+### Priorities (map from spec tiers):
+- **critical**: P0 features essential for MVP
+- **high**: P1 important features
+- **medium**: P2 nice-to-have features
+- **low**: P3 future features, cleanup
+
+### Complexity:
+- **simple**: Single file, < 1 hour
+- **moderate**: Multiple files, 1-4 hours
+- **complex**: Architectural changes, 4+ hours
+
+## Output Format
+Return a JSON array of tasks:
+\`\`\`json
+[
+  {
+    "title": "Implement [Feature Name] from SPEC Section X.X",
+    "description": "## Overview\\n[What needs to be done]\\n\\n## From SPEC.md\\n[Relevant spec requirements]\\n\\n## Implementation Plan\\n1. [Step 1]\\n2. [Step 2]\\n\\n## Acceptance Criteria\\n- [Criterion 1]\\n- [Criterion 2]\\n\\n## Verification\\n- Run \`npm install && npm run build\` to verify compilation\\n- [Other verification steps]",
+    "priority": "critical|high|medium|low",
+    "category": "feature|bugfix|refactor|docs|test|chore",
+    "estimatedComplexity": "simple|moderate|complex",
+    "affectedPaths": ["path/to/file1.ts", "path/to/file2.tsx"],
+    "estimatedDurationMinutes": 60
+  }
+]
+\`\`\`
+
+**IMPORTANT:**
+- Each task description MUST mention running \`npm install && npm run build\` for verification
+- DO NOT duplicate existing open issues
+- Be specific about file paths based on the codebase structure
+- Include relevant SPEC requirements in the description
+
+Return ONLY the JSON array, no other text.`;
+  }
+
+  /**
+   * Get the loaded spec context (if available)
+   */
+  getSpecContext(): SpecContext | null {
+    return this.specContext;
   }
 
   private async callClaude(prompt: string): Promise<DiscoveredTask[]> {
