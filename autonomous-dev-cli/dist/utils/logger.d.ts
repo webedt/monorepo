@@ -1,4 +1,5 @@
 import { StructuredError, type ErrorContext } from './errors.js';
+import { type CyclePhase, type ProgressManager } from './progress.js';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Default timing threshold in ms for logging slow operations
@@ -120,6 +121,14 @@ export interface CorrelationContext {
     startTime?: number;
 }
 /**
+ * Log rotation policy type
+ */
+export type LogRotationPolicy = 'size' | 'time' | 'both';
+/**
+ * Time-based rotation interval
+ */
+export type LogRotationInterval = 'hourly' | 'daily' | 'weekly';
+/**
  * Configuration for structured file logging
  */
 export interface StructuredFileLoggerConfig {
@@ -131,6 +140,14 @@ export interface StructuredFileLoggerConfig {
     maxFiles: number;
     /** Include performance metrics in logs (default: true) */
     includeMetrics: boolean;
+    /** Log rotation policy: 'size', 'time', or 'both' (default: 'size') */
+    rotationPolicy: LogRotationPolicy;
+    /** Time-based rotation interval (default: 'daily') */
+    rotationInterval: LogRotationInterval;
+    /** Maximum age of log files in days for cleanup (default: 30) */
+    maxAgeDays: number;
+    /** Enable compression of rotated files (default: false) */
+    compressRotated: boolean;
 }
 /**
  * Aggregated metrics for tracking operational statistics
@@ -222,6 +239,8 @@ export declare class StructuredFileLogger {
     private currentLogFile;
     private metricsAggregator;
     private enabled;
+    private lastRotationTime;
+    private rotationCheckInterval;
     constructor(config?: Partial<StructuredFileLoggerConfig>);
     /**
      * Enable structured file logging
@@ -231,6 +250,22 @@ export declare class StructuredFileLogger {
      * Disable structured file logging
      */
     disable(): void;
+    /**
+     * Start periodic rotation check for time-based rotation
+     */
+    private startRotationCheck;
+    /**
+     * Stop periodic rotation check
+     */
+    private stopRotationCheck;
+    /**
+     * Check if time-based rotation is needed
+     */
+    private needsTimeBasedRotation;
+    /**
+     * Cleanup log files older than maxAgeDays
+     */
+    private cleanupOldLogFiles;
     /**
      * Check if structured file logging is enabled
      */
@@ -248,7 +283,7 @@ export declare class StructuredFileLogger {
      */
     private ensureLogDirectory;
     /**
-     * Check if log rotation is needed
+     * Check if log rotation is needed based on rotation policy
      */
     private needsRotation;
     /**
@@ -507,6 +542,34 @@ declare class Logger {
     success(message: string, meta?: object): void;
     failure(message: string): void;
     step(step: number, total: number, message: string): void;
+    /**
+     * Show a progress bar for batch operations
+     */
+    progressBar(current: number, total: number, label: string, etaMs?: number): void;
+    /**
+     * Clear the current progress line
+     */
+    clearProgress(): void;
+    /**
+     * Log cycle phase change with visual indicator
+     */
+    cyclePhase(phase: CyclePhase, step: number, total: number): void;
+    /**
+     * Log worker execution progress
+     */
+    workerProgress(workerId: string, issueNumber: number, status: 'starting' | 'running' | 'completed' | 'failed', progress?: number, message?: string): void;
+    /**
+     * Log estimated time remaining
+     */
+    estimatedTime(label: string, etaMs: number): void;
+    /**
+     * Log waiting state with countdown
+     */
+    waitingCountdown(remainingMs: number): void;
+    /**
+     * Get the progress manager for advanced progress tracking
+     */
+    getProgressManager(): ProgressManager;
     divider(): void;
     /**
      * Log service degradation event

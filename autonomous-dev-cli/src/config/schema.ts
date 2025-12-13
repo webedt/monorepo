@@ -38,7 +38,30 @@ const noCredentialString = z.string().refine(
   },
   { message: 'Credentials should not be stored in config files. Use environment variables instead.' }
 );
+/**
+ * Current configuration schema version
+ * Increment this when making breaking changes to the config format
+ */
+export const CURRENT_CONFIG_VERSION = 2;
+
+/**
+ * Supported configuration versions for migration
+ */
+export const SUPPORTED_CONFIG_VERSIONS = [1, 2] as const;
+export type ConfigVersion = typeof SUPPORTED_CONFIG_VERSIONS[number];
+
 export const ConfigSchema = z.object({
+  /**
+   * Configuration Version
+   * Used for migration and compatibility checking.
+   * If not specified, config is treated as v1 (legacy).
+   */
+  version: z.number()
+    .min(1, 'Configuration version must be at least 1')
+    .max(CURRENT_CONFIG_VERSION, `Configuration version cannot exceed ${CURRENT_CONFIG_VERSION}`)
+    .default(CURRENT_CONFIG_VERSION)
+    .describe('Configuration schema version for migration support'),
+
   /**
    * Target Repository Settings
    * Configure the GitHub repository that autonomous-dev will work with.
@@ -374,6 +397,7 @@ export function validateNoCredentialsInConfig(config: Partial<Config>): string[]
 }
 
 export const defaultConfig: Partial<Config> = {
+  version: CURRENT_CONFIG_VERSION,
   discovery: {
     tasksPerCycle: 5,
     maxOpenIssues: 10,

@@ -6,6 +6,7 @@ import { createWorkerPool } from './executor/index.js';
 import { runEvaluation } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
 import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, startRequestLifecycle, endRequestLifecycle, initStructuredFileLogging, } from './utils/logger.js';
+import { getProgressManager, } from './utils/progress.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
 import { createHealthServer, } from './monitoring/index.js';
@@ -42,9 +43,13 @@ export class Daemon {
     daemonStatus = 'stopped';
     // Structured file logging
     structuredLogger = null;
+    // Progress tracking
+    progressManager;
     constructor(options = {}) {
         this.options = options;
         this.config = loadConfig(options.configPath);
+        // Initialize progress manager (will be updated with JSON mode after log format is set)
+        this.progressManager = getProgressManager(options.logFormat === 'json');
         // Configure logging from config (can be overridden by options)
         if (this.config.logging) {
             logger.setFormat(this.config.logging.format);
@@ -128,6 +133,8 @@ export class Daemon {
                 // Start request lifecycle tracking for the entire cycle
                 startRequestLifecycle(cycleCorrelationId);
                 logger.header(`Cycle #${this.cycleCount}`);
+                // Initialize progress tracking for this cycle
+                this.progressManager.startCycle(this.cycleCount, 6);
                 logger.info(`Starting cycle`, {
                     cycle: this.cycleCount,
                     correlationId: cycleCorrelationId,
@@ -157,6 +164,8 @@ export class Daemon {
                 // Calculate memory delta for the cycle
                 const cycleEndMemory = getMemoryUsageMB();
                 const memoryDelta = Math.round((cycleEndMemory - cycleStartMemory) * 100) / 100;
+                // End progress tracking for this cycle
+                this.progressManager.endCycle(result.success);
                 this.logCycleResult(result);
                 // Write to structured file log if enabled
                 if (this.structuredLogger?.isEnabled()) {
@@ -196,6 +205,7 @@ export class Daemon {
                 // Wait before next cycle
                 if (this.config.daemon.pauseBetweenCycles) {
                     logger.info(`Waiting ${this.config.daemon.loopIntervalMs / 1000}s before next cycle...`);
+                    this.progressManager.showWaiting(this.config.daemon.loopIntervalMs);
                     await this.sleep(this.config.daemon.loopIntervalMs);
                 }
             }
@@ -720,7 +730,8 @@ export class Daemon {
                 });
             }
             // STEP 1: Get existing issues with graceful degradation
-            logger.step(1, 5, 'Fetching existing issues');
+            logger.cyclePhase('fetch-issues', 1, 6);
+            this.progressManager.setPhase('fetch-issues', 1);
             metrics.recordCorrelationOperation(this.getCurrentCorrelationId(), 'fetch_issues');
             const { result: issueResult, duration: issueFetchDuration } = await timeOperation(() => this.github.issues.listOpenIssuesWithFallback(this.config.discovery.issueLabel, this.lastKnownIssues // Use cached issues as fallback
             ), 'fetchIssues');
@@ -745,7 +756,8 @@ export class Daemon {
             // STEP 2: Discover new tasks (if we have capacity)
             let newIssues = [];
             if (availableSlots > 0 && !this.options.dryRun) {
-                logger.step(2, 5, 'Discovering new tasks');
+                logger.cyclePhase('discover-tasks', 2, 6);
+                this.progressManager.setPhase('discover-tasks', 2);
                 // Clone repo for analysis
                 const analysisDir = join(this.config.execution.workDir, 'analysis');
                 // For now, we'll analyze the current directory if it's the target repo
@@ -828,7 +840,8 @@ export class Daemon {
                 logger.info('Dry run - skipping issue creation');
             }
             // STEP 3: Execute tasks
-            logger.step(3, 5, 'Executing tasks');
+            logger.cyclePhase('execute-tasks', 3, 6);
+            this.progressManager.setPhase('execute-tasks', 3);
             // Get all issues to work on (prioritize user-created, then auto-created)
             const allIssues = [...existingIssues, ...newIssues];
             const issuesToWork = allIssues
@@ -876,7 +889,8 @@ export class Daemon {
                 tasksCompleted = results.filter((r) => r.success).length;
                 tasksFailed = results.filter((r) => !r.success).length;
                 // STEP 4: Run evaluation pipeline on successful tasks
-                logger.step(4, 6, 'Running evaluation pipeline');
+                logger.cyclePhase('evaluate', 4, 6);
+                this.progressManager.setPhase('evaluate', 4);
                 // Track which results pass evaluation (for merge step)
                 const evaluationResults = new Map();
                 const evaluationPassed = new Set();
@@ -967,7 +981,8 @@ export class Daemon {
                     }
                 }
                 // STEP 5: Create PRs for tasks that passed evaluation
-                logger.step(5, 6, 'Creating PRs');
+                logger.cyclePhase('create-prs', 5, 6);
+                this.progressManager.setPhase('create-prs', 5);
                 // Track created PRs for the merge step
                 const createdPRs = new Map();
                 for (const result of results) {
@@ -1032,7 +1047,8 @@ export class Daemon {
                 }
                 // STEP 6: Merge successful PRs
                 if (this.config.merge.autoMerge) {
-                    logger.step(6, 6, 'Merging PRs');
+                    logger.cyclePhase('merge-prs', 6, 6);
+                    this.progressManager.setPhase('merge-prs', 6);
                     const resolver = createConflictResolver({
                         prManager: this.github.pulls,
                         branchManager: this.github.branches,

@@ -1,5 +1,21 @@
 import { z } from 'zod';
+/**
+ * Current configuration schema version
+ * Increment this when making breaking changes to the config format
+ */
+export declare const CURRENT_CONFIG_VERSION = 2;
+/**
+ * Supported configuration versions for migration
+ */
+export declare const SUPPORTED_CONFIG_VERSIONS: readonly [1, 2];
+export type ConfigVersion = typeof SUPPORTED_CONFIG_VERSIONS[number];
 export declare const ConfigSchema: z.ZodObject<{
+    /**
+     * Configuration Version
+     * Used for migration and compatibility checking.
+     * If not specified, config is treated as v1 (legacy).
+     */
+    version: z.ZodDefault<z.ZodNumber>;
     /**
      * Target Repository Settings
      * Configure the GitHub repository that autonomous-dev will work with.
@@ -283,6 +299,12 @@ export declare const ConfigSchema: z.ZodObject<{
         maxLogFiles: z.ZodDefault<z.ZodNumber>;
         /** Include performance metrics in structured logs (default: true when structured logging enabled) */
         includeMetrics: z.ZodDefault<z.ZodBoolean>;
+        /** Log rotation policy: 'size' for size-based, 'time' for time-based, 'both' for combined */
+        rotationPolicy: z.ZodDefault<z.ZodEnum<["size", "time", "both"]>>;
+        /** Time-based rotation interval: 'hourly', 'daily', or 'weekly' */
+        rotationInterval: z.ZodDefault<z.ZodEnum<["hourly", "daily", "weekly"]>>;
+        /** Maximum age of log files in days before cleanup (default: 30) */
+        maxLogAgeDays: z.ZodDefault<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
         format: "pretty" | "json";
         level: "debug" | "info" | "warn" | "error";
@@ -293,6 +315,9 @@ export declare const ConfigSchema: z.ZodObject<{
         maxLogFileSizeBytes: number;
         maxLogFiles: number;
         includeMetrics: boolean;
+        rotationPolicy: "size" | "time" | "both";
+        rotationInterval: "hourly" | "daily" | "weekly";
+        maxLogAgeDays: number;
     }, {
         format?: "pretty" | "json" | undefined;
         level?: "debug" | "info" | "warn" | "error" | undefined;
@@ -303,6 +328,77 @@ export declare const ConfigSchema: z.ZodObject<{
         maxLogFileSizeBytes?: number | undefined;
         maxLogFiles?: number | undefined;
         includeMetrics?: boolean | undefined;
+        rotationPolicy?: "size" | "time" | "both" | undefined;
+        rotationInterval?: "hourly" | "daily" | "weekly" | undefined;
+        maxLogAgeDays?: number | undefined;
+    }>>;
+    /**
+     * Alerting Settings
+     * Configure alerting hooks for critical failures and monitoring.
+     */
+    alerting: z.ZodDefault<z.ZodObject<{
+        /** Enable alerting system (default: true) */
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        /** Webhook URL for sending alerts (optional) */
+        webhookUrl: z.ZodOptional<z.ZodString>;
+        /** File path for alert logs (optional) */
+        alertLogPath: z.ZodOptional<z.ZodString>;
+        /** Minimum interval between repeated alerts in milliseconds (default: 60000 = 1 minute) */
+        cooldownMs: z.ZodDefault<z.ZodNumber>;
+        /** Maximum alerts per minute for rate limiting (default: 30) */
+        maxAlertsPerMinute: z.ZodDefault<z.ZodNumber>;
+        /** Enable console output for alerts (default: true) */
+        consoleOutput: z.ZodDefault<z.ZodBoolean>;
+        /** Minimum severity for webhook notifications: 'info', 'warning', 'error', 'critical' */
+        webhookMinSeverity: z.ZodDefault<z.ZodEnum<["info", "warning", "error", "critical"]>>;
+    }, "strip", z.ZodTypeAny, {
+        enabled: boolean;
+        cooldownMs: number;
+        maxAlertsPerMinute: number;
+        consoleOutput: boolean;
+        webhookMinSeverity: "critical" | "info" | "error" | "warning";
+        webhookUrl?: string | undefined;
+        alertLogPath?: string | undefined;
+    }, {
+        enabled?: boolean | undefined;
+        webhookUrl?: string | undefined;
+        alertLogPath?: string | undefined;
+        cooldownMs?: number | undefined;
+        maxAlertsPerMinute?: number | undefined;
+        consoleOutput?: boolean | undefined;
+        webhookMinSeverity?: "critical" | "info" | "error" | "warning" | undefined;
+    }>>;
+    /**
+     * Metrics Settings
+     * Configure metrics collection and dashboard integration.
+     */
+    metrics: z.ZodDefault<z.ZodObject<{
+        /** Enable performance regression detection (default: true) */
+        enableRegressionDetection: z.ZodDefault<z.ZodBoolean>;
+        /** Percentage threshold for regression detection (default: 20) */
+        regressionThresholdPercent: z.ZodDefault<z.ZodNumber>;
+        /** Enable task complexity distribution tracking (default: true) */
+        enableComplexityTracking: z.ZodDefault<z.ZodBoolean>;
+        /** Number of samples for baseline calculation (default: 100) */
+        baselineSampleSize: z.ZodDefault<z.ZodNumber>;
+        /** Enable dashboard metrics endpoint (default: true) */
+        enableDashboard: z.ZodDefault<z.ZodBoolean>;
+        /** HTTP port for metrics endpoint (default: 9090) */
+        metricsPort: z.ZodDefault<z.ZodNumber>;
+    }, "strip", z.ZodTypeAny, {
+        enableRegressionDetection: boolean;
+        regressionThresholdPercent: number;
+        enableComplexityTracking: boolean;
+        baselineSampleSize: number;
+        enableDashboard: boolean;
+        metricsPort: number;
+    }, {
+        enableRegressionDetection?: boolean | undefined;
+        regressionThresholdPercent?: number | undefined;
+        enableComplexityTracking?: boolean | undefined;
+        baselineSampleSize?: number | undefined;
+        enableDashboard?: boolean | undefined;
+        metricsPort?: number | undefined;
     }>>;
     /**
      * Circuit Breaker Settings
@@ -390,6 +486,7 @@ export declare const ConfigSchema: z.ZodObject<{
         userEmail?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
+    version: number;
     repo: {
         owner: string;
         name: string;
@@ -465,6 +562,26 @@ export declare const ConfigSchema: z.ZodObject<{
         maxLogFileSizeBytes: number;
         maxLogFiles: number;
         includeMetrics: boolean;
+        rotationPolicy: "size" | "time" | "both";
+        rotationInterval: "hourly" | "daily" | "weekly";
+        maxLogAgeDays: number;
+    };
+    alerting: {
+        enabled: boolean;
+        cooldownMs: number;
+        maxAlertsPerMinute: number;
+        consoleOutput: boolean;
+        webhookMinSeverity: "critical" | "info" | "error" | "warning";
+        webhookUrl?: string | undefined;
+        alertLogPath?: string | undefined;
+    };
+    metrics: {
+        enableRegressionDetection: boolean;
+        regressionThresholdPercent: number;
+        enableComplexityTracking: boolean;
+        baselineSampleSize: number;
+        enableDashboard: boolean;
+        metricsPort: number;
     };
     circuitBreaker: {
         enabled: boolean;
@@ -533,6 +650,7 @@ export declare const ConfigSchema: z.ZodObject<{
         databaseUrl?: string | undefined;
         userEmail?: string | undefined;
     };
+    version?: number | undefined;
     cache?: {
         enabled?: boolean | undefined;
         maxEntries?: number | undefined;
@@ -570,6 +688,26 @@ export declare const ConfigSchema: z.ZodObject<{
         maxLogFileSizeBytes?: number | undefined;
         maxLogFiles?: number | undefined;
         includeMetrics?: boolean | undefined;
+        rotationPolicy?: "size" | "time" | "both" | undefined;
+        rotationInterval?: "hourly" | "daily" | "weekly" | undefined;
+        maxLogAgeDays?: number | undefined;
+    } | undefined;
+    alerting?: {
+        enabled?: boolean | undefined;
+        webhookUrl?: string | undefined;
+        alertLogPath?: string | undefined;
+        cooldownMs?: number | undefined;
+        maxAlertsPerMinute?: number | undefined;
+        consoleOutput?: boolean | undefined;
+        webhookMinSeverity?: "critical" | "info" | "error" | "warning" | undefined;
+    } | undefined;
+    metrics?: {
+        enableRegressionDetection?: boolean | undefined;
+        regressionThresholdPercent?: number | undefined;
+        enableComplexityTracking?: boolean | undefined;
+        baselineSampleSize?: number | undefined;
+        enableDashboard?: boolean | undefined;
+        metricsPort?: number | undefined;
     } | undefined;
     circuitBreaker?: {
         enabled?: boolean | undefined;

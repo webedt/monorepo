@@ -1,5 +1,6 @@
 import { Worker } from './worker.js';
 import { logger } from '../utils/logger.js';
+import { getProgressManager, formatDuration, ETACalculator, } from '../utils/progress.js';
 import { metrics } from '../utils/metrics.js';
 import { getDeadLetterQueue, } from '../utils/dead-letter-queue.js';
 import { getAllCircuitBreakerHealth, } from '../utils/circuit-breaker.js';
@@ -48,6 +49,10 @@ export class WorkerPool {
     maxHistoryEntries = 1000;
     // Queue overflow tracking
     overflowEvents = [];
+    // Progress tracking
+    progressManager;
+    taskETACalculator = new ETACalculator();
+    executionStartTime = 0;
     // Graceful degradation state
     degradationStatus = {
         isDegraded: false,
@@ -78,6 +83,8 @@ export class WorkerPool {
     constructor(options) {
         this.options = options;
         this.repository = this.extractRepoName(options.repoUrl);
+        // Initialize progress manager
+        this.progressManager = getProgressManager();
         // Initialize scaling configuration
         this.scalingConfig = {
             ...WorkerPool.DEFAULT_SCALING_CONFIG,
@@ -827,6 +834,9 @@ export class WorkerPool {
         this.results = [];
         this.workerTaskMap.clear();
         this.taskGroupWorkers.clear();
+        // Reset progress tracking
+        this.executionStartTime = Date.now();
+        this.taskETACalculator.reset();
         // Load any persisted tasks from previous shutdown
         const persistedTasks = await this.loadPersistedTasks();
         // Convert tasks to PoolTasks with metadata enrichment
@@ -1008,6 +1018,10 @@ export class WorkerPool {
             retryCount: task.retryCount ?? 0,
             queuedAt: task.queuedAt?.toISOString(),
         });
+        // Log worker progress start
+        logger.workerProgress(workerId, task.issue.number, 'starting');
+        // Track with progress manager
+        this.progressManager.startWorker(workerId, task.id, task.issue.number);
         // Update metrics after task is dequeued
         this.updateMetrics();
         const worker = new Worker({
@@ -1035,6 +1049,13 @@ export class WorkerPool {
             // Record in execution history
             if (result.success) {
                 this.recordExecutionHistory(task, 'completed', workerId);
+                // Track completion for ETA calculation
+                if (result.duration) {
+                    this.taskETACalculator.addSample(result.duration);
+                }
+                // Log worker progress completion
+                logger.workerProgress(workerId, task.issue.number, 'completed', 100, `${formatDuration(result.duration || 0)}`);
+                this.progressManager.completeWorker(workerId, true);
                 logger.success(`${task.id} completed: ${task.issue.title}`);
                 logger.debug(`Task completion details`, {
                     taskId: task.id,
