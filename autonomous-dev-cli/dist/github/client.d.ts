@@ -6,6 +6,8 @@ export interface GitHubClientOptions {
     repo: string;
     retryConfig?: Partial<RetryConfig>;
     circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
+    /** Timeout for individual API calls in milliseconds (default: 30000) */
+    requestTimeoutMs?: number;
 }
 /**
  * Circuit breaker configuration for graceful degradation
@@ -58,6 +60,7 @@ export declare class GitHubClient {
     readonly repo: string;
     private retryConfig;
     private circuitBreakerConfig;
+    private requestTimeoutMs;
     private circuitState;
     private consecutiveFailures;
     private consecutiveSuccesses;

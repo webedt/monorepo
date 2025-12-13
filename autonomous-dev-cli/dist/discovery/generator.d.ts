@@ -31,6 +31,22 @@ export interface TaskGeneratorOptions {
     repoContext?: string;
     analyzerConfig?: AnalyzerConfig;
     circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
+    /** Enable fallback task generation when Claude fails (default: true) */
+    enableFallbackGeneration?: boolean;
+}
+/**
+ * Result of task generation with status information
+ */
+export interface TaskGenerationResult {
+    tasks: DiscoveredTask[];
+    success: boolean;
+    usedFallback: boolean;
+    error?: {
+        code: string;
+        message: string;
+        isRetryable: boolean;
+    };
+    duration: number;
 }
 export declare class TaskGenerator {
     private claudeAuth;
@@ -41,12 +57,22 @@ export declare class TaskGenerator {
     private repoContext;
     private analyzerConfig;
     private circuitBreaker;
+    private enableFallbackGeneration;
     constructor(options: TaskGeneratorOptions);
     /**
      * Get the circuit breaker health status
      */
     getCircuitBreakerHealth(): import("../utils/circuit-breaker.js").CircuitBreakerHealth;
     generateTasks(): Promise<DiscoveredTask[]>;
+    /**
+     * Generate tasks with detailed result information including fallback status
+     */
+    generateTasksWithFallback(): Promise<TaskGenerationResult>;
+    /**
+     * Generate fallback tasks from codebase analysis when Claude is unavailable.
+     * Creates basic tasks from TODO comments, FIXME items, and other signals.
+     */
+    private generateFallbackTasks;
     private buildPrompt;
     private callClaude;
     /**
@@ -59,4 +85,8 @@ export declare class TaskGenerator {
     private parseClaudeResponse;
 }
 export declare function discoverTasks(options: TaskGeneratorOptions): Promise<DiscoveredTask[]>;
+/**
+ * Discover tasks with detailed result including fallback status
+ */
+export declare function discoverTasksWithFallback(options: TaskGeneratorOptions): Promise<TaskGenerationResult>;
 //# sourceMappingURL=generator.d.ts.map

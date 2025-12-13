@@ -1036,4 +1036,215 @@ class Logger {
     }
 }
 export const logger = new Logger({ level: 'info' });
+/**
+ * Claude execution history logger for debugging failed attempts
+ */
+export class ClaudeExecutionLogger {
+    correlationId;
+    taskId;
+    attempts = [];
+    currentAttempt = null;
+    log;
+    constructor(correlationId, taskId) {
+        this.correlationId = correlationId;
+        this.taskId = taskId;
+        this.log = logger.child('ClaudeExecutionLogger').withCorrelationId(correlationId);
+    }
+    /**
+     * Start a new execution attempt
+     */
+    startAttempt(attemptNumber) {
+        this.currentAttempt = {
+            attemptNumber,
+            startTime: new Date().toISOString(),
+            success: false,
+            toolUseCount: 0,
+            turnCount: 0,
+            conversationHistory: [],
+        };
+        this.log.debug(`Starting Claude execution attempt ${attemptNumber}`, {
+            taskId: this.taskId,
+            attemptNumber,
+        });
+    }
+    /**
+     * Record a message in the conversation history
+     */
+    recordMessage(role, type, content, metadata) {
+        if (!this.currentAttempt)
+            return;
+        const entry = {
+            timestamp: new Date().toISOString(),
+            role,
+            type,
+            content: this.truncateContent(content),
+            metadata,
+        };
+        this.currentAttempt.conversationHistory.push(entry);
+        // Track tool use and turn counts
+        if (type === 'tool_use') {
+            this.currentAttempt.toolUseCount++;
+        }
+        if (role === 'assistant' && type === 'message') {
+            this.currentAttempt.turnCount++;
+        }
+    }
+    /**
+     * Record tool use
+     */
+    recordToolUse(toolName, input) {
+        this.recordMessage('assistant', 'tool_use', toolName, {
+            tool: toolName,
+            inputSummary: input ? this.summarizeInput(input) : undefined,
+        });
+    }
+    /**
+     * Record tool result
+     */
+    recordToolResult(toolName, success, output) {
+        this.recordMessage('tool', 'tool_result', output ? this.truncateContent(output) : '', {
+            tool: toolName,
+            success,
+        });
+    }
+    /**
+     * Record assistant text response
+     */
+    recordAssistantText(text) {
+        this.recordMessage('assistant', 'message', text);
+    }
+    /**
+     * Record an error in the current attempt
+     */
+    recordError(code, message, isRetryable) {
+        if (!this.currentAttempt)
+            return;
+        this.currentAttempt.error = { code, message, isRetryable };
+        this.recordMessage('system', 'error', message, { code, isRetryable });
+        this.log.warn(`Claude execution error in attempt ${this.currentAttempt.attemptNumber}`, {
+            taskId: this.taskId,
+            attemptNumber: this.currentAttempt.attemptNumber,
+            errorCode: code,
+            errorMessage: message,
+            isRetryable,
+        });
+    }
+    /**
+     * Record a timeout in the current attempt
+     */
+    recordTimeout(timeoutMs) {
+        if (!this.currentAttempt)
+            return;
+        this.recordMessage('system', 'timeout', `Execution timed out after ${timeoutMs}ms`, {
+            timeoutMs,
+        });
+        this.currentAttempt.error = {
+            code: 'CLAUDE_TIMEOUT',
+            message: `Execution timed out after ${Math.round(timeoutMs / 1000)}s`,
+            isRetryable: true,
+        };
+        this.log.warn(`Claude execution timeout in attempt ${this.currentAttempt.attemptNumber}`, {
+            taskId: this.taskId,
+            attemptNumber: this.currentAttempt.attemptNumber,
+            timeoutMs,
+        });
+    }
+    /**
+     * End the current attempt
+     */
+    endAttempt(success) {
+        if (!this.currentAttempt)
+            return;
+        this.currentAttempt.endTime = new Date().toISOString();
+        this.currentAttempt.durationMs = new Date(this.currentAttempt.endTime).getTime() -
+            new Date(this.currentAttempt.startTime).getTime();
+        this.currentAttempt.success = success;
+        this.attempts.push(this.currentAttempt);
+        this.log.info(`Claude execution attempt ${this.currentAttempt.attemptNumber} ${success ? 'succeeded' : 'failed'}`, {
+            taskId: this.taskId,
+            attemptNumber: this.currentAttempt.attemptNumber,
+            durationMs: this.currentAttempt.durationMs,
+            toolUseCount: this.currentAttempt.toolUseCount,
+            turnCount: this.currentAttempt.turnCount,
+            success,
+            errorCode: this.currentAttempt.error?.code,
+        });
+        this.currentAttempt = null;
+    }
+    /**
+     * Get all execution attempts for debugging
+     */
+    getAttempts() {
+        return [...this.attempts];
+    }
+    /**
+     * Get a summary of all attempts for logging
+     */
+    getSummary() {
+        const totalAttempts = this.attempts.length;
+        const successfulAttempts = this.attempts.filter(a => a.success).length;
+        const totalDurationMs = this.attempts.reduce((sum, a) => sum + (a.durationMs || 0), 0);
+        const totalToolUses = this.attempts.reduce((sum, a) => sum + a.toolUseCount, 0);
+        const totalTurns = this.attempts.reduce((sum, a) => sum + a.turnCount, 0);
+        const lastFailedAttempt = this.attempts.filter(a => !a.success).pop();
+        return {
+            totalAttempts,
+            successfulAttempts,
+            totalDurationMs,
+            totalToolUses,
+            totalTurns,
+            lastError: lastFailedAttempt?.error,
+        };
+    }
+    /**
+     * Log the full execution history for debugging
+     */
+    logFullHistory(level = 'debug') {
+        const summary = this.getSummary();
+        this.log[level]('Claude execution history', {
+            taskId: this.taskId,
+            correlationId: this.correlationId,
+            summary,
+        });
+        // In debug mode, log each attempt's conversation history
+        if (level === 'debug') {
+            for (const attempt of this.attempts) {
+                this.log.debug(`Attempt ${attempt.attemptNumber} conversation history`, {
+                    attemptNumber: attempt.attemptNumber,
+                    startTime: attempt.startTime,
+                    endTime: attempt.endTime,
+                    durationMs: attempt.durationMs,
+                    success: attempt.success,
+                    toolUseCount: attempt.toolUseCount,
+                    turnCount: attempt.turnCount,
+                    error: attempt.error,
+                    conversationLength: attempt.conversationHistory.length,
+                });
+            }
+        }
+    }
+    /**
+     * Truncate content for logging
+     */
+    truncateContent(content, maxLength = 500) {
+        if (content.length <= maxLength)
+            return content;
+        return content.slice(0, maxLength) + `... (${content.length} chars total)`;
+    }
+    /**
+     * Summarize tool input for logging
+     */
+    summarizeInput(input) {
+        const summary = {};
+        for (const [key, value] of Object.entries(input)) {
+            if (typeof value === 'string') {
+                summary[key] = value.length > 100 ? `${value.slice(0, 100)}...` : value;
+            }
+            else if (value !== undefined && value !== null) {
+                summary[key] = typeof value;
+            }
+        }
+        return summary;
+    }
+}
 //# sourceMappingURL=logger.js.map

@@ -988,12 +988,21 @@ export class Daemon implements DaemonStateProvider {
         tasksCompleted = results.filter((r) => r.success).length;
         tasksFailed = results.filter((r) => !r.success).length;
 
-        // STEP 4: Create PRs and evaluate
-        logger.step(4, 5, 'Creating PRs and evaluating');
+        // STEP 4: Run evaluation pipeline on successful tasks
+        logger.step(4, 6, 'Running evaluation pipeline');
+
+        // Track which results pass evaluation (for merge step)
+        const evaluationResults: Map<string, EvaluationResult> = new Map();
+        const evaluationPassed: Set<string> = new Set();
+
+        // Check if any evaluation is required
+        const evaluationRequired = this.config.evaluation.requireBuild ||
+          this.config.evaluation.requireTests ||
+          this.config.evaluation.requireHealthCheck;
 
         for (const result of results) {
           if (!result.success) {
-            // Remove in-progress label, add failed label with graceful degradation
+            // Handle failed task execution
             await this.github.issues.removeLabel(result.issue.number, 'in-progress');
             const labelResult = await this.github.issues.addLabelsWithFallback(result.issue.number, ['needs-review']);
             if (labelResult.degraded) {
@@ -1009,19 +1018,120 @@ export class Daemon implements DaemonStateProvider {
             continue;
           }
 
+          // Run evaluation pipeline if any evaluation is required
+          if (evaluationRequired) {
+            try {
+              const evalResult = await runEvaluation({
+                repoPath: join(this.config.execution.workDir, result.branchName),
+                branchName: result.branchName,
+                config: {
+                  requireBuild: this.config.evaluation.requireBuild,
+                  requireTests: this.config.evaluation.requireTests,
+                  requireHealthCheck: this.config.evaluation.requireHealthCheck,
+                  healthCheckUrls: this.config.evaluation.healthCheckUrls,
+                  previewUrlPattern: this.config.evaluation.previewUrlPattern,
+                },
+                repoInfo: {
+                  owner: this.config.repo.owner,
+                  repo: this.config.repo.name,
+                },
+              });
+
+              evaluationResults.set(result.branchName, evalResult);
+
+              if (evalResult.success) {
+                evaluationPassed.add(result.branchName);
+                logger.success(`Evaluation passed for issue #${result.issue.number}`, {
+                  issueNumber: result.issue.number,
+                  branchName: result.branchName,
+                  duration: evalResult.duration,
+                });
+              } else {
+                // Evaluation failed - mark issue as needs-review
+                logger.warn(`Evaluation failed for issue #${result.issue.number}`, {
+                  issueNumber: result.issue.number,
+                  branchName: result.branchName,
+                  summary: evalResult.summary,
+                });
+
+                await this.github.issues.removeLabel(result.issue.number, 'in-progress');
+                const labelResult = await this.github.issues.addLabelsWithFallback(
+                  result.issue.number,
+                  ['needs-review', 'evaluation-failed']
+                );
+                if (labelResult.degraded) {
+                  degraded = true;
+                }
+
+                // Add evaluation results as comment on the issue
+                const commentResult = await this.github.issues.addCommentWithFallback(
+                  result.issue.number,
+                  `⚠️ **Evaluation Failed**\n\nThe automated quality checks did not pass:\n\n${evalResult.summary}\n\n---\n*Duration: ${evalResult.duration}ms*`
+                );
+                if (commentResult.degraded) {
+                  degraded = true;
+                }
+
+                errors.push(`[EVALUATION_FAILED] Evaluation failed for issue #${result.issue.number}: ${evalResult.summary.split('\n')[0]}`);
+                tasksFailed++;
+                tasksCompleted--;
+              }
+            } catch (evalError: any) {
+              // Handle evaluation errors gracefully
+              logger.error(`Evaluation error for issue #${result.issue.number}`, {
+                error: evalError.message,
+                issueNumber: result.issue.number,
+                branchName: result.branchName,
+              });
+
+              // Mark as needs-review but don't block if evaluation itself fails
+              await this.github.issues.removeLabel(result.issue.number, 'in-progress');
+              await this.github.issues.addLabelsWithFallback(result.issue.number, ['needs-review', 'evaluation-error']);
+              await this.github.issues.addCommentWithFallback(
+                result.issue.number,
+                `⚠️ **Evaluation Error**\n\nAn error occurred during evaluation:\n\n\`\`\`\n${evalError.message}\n\`\`\`\n\nPlease review manually.`
+              );
+
+              errors.push(`[EVALUATION_ERROR] Evaluation error for issue #${result.issue.number}: ${evalError.message}`);
+            }
+          } else {
+            // No evaluation required - all successful tasks pass
+            evaluationPassed.add(result.branchName);
+          }
+        }
+
+        // STEP 5: Create PRs for tasks that passed evaluation
+        logger.step(5, 6, 'Creating PRs');
+
+        // Track created PRs for the merge step
+        const createdPRs: Map<string, { prNumber: number; issueNumber: number }> = new Map();
+
+        for (const result of results) {
+          if (!result.success) {
+            continue;
+          }
+
+          // Skip PR creation if evaluation failed
+          if (!evaluationPassed.has(result.branchName)) {
+            logger.info(`Skipping PR creation for issue #${result.issue.number} - evaluation did not pass`, {
+              issueNumber: result.issue.number,
+              branchName: result.branchName,
+            });
+            continue;
+          }
+
           // Create PR with graceful degradation
           metrics.githubApiCallsTotal.inc({ repository: this.repository });
 
           const prResult = await this.github.pulls.createPRWithFallback({
             title: result.issue.title,
-            body: this.generatePRBody(result.issue),
+            body: this.generatePRBody(result.issue, evaluationResults.get(result.branchName)),
             head: result.branchName,
             base: this.config.repo.baseBranch,
           });
 
           if (prResult.degraded) {
             degraded = true;
-            // Track GitHub API error for degraded PR creation
             metrics.githubApiErrorsTotal.inc({ repository: this.repository });
             metrics.recordError({
               repository: this.repository,
@@ -1038,30 +1148,43 @@ export class Daemon implements DaemonStateProvider {
               branchName: result.branchName,
             });
 
-            // Add a label to indicate PR creation was skipped
             await this.github.issues.addLabelsWithFallback(result.issue.number, ['pr-pending']);
             errors.push(`[${ErrorCode.GITHUB_SERVICE_DEGRADED}] PR creation skipped for issue #${result.issue.number}`);
           } else if (prResult.value) {
             const pr = prResult.value;
-            // Track PR creation
             metrics.prsCreatedTotal.inc({ repository: this.repository });
 
             logger.success(`Created PR #${pr.number} for issue #${result.issue.number}`);
+            createdPRs.set(result.branchName, { prNumber: pr.number, issueNumber: result.issue.number });
 
-            // Link PR to issue with graceful degradation
+            // Build PR comment with evaluation results
+            let prComment = `🔗 PR created: #${pr.number}`;
+            const evalResult = evaluationResults.get(result.branchName);
+            if (evalResult) {
+              prComment += `\n\n**Evaluation Results:**\n${evalResult.summary}`;
+            }
+
             const commentResult = await this.github.issues.addCommentWithFallback(
               result.issue.number,
-              `🔗 PR created: #${pr.number}`
+              prComment
             );
             if (commentResult.degraded) {
               degraded = true;
             }
+
+            // Also add evaluation results as PR comment if available
+            if (evalResult) {
+              await this.github.issues.addCommentWithFallback(
+                pr.number,
+                `## Evaluation Results\n\n${evalResult.summary}\n\n---\n*Evaluation completed in ${evalResult.duration}ms*`
+              );
+            }
           }
         }
 
-        // STEP 5: Merge successful PRs
+        // STEP 6: Merge successful PRs
         if (this.config.merge.autoMerge) {
-          logger.step(5, 5, 'Merging PRs');
+          logger.step(6, 6, 'Merging PRs');
 
           const resolver = createConflictResolver({
             prManager: this.github.pulls,
@@ -1074,9 +1197,22 @@ export class Daemon implements DaemonStateProvider {
             baseBranch: this.config.repo.baseBranch,
           });
 
-          // Get branches to merge
+          // Get branches to merge - only include those that passed evaluation
+          // When requireAllChecks is true, evaluation must pass for auto-merge
           const branchesToMerge = results
             .filter((r) => r.success)
+            .filter((r) => {
+              // If requireAllChecks is true and evaluation was run, check if it passed
+              if (this.config.merge.requireAllChecks && evaluationRequired) {
+                const passed = evaluationPassed.has(r.branchName);
+                if (!passed) {
+                  logger.info(`Skipping auto-merge for ${r.branchName} - evaluation did not pass and requireAllChecks is enabled`);
+                }
+                return passed;
+              }
+              // Otherwise just check if evaluation passed (if it was run)
+              return evaluationPassed.has(r.branchName);
+            })
             .map((r) => ({ branchName: r.branchName }));
 
           const mergeResults = await resolver.mergeSequentially(branchesToMerge);
@@ -1192,7 +1328,11 @@ ${relatedIssuesSection}
     return `auto/${issue.number}-${slug}`;
   }
 
-  private generatePRBody(issue: Issue): string {
+  private generatePRBody(issue: Issue, evaluationResult?: EvaluationResult): string {
+    const evaluationSection = evaluationResult
+      ? `\n## Evaluation Results\n\n${evaluationResult.summary}\n\n*Evaluation completed in ${evaluationResult.duration}ms*\n`
+      : '';
+
     return `## Summary
 
 Implements #${issue.number}
@@ -1202,7 +1342,7 @@ ${issue.body || ''}
 ## Changes
 
 *Changes were implemented autonomously by Claude.*
-
+${evaluationSection}
 ---
 
 🤖 Generated by [Autonomous Dev CLI](https://github.com/webedt/monorepo/tree/main/autonomous-dev-cli)

@@ -400,5 +400,106 @@ declare class Logger {
     getLogEntry(level: LogLevel, message: string, meta?: object): StructuredLogEntry;
 }
 export declare const logger: Logger;
+/**
+ * Conversation history entry for Claude SDK debugging
+ */
+export interface ConversationHistoryEntry {
+    timestamp: string;
+    role: 'user' | 'assistant' | 'system' | 'tool';
+    type: 'message' | 'tool_use' | 'tool_result' | 'error' | 'timeout';
+    content: string;
+    metadata?: Record<string, unknown>;
+}
+/**
+ * Claude execution attempt record for retry debugging
+ */
+export interface ClaudeExecutionAttempt {
+    attemptNumber: number;
+    startTime: string;
+    endTime?: string;
+    durationMs?: number;
+    success: boolean;
+    error?: {
+        code: string;
+        message: string;
+        isRetryable: boolean;
+    };
+    toolUseCount: number;
+    turnCount: number;
+    conversationHistory: ConversationHistoryEntry[];
+}
+/**
+ * Claude execution history logger for debugging failed attempts
+ */
+export declare class ClaudeExecutionLogger {
+    private correlationId;
+    private taskId;
+    private attempts;
+    private currentAttempt;
+    private log;
+    constructor(correlationId: string, taskId: string);
+    /**
+     * Start a new execution attempt
+     */
+    startAttempt(attemptNumber: number): void;
+    /**
+     * Record a message in the conversation history
+     */
+    recordMessage(role: ConversationHistoryEntry['role'], type: ConversationHistoryEntry['type'], content: string, metadata?: Record<string, unknown>): void;
+    /**
+     * Record tool use
+     */
+    recordToolUse(toolName: string, input?: Record<string, unknown>): void;
+    /**
+     * Record tool result
+     */
+    recordToolResult(toolName: string, success: boolean, output?: string): void;
+    /**
+     * Record assistant text response
+     */
+    recordAssistantText(text: string): void;
+    /**
+     * Record an error in the current attempt
+     */
+    recordError(code: string, message: string, isRetryable: boolean): void;
+    /**
+     * Record a timeout in the current attempt
+     */
+    recordTimeout(timeoutMs: number): void;
+    /**
+     * End the current attempt
+     */
+    endAttempt(success: boolean): void;
+    /**
+     * Get all execution attempts for debugging
+     */
+    getAttempts(): ClaudeExecutionAttempt[];
+    /**
+     * Get a summary of all attempts for logging
+     */
+    getSummary(): {
+        totalAttempts: number;
+        successfulAttempts: number;
+        totalDurationMs: number;
+        totalToolUses: number;
+        totalTurns: number;
+        lastError?: {
+            code: string;
+            message: string;
+        };
+    };
+    /**
+     * Log the full execution history for debugging
+     */
+    logFullHistory(level?: LogLevel): void;
+    /**
+     * Truncate content for logging
+     */
+    private truncateContent;
+    /**
+     * Summarize tool input for logging
+     */
+    private summarizeInput;
+}
 export {};
 //# sourceMappingURL=logger.d.ts.map

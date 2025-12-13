@@ -36,6 +36,10 @@ export var ErrorCode;
     ErrorCode["DB_CONNECTION_FAILED"] = "DB_CONNECTION_FAILED";
     ErrorCode["DB_USER_NOT_FOUND"] = "DB_USER_NOT_FOUND";
     ErrorCode["DB_QUERY_FAILED"] = "DB_QUERY_FAILED";
+    ErrorCode["DB_QUERY_TIMEOUT"] = "DB_QUERY_TIMEOUT";
+    ErrorCode["DB_CONSTRAINT_VIOLATION"] = "DB_CONSTRAINT_VIOLATION";
+    ErrorCode["DB_TRANSACTION_FAILED"] = "DB_TRANSACTION_FAILED";
+    ErrorCode["DB_POOL_EXHAUSTED"] = "DB_POOL_EXHAUSTED";
     // Execution errors (5000-5999)
     ErrorCode["EXEC_WORKSPACE_FAILED"] = "EXEC_WORKSPACE_FAILED";
     ErrorCode["EXEC_CLONE_FAILED"] = "EXEC_CLONE_FAILED";
@@ -53,6 +57,19 @@ export var ErrorCode;
     ErrorCode["ANALYZER_MAX_DEPTH_EXCEEDED"] = "ANALYZER_MAX_DEPTH_EXCEEDED";
     ErrorCode["ANALYZER_MAX_FILES_EXCEEDED"] = "ANALYZER_MAX_FILES_EXCEEDED";
     ErrorCode["ANALYZER_INVALID_CONFIG"] = "ANALYZER_INVALID_CONFIG";
+    // Validation errors (7000-7999)
+    ErrorCode["VALIDATION_FAILED"] = "VALIDATION_FAILED";
+    ErrorCode["VALIDATION_REQUIRED_FIELD"] = "VALIDATION_REQUIRED_FIELD";
+    ErrorCode["VALIDATION_INVALID_FORMAT"] = "VALIDATION_INVALID_FORMAT";
+    ErrorCode["VALIDATION_OUT_OF_RANGE"] = "VALIDATION_OUT_OF_RANGE";
+    ErrorCode["VALIDATION_INVALID_TYPE"] = "VALIDATION_INVALID_TYPE";
+    ErrorCode["VALIDATION_SCHEMA_MISMATCH"] = "VALIDATION_SCHEMA_MISMATCH";
+    // Conflict errors (8000-8999)
+    ErrorCode["CONFLICT_MERGE_FAILED"] = "CONFLICT_MERGE_FAILED";
+    ErrorCode["CONFLICT_BRANCH_DIVERGED"] = "CONFLICT_BRANCH_DIVERGED";
+    ErrorCode["CONFLICT_FILE_MODIFIED"] = "CONFLICT_FILE_MODIFIED";
+    ErrorCode["CONFLICT_CONCURRENT_EDIT"] = "CONFLICT_CONCURRENT_EDIT";
+    ErrorCode["CONFLICT_RESOLUTION_FAILED"] = "CONFLICT_RESOLUTION_FAILED";
     // General errors (9000-9999)
     ErrorCode["INTERNAL_ERROR"] = "INTERNAL_ERROR";
     ErrorCode["NETWORK_ERROR"] = "NETWORK_ERROR";
@@ -103,8 +120,11 @@ export class StructuredError extends Error {
             ErrorCode.CLAUDE_RATE_LIMITED,
             ErrorCode.CLAUDE_NETWORK_ERROR,
             ErrorCode.DB_CONNECTION_FAILED,
+            ErrorCode.DB_QUERY_TIMEOUT,
+            ErrorCode.DB_POOL_EXHAUSTED,
             ErrorCode.SERVICE_DEGRADED,
             ErrorCode.CIRCUIT_BREAKER_OPEN,
+            ErrorCode.CONFLICT_CONCURRENT_EDIT,
         ];
         if (transientCodes.includes(code))
             return 'transient';
@@ -114,6 +134,7 @@ export class StructuredError extends Error {
             ErrorCode.CLAUDE_AUTH_FAILED,
             ErrorCode.CONFIG_INVALID,
             ErrorCode.CONFIG_MISSING_REQUIRED,
+            ErrorCode.DB_CONSTRAINT_VIOLATION,
         ];
         if (criticalCodes.includes(code))
             return 'critical';
@@ -133,10 +154,15 @@ export class StructuredError extends Error {
             ErrorCode.CLAUDE_RATE_LIMITED,
             ErrorCode.CLAUDE_NETWORK_ERROR,
             ErrorCode.DB_CONNECTION_FAILED,
+            ErrorCode.DB_QUERY_TIMEOUT,
+            ErrorCode.DB_POOL_EXHAUSTED,
+            ErrorCode.DB_TRANSACTION_FAILED,
             ErrorCode.EXEC_CLONE_FAILED,
             ErrorCode.EXEC_PUSH_FAILED,
             ErrorCode.SERVICE_DEGRADED,
             ErrorCode.CIRCUIT_BREAKER_OPEN,
+            ErrorCode.CONFLICT_MERGE_FAILED,
+            ErrorCode.CONFLICT_CONCURRENT_EDIT,
         ];
         return retryableCodes.includes(code);
     }
@@ -542,6 +568,316 @@ function getAnalyzerRecoveryActions(code) {
             });
             actions.push({
                 description: 'Run "autonomous-dev help-config" for configuration documentation',
+                automatic: false,
+            });
+            break;
+    }
+    return actions;
+}
+/**
+ * Database-specific error for database operations
+ */
+export class DatabaseError extends StructuredError {
+    constructor(code, message, options = {}) {
+        const recoveryActions = options.recoveryActions ?? getDatabaseRecoveryActions(code);
+        super(code, message, {
+            severity: getDatabaseSeverity(code),
+            recoveryActions,
+            context: {
+                ...options.context,
+                query: options.query,
+                table: options.table,
+            },
+            cause: options.cause,
+            isRetryable: isDatabaseRetryable(code),
+        });
+        this.name = 'DatabaseError';
+    }
+}
+function getDatabaseSeverity(code) {
+    switch (code) {
+        case ErrorCode.DB_CONNECTION_FAILED:
+        case ErrorCode.DB_QUERY_TIMEOUT:
+        case ErrorCode.DB_POOL_EXHAUSTED:
+        case ErrorCode.DB_TRANSACTION_FAILED:
+            return 'transient';
+        case ErrorCode.DB_CONSTRAINT_VIOLATION:
+            return 'critical';
+        default:
+            return 'error';
+    }
+}
+function isDatabaseRetryable(code) {
+    const retryableCodes = [
+        ErrorCode.DB_CONNECTION_FAILED,
+        ErrorCode.DB_QUERY_TIMEOUT,
+        ErrorCode.DB_POOL_EXHAUSTED,
+        ErrorCode.DB_TRANSACTION_FAILED,
+    ];
+    return retryableCodes.includes(code);
+}
+function getDatabaseRecoveryActions(code) {
+    const actions = [];
+    switch (code) {
+        case ErrorCode.DB_CONNECTION_FAILED:
+            actions.push({
+                description: 'Check database connection string is correct',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Verify database server is running and accessible',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Retry the connection',
+                automatic: true,
+            });
+            break;
+        case ErrorCode.DB_USER_NOT_FOUND:
+            actions.push({
+                description: 'Verify the user email is correct',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check that the user exists in the database',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.DB_QUERY_FAILED:
+            actions.push({
+                description: 'Check the query syntax and parameters',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Verify database permissions',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.DB_QUERY_TIMEOUT:
+            actions.push({
+                description: 'Increase query timeout in configuration',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Optimize the query or add database indexes',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Retry the query',
+                automatic: true,
+            });
+            break;
+        case ErrorCode.DB_CONSTRAINT_VIOLATION:
+            actions.push({
+                description: 'Check for duplicate keys or foreign key violations',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Verify data integrity before insert/update',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.DB_TRANSACTION_FAILED:
+            actions.push({
+                description: 'Retry the transaction',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Check for deadlocks or resource contention',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.DB_POOL_EXHAUSTED:
+            actions.push({
+                description: 'Wait for connections to be released',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Increase connection pool size in configuration',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Check for connection leaks',
+                automatic: false,
+            });
+            break;
+    }
+    return actions;
+}
+/**
+ * Validation-specific error for input/data validation
+ */
+export class ValidationError extends StructuredError {
+    constructor(code, message, options = {}) {
+        const recoveryActions = options.recoveryActions ?? getValidationRecoveryActions(code, options.field);
+        super(code, message, {
+            severity: 'error',
+            recoveryActions,
+            context: {
+                ...options.context,
+                field: options.field,
+                invalidValue: options.value,
+                expectedType: options.expectedType,
+                constraints: options.constraints,
+            },
+            cause: options.cause,
+            isRetryable: false,
+        });
+        this.name = 'ValidationError';
+    }
+}
+function getValidationRecoveryActions(code, field) {
+    const actions = [];
+    switch (code) {
+        case ErrorCode.VALIDATION_FAILED:
+            actions.push({
+                description: 'Review the input data for errors',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.VALIDATION_REQUIRED_FIELD:
+            if (field) {
+                actions.push({
+                    description: `Provide a value for the required field "${field}"`,
+                    automatic: false,
+                });
+            }
+            else {
+                actions.push({
+                    description: 'Provide values for all required fields',
+                    automatic: false,
+                });
+            }
+            break;
+        case ErrorCode.VALIDATION_INVALID_FORMAT:
+            actions.push({
+                description: 'Check the format of the input value',
+                automatic: false,
+            });
+            if (field) {
+                actions.push({
+                    description: `Ensure "${field}" matches the expected format`,
+                    automatic: false,
+                });
+            }
+            break;
+        case ErrorCode.VALIDATION_OUT_OF_RANGE:
+            actions.push({
+                description: 'Ensure the value is within the allowed range',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.VALIDATION_INVALID_TYPE:
+            actions.push({
+                description: 'Provide a value of the correct type',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.VALIDATION_SCHEMA_MISMATCH:
+            actions.push({
+                description: 'Check the data structure matches the expected schema',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Review the API documentation for the correct format',
+                automatic: false,
+            });
+            break;
+    }
+    return actions;
+}
+/**
+ * Conflict-specific error for merge and concurrent edit conflicts
+ */
+export class ConflictError extends StructuredError {
+    constructor(code, message, options = {}) {
+        const recoveryActions = options.recoveryActions ?? getConflictRecoveryActions(code);
+        super(code, message, {
+            severity: getConflictSeverity(code),
+            recoveryActions,
+            context: {
+                ...options.context,
+                branchName: options.branchName,
+                baseBranch: options.baseBranch,
+                conflictingFiles: options.conflictingFiles,
+            },
+            cause: options.cause,
+            isRetryable: isConflictRetryable(code),
+        });
+        this.name = 'ConflictError';
+    }
+}
+function getConflictSeverity(code) {
+    switch (code) {
+        case ErrorCode.CONFLICT_CONCURRENT_EDIT:
+            return 'transient';
+        case ErrorCode.CONFLICT_RESOLUTION_FAILED:
+            return 'critical';
+        default:
+            return 'error';
+    }
+}
+function isConflictRetryable(code) {
+    const retryableCodes = [
+        ErrorCode.CONFLICT_MERGE_FAILED,
+        ErrorCode.CONFLICT_CONCURRENT_EDIT,
+    ];
+    return retryableCodes.includes(code);
+}
+function getConflictRecoveryActions(code) {
+    const actions = [];
+    switch (code) {
+        case ErrorCode.CONFLICT_MERGE_FAILED:
+            actions.push({
+                description: 'Pull the latest changes from the base branch',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Resolve merge conflicts manually',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Retry the merge operation',
+                automatic: true,
+            });
+            break;
+        case ErrorCode.CONFLICT_BRANCH_DIVERGED:
+            actions.push({
+                description: 'Rebase the branch onto the latest base branch',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Create a new branch from the latest base',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.CONFLICT_FILE_MODIFIED:
+            actions.push({
+                description: 'Review the modified files for conflicts',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Merge the changes manually',
+                automatic: false,
+            });
+            break;
+        case ErrorCode.CONFLICT_CONCURRENT_EDIT:
+            actions.push({
+                description: 'Wait for the concurrent operation to complete',
+                automatic: true,
+            });
+            actions.push({
+                description: 'Retry the operation',
+                automatic: true,
+            });
+            break;
+        case ErrorCode.CONFLICT_RESOLUTION_FAILED:
+            actions.push({
+                description: 'Manually resolve the conflicts in the affected files',
+                automatic: false,
+            });
+            actions.push({
+                description: 'Consider using a different conflict resolution strategy',
                 automatic: false,
             });
             break;

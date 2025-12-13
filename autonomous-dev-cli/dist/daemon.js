@@ -3,10 +3,12 @@ import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
 import { discoverTasks, createDeduplicator, getParallelSafeTasks, } from './discovery/index.js';
 import { createWorkerPool } from './executor/index.js';
+import { runEvaluation } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
 import { logger, generateCorrelationId, clearCorrelationId, getCorrelationId, setCorrelationContext, getMemoryUsageMB, timeOperation, createOperationContext, finalizeOperationContext, startRequestLifecycle, endRequestLifecycle, } from './utils/logger.js';
 import { metrics } from './utils/metrics.js';
 import { createMonitoringServer } from './utils/monitoring.js';
+import { createHealthServer, } from './monitoring/index.js';
 import { StructuredError, ErrorCode, GitHubError, ClaudeError, ConfigError, wrapError, } from './utils/errors.js';
 import { mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -19,6 +21,7 @@ export class Daemon {
     userId = null;
     enableDatabaseLogging = false;
     monitoringServer = null;
+    healthServer = null;
     repository = '';
     lastKnownIssues = []; // Cache for graceful degradation
     serviceHealth = {
@@ -26,6 +29,17 @@ export class Daemon {
         overallStatus: 'healthy',
         lastCheck: new Date(),
     };
+    // Health monitoring state
+    startTime = new Date();
+    lastCycleTime = null;
+    lastCycleSuccess = null;
+    lastCycleDuration = null;
+    currentWorkerPool = null;
+    totalErrors = 0;
+    lastErrorTime = null;
+    errorsByType = {};
+    recentErrors = [];
+    daemonStatus = 'stopped';
     constructor(options = {}) {
         this.options = options;
         this.config = loadConfig(options.configPath);
@@ -48,16 +62,20 @@ export class Daemon {
     async start() {
         logger.header('Autonomous Dev CLI');
         logger.info('Starting daemon...');
+        this.daemonStatus = 'starting';
+        this.startTime = new Date();
         try {
             // Initialize
             await this.initialize();
             // Start monitoring server if port is configured
             if (this.options.monitoringPort) {
                 await this.startMonitoringServer();
+                await this.startHealthServer();
             }
             // Update health status
             metrics.updateHealthStatus(true);
             this.isRunning = true;
+            this.daemonStatus = 'running';
             // Main loop
             while (this.isRunning) {
                 this.cycleCount++;
@@ -89,6 +107,24 @@ export class Daemon {
                 // Log memory snapshot at cycle start
                 logger.memorySnapshot('Daemon', `Cycle #${this.cycleCount} start`);
                 const result = await this.runCycle();
+                // Update last cycle tracking for health monitoring
+                this.lastCycleTime = new Date();
+                this.lastCycleSuccess = result.success;
+                this.lastCycleDuration = result.duration;
+                // Track errors for health monitoring
+                if (result.errors.length > 0) {
+                    this.totalErrors += result.errors.length;
+                    this.lastErrorTime = new Date();
+                    for (const error of result.errors) {
+                        const errorType = this.extractErrorType(error);
+                        this.errorsByType[errorType] = (this.errorsByType[errorType] || 0) + 1;
+                        this.recentErrors.push({ time: new Date(), type: errorType });
+                    }
+                    // Keep only last 100 recent errors for rate calculation
+                    if (this.recentErrors.length > 100) {
+                        this.recentErrors = this.recentErrors.slice(-100);
+                    }
+                }
                 // Calculate memory delta for the cycle
                 const cycleEndMemory = getMemoryUsageMB();
                 const memoryDelta = Math.round((cycleEndMemory - cycleStartMemory) * 100) / 100;
@@ -180,6 +216,7 @@ export class Daemon {
     }
     async stop() {
         logger.info('Stop requested...');
+        this.daemonStatus = 'stopping';
         this.isRunning = false;
         metrics.updateHealthStatus(false);
     }
@@ -275,6 +312,166 @@ export class Daemon {
         }));
         await this.monitoringServer.start();
     }
+    /**
+     * Start the health server for external monitoring
+     */
+    async startHealthServer() {
+        if (!this.options.monitoringPort)
+            return;
+        // Use port + 1 for health server to avoid conflict with monitoring server
+        const healthPort = this.options.monitoringPort + 1;
+        this.healthServer = createHealthServer({
+            port: healthPort,
+            host: '0.0.0.0',
+        });
+        // Set this daemon as the state provider
+        this.healthServer.setStateProvider(this);
+        // Register health checks
+        this.healthServer.registerHealthCheck(async () => {
+            if (!this.github) {
+                return {
+                    name: 'github',
+                    status: 'fail',
+                    message: 'GitHub client not initialized',
+                };
+            }
+            const health = this.github.client.getServiceHealth();
+            const statusMap = {
+                healthy: 'pass',
+                degraded: 'warn',
+                unavailable: 'fail',
+            };
+            return {
+                name: 'github',
+                status: statusMap[health.status] ?? 'fail',
+                message: `GitHub API ${health.status} (circuit: ${health.circuitState})`,
+            };
+        });
+        this.healthServer.registerHealthCheck(async () => ({
+            name: 'database',
+            status: this.enableDatabaseLogging ? 'pass' : 'pass',
+            message: this.enableDatabaseLogging ? 'Database connected' : 'Database logging disabled',
+        }));
+        this.healthServer.registerHealthCheck(async () => ({
+            name: 'daemon',
+            status: this.isRunning ? 'pass' : 'fail',
+            message: this.isRunning ? `Running cycle ${this.cycleCount}` : 'Daemon not running',
+        }));
+        await this.healthServer.start();
+    }
+    /**
+     * DaemonStateProvider implementation: Get current daemon status
+     */
+    getDaemonStatus() {
+        return {
+            status: this.daemonStatus,
+            cycleCount: this.cycleCount,
+            lastCycleTime: this.lastCycleTime,
+            lastCycleSuccess: this.lastCycleSuccess,
+            lastCycleDuration: this.lastCycleDuration,
+            startTime: this.startTime,
+            uptime: Math.floor((Date.now() - this.startTime.getTime()) / 1000),
+            version: '0.1.0',
+        };
+    }
+    /**
+     * DaemonStateProvider implementation: Get worker pool status
+     */
+    getWorkerPoolStatus() {
+        if (!this.currentWorkerPool) {
+            return {
+                activeWorkers: 0,
+                queuedTasks: 0,
+                completedTasks: 0,
+                failedTasks: 0,
+                maxWorkers: this.config.execution.parallelWorkers,
+                isRunning: false,
+            };
+        }
+        const status = this.currentWorkerPool.getStatus();
+        return {
+            activeWorkers: status.active,
+            queuedTasks: status.queued,
+            completedTasks: status.succeeded,
+            failedTasks: status.failed,
+            maxWorkers: this.config.execution.parallelWorkers,
+            isRunning: status.active > 0 || status.queued > 0,
+        };
+    }
+    /**
+     * DaemonStateProvider implementation: Get error metrics
+     */
+    getErrorMetrics() {
+        // Calculate recent error rate (errors in last 5 minutes)
+        const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+        const recentErrorCount = this.recentErrors.filter((e) => e.time.getTime() > fiveMinutesAgo).length;
+        const recentErrorRate = recentErrorCount / 5; // errors per minute
+        return {
+            totalErrors: this.totalErrors,
+            recentErrorRate,
+            lastErrorTime: this.lastErrorTime,
+            errorsByType: { ...this.errorsByType },
+        };
+    }
+    /**
+     * DaemonStateProvider implementation: Get service health
+     */
+    getServiceHealth() {
+        const services = [];
+        // GitHub service health
+        if (this.github) {
+            const health = this.github.client.getServiceHealth();
+            const statusMap = {
+                healthy: 'available',
+                degraded: 'degraded',
+                unavailable: 'unavailable',
+            };
+            services.push({
+                name: 'github',
+                status: statusMap[health.status] ?? 'unavailable',
+                details: {
+                    circuitState: health.circuitState,
+                    consecutiveFailures: health.consecutiveFailures,
+                    rateLimitRemaining: health.rateLimitRemaining,
+                },
+            });
+        }
+        // Database service (if enabled)
+        if (this.enableDatabaseLogging) {
+            services.push({
+                name: 'database',
+                status: 'available',
+                details: {
+                    userId: this.userId,
+                },
+            });
+        }
+        return services;
+    }
+    /**
+     * Extract error type from error message for categorization
+     */
+    extractErrorType(error) {
+        const errorMatch = error.match(/\[([^\]]+)\]/);
+        if (errorMatch) {
+            return errorMatch[1];
+        }
+        if (error.toLowerCase().includes('github'))
+            return 'GITHUB_ERROR';
+        if (error.toLowerCase().includes('claude'))
+            return 'CLAUDE_ERROR';
+        if (error.toLowerCase().includes('timeout'))
+            return 'TIMEOUT_ERROR';
+        if (error.toLowerCase().includes('network'))
+            return 'NETWORK_ERROR';
+        return 'UNKNOWN_ERROR';
+    }
+    /**
+     * Get the health server port (for CLI status command)
+     */
+    getHealthServerPort() {
+        return this.healthServer?.getPort() ?? null;
+    }
     async initialize() {
         logger.info('Initializing...');
         // Set repository identifier for metrics
@@ -367,6 +564,11 @@ export class Daemon {
         logger.info('Shutting down...');
         // Update health status
         metrics.updateHealthStatus(false);
+        this.daemonStatus = 'stopped';
+        // Stop health server
+        if (this.healthServer) {
+            await this.healthServer.stop();
+        }
         // Stop monitoring server
         if (this.monitoringServer) {
             await this.monitoringServer.stop();
@@ -531,7 +733,7 @@ export class Daemon {
                     }
                 }
                 // Create worker pool and execute
-                const workerPool = createWorkerPool({
+                this.currentWorkerPool = createWorkerPool({
                     maxWorkers: this.config.execution.parallelWorkers,
                     workDir: this.config.execution.workDir,
                     repoUrl: `https://github.com/${this.config.repo.owner}/${this.config.repo.name}`,
@@ -552,14 +754,23 @@ export class Daemon {
                     issue,
                     branchName: this.generateBranchName(issue),
                 }));
-                const results = await workerPool.executeTasks(workerTasks);
+                const results = await this.currentWorkerPool.executeTasks(workerTasks);
+                // Clear worker pool reference after execution
+                this.currentWorkerPool = null;
                 tasksCompleted = results.filter((r) => r.success).length;
                 tasksFailed = results.filter((r) => !r.success).length;
-                // STEP 4: Create PRs and evaluate
-                logger.step(4, 5, 'Creating PRs and evaluating');
+                // STEP 4: Run evaluation pipeline on successful tasks
+                logger.step(4, 6, 'Running evaluation pipeline');
+                // Track which results pass evaluation (for merge step)
+                const evaluationResults = new Map();
+                const evaluationPassed = new Set();
+                // Check if any evaluation is required
+                const evaluationRequired = this.config.evaluation.requireBuild ||
+                    this.config.evaluation.requireTests ||
+                    this.config.evaluation.requireHealthCheck;
                 for (const result of results) {
                     if (!result.success) {
-                        // Remove in-progress label, add failed label with graceful degradation
+                        // Handle failed task execution
                         await this.github.issues.removeLabel(result.issue.number, 'in-progress');
                         const labelResult = await this.github.issues.addLabelsWithFallback(result.issue.number, ['needs-review']);
                         if (labelResult.degraded) {
@@ -571,17 +782,100 @@ export class Daemon {
                         }
                         continue;
                     }
+                    // Run evaluation pipeline if any evaluation is required
+                    if (evaluationRequired) {
+                        try {
+                            const evalResult = await runEvaluation({
+                                repoPath: join(this.config.execution.workDir, result.branchName),
+                                branchName: result.branchName,
+                                config: {
+                                    requireBuild: this.config.evaluation.requireBuild,
+                                    requireTests: this.config.evaluation.requireTests,
+                                    requireHealthCheck: this.config.evaluation.requireHealthCheck,
+                                    healthCheckUrls: this.config.evaluation.healthCheckUrls,
+                                    previewUrlPattern: this.config.evaluation.previewUrlPattern,
+                                },
+                                repoInfo: {
+                                    owner: this.config.repo.owner,
+                                    repo: this.config.repo.name,
+                                },
+                            });
+                            evaluationResults.set(result.branchName, evalResult);
+                            if (evalResult.success) {
+                                evaluationPassed.add(result.branchName);
+                                logger.success(`Evaluation passed for issue #${result.issue.number}`, {
+                                    issueNumber: result.issue.number,
+                                    branchName: result.branchName,
+                                    duration: evalResult.duration,
+                                });
+                            }
+                            else {
+                                // Evaluation failed - mark issue as needs-review
+                                logger.warn(`Evaluation failed for issue #${result.issue.number}`, {
+                                    issueNumber: result.issue.number,
+                                    branchName: result.branchName,
+                                    summary: evalResult.summary,
+                                });
+                                await this.github.issues.removeLabel(result.issue.number, 'in-progress');
+                                const labelResult = await this.github.issues.addLabelsWithFallback(result.issue.number, ['needs-review', 'evaluation-failed']);
+                                if (labelResult.degraded) {
+                                    degraded = true;
+                                }
+                                // Add evaluation results as comment on the issue
+                                const commentResult = await this.github.issues.addCommentWithFallback(result.issue.number, `⚠️ **Evaluation Failed**\n\nThe automated quality checks did not pass:\n\n${evalResult.summary}\n\n---\n*Duration: ${evalResult.duration}ms*`);
+                                if (commentResult.degraded) {
+                                    degraded = true;
+                                }
+                                errors.push(`[EVALUATION_FAILED] Evaluation failed for issue #${result.issue.number}: ${evalResult.summary.split('\n')[0]}`);
+                                tasksFailed++;
+                                tasksCompleted--;
+                            }
+                        }
+                        catch (evalError) {
+                            // Handle evaluation errors gracefully
+                            logger.error(`Evaluation error for issue #${result.issue.number}`, {
+                                error: evalError.message,
+                                issueNumber: result.issue.number,
+                                branchName: result.branchName,
+                            });
+                            // Mark as needs-review but don't block if evaluation itself fails
+                            await this.github.issues.removeLabel(result.issue.number, 'in-progress');
+                            await this.github.issues.addLabelsWithFallback(result.issue.number, ['needs-review', 'evaluation-error']);
+                            await this.github.issues.addCommentWithFallback(result.issue.number, `⚠️ **Evaluation Error**\n\nAn error occurred during evaluation:\n\n\`\`\`\n${evalError.message}\n\`\`\`\n\nPlease review manually.`);
+                            errors.push(`[EVALUATION_ERROR] Evaluation error for issue #${result.issue.number}: ${evalError.message}`);
+                        }
+                    }
+                    else {
+                        // No evaluation required - all successful tasks pass
+                        evaluationPassed.add(result.branchName);
+                    }
+                }
+                // STEP 5: Create PRs for tasks that passed evaluation
+                logger.step(5, 6, 'Creating PRs');
+                // Track created PRs for the merge step
+                const createdPRs = new Map();
+                for (const result of results) {
+                    if (!result.success) {
+                        continue;
+                    }
+                    // Skip PR creation if evaluation failed
+                    if (!evaluationPassed.has(result.branchName)) {
+                        logger.info(`Skipping PR creation for issue #${result.issue.number} - evaluation did not pass`, {
+                            issueNumber: result.issue.number,
+                            branchName: result.branchName,
+                        });
+                        continue;
+                    }
                     // Create PR with graceful degradation
                     metrics.githubApiCallsTotal.inc({ repository: this.repository });
                     const prResult = await this.github.pulls.createPRWithFallback({
                         title: result.issue.title,
-                        body: this.generatePRBody(result.issue),
+                        body: this.generatePRBody(result.issue, evaluationResults.get(result.branchName)),
                         head: result.branchName,
                         base: this.config.repo.baseBranch,
                     });
                     if (prResult.degraded) {
                         degraded = true;
-                        // Track GitHub API error for degraded PR creation
                         metrics.githubApiErrorsTotal.inc({ repository: this.repository });
                         metrics.recordError({
                             repository: this.repository,
@@ -596,25 +890,33 @@ export class Daemon {
                             issueNumber: result.issue.number,
                             branchName: result.branchName,
                         });
-                        // Add a label to indicate PR creation was skipped
                         await this.github.issues.addLabelsWithFallback(result.issue.number, ['pr-pending']);
                         errors.push(`[${ErrorCode.GITHUB_SERVICE_DEGRADED}] PR creation skipped for issue #${result.issue.number}`);
                     }
                     else if (prResult.value) {
                         const pr = prResult.value;
-                        // Track PR creation
                         metrics.prsCreatedTotal.inc({ repository: this.repository });
                         logger.success(`Created PR #${pr.number} for issue #${result.issue.number}`);
-                        // Link PR to issue with graceful degradation
-                        const commentResult = await this.github.issues.addCommentWithFallback(result.issue.number, `🔗 PR created: #${pr.number}`);
+                        createdPRs.set(result.branchName, { prNumber: pr.number, issueNumber: result.issue.number });
+                        // Build PR comment with evaluation results
+                        let prComment = `🔗 PR created: #${pr.number}`;
+                        const evalResult = evaluationResults.get(result.branchName);
+                        if (evalResult) {
+                            prComment += `\n\n**Evaluation Results:**\n${evalResult.summary}`;
+                        }
+                        const commentResult = await this.github.issues.addCommentWithFallback(result.issue.number, prComment);
                         if (commentResult.degraded) {
                             degraded = true;
                         }
+                        // Also add evaluation results as PR comment if available
+                        if (evalResult) {
+                            await this.github.issues.addCommentWithFallback(pr.number, `## Evaluation Results\n\n${evalResult.summary}\n\n---\n*Evaluation completed in ${evalResult.duration}ms*`);
+                        }
                     }
                 }
-                // STEP 5: Merge successful PRs
+                // STEP 6: Merge successful PRs
                 if (this.config.merge.autoMerge) {
-                    logger.step(5, 5, 'Merging PRs');
+                    logger.step(6, 6, 'Merging PRs');
                     const resolver = createConflictResolver({
                         prManager: this.github.pulls,
                         branchManager: this.github.branches,
@@ -625,9 +927,22 @@ export class Daemon {
                         repo: this.config.repo.name,
                         baseBranch: this.config.repo.baseBranch,
                     });
-                    // Get branches to merge
+                    // Get branches to merge - only include those that passed evaluation
+                    // When requireAllChecks is true, evaluation must pass for auto-merge
                     const branchesToMerge = results
                         .filter((r) => r.success)
+                        .filter((r) => {
+                        // If requireAllChecks is true and evaluation was run, check if it passed
+                        if (this.config.merge.requireAllChecks && evaluationRequired) {
+                            const passed = evaluationPassed.has(r.branchName);
+                            if (!passed) {
+                                logger.info(`Skipping auto-merge for ${r.branchName} - evaluation did not pass and requireAllChecks is enabled`);
+                            }
+                            return passed;
+                        }
+                        // Otherwise just check if evaluation passed (if it was run)
+                        return evaluationPassed.has(r.branchName);
+                    })
                         .map((r) => ({ branchName: r.branchName }));
                     const mergeResults = await resolver.mergeSequentially(branchesToMerge);
                     for (const [branch, mergeResult] of mergeResults) {
@@ -725,7 +1040,10 @@ ${relatedIssuesSection}
             .slice(0, 40);
         return `auto/${issue.number}-${slug}`;
     }
-    generatePRBody(issue) {
+    generatePRBody(issue, evaluationResult) {
+        const evaluationSection = evaluationResult
+            ? `\n## Evaluation Results\n\n${evaluationResult.summary}\n\n*Evaluation completed in ${evaluationResult.duration}ms*\n`
+            : '';
         return `## Summary
 
 Implements #${issue.number}
@@ -735,7 +1053,7 @@ ${issue.body || ''}
 ## Changes
 
 *Changes were implemented autonomously by Claude.*
-
+${evaluationSection}
 ---
 
 🤖 Generated by [Autonomous Dev CLI](https://github.com/webedt/monorepo/tree/main/autonomous-dev-cli)

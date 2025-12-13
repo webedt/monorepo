@@ -35,6 +35,10 @@ export declare enum ErrorCode {
     DB_CONNECTION_FAILED = "DB_CONNECTION_FAILED",
     DB_USER_NOT_FOUND = "DB_USER_NOT_FOUND",
     DB_QUERY_FAILED = "DB_QUERY_FAILED",
+    DB_QUERY_TIMEOUT = "DB_QUERY_TIMEOUT",
+    DB_CONSTRAINT_VIOLATION = "DB_CONSTRAINT_VIOLATION",
+    DB_TRANSACTION_FAILED = "DB_TRANSACTION_FAILED",
+    DB_POOL_EXHAUSTED = "DB_POOL_EXHAUSTED",
     EXEC_WORKSPACE_FAILED = "EXEC_WORKSPACE_FAILED",
     EXEC_CLONE_FAILED = "EXEC_CLONE_FAILED",
     EXEC_BRANCH_FAILED = "EXEC_BRANCH_FAILED",
@@ -50,6 +54,17 @@ export declare enum ErrorCode {
     ANALYZER_MAX_DEPTH_EXCEEDED = "ANALYZER_MAX_DEPTH_EXCEEDED",
     ANALYZER_MAX_FILES_EXCEEDED = "ANALYZER_MAX_FILES_EXCEEDED",
     ANALYZER_INVALID_CONFIG = "ANALYZER_INVALID_CONFIG",
+    VALIDATION_FAILED = "VALIDATION_FAILED",
+    VALIDATION_REQUIRED_FIELD = "VALIDATION_REQUIRED_FIELD",
+    VALIDATION_INVALID_FORMAT = "VALIDATION_INVALID_FORMAT",
+    VALIDATION_OUT_OF_RANGE = "VALIDATION_OUT_OF_RANGE",
+    VALIDATION_INVALID_TYPE = "VALIDATION_INVALID_TYPE",
+    VALIDATION_SCHEMA_MISMATCH = "VALIDATION_SCHEMA_MISMATCH",
+    CONFLICT_MERGE_FAILED = "CONFLICT_MERGE_FAILED",
+    CONFLICT_BRANCH_DIVERGED = "CONFLICT_BRANCH_DIVERGED",
+    CONFLICT_FILE_MODIFIED = "CONFLICT_FILE_MODIFIED",
+    CONFLICT_CONCURRENT_EDIT = "CONFLICT_CONCURRENT_EDIT",
+    CONFLICT_RESOLUTION_FAILED = "CONFLICT_RESOLUTION_FAILED",
     INTERNAL_ERROR = "INTERNAL_ERROR",
     NETWORK_ERROR = "NETWORK_ERROR",
     NOT_INITIALIZED = "NOT_INITIALIZED",
@@ -156,6 +171,45 @@ export declare class AnalyzerError extends StructuredError {
         path?: string;
         pattern?: string;
         limit?: number;
+        recoveryActions?: RecoveryAction[];
+        context?: ErrorContext;
+        cause?: Error;
+    });
+}
+/**
+ * Database-specific error for database operations
+ */
+export declare class DatabaseError extends StructuredError {
+    constructor(code: ErrorCode, message: string, options?: {
+        query?: string;
+        table?: string;
+        recoveryActions?: RecoveryAction[];
+        context?: ErrorContext;
+        cause?: Error;
+    });
+}
+/**
+ * Validation-specific error for input/data validation
+ */
+export declare class ValidationError extends StructuredError {
+    constructor(code: ErrorCode, message: string, options?: {
+        field?: string;
+        value?: unknown;
+        expectedType?: string;
+        constraints?: string[];
+        recoveryActions?: RecoveryAction[];
+        context?: ErrorContext;
+        cause?: Error;
+    });
+}
+/**
+ * Conflict-specific error for merge and concurrent edit conflicts
+ */
+export declare class ConflictError extends StructuredError {
+    constructor(code: ErrorCode, message: string, options?: {
+        branchName?: string;
+        baseBranch?: string;
+        conflictingFiles?: string[];
         recoveryActions?: RecoveryAction[];
         context?: ErrorContext;
         cause?: Error;

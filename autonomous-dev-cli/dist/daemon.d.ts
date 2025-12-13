@@ -1,5 +1,6 @@
 import { type ServiceHealth } from './github/index.js';
 import { type LogFormat } from './utils/logger.js';
+import { type DaemonStateProvider, type DaemonStatus, type WorkerPoolStatus, type ErrorMetrics } from './monitoring/index.js';
 /**
  * Aggregated service health for all external dependencies
  */
@@ -27,7 +28,7 @@ export interface CycleResult {
     degraded: boolean;
     serviceHealth: DaemonServiceHealth;
 }
-export declare class Daemon {
+export declare class Daemon implements DaemonStateProvider {
     private config;
     private github;
     private isRunning;
@@ -36,9 +37,20 @@ export declare class Daemon {
     private userId;
     private enableDatabaseLogging;
     private monitoringServer;
+    private healthServer;
     private repository;
     private lastKnownIssues;
     private serviceHealth;
+    private startTime;
+    private lastCycleTime;
+    private lastCycleSuccess;
+    private lastCycleDuration;
+    private currentWorkerPool;
+    private totalErrors;
+    private lastErrorTime;
+    private errorsByType;
+    private recentErrors;
+    private daemonStatus;
     constructor(options?: DaemonOptions);
     start(): Promise<void>;
     /**
@@ -59,10 +71,6 @@ export declare class Daemon {
      */
     private updateServiceHealth;
     /**
-     * Get the current service health status
-     */
-    getServiceHealth(): DaemonServiceHealth;
-    /**
      * Log the current service health status
      */
     private logServiceHealthStatus;
@@ -70,6 +78,30 @@ export declare class Daemon {
      * Start the monitoring server for health checks and metrics
      */
     private startMonitoringServer;
+    /**
+     * Start the health server for external monitoring
+     */
+    private startHealthServer;
+    /**
+     * DaemonStateProvider implementation: Get current daemon status
+     */
+    getDaemonStatus(): DaemonStatus;
+    /**
+     * DaemonStateProvider implementation: Get worker pool status
+     */
+    getWorkerPoolStatus(): WorkerPoolStatus | null;
+    /**
+     * DaemonStateProvider implementation: Get error metrics
+     */
+    getErrorMetrics(): ErrorMetrics;
+    /**
+     * Extract error type from error message for categorization
+     */
+    private extractErrorType;
+    /**
+     * Get the health server port (for CLI status command)
+     */
+    getHealthServerPort(): number | null;
     private initialize;
     private shutdown;
     private runCycle;
