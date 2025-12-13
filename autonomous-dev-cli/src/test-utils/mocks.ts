@@ -68,8 +68,9 @@ export function createMockServiceHealth(overrides: Partial<ServiceHealth> = {}):
     status: 'healthy',
     circuitState: 'closed',
     consecutiveFailures: 0,
+    consecutiveSuccesses: 0,
     rateLimitRemaining: 5000,
-    lastSuccessfulCall: new Date(),
+    lastSuccess: new Date(),
     ...overrides,
   };
 }
@@ -79,8 +80,8 @@ export function createMockServiceHealth(overrides: Partial<ServiceHealth> = {}):
  */
 export function createMockIssuesManager(overrides: Record<string, any> = {}) {
   return {
-    listOpenIssues: mock.fn(async () => [createMockIssue()]),
-    listOpenIssuesWithFallback: mock.fn(async () => ({
+    listOpenIssues: mock.fn(async (_label?: string) => [createMockIssue()]),
+    listOpenIssuesWithFallback: mock.fn(async (_label?: string, _fallback?: Issue[]) => ({
       value: [createMockIssue()],
       degraded: false,
     })),
@@ -91,18 +92,20 @@ export function createMockIssuesManager(overrides: Record<string, any> = {}) {
       labels: params.labels,
     })),
     updateIssue: mock.fn(async () => createMockIssue()),
-    closeIssue: mock.fn(async () => {}),
-    addComment: mock.fn(async () => ({ id: 1, body: 'Comment' })),
-    addCommentWithFallback: mock.fn(async () => ({
-      value: { id: 1, body: 'Comment' },
+    closeIssue: mock.fn(async (_issueNumber: number, _comment?: string) => {}),
+    addComment: mock.fn(async (_issueNumber: number, _body: string) => {}),
+    addCommentWithFallback: mock.fn(async (_issueNumber: number, _body: string) => ({
+      value: undefined,
       degraded: false,
     })),
-    addLabels: mock.fn(async () => []),
-    addLabelsWithFallback: mock.fn(async () => ({
-      value: [],
+    addLabels: mock.fn(async (_issueNumber: number, _labels: string[]) => {}),
+    addLabelsWithFallback: mock.fn(async (_issueNumber: number, _labels: string[]) => ({
+      value: undefined,
       degraded: false,
     })),
-    removeLabel: mock.fn(async () => {}),
+    removeLabel: mock.fn(async (_issueNumber: number, _label: string) => {}),
+    getServiceHealth: mock.fn(() => createMockServiceHealth()),
+    isAvailable: mock.fn(() => true),
     ...overrides,
   };
 }
@@ -114,20 +117,20 @@ export function createMockPullsManager(overrides: Record<string, any> = {}) {
   return {
     listOpenPRs: mock.fn(async () => [createMockPR()]),
     getPR: mock.fn(async (number: number) => createMockPR({ number })),
-    findPRForBranch: mock.fn(async () => createMockPR()),
+    findPRForBranch: mock.fn(async (_branch: string) => createMockPR()),
     createPR: mock.fn(async (params: any) => createMockPR({
       title: params.title,
       body: params.body,
     })),
-    createPRWithFallback: mock.fn(async () => ({
+    createPRWithFallback: mock.fn(async (_params?: any) => ({
       value: createMockPR(),
       degraded: false,
     })),
-    mergePR: mock.fn(async (): Promise<MergeResult> => createMockMergeResult()),
-    closePR: mock.fn(async () => {}),
-    updatePRFromBase: mock.fn(async () => true),
-    waitForMergeable: mock.fn(async () => true),
-    getChecksStatus: mock.fn(async () => ({ state: 'success', statuses: [] })),
+    mergePR: mock.fn(async (_prNumber: number, _mergeMethod?: string): Promise<MergeResult> => createMockMergeResult()),
+    closePR: mock.fn(async (_prNumber: number) => {}),
+    updatePRFromBase: mock.fn(async (_prNumber: number) => true),
+    waitForMergeable: mock.fn(async (_prNumber: number) => true),
+    getChecksStatus: mock.fn(async (_prNumber: number) => ({ state: 'success', statuses: [] })),
     ...overrides,
   };
 }
@@ -333,7 +336,7 @@ export function createMockMergeAttemptResult(overrides: Record<string, any> = {}
  */
 export function createMockConflictResolver(overrides: Record<string, any> = {}) {
   return {
-    attemptMerge: mock.fn(async () => createMockMergeAttemptResult()),
+    attemptMerge: mock.fn(async (_branchName: string, _prNumber: number) => createMockMergeAttemptResult()),
     mergeSequentially: mock.fn(async (branches: any[]) => {
       const results = new Map();
       for (const { branchName } of branches) {
