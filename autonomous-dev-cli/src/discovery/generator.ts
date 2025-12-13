@@ -739,7 +739,7 @@ Return ONLY the JSON array, no other text.`;
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': this.claudeAuth.accessToken,
+            'Authorization': `Bearer ${this.claudeAuth.accessToken}`,
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
