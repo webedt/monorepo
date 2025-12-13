@@ -14,6 +14,10 @@ import {
   type RequestPhase,
 } from '../utils/logger.js';
 import { ClaudeError, ErrorCode } from '../utils/errors.js';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { homedir } from 'os';
+import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { metrics } from '../utils/metrics.js';
 import {
   extractRetryAfterMs,
@@ -725,6 +729,31 @@ Return ONLY the JSON array, no other text.`;
     return this.specContext;
   }
 
+  /**
+   * Write Claude OAuth credentials to ~/.claude/.credentials.json for SDK
+   */
+  private writeClaudeCredentials(): void {
+    const claudeDir = join(homedir(), '.claude');
+    const credentialsPath = join(claudeDir, '.credentials.json');
+
+    if (!existsSync(claudeDir)) {
+      mkdirSync(claudeDir, { recursive: true });
+    }
+
+    const credentials = {
+      claudeAiOauth: {
+        accessToken: this.claudeAuth.accessToken,
+        refreshToken: this.claudeAuth.refreshToken,
+        expiresAt: this.claudeAuth.expiresAt || Date.now() + 3600000,
+        scopes: ['user:inference', 'user:profile'],
+        subscriptionType: 'max',
+      },
+    };
+
+    writeFileSync(credentialsPath, JSON.stringify(credentials), { mode: 0o600 });
+    logger.debug('Claude credentials written for SDK');
+  }
+
   private async callClaude(prompt: string): Promise<DiscoveredTask[]> {
     // Reset token refresh state for this new API call cycle
     this.resetTokenRefreshState();
@@ -732,65 +761,98 @@ Return ONLY the JSON array, no other text.`;
     // Proactively refresh tokens if they're about to expire
     await this.validateAndRefreshTokensIfNeeded();
 
+    // Write credentials for SDK to use
+    this.writeClaudeCredentials();
+
     // Use circuit breaker with exponential backoff for resilience
     return this.circuitBreaker.executeWithRetry(
       async () => {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.claudeAuth.accessToken}`,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 4096,
-            messages: [
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-          }),
-        });
+        try {
+          // Use Claude Agent SDK instead of direct API calls
+          // The SDK reads credentials from ~/.claude/.credentials.json
+          const stream = query({
+            prompt: prompt + '\n\nIMPORTANT: Respond with ONLY valid JSON, no markdown code blocks or other formatting.',
+            options: {
+              model: 'claude-sonnet-4-20250514',
+              cwd: this.repoPath,
+              maxTurns: 1, // Single turn for task discovery
+              allowedTools: [], // No tools needed for task discovery
+            },
+          });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          const statusCode = response.status;
+          let responseContent = '';
 
-          // Handle 401/403 auth errors with token refresh
-          if (statusCode === 401 || statusCode === 403) {
-            const refreshed = await this.attemptTokenRefresh();
-            if (refreshed) {
-              // Retry with new tokens - throw a retryable error
-              throw new ClaudeError(
-                ErrorCode.CLAUDE_AUTH_FAILED,
-                `Claude API authentication failed (${statusCode}), tokens refreshed - retrying`,
-                {
-                  context: {
-                    statusCode,
-                    errorText,
-                    tokensRefreshed: true,
-                  },
+          // Collect response from stream
+          for await (const message of stream) {
+            if (message.type === 'assistant') {
+              const assistantMessage = message.message;
+              if (assistantMessage?.content && Array.isArray(assistantMessage.content)) {
+                for (const item of assistantMessage.content) {
+                  if (item.type === 'text' && item.text) {
+                    responseContent += item.text;
+                  }
                 }
+              }
+            }
+
+            // Handle result messages for errors
+            if (message.type === 'result' && message.is_error) {
+              const errorMsg = (message as any).error_message || (message as any).result || 'Unknown SDK error';
+              throw new ClaudeError(
+                ErrorCode.CLAUDE_API_ERROR,
+                `Claude SDK error: ${errorMsg}`,
+                { context: { sdkResult: message } }
               );
             }
           }
 
-          // Create a structured error with proper classification
-          const error = this.createApiError(statusCode, errorText, response.headers);
-          throw error;
+          if (!responseContent) {
+            throw new ClaudeError(
+              ErrorCode.CLAUDE_API_ERROR,
+              'Claude SDK returned empty response',
+              { context: { prompt: prompt.slice(0, 200) } }
+            );
+          }
+
+          // Parse JSON from response
+          return this.parseClaudeResponse(responseContent);
+        } catch (error) {
+          // Convert SDK errors to ClaudeError for consistent handling
+          if (error instanceof ClaudeError) {
+            throw error;
+          }
+
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          // Check for auth-related errors
+          if (errorMessage.includes('authentication') || errorMessage.includes('401') || errorMessage.includes('403')) {
+            const refreshed = await this.attemptTokenRefresh();
+            if (refreshed) {
+              // Re-write credentials after refresh
+              this.writeClaudeCredentials();
+              throw new ClaudeError(
+                ErrorCode.CLAUDE_AUTH_FAILED,
+                `Claude SDK authentication failed, tokens refreshed - retrying`,
+                { context: { tokensRefreshed: true } }
+              );
+            }
+            throw new ClaudeError(
+              ErrorCode.CLAUDE_AUTH_FAILED,
+              `Claude SDK authentication failed: ${errorMessage}`,
+              { context: { originalError: errorMessage } }
+            );
+          }
+
+          throw new ClaudeError(
+            ErrorCode.CLAUDE_API_ERROR,
+            `Claude SDK error: ${errorMessage}`,
+            { context: { originalError: errorMessage } }
+          );
         }
-
-        const data = await response.json() as { content: Array<{ text?: string }> };
-        const content = data.content[0]?.text || '';
-
-        // Parse JSON from response
-        return this.parseClaudeResponse(content);
       },
       {
-        maxRetries: 5,
-        operationName: 'Claude API call (discovery)',
+        maxRetries: 3,
+        operationName: 'Claude SDK call (discovery)',
         context: {
           component: 'TaskGenerator',
           operation: 'generateTasks',
@@ -804,7 +866,7 @@ Return ONLY the JSON array, no other text.`;
         },
         onRetry: (error, attempt, delay) => {
           const statusCode = extractHttpStatus(error);
-          logger.warn(`Claude API retry (attempt ${attempt})`, {
+          logger.warn(`Claude SDK retry (attempt ${attempt})`, {
             error: error.message,
             statusCode,
             retryInMs: Math.round(delay),
