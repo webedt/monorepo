@@ -155,13 +155,17 @@ Work on each project independently in its own directory. The monorepo structure 
 
 ## Documentation
 
-For detailed documentation on each project:
+For detailed documentation on each project, see the [docs/](./docs/) directory or the links below:
 
 | Project | Documentation |
 |---------|---------------|
 | **Autonomous Dev CLI** | [README](./autonomous-dev-cli/README.md) \| [Quick Start](./autonomous-dev-cli/docs/quick-start.md) \| [Configuration](./autonomous-dev-cli/docs/configuration.md) |
 | **AI Coding Worker** | [README](./ai-coding-worker/README.md) |
 | **Internal API Server** | [README](./internal-api-server/README.md) |
+
+### Documentation Hub
+
+The [docs/](./docs/) directory provides a centralized documentation hub with quick links to all project documentation.
 
 ## Example Configurations
 
