@@ -95,6 +95,7 @@ jobs:
           REPO_OWNER=webedt
           REPO_NAME=monorepo
           REPO_BASE_BRANCH=dev
+          USER_EMAIL=etdofresh@gmail.com
           ENVEOF
           )
 
@@ -107,6 +108,7 @@ jobs:
           echo "  ✅ REPO_OWNER=webedt"
           echo "  ✅ REPO_NAME=monorepo"
           echo "  ✅ REPO_BASE_BRANCH=dev"
+          echo "  ✅ USER_EMAIL=etdofresh@gmail.com"
           echo ""
 
           # Update compose environment variables
