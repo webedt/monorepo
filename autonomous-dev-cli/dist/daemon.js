@@ -1,7 +1,7 @@
 import { loadConfig } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
-import { discoverTasks, createDeduplicator, getParallelSafeTasks, } from './discovery/index.js';
+import { discoverTasks, createDeduplicator, getParallelSafeTasks, initPersistentCache, } from './discovery/index.js';
 import { createWorkerPool } from './executor/index.js';
 import { runEvaluation } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
@@ -591,7 +591,80 @@ export class Daemon {
         if (!existsSync(this.config.execution.workDir)) {
             mkdirSync(this.config.execution.workDir, { recursive: true });
         }
+        // Initialize and warm the analysis cache
+        await this.initializeAnalysisCache();
         logger.success('Initialization complete');
+    }
+    /**
+     * Initialize the persistent analysis cache with configuration from config file
+     * and optionally warm the cache on startup
+     */
+    async initializeAnalysisCache() {
+        // Skip if cache is disabled in config
+        if (this.config.cache && !this.config.cache.enabled) {
+            logger.debug('Analysis cache disabled in configuration');
+            return;
+        }
+        try {
+            // Build cache configuration from config schema
+            const cacheConfig = {};
+            if (this.config.cache) {
+                cacheConfig.enabled = this.config.cache.enabled;
+                cacheConfig.maxEntries = this.config.cache.maxEntries;
+                cacheConfig.ttlMs = this.config.cache.ttlMinutes * 60 * 1000;
+                cacheConfig.maxSizeBytes = this.config.cache.maxSizeMB * 1024 * 1024;
+                cacheConfig.cacheDir = this.config.cache.cacheDir;
+                cacheConfig.persistToDisk = this.config.cache.persistToDisk;
+                cacheConfig.useGitInvalidation = this.config.cache.useGitInvalidation;
+                cacheConfig.enableIncrementalAnalysis = this.config.cache.enableIncrementalAnalysis;
+            }
+            // Initialize the persistent cache
+            const cache = await initPersistentCache(cacheConfig);
+            const stats = cache.getStats();
+            logger.info('Persistent analysis cache initialized', {
+                entriesLoaded: stats.totalEntries,
+                totalSizeBytes: stats.totalSizeBytes,
+                config: {
+                    maxEntries: cacheConfig.maxEntries,
+                    ttlMinutes: this.config.cache?.ttlMinutes ?? 30,
+                    persistToDisk: cacheConfig.persistToDisk,
+                },
+            });
+            // Warm the cache if enabled
+            if (this.config.cache?.warmOnStartup) {
+                await this.warmAnalysisCache(cache);
+            }
+        }
+        catch (error) {
+            // Cache initialization is non-critical, log warning and continue
+            logger.warn('Failed to initialize analysis cache, continuing without persistent caching', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+    /**
+     * Warm the analysis cache by pre-validating cached entries
+     */
+    async warmAnalysisCache(cache) {
+        const startTime = Date.now();
+        try {
+            // Warm cache for the current working directory (typical analysis target)
+            const repoPath = process.cwd();
+            const excludePaths = this.config.discovery.excludePaths;
+            await cache.warmCache([repoPath], excludePaths);
+            const duration = Date.now() - startTime;
+            const stats = cache.getStats();
+            logger.info('Analysis cache warmed', {
+                duration,
+                validEntries: stats.totalEntries,
+                hitRate: stats.hitRate,
+            });
+        }
+        catch (error) {
+            logger.warn('Cache warming failed', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
     async shutdown() {
         logger.info('Shutting down...');

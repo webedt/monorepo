@@ -53,6 +53,50 @@ export declare const ConfigSchema: z.ZodObject<{
         maxFiles?: number | undefined;
     }>;
     /**
+     * Analysis Cache Settings
+     * Control caching of codebase analysis results for improved performance.
+     */
+    cache: z.ZodDefault<z.ZodObject<{
+        /** Enable caching of analysis results (default: true) */
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        /** Maximum number of cached analysis entries (1-1000, default: 100) */
+        maxEntries: z.ZodDefault<z.ZodNumber>;
+        /** Time-to-live for cache entries in minutes (1-1440, default: 30) */
+        ttlMinutes: z.ZodDefault<z.ZodNumber>;
+        /** Maximum total cache size in megabytes (10-1000, default: 100) */
+        maxSizeMB: z.ZodDefault<z.ZodNumber>;
+        /** Directory for persistent cache storage (default: .autonomous-dev-cache) */
+        cacheDir: z.ZodDefault<z.ZodString>;
+        /** Enable persistent file-based caching across restarts (default: true) */
+        persistToDisk: z.ZodDefault<z.ZodBoolean>;
+        /** Use git commit hash for cache invalidation (default: true) */
+        useGitInvalidation: z.ZodDefault<z.ZodBoolean>;
+        /** Enable incremental analysis for changed files only (default: true) */
+        enableIncrementalAnalysis: z.ZodDefault<z.ZodBoolean>;
+        /** Warm cache during daemon startup (default: true) */
+        warmOnStartup: z.ZodDefault<z.ZodBoolean>;
+    }, "strip", z.ZodTypeAny, {
+        enabled: boolean;
+        maxEntries: number;
+        ttlMinutes: number;
+        maxSizeMB: number;
+        cacheDir: string;
+        persistToDisk: boolean;
+        useGitInvalidation: boolean;
+        enableIncrementalAnalysis: boolean;
+        warmOnStartup: boolean;
+    }, {
+        enabled?: boolean | undefined;
+        maxEntries?: number | undefined;
+        ttlMinutes?: number | undefined;
+        maxSizeMB?: number | undefined;
+        cacheDir?: string | undefined;
+        persistToDisk?: boolean | undefined;
+        useGitInvalidation?: boolean | undefined;
+        enableIncrementalAnalysis?: boolean | undefined;
+        warmOnStartup?: boolean | undefined;
+    }>>;
+    /**
      * Execution Settings
      * Control how tasks are executed.
      */
@@ -278,19 +322,19 @@ export declare const ConfigSchema: z.ZodObject<{
         /** Enable circuit breaker for Claude API calls (default: true) */
         enabled: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
+        enabled: boolean;
         failureThreshold: number;
         resetTimeoutMs: number;
         baseDelayMs: number;
         maxDelayMs: number;
         successThreshold: number;
-        enabled: boolean;
     }, {
+        enabled?: boolean | undefined;
         failureThreshold?: number | undefined;
         resetTimeoutMs?: number | undefined;
         baseDelayMs?: number | undefined;
         maxDelayMs?: number | undefined;
         successThreshold?: number | undefined;
-        enabled?: boolean | undefined;
     }>>;
     /**
      * Credentials
@@ -359,6 +403,17 @@ export declare const ConfigSchema: z.ZodObject<{
         maxDepth: number;
         maxFiles: number;
     };
+    cache: {
+        enabled: boolean;
+        maxEntries: number;
+        ttlMinutes: number;
+        maxSizeMB: number;
+        cacheDir: string;
+        persistToDisk: boolean;
+        useGitInvalidation: boolean;
+        enableIncrementalAnalysis: boolean;
+        warmOnStartup: boolean;
+    };
     execution: {
         parallelWorkers: number;
         timeoutMinutes: number;
@@ -412,12 +467,12 @@ export declare const ConfigSchema: z.ZodObject<{
         includeMetrics: boolean;
     };
     circuitBreaker: {
+        enabled: boolean;
         failureThreshold: number;
         resetTimeoutMs: number;
         baseDelayMs: number;
         maxDelayMs: number;
         successThreshold: number;
-        enabled: boolean;
     };
     credentials: {
         githubToken?: string | undefined;
@@ -478,6 +533,17 @@ export declare const ConfigSchema: z.ZodObject<{
         databaseUrl?: string | undefined;
         userEmail?: string | undefined;
     };
+    cache?: {
+        enabled?: boolean | undefined;
+        maxEntries?: number | undefined;
+        ttlMinutes?: number | undefined;
+        maxSizeMB?: number | undefined;
+        cacheDir?: string | undefined;
+        persistToDisk?: boolean | undefined;
+        useGitInvalidation?: boolean | undefined;
+        enableIncrementalAnalysis?: boolean | undefined;
+        warmOnStartup?: boolean | undefined;
+    } | undefined;
     pullRequest?: {
         useDraftPRs?: boolean | undefined;
         autoAssignReviewers?: boolean | undefined;
@@ -506,12 +572,12 @@ export declare const ConfigSchema: z.ZodObject<{
         includeMetrics?: boolean | undefined;
     } | undefined;
     circuitBreaker?: {
+        enabled?: boolean | undefined;
         failureThreshold?: number | undefined;
         resetTimeoutMs?: number | undefined;
         baseDelayMs?: number | undefined;
         maxDelayMs?: number | undefined;
         successThreshold?: number | undefined;
-        enabled?: boolean | undefined;
     } | undefined;
 }>;
 export type Config = z.infer<typeof ConfigSchema>;

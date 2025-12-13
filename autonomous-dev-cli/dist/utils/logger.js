@@ -1098,10 +1098,10 @@ class Logger {
         }
     }
     // Special formatted outputs (only in pretty mode)
-    success(message) {
+    success(message, meta) {
         if (this.format === 'json') {
             const entry = this.createLogEntry('info', message);
-            entry.meta = { status: 'success' };
+            entry.meta = { status: 'success', ...meta };
             console.log(this.formatJson(entry));
         }
         else {

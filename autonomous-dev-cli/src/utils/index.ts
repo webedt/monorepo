@@ -145,3 +145,24 @@ export {
   createTimedAbortController,
   withCleanup,
 } from './timeout.js';
+
+// Re-export validation utilities
+export {
+  // Validation functions
+  validateConfigPath,
+  validateNumericParam,
+  validateRepoInfo,
+  validateGitHubToken,
+  validateClaudeAuth,
+  validatePort,
+  validateHost,
+  validateCLIOptions,
+  // Display utilities
+  displayValidationError,
+  formatCredentialSetupInstructions,
+  createMissingCredentialMessage,
+  // Types and constants
+  type ValidationResult,
+  type NumericRange,
+  NUMERIC_RANGES,
+} from './validation.js';

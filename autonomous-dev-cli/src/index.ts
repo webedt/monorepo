@@ -7,11 +7,188 @@ import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
 import { discoverTasks } from './discovery/index.js';
 import { logger } from './utils/logger.js';
+import {
+  validateConfigPath,
+  validateNumericParam,
+  validatePort,
+  validateHost,
+  validateGitHubToken,
+  validateClaudeAuth,
+  validateRepoInfo,
+  displayValidationError,
+  createMissingCredentialMessage,
+  NUMERIC_RANGES,
+} from './utils/validation.js';
+import { StructuredError, ConfigError, ErrorCode } from './utils/errors.js';
 import chalk from 'chalk';
 import * as readline from 'readline';
 import { writeFileSync, existsSync } from 'fs';
 
 const program = new Command();
+
+/**
+ * Global error handler for CLI commands
+ * Provides user-friendly error messages with actionable suggestions
+ */
+function handleCommandError(error: unknown, commandName: string): never {
+  console.error();
+
+  if (error instanceof StructuredError) {
+    // Use the structured error logging
+    logger.structuredError(error, { includeRecovery: true });
+  } else if (error instanceof Error) {
+    // Handle standard errors with helpful formatting
+    console.error(chalk.red.bold('Error:'), error.message);
+    console.error();
+
+    // Provide context-specific suggestions based on error message
+    const suggestions = getErrorSuggestions(error, commandName);
+    if (suggestions.length > 0) {
+      console.error(chalk.yellow.bold('Suggestions:'));
+      suggestions.forEach(s => console.error(`  • ${s}`));
+      console.error();
+    }
+
+    // Show stack trace in verbose mode
+    if (process.env.DEBUG || process.argv.includes('--verbose') || process.argv.includes('-v')) {
+      console.error(chalk.gray('Stack trace:'));
+      console.error(chalk.gray(error.stack || 'No stack trace available'));
+      console.error();
+    }
+  } else {
+    console.error(chalk.red.bold('Unknown error:'), String(error));
+  }
+
+  console.error(chalk.gray(`For more help, run: autonomous-dev ${commandName} --help`));
+  console.error();
+
+  process.exit(1);
+}
+
+/**
+ * Get contextual error suggestions based on error message and command
+ */
+function getErrorSuggestions(error: Error, commandName: string): string[] {
+  const suggestions: string[] = [];
+  const message = error.message.toLowerCase();
+
+  // Network-related errors
+  if (message.includes('enotfound') || message.includes('network') || message.includes('etimedout')) {
+    suggestions.push('Check your internet connection');
+    suggestions.push('Verify firewall settings allow outbound connections');
+  }
+
+  // Authentication errors
+  if (message.includes('auth') || message.includes('401') || message.includes('403') || message.includes('token')) {
+    suggestions.push('Check that your credentials are set correctly');
+    suggestions.push('Run "autonomous-dev config" to verify credential status');
+    suggestions.push('Ensure tokens have not expired');
+  }
+
+  // Configuration errors
+  if (message.includes('config') || message.includes('json') || message.includes('parse')) {
+    suggestions.push('Run "autonomous-dev init" to create a new configuration');
+    suggestions.push('Verify your config file is valid JSON');
+    suggestions.push('Run "autonomous-dev help-config" for configuration reference');
+  }
+
+  // Rate limiting
+  if (message.includes('rate') || message.includes('429') || message.includes('quota')) {
+    suggestions.push('Wait a few minutes before retrying');
+    suggestions.push('Consider reducing the number of parallel workers');
+  }
+
+  // Repository errors
+  if (message.includes('repository') || message.includes('repo') || message.includes('404')) {
+    suggestions.push('Verify repository owner and name are correct');
+    suggestions.push('Check that your token has access to the repository');
+  }
+
+  // Add command-specific suggestions
+  if (commandName === 'start' || commandName === 'run') {
+    if (suggestions.length === 0) {
+      suggestions.push('Try running with --verbose for more details');
+      suggestions.push('Check your configuration with "autonomous-dev config"');
+    }
+  } else if (commandName === 'discover') {
+    suggestions.push('Ensure Claude credentials are configured');
+    suggestions.push('Verify the repository is accessible');
+  } else if (commandName === 'status') {
+    suggestions.push('Ensure GitHub token is configured');
+    suggestions.push('Check repository settings in your config');
+  }
+
+  return suggestions;
+}
+
+/**
+ * Validate common command options and exit if invalid
+ */
+function validateCommonOptions(options: {
+  config?: string;
+  count?: string;
+  port?: string;
+  host?: string;
+}, commandName: string): void {
+  // Validate config path if provided
+  if (options.config) {
+    const configResult = validateConfigPath(options.config);
+    if (!configResult.valid) {
+      displayValidationError(configResult);
+      console.error(chalk.gray(`For more help, run: autonomous-dev ${commandName} --help`));
+      process.exit(1);
+    }
+  }
+
+  // Validate count if provided
+  if (options.count) {
+    const countResult = validateNumericParam(options.count, 'count', NUMERIC_RANGES.taskCount);
+    if (!countResult.valid) {
+      displayValidationError(countResult);
+      process.exit(1);
+    }
+  }
+
+  // Validate port if provided
+  if (options.port) {
+    const portResult = validatePort(options.port);
+    if (!portResult.valid) {
+      displayValidationError(portResult);
+      process.exit(1);
+    }
+  }
+
+  // Validate host if provided
+  if (options.host) {
+    const hostResult = validateHost(options.host);
+    if (!hostResult.valid) {
+      displayValidationError(hostResult);
+      process.exit(1);
+    }
+  }
+}
+
+/**
+ * Validate credentials are present and show helpful message if missing
+ */
+function validateCredentials(
+  config: { credentials: { githubToken?: string; claudeAuth?: { accessToken: string } } },
+  requirements: { github?: boolean; claude?: boolean }
+): boolean {
+  let valid = true;
+
+  if (requirements.github && !config.credentials.githubToken) {
+    console.error(createMissingCredentialMessage('github'));
+    valid = false;
+  }
+
+  if (requirements.claude && !config.credentials.claudeAuth) {
+    console.error(createMissingCredentialMessage('claude'));
+    valid = false;
+  }
+
+  return valid;
+}
 
 // Helper to format examples section
 function formatExamples(examples: string[]): string {
@@ -71,30 +248,32 @@ program
   .option('-v, --verbose', 'Enable verbose/debug logging output')
   .option('--dry-run', 'Discover tasks but do not execute or create issues (safe preview mode)')
   .action(async (options) => {
-    const daemon = createDaemon({
-      configPath: options.config,
-      verbose: options.verbose,
-      dryRun: options.dryRun,
-      singleCycle: false,
-    });
-
-    // Handle graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('\n');
-      logger.info('Received SIGINT, stopping...');
-      await daemon.stop();
-    });
-
-    process.on('SIGTERM', async () => {
-      logger.info('Received SIGTERM, stopping...');
-      await daemon.stop();
-    });
+    // Validate options before proceeding
+    validateCommonOptions({ config: options.config }, 'start');
 
     try {
+      const daemon = createDaemon({
+        configPath: options.config,
+        verbose: options.verbose,
+        dryRun: options.dryRun,
+        singleCycle: false,
+      });
+
+      // Handle graceful shutdown
+      process.on('SIGINT', async () => {
+        console.log('\n');
+        logger.info('Received SIGINT, stopping...');
+        await daemon.stop();
+      });
+
+      process.on('SIGTERM', async () => {
+        logger.info('Received SIGTERM, stopping...');
+        await daemon.stop();
+      });
+
       await daemon.start();
-    } catch (error: any) {
-      logger.error('Daemon failed', { error: error.message });
-      process.exit(1);
+    } catch (error: unknown) {
+      handleCommandError(error, 'start');
     }
   });
 
@@ -131,18 +310,20 @@ program
   .option('-v, --verbose', 'Enable verbose/debug logging output')
   .option('--dry-run', 'Discover tasks but do not execute or create issues (safe preview mode)')
   .action(async (options) => {
-    const daemon = createDaemon({
-      configPath: options.config,
-      verbose: options.verbose,
-      dryRun: options.dryRun,
-      singleCycle: true,
-    });
+    // Validate options before proceeding
+    validateCommonOptions({ config: options.config }, 'run');
 
     try {
+      const daemon = createDaemon({
+        configPath: options.config,
+        verbose: options.verbose,
+        dryRun: options.dryRun,
+        singleCycle: true,
+      });
+
       await daemon.start();
-    } catch (error: any) {
-      logger.error('Cycle failed', { error: error.message });
-      process.exit(1);
+    } catch (error: unknown) {
+      handleCommandError(error, 'run');
     }
   });
 
@@ -185,6 +366,17 @@ program
   .option('-n, --count <number>', 'Number of tasks to discover (default: 5, max: 10)', '5')
   .option('--create-issues', 'Create GitHub issues for discovered tasks automatically')
   .action(async (options) => {
+    // Validate options before proceeding
+    validateCommonOptions({ config: options.config, count: options.count }, 'discover');
+
+    // Validate count parameter specifically
+    const countResult = validateNumericParam(options.count, 'count', NUMERIC_RANGES.taskCount);
+    if (!countResult.valid) {
+      displayValidationError(countResult);
+      process.exit(1);
+    }
+    const taskCount = countResult.parsedValue || NUMERIC_RANGES.taskCount.default;
+
     if (options.verbose) {
       logger.setLevel('debug');
     }
@@ -210,8 +402,8 @@ program
         }
       }
 
-      if (!config.credentials.claudeAuth) {
-        logger.error('Claude auth not configured');
+      // Validate Claude auth with helpful message
+      if (!validateCredentials(config, { claude: true })) {
         process.exit(1);
       }
 
@@ -231,10 +423,10 @@ program
       // Discover tasks
       logger.info('Discovering tasks...');
       const tasks = await discoverTasks({
-        claudeAuth: config.credentials.claudeAuth,
+        claudeAuth: config.credentials.claudeAuth!, // Validated above
         repoPath: process.cwd(),
         excludePaths: config.discovery.excludePaths,
-        tasksPerCycle: parseInt(options.count, 10),
+        tasksPerCycle: taskCount,
         existingIssues,
         repoContext: 'WebEDT - AI-powered coding assistant platform',
       });
@@ -279,9 +471,9 @@ program
       }
 
       await closeDatabase();
-    } catch (error: any) {
-      logger.error('Discovery failed', { error: error.message });
-      process.exit(1);
+    } catch (error: unknown) {
+      await closeDatabase();
+      handleCommandError(error, 'discover');
     }
   });
 
@@ -323,14 +515,36 @@ program
   .option('-p, --port <port>', 'Daemon health server port (default: 9091)', '9091')
   .option('-H, --host <host>', 'Daemon health server host (default: localhost)', 'localhost')
   .action(async (options) => {
+    // Validate options before proceeding
+    validateCommonOptions({
+      config: options.config,
+      port: options.port,
+      host: options.host,
+    }, 'status');
+
+    // Validate port with detailed error message
+    const portResult = validatePort(options.port);
+    if (!portResult.valid) {
+      displayValidationError(portResult);
+      process.exit(1);
+    }
+    const port = portResult.parsedValue || NUMERIC_RANGES.port.default;
+
     try {
       // If daemon flag is set, check daemon status
       if (options.daemon) {
-        await checkDaemonStatus(options.host, parseInt(options.port, 10));
+        await checkDaemonStatus(options.host, port);
         return;
       }
 
       const config = loadConfig(options.config);
+
+      // Validate repository configuration
+      const repoResult = validateRepoInfo(config.repo.owner, config.repo.name);
+      if (!repoResult.valid) {
+        displayValidationError(repoResult);
+        process.exit(1);
+      }
 
       // Load credentials
       if (config.credentials.databaseUrl && config.credentials.userEmail) {
@@ -341,13 +555,13 @@ program
         }
       }
 
-      if (!config.credentials.githubToken) {
-        logger.error('GitHub token not configured');
+      // Validate GitHub token with helpful message
+      if (!validateCredentials(config, { github: true })) {
         process.exit(1);
       }
 
       const github = createGitHub({
-        token: config.credentials.githubToken,
+        token: config.credentials.githubToken!, // Validated above
         owner: config.repo.owner,
         repo: config.repo.name,
       });
@@ -399,9 +613,9 @@ program
       }
 
       await closeDatabase();
-    } catch (error: any) {
-      logger.error('Status check failed', { error: error.message });
-      process.exit(1);
+    } catch (error: unknown) {
+      await closeDatabase();
+      handleCommandError(error, 'status');
     }
   });
 
@@ -577,10 +791,39 @@ program
   .option('-c, --config <path>', 'Path to configuration file (JSON format)')
   .option('--validate', 'Only validate configuration, do not show details')
   .action(async (options) => {
+    // Validate config path if provided
+    validateCommonOptions({ config: options.config }, 'config');
+
     try {
       const config = loadConfig(options.config);
 
+      // Validate repository info
+      const repoResult = validateRepoInfo(config.repo.owner, config.repo.name);
+      if (!repoResult.valid && options.validate) {
+        displayValidationError(repoResult);
+        process.exit(1);
+      }
+
       if (options.validate) {
+        // Additional credential validation in validate mode
+        const hasGitHub = !!config.credentials.githubToken;
+        const hasClaude = !!config.credentials.claudeAuth;
+
+        if (!hasGitHub || !hasClaude) {
+          console.error();
+          console.error(chalk.yellow.bold('Configuration valid but credentials incomplete:'));
+          if (!hasGitHub) {
+            console.error(chalk.yellow('  • GitHub token not configured'));
+          }
+          if (!hasClaude) {
+            console.error(chalk.yellow('  • Claude auth not configured'));
+          }
+          console.error();
+          console.error(chalk.gray('Run "autonomous-dev config" to see credential status'));
+          console.error();
+          process.exit(0);
+        }
+
         logger.success('Configuration is valid');
         return;
       }
@@ -622,9 +865,8 @@ program
       console.log(`  Claude:      ${config.credentials.claudeAuth ? chalk.green('✓ configured') : chalk.red('✗ missing')}`);
       console.log(`  Database:    ${config.credentials.databaseUrl ? chalk.green('✓ configured') : chalk.gray('not used')}`);
       console.log(`  User Email:  ${config.credentials.userEmail || chalk.gray('not set')}`);
-    } catch (error: any) {
-      logger.error('Configuration error', { error: error.message });
-      process.exit(1);
+    } catch (error: unknown) {
+      handleCommandError(error, 'config');
     }
   });
 
@@ -699,17 +941,37 @@ program
       // Repository settings
       console.log(chalk.bold.cyan('Repository Settings'));
       console.log(chalk.gray('─'.repeat(40)));
-      const repoOwner = await question('GitHub repository owner (username or org): ');
-      if (!repoOwner) {
-        logger.error('Repository owner is required');
-        rl.close();
-        process.exit(1);
+      let repoOwner = '';
+      let repoName = '';
+
+      // Validate repository owner
+      while (!repoOwner) {
+        repoOwner = await question('GitHub repository owner (username or org): ');
+        if (!repoOwner) {
+          console.error(chalk.red('  Repository owner is required'));
+          continue;
+        }
+        const ownerResult = validateRepoInfo(repoOwner, 'placeholder');
+        if (!ownerResult.valid && ownerResult.error?.message.includes('owner')) {
+          console.error(chalk.red(`  ${ownerResult.error.message}`));
+          console.error(chalk.gray('  Owner should contain only alphanumeric characters and hyphens'));
+          repoOwner = '';
+        }
       }
-      const repoName = await question('Repository name: ');
-      if (!repoName) {
-        logger.error('Repository name is required');
-        rl.close();
-        process.exit(1);
+
+      // Validate repository name
+      while (!repoName) {
+        repoName = await question('Repository name: ');
+        if (!repoName) {
+          console.error(chalk.red('  Repository name is required'));
+          continue;
+        }
+        const nameResult = validateRepoInfo(repoOwner, repoName);
+        if (!nameResult.valid && nameResult.error?.message.includes('name')) {
+          console.error(chalk.red(`  ${nameResult.error.message}`));
+          console.error(chalk.gray('  Name should contain only alphanumeric characters, dots, underscores, and hyphens'));
+          repoName = '';
+        }
       }
       const baseBranch = await questionWithDefault('Base branch', 'main');
       console.log();
@@ -717,16 +979,53 @@ program
       // Discovery settings
       console.log(chalk.bold.cyan('Discovery Settings'));
       console.log(chalk.gray('─'.repeat(40)));
-      const tasksPerCycle = parseInt(await questionWithDefault('Tasks to discover per cycle (1-10)', '5'), 10);
-      const maxOpenIssues = parseInt(await questionWithDefault('Maximum open issues before pausing', '10'), 10);
+
+      // Validate tasks per cycle with range enforcement
+      let tasksPerCycle = NUMERIC_RANGES.taskCount.default;
+      const tasksInput = await questionWithDefault('Tasks to discover per cycle (1-10)', '5');
+      const tasksResult = validateNumericParam(tasksInput, 'tasksPerCycle', NUMERIC_RANGES.taskCount);
+      if (tasksResult.valid && tasksResult.parsedValue) {
+        tasksPerCycle = tasksResult.parsedValue;
+      } else if (!tasksResult.valid) {
+        console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.taskCount.default}`));
+      }
+
+      // Validate max open issues
+      let maxOpenIssues = NUMERIC_RANGES.maxOpenIssues.default;
+      const maxIssuesInput = await questionWithDefault('Maximum open issues before pausing (1-100)', '10');
+      const maxIssuesResult = validateNumericParam(maxIssuesInput, 'maxOpenIssues', NUMERIC_RANGES.maxOpenIssues);
+      if (maxIssuesResult.valid && maxIssuesResult.parsedValue) {
+        maxOpenIssues = maxIssuesResult.parsedValue;
+      } else if (!maxIssuesResult.valid) {
+        console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.maxOpenIssues.default}`));
+      }
+
       const issueLabel = await questionWithDefault('Label for auto-created issues', 'autonomous-dev');
       console.log();
 
       // Execution settings
       console.log(chalk.bold.cyan('Execution Settings'));
       console.log(chalk.gray('─'.repeat(40)));
-      const parallelWorkers = parseInt(await questionWithDefault('Parallel workers (1-10)', '4'), 10);
-      const timeoutMinutes = parseInt(await questionWithDefault('Task timeout in minutes', '30'), 10);
+
+      // Validate parallel workers with range enforcement
+      let parallelWorkers = NUMERIC_RANGES.workerCount.default;
+      const workersInput = await questionWithDefault('Parallel workers (1-10)', '4');
+      const workersResult = validateNumericParam(workersInput, 'parallelWorkers', NUMERIC_RANGES.workerCount);
+      if (workersResult.valid && workersResult.parsedValue) {
+        parallelWorkers = workersResult.parsedValue;
+      } else if (!workersResult.valid) {
+        console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.workerCount.default}`));
+      }
+
+      // Validate timeout minutes
+      let timeoutMinutes = NUMERIC_RANGES.timeoutMinutes.default;
+      const timeoutInput = await questionWithDefault('Task timeout in minutes (5-120)', '30');
+      const timeoutResult = validateNumericParam(timeoutInput, 'timeoutMinutes', NUMERIC_RANGES.timeoutMinutes);
+      if (timeoutResult.valid && timeoutResult.parsedValue) {
+        timeoutMinutes = timeoutResult.parsedValue;
+      } else if (!timeoutResult.valid) {
+        console.error(chalk.yellow(`  Invalid value, using default: ${NUMERIC_RANGES.timeoutMinutes.default}`));
+      }
       console.log();
 
       // Evaluation settings
@@ -747,7 +1046,7 @@ program
 
       rl.close();
 
-      // Build config object
+      // Build config object (values already validated)
       const config = {
         repo: {
           owner: repoOwner,
@@ -755,14 +1054,14 @@ program
           baseBranch,
         },
         discovery: {
-          tasksPerCycle: Math.min(10, Math.max(1, tasksPerCycle)),
-          maxOpenIssues: Math.max(1, maxOpenIssues),
+          tasksPerCycle,
+          maxOpenIssues,
           excludePaths: ['node_modules', 'dist', '.git', 'coverage', '*.lock'],
           issueLabel,
         },
         execution: {
-          parallelWorkers: Math.min(10, Math.max(1, parallelWorkers)),
-          timeoutMinutes: Math.min(120, Math.max(5, timeoutMinutes)),
+          parallelWorkers,
+          timeoutMinutes,
           workDir: '/tmp/autonomous-dev',
         },
         evaluation: {
@@ -809,10 +1108,9 @@ program
       console.log('  4. Start autonomous development:');
       console.log(chalk.gray('     autonomous-dev start'));
       console.log();
-    } catch (error: any) {
+    } catch (error: unknown) {
       rl.close();
-      logger.error('Setup failed', { error: error.message });
-      process.exit(1);
+      handleCommandError(error, 'init');
     }
   });
 

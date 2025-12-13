@@ -504,7 +504,7 @@ declare class Logger {
      */
     errorWithContext(message: string, error: Error | StructuredError, context: ErrorContext): void;
     private getSeverityColor;
-    success(message: string): void;
+    success(message: string, meta?: object): void;
     failure(message: string): void;
     step(step: number, total: number, message: string): void;
     divider(): void;

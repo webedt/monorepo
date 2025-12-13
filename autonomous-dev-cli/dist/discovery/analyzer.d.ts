@@ -1,4 +1,5 @@
 import { AnalyzerError } from '../utils/errors.js';
+import { PersistentAnalysisCache, type CacheConfig, type CacheStats as PersistentCacheStats } from './cache.js';
 interface CacheStats {
     hits: number;
     misses: number;
@@ -158,6 +159,12 @@ export interface AnalyzerConfig {
     enableGitAnalysis?: boolean;
     gitAnalysisDays?: number;
     gitMaxCommits?: number;
+    /** Enable persistent caching with git-based invalidation (default: true) */
+    enablePersistentCache?: boolean;
+    /** Custom persistent cache instance */
+    persistentCache?: PersistentAnalysisCache;
+    /** Persistent cache configuration */
+    persistentCacheConfig?: Partial<CacheConfig>;
 }
 /**
  * Result type for validation operations
@@ -182,7 +189,28 @@ export declare class CodebaseAnalyzer {
     private gitAnalysisDays;
     private gitMaxCommits;
     private git;
+    private enablePersistentCache;
+    private persistentCache;
+    private persistentCacheInitialized;
     constructor(repoPath: string, excludePaths?: string[], config?: AnalyzerConfig);
+    /**
+     * Initialize the persistent cache if not already done
+     */
+    private initializePersistentCache;
+    /**
+     * Get the persistent cache instance
+     */
+    getPersistentCache(): PersistentAnalysisCache | null;
+    /**
+     * Get combined cache statistics (in-memory + persistent)
+     */
+    getCombinedCacheStats(): {
+        inMemory: CacheStats & {
+            size: number;
+            hitRate: number;
+        };
+        persistent: PersistentCacheStats | null;
+    };
     /**
      * Report progress to the callback if registered
      */
