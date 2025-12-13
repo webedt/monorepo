@@ -92,6 +92,9 @@ jobs:
           ENV_VARS=$(cat <<ENVEOF
           NODE_ENV=production
           DATABASE_URL=${DATABASE_URL}
+          REPO_OWNER=webedt
+          REPO_NAME=monorepo
+          REPO_BASE_BRANCH=dev
           ENVEOF
           )
 
@@ -101,6 +104,9 @@ jobs:
 
           echo "  ✅ NODE_ENV=production"
           echo "  ✅ DATABASE_URL=***"
+          echo "  ✅ REPO_OWNER=webedt"
+          echo "  ✅ REPO_NAME=monorepo"
+          echo "  ✅ REPO_BASE_BRANCH=dev"
           echo ""
 
           # Update compose environment variables
