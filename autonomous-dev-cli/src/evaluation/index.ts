@@ -218,7 +218,19 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
     branchName,
     correlationId,
   });
-  console.log(result.summary);
+
+  // Log evaluation summary with structured data for each step
+  for (const line of result.summary.split('\n')) {
+    if (line.startsWith('✅')) {
+      logger.success(line.substring(2).trim());
+    } else if (line.startsWith('❌')) {
+      logger.failure(line.substring(2).trim());
+    } else if (line.startsWith('⏭️')) {
+      logger.info(line.substring(3).trim(), { skipped: true });
+    } else if (line.trim()) {
+      logger.info(line);
+    }
+  }
 
   return result;
 }
