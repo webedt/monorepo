@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { StructuredError } from './errors.js';
+import { randomUUID } from 'crypto';
 const levelPriority = {
     debug: 0,
     info: 1,
@@ -18,48 +19,139 @@ const levelIcons = {
     warn: '⚠️',
     error: '❌',
 };
+// Global correlation ID for request tracing across components
+let globalCorrelationId;
+/**
+ * Generate a new correlation ID
+ */
+export function generateCorrelationId() {
+    return randomUUID();
+}
+/**
+ * Set the global correlation ID for the current execution context
+ */
+export function setCorrelationId(id) {
+    globalCorrelationId = id;
+}
+/**
+ * Get the current global correlation ID
+ */
+export function getCorrelationId() {
+    return globalCorrelationId;
+}
+/**
+ * Clear the global correlation ID
+ */
+export function clearCorrelationId() {
+    globalCorrelationId = undefined;
+}
 class Logger {
     level;
     prefix;
+    format;
+    correlationId;
     constructor(options = { level: 'info' }) {
         this.level = options.level;
         this.prefix = options.prefix || '';
+        this.format = options.format || 'pretty';
+        this.correlationId = options.correlationId;
     }
     setLevel(level) {
         this.level = level;
     }
+    setFormat(format) {
+        this.format = format;
+    }
+    /**
+     * Set the correlation ID for this logger instance
+     */
+    setCorrelationId(id) {
+        this.correlationId = id;
+    }
+    /**
+     * Get the effective correlation ID (instance or global)
+     */
+    getEffectiveCorrelationId() {
+        return this.correlationId || globalCorrelationId;
+    }
     shouldLog(level) {
         return levelPriority[level] >= levelPriority[this.level];
     }
-    formatMessage(level, message, meta) {
+    /**
+     * Create a structured log entry
+     */
+    createLogEntry(level, message, meta) {
+        const entry = {
+            timestamp: new Date().toISOString(),
+            level,
+            message,
+        };
+        const correlationId = this.getEffectiveCorrelationId();
+        if (correlationId) {
+            entry.correlationId = correlationId;
+        }
+        if (this.prefix) {
+            entry.component = this.prefix;
+        }
+        if (meta && Object.keys(meta).length > 0) {
+            entry.meta = meta;
+        }
+        return entry;
+    }
+    /**
+     * Format a log entry as pretty output for terminal
+     */
+    formatPretty(level, message, meta) {
         const timestamp = new Date().toISOString();
         const icon = levelIcons[level];
         const colorFn = levelColors[level];
         const prefix = this.prefix ? `[${this.prefix}] ` : '';
-        let formatted = `${chalk.gray(timestamp)} ${icon} ${colorFn(level.toUpperCase().padEnd(5))} ${prefix}${message}`;
+        const correlationId = this.getEffectiveCorrelationId();
+        const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
+        let formatted = `${chalk.gray(timestamp)} ${icon} ${colorFn(level.toUpperCase().padEnd(5))} ${prefix}${message}${correlationStr}`;
         if (meta && Object.keys(meta).length > 0) {
             formatted += ` ${chalk.gray(JSON.stringify(meta))}`;
         }
         return formatted;
     }
+    /**
+     * Format a log entry as JSON
+     */
+    formatJson(entry) {
+        return JSON.stringify(entry);
+    }
+    /**
+     * Write a log entry to output
+     */
+    writeLog(level, message, meta) {
+        if (this.format === 'json') {
+            const entry = this.createLogEntry(level, message, meta);
+            const output = level === 'error' ? console.error : console.log;
+            output(this.formatJson(entry));
+        }
+        else {
+            const output = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+            output(this.formatPretty(level, message, meta));
+        }
+    }
     debug(message, meta) {
         if (this.shouldLog('debug')) {
-            console.log(this.formatMessage('debug', message, meta));
+            this.writeLog('debug', message, meta);
         }
     }
     info(message, meta) {
         if (this.shouldLog('info')) {
-            console.log(this.formatMessage('info', message, meta));
+            this.writeLog('info', message, meta);
         }
     }
     warn(message, meta) {
         if (this.shouldLog('warn')) {
-            console.warn(this.formatMessage('warn', message, meta));
+            this.writeLog('warn', message, meta);
         }
     }
     error(message, meta) {
         if (this.shouldLog('error')) {
-            console.error(this.formatMessage('error', message, meta));
+            this.writeLog('error', message, meta);
         }
     }
     /**
@@ -71,12 +163,35 @@ class Logger {
         const { context, includeStack = false, includeRecovery = true } = options;
         // Merge additional context if provided
         const mergedContext = context ? { ...error.context, ...context } : error.context;
-        // Build comprehensive log output
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('error', error.message);
+            entry.error = {
+                code: error.code,
+                message: error.message,
+                severity: error.severity,
+                isRetryable: error.isRetryable,
+                context: mergedContext,
+            };
+            if (includeStack && error.stack) {
+                entry.error.stack = error.stack;
+            }
+            if (includeRecovery && error.recoveryActions.length > 0) {
+                entry.error.recoveryActions = error.recoveryActions;
+            }
+            if (error.cause) {
+                entry.error.cause = error.cause.message;
+            }
+            console.error(this.formatJson(entry));
+            return;
+        }
+        // Pretty format
         const timestamp = new Date().toISOString();
         const prefix = this.prefix ? `[${this.prefix}] ` : '';
         const severityColor = this.getSeverityColor(error.severity);
+        const correlationId = this.getEffectiveCorrelationId();
+        const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
         console.error();
-        console.error(chalk.gray(timestamp), levelIcons.error, levelColors.error('ERROR'), prefix, chalk.bold(`[${error.code}]`), error.message);
+        console.error(chalk.gray(timestamp), levelIcons.error, levelColors.error('ERROR'), prefix, chalk.bold(`[${error.code}]`), error.message, correlationStr);
         console.error(chalk.gray('  Severity:'), severityColor(error.severity));
         console.error(chalk.gray('  Retryable:'), error.isRetryable ? chalk.green('yes') : chalk.red('no'));
         // Log context details
@@ -124,11 +239,23 @@ class Logger {
             this.structuredError(error, { context, includeStack: true, includeRecovery: true });
         }
         else {
-            // Convert regular error to structured format for consistent logging
+            if (this.format === 'json') {
+                const entry = this.createLogEntry('error', message);
+                entry.error = {
+                    message: error.message,
+                    stack: error.stack,
+                    context,
+                };
+                console.error(this.formatJson(entry));
+                return;
+            }
+            // Pretty format
             const timestamp = new Date().toISOString();
             const prefix = this.prefix ? `[${this.prefix}] ` : '';
+            const correlationId = this.getEffectiveCorrelationId();
+            const correlationStr = correlationId ? chalk.gray(` [${correlationId.slice(0, 8)}]`) : '';
             console.error();
-            console.error(chalk.gray(timestamp), levelIcons.error, levelColors.error('ERROR'), prefix, message);
+            console.error(chalk.gray(timestamp), levelIcons.error, levelColors.error('ERROR'), prefix, message, correlationStr);
             console.error(chalk.gray('  Error:'), error.message);
             if (Object.keys(context).length > 0) {
                 console.error(chalk.gray('  Context:'));
@@ -163,28 +290,83 @@ class Logger {
                 return chalk.white;
         }
     }
-    // Special formatted outputs
+    // Special formatted outputs (only in pretty mode)
     success(message) {
-        console.log(`${chalk.green('✓')} ${message}`);
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', message);
+            entry.meta = { status: 'success' };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            console.log(`${chalk.green('✓')} ${message}`);
+        }
     }
     failure(message) {
-        console.log(`${chalk.red('✗')} ${message}`);
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('error', message);
+            entry.meta = { status: 'failure' };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            console.log(`${chalk.red('✗')} ${message}`);
+        }
     }
     step(step, total, message) {
-        console.log(`${chalk.cyan(`[${step}/${total}]`)} ${message}`);
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', message);
+            entry.meta = { step, total };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            console.log(`${chalk.cyan(`[${step}/${total}]`)} ${message}`);
+        }
     }
     divider() {
-        console.log(chalk.gray('─'.repeat(60)));
+        if (this.format !== 'json') {
+            console.log(chalk.gray('─'.repeat(60)));
+        }
     }
     header(title) {
-        console.log();
-        console.log(chalk.bold.cyan(`═══ ${title} ${'═'.repeat(Math.max(0, 50 - title.length))}`));
-        console.log();
+        if (this.format === 'json') {
+            const entry = this.createLogEntry('info', title);
+            entry.meta = { type: 'header' };
+            console.log(this.formatJson(entry));
+        }
+        else {
+            console.log();
+            console.log(chalk.bold.cyan(`═══ ${title} ${'═'.repeat(Math.max(0, 50 - title.length))}`));
+            console.log();
+        }
     }
-    // Create a child logger with a prefix
+    /**
+     * Create a child logger with a prefix and optionally inherit correlation ID
+     */
     child(prefix) {
-        const child = new Logger({ level: this.level, prefix });
+        const child = new Logger({
+            level: this.level,
+            prefix,
+            format: this.format,
+            correlationId: this.correlationId,
+        });
         return child;
+    }
+    /**
+     * Create a child logger with a specific correlation ID for request tracing
+     */
+    withCorrelationId(correlationId) {
+        const child = new Logger({
+            level: this.level,
+            prefix: this.prefix,
+            format: this.format,
+            correlationId,
+        });
+        return child;
+    }
+    /**
+     * Get the current log entry as a structured object (for testing/inspection)
+     */
+    getLogEntry(level, message, meta) {
+        return this.createLogEntry(level, message, meta);
     }
 }
 export const logger = new Logger({ level: 'info' });
