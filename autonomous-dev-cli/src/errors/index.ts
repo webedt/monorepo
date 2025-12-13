@@ -18,7 +18,15 @@
  *   ├── AnalyzerError - Codebase analysis errors
  *   ├── DatabaseError - Database operation errors
  *   ├── ValidationError - Input/data validation errors
- *   └── ConflictError - Merge and concurrent edit conflicts
+ *   ├── ConflictError - Merge and concurrent edit conflicts
+ *   └── ExecutorError (with recovery strategies)
+ *       ├── NetworkExecutorError - Network-related executor failures
+ *       ├── TimeoutExecutorError - Timeout-related executor failures
+ *       ├── ConfigurationExecutorError - Configuration-related executor failures
+ *       ├── ResourceExhaustionError - Resource exhaustion failures
+ *       ├── GitExecutorError - Git operation failures
+ *       ├── ClaudeExecutorError - Claude API executor failures
+ *       └── WorkspaceExecutorError - Workspace/filesystem failures
  */
 
 // Re-export all error types and utilities from the main errors module
@@ -56,6 +64,42 @@ export {
   createGitHubErrorFromResponse,
   formatError,
 } from '../utils/errors.js';
+
+// Re-export executor-specific error types and utilities
+export {
+  // Recovery strategy types
+  type RecoveryStrategy,
+  type RecoveryStrategyConfig,
+
+  // Task execution state
+  type TaskExecutionState,
+  type ExecutionPhase,
+  type ExecutorErrorContext,
+
+  // Executor error classes with recovery strategies
+  ExecutorError,
+  NetworkExecutorError,
+  TimeoutExecutorError,
+  ConfigurationExecutorError,
+  ResourceExhaustionError,
+  GitExecutorError,
+  ClaudeExecutorError,
+  WorkspaceExecutorError,
+
+  // Error aggregation utilities
+  ErrorAggregator,
+  getErrorAggregator,
+
+  // Factory function for creating typed errors
+  createExecutorError,
+
+  // Type guards for executor errors
+  isExecutorError,
+  isNetworkExecutorError,
+  isTimeoutExecutorError,
+  isClaudeExecutorError,
+  isGitExecutorError,
+} from './executor-errors.js';
 
 /**
  * Type guard to check if an error is a StructuredError
