@@ -304,8 +304,9 @@ export class Worker {
               if (block.type === 'tool_use') {
                 const toolName = (block as any).name;
                 const toolInput = (block as any).input;
-                // Show tool usage in logs
-                this.log.info(`[${elapsed}s] 🔧 ${toolName}`);
+                // Show tool usage with details
+                const toolDetail = this.getToolDetail(toolName, toolInput);
+                this.log.info(`[${elapsed}s] 🔧 ${toolName}: ${toolDetail}`);
 
                 // Log tool use event to database
                 if (chatSessionId) {
@@ -353,6 +354,35 @@ export class Worker {
       throw error;
     } finally {
       clearTimeout(timeoutId);
+    }
+  }
+
+  private getToolDetail(toolName: string, input: any): string {
+    if (!input) return '';
+
+    switch (toolName) {
+      case 'Read':
+        return input.file_path || input.path || '';
+      case 'Write':
+        return input.file_path || input.path || '';
+      case 'Edit':
+      case 'MultiEdit':
+        return input.file_path || input.path || '';
+      case 'Bash':
+        const cmd = input.command || '';
+        return cmd.length > 80 ? cmd.slice(0, 80) + '...' : cmd;
+      case 'Glob':
+        return input.pattern || '';
+      case 'Grep':
+        return `"${input.pattern || ''}" in ${input.path || '.'}`;
+      case 'Task':
+        return input.description || input.prompt?.slice(0, 50) || '';
+      case 'LS':
+        return input.path || '.';
+      case 'WebFetch':
+        return input.url || '';
+      default:
+        return JSON.stringify(input).slice(0, 60);
     }
   }
 
