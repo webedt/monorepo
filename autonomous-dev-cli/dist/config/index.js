@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { config as loadEnv } from 'dotenv';
-import { ConfigSchema, defaultConfig } from './schema.js';
+import { ConfigSchema, defaultConfig, validateNoCredentialsInConfig } from './schema.js';
 import { logger } from '../utils/logger.js';
 import { ConfigError, ErrorCode, } from '../utils/errors.js';
 // Load .env file
@@ -472,6 +472,19 @@ export function loadConfig(configPath) {
     };
     // Merge configs: defaults < file < env
     const mergedConfig = deepMerge(deepMerge(defaultConfig, fileConfig), envConfig);
+    // Check for credentials in config file (security warning)
+    if (fileConfig && Object.keys(fileConfig).length > 0) {
+        const credentialWarnings = validateNoCredentialsInConfig(fileConfig);
+        if (credentialWarnings.length > 0) {
+            logger.warn('Security Warning: Potential credentials detected in config file');
+            for (const warning of credentialWarnings) {
+                logger.warn(`  ${warning}`);
+            }
+            console.log('\nSECURITY BEST PRACTICE:');
+            console.log('  Credentials should be set via environment variables, not config files.');
+            console.log('  This prevents accidental exposure in version control or logs.\n');
+        }
+    }
     // Validate
     const result = ConfigSchema.safeParse(mergedConfig);
     if (!result.success) {
