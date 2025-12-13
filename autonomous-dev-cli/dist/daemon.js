@@ -2,6 +2,7 @@ import { loadConfig } from './config/index.js';
 import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
 import { createGitHub } from './github/index.js';
 import { discoverTasks, createDeduplicator, getParallelSafeTasks, initPersistentCache, } from './discovery/index.js';
+import { createPreviewSession, runInteractivePreview, PreviewSessionManager, } from './preview/index.js';
 import { createWorkerPool } from './executor/index.js';
 import { runEvaluation } from './evaluation/index.js';
 import { createConflictResolver } from './conflicts/index.js';
@@ -794,17 +795,70 @@ export class Daemon {
                     const tasks = deduplicator.getConflictSafeOrder(nonDuplicateTasks);
                     tasksDiscovered = tasks.length;
                     logger.info(`${tasks.length} tasks remaining after deduplication`);
-                    // Create GitHub issues for new tasks
+                    // Handle preview mode - require approval before creating issues
+                    let approvedTasks = tasks;
+                    if (this.options.previewMode && tasks.length > 0) {
+                        logger.info('Preview mode enabled - tasks require approval before execution');
+                        // Load from batch file if specified
+                        if (this.options.approvedTasksFile) {
+                            const batch = PreviewSessionManager.loadFromBatchFile(this.options.approvedTasksFile);
+                            if (batch && batch.tasks.length > 0) {
+                                logger.info(`Loaded ${batch.tasks.length} pre-approved tasks from ${this.options.approvedTasksFile}`);
+                                // Use the pre-approved tasks (convert PreviewTask back to DiscoveredTask format)
+                                approvedTasks = batch.tasks.map((pt) => ({
+                                    title: pt.title,
+                                    description: pt.description,
+                                    priority: pt.priority,
+                                    category: pt.category,
+                                    estimatedComplexity: pt.estimatedComplexity,
+                                    affectedPaths: pt.affectedPaths,
+                                    estimatedDurationMinutes: pt.estimatedDurationMinutes,
+                                    relatedIssues: pt.relatedIssues,
+                                }));
+                            }
+                            else {
+                                logger.warn('Failed to load approved tasks from batch file, using auto-approve');
+                                approvedTasks = tasks;
+                            }
+                        }
+                        else if (this.options.autoApprove) {
+                            // Auto-approve mode for CI/CD
+                            logger.info('Auto-approve mode enabled - approving all discovered tasks');
+                            approvedTasks = tasks;
+                        }
+                        else {
+                            // Interactive preview mode
+                            const previewSession = createPreviewSession(tasks, process.cwd());
+                            // Run interactive preview
+                            const result = await runInteractivePreview(previewSession);
+                            // Only use approved tasks
+                            approvedTasks = result.approvedTasks.map((pt) => ({
+                                title: pt.title,
+                                description: pt.description,
+                                priority: pt.priority,
+                                category: pt.category,
+                                estimatedComplexity: pt.estimatedComplexity,
+                                affectedPaths: pt.affectedPaths,
+                                estimatedDurationMinutes: pt.estimatedDurationMinutes,
+                                relatedIssues: pt.relatedIssues,
+                            }));
+                            logger.info(`Preview complete: ${result.approvedTasks.length} approved, ${result.rejectedTasks.length} rejected, ${result.deferredTasks.length} deferred`);
+                            if (approvedTasks.length === 0) {
+                                logger.info('No tasks approved - skipping issue creation');
+                            }
+                        }
+                    }
+                    // Create GitHub issues for approved tasks
                     // Check if GitHub is available before attempting to create issues
                     if (!this.github.client.isAvailable()) {
                         degraded = true;
                         logger.degraded('GitHub', 'Skipping issue creation due to service degradation', {
-                            tasksDiscovered: tasks.length,
+                            tasksDiscovered: approvedTasks.length,
                         });
                         errors.push(`[${ErrorCode.GITHUB_SERVICE_DEGRADED}] Issue creation skipped due to GitHub service degradation`);
                     }
                     else {
-                        for (const task of tasks) {
+                        for (const task of approvedTasks) {
                             try {
                                 const issue = await this.createIssueForTask(task);
                                 newIssues.push(issue);

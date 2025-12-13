@@ -8,6 +8,23 @@ export interface GitHubClientOptions {
     circuitBreakerConfig?: Partial<CircuitBreakerConfig>;
     /** Timeout for individual API calls in milliseconds (default: 30000) */
     requestTimeoutMs?: number;
+    /** Configuration for rate limit handling */
+    rateLimitConfig?: Partial<RateLimitConfig>;
+}
+/**
+ * Configuration options for rate limit handling
+ */
+export interface RateLimitConfig {
+    /** Threshold (remaining requests) at which to start queuing requests (default: 100) */
+    queueThreshold: number;
+    /** Maximum number of requests to queue before rejecting (default: 50) */
+    maxQueueSize: number;
+    /** Maximum time to wait in queue in milliseconds (default: 120000 = 2 minutes) */
+    maxQueueWaitMs: number;
+    /** Whether to preemptively wait when approaching rate limit (default: true) */
+    preemptiveWait: boolean;
+    /** Log rate limit status at debug level on every request (default: true) */
+    logRateLimitStatus: boolean;
 }
 /**
  * Circuit breaker configuration for graceful degradation
@@ -53,6 +70,8 @@ export interface ServiceHealth {
     rateLimitRemaining?: number;
     rateLimitResetAt?: Date;
     rateLimitState?: RateLimitState;
+    /** Number of requests currently queued due to rate limiting */
+    queuedRequests?: number;
 }
 export declare class GitHubClient {
     private octokit;
@@ -60,6 +79,7 @@ export declare class GitHubClient {
     readonly repo: string;
     private retryConfig;
     private circuitBreakerConfig;
+    private rateLimitConfig;
     private requestTimeoutMs;
     private circuitState;
     private consecutiveFailures;
@@ -71,6 +91,9 @@ export declare class GitHubClient {
     private rateLimitRemaining;
     private rateLimitResetAt;
     private rateLimitState;
+    private requestQueue;
+    private isProcessingQueue;
+    private queueProcessorInterval;
     private log;
     constructor(options: GitHubClientOptions);
     get client(): Octokit;
@@ -82,6 +105,18 @@ export declare class GitHubClient {
      * Get the current rate limit state
      */
     getRateLimitState(): RateLimitState;
+    /**
+     * Get the current queue status
+     */
+    getQueueStatus(): {
+        size: number;
+        isProcessing: boolean;
+        config: RateLimitConfig;
+    };
+    /**
+     * Clear the request queue (e.g., on shutdown)
+     */
+    clearQueue(): void;
     /**
      * Check if the circuit breaker allows requests
      */
@@ -110,6 +145,35 @@ export declare class GitHubClient {
      * Wait for rate limit if needed before making a request
      */
     waitForRateLimitReset(): Promise<void>;
+    /**
+     * Check if rate limit is approaching and requests should be queued
+     */
+    private shouldQueueRequest;
+    /**
+     * Add a request to the queue when rate limit is approaching
+     */
+    private enqueueRequest;
+    /**
+     * Start the queue processor if not already running
+     */
+    private startQueueProcessor;
+    /**
+     * Stop the queue processor
+     */
+    private stopQueueProcessor;
+    /**
+     * Process queued requests when rate limit allows
+     */
+    private processQueue;
+    /**
+     * Log rate limit status at debug level
+     */
+    private logRateLimitStatus;
+    /**
+     * Execute a GitHub API request with rate limit awareness
+     * Routes requests through the queue when approaching rate limits
+     */
+    execute<T>(operation: () => Promise<T>, endpoint: string, context?: ErrorContext): Promise<T>;
     /**
      * Execute a GitHub API request with automatic retry for transient failures
      * Integrates with circuit breaker for graceful degradation
