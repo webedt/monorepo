@@ -1,7 +1,7 @@
 FROM node:20-slim
 
-# Install git (needed for git operations)
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+# Install git and tmux
+RUN apt-get update && apt-get install -y git tmux && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally (required for Claude Agent SDK)
 RUN npm install -g @anthropic-ai/claude-code
