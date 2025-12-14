@@ -561,6 +561,43 @@ export async function getUserCredentials(email: string): Promise<UserCredentials
   }
 }
 
+/**
+ * Update Claude auth tokens for a user.
+ * Called after token refresh to persist the new tokens.
+ */
+export async function updateUserClaudeAuth(
+  userId: string,
+  claudeAuth: {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+  }
+): Promise<void> {
+  const database = getDb();
+
+  try {
+    await withQueryTimeout(
+      () => database
+        .update(users)
+        .set({ claudeAuth })
+        .where(eq(users.id, userId)),
+      'updateUserClaudeAuth'
+    );
+
+    logger.info('Updated Claude auth in database', {
+      userId,
+      expiresAt: new Date(claudeAuth.expiresAt).toISOString(),
+    });
+  } catch (error) {
+    if (error instanceof TimeoutError) {
+      logger.error(`Database query timed out while updating Claude auth for user ${userId}`, { error });
+    } else {
+      logger.error(`Failed to update Claude auth for user ${userId}`, { error });
+    }
+    throw error;
+  }
+}
+
 // ============================================================================
 // Chat Session Operations
 // ============================================================================
