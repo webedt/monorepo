@@ -12,16 +12,28 @@ WebEDT is a web-based game development platform that enables users to browse and
 
 ### Platform Features
 
-- **Dashboard** - Customizable widget-based homepage with drag-and-drop arrangement
-- **Store** - Grid-based marketplace with search, filtering, wishlists, and trailer previews
-- **Library** - Multi-view game library (grid, list, compact) with collections and favorites
+- **Dashboard** - Personalized aggregation hub separate from the Store
+  - Customizable widget system with drag-and-drop arrangement
+  - Widgets: Recently Played, Editor Quick Access, Store Highlights, Library Favorites, Community Activity, Session Activity
+  - Layout saved per user, adapts based on player vs. editor preferences
+- **Store** - Grid-based marketplace for browsing and purchasing games
+  - Grid view layout with thumbnails, prices, Play Now/View Trailer buttons, wishlist option
+  - Trailer auto-play on hover (Netflix/YouTube style)
+  - Universal search across all fields, filter dropdowns for category/genre/price
+  - Stripe and PayPal payment integration
+  - Wishlist with sale notifications, ratings & reviews, creator analytics
+- **Library** - Multi-view library visible only when logged in
+  - Three view modes: Grid View, List View, Compact List View
+  - Filtering: All items, Recently added, Recently played, Most used, Favorites, Collections, Wishlisted
+  - Quick Favorite icon, Custom Collections/Folders, Pagination
+  - Cloud Services: Cloud saves synced across devices, Leaderboards API
 - **Editor Suite** - Complete game development environment with AI assistance
-  - Chat - AI-powered development assistant
-  - Code - VS Code-style editor with syntax highlighting
-  - Images - Image editor, sprite sheets, animations
-  - Sounds - Wave editor, SFX generator, track mixer
-  - Scenes - Object prefabs and scene composition
-  - Preview - Live preview of your current branch
+  - Chat - AI-powered development assistant with verbosity modes
+  - Code - VS Code-style editor with syntax highlighting, multi-file editing, Git diff
+  - Images - Image editor with layers, sprite sheet editor, frame/bone animation editors
+  - Sounds - Wave editor, SFXR-style SFX generator, multi-track mixer/DAW
+  - Scenes - Object prefabs with component system, 2D/UI scene composition
+  - Preview - Live preview of your current branch with hot reload
 
 ### Autonomous Development Features
 
@@ -218,11 +230,11 @@ The **Website** is a React-based frontend that provides the complete WebEDT plat
 - **Deployment**: Dokploy (self-hosted)
 
 **Key Features:**
-- **Dashboard**: Customizable widget-based homepage with drag-and-drop arrangement
-- **Store**: Grid marketplace with search, filtering, wishlists, and trailer previews
-- **Library**: Multi-view (grid, list, compact) with collections, favorites, and sorting
-- **Editor Suite**: AI-powered development tools for Chat, Code, Images, Sounds, Scenes
-- **Sessions**: Git-based session management with real-time collaboration
+- **Dashboard**: Personalized aggregation hub with customizable widgets (Recently Played, Editor Quick Access, Store Highlights, Library Favorites, Community Activity, Session Activity)
+- **Store**: Grid marketplace with trailer auto-play on hover, universal search, filtering, wishlists, ratings & reviews, and Stripe/PayPal integration
+- **Library**: Three view modes (Grid, List, Compact) with filtering by recently added/played, favorites, collections; Quick Favorite and Custom Collections support
+- **Editor Suite**: AI-powered development tools for Chat (with verbosity modes), Code (multi-file with Git diff), Images (layers, sprites, animations), Sounds (wave editor, SFX generator, DAW), Scenes (prefabs, 2D/UI)
+- **Sessions**: Git-branch-based session management that persists indefinitely across all editor tools
 
 **Workflows:**
 - `website-deploy-dokploy.yml` - Deploys to Dokploy on non-main branch pushes
@@ -371,6 +383,7 @@ For detailed documentation on each project, see the [docs/](./docs/) directory o
 
 | Project | Documentation |
 |---------|---------------|
+| **Website** | [README](./website/README.md) - WebEDT frontend with Dashboard, Store, Library, and Editor |
 | **Autonomous Dev CLI** | [README](./autonomous-dev-cli/README.md) \| [Quick Start](./autonomous-dev-cli/docs/quick-start.md) \| [Configuration](./autonomous-dev-cli/docs/configuration.md) |
 | **AI Coding Worker** | [README](./ai-coding-worker/README.md) |
 | **Internal API Server** | [README](./internal-api-server/README.md) |
