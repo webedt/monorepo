@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useCanvas } from '@/hooks/useCanvas';
-import { useImageLayersStore } from '@/lib/store';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useDrawing } from '@/hooks/useDrawing';
+import { useImageLayersStore, useSessionLastPageStore } from '@/lib/store';
 import { Canvas, Toolbar, LayerPanel } from '@/components/editor/image';
 import { downloadCanvas, getMimeType } from '@/utils/imageEditor';
+import type { DrawingTool, CanvasConfig, CanvasState } from '@/types/editor';
 
 // Image dimension presets
 const DIMENSION_PRESETS = [
@@ -19,9 +20,20 @@ const DIMENSION_PRESETS = [
 
 export default function ImageEditor() {
   const navigate = useNavigate();
+  const { sessionId } = useParams<{ sessionId?: string }>();
 
-  // Canvas hook
-  const canvas = useCanvas();
+  // Session tracking for navigation
+  const setLastPage = useSessionLastPageStore((state) => state.setLastPage);
+
+  // Track this page as last visited when session is active
+  useEffect(() => {
+    if (sessionId) {
+      setLastPage(sessionId, 'images');
+    }
+  }, [sessionId, setLastPage]);
+
+  // Drawing hook with touch support
+  const drawing = useDrawing();
 
   // Layers store
   const { initializeBaseLayer, clearLayers, layers } = useImageLayersStore();
@@ -42,11 +54,11 @@ export default function ImageEditor() {
       ? undefined
       : newImageBackground === 'white' ? '#FFFFFF' : '#000000';
 
-    canvas.initializeCanvas(newImageWidth, newImageHeight, backgroundColor);
+    drawing.initializeCanvas(newImageWidth, newImageHeight, backgroundColor);
     clearLayers();
     initializeBaseLayer();
     setShowNewImageModal(false);
-  }, [newImageWidth, newImageHeight, newImageBackground, canvas, clearLayers, initializeBaseLayer]);
+  }, [newImageWidth, newImageHeight, newImageBackground, drawing, clearLayers, initializeBaseLayer]);
 
   // Handle preset selection
   const handlePresetSelect = (preset: typeof DIMENSION_PRESETS[0]) => {
@@ -56,13 +68,13 @@ export default function ImageEditor() {
 
   // Handle export
   const handleExport = useCallback(() => {
-    const canvasEl = canvas.canvasRef.current;
+    const canvasEl = drawing.canvasRef.current;
     if (!canvasEl) return;
 
     const mimeType = getMimeType(exportFormat);
     downloadCanvas(canvasEl, `${exportFilename}.${exportFormat}`, mimeType);
     setShowExportModal(false);
-  }, [canvas.canvasRef, exportFilename, exportFormat]);
+  }, [drawing.canvasRef, exportFilename, exportFormat]);
 
   // Handle save (for future session management)
   const handleSave = useCallback(() => {
@@ -79,10 +91,10 @@ export default function ImageEditor() {
 
       if (isCtrlOrCmd && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        canvas.undo();
+        drawing.undo();
       } else if (isCtrlOrCmd && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
         e.preventDefault();
-        canvas.redo();
+        drawing.redo();
       } else if (isCtrlOrCmd && e.key === 's') {
         e.preventDefault();
         handleSave();
@@ -90,35 +102,35 @@ export default function ImageEditor() {
         e.preventDefault();
         setShowExportModal(true);
       } else if (e.key === 'Escape') {
-        canvas.setSelection(null);
+        drawing.setSelection(null);
       }
 
       // Tool shortcuts (no modifier)
       if (!isCtrlOrCmd && !e.altKey) {
         switch (e.key.toLowerCase()) {
           case 'v':
-            canvas.setTool('select');
+            drawing.setTool('select');
             break;
           case 'p':
-            canvas.setTool('pencil');
+            drawing.setTool('pencil');
             break;
           case 'b':
-            canvas.setTool('brush');
+            drawing.setTool('brush');
             break;
           case 'e':
-            canvas.setTool('eraser');
+            drawing.setTool('eraser');
             break;
           case 'g':
-            canvas.setTool('fill');
+            drawing.setTool('fill');
             break;
           case 'r':
-            canvas.setTool('rectangle');
+            drawing.setTool('rectangle');
             break;
           case 'c':
-            canvas.setTool('circle');
+            drawing.setTool('circle');
             break;
           case 'l':
-            canvas.setTool('line');
+            drawing.setTool('line');
             break;
         }
       }
@@ -126,7 +138,7 @@ export default function ImageEditor() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canvas, handleSave]);
+  }, [drawing, handleSave]);
 
   return (
     <div className="h-screen flex flex-col bg-base-100">
@@ -171,47 +183,50 @@ export default function ImageEditor() {
       <div className="flex-1 flex overflow-hidden">
         {/* Toolbar */}
         <Toolbar
-          tool={canvas.config.tool}
-          brushSize={canvas.config.brushSize}
-          brushOpacity={canvas.config.brushOpacity}
-          primaryColor={canvas.config.primaryColor}
-          secondaryColor={canvas.config.secondaryColor}
-          zoom={canvas.canvasState.zoom}
-          canUndo={canvas.canUndo}
-          canRedo={canvas.canRedo}
-          isDirty={canvas.isDirty}
-          onToolChange={canvas.setTool}
-          onBrushSizeChange={canvas.setBrushSize}
-          onBrushOpacityChange={canvas.setBrushOpacity}
-          onPrimaryColorChange={canvas.setPrimaryColor}
-          onSecondaryColorChange={canvas.setSecondaryColor}
-          onZoomChange={canvas.setZoom}
-          onResetPan={canvas.resetPan}
-          onUndo={canvas.undo}
-          onRedo={canvas.redo}
-          onClear={canvas.clearCanvas}
-          onFitToScreen={canvas.fitToContainer}
+          tool={drawing.config.tool}
+          brushSize={drawing.config.brushSize}
+          brushOpacity={drawing.config.brushOpacity}
+          primaryColor={drawing.config.primaryColor}
+          secondaryColor={drawing.config.secondaryColor}
+          zoom={drawing.canvasState.zoom}
+          canUndo={drawing.canUndo}
+          canRedo={drawing.canRedo}
+          isDirty={drawing.isDirty}
+          onToolChange={drawing.setTool}
+          onBrushSizeChange={drawing.setBrushSize}
+          onBrushOpacityChange={drawing.setBrushOpacity}
+          onPrimaryColorChange={drawing.setPrimaryColor}
+          onSecondaryColorChange={drawing.setSecondaryColor}
+          onZoomChange={drawing.setZoom}
+          onResetPan={drawing.resetPan}
+          onUndo={drawing.undo}
+          onRedo={drawing.redo}
+          onClear={drawing.clearCanvas}
+          onFitToScreen={drawing.fitToContainer}
           onSave={handleSave}
           onExport={() => setShowExportModal(true)}
         />
 
         {/* Canvas Area */}
         <Canvas
-          canvasRef={canvas.canvasRef}
-          drawingLayerRef={canvas.drawingLayerRef}
-          containerRef={canvas.containerRef}
-          width={canvas.canvasState.width}
-          height={canvas.canvasState.height}
-          zoom={canvas.canvasState.zoom}
-          panX={canvas.canvasState.panX}
-          panY={canvas.canvasState.panY}
-          selection={canvas.selection}
-          isPanning={canvas.isPanning}
-          onMouseDown={canvas.handleMouseDown}
-          onMouseMove={canvas.handleMouseMove}
-          onMouseUp={canvas.handleMouseUp}
-          onMouseLeave={canvas.handleMouseLeave}
-          onWheel={canvas.handleWheel}
+          canvasRef={drawing.canvasRef}
+          drawingLayerRef={drawing.drawingLayerRef}
+          containerRef={drawing.containerRef}
+          width={drawing.canvasState.width}
+          height={drawing.canvasState.height}
+          zoom={drawing.canvasState.zoom}
+          panX={drawing.canvasState.panX}
+          panY={drawing.canvasState.panY}
+          selection={drawing.selection}
+          isPanning={drawing.isPanning}
+          onMouseDown={drawing.handleMouseDown}
+          onMouseMove={drawing.handleMouseMove}
+          onMouseUp={drawing.handleMouseUp}
+          onMouseLeave={drawing.handleMouseLeave}
+          onWheel={drawing.handleWheel}
+          onTouchStart={drawing.handleTouchStart}
+          onTouchMove={drawing.handleTouchMove}
+          onTouchEnd={drawing.handleTouchEnd}
         />
 
         {/* Layer Panel */}
@@ -224,21 +239,24 @@ export default function ImageEditor() {
       <footer className="flex items-center justify-between px-4 py-1 bg-base-200 border-t border-base-300 text-xs text-base-content/70">
         <div className="flex items-center gap-4">
           <span>
-            {canvas.canvasState.width} × {canvas.canvasState.height}px
+            {drawing.canvasState.width} × {drawing.canvasState.height}px
           </span>
           <span>
-            Zoom: {canvas.canvasState.zoom}%
+            Zoom: {drawing.canvasState.zoom}%
           </span>
           <span>
             Layers: {layers.length}
           </span>
+          {sessionId && (
+            <span className="text-primary">Session: {sessionId.slice(0, 8)}...</span>
+          )}
         </div>
         <div className="flex items-center gap-4">
-          {canvas.isDirty && (
+          {drawing.isDirty && (
             <span className="text-warning">Unsaved changes</span>
           )}
           <span>
-            Tool: {canvas.config.tool}
+            Tool: {drawing.config.tool}
           </span>
         </div>
       </footer>

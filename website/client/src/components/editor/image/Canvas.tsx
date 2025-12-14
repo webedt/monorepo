@@ -17,6 +17,10 @@ interface CanvasProps {
   onMouseUp: () => void;
   onMouseLeave: () => void;
   onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
+  // Touch event handlers for mobile/tablet support
+  onTouchStart?: (e: React.TouchEvent<HTMLCanvasElement>) => void;
+  onTouchMove?: (e: React.TouchEvent<HTMLCanvasElement>) => void;
+  onTouchEnd?: () => void;
 }
 
 export default function Canvas({
@@ -34,7 +38,10 @@ export default function Canvas({
   onMouseMove,
   onMouseUp,
   onMouseLeave,
-  onWheel
+  onWheel,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd
 }: CanvasProps) {
   const checkerboardRef = useRef<HTMLCanvasElement>(null);
 
@@ -105,7 +112,7 @@ export default function Canvas({
         {/* Drawing layer */}
         <canvas
           ref={drawingLayerRef}
-          className="absolute inset-0 cursor-crosshair"
+          className="absolute inset-0 cursor-crosshair touch-none"
           style={{
             width: scaledWidth,
             height: scaledHeight,
@@ -115,6 +122,9 @@ export default function Canvas({
           onMouseMove={onMouseMove}
           onMouseUp={onMouseUp}
           onMouseLeave={onMouseLeave}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
         />
 
         {/* Selection overlay */}
