@@ -307,3 +307,7 @@ The `claude_auth` should be a valid JSON object with `accessToken` and `refreshT
    ```
 4. **Rotate tokens regularly** and update the database
 5. **Use environment variables** for credentials when possible instead of config files
+
+---
+
+*Documentation last updated: December 14, 2025*

@@ -225,3 +225,7 @@ See [Troubleshooting Guide](./troubleshooting.md) for more help.
 - [Database Setup](./database-setup.md)
 - [Troubleshooting](./troubleshooting.md)
 - [Security Best Practices](./security.md)
+
+---
+
+*Documentation last updated: December 14, 2025*

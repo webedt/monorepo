@@ -261,3 +261,7 @@ The CLI validates all configuration values on startup. If validation fails, you'
 Run `autonomous-dev config --validate` to check your configuration without starting the daemon.
 
 Run `autonomous-dev help-config` to see detailed help for all configuration options.
+
+---
+
+*Documentation last updated: December 14, 2025*
