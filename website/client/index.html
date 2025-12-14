@@ -12,19 +12,28 @@
         const pathname = window.location.pathname;
         const pathSegments = pathname.split('/').filter(Boolean);
 
-        // Check for path-based deployment pattern: /owner/repo/branch/... or /owner/repo/website/branch/...
+        // Check for path-based deployment pattern
+        // Patterns:
+        //   /github/owner/repo/branch/...  (preview via /github prefix)
+        //   /owner/repo/branch/...         (standard path-based)
+        //   /owner/repo/website/branch/... (monorepo website folder)
         // Exclude known app routes from first segment check
         const appRoutes = ['login', 'register', 'session', 'sessions', 'settings', 'new-session',
                           'code', 'images', 'sound', 'scene-editor', 'preview', 'quick-setup', 'item'];
 
         let basePath = '/'; // Default for root-based deployments
 
-        if (pathSegments.length >= 3 && !appRoutes.includes(pathSegments[0])) {
-          // Check for monorepo pattern: /owner/repo/website/branch/
-          if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
+        if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
+          // Check for /github/ prefix pattern: /github/owner/repo/branch/
+          if (pathSegments[0] === 'github' && pathSegments.length >= 4) {
             basePath = '/' + pathSegments[0] + '/' + pathSegments[1] + '/' + pathSegments[2] + '/' + pathSegments[3] + '/';
-          } else {
-            // Standard path-based deployment: /owner/repo/branch/
+          }
+          // Check for monorepo pattern: /owner/repo/website/branch/
+          else if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
+            basePath = '/' + pathSegments[0] + '/' + pathSegments[1] + '/' + pathSegments[2] + '/' + pathSegments[3] + '/';
+          }
+          // Standard path-based deployment: /owner/repo/branch/
+          else if (pathSegments.length >= 3) {
             basePath = '/' + pathSegments[0] + '/' + pathSegments[1] + '/' + pathSegments[2] + '/';
           }
         }
