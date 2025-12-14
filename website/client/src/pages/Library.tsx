@@ -3,14 +3,10 @@ import { useLibrary } from '@/hooks/useLibrary';
 import { useLibraryPreferences } from '@/hooks/useLibraryPreferences';
 import {
   LibraryViewSelector,
-  LibraryItemCard,
-  LibraryListItem,
   LibraryFilters,
 } from '@/components/library';
-import ItemGridView from '@/components/ItemViews/ItemGridView';
-import ItemDetailedView from '@/components/ItemViews/ItemDetailedView';
-import ItemMinimalView from '@/components/ItemViews/ItemMinimalView';
-import type { LibraryItem, SortField } from '@/types/library';
+import { GridView, ListView, CompactListView } from '@/components/LibraryViews';
+import type { LibraryItem } from '@/types/library';
 
 // Mock library items - in production these would come from an API
 const mockLibraryItems: LibraryItem[] = [
@@ -162,108 +158,6 @@ export default function Library() {
     }
   };
 
-  // Render sort icon for list headers
-  const renderSortIcon = (field: Exclude<SortField, null>) => {
-    if (sortField !== field) {
-      return (
-        <svg className="w-4 h-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-        </svg>
-      );
-    }
-    if (sortDirection === 'asc') {
-      return (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-        </svg>
-      );
-    }
-    return (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-      </svg>
-    );
-  };
-
-  // Header for list views with sortable columns
-  const renderHeader = () => (
-    <div className="flex items-center gap-4 px-4 py-3 bg-base-300 rounded-lg font-semibold text-sm mb-2">
-      <div className="w-10 h-10"></div> {/* Thumbnail spacer */}
-      <div className="w-12"></div> {/* Favorite spacer */}
-      <button
-        onClick={() => handleSort('title')}
-        className="flex-1 flex items-center gap-2 hover:text-primary transition-colors"
-      >
-        Title
-        {renderSortIcon('title')}
-      </button>
-      <button
-        onClick={() => handleSort('price')}
-        className="flex items-center gap-2 hover:text-primary transition-colors"
-      >
-        Price
-        {renderSortIcon('price')}
-      </button>
-      <div className="w-24"></div> {/* Actions spacer */}
-    </div>
-  );
-
-  // Render grid view card
-  const renderCard = (item: LibraryItem) => (
-    <LibraryItemCard
-      key={item.id}
-      item={item}
-      isFavorite={isFavorite(item.id)}
-      onToggleFavorite={toggleFavorite}
-      collections={collections}
-      itemCollections={getItemCollections(item.id)}
-      onAddToCollection={addToCollection}
-      onRemoveFromCollection={removeFromCollection}
-      onOpenCollectionModal={() => setShowCollectionModal(true)}
-      collectionMenuItemId={collectionMenuItemId}
-      onSetCollectionMenuItemId={setCollectionMenuItemId}
-      collectionMenuRef={collectionMenuRef}
-    />
-  );
-
-  // Render detailed list view row
-  const renderDetailedRow = (item: LibraryItem) => (
-    <LibraryListItem
-      key={item.id}
-      item={item}
-      isFavorite={isFavorite(item.id)}
-      onToggleFavorite={toggleFavorite}
-      collections={collections}
-      itemCollections={getItemCollections(item.id)}
-      onAddToCollection={addToCollection}
-      onRemoveFromCollection={removeFromCollection}
-      onOpenCollectionModal={() => setShowCollectionModal(true)}
-      collectionMenuItemId={collectionMenuItemId}
-      onSetCollectionMenuItemId={setCollectionMenuItemId}
-      collectionMenuRef={collectionMenuRef}
-      variant="detailed"
-    />
-  );
-
-  // Render compact list view row
-  const renderMinimalRow = (item: LibraryItem) => (
-    <LibraryListItem
-      key={item.id}
-      item={item}
-      isFavorite={isFavorite(item.id)}
-      onToggleFavorite={toggleFavorite}
-      collections={collections}
-      itemCollections={getItemCollections(item.id)}
-      onAddToCollection={addToCollection}
-      onRemoveFromCollection={removeFromCollection}
-      onOpenCollectionModal={() => setShowCollectionModal(true)}
-      collectionMenuItemId={collectionMenuItemId}
-      onSetCollectionMenuItemId={setCollectionMenuItemId}
-      collectionMenuRef={collectionMenuRef}
-      variant="compact"
-    />
-  );
-
   // Render pagination controls
   const renderPagination = () => {
     if (totalPages <= 1) return null;
@@ -399,19 +293,61 @@ export default function Library() {
           </div>
         ) : (
           <>
-            {/* Grid View - Thumbnail-based grid layout */}
+            {/* Grid View - Thumbnail-based grid layout (SPEC.md Section 4.2) */}
             {viewMode === 'grid' && (
-              <ItemGridView items={items} renderCard={renderCard} />
+              <GridView
+                items={items}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                collections={collections}
+                getItemCollections={getItemCollections}
+                onAddToCollection={addToCollection}
+                onRemoveFromCollection={removeFromCollection}
+                onOpenCollectionModal={() => setShowCollectionModal(true)}
+                collectionMenuItemId={collectionMenuItemId}
+                onSetCollectionMenuItemId={setCollectionMenuItemId}
+                collectionMenuRef={collectionMenuRef}
+              />
             )}
 
-            {/* List View - Standard list with more details */}
+            {/* List View - Standard list with more details (SPEC.md Section 4.2) */}
             {viewMode === 'detailed' && (
-              <ItemDetailedView items={items} renderRow={renderDetailedRow} renderHeader={renderHeader} />
+              <ListView
+                items={items}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                collections={collections}
+                getItemCollections={getItemCollections}
+                onAddToCollection={addToCollection}
+                onRemoveFromCollection={removeFromCollection}
+                onOpenCollectionModal={() => setShowCollectionModal(true)}
+                collectionMenuItemId={collectionMenuItemId}
+                onSetCollectionMenuItemId={setCollectionMenuItemId}
+                collectionMenuRef={collectionMenuRef}
+              />
             )}
 
-            {/* Compact List View - Dense list for power users */}
+            {/* Compact List View - Dense list for power users (SPEC.md Section 4.2) */}
             {viewMode === 'minimal' && (
-              <ItemMinimalView items={items} renderRow={renderMinimalRow} renderHeader={renderHeader} />
+              <CompactListView
+                items={items}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                collections={collections}
+                getItemCollections={getItemCollections}
+                onAddToCollection={addToCollection}
+                onRemoveFromCollection={removeFromCollection}
+                onOpenCollectionModal={() => setShowCollectionModal(true)}
+                collectionMenuItemId={collectionMenuItemId}
+                onSetCollectionMenuItemId={setCollectionMenuItemId}
+                collectionMenuRef={collectionMenuRef}
+              />
             )}
           </>
         )}
