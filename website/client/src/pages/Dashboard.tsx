@@ -1,10 +1,12 @@
 import { useAuthStore } from '@/lib/store';
-import { useWidgetPreferences } from '@/hooks/useWidgetPreferences';
+import { useDashboardLayout } from '@/hooks/useDashboardLayout';
 import {
-  WidgetCard,
+  Widget,
   RecentlyPlayedWidget,
   EditorQuickAccessWidget,
   StoreHighlightsWidget,
+} from '@/components/dashboard';
+import {
   LibraryFavoritesWidget,
   CommunityActivityWidget,
   SessionActivityWidget,
@@ -45,9 +47,10 @@ export default function Dashboard() {
     handleDragStart,
     handleDragOver,
     handleDrop,
+    handleDragEnd,
     isCustomizing,
     setIsCustomizing,
-  } = useWidgetPreferences();
+  } = useDashboardLayout();
 
   // Get greeting based on time of day
   const getGreeting = () => {
@@ -148,16 +151,17 @@ export default function Dashboard() {
         {/* Widgets Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {enabledWidgets.map((widget) => (
-            <WidgetCard
+            <Widget
               key={widget.id}
               widget={widget}
               isDragging={draggedWidget === widget.id}
               onDragStart={handleDragStart}
               onDragOver={handleDragOver}
               onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
             >
               {renderWidgetContent(widget.id)}
-            </WidgetCard>
+            </Widget>
           ))}
         </div>
 
