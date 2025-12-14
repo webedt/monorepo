@@ -1,11 +1,11 @@
 import { type ReactNode } from 'react';
 import { DraggableWidget } from '@/components/DraggableWidget';
-import { useDashboardStore, type DashboardWidget } from '@/stores/dashboardStore';
+import { useDashboardStore } from '@/stores/dashboardStore';
 import {
   RecentlyPlayedWidget,
   EditorQuickAccessWidget,
   StoreHighlightsWidget,
-} from '@/components/dashboard';
+} from './index';
 import {
   LibraryFavoritesWidget,
   CommunityActivityWidget,
