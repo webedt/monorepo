@@ -207,6 +207,9 @@ The Library displays your purchased and wishlisted items with multiple view opti
 - Last Played (Recent/Oldest)
 - Play Count (Most/Least)
 
+**Sorting Direction:**
+- Click column headers to toggle ascending/descending sort
+
 **Organization Features:**
 - **Quick Favorite** - Star/favorite icon accessible directly from any view (click to toggle)
 - **Custom Collections/Folders** - User-created organizational folders with create/delete/add/remove functionality
@@ -484,4 +487,5 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-*Documentation last updated: December 2025 (Updated for Dashboard, Store, and Library features per SPEC.md Sections 2-4)*
+*Documentation last updated: December 2025*
+*Updated for Dashboard, Store, and Library features per SPEC.md Sections 2-4*
