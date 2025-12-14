@@ -102,7 +102,7 @@ const generateRatingSummary = (rating: number = 4, reviewCount: number = 100): R
 export default function StoreItemDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isWishlisted, toggleWishlist, addToWishlist, removeFromWishlist } = useWishlist();
+  const { isWishlisted, toggleWishlist } = useWishlist();
 
   // Find the item from mock data
   const item = useMemo(() => {
@@ -219,7 +219,6 @@ export default function StoreItemDetail() {
     );
   }
 
-  const isFree = item.price === null || item.price === 0;
   const wishlisted = isWishlisted(item.id);
 
   return (
