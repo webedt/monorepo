@@ -129,10 +129,10 @@ describe('Daemon', () => {
     });
   });
 
-  describe('getServiceHealth', () => {
+  describe('getInternalServiceHealth', () => {
     it('should return initial service health', () => {
       const daemon = new Daemon();
-      const health = daemon.getServiceHealth();
+      const health = daemon.getInternalServiceHealth();
 
       assert.ok(health);
       assert.ok('github' in health);
@@ -142,14 +142,14 @@ describe('Daemon', () => {
 
     it('should initially have healthy status', () => {
       const daemon = new Daemon();
-      const health = daemon.getServiceHealth();
+      const health = daemon.getInternalServiceHealth();
 
       assert.strictEqual(health.overallStatus, 'healthy');
     });
 
     it('should have null github health before initialization', () => {
       const daemon = new Daemon();
-      const health = daemon.getServiceHealth();
+      const health = daemon.getInternalServiceHealth();
 
       assert.strictEqual(health.github, null);
     });
@@ -276,7 +276,7 @@ describe('Daemon', () => {
 
     it('should provide service health tracking', () => {
       const daemon = new Daemon();
-      const health = daemon.getServiceHealth();
+      const health = daemon.getInternalServiceHealth();
 
       assert.ok(health.lastCheck instanceof Date);
       assert.ok(['healthy', 'degraded', 'unavailable'].includes(health.overallStatus));

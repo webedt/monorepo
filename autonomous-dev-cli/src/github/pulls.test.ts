@@ -60,6 +60,9 @@ function createMockClient(overrides: Record<string, any> = {}): GitHubClient {
         return { value: fallback, degraded: true };
       }
     }),
+    getCachedOrFetch: mock.fn(async <T>(_type: string, _key: string, fetcher: () => Promise<T>) => {
+      return fetcher();
+    }),
     ...overrides,
   } as unknown as GitHubClient;
 }

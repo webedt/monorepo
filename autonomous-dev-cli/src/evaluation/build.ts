@@ -68,9 +68,10 @@ export class BuildCache {
     for (const pkgPath of packageJsonPaths) {
       if (existsSync(pkgPath)) {
         try {
-          const stat = statSync(pkgPath);
           const content = readFileSync(pkgPath, 'utf-8');
-          hashData.push(`${pkgPath}:${stat.mtimeMs}:${content.length}`);
+          // Use content hash for accurate change detection
+          const contentHash = createHash('md5').update(content).digest('hex');
+          hashData.push(`${pkgPath}:${contentHash}`);
         } catch {
           // Skip inaccessible files
         }
@@ -93,8 +94,9 @@ export class BuildCache {
     const tsconfigPath = join(repoPath, 'tsconfig.json');
     if (existsSync(tsconfigPath)) {
       try {
-        const stat = statSync(tsconfigPath);
-        hashData.push(`${tsconfigPath}:${stat.mtimeMs}`);
+        const content = readFileSync(tsconfigPath, 'utf-8');
+        const contentHash = createHash('md5').update(content).digest('hex');
+        hashData.push(`${tsconfigPath}:${contentHash}`);
       } catch {
         // Skip
       }
@@ -120,7 +122,10 @@ export class BuildCache {
           try {
             const stat = statSync(fullPath);
             if (stat.isFile() && /\.(ts|tsx|js|jsx|json)$/.test(item)) {
-              hashes.push(`${fullPath}:${stat.mtimeMs}`);
+              // Use content hash for accurate change detection
+              const content = readFileSync(fullPath, 'utf-8');
+              const contentHash = createHash('md5').update(content).digest('hex');
+              hashes.push(`${fullPath}:${contentHash}`);
               count++;
             } else if (stat.isDirectory()) {
               scanDir(fullPath, depth + 1);

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -75,7 +75,7 @@ describe('DeadLetterQueue', () => {
         reprocessAttempts: 0,
       };
 
-      const { writeFileSync } = await import('fs');
+      // Use writeFileSync which is imported at the top
       writeFileSync(
         join(persistDir, 'dlq', 'dlq.json'),
         JSON.stringify([mockEntry])

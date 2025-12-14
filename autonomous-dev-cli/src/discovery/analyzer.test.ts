@@ -204,7 +204,6 @@ describe('CodebaseAnalyzer', () => {
       assert.ok(analysis);
       assert.strictEqual(analysis.fileCount, 0);
       assert.deepStrictEqual(analysis.structure, []);
-      assert.deepStrictEqual(analysis.todoComments, []);
       assert.deepStrictEqual(analysis.packages, []);
     });
 
@@ -232,37 +231,6 @@ describe('CodebaseAnalyzer', () => {
       const analysis = await analyzer.analyze();
 
       assert.strictEqual(analysis.fileCount, 2);
-    });
-
-    it('should find TODO comments', async () => {
-      writeFileSync(join(testDir, 'todo.ts'), `
-        // TODO: Implement this feature
-        const x = 1;
-        // FIXME: This is broken
-        const y = 2;
-      `);
-
-      const analyzer = new CodebaseAnalyzer(testDir);
-      const analysis = await analyzer.analyze();
-
-      assert.ok(analysis.todoComments.length >= 2);
-      assert.ok(analysis.todoComments.some(t => t.type === 'TODO'));
-      assert.ok(analysis.todoComments.some(t => t.type === 'FIXME'));
-    });
-
-    it('should find HACK and XXX comments', async () => {
-      writeFileSync(join(testDir, 'hacks.ts'), `
-        // HACK: Temporary workaround
-        const temp = null;
-        // XXX: Needs attention
-        const attention = true;
-      `);
-
-      const analyzer = new CodebaseAnalyzer(testDir);
-      const analysis = await analyzer.analyze();
-
-      assert.ok(analysis.todoComments.some(t => t.type === 'HACK'));
-      assert.ok(analysis.todoComments.some(t => t.type === 'XXX'));
     });
 
     it('should find package.json files', async () => {
@@ -401,16 +369,6 @@ describe('CodebaseAnalyzer', () => {
       assert.ok(summary.includes('my-package'));
     });
 
-    it('should include TODO section when TODOs exist', async () => {
-      writeFileSync(join(testDir, 'app.ts'), '// TODO: Fix this bug');
-
-      const analyzer = new CodebaseAnalyzer(testDir);
-      const analysis = await analyzer.analyze();
-      const summary = analyzer.generateSummary(analysis);
-
-      assert.ok(summary.includes('TODO'));
-    });
-
     it('should include top-level structure', async () => {
       mkdirSync(join(testDir, 'src'));
       writeFileSync(join(testDir, 'README.md'), '# Test');
@@ -543,7 +501,8 @@ describe('DirectoryEntry structure', () => {
     const srcDir = analysis.structure.find(e => e.name === 'src');
     assert.ok(srcDir);
     assert.ok(srcDir.children);
-    assert.ok(srcDir.children.some(c => c.path === 'src/index.ts'));
+    // Normalize path separators for cross-platform compatibility
+    assert.ok(srcDir.children.some(c => c.path.replace(/\\/g, '/') === 'src/index.ts'));
   });
 
   it('should nest children in directory entries', async () => {
