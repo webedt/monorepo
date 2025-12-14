@@ -18,9 +18,8 @@ export interface CompactListViewProps {
   collectionMenuItemId: number | null;
   onSetCollectionMenuItemId: (itemId: number | null) => void;
   collectionMenuRef: React.RefObject<HTMLDivElement>;
-  // Cloud sync props
+  // Cloud sync props (optional, for future integration)
   getCloudSyncState?: (itemId: number) => CloudSyncState;
-  onSyncItem?: (itemId: number) => void;
 }
 
 /**
@@ -42,6 +41,7 @@ export default function CompactListView({
   collectionMenuItemId,
   onSetCollectionMenuItemId,
   collectionMenuRef,
+  getCloudSyncState,
 }: CompactListViewProps) {
   const navigate = useNavigate();
 
@@ -225,9 +225,12 @@ export default function CompactListView({
             {renderFavoriteButton(item)}
           </div>
 
-          {/* Title */}
-          <div className="flex-1 min-w-0">
+          {/* Title and Cloud Sync */}
+          <div className="flex-1 min-w-0 flex items-center gap-2">
             <h3 className="text-sm font-medium text-base-content truncate">{item.title}</h3>
+            {getCloudSyncState && (
+              <CloudSyncIndicatorCompact syncState={getCloudSyncState(item.id)} />
+            )}
           </div>
 
           {/* Price */}

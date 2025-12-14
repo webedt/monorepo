@@ -307,7 +307,7 @@ export const leaderboardsApi = {
         return {
           success: true,
           entry: entries[existingIndex],
-          rank: entries.findIndex((e, i) => {
+          rank: entries.findIndex((_e, i) => {
             const sorted = [...entries].sort((a, b) =>
               config.scoreType === 'lowest' ? a.score - b.score : b.score - a.score
             );

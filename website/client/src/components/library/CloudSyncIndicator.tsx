@@ -6,7 +6,7 @@
  * icons and tooltips for each sync state.
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { CloudSyncStatus, CloudSyncState } from '@/types/cloudServices';
 
 interface CloudSyncIndicatorProps {
