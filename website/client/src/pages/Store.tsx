@@ -698,6 +698,19 @@ export default function Store() {
           </>
         )}
       </div>
+
+      {/* Store Item Modal */}
+      <StoreItemModal
+        item={selectedItem}
+        isOpen={isModalOpen}
+        isWishlisted={selectedItem ? isWishlisted(selectedItem.id) : false}
+        allItems={sortedItems}
+        onClose={handleCloseModal}
+        onToggleWishlist={handleToggleWishlist}
+        onPurchase={handlePurchase}
+        onPlayNow={handlePlayNow}
+        onNavigate={handleNavigateItem}
+      />
     </div>
   );
 }

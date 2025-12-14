@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { StoreItem } from '@/types/store';
 
-interface StoreItemCardProps {
+export interface StoreItemCardProps {
   item: StoreItem;
   isWishlisted: boolean;
   onPlayNow?: (item: StoreItem) => void;
   onViewTrailer?: (item: StoreItem) => void;
   onToggleWishlist?: (item: StoreItem) => void;
+  onClick?: (item: StoreItem) => void;
 }
 
 export default function StoreItemCard({
@@ -16,6 +17,7 @@ export default function StoreItemCard({
   onPlayNow,
   onViewTrailer,
   onToggleWishlist,
+  onClick,
 }: StoreItemCardProps) {
   const navigate = useNavigate();
   const [isHovering, setIsHovering] = useState(false);
@@ -123,7 +125,7 @@ export default function StoreItemCard({
       {/* Thumbnail with hover trailer auto-play (Netflix/YouTube style) */}
       <figure
         className="relative h-48 overflow-hidden cursor-pointer group"
-        onClick={() => navigate(`/item/${item.id}`)}
+        onClick={() => onClick ? onClick(item) : navigate(`/item/${item.id}`)}
       >
         {/* Thumbnail Image */}
         <img

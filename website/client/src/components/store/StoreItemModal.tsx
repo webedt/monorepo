@@ -34,7 +34,7 @@ export default function StoreItemModal({
   onNavigate,
 }: StoreItemModalProps) {
   const navigate = useNavigate();
-  const modalRef = useRef<HTMLDialogElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Find current item index for navigation
@@ -245,7 +245,7 @@ export default function StoreItemModal({
 
       {/* Modal Content */}
       <div
-        ref={modalRef as React.RefObject<HTMLDivElement>}
+        ref={modalRef}
         className="bg-base-100 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
