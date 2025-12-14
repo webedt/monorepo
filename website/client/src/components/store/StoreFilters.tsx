@@ -7,6 +7,7 @@ import type {
   PriceRange,
 } from '@/types/store';
 import { categoryLabels, genreLabels, priceRangeLabels } from '@/types/store';
+import type { ActiveFilter } from '@/hooks/useStoreFilters';
 
 type ViewMode = 'grid' | 'detailed' | 'minimal';
 
@@ -28,6 +29,8 @@ interface StoreFiltersProps {
   // Actions
   hasActiveFilters: boolean;
   onClearFilters: () => void;
+  activeFilters?: ActiveFilter[];
+  onClearFilter?: (type: ActiveFilter['type']) => void;
 
   // View mode
   viewMode: ViewMode;
@@ -44,6 +47,7 @@ interface StoreFiltersProps {
  * - Universal Search Box
  * - Filter Dropdowns (category, genre, price range)
  * - On Sale toggle
+ * - Active filter badges with individual clear buttons
  * - Clear filters functionality
  */
 export default function StoreFilters({
@@ -59,13 +63,15 @@ export default function StoreFilters({
   onShowOnSaleChange,
   hasActiveFilters,
   onClearFilters,
+  activeFilters = [],
+  onClearFilter,
   viewMode,
   onViewModeChange,
   totalItems,
   displayedItems,
 }: StoreFiltersProps) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Search Box */}
       <SearchBar
         value={searchQuery}
@@ -108,7 +114,7 @@ export default function StoreFilters({
             <span className="label-text">On Sale</span>
           </label>
 
-          {/* Clear Filters Button */}
+          {/* Clear All Filters Button */}
           {hasActiveFilters && (
             <button className="btn btn-ghost btn-sm text-error" onClick={onClearFilters}>
               <svg
@@ -125,13 +131,51 @@ export default function StoreFilters({
                   d="M6 18L18 6M6 6l12 12"
                 />
               </svg>
-              Clear Filters
+              Clear All
             </button>
           )}
         </div>
 
         <ViewToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
       </div>
+
+      {/* Active Filter Badges */}
+      {activeFilters.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-sm text-base-content/60">Active filters:</span>
+          {activeFilters.map((filter) => (
+            <div
+              key={filter.type}
+              className="badge badge-lg gap-2 bg-primary/10 border-primary/30"
+            >
+              <span className="text-xs text-base-content/60">{filter.label}:</span>
+              <span className="font-medium truncate max-w-32">{filter.value}</span>
+              {onClearFilter && (
+                <button
+                  className="btn btn-ghost btn-xs btn-circle -mr-1 hover:bg-primary/20"
+                  onClick={() => onClearFilter(filter.type)}
+                  aria-label={`Clear ${filter.label} filter`}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-3 w-3"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Results Count */}
       <div className="text-sm text-base-content/60">

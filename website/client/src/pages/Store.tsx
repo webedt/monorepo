@@ -20,6 +20,7 @@ export default function Store() {
   const { isWishlisted, toggleWishlist } = useWishlist();
 
   // Use the store filters hook for search, filter, and sort state management
+  // Now includes URL query parameter synchronization and debounced search
   const {
     searchQuery,
     selectedCategory,
@@ -30,6 +31,7 @@ export default function Store() {
     sortDirection,
     sortedItems,
     hasActiveFilters,
+    activeFilters,
     setSearchQuery,
     setSelectedCategory,
     setSelectedGenre,
@@ -37,6 +39,7 @@ export default function Store() {
     setShowOnSaleOnly,
     handleSort,
     clearFilters,
+    clearFilter,
   } = useStoreFilters(mockStoreItems);
 
   // Modal state
@@ -412,6 +415,8 @@ export default function Store() {
             onShowOnSaleChange={setShowOnSaleOnly}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={clearFilters}
+            activeFilters={activeFilters}
+            onClearFilter={clearFilter}
             viewMode={viewMode}
             onViewModeChange={setViewMode}
             totalItems={mockStoreItems.length}
