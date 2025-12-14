@@ -466,4 +466,4 @@ This repo supports long-running autonomous development via the autonomous CLI.
 
 ---
 
-*Documentation last updated: 2025-12-13*
+*Documentation last updated: 2025-12-14*

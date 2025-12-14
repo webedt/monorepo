@@ -669,6 +669,10 @@ MIT License - see individual project directories for full license text.
 
 Copyright (c) 2024-2025 ETdoFresh
 
+---
+
+*Documentation last updated: December 2025*
+
 ## Migration from Separate Repos
 
 This monorepo was created by consolidating multiple repositories. All git history from the original repositories has been preserved in their respective folders.
