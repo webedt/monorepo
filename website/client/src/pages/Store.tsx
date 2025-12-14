@@ -1,11 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useViewMode } from '@/hooks/useViewMode';
 import { useWishlist } from '@/hooks/useWishlist';
 import ViewToggle from '@/components/ViewToggle';
 import ItemDetailedView from '@/components/ItemViews/ItemDetailedView';
 import ItemMinimalView from '@/components/ItemViews/ItemMinimalView';
-import { StoreItemCard, StoreGrid } from '@/components/store';
+import { StoreItemCard, StoreGrid, StoreItemModal } from '@/components/store';
 import { mockStoreItems } from '@/data/mockStoreData';
 import type {
   StoreItem,
@@ -32,6 +32,10 @@ export default function Store() {
   // Sort state
   const [sortField, setSortField] = useState<StoreSortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+
+  // Modal state
+  const [selectedItem, setSelectedItem] = useState<StoreItem | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Filter items based on search and filters
   const filteredItems = useMemo(() => {
@@ -166,10 +170,34 @@ export default function Store() {
     navigate(`/item/${item.id}`);
   };
 
-  // Handle view trailer
+  // Handle view trailer - opens modal with the item
   const handleViewTrailer = (item: StoreItem) => {
-    console.log('View Trailer:', item.title, item.trailerUrl);
+    setSelectedItem(item);
+    setIsModalOpen(true);
   };
+
+  // Handle opening item modal
+  const handleOpenModal = useCallback((item: StoreItem) => {
+    setSelectedItem(item);
+    setIsModalOpen(true);
+  }, []);
+
+  // Handle closing modal
+  const handleCloseModal = useCallback(() => {
+    setIsModalOpen(false);
+    setSelectedItem(null);
+  }, []);
+
+  // Handle navigating between items in modal
+  const handleNavigateItem = useCallback((item: StoreItem) => {
+    setSelectedItem(item);
+  }, []);
+
+  // Handle purchase from modal
+  const handlePurchase = useCallback((item: StoreItem) => {
+    console.log('Purchase:', item.title, item.price);
+    // In production, this would integrate with Stripe/PayPal checkout
+  }, []);
 
   // Format price for display
   const formatPrice = (price: number | null): string => {
@@ -245,6 +273,7 @@ export default function Store() {
       onPlayNow={handlePlayNow}
       onViewTrailer={handleViewTrailer}
       onToggleWishlist={handleToggleWishlist}
+      onClick={handleOpenModal}
     />
   );
 
@@ -257,7 +286,7 @@ export default function Store() {
       <div
         key={item.id}
         className="flex items-center gap-4 p-4 bg-base-100 rounded-lg shadow hover:shadow-lg transition-shadow cursor-pointer"
-        onClick={() => navigate(`/item/${item.id}`)}
+        onClick={() => handleOpenModal(item)}
       >
         {/* Thumbnail */}
         <img src={item.thumbnail} alt={item.title} className="w-24 h-24 object-cover rounded" />
@@ -381,7 +410,7 @@ export default function Store() {
       <div
         key={item.id}
         className="flex items-center gap-4 p-3 bg-base-100 rounded hover:bg-base-200 transition-colors cursor-pointer"
-        onClick={() => navigate(`/item/${item.id}`)}
+        onClick={() => handleOpenModal(item)}
       >
         <img src={item.thumbnail} alt={item.title} className="w-10 h-10 object-cover rounded" />
 
