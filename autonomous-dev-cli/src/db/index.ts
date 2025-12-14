@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and, isNull } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'crypto';
@@ -93,6 +93,7 @@ export const chatSessions = pgTable('chat_sessions', {
   branch: text('branch'),
   provider: text('provider').default('claude'),
   providerSessionId: text('provider_session_id'),
+  issueNumber: integer('issue_number'), // GitHub issue number linked to this session
   autoCommit: boolean('auto_commit').default(false).notNull(),
   locked: boolean('locked').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -234,6 +235,7 @@ export interface CreateChatSessionParams {
   baseBranch: string;
   userRequest: string;
   provider?: string;
+  issueNumber?: number;
 }
 
 export interface EventData {
@@ -617,6 +619,7 @@ export async function createChatSession(params: CreateChatSessionParams): Promis
       baseBranch: params.baseBranch,
       userRequest: params.userRequest,
       provider: params.provider || 'claude',
+      issueNumber: params.issueNumber,
       status: 'pending',
       autoCommit: true,
     })
@@ -680,6 +683,56 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
     .limit(1);
 
   return session || null;
+}
+
+/**
+ * Soft-delete all chat sessions associated with a GitHub issue number.
+ * This marks sessions as deleted and cleans up storage.
+ * @param issueNumber The GitHub issue number
+ * @param repositoryOwner The repository owner
+ * @param repositoryName The repository name
+ * @returns Number of sessions deleted
+ */
+export async function softDeleteSessionsByIssue(
+  issueNumber: number,
+  repositoryOwner: string,
+  repositoryName: string
+): Promise<number> {
+  const database = getDb();
+
+  // Find sessions matching the issue
+  const sessionsToDelete = await database
+    .select({ id: chatSessions.id, sessionPath: chatSessions.sessionPath })
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.issueNumber, issueNumber),
+        eq(chatSessions.repositoryOwner, repositoryOwner),
+        eq(chatSessions.repositoryName, repositoryName),
+        isNull(chatSessions.deletedAt)
+      )
+    );
+
+  if (sessionsToDelete.length === 0) {
+    logger.debug(`No sessions found for issue #${issueNumber} in ${repositoryOwner}/${repositoryName}`);
+    return 0;
+  }
+
+  // Soft delete the sessions
+  await database
+    .update(chatSessions)
+    .set({ deletedAt: new Date() })
+    .where(
+      and(
+        eq(chatSessions.issueNumber, issueNumber),
+        eq(chatSessions.repositoryOwner, repositoryOwner),
+        eq(chatSessions.repositoryName, repositoryName),
+        isNull(chatSessions.deletedAt)
+      )
+    );
+
+  logger.info(`Soft-deleted ${sessionsToDelete.length} session(s) for issue #${issueNumber} in ${repositoryOwner}/${repositoryName}`);
+  return sessionsToDelete.length;
 }
 
 // ============================================================================

@@ -342,6 +342,7 @@ describe('Type Inference', () => {
         branch: 'feature/test',
         provider: 'claude',
         providerSessionId: null,
+        issueNumber: null,
         autoCommit: true,
         locked: false,
         createdAt: new Date(),

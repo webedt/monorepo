@@ -1,12 +1,22 @@
 # Documentation Hub
 
-Welcome to the Autonomous Development System documentation. This hub provides comprehensive guides for understanding, configuring, and using the system.
+Welcome to the WebEDT Platform documentation. This hub provides comprehensive guides for understanding, configuring, and using the platform and its autonomous development tools.
+
+## Platform Overview
+
+WebEDT is a web-based game development platform that combines:
+- **Digital Storefront** - Browse, purchase, and manage games
+- **Game Library** - Organize your purchased and wishlisted games
+- **Customizable Dashboard** - Personalized widgets for quick access to content
+- **Integrated Development Environment** - Create and edit games using AI-powered tools
+- **Autonomous Development System** - AI agents that continuously improve codebases
 
 ## Quick Links
 
 | I want to... | Go to |
 |--------------|-------|
 | Get started quickly | [Quick Start](#quick-start) |
+| Learn about WebEDT features | [Platform Features](#webedt-platform-features) |
 | Understand the architecture | [Architecture Guide](./architecture.md) |
 | Configure the system | [Configuration Guide](./configuration.md) |
 | Use the CLI and APIs | [API Reference](./api-reference.md) |
@@ -71,10 +81,10 @@ autonomous-dev start
 
 | Project | Description | Location |
 |---------|-------------|----------|
-| **Autonomous Dev CLI** | Main orchestration tool | [README](../autonomous-dev-cli/README.md) |
-| **AI Coding Worker** | LLM execution service | [README](../ai-coding-worker/README.md) |
-| **Internal API Server** | Central backend service | [README](../internal-api-server/README.md) |
-| **Website** | React frontend | [README](../website/README.md) |
+| **Website** | React frontend with Dashboard, Store, Library, and Editor | [README](../website/README.md) |
+| **Autonomous Dev CLI** | Main orchestration tool for autonomous development | [README](../autonomous-dev-cli/README.md) |
+| **AI Coding Worker** | LLM execution service for code generation | [README](../ai-coding-worker/README.md) |
+| **Internal API Server** | Central backend service for API, storage, auth | [README](../internal-api-server/README.md) |
 
 ### Additional Resources
 
@@ -112,6 +122,68 @@ The system uses a 5-phase autonomous development workflow:
 | **5. Merge** | Auto-merge passing PRs, handle conflicts, close issues |
 
 For detailed architecture information, see the [Architecture Guide](./architecture.md).
+
+## WebEDT Platform Features
+
+### Dashboard (Homepage)
+
+The Dashboard serves as a personalized aggregation hub that pulls content from multiple sections of the platform.
+
+**Key Features:**
+- **Customizable Widget System** - Drag-and-drop widget arrangement, choose which sections appear
+- **Available Widgets:**
+  - Recently Played - Your recently played games
+  - Editor Quick Access - Recent sessions, quick-start options
+  - Store Highlights - Featured and new items
+  - Library Favorites - Quick access to favorited items
+  - Community Activity - Recent channel messages
+  - Session Activity - Active/recent editor sessions
+- **Personalization** - Adapts based on user preferences, layout saved per user
+
+### Store (Marketplace)
+
+The Store provides a grid-based marketplace for browsing and purchasing games.
+
+**Key Features:**
+- **Grid View Layout** - Thumbnails with price, play button, trailer, and wishlist options
+- **Trailer Auto-play** - Netflix/YouTube style hover preview
+- **Universal Search** - Single search box across all fields (title, description, tags, creator)
+- **Filter Dropdowns** - Category, genre, price range filtering
+- **Wishlist** - Add items to personal wishlist with sale notifications
+- **Ratings & Reviews** - Star-based rating system with written reviews
+
+### Library
+
+The Library displays your purchased and wishlisted items with multiple view options.
+
+**Key Features:**
+- **Three View Modes:**
+  - Grid View - Thumbnail-based grid layout
+  - List View - Standard list with more details
+  - Compact List View - Dense list for power users
+- **Filtering & Sorting:**
+  - All items, Recently added, Recently played
+  - Most used, Favorites, Wishlisted items
+  - By collection/folder
+- **Organization Features:**
+  - Quick Favorite - Star/favorite icon accessible from any view
+  - Custom Collections/Folders - User-created organizational folders
+  - Pagination support
+- **Visibility** - Library only visible when user is logged in
+
+### Editor Suite
+
+The Editor provides a complete game development environment with AI assistance.
+
+**Components:**
+- **Chat** - AI-powered development assistant
+- **Code Editor** - VS Code-style interface with syntax highlighting
+- **Images** - Image editor, sprite sheet editor, frame animation editor
+- **Sounds** - Wave editor, sound effects generator, track editor
+- **Scenes** - Object editor (prefabs), scene editor with 2D/UI support
+- **Preview** - Live preview of your current branch
+
+For complete platform specifications, see [SPEC.md](../SPEC.md).
 
 ## Component Architecture
 
@@ -353,4 +425,4 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-*Documentation last updated: December 2024*
+*Documentation last updated: December 2025*

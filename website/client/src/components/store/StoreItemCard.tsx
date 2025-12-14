@@ -1,13 +1,14 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { StoreItem } from '@/types/store';
 
-interface StoreItemCardProps {
+export interface StoreItemCardProps {
   item: StoreItem;
   isWishlisted: boolean;
   onPlayNow?: (item: StoreItem) => void;
   onViewTrailer?: (item: StoreItem) => void;
   onToggleWishlist?: (item: StoreItem) => void;
+  onClick?: (item: StoreItem) => void;
 }
 
 export default function StoreItemCard({
@@ -16,33 +17,67 @@ export default function StoreItemCard({
   onPlayNow,
   onViewTrailer,
   onToggleWishlist,
+  onClick,
 }: StoreItemCardProps) {
   const navigate = useNavigate();
   const [isHovering, setIsHovering] = useState(false);
+  const [showTrailer, setShowTrailer] = useState(false);
+  const [trailerLoaded, setTrailerLoaded] = useState(false);
+  const [trailerError, setTrailerError] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trailerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Clean up timeout on unmount
+  // Clean up timeouts on unmount
   useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) {
         clearTimeout(hoverTimeoutRef.current);
       }
+      if (trailerTimeoutRef.current) {
+        clearTimeout(trailerTimeoutRef.current);
+      }
     };
   }, []);
 
-  const handleMouseEnter = () => {
+  // Handle video playback when showTrailer changes
+  useEffect(() => {
+    if (showTrailer && videoRef.current && trailerLoaded) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {
+        // Autoplay may be blocked by browser
+        setTrailerError(true);
+      });
+    } else if (!showTrailer && videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+  }, [showTrailer, trailerLoaded]);
+
+  const handleMouseEnter = useCallback(() => {
     // Delay hover state to prevent flickering
     hoverTimeoutRef.current = setTimeout(() => {
       setIsHovering(true);
     }, 300);
-  };
 
-  const handleMouseLeave = () => {
+    // Delay trailer auto-play for Netflix/YouTube style effect
+    if (item.trailerUrl) {
+      trailerTimeoutRef.current = setTimeout(() => {
+        setShowTrailer(true);
+      }, 800); // Start playing trailer after 800ms of hovering
+    }
+  }, [item.trailerUrl]);
+
+  const handleMouseLeave = useCallback(() => {
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
     }
+    if (trailerTimeoutRef.current) {
+      clearTimeout(trailerTimeoutRef.current);
+    }
     setIsHovering(false);
-  };
+    setShowTrailer(false);
+  }, []);
 
   const handlePlayNow = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -87,26 +122,56 @@ export default function StoreItemCard({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Thumbnail with hover effect */}
+      {/* Thumbnail with hover trailer auto-play (Netflix/YouTube style) */}
       <figure
         className="relative h-48 overflow-hidden cursor-pointer group"
-        onClick={() => navigate(`/item/${item.id}`)}
+        onClick={() => onClick ? onClick(item) : navigate(`/item/${item.id}`)}
       >
+        {/* Thumbnail Image */}
         <img
           src={item.thumbnail}
           alt={item.title}
-          className={`w-full h-full object-cover transition-transform duration-300 ${
+          className={`w-full h-full object-cover transition-all duration-300 ${
             isHovering ? 'scale-110' : 'scale-100'
-          }`}
+          } ${showTrailer && trailerLoaded && !trailerError ? 'opacity-0' : 'opacity-100'}`}
         />
 
-        {/* Hover Overlay with Trailer Preview Placeholder */}
+        {/* Video Trailer (auto-plays on hover) */}
+        {item.trailerUrl && (
+          <video
+            ref={videoRef}
+            src={item.trailerUrl}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+              showTrailer && trailerLoaded && !trailerError ? 'opacity-100' : 'opacity-0'
+            }`}
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            onLoadedData={() => setTrailerLoaded(true)}
+            onError={() => setTrailerError(true)}
+          />
+        )}
+
+        {/* Hover Overlay - shown when no trailer is playing */}
         <div
           className={`absolute inset-0 bg-black/70 transition-opacity duration-300 flex flex-col items-center justify-center ${
-            isHovering ? 'opacity-100' : 'opacity-0'
+            isHovering && (!showTrailer || !trailerLoaded || trailerError) ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          {item.trailerUrl ? (
+          {item.trailerUrl && !trailerError ? (
+            <div className="text-center text-white">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-12 w-12 mx-auto mb-2 animate-pulse"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              <p className="text-sm opacity-75">Loading trailer...</p>
+            </div>
+          ) : item.trailerUrl && trailerError ? (
             <div className="text-center text-white">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -116,7 +181,7 @@ export default function StoreItemCard({
               >
                 <path d="M8 5v14l11-7z" />
               </svg>
-              <p className="text-sm opacity-75">Trailer Preview</p>
+              <p className="text-sm opacity-75">Click to view trailer</p>
             </div>
           ) : (
             <div className="text-white transform scale-90 hover:scale-100 transition-transform duration-300">
@@ -135,6 +200,14 @@ export default function StoreItemCard({
             </div>
           )}
         </div>
+
+        {/* Video Playing Indicator */}
+        {showTrailer && trailerLoaded && !trailerError && (
+          <div className="absolute bottom-2 left-2 flex items-center gap-1 bg-black/60 px-2 py-1 rounded text-white text-xs">
+            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+            <span>Playing</span>
+          </div>
+        )}
 
         {/* Badges */}
         <div className="absolute top-2 left-2 flex flex-col gap-1">

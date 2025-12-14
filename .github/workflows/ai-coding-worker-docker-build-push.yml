@@ -119,6 +119,42 @@ jobs:
             exit 1
           fi
 
+      - name: Cleanup old registry tags
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          echo "🧹 Cleaning up old registry tags..."
+
+          # Get all tags except latest, main, dev, buildcache
+          TAGS=$(curl -s "https://${REGISTRY}/v2/${IMAGE_NAME}/tags/list" | jq -r '.tags[]' 2>/dev/null || echo "")
+
+          DELETED=0
+          for TAG in $TAGS; do
+            # Keep latest, main, dev, and buildcache tags
+            if [[ "$TAG" == "latest" || "$TAG" == "main" || "$TAG" == "dev" || "$TAG" == "buildcache" ]]; then
+              echo "  KEEP: $TAG"
+              continue
+            fi
+
+            # Delete old SHA and branch tags
+            DIGEST=$(curl -sI -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              "https://${REGISTRY}/v2/${IMAGE_NAME}/manifests/${TAG}" 2>/dev/null | \
+              grep -i "docker-content-digest" | awk '{print $2}' | tr -d '\r\n')
+
+            if [ -n "$DIGEST" ]; then
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+                "https://${REGISTRY}/v2/${IMAGE_NAME}/manifests/${DIGEST}")
+              if [ "$HTTP_CODE" -eq 202 ]; then
+                echo "  DELETE: $TAG"
+                ((DELETED++))
+              fi
+            fi
+          done
+
+          echo "✅ Deleted $DELETED old tags"
+
       - name: Deployment Summary
         if: always() && github.ref == 'refs/heads/main'
         run: |

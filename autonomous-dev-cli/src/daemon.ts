@@ -1,5 +1,5 @@
 import { loadConfig, type Config } from './config/index.js';
-import { initDatabase, getUserCredentials, updateUserClaudeAuth, closeDatabase } from './db/index.js';
+import { initDatabase, getUserCredentials, updateUserClaudeAuth, closeDatabase, softDeleteSessionsByIssue } from './db/index.js';
 import { createGitHub, type GitHub, type Issue, type ServiceHealth } from './github/index.js';
 import { formatBuildInfo } from './utils/buildInfo.js';
 import { simpleGit } from 'simple-git';
@@ -2000,6 +2000,21 @@ export class Daemon implements DaemonStateProvider {
                   result.issue.number,
                   `✅ Automatically implemented and merged via PR #${mergeResult.pr?.number}`
                 );
+
+                // Soft-delete associated chat sessions to free up storage
+                try {
+                  const deletedCount = await softDeleteSessionsByIssue(
+                    result.issue.number,
+                    this.config.repo.owner,
+                    this.config.repo.name
+                  );
+                  if (deletedCount > 0) {
+                    logger.info(`Soft-deleted ${deletedCount} session(s) for issue #${result.issue.number}`);
+                  }
+                } catch (sessionError) {
+                  // Don't fail the cycle if session cleanup fails
+                  logger.warn(`Failed to delete sessions for issue #${result.issue.number}: ${getErrorMessage(sessionError)}`);
+                }
 
                 // Update STATUS.md with changelog entry for completed task
                 try {

@@ -89,19 +89,31 @@ function App() {
     }
 
     // Detect from current pathname for path-based routing
-    // Example: https://webedit.etdofresh.com/github/webedt/website/branch/ -> /github/webedt/website/branch
-    // Monorepo: https://webedit.etdofresh.com/github/webedt/monorepo/website/branch/ -> /github/webedt/monorepo/website/branch
+    // Patterns:
+    //   /github/owner/repo/branch/...  (preview via /github prefix)
+    //   /owner/repo/branch/...         (standard path-based)
+    //   /owner/repo/website/branch/... (monorepo website folder)
     const pathname = window.location.pathname;
-
-    // Check if we're in a path-based deployment (3+ path segments)
     const pathSegments = pathname.split('/').filter(Boolean);
-    if (pathSegments.length >= 3 && !['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin', 'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community', 'item', 'github', 'store', 'quick-setup', 'dashboard'].includes(pathSegments[0])) {
+
+    // App routes that should not be treated as path-based deployment prefixes
+    const appRoutes = ['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin',
+                       'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
+                       'item', 'store', 'quick-setup', 'dashboard', 'landing'];
+
+    if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
+      // Check for /github/ prefix pattern: /github/owner/repo/branch/
+      if (pathSegments[0] === 'github' && pathSegments.length >= 4) {
+        return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
+      }
       // Check for monorepo pattern: /owner/repo/website/branch/
       if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
         return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
       }
       // Standard format: /owner/repo/branch/...
-      return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+      if (pathSegments.length >= 3) {
+        return `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+      }
     }
 
     return '/';

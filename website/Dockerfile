@@ -3,8 +3,9 @@ FROM node:20-alpine AS client-build
 
 WORKDIR /app/client
 
-# Copy client package files
+# Copy client package files and local tarball dependencies
 COPY client/package*.json ./
+COPY client/*.tgz ./
 
 # Install client dependencies
 RUN npm install

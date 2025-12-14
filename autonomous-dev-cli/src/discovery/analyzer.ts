@@ -1285,18 +1285,39 @@ export class CodebaseAnalyzer {
    */
   private shouldExclude(relativePath: string): boolean {
     for (const pattern of this.excludePaths) {
-      try {
-        // First try as a simple prefix match
-        if (relativePath.startsWith(pattern)) {
-          return true;
+      // First try as a simple prefix match
+      if (relativePath.startsWith(pattern)) {
+        return true;
+      }
+
+      // Handle glob-style patterns (*.ext, **/*.ext)
+      if (pattern.includes('*')) {
+        // Convert glob to regex: *.ts -> \.ts$, **/*.ts -> .*\.ts$
+        const regexPattern = pattern
+          .replace(/\./g, '\\.')           // Escape dots
+          .replace(/\*\*/g, '<<<GLOBSTAR>>>')  // Preserve ** temporarily
+          .replace(/\*/g, '[^/]*')         // * matches anything except /
+          .replace(/<<<GLOBSTAR>>>/g, '.*'); // ** matches anything including /
+
+        try {
+          const regex = new RegExp(regexPattern);
+          if (regex.test(relativePath)) {
+            return true;
+          }
+        } catch {
+          // Invalid regex, skip silently (only log once per unique pattern)
         }
-        // Then try as a regex pattern (with safety check already done in validateConfig)
-        if (relativePath.match(pattern)) {
-          return true;
+      } else {
+        // Try as a regex pattern if it looks like one (contains regex chars)
+        if (/[\\^$+?{}[\]|()]/.test(pattern)) {
+          try {
+            if (relativePath.match(pattern)) {
+              return true;
+            }
+          } catch {
+            // Invalid regex, skip silently
+          }
         }
-      } catch {
-        // If the pattern fails to match, skip it and log a warning
-        logger.debug(`Skipping invalid exclude pattern: ${pattern}`);
       }
     }
     return false;

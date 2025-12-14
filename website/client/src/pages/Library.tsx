@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useViewMode } from '@/hooks/useViewMode';
 import { useLibrary } from '@/hooks/useLibrary';
-import ViewToggle from '@/components/ViewToggle';
-import ItemGridView from '@/components/ItemViews/ItemGridView';
-import ItemDetailedView from '@/components/ItemViews/ItemDetailedView';
-import ItemMinimalView from '@/components/ItemViews/ItemMinimalView';
-import type { LibraryItem, LibraryFilter, SortField } from '@/types/library';
+import { useLibraryPreferences } from '@/hooks/useLibraryPreferences';
+import {
+  LibraryViewSelector,
+  LibraryFilters,
+} from '@/components/library';
+import { GridView, ListView, CompactListView } from '@/components/LibraryViews';
+import type { LibraryItem } from '@/types/library';
 
 // Mock library items - in production these would come from an API
 const mockLibraryItems: LibraryItem[] = [
@@ -91,21 +91,29 @@ const mockLibraryItems: LibraryItem[] = [
   },
 ];
 
-// Filter label mapping
-const filterLabels: Record<LibraryFilter, string> = {
-  'all': 'All',
-  'recently-added': 'Recently Added',
-  'recently-played': 'Recently Played',
-  'most-used': 'Most Used',
-  'favorites': 'Favorites',
-  'wishlisted': 'Wishlisted',
-};
-
+/**
+ * Library page component.
+ * Implements SPEC.md Sections 4.2, 4.3, and 4.4:
+ * - Three view modes: Grid, List, Compact List
+ * - Filtering & sorting options
+ * - Organization features (favorites, collections)
+ */
 export default function Library() {
-  const [viewMode, setViewMode] = useViewMode('library-view');
-  const navigate = useNavigate();
+  // Use the library preferences hook for view mode and favorites/collections
+  const {
+    viewMode,
+    setViewMode,
+    isFavorite,
+    toggleFavorite,
+    collections,
+    createCollection,
+    deleteCollection,
+    addToCollection,
+    removeFromCollection,
+    getItemCollections,
+  } = useLibraryPreferences();
 
-  // Use the library hook for all state management
+  // Use the library hook for filtering, sorting, and pagination
   const {
     items,
     totalItems,
@@ -119,14 +127,6 @@ export default function Library() {
     currentPage,
     setCurrentPage,
     totalPages,
-    toggleFavorite,
-    isFavorite,
-    collections,
-    createCollection,
-    deleteCollection,
-    addToCollection,
-    removeFromCollection,
-    getItemCollections,
   } = useLibrary(mockLibraryItems);
 
   // State for collection management modal
@@ -157,421 +157,6 @@ export default function Library() {
       setShowCollectionModal(false);
     }
   };
-
-  // Render sort icon
-  const renderSortIcon = (field: Exclude<SortField, null>) => {
-    if (sortField !== field) {
-      return (
-        <svg className="w-4 h-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-        </svg>
-      );
-    }
-    if (sortDirection === 'asc') {
-      return (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-        </svg>
-      );
-    }
-    return (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-      </svg>
-    );
-  };
-
-  // Render favorite star button
-  const renderFavoriteButton = (itemId: number, size: 'sm' | 'md' = 'md') => {
-    const favorited = isFavorite(itemId);
-    const sizeClasses = size === 'sm' ? 'h-4 w-4' : 'h-5 w-5';
-    const btnClasses = size === 'sm' ? 'btn-xs' : 'btn-sm';
-
-    return (
-      <button
-        className={`btn btn-ghost ${btnClasses} btn-circle`}
-        onClick={(e) => {
-          e.stopPropagation();
-          toggleFavorite(itemId);
-        }}
-        title={favorited ? 'Remove from Favorites' : 'Add to Favorites'}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className={`${sizeClasses} ${favorited ? 'text-warning fill-warning' : ''}`}
-          viewBox="0 0 24 24"
-          fill={favorited ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-        </svg>
-      </button>
-    );
-  };
-
-  // Render collection menu button
-  const renderCollectionMenu = (itemId: number, size: 'sm' | 'md' = 'md') => {
-    const btnClasses = size === 'sm' ? 'btn-xs' : 'btn-sm';
-    const sizeClasses = size === 'sm' ? 'h-4 w-4' : 'h-5 w-5';
-    const itemCollections = getItemCollections(itemId);
-
-    return (
-      <div className="relative">
-        <button
-          className={`btn btn-ghost ${btnClasses} btn-circle`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setCollectionMenuItemId(collectionMenuItemId === itemId ? null : itemId);
-          }}
-          title="Add to Collection"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className={sizeClasses}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-          </svg>
-        </button>
-
-        {collectionMenuItemId === itemId && (
-          <div
-            ref={collectionMenuRef}
-            className="absolute right-0 top-full mt-1 w-48 bg-base-100 rounded-lg shadow-xl border border-base-300 py-2 z-50"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-3 py-1 text-xs font-semibold text-base-content/60 uppercase">
-              Collections
-            </div>
-            {collections.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-base-content/50">
-                No collections yet
-              </div>
-            ) : (
-              collections.map((collection) => {
-                const isInCollection = itemCollections.some(c => c.id === collection.id);
-                return (
-                  <button
-                    key={collection.id}
-                    onClick={() => {
-                      if (isInCollection) {
-                        removeFromCollection(itemId, collection.id);
-                      } else {
-                        addToCollection(itemId, collection.id);
-                      }
-                    }}
-                    className="w-full px-3 py-2 text-sm text-left hover:bg-base-200 flex items-center gap-2"
-                  >
-                    <span className={`w-4 h-4 flex items-center justify-center ${isInCollection ? 'text-success' : 'text-base-content/30'}`}>
-                      {isInCollection ? (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                      )}
-                    </span>
-                    {collection.name}
-                  </button>
-                );
-              })
-            )}
-            <div className="border-t border-base-300 mt-2 pt-2">
-              <button
-                onClick={() => {
-                  setCollectionMenuItemId(null);
-                  setShowCollectionModal(true);
-                }}
-                className="w-full px-3 py-2 text-sm text-left hover:bg-base-200 flex items-center gap-2 text-primary"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                New Collection
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Header for list views
-  const renderHeader = () => (
-    <div className="flex items-center gap-4 px-4 py-3 bg-base-300 rounded-lg font-semibold text-sm mb-2">
-      <div className="w-10 h-10"></div> {/* Thumbnail spacer */}
-      <div className="w-12"></div> {/* Favorite spacer */}
-      <button
-        onClick={() => handleSort('title')}
-        className="flex-1 flex items-center gap-2 hover:text-primary transition-colors"
-      >
-        Title
-        {renderSortIcon('title')}
-      </button>
-      <button
-        onClick={() => handleSort('price')}
-        className="flex items-center gap-2 hover:text-primary transition-colors"
-      >
-        Price
-        {renderSortIcon('price')}
-      </button>
-      <div className="w-24"></div> {/* Actions spacer */}
-    </div>
-  );
-
-  // Grid/Card view renderer
-  const renderCard = (item: LibraryItem) => (
-    <div
-      key={item.id}
-      className="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow"
-    >
-      {/* Thumbnail - Clickable to Open */}
-      <figure
-        className="relative h-48 overflow-hidden cursor-pointer group"
-        onClick={() => navigate(`/library/${item.id}`)}
-      >
-        <img
-          src={item.thumbnail}
-          alt={item.title}
-          className="w-full h-full object-cover transition-transform group-hover:scale-105"
-        />
-        {/* Hover Overlay */}
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-          <div className="text-white transform scale-90 group-hover:scale-100 transition-transform duration-300">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-16 w-16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-          </div>
-        </div>
-
-        {/* Favorite Star - Top Right Corner */}
-        <div className="absolute top-2 right-2 z-10" onClick={(e) => e.stopPropagation()}>
-          {renderFavoriteButton(item.id)}
-        </div>
-      </figure>
-
-      <div className="card-body p-4">
-        {/* Title */}
-        <h2 className="card-title text-lg">{item.title}</h2>
-
-        {/* Description */}
-        <p className="text-sm text-base-content/70 line-clamp-2 mb-2">
-          {item.description}
-        </p>
-
-        {/* Price with Icons */}
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-success font-semibold">Owned</div>
-          <div className="flex gap-2">
-            {/* Collection Menu */}
-            {renderCollectionMenu(item.id)}
-
-            {/* Launch Icon */}
-            <button
-              className="btn btn-ghost btn-sm btn-circle"
-              onClick={(e) => {
-                e.stopPropagation();
-                console.log('Launch:', item.title);
-              }}
-              title="Launch"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </button>
-
-            {/* Info Icon */}
-            <button
-              className="btn btn-ghost btn-sm btn-circle"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/library/${item.id}`);
-              }}
-              title="View Details"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4M12 8h.01" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Detailed line view renderer
-  const renderDetailedRow = (item: LibraryItem) => (
-    <div
-      key={item.id}
-      className="flex items-center gap-4 p-4 bg-base-100 rounded-lg shadow hover:shadow-lg transition-shadow cursor-pointer"
-      onClick={() => navigate(`/library/${item.id}`)}
-    >
-      {/* Thumbnail */}
-      <img
-        src={item.thumbnail}
-        alt={item.title}
-        className="w-24 h-24 object-cover rounded"
-      />
-
-      {/* Favorite */}
-      <div onClick={(e) => e.stopPropagation()}>
-        {renderFavoriteButton(item.id)}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <h3 className="text-lg font-semibold text-base-content">{item.title}</h3>
-        <p className="text-sm text-base-content/70 mt-1">{item.description}</p>
-        <p className="text-xs text-success font-semibold mt-2">Owned</p>
-      </div>
-
-      {/* Price and Actions */}
-      <div className="flex items-center gap-4">
-        <div className="text-lg font-semibold text-base-content/60">{item.price}</div>
-        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-          {renderCollectionMenu(item.id)}
-          <button
-            className="btn btn-ghost btn-sm btn-circle"
-            onClick={(e) => {
-              e.stopPropagation();
-              console.log('Launch:', item.title);
-            }}
-            title="Launch"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </button>
-          <button
-            className="btn btn-ghost btn-sm btn-circle"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/library/${item.id}`);
-            }}
-            title="View Details"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 16v-4M12 8h.01" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Minimal line view renderer
-  const renderMinimalRow = (item: LibraryItem) => (
-    <div
-      key={item.id}
-      className="flex items-center gap-4 p-3 bg-base-100 rounded hover:bg-base-200 transition-colors cursor-pointer"
-      onClick={() => navigate(`/library/${item.id}`)}
-    >
-      {/* Icon/Thumbnail */}
-      <img
-        src={item.thumbnail}
-        alt={item.title}
-        className="w-10 h-10 object-cover rounded"
-      />
-
-      {/* Favorite */}
-      <div onClick={(e) => e.stopPropagation()}>
-        {renderFavoriteButton(item.id, 'sm')}
-      </div>
-
-      {/* Title */}
-      <div className="flex-1 min-w-0">
-        <h3 className="text-sm font-medium text-base-content truncate">{item.title}</h3>
-      </div>
-
-      {/* Price */}
-      <div className="text-xs text-base-content/60">{item.price}</div>
-
-      {/* Quick Actions */}
-      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-        {renderCollectionMenu(item.id, 'sm')}
-        <button
-          className="btn btn-ghost btn-xs btn-circle"
-          onClick={(e) => {
-            e.stopPropagation();
-            console.log('Launch:', item.title);
-          }}
-          title="Launch"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-          >
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        </button>
-        <button
-          className="btn btn-ghost btn-xs btn-circle"
-          onClick={(e) => {
-            e.stopPropagation();
-            navigate(`/library/${item.id}`);
-          }}
-          title="View Details"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 16v-4M12 8h.01" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
 
   // Render pagination controls
   const renderPagination = () => {
@@ -619,6 +204,7 @@ export default function Library() {
           className="btn btn-sm btn-ghost"
           onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
           disabled={currentPage === 1}
+          aria-label="Previous page"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -631,6 +217,8 @@ export default function Library() {
               key={index}
               className={`btn btn-sm ${currentPage === page ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setCurrentPage(page)}
+              aria-label={`Page ${page}`}
+              aria-current={currentPage === page ? 'page' : undefined}
             >
               {page}
             </button>
@@ -643,6 +231,7 @@ export default function Library() {
           className="btn btn-sm btn-ghost"
           onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
           disabled={currentPage === totalPages}
+          aria-label="Next page"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -663,77 +252,29 @@ export default function Library() {
           </p>
         </div>
 
-        {/* Filter Tabs, Collections, and View Toggle */}
+        {/* View Selector and Filters */}
         <div className="mb-8 space-y-4">
-          {/* Main filter row */}
+          {/* Top row - View selector */}
           <div className="flex flex-wrap gap-4 items-center justify-between">
-            {/* Category Filters */}
-            <div className="flex gap-2 flex-wrap">
-              {(Object.keys(filterLabels) as LibraryFilter[]).map((filterKey) => (
-                <button
-                  key={filterKey}
-                  onClick={() => setFilter(filterKey)}
-                  className={`btn btn-sm ${
-                    filter === filterKey ? 'btn-primary' : 'btn-ghost'
-                  }`}
-                >
-                  {filterLabels[filterKey]}
-                </button>
-              ))}
-            </div>
-
-            <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-          </div>
-
-          {/* Collections row */}
-          <div className="flex gap-2 items-center flex-wrap">
-            <span className="text-sm text-base-content/60">Collections:</span>
-            <button
-              onClick={() => setSelectedCollection(null)}
-              className={`btn btn-xs ${selectedCollection === null ? 'btn-secondary' : 'btn-ghost'}`}
-            >
-              All
-            </button>
-            {collections.map((collection) => (
-              <div key={collection.id} className="relative group">
-                <button
-                  onClick={() => setSelectedCollection(collection.id)}
-                  className={`btn btn-xs ${selectedCollection === collection.id ? 'btn-secondary' : 'btn-ghost'}`}
-                >
-                  {collection.name}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm(`Delete collection "${collection.name}"?`)) {
-                      deleteCollection(collection.id);
-                      if (selectedCollection === collection.id) {
-                        setSelectedCollection(null);
-                      }
-                    }
-                  }}
-                  className="absolute -top-1 -right-1 w-4 h-4 bg-error text-error-content rounded-full text-xs hidden group-hover:flex items-center justify-center"
-                  title="Delete collection"
-                >
-                  x
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() => setShowCollectionModal(true)}
-              className="btn btn-xs btn-ghost text-primary"
-            >
-              + New
-            </button>
-          </div>
-
-          {/* Results count */}
-          <div className="text-sm text-base-content/60">
-            Showing {items.length} of {totalItems} items
+            <LibraryFilters
+              filter={filter}
+              onFilterChange={setFilter}
+              selectedCollection={selectedCollection}
+              onCollectionChange={setSelectedCollection}
+              collections={collections}
+              onCreateCollection={() => setShowCollectionModal(true)}
+              onDeleteCollection={deleteCollection}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+              totalItems={totalItems}
+              displayedItems={items.length}
+            />
+            <LibraryViewSelector viewMode={viewMode} onViewModeChange={setViewMode} />
           </div>
         </div>
 
-        {/* Library Items - Dynamic View */}
+        {/* Library Items - Dynamic View based on view mode */}
         {items.length === 0 ? (
           <div className="text-center py-16">
             <div className="text-6xl mb-4">
@@ -752,14 +293,61 @@ export default function Library() {
           </div>
         ) : (
           <>
+            {/* Grid View - Thumbnail-based grid layout (SPEC.md Section 4.2) */}
             {viewMode === 'grid' && (
-              <ItemGridView items={items} renderCard={renderCard} />
+              <GridView
+                items={items}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                collections={collections}
+                getItemCollections={getItemCollections}
+                onAddToCollection={addToCollection}
+                onRemoveFromCollection={removeFromCollection}
+                onOpenCollectionModal={() => setShowCollectionModal(true)}
+                collectionMenuItemId={collectionMenuItemId}
+                onSetCollectionMenuItemId={setCollectionMenuItemId}
+                collectionMenuRef={collectionMenuRef}
+              />
             )}
+
+            {/* List View - Standard list with more details (SPEC.md Section 4.2) */}
             {viewMode === 'detailed' && (
-              <ItemDetailedView items={items} renderRow={renderDetailedRow} renderHeader={renderHeader} />
+              <ListView
+                items={items}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                collections={collections}
+                getItemCollections={getItemCollections}
+                onAddToCollection={addToCollection}
+                onRemoveFromCollection={removeFromCollection}
+                onOpenCollectionModal={() => setShowCollectionModal(true)}
+                collectionMenuItemId={collectionMenuItemId}
+                onSetCollectionMenuItemId={setCollectionMenuItemId}
+                collectionMenuRef={collectionMenuRef}
+              />
             )}
+
+            {/* Compact List View - Dense list for power users (SPEC.md Section 4.2) */}
             {viewMode === 'minimal' && (
-              <ItemMinimalView items={items} renderRow={renderMinimalRow} renderHeader={renderHeader} />
+              <CompactListView
+                items={items}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                collections={collections}
+                getItemCollections={getItemCollections}
+                onAddToCollection={addToCollection}
+                onRemoveFromCollection={removeFromCollection}
+                onOpenCollectionModal={() => setShowCollectionModal(true)}
+                collectionMenuItemId={collectionMenuItemId}
+                onSetCollectionMenuItemId={setCollectionMenuItemId}
+                collectionMenuRef={collectionMenuRef}
+              />
             )}
           </>
         )}
