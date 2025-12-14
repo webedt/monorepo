@@ -322,8 +322,8 @@ export const ConfigSchema = z.object({
    * Control the continuous daemon mode.
    */
   daemon: z.object({
-    /** Interval between daemon cycles in milliseconds (min: 0, default: 60000 = 1 minute) */
-    loopIntervalMs: z.number().min(0, 'Interval cannot be negative').default(60000),
+    /** Interval between daemon cycles in milliseconds (min: 0, default: 5000 = 5 seconds) */
+    loopIntervalMs: z.number().min(0, 'Interval cannot be negative').default(5000),
     /** Pause between development cycles (default: true) */
     pauseBetweenCycles: z.boolean().default(true),
   }).describe('Daemon mode settings'),
@@ -627,7 +627,7 @@ export const defaultConfig: Partial<Config> = {
     maxChangedFilesInDescription: 10,
   },
   daemon: {
-    loopIntervalMs: 60000,
+    loopIntervalMs: 5000,
     pauseBetweenCycles: true,
   },
   logging: {
