@@ -127,65 +127,65 @@ For detailed architecture information, see the [Architecture Guide](./architectu
 
 ### Dashboard (Homepage)
 
-The Dashboard is a separate page from the Store, serving as a personalized aggregation hub that pulls content from multiple sections of the platform.
+The Dashboard is a separate page from the Store, serving as a personalized aggregation hub that pulls content from multiple sections of the platform (SPEC.md Section 2).
 
-**Layout:**
+**Layout (Section 2.1):**
 - **Customizable Widget System** - Drag-and-drop widget arrangement
 - Choose which sections appear on your dashboard
 - Layout saved per user for persistent personalization
 
-**Available Widgets/Sections:**
-- **Recently Played** - Your recently played games
+**Available Widgets/Sections (Section 2.2):**
+- **Recently Played** - User's recently played games
 - **Editor Quick Access** - Recent sessions, quick-start options
 - **Store Highlights** - Featured and new items
 - **Library Favorites** - Quick access to favorited items
 - **Community Activity** - Recent channel messages
 - **Session Activity** - Active/recent editor sessions
 
-**Personalization:**
+**Personalization (Section 2.3):**
 - Adapts based on user preferences (player vs. editor focus)
 - Default landing page configurable in settings
 
 ### Store (Marketplace)
 
-The Store provides a grid-based marketplace for browsing and purchasing games.
+The Store provides a grid-based marketplace for browsing and purchasing games (SPEC.md Section 3).
 
-**Layout & Display:**
+**Layout & Display (Section 3.1):**
 - Grid view layout with thumbnails
 - Each item displays: thumbnail image, price (or "Free" badge), "Play Now" button, "View Trailer" button/link, and wishlist button
 
-**Hover Behavior:**
+**Hover Behavior (Section 3.2):**
 - **Trailer Auto-play** - When hovering over an item with a trailer, automatically play the trailer video (Netflix/YouTube style)
 
-**Search & Filtering:**
+**Search & Filtering (Section 3.3):**
 - **Universal Search Box** - Single text input that searches across all fields (title, description, tags, creator, etc.)
 - **Filter Dropdowns** - Category, genre, price range, etc.
 - **Categories/Tags/Genres** - Admin-configurable taxonomy system for organizing items
 
-**Pricing & Commerce:**
+**Pricing & Commerce (Section 3.4):**
 - **Payment Providers** - Stripe and PayPal integration
 - **Pricing Options** - Free items, paid items, sales/discounts, bundles (items can also be purchased individually)
 
-**Wishlist:**
+**Wishlist (Section 3.5):**
 - Add items to personal wishlist
 - Wishlist notifications (price drops, sales)
 - Wishlist visible in user library
 
-**Ratings & Reviews:**
+**Ratings & Reviews (Section 3.6):**
 - User rating system (star-based or similar)
 - Written reviews with review moderation
 
-**Creator Analytics:**
+**Creator Analytics (Section 3.7):**
 - Views/impressions, wishlist adds, conversion rates
 - Revenue tracking, download/play counts
 
-**Publishing Pipeline:**
+**Publishing Pipeline (Section 3.8):**
 - Mechanism for developers to publish projects from editor to store
 - Support for publishing as individual or organization/studio
 
 ### Library
 
-The Library displays your purchased and wishlisted items with multiple view options. The library is only visible when the user is logged in (hidden for unauthenticated users).
+The Library displays your purchased and wishlisted items with multiple view options. Per SPEC.md Section 4, the library link/tab is only visible when the user is logged in and is hidden for unauthenticated users.
 
 **View Options (Three View Modes):**
 1. **Grid View** - Thumbnail-based grid layout with visual item cards
@@ -213,9 +213,9 @@ The Library displays your purchased and wishlisted items with multiple view opti
 **Organization Features:**
 - **Quick Favorite** - Star/favorite icon accessible directly from any view (click to toggle)
 - **Custom Collections/Folders** - User-created organizational folders with create/delete/add/remove functionality
-- **Pagination** - Navigate through large libraries with page controls
+- **Pagination or Infinite Scroll** - Navigate through large libraries with page controls
 
-**Cloud Services:**
+**Cloud Services (Section 4.5):**
 - **Cloud Saves** - Synced across devices automatically (web-based games sync inherently)
 - **Shared Platform Libraries for Games:**
   - Cloud save API
@@ -488,4 +488,4 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 ---
 
 *Documentation last updated: December 2025*
-*Updated for Dashboard, Store, and Library features per SPEC.md Sections 2-4*
+*Updated for Dashboard (Section 2), Store (Section 3), and Library (Section 4) features per SPEC.md*
