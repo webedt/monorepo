@@ -1,163 +1,45 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useViewMode } from '@/hooks/useViewMode';
 import { useWishlist } from '@/hooks/useWishlist';
+import { useStoreFilters } from '@/hooks/useStoreFilters';
 import ViewToggle from '@/components/ViewToggle';
 import ItemDetailedView from '@/components/ItemViews/ItemDetailedView';
 import ItemMinimalView from '@/components/ItemViews/ItemMinimalView';
-import { StoreItemCard, StoreGrid, StoreItemModal } from '@/components/store';
+import { StoreItemCard, StoreGrid, StoreItemModal, StoreFilters } from '@/components/store';
 import { mockStoreItems } from '@/data/mockStoreData';
-import type {
-  StoreItem,
-  StoreCategory,
-  StoreGenre,
-  PriceRange,
-  StoreSortField,
-  SortDirection,
-} from '@/types/store';
-import { categoryLabels, genreLabels, priceRangeLabels } from '@/types/store';
+import type { StoreItem, StoreSortField } from '@/types/store';
 
 export default function Store() {
   const navigate = useNavigate();
   const [viewMode, setViewMode] = useViewMode('store-view');
   const { isWishlisted, toggleWishlist } = useWishlist();
 
-  // Search and filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<StoreCategory | 'all'>('all');
-  const [selectedGenre, setSelectedGenre] = useState<StoreGenre | 'all'>('all');
-  const [selectedPriceRange, setSelectedPriceRange] = useState<PriceRange>('all');
-  const [showOnSaleOnly, setShowOnSaleOnly] = useState(false);
-
-  // Sort state
-  const [sortField, setSortField] = useState<StoreSortField>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  // Use the store filters hook for search and filtering
+  const {
+    items: sortedItems,
+    filteredCount,
+    totalCount,
+    searchQuery,
+    setSearchQuery,
+    selectedCategory,
+    setSelectedCategory,
+    selectedGenre,
+    setSelectedGenre,
+    selectedPriceRange,
+    setSelectedPriceRange,
+    showOnSaleOnly,
+    setShowOnSaleOnly,
+    sortField,
+    sortDirection,
+    handleSort,
+    hasActiveFilters,
+    clearFilters,
+  } = useStoreFilters(mockStoreItems);
 
   // Modal state
   const [selectedItem, setSelectedItem] = useState<StoreItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  // Filter items based on search and filters
-  const filteredItems = useMemo(() => {
-    return mockStoreItems.filter((item) => {
-      // Search filter - searches across multiple fields
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const searchableText = [
-          item.title,
-          item.description,
-          item.creator,
-          item.category,
-          item.genre,
-          ...item.tags,
-        ]
-          .join(' ')
-          .toLowerCase();
-
-        if (!searchableText.includes(query)) {
-          return false;
-        }
-      }
-
-      // Category filter
-      if (selectedCategory !== 'all' && item.category !== selectedCategory) {
-        return false;
-      }
-
-      // Genre filter
-      if (selectedGenre !== 'all' && item.genre !== selectedGenre) {
-        return false;
-      }
-
-      // Price range filter
-      if (selectedPriceRange !== 'all') {
-        const price = item.price ?? 0;
-        switch (selectedPriceRange) {
-          case 'free':
-            if (price !== 0) return false;
-            break;
-          case 'under5':
-            if (price === 0 || price >= 5) return false;
-            break;
-          case 'under10':
-            if (price === 0 || price >= 10) return false;
-            break;
-          case 'under25':
-            if (price === 0 || price >= 25) return false;
-            break;
-          case 'under50':
-            if (price === 0 || price >= 50) return false;
-            break;
-          case 'over50':
-            if (price <= 50) return false;
-            break;
-        }
-      }
-
-      // On sale filter
-      if (showOnSaleOnly && !item.isOnSale) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [searchQuery, selectedCategory, selectedGenre, selectedPriceRange, showOnSaleOnly]);
-
-  // Sort items
-  const sortedItems = useMemo(() => {
-    if (!sortField || !sortDirection) {
-      return filteredItems;
-    }
-
-    return [...filteredItems].sort((a, b) => {
-      let comparison = 0;
-
-      switch (sortField) {
-        case 'title':
-          comparison = a.title.localeCompare(b.title);
-          break;
-        case 'price':
-          const priceA = a.price ?? 0;
-          const priceB = b.price ?? 0;
-          comparison = priceA - priceB;
-          break;
-        case 'releaseDate':
-          comparison = new Date(a.releaseDate).getTime() - new Date(b.releaseDate).getTime();
-          break;
-        case 'rating':
-          comparison = (a.rating ?? 0) - (b.rating ?? 0);
-          break;
-      }
-
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-  }, [filteredItems, sortField, sortDirection]);
-
-  // Handle sort click
-  const handleSort = (field: Exclude<StoreSortField, null>) => {
-    if (sortField === field) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortField(null);
-        setSortDirection(null);
-      }
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
-
-  // Clear all filters
-  const clearFilters = () => {
-    setSearchQuery('');
-    setSelectedCategory('all');
-    setSelectedGenre('all');
-    setSelectedPriceRange('all');
-    setShowOnSaleOnly(false);
-    setSortField(null);
-    setSortDirection(null);
-  };
 
   // Handle wishlist toggle
   const handleToggleWishlist = (item: StoreItem) => {
@@ -504,13 +386,6 @@ export default function Store() {
     );
   };
 
-  const hasActiveFilters =
-    searchQuery ||
-    selectedCategory !== 'all' ||
-    selectedGenre !== 'all' ||
-    selectedPriceRange !== 'all' ||
-    showOnSaleOnly;
-
   return (
     <div className="min-h-screen bg-base-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -520,136 +395,25 @@ export default function Store() {
           <p className="text-base-content/70">Browse and discover games in our marketplace</p>
         </div>
 
-        {/* Search Box */}
+        {/* Search and Filters */}
         <div className="mb-6">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Search games, creators, tags..."
-              className="input input-bordered w-full pl-10 pr-4"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-base-content/50"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-            {searchQuery && (
-              <button
-                className="absolute right-3 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs btn-circle"
-                onClick={() => setSearchQuery('')}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Filter Dropdowns and View Toggle */}
-        <div className="mb-6 flex flex-wrap gap-4 items-center justify-between">
-          <div className="flex flex-wrap gap-3 items-center">
-            {/* Category Dropdown */}
-            <select
-              className="select select-bordered select-sm"
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value as StoreCategory | 'all')}
-            >
-              {(Object.keys(categoryLabels) as (StoreCategory | 'all')[]).map((cat) => (
-                <option key={cat} value={cat}>
-                  {categoryLabels[cat]}
-                </option>
-              ))}
-            </select>
-
-            {/* Genre Dropdown */}
-            <select
-              className="select select-bordered select-sm"
-              value={selectedGenre}
-              onChange={(e) => setSelectedGenre(e.target.value as StoreGenre | 'all')}
-            >
-              {(Object.keys(genreLabels) as (StoreGenre | 'all')[]).map((genre) => (
-                <option key={genre} value={genre}>
-                  {genreLabels[genre]}
-                </option>
-              ))}
-            </select>
-
-            {/* Price Range Dropdown */}
-            <select
-              className="select select-bordered select-sm"
-              value={selectedPriceRange}
-              onChange={(e) => setSelectedPriceRange(e.target.value as PriceRange)}
-            >
-              {(Object.keys(priceRangeLabels) as PriceRange[]).map((range) => (
-                <option key={range} value={range}>
-                  {priceRangeLabels[range]}
-                </option>
-              ))}
-            </select>
-
-            {/* On Sale Toggle */}
-            <label className="cursor-pointer label gap-2">
-              <input
-                type="checkbox"
-                className="checkbox checkbox-sm checkbox-primary"
-                checked={showOnSaleOnly}
-                onChange={(e) => setShowOnSaleOnly(e.target.checked)}
-              />
-              <span className="label-text">On Sale</span>
-            </label>
-
-            {/* Clear Filters Button */}
-            {hasActiveFilters && (
-              <button className="btn btn-ghost btn-sm text-error" onClick={clearFilters}>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 mr-1"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-                Clear Filters
-              </button>
-            )}
-          </div>
-
-          <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-        </div>
-
-        {/* Results Count */}
-        <div className="mb-4 text-sm text-base-content/60">
-          Showing {sortedItems.length} of {mockStoreItems.length} items
-          {hasActiveFilters && ' (filtered)'}
+          <StoreFilters
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            selectedCategory={selectedCategory}
+            onCategoryChange={setSelectedCategory}
+            selectedGenre={selectedGenre}
+            onGenreChange={setSelectedGenre}
+            selectedPriceRange={selectedPriceRange}
+            onPriceRangeChange={setSelectedPriceRange}
+            showOnSaleOnly={showOnSaleOnly}
+            onShowOnSaleChange={setShowOnSaleOnly}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={clearFilters}
+            filteredCount={filteredCount}
+            totalCount={totalCount}
+            rightContent={<ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />}
+          />
         </div>
 
         {/* Store Items - Dynamic View */}
@@ -698,6 +462,21 @@ export default function Store() {
           </>
         )}
       </div>
+
+      {/* Item Modal */}
+      {selectedItem && (
+        <StoreItemModal
+          item={selectedItem}
+          isOpen={isModalOpen}
+          onClose={handleCloseModal}
+          onPurchase={handlePurchase}
+          onPlayNow={handlePlayNow}
+          isWishlisted={isWishlisted(selectedItem.id)}
+          onToggleWishlist={() => handleToggleWishlist(selectedItem)}
+          allItems={sortedItems}
+          onNavigateItem={handleNavigateItem}
+        />
+      )}
     </div>
   );
 }
