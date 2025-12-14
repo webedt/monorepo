@@ -2,7 +2,7 @@
 
 This document provides detailed API documentation for the WebEDT Platform and Autonomous Development System's key interfaces, classes, and modules.
 
-The WebEDT Platform includes a Dashboard (Section 2), Store/Marketplace (Section 3), Library (Section 4), and Editor Suite (Section 6) as defined in SPEC.md. The autonomous development system powers continuous AI-driven code improvement.
+The WebEDT Platform includes a Dashboard (Section 2), Store/Marketplace (Section 3), Library (Section 4), Community (Section 5), and Editor Suite (Section 6) as defined in SPEC.md. The autonomous development system powers continuous AI-driven code improvement.
 
 ## Table of Contents
 

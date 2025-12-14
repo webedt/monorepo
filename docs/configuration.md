@@ -2,7 +2,7 @@
 
 This guide provides comprehensive documentation for all configuration options in the WebEDT Platform and Autonomous Development System.
 
-For platform feature specifications, see SPEC.md (Dashboard: Section 2, Store: Section 3, Library: Section 4, Editor Suite: Section 6).
+For platform feature specifications, see SPEC.md (Dashboard: Section 2, Store: Section 3, Library: Section 4, Community: Section 5, Editor Suite: Section 6).
 
 ## Table of Contents
 

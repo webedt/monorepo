@@ -192,23 +192,25 @@ The Library displays your purchased and wishlisted items with multiple view opti
 2. **List View** - Standard list with more details including description and metadata
 3. **Compact List View** - Dense list for power users with minimal visual elements
 
-**Filtering & Sorting:**
+**Filtering Options:**
 - All items - View complete library
-- Recently added - Sort by purchase date
-- Recently played - Sort by last played date
-- Most used - Sort by play count
+- Recently added - Filter to items purchased within the last 7 days
+- Recently played - Filter to items played within the last 7 days
+- Most used - Filter to items with high play counts
 - Favorites - Filter to starred items only
 - By collection/folder - Filter by user-created collections
 - Wishlisted items - View items on wishlist
 
 **Sorting Options:**
-- Title (A-Z, Z-A)
-- Date Added (Newest/Oldest)
-- Last Played (Recent/Oldest)
-- Play Count (Most/Least)
+- Title - Alphabetical sorting (A-Z or Z-A)
+- Date Added - Sort by purchase date (Newest first or Oldest first)
+- Last Played - Sort by last played date (Most recent or Oldest)
+- Play Count - Sort by usage frequency (Most played or Least played)
 
-**Sorting Direction:**
-- Click column headers to toggle ascending/descending sort
+**Sorting Behavior:**
+- Click column headers in List and Compact views to toggle ascending/descending sort
+- Sort indicator arrows show current sort direction
+- Sorting persists across view mode changes
 
 **Organization Features:**
 - **Quick Favorite** - Star/favorite icon accessible directly from any view (click to toggle)
@@ -222,6 +224,28 @@ The Library displays your purchased and wishlisted items with multiple view opti
   - Leaderboards API (planned)
   - Achievement system (future)
   - Voice chat library for games (future)
+
+### Community
+
+The Community section provides Discord-like communication features for platform users (SPEC.md Section 5).
+
+**Platform Style:**
+- Discord-like structure with channels
+- Text-based messaging (voice chat reserved for in-game library)
+
+**Channel Types:**
+- **Platform Default Channels** - Official channels (#announcements, #general)
+- **Game/Project Channels** - Channels associated with published games
+- **Organization Private Channels** - Private to organization members
+- **Project Collaboration Channels** - Private for session collaborators
+
+**Features:**
+- Browse and search public channels
+- Subscribe to game channels
+- Deep linking to items, profiles, and channels
+- User profiles with display name, avatar, and published games
+- Basic moderation tools and report system
+- Browser notifications for mentions and replies
 
 ### Editor Suite
 
@@ -488,4 +512,4 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 ---
 
 *Documentation last updated: December 2025*
-*Updated for Dashboard (Section 2), Store (Section 3), and Library (Section 4) features per SPEC.md*
+*Updated for Dashboard (Section 2), Store (Section 3), Library (Section 4), and Community (Section 5) features per SPEC.md*
