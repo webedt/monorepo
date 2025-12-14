@@ -2,10 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { useLibrary } from '@/hooks/useLibrary';
 import { useLibraryPreferences } from '@/hooks/useLibraryPreferences';
 import {
-  LibraryViewSelector,
+  LibraryViewToggle,
   LibraryFilters,
+  LibraryGridView,
+  LibraryListView,
+  LibraryCompactView,
 } from '@/components/library';
-import { GridView, ListView, CompactListView } from '@/components/LibraryViews';
 import type { LibraryItem } from '@/types/library';
 
 // Mock library items - in production these would come from an API
@@ -270,7 +272,7 @@ export default function Library() {
               totalItems={totalItems}
               displayedItems={items.length}
             />
-            <LibraryViewSelector viewMode={viewMode} onViewModeChange={setViewMode} />
+            <LibraryViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
           </div>
         </div>
 
@@ -295,7 +297,7 @@ export default function Library() {
           <>
             {/* Grid View - Thumbnail-based grid layout (SPEC.md Section 4.2) */}
             {viewMode === 'grid' && (
-              <GridView
+              <LibraryGridView
                 items={items}
                 isFavorite={isFavorite}
                 onToggleFavorite={toggleFavorite}
@@ -312,7 +314,7 @@ export default function Library() {
 
             {/* List View - Standard list with more details (SPEC.md Section 4.2) */}
             {viewMode === 'detailed' && (
-              <ListView
+              <LibraryListView
                 items={items}
                 sortField={sortField}
                 sortDirection={sortDirection}
@@ -332,7 +334,7 @@ export default function Library() {
 
             {/* Compact List View - Dense list for power users (SPEC.md Section 4.2) */}
             {viewMode === 'minimal' && (
-              <CompactListView
+              <LibraryCompactView
                 items={items}
                 sortField={sortField}
                 sortDirection={sortDirection}
