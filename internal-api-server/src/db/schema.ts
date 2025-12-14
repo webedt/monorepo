@@ -76,6 +76,7 @@ export const chatSessions = pgTable('chat_sessions', {
   branch: text('branch'), // Working branch name - populated when branch is created
   provider: text('provider').default('claude'), // 'claude' | 'codex' | 'copilot' | 'gemini'
   providerSessionId: text('provider_session_id'), // Claude SDK session ID for conversation resume
+  issueNumber: integer('issue_number'), // GitHub issue number linked to this session
   autoCommit: boolean('auto_commit').default(false).notNull(),
   locked: boolean('locked').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),

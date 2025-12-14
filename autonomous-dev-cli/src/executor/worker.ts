@@ -89,6 +89,7 @@ import {
   addMessage,
   addEvent,
   generateSessionPath,
+  softDeleteSessionsByIssue,
   type CreateChatSessionParams,
 } from '../db/index.js';
 import { loadSpecContext, type SpecContext } from '../discovery/spec-reader.js';
@@ -605,6 +606,7 @@ export class Worker {
           baseBranch: this.options.baseBranch,
           userRequest: `[Auto] Issue #${issue.number}: ${issue.title}\n\n${issue.body || 'No description'}`,
           provider: 'claude',
+          issueNumber: issue.number,
         });
         chatSessionId = session.id;
         taskLog.debug(`Created chat session: ${chatSessionId}`);
@@ -2345,5 +2347,23 @@ Implements #${issue.number}
       prNumber,
       mergeSha,
     });
+
+    // Soft-delete associated chat sessions to free up storage
+    if (this.options.enableDatabaseLogging) {
+      try {
+        const deletedCount = await softDeleteSessionsByIssue(issueNumber, owner, repo);
+        if (deletedCount > 0) {
+          this.log.info(`Soft-deleted ${deletedCount} session(s) for issue #${issueNumber}`, {
+            issueNumber,
+            owner,
+            repo,
+            deletedCount,
+          });
+        }
+      } catch (error: unknown) {
+        // Don't fail the close operation if session cleanup fails
+        this.log.warn(`Failed to delete sessions for issue #${issueNumber}: ${getErrorMessage(error)}`);
+      }
+    }
   }
 }
