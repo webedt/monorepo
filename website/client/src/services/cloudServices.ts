@@ -35,8 +35,7 @@ const DEFAULT_CONFIG: CloudServicesConfig = {
 // Storage key for local cloud sync state
 const CLOUD_SYNC_STATE_KEY = 'cloud-sync-state';
 const CLOUD_CONFIG_KEY = 'cloud-services-config';
-// Reserved for future use when implementing pending syncs queue
-const _PENDING_SYNCS_KEY = 'cloud-pending-syncs';
+// Note: PENDING_SYNCS_KEY = 'cloud-pending-syncs' reserved for future use when implementing pending syncs queue
 
 /**
  * Get cloud services configuration
