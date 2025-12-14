@@ -3,6 +3,7 @@ version: '3.8'
 services:
   autonomous-dev-cli:
     image: dockerregistry.etdofresh.com/autonomous-dev-cli:latest
+    command: ["node", "dist/index.js", "start", "--verbose"]
     environment:
       NODE_ENV: production
 

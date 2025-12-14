@@ -26,6 +26,7 @@ import Preview from '@/pages/Preview';
 import ItemPage from '@/pages/ItemPage';
 import LibraryItemPage from '@/pages/LibraryItemPage';
 import SplitViewRouter from '@/components/SplitViewRouter';
+import ImageEditor from '@/pages/editor/ImageEditor';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -268,6 +269,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Preview />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/image-editor"
+            element={
+              <ProtectedRoute>
+                <ImageEditor />
               </ProtectedRoute>
             }
           />

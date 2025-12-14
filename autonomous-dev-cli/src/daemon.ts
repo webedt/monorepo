@@ -1,5 +1,5 @@
 import { loadConfig, type Config } from './config/index.js';
-import { initDatabase, getUserCredentials, closeDatabase } from './db/index.js';
+import { initDatabase, getUserCredentials, updateUserClaudeAuth, closeDatabase } from './db/index.js';
 import { createGitHub, type GitHub, type Issue, type ServiceHealth } from './github/index.js';
 import { formatBuildInfo } from './utils/buildInfo.js';
 import { simpleGit } from 'simple-git';
@@ -91,6 +91,7 @@ import {
 } from './errors/executor-errors.js';
 import { join } from 'path';
 import chalk from 'chalk';
+import { refreshClaudeToken, shouldRefreshToken } from './utils/claudeAuth.js';
 
 /**
  * Aggregated service health for all external dependencies
@@ -1428,6 +1429,28 @@ export class Daemon implements DaemonStateProvider {
         );
       }
 
+      // Proactively refresh Claude token if it's about to expire
+      if (this.config.credentials.claudeAuth.expiresAt &&
+          shouldRefreshToken(this.config.credentials.claudeAuth.expiresAt)) {
+        logger.info('Claude token expiring soon, proactively refreshing');
+        try {
+          const newAuth = await refreshClaudeToken(this.config.credentials.claudeAuth.refreshToken);
+          this.config.credentials.claudeAuth = newAuth;
+
+          // Update database if we have a userId
+          if (this.userId) {
+            await updateUserClaudeAuth(this.userId, newAuth);
+            logger.info('Claude token proactively refreshed and saved to database');
+          } else {
+            logger.info('Claude token proactively refreshed (no database update - no userId)');
+          }
+        } catch (refreshError) {
+          logger.warn('Failed to proactively refresh Claude token, will retry on demand', {
+            error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+          });
+        }
+      }
+
       // STEP 1: Get existing issues with graceful degradation
       logger.cyclePhase('fetch-issues', 1, 6);
       this.progressManager.setPhase('fetch-issues', 1);
@@ -1505,6 +1528,23 @@ export class Daemon implements DaemonStateProvider {
         }
 
         try {
+          // Create token refresh callback that updates both memory and database
+          const onTokenRefresh = async (currentRefreshToken: string) => {
+            logger.info('Refreshing Claude tokens via callback');
+            const newAuth = await refreshClaudeToken(currentRefreshToken);
+
+            // Update in-memory config
+            this.config.credentials.claudeAuth = newAuth;
+
+            // Update database if we have a userId
+            if (this.userId) {
+              await updateUserClaudeAuth(this.userId, newAuth);
+              logger.info('Claude tokens updated in database', { userId: this.userId });
+            }
+
+            return newAuth;
+          };
+
           const rawTasks = await discoverTasks({
             claudeAuth: this.config.credentials.claudeAuth,
             repoPath, // Use cloned repo or fallback to cwd
@@ -1512,6 +1552,7 @@ export class Daemon implements DaemonStateProvider {
             tasksPerCycle: Math.min(this.config.discovery.tasksPerCycle, availableSlots),
             existingIssues,
             repoContext: `WebEDT - AI-powered coding assistant platform with React frontend, Express backend, and Claude Agent SDK integration.`,
+            onTokenRefresh,
           });
 
           logger.info(`Discovered ${rawTasks.length} raw tasks, running deduplication...`);
