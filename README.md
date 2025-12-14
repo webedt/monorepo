@@ -24,8 +24,9 @@ WebEDT is a web-based game development platform that enables users to browse and
   - Wishlist with sale notifications, ratings & reviews, creator analytics
 - **Library** - Multi-view library visible only when logged in
   - Three view modes: Grid View, List View, Compact List View
-  - Filtering: All items, Recently added, Recently played, Most used, Favorites, Collections, Wishlisted
-  - Quick Favorite icon, Custom Collections/Folders, Pagination
+  - Filtering: All items, Recently added, Recently played, Most used, Favorites, By collection, Wishlisted
+  - Sorting: Title, Date Added, Last Played, Play Count (ascending/descending)
+  - Quick Favorite icon, Custom Collections/Folders with full CRUD, Pagination controls
   - Cloud Services: Cloud saves synced across devices, Leaderboards API
 - **Editor Suite** - Complete game development environment with AI assistance
   - Chat - AI-powered development assistant with verbosity modes

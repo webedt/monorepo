@@ -185,26 +185,32 @@ The Store provides a grid-based marketplace for browsing and purchasing games.
 
 ### Library
 
-The Library displays your purchased and wishlisted items with multiple view options. The library is only visible when the user is logged in.
+The Library displays your purchased and wishlisted items with multiple view options. The library is only visible when the user is logged in (hidden for unauthenticated users).
 
 **View Options (Three View Modes):**
-1. **Grid View** - Thumbnail-based grid layout
-2. **List View** - Standard list with more details
-3. **Compact List View** - Dense list for power users
+1. **Grid View** - Thumbnail-based grid layout with visual item cards
+2. **List View** - Standard list with more details including description and metadata
+3. **Compact List View** - Dense list for power users with minimal visual elements
 
 **Filtering & Sorting:**
-- All items
-- Recently added
-- Recently played
-- Most used
-- Favorites
-- By collection/folder
-- Wishlisted items
+- All items - View complete library
+- Recently added - Sort by purchase date
+- Recently played - Sort by last played date
+- Most used - Sort by play count
+- Favorites - Filter to starred items only
+- By collection/folder - Filter by user-created collections
+- Wishlisted items - View items on wishlist
+
+**Sorting Options:**
+- Title (A-Z, Z-A)
+- Date Added (Newest/Oldest)
+- Last Played (Recent/Oldest)
+- Play Count (Most/Least)
 
 **Organization Features:**
-- **Quick Favorite** - Star/favorite icon accessible directly from any view
-- **Custom Collections/Folders** - User-created organizational folders
-- Pagination or infinite scroll support
+- **Quick Favorite** - Star/favorite icon accessible directly from any view (click to toggle)
+- **Custom Collections/Folders** - User-created organizational folders with create/delete/add/remove functionality
+- **Pagination** - Navigate through large libraries with page controls
 
 **Cloud Services:**
 - **Cloud Saves** - Synced across devices automatically (web-based games sync inherently)
@@ -478,4 +484,4 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-*Documentation last updated: December 2025*
+*Documentation last updated: December 2025 (Updated for Library View Options and Filtering per SPEC.md Sections 4.2-4.4)*
