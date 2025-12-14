@@ -15,6 +15,8 @@ export interface CanvasState {
   width: number;
   height: number;
   zoom: number;
+  panX: number;
+  panY: number;
   history: ImageData[];
   historyIndex: number;
 }
@@ -47,6 +49,8 @@ export interface UseCanvasReturn {
   setPrimaryColor: (color: string) => void;
   setSecondaryColor: (color: string) => void;
   setZoom: (zoom: number) => void;
+  setPan: (panX: number, panY: number) => void;
+  resetPan: () => void;
   setSelection: (selection: Selection | null) => void;
 
   // Canvas operations
@@ -65,6 +69,10 @@ export interface UseCanvasReturn {
   handleMouseMove: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   handleMouseUp: () => void;
   handleMouseLeave: () => void;
+  handleWheel: (e: React.WheelEvent<HTMLDivElement>) => void;
+
+  // Pan state
+  isPanning: boolean;
 
   // Helpers
   canUndo: boolean;
@@ -83,11 +91,17 @@ export function useCanvas(): UseCanvasReturn {
   const shapeStartRef = useRef<Point | null>(null);
   const selectionStartRef = useRef<Point | null>(null);
 
+  // Pan state refs
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+
   // Canvas state
   const [canvasState, setCanvasState] = useState<CanvasState>({
     width: 800,
     height: 600,
     zoom: 100,
+    panX: 0,
+    panY: 0,
     history: [],
     historyIndex: -1
   });
@@ -106,6 +120,7 @@ export function useCanvas(): UseCanvasReturn {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
 
   // Config setters
   const setTool = useCallback((tool: DrawingTool) => {
@@ -130,6 +145,14 @@ export function useCanvas(): UseCanvasReturn {
 
   const setZoom = useCallback((zoom: number) => {
     setCanvasState(prev => ({ ...prev, zoom: Math.max(10, Math.min(400, zoom)) }));
+  }, []);
+
+  const setPan = useCallback((panX: number, panY: number) => {
+    setCanvasState(prev => ({ ...prev, panX, panY }));
+  }, []);
+
+  const resetPan = useCallback(() => {
+    setCanvasState(prev => ({ ...prev, panX: 0, panY: 0 }));
   }, []);
 
   // Initialize canvas with dimensions
@@ -161,6 +184,8 @@ export function useCanvas(): UseCanvasReturn {
         ...prev,
         width,
         height,
+        panX: 0,
+        panY: 0,
         history: [imageData],
         historyIndex: 0
       }));
@@ -209,6 +234,8 @@ export function useCanvas(): UseCanvasReturn {
           width: img.width,
           height: img.height,
           zoom: fitZoom,
+          panX: 0,
+          panY: 0,
           history: [imageData],
           historyIndex: 0
         }));
@@ -368,6 +395,20 @@ export function useCanvas(): UseCanvasReturn {
 
   // Mouse down handler
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Handle middle mouse button for panning
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      e.preventDefault();
+      isPanningRef.current = true;
+      setIsPanning(true);
+      panStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        panX: canvasState.panX,
+        panY: canvasState.panY
+      };
+      return;
+    }
+
     const pos = getCanvasPosition(e);
     const drawingCanvas = drawingLayerRef.current;
     const baseCanvas = canvasRef.current;
@@ -423,10 +464,22 @@ export function useCanvas(): UseCanvasReturn {
 
     // Draw initial point
     drawPoint(ctx, pos, config.primaryColor, config.brushSize, config.brushOpacity);
-  }, [config, getCanvasPosition, saveToHistory]);
+  }, [config, getCanvasPosition, saveToHistory, canvasState.panX, canvasState.panY]);
 
   // Mouse move handler
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Handle panning
+    if (isPanningRef.current && panStartRef.current) {
+      const deltaX = e.clientX - panStartRef.current.x;
+      const deltaY = e.clientY - panStartRef.current.y;
+      setCanvasState(prev => ({
+        ...prev,
+        panX: panStartRef.current!.panX + deltaX,
+        panY: panStartRef.current!.panY + deltaY
+      }));
+      return;
+    }
+
     const pos = getCanvasPosition(e);
 
     // Handle selection
@@ -481,6 +534,14 @@ export function useCanvas(): UseCanvasReturn {
 
   // Mouse up handler
   const handleMouseUp = useCallback(() => {
+    // Handle end of panning
+    if (isPanningRef.current) {
+      isPanningRef.current = false;
+      setIsPanning(false);
+      panStartRef.current = null;
+      return;
+    }
+
     if (isSelecting) {
       setIsSelecting(false);
       selectionStartRef.current = null;
@@ -500,10 +561,36 @@ export function useCanvas(): UseCanvasReturn {
 
   // Mouse leave handler
   const handleMouseLeave = useCallback(() => {
+    if (isPanningRef.current) {
+      isPanningRef.current = false;
+      setIsPanning(false);
+      panStartRef.current = null;
+      return;
+    }
     if (isDrawingRef.current) {
       handleMouseUp();
     }
   }, [handleMouseUp]);
+
+  // Wheel handler for zoom
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    // Ctrl+scroll for zoom
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -10 : 10;
+      setCanvasState(prev => ({
+        ...prev,
+        zoom: Math.max(10, Math.min(400, prev.zoom + delta))
+      }));
+    } else {
+      // Regular scroll for panning
+      setCanvasState(prev => ({
+        ...prev,
+        panX: prev.panX - e.deltaX,
+        panY: prev.panY - e.deltaY
+      }));
+    }
+  }, []);
 
   // Restore canvas from history after re-renders
   useEffect(() => {
@@ -554,6 +641,8 @@ export function useCanvas(): UseCanvasReturn {
     setPrimaryColor,
     setSecondaryColor,
     setZoom,
+    setPan,
+    resetPan,
     setSelection,
 
     // Canvas operations
@@ -572,6 +661,10 @@ export function useCanvas(): UseCanvasReturn {
     handleMouseMove,
     handleMouseUp,
     handleMouseLeave,
+    handleWheel,
+
+    // Pan state
+    isPanning,
 
     // Helpers
     canUndo: canvasState.historyIndex > 0,
