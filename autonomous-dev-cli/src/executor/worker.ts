@@ -2086,14 +2086,22 @@ ${specContext.notes}
 
     return `You are an expert developer working on implementing a GitHub issue.
 
+## Working Directory
+
+**IMPORTANT:** Your current working directory is: \`${repoDir || '.'}\`
+
+All file operations (Read, Write, Edit, Glob, Grep, Bash) should use paths relative to this directory or absolute paths starting with \`${repoDir || '.'}\`.
+
+Do NOT use paths like \`/code/\`, \`/workspace/\`, or any other assumed paths. Always use \`pwd\` first if unsure, or use relative paths like \`./CLAUDE.md\` or \`./website/client/src/\`.
+
 ## Issue #${issue.number}: ${issue.title}
 
 ${issue.body || 'No description provided.'}
 ${specSection}
 ## Instructions
 
-1. First, explore the codebase to understand the structure and existing patterns
-2. Read CLAUDE.md if it exists for project-specific guidelines
+1. First, run \`pwd\` to confirm your working directory, then explore the codebase
+2. Read \`./CLAUDE.md\` (relative path) if it exists for project-specific guidelines
 3. ${hasExistingFiles ? 'Review the existing implementation files listed above' : 'Identify related files that may need modification'}
 4. Implement the changes described in the issue
 5. Follow existing code style and conventions
