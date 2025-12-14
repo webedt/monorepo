@@ -1,7 +1,7 @@
 import { useAuthStore } from '@/lib/store';
 import { useDashboardLayout } from '@/hooks/useDashboardLayout';
+import { WidgetContainer } from '@/components/WidgetContainer';
 import {
-  Widget,
   RecentlyPlayedWidget,
   EditorQuickAccessWidget,
   StoreHighlightsWidget,
@@ -12,7 +12,11 @@ import {
   SessionActivityWidget,
 } from '@/components/widgets';
 
-// Widget content renderer based on widget ID
+/**
+ * Widget content renderer based on widget ID
+ * Maps widget IDs to their corresponding React components
+ * Implements SPEC.md Section 2.2 - Available Widgets/Sections
+ */
 function renderWidgetContent(widgetId: string) {
   switch (widgetId) {
     case 'recently-played':
@@ -148,20 +152,21 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Widgets Grid */}
+        {/* Widgets Grid - Responsive layout for different screen sizes */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {enabledWidgets.map((widget) => (
-            <Widget
+            <WidgetContainer
               key={widget.id}
               widget={widget}
               isDragging={draggedWidget === widget.id}
+              isDragEnabled={true}
               onDragStart={handleDragStart}
               onDragOver={handleDragOver}
               onDrop={handleDrop}
               onDragEnd={handleDragEnd}
             >
               {renderWidgetContent(widget.id)}
-            </Widget>
+            </WidgetContainer>
           ))}
         </div>
 
