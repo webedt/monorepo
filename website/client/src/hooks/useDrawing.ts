@@ -65,7 +65,7 @@ export function useDrawing(): UseDrawingReturn {
   // Convert touch event to mouse-like event for canvas operations
   const createMouseEventFromTouch = useCallback((
     e: React.TouchEvent<HTMLCanvasElement>,
-    eventType: 'mousedown' | 'mousemove' | 'mouseup'
+    _eventType: 'mousedown' | 'mousemove' | 'mouseup'
   ): React.MouseEvent<HTMLCanvasElement> => {
     const touch = e.touches[0] || e.changedTouches[0];
     if (!touch) {

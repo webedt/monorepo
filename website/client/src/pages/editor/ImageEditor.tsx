@@ -4,7 +4,6 @@ import { useDrawing } from '@/hooks/useDrawing';
 import { useImageLayersStore, useSessionLastPageStore } from '@/lib/store';
 import { Canvas, Toolbar, LayerPanel } from '@/components/editor/image';
 import { downloadCanvas, getMimeType } from '@/utils/imageEditor';
-import type { DrawingTool, CanvasConfig, CanvasState } from '@/types/editor';
 
 // Image dimension presets
 const DIMENSION_PRESETS = [
