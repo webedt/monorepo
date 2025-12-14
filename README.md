@@ -1,6 +1,6 @@
-# Autonomous Development System
+# WebEDT Platform
 
-> A comprehensive platform for autonomous codebase development powered by AI agents, GitHub automation, and intelligent workflow orchestration.
+> A comprehensive web-based game development platform combining a digital storefront, game library, integrated development environment, and autonomous AI-powered development tools.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org)
@@ -8,9 +8,22 @@
 
 ## Overview
 
-This monorepo contains a complete autonomous development system that uses AI to continuously analyze, improve, and evolve your codebase. The system discovers development tasks, creates GitHub issues, implements changes using Claude AI, evaluates the results, and auto-merges successful changes.
+WebEDT is a web-based game development platform that enables users to browse and purchase games, manage their library, and create games using an integrated development environment with AI assistance. This monorepo also includes an autonomous development system that uses AI to continuously analyze, improve, and evolve codebases.
 
-### Key Features
+### Platform Features
+
+- **Dashboard** - Customizable widget-based homepage with drag-and-drop arrangement
+- **Store** - Grid-based marketplace with search, filtering, wishlists, and trailer previews
+- **Library** - Multi-view game library (grid, list, compact) with collections and favorites
+- **Editor Suite** - Complete game development environment with AI assistance
+  - Chat - AI-powered development assistant
+  - Code - VS Code-style editor with syntax highlighting
+  - Images - Image editor, sprite sheets, animations
+  - Sounds - Wave editor, SFX generator, track mixer
+  - Scenes - Object prefabs and scene composition
+  - Preview - Live preview of your current branch
+
+### Autonomous Development Features
 
 - **AI-Powered Task Discovery** - Claude AI analyzes your codebase to identify improvements, bug fixes, and new features
 - **Automated GitHub Integration** - Creates issues, branches, and pull requests automatically
@@ -21,6 +34,7 @@ This monorepo contains a complete autonomous development system that uses AI to 
 
 ### Use Cases
 
+- **Game Development** - Create and publish games using the integrated editor
 - **Continuous Code Improvement** - Let AI maintain and improve code quality
 - **Automated Bug Fixing** - Identify and fix common issues automatically
 - **Documentation Generation** - Auto-generate and update documentation
@@ -107,13 +121,15 @@ autonomous-dev discover --dry-run
 
 ```
 .
+├── website/                           # React frontend with Dashboard, Store, Library, Editor
+├── internal-api-server/               # Internal API Server for auth, storage, sessions
+├── ai-coding-worker/                  # AI Coding Worker service for LLM execution
 ├── autonomous-dev-cli/                # Autonomous Development CLI
-├── ai-coding-worker/                  # AI Coding Worker service
-├── internal-api-server/               # Internal API Server service
-├── website/                           # Website project (pnpm workspace)
 ├── shared/                            # Shared utilities and types
 ├── examples/                          # Example configurations
 ├── docs/                              # Documentation hub
+├── SPEC.md                            # Platform specification document
+├── STATUS.md                          # Implementation status tracking
 └── .github/
     └── workflows/                     # Centralized GitHub Actions workflows
         ├── website-deploy-dokploy.yml
@@ -193,7 +209,26 @@ The autonomous development system follows a 5-phase workflow that continuously i
 
 ## Projects
 
-### 1. Autonomous Dev CLI
+### 1. Website (WebEDT Frontend)
+
+The **Website** is a React-based frontend that provides the complete WebEDT platform experience including the dashboard, store, library, and editor suite.
+
+- **Path**: `website/`
+- **Type**: React frontend (Vite) + Express API facade
+- **Deployment**: Dokploy (self-hosted)
+
+**Key Features:**
+- **Dashboard**: Customizable widget-based homepage with drag-and-drop arrangement
+- **Store**: Grid marketplace with search, filtering, wishlists, and trailer previews
+- **Library**: Multi-view (grid, list, compact) with collections, favorites, and sorting
+- **Editor Suite**: AI-powered development tools for Chat, Code, Images, Sounds, Scenes
+- **Sessions**: Git-based session management with real-time collaboration
+
+**Workflows:**
+- `website-deploy-dokploy.yml` - Deploys to Dokploy on non-main branch pushes
+- `website-cleanup-dokploy.yml` - Cleans up Dokploy apps on branch deletion
+
+### 2. Autonomous Dev CLI
 
 The **Autonomous Development CLI** is a powerful command-line tool that runs as a continuous daemon to autonomously develop your codebase. It uses Claude AI to discover tasks, create GitHub issues, implement changes in parallel, evaluate results, and auto-merge successful changes.
 
@@ -223,14 +258,6 @@ autonomous-dev start
 ```
 
 See the [Quick Start Guide](./autonomous-dev-cli/docs/quick-start.md) for detailed setup instructions.
-
-### 2. Website
-- **Path**: `website/`
-- **Type**: React frontend with Express API facade
-- **Deployment**: Dokploy (self-hosted)
-- **Workflows**:
-  - `website-deploy-dokploy.yml` - Deploys to Dokploy on non-main branch pushes
-  - `website-cleanup-dokploy.yml` - Cleans up Dokploy apps on branch deletion
 
 ### 3. AI Coding Worker
 - **Path**: `ai-coding-worker/`
@@ -333,6 +360,7 @@ For detailed documentation on each project, see the [docs/](./docs/) directory o
 
 | Document | Description |
 |----------|-------------|
+| [Platform Specification](./SPEC.md) | Complete WebEDT platform specification and requirements |
 | [Documentation Hub](./docs/README.md) | Central hub with quick links to all documentation |
 | [Architecture Guide](./docs/architecture.md) | System design, component relationships, and the 5-phase daemon cycle |
 | [Configuration Guide](./docs/configuration.md) | Complete reference for all configuration options |
