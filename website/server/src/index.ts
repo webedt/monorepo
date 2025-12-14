@@ -75,12 +75,18 @@ function isAllowedRoute(path: string): boolean {
 }
 
 // Extract owner/repo/branch prefix from a URL path for cookie scoping
-// e.g., /webedt/monorepo/branch-name/login -> /webedt/monorepo/branch-name
+// Patterns:
+//   /github/owner/repo/branch/...  (preview via /github prefix) -> /github/owner/repo/branch
+//   /owner/repo/branch/...         (standard path-based) -> /owner/repo/branch
 // This ensures cookies are scoped to the specific preview branch
 function getOwnerRepoBranchPath(urlPath: string): string {
   const segments = urlPath.split('/').filter(Boolean);
-  // For preview deployments: need owner/repo/branch (3 segments minimum)
-  // e.g., /webedt/monorepo/feature-branch/session -> /webedt/monorepo/feature-branch
+
+  // Check for /github/ prefix pattern: /github/owner/repo/branch/
+  if (segments[0] === 'github' && segments.length >= 4) {
+    return `/${segments[0]}/${segments[1]}/${segments[2]}/${segments[3]}`;
+  }
+  // Standard path-based deployment: /owner/repo/branch/
   if (segments.length >= 3) {
     return `/${segments[0]}/${segments[1]}/${segments[2]}`;
   }
