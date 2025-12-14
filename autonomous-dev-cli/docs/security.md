@@ -324,3 +324,7 @@ Before going to production:
 - [GitHub Token Best Practices](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 - [Anthropic Security](https://www.anthropic.com/security)
 - [OWASP Secrets Management](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html)
+
+---
+
+*Documentation last updated: December 14, 2025*

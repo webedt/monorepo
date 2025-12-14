@@ -504,3 +504,7 @@ autonomous-dev start --verbose
 # Dry run (no changes)
 autonomous-dev start --dry-run --verbose
 ```
+
+---
+
+*Documentation last updated: December 14, 2025*
