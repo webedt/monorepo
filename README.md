@@ -667,7 +667,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for gu
 
 MIT License - see individual project directories for full license text.
 
-Copyright (c) 2024 ETdoFresh
+Copyright (c) 2024-2025 ETdoFresh
 
 ## Migration from Separate Repos
 

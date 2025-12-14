@@ -857,3 +857,7 @@ Times out with: "Discovery timeout after 300000ms"
 - [Architecture Documentation](./architecture.md) - System architecture overview
 - [Configuration Guide](./configuration.md) - Complete configuration reference
 - [API Reference](./api-reference.md) - Detailed API documentation
+
+---
+
+*Documentation last updated: December 2025*

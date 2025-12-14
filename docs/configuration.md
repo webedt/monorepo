@@ -769,3 +769,7 @@ autonomous-dev help-config
 - [Architecture Documentation](./architecture.md) - System architecture overview
 - [API Reference](./api-reference.md) - Detailed API documentation
 - [Troubleshooting Guide](./troubleshooting.md) - Common issues and solutions
+
+---
+
+*Documentation last updated: December 2025*
