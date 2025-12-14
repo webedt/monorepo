@@ -1420,9 +1420,10 @@ export default function Settings() {
                     </div>
                     <select
                       value={defaultLandingPage}
-                      onChange={(e) => setDefaultLandingPage(e.target.value as 'store' | 'library' | 'community' | 'sessions')}
+                      onChange={(e) => setDefaultLandingPage(e.target.value as 'dashboard' | 'store' | 'library' | 'community' | 'sessions')}
                       className="select select-bordered w-full max-w-md"
                     >
+                      <option value="dashboard">Dashboard - Your personalized overview</option>
                       <option value="store">Store - Browse available items and tools</option>
                       <option value="library">Library - Your purchased items</option>
                       <option value="community">Community - Shared community items</option>
