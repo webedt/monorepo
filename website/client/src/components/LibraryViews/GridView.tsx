@@ -15,9 +15,8 @@ export interface GridViewProps {
   collectionMenuItemId: number | null;
   onSetCollectionMenuItemId: (itemId: number | null) => void;
   collectionMenuRef: React.RefObject<HTMLDivElement>;
-  // Cloud sync props
+  // Cloud sync props (optional, for future integration)
   getCloudSyncState?: (itemId: number) => CloudSyncState;
-  onSyncItem?: (itemId: number) => void;
 }
 
 /**
@@ -37,7 +36,6 @@ export default function GridView({
   onSetCollectionMenuItemId,
   collectionMenuRef,
   getCloudSyncState,
-  onSyncItem,
 }: GridViewProps) {
   const navigate = useNavigate();
 
