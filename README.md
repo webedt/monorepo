@@ -678,7 +678,7 @@ Copyright (c) 2024-2025 ETdoFresh
 
 ---
 
-*Documentation last updated: December 2025*
+*Documentation last updated: December 14, 2025*
 
 ## Migration from Separate Repos
 
