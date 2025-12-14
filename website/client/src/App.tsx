@@ -194,6 +194,14 @@ function App() {
               }
             />
             <Route
+              path="/editor/sessions"
+              element={
+                <ProtectedRoute>
+                  <Sessions />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/trash"
               element={
                 <ProtectedRoute>
