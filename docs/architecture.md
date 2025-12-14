@@ -19,6 +19,7 @@ The WebEDT Platform is a comprehensive web-based game development platform that 
 - **Dashboard** - Personalized aggregation hub with customizable widgets (SPEC.md Section 2)
 - **Store** - Grid-based marketplace for browsing and purchasing games (SPEC.md Section 3)
 - **Library** - Multi-view library for owned and wishlisted items with Cloud Services (SPEC.md Section 4)
+- **Community** - Discord-like communication with channels for players and developers (SPEC.md Section 5)
 - **Editor Suite** - Complete game development environment with AI assistance (SPEC.md Section 6)
 - **Autonomous Development System** - AI agents that continuously analyze, improve, and evolve codebases
 
@@ -31,6 +32,7 @@ The autonomous development system operates as a continuous daemon that discovers
 | Dashboard | Section 2 | Personalized widget-based homepage with drag-and-drop customization |
 | Store | Section 3 | Grid marketplace with search, filtering, wishlists, ratings, and commerce |
 | Library | Section 4 | Multi-view (Grid/List/Compact) library with collections, favorites, and pagination |
+| Community | Section 5 | Discord-like channels for platform, game, and organization communication |
 | Editor Suite | Section 6 | AI-powered development tools (Chat, Code, Images, Sounds, Scenes, Preview) |
 
 ### High-Level Architecture
