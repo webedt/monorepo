@@ -125,7 +125,7 @@ export default function StoreItemModal({
       if (onPlayNow) {
         onPlayNow(item);
       } else {
-        navigate(`/item/${item.id}`);
+        navigate(`/store/${item.id}`);
         onClose();
       }
     }
@@ -422,7 +422,7 @@ export default function StoreItemModal({
             <button
               className="link link-primary"
               onClick={() => {
-                navigate(`/item/${item.id}`);
+                navigate(`/store/${item.id}`);
                 onClose();
               }}
             >

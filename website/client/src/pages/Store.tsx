@@ -51,10 +51,10 @@ export default function Store() {
     toggleWishlist(item.id);
   };
 
-  // Handle play now
+  // Handle play now - navigate to detailed store item page
   const handlePlayNow = (item: StoreItem) => {
     console.log('Play Now:', item.title);
-    navigate(`/item/${item.id}`);
+    navigate(`/store/${item.id}`);
   };
 
   // Handle view trailer - opens modal with the item
