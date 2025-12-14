@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuthStore } from '@/lib/store';
-import { useDashboardPreferences } from '@/hooks/useDashboardPreferences';
+import { useDashboardStore } from '@/stores/dashboardStore';
 import { DraggableWidget } from '@/components/DraggableWidget';
 import { DashboardSettings } from '@/components/DashboardSettings';
 import {
@@ -53,26 +53,53 @@ export default function Dashboard() {
   const user = useAuthStore((state) => state.user);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Use the enhanced dashboard preferences hook
-  const {
-    widgets,
-    enabledWidgets,
-    userFocus,
-    toggleWidget,
-    applyFocusPreset,
-    resetToDefaults,
-    moveWidgetUp,
-    moveWidgetDown,
-    dashboardAsLandingPage,
-    setDashboardAsLandingPage,
-    draggedWidget,
-    handleDragStart,
-    handleDragOver,
-    handleDrop,
-    handleDragEnd,
-    isCustomizing,
-    setIsCustomizing,
-  } = useDashboardPreferences();
+  // Use the centralized dashboard store for state management
+  // Implements SPEC.md Section 2.1 - Save layout per user
+  const widgets = useDashboardStore((state) => state.widgets);
+  const userFocus = useDashboardStore((state) => state.userFocus);
+  const dashboardAsLandingPage = useDashboardStore((state) => state.dashboardAsLandingPage);
+  const isCustomizing = useDashboardStore((state) => state.isCustomizing);
+  const draggedWidget = useDashboardStore((state) => state.draggedWidget);
+
+  // Actions from the store
+  const toggleWidget = useDashboardStore((state) => state.toggleWidget);
+  const applyFocusPreset = useDashboardStore((state) => state.applyFocusPreset);
+  const resetToDefaults = useDashboardStore((state) => state.resetToDefaults);
+  const moveWidgetUp = useDashboardStore((state) => state.moveWidgetUp);
+  const moveWidgetDown = useDashboardStore((state) => state.moveWidgetDown);
+  const setDashboardAsLandingPage = useDashboardStore((state) => state.setDashboardAsLandingPage);
+  const setIsCustomizing = useDashboardStore((state) => state.setIsCustomizing);
+  const setDraggedWidget = useDashboardStore((state) => state.setDraggedWidget);
+  const reorderWidgets = useDashboardStore((state) => state.reorderWidgets);
+
+  // Get enabled widgets sorted by order
+  const enabledWidgets = widgets
+    .filter((w) => w.enabled)
+    .sort((a, b) => a.order - b.order);
+
+  // Drag-and-drop handlers
+  const handleDragStart = (e: React.DragEvent, widgetId: string) => {
+    setDraggedWidget(widgetId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', widgetId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent, targetWidgetId: string) => {
+    e.preventDefault();
+    if (draggedWidget && draggedWidget !== targetWidgetId) {
+      reorderWidgets(draggedWidget, targetWidgetId);
+    }
+    setDraggedWidget(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedWidget(null);
+  };
 
   // Get greeting based on time of day
   const getGreeting = () => {
