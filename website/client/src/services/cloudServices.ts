@@ -35,7 +35,8 @@ const DEFAULT_CONFIG: CloudServicesConfig = {
 // Storage key for local cloud sync state
 const CLOUD_SYNC_STATE_KEY = 'cloud-sync-state';
 const CLOUD_CONFIG_KEY = 'cloud-services-config';
-const PENDING_SYNCS_KEY = 'cloud-pending-syncs';
+// Reserved for future use when implementing pending syncs queue
+const _PENDING_SYNCS_KEY = 'cloud-pending-syncs';
 
 /**
  * Get cloud services configuration
@@ -279,7 +280,7 @@ export const cloudSaveService = {
     itemId: number,
     slotIndex: number,
     data: Record<string, unknown>,
-    options: CloudSaveOptions = {}
+    _options: CloudSaveOptions = {}
   ): Promise<CloudSaveResult> {
     const config = getCloudServicesConfig();
     if (!config.cloudSaveEnabled) {

@@ -105,7 +105,7 @@ export default function Settings() {
   const [preferredProvider, setPreferredProvider] = useState<'claude' | 'codex' | 'gemini'>(user?.preferredProvider as any || 'claude');
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
-  const [defaultLandingPage, setDefaultLandingPage] = useState<'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
+  const [defaultLandingPage, setDefaultLandingPage] = useState<'dashboard' | 'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
   const [preferredModel, setPreferredModel] = useState(user?.preferredModel || '');
   const [chatVerbosity, setChatVerbosity] = useState<'minimal' | 'normal' | 'verbose'>(user?.chatVerbosityLevel || 'verbose');
 
