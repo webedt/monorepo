@@ -14,7 +14,7 @@ export interface LibraryGridViewProps {
   onOpenCollectionModal: () => void;
   collectionMenuItemId: number | null;
   onSetCollectionMenuItemId: (itemId: number | null) => void;
-  collectionMenuRef: React.RefObject<HTMLDivElement | null>;
+  collectionMenuRef: React.RefObject<HTMLDivElement>;
   getCloudSyncState?: (itemId: number) => CloudSyncState;
 }
 
