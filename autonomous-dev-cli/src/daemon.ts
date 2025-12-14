@@ -1518,13 +1518,26 @@ export class Daemon implements DaemonStateProvider {
         issueCount: existingIssues.length,
       });
 
+      // Check if we have pending issues to work on (not in-progress)
+      const pendingIssues = existingIssues.filter((i) => !i.labels.includes('in-progress'));
+      const hasPendingIssues = pendingIssues.length > 0;
+
       // Check if we have capacity for more issues
       const availableSlots = this.config.discovery.maxOpenIssues - existingIssues.length;
 
-      // STEP 2: Discover new tasks (if we have capacity)
+      // STEP 2: Discover new tasks (ONLY if no pending issues exist)
+      // This ensures we work through existing backlog before creating new tasks
       let newIssues: Issue[] = [];
 
-      if (availableSlots > 0 && !this.options.dryRun) {
+      if (hasPendingIssues) {
+        logger.info(`Found ${pendingIssues.length} pending issues - skipping task discovery to work on existing backlog`, {
+          pendingCount: pendingIssues.length,
+          pendingIssues: pendingIssues.map(i => `#${i.number}: ${i.title}`).slice(0, 5),
+        });
+        this.progressManager.setPhase('discover-tasks', 2);
+        logger.cyclePhase('discover-tasks', 2, 6);
+        logger.info('Skipping discovery - processing existing issues first');
+      } else if (availableSlots > 0 && !this.options.dryRun) {
         logger.cyclePhase('discover-tasks', 2, 6);
         this.progressManager.setPhase('discover-tasks', 2);
 
@@ -1723,9 +1736,9 @@ export class Daemon implements DaemonStateProvider {
           // Mark as degraded but continue with existing issues
           degraded = true;
         }
-      } else if (availableSlots <= 0) {
+      } else if (availableSlots <= 0 && !hasPendingIssues) {
         logger.info('Max open issues reached, skipping discovery');
-      } else {
+      } else if (this.options.dryRun) {
         logger.info('Dry run - skipping issue creation');
       }
 
