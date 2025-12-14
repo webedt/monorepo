@@ -22,12 +22,13 @@ WebEDT is a web-based game development platform that enables users to browse and
   - Universal search across all fields, filter dropdowns for category/genre/price
   - Stripe and PayPal payment integration
   - Wishlist with sale notifications, ratings & reviews, creator analytics
-- **Library** - Multi-view library visible only when logged in
-  - Three view modes: Grid View, List View, Compact List View
-  - Filtering: All items, Recently added, Recently played, Most used, Favorites, By collection, Wishlisted
-  - Sorting: Title, Date Added, Last Played, Play Count (ascending/descending)
-  - Quick Favorite icon, Custom Collections/Folders with full CRUD, Pagination controls
-  - Cloud Services: Cloud saves synced across devices, Leaderboards API
+- **Library** - Multi-view library visible only when logged in (hidden for unauthenticated users)
+  - Three view modes: Grid View (thumbnail-based), List View (standard with details), Compact List View (dense for power users)
+  - Filtering: All items, Recently added, Recently played, Most used, Favorites, By collection/folder, Wishlisted items
+  - Sorting: Title, Date Added, Last Played, Play Count (ascending/descending with column header toggle)
+  - Organization: Quick Favorite star icon accessible from any view, Custom Collections/Folders with full CRUD
+  - Navigation: Pagination controls for large libraries
+  - Cloud Services: Cloud saves synced across devices, Leaderboards API, Achievement system (future), Voice chat library (future)
 - **Editor Suite** - Complete game development environment with AI assistance
   - Chat - AI-powered development assistant with verbosity modes
   - Code - VS Code-style editor with syntax highlighting, multi-file editing, Git diff
@@ -231,9 +232,9 @@ The **Website** is a React-based frontend that provides the complete WebEDT plat
 - **Deployment**: Dokploy (self-hosted)
 
 **Key Features:**
-- **Dashboard**: Personalized aggregation hub with customizable widgets (Recently Played, Editor Quick Access, Store Highlights, Library Favorites, Community Activity, Session Activity)
-- **Store**: Grid marketplace with trailer auto-play on hover, universal search, filtering, wishlists, ratings & reviews, and Stripe/PayPal integration
-- **Library**: Three view modes (Grid, List, Compact) with filtering by recently added/played, favorites, collections; Quick Favorite and Custom Collections support
+- **Dashboard**: Personalized aggregation hub with customizable drag-and-drop widgets (Recently Played, Editor Quick Access, Store Highlights, Library Favorites, Community Activity, Session Activity) - adapts based on player vs. editor preferences
+- **Store**: Grid marketplace with trailer auto-play on hover, universal search, category/genre/price filtering, wishlists with sale notifications, ratings & reviews, creator analytics, and Stripe/PayPal integration
+- **Library**: Three view modes (Grid, List, Compact) with filtering by recently added/played, most used, favorites, collections, and wishlisted items; Quick Favorite star icon, Custom Collections/Folders with CRUD, pagination controls, and Cloud Services (cloud saves, leaderboards API)
 - **Editor Suite**: AI-powered development tools for Chat (with verbosity modes), Code (multi-file with Git diff), Images (layers, sprites, animations), Sounds (wave editor, SFX generator, DAW), Scenes (prefabs, 2D/UI)
 - **Sessions**: Git-branch-based session management that persists indefinitely across all editor tools
 
