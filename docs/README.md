@@ -511,5 +511,5 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-*Documentation last updated: December 2025*
+*Documentation last updated: December 14, 2025*
 *Updated for Dashboard (Section 2), Store (Section 3), Library (Section 4), and Community (Section 5) features per SPEC.md*

@@ -972,4 +972,4 @@ GET /health
 
 ---
 
-*Documentation last updated: December 2025*
+*Documentation last updated: December 14, 2025*
