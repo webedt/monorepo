@@ -1,4 +1,4 @@
-export { Worker, type WorkerOptions, type WorkerTask, type WorkerResult } from './worker.js';
+export { Worker, type WorkerOptions, type WorkerTask, type WorkerResult, type TokenRefreshCallback } from './worker.js';
 export {
   WorkerPool,
   createWorkerPool,

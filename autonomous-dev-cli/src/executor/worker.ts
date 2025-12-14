@@ -93,6 +93,15 @@ import {
   type CreateChatSessionParams,
 } from '../db/index.js';
 import { loadSpecContext, type SpecContext } from '../discovery/spec-reader.js';
+import { refreshClaudeToken, shouldRefreshToken, InvalidRefreshTokenError } from '../utils/claudeAuth.js';
+
+/**
+ * Callback for refreshing Claude OAuth tokens.
+ * Returns the new tokens after successful refresh.
+ */
+export type TokenRefreshCallback = (
+  currentRefreshToken: string
+) => Promise<{ accessToken: string; refreshToken: string; expiresAt: number }>;
 
 /**
  * Default timeout for Claude execution (30 minutes for complex tasks)
@@ -404,6 +413,12 @@ export interface WorkerOptions {
     /** Git merge method: 'merge', 'squash', or 'rebase' */
     mergeMethod?: 'merge' | 'squash' | 'rebase';
   };
+  /**
+   * Callback to refresh Claude OAuth tokens when they expire.
+   * If provided, tokens will be proactively refreshed before Claude execution
+   * and the refreshed tokens will be persisted.
+   */
+  onTokenRefresh?: TokenRefreshCallback;
 }
 
 /**
@@ -648,7 +663,8 @@ export class Worker {
         await addEvent(chatSessionId, 'setup_progress', { type: 'setup_progress', stage: 'branch', message: `Created branch: ${branchName}` });
       }
 
-      // Write Claude credentials
+      // Refresh tokens if needed and write Claude credentials
+      await this.refreshTokensIfNeeded();
       this.writeClaudeCredentials();
 
       // Execute task with Claude
@@ -1212,6 +1228,84 @@ export class Worker {
     const git = simpleGit(repoDir);
     await git.checkoutLocalBranch(branchName);
     this.log.debug(`Created branch: ${branchName}`);
+  }
+
+  /**
+   * Refresh Claude tokens if they are about to expire.
+   * Updates this.options.claudeAuth with fresh tokens and persists via callback.
+   * Throws InvalidRefreshTokenError if the refresh token is permanently invalid.
+   */
+  private async refreshTokensIfNeeded(): Promise<void> {
+    const expiresAt = this.options.claudeAuth.expiresAt;
+
+    // Skip if no expiry info or token is still valid
+    if (!expiresAt || !shouldRefreshToken(expiresAt)) {
+      return;
+    }
+
+    this.log.info('Claude token expiring soon, refreshing before execution', {
+      expiresAt: new Date(expiresAt).toISOString(),
+      expiresIn: Math.round((expiresAt - Date.now()) / 1000),
+    });
+
+    // If we have a callback, use it (it will also persist to database)
+    if (this.options.onTokenRefresh) {
+      try {
+        const newAuth = await this.options.onTokenRefresh(this.options.claudeAuth.refreshToken);
+
+        // Update our local copy
+        this.options.claudeAuth = {
+          accessToken: newAuth.accessToken,
+          refreshToken: newAuth.refreshToken,
+          expiresAt: newAuth.expiresAt,
+        };
+
+        this.log.info('Claude tokens refreshed successfully via callback', {
+          newExpiresAt: new Date(newAuth.expiresAt).toISOString(),
+        });
+      } catch (error) {
+        // Re-throw InvalidRefreshTokenError - this is unrecoverable
+        if (error instanceof InvalidRefreshTokenError) {
+          this.log.error('Refresh token is invalid or expired - cannot continue', {
+            error: error.message,
+          });
+          throw error;
+        }
+
+        // For other errors, log warning and try direct refresh
+        this.log.warn('Token refresh via callback failed, attempting direct refresh', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // If no callback or callback failed (non-fatally), try direct refresh
+    // This won't persist to DB but will at least work for this execution
+    if (shouldRefreshToken(this.options.claudeAuth.expiresAt || 0)) {
+      try {
+        const newAuth = await refreshClaudeToken(this.options.claudeAuth.refreshToken);
+
+        // Update our local copy
+        this.options.claudeAuth = {
+          accessToken: newAuth.accessToken,
+          refreshToken: newAuth.refreshToken,
+          expiresAt: newAuth.expiresAt,
+        };
+
+        this.log.info('Claude tokens refreshed via direct API call', {
+          newExpiresAt: new Date(newAuth.expiresAt).toISOString(),
+        });
+      } catch (error) {
+        // Re-throw InvalidRefreshTokenError - this is unrecoverable
+        if (error instanceof InvalidRefreshTokenError) {
+          throw error;
+        }
+
+        this.log.warn('Direct token refresh failed, proceeding with existing token', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   private writeClaudeCredentials(): void {
@@ -2022,10 +2116,44 @@ This is a monorepo, so run these commands in the appropriate project directory:
 - For ai-coding-worker changes: \`cd ai-coding-worker && npm install && npm run build\`
 - For autonomous-dev-cli changes: \`cd autonomous-dev-cli && npm install && npm run build\`
 
+## Testing & Verification (REQUIRED)
+
+You MUST verify your changes actually work. Use ANY method necessary:
+
+1. **Run the application** - Start the dev server and verify functionality works
+   - \`npm run dev\` to start the application
+   - Check that pages load without errors
+   - Test the specific feature you implemented
+
+2. **Write a test script** - Create a temporary test script to verify behavior
+   - Write a simple script that exercises your code
+   - Run it to confirm it works as expected
+   - DELETE the test script after verification (do not commit test scripts)
+
+3. **Query endpoints** - For API changes, test the endpoints directly
+   - Use curl or fetch to test API endpoints
+   - Verify responses are correct
+   - Check error handling works
+
+4. **Console verification** - Add temporary console.logs to verify flow
+   - Add logging to confirm code paths are hit
+   - Remove console.logs after verification
+
+5. **Interactive testing** - If it's a UI change:
+   - Start the dev server
+   - Navigate to the page
+   - Interact with the feature
+   - Verify it works visually
+
+**The key principle: DO NOT assume your code works. VERIFY IT ACTUALLY WORKS.**
+
+If you cannot test something directly, explain in your completion message why and what manual testing would be needed.
+
 ## Important
 
 - Make real, working changes - not placeholder code
 - Ensure the code compiles/builds successfully (run the build commands above!)
+- VERIFY your changes work using one of the testing methods above
 - Follow TypeScript best practices if the project uses TypeScript
 - Add appropriate comments only where they add value
 - Do NOT update STATUS.md - this will be done automatically after successful implementation
@@ -2035,8 +2163,10 @@ This is a monorepo, so run these commands in the appropriate project directory:
 Before finishing, verify:
 - [ ] All changes implement the issue requirements
 - [ ] \`npm install && npm run build\` passes without errors
+- [ ] Changes have been TESTED and verified to work
 - [ ] No unrelated files were modified
 - [ ] Code follows existing patterns and conventions
+- [ ] Any temporary test scripts have been deleted
 
 Start by exploring the codebase, then implement the required changes.`;
   }

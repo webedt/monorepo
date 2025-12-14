@@ -14,6 +14,7 @@ import {
   type RequestPhase,
 } from '../utils/logger.js';
 import { ClaudeError, ErrorCode } from '../utils/errors.js';
+import { InvalidRefreshTokenError } from '../utils/claudeAuth.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -142,6 +143,7 @@ export class TaskGenerator {
   /**
    * Attempt to refresh Claude tokens when authentication fails.
    * Returns true if refresh was successful, false otherwise.
+   * Throws InvalidRefreshTokenError if the refresh token is permanently invalid.
    */
   private async attemptTokenRefresh(): Promise<boolean> {
     // Only attempt refresh once per request cycle to prevent infinite loops
@@ -166,6 +168,14 @@ export class TaskGenerator {
       logger.info('Claude tokens refreshed successfully');
       return true;
     } catch (refreshError) {
+      // Re-throw InvalidRefreshTokenError - this is unrecoverable and must be handled by caller
+      if (refreshError instanceof InvalidRefreshTokenError) {
+        logger.error('Refresh token is invalid or expired - cannot recover', {
+          error: refreshError.message,
+        });
+        throw refreshError;
+      }
+
       logger.error('Failed to refresh Claude tokens', {
         error: refreshError instanceof Error ? refreshError.message : String(refreshError),
       });
@@ -659,14 +669,39 @@ ${gitAnalysisSection}
 ${existingIssues}
 
 ## Your Task
-Generate exactly ${this.tasksPerCycle} implementation tasks based on the SPEC requirements above.
+Generate exactly ${this.tasksPerCycle} implementation tasks. Consider ALL of the following task sources:
+
+### 1. SPEC-to-Codebase Compliance (HIGHEST PRIORITY)
+- Compare SPEC.md requirements against actual codebase implementation
+- Identify ANY discrepancies where the code doesn't match the spec
+- Create tasks to bring the codebase into compliance with SPEC.md
+- Check for missing features, incorrect implementations, or outdated code
+
+### 2. Bug Fixes & Deploy Errors (CRITICAL PRIORITY)
+- Check for any deployment errors, build failures, or GitHub Actions failures
+- Look for runtime errors, broken functionality, or integration issues
+- Create tasks to fix any bugs or errors that would prevent deployment
+- Address any CI/CD pipeline failures or test failures
+
+### 3. STATUS.md Maintenance
+- You ARE ALLOWED to create tasks that modify STATUS.md
+- If features are completed but STATUS.md is outdated, create a task to update it
+- If STATUS.md has incorrect information, create a task to fix it
+- Compact or reorganize STATUS.md if it becomes unwieldy
+- Add new entries or remove obsolete ones as needed
+
+### 4. Feature Implementation
+- Generate tasks for P0 features first, then P1, etc.
+- Tasks should directly implement features described in SPEC.md
+- Break large features into smaller, independently mergeable PRs
+- Reference existing implementation files when extending features
 
 **IMPORTANT GUIDELINES:**
-1. **Follow the Priority Order** - Generate tasks for P0 features first, then P1, etc.
-2. **Match Spec Requirements** - Tasks should directly implement features described in SPEC.md
-3. **Build Incrementally** - Break large features into smaller, independently mergeable PRs
-4. **Follow Existing Patterns** - Reference existing implementation files when extending features
-5. **Verify Your Work** - Each task MUST include running \`npm install && npm run build\` to verify the code compiles
+1. **SPEC Compliance First** - If the codebase doesn't match SPEC.md, fix it
+2. **Fix Bugs/Errors** - Deploy errors and build failures are critical priority
+3. **STATUS.md Updates Are OK** - Create tasks to update/fix/compact STATUS.md when needed
+4. **Follow Priority Order** - P0 > bugs > P1 > P2 > P3
+5. **Verify Your Work** - Each task MUST include running \`npm install && npm run build\`
 
 **For Partial Features (🟡):**
 - Review existing files before adding new functionality
@@ -679,18 +714,19 @@ Generate exactly ${this.tasksPerCycle} implementation tasks based on the SPEC re
 - Reference the SPEC section for acceptance criteria
 
 ### Categories:
+- **security**: Security vulnerabilities, auth issues
+- **bugfix**: Fix broken behavior, deploy errors, build failures
 - **feature**: New functionality from the spec
-- **bugfix**: Fix broken behavior
 - **refactor**: Improve existing code
-- **docs**: Update documentation
+- **docs**: Update documentation (including STATUS.md)
 - **test**: Add tests
-- **chore**: Maintenance tasks
+- **chore**: Maintenance tasks, STATUS.md updates
 
 ### Priorities (map from spec tiers):
-- **critical**: P0 features essential for MVP
-- **high**: P1 important features
+- **critical**: Deploy errors, build failures, P0 features, SPEC compliance issues
+- **high**: Bugs, P1 important features
 - **medium**: P2 nice-to-have features
-- **low**: P3 future features, cleanup
+- **low**: P3 future features, cleanup, minor STATUS.md updates
 
 ### Complexity:
 - **simple**: Single file, < 1 hour
@@ -718,6 +754,7 @@ Return a JSON array of tasks:
 - DO NOT duplicate existing open issues
 - Be specific about file paths based on the codebase structure
 - Include relevant SPEC requirements in the description
+- Tasks CAN modify STATUS.md when appropriate
 
 Return ONLY the JSON array, no other text.`;
   }
@@ -773,7 +810,6 @@ Return ONLY the JSON array, no other text.`;
           const stream = query({
             prompt: prompt + '\n\nIMPORTANT: Respond with ONLY valid JSON, no markdown code blocks or other formatting.',
             options: {
-              model: 'claude-sonnet-4-20250514',
               cwd: this.repoPath,
               maxTurns: 1, // Single turn for task discovery
               allowedTools: [], // No tools needed for task discovery

@@ -1727,6 +1727,8 @@ export class WorkerPool extends EventEmitter {
         retryConfig: this.options.retryConfig,
         // Merge configuration for auto-merge after PR creation
         mergeConfig: this.options.mergeConfig,
+        // Token refresh callback for proactive token refresh
+        onTokenRefresh: this.options.onTokenRefresh,
       },
       workerId
     );
