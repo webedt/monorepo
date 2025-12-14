@@ -8,11 +8,19 @@ interface CanvasProps {
   width: number;
   height: number;
   zoom: number;
+  panX?: number;
+  panY?: number;
   selection: Selection | null;
+  isPanning?: boolean;
   onMouseDown: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   onMouseMove: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   onMouseUp: () => void;
   onMouseLeave: () => void;
+  onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
+  // Touch event handlers for mobile/tablet support
+  onTouchStart?: (e: React.TouchEvent<HTMLCanvasElement>) => void;
+  onTouchMove?: (e: React.TouchEvent<HTMLCanvasElement>) => void;
+  onTouchEnd?: () => void;
 }
 
 export default function Canvas({
@@ -22,11 +30,18 @@ export default function Canvas({
   width,
   height,
   zoom,
+  panX = 0,
+  panY = 0,
   selection,
+  isPanning = false,
   onMouseDown,
   onMouseMove,
   onMouseUp,
-  onMouseLeave
+  onMouseLeave,
+  onWheel,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd
 }: CanvasProps) {
   const checkerboardRef = useRef<HTMLCanvasElement>(null);
 
@@ -60,13 +75,17 @@ export default function Canvas({
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-auto bg-base-300 flex items-center justify-center p-4"
+      className="flex-1 overflow-hidden bg-base-300 flex items-center justify-center p-4"
+      onWheel={onWheel}
+      style={{ cursor: isPanning ? 'grabbing' : 'default' }}
     >
       <div
         className="relative bg-white shadow-lg"
         style={{
           width: scaledWidth,
-          height: scaledHeight
+          height: scaledHeight,
+          transform: `translate(${panX}px, ${panY}px)`,
+          transition: isPanning ? 'none' : 'transform 0.1s ease-out'
         }}
       >
         {/* Checkerboard background for transparency */}
@@ -93,7 +112,7 @@ export default function Canvas({
         {/* Drawing layer */}
         <canvas
           ref={drawingLayerRef}
-          className="absolute inset-0 cursor-crosshair"
+          className="absolute inset-0 cursor-crosshair touch-none"
           style={{
             width: scaledWidth,
             height: scaledHeight,
@@ -103,6 +122,9 @@ export default function Canvas({
           onMouseMove={onMouseMove}
           onMouseUp={onMouseUp}
           onMouseLeave={onMouseLeave}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
         />
 
         {/* Selection overlay */}

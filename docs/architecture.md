@@ -1,10 +1,11 @@
 # Architecture Documentation
 
-This document provides a comprehensive overview of the Autonomous Development System architecture, including component relationships, data flows, and the daemon cycle.
+This document provides a comprehensive overview of the WebEDT Platform and Autonomous Development System architecture, including component relationships, data flows, and the daemon cycle.
 
 ## Table of Contents
 
 - [System Overview](#system-overview)
+- [WebEDT Platform Components](#webedt-platform-components)
 - [Component Architecture](#component-architecture)
 - [The 5-Phase Daemon Cycle](#the-5-phase-daemon-cycle)
 - [Data Flow](#data-flow)
@@ -14,7 +15,23 @@ This document provides a comprehensive overview of the Autonomous Development Sy
 
 ## System Overview
 
-The Autonomous Development System is a platform that uses AI agents to continuously analyze, improve, and evolve codebases. It operates as a continuous daemon that discovers development tasks, creates GitHub issues, implements changes using AI (Claude Agent SDK), evaluates results, and auto-merges successful changes.
+The WebEDT Platform is a comprehensive web-based game development platform that includes:
+- **Dashboard** - Personalized aggregation hub with customizable widgets (SPEC.md Section 2)
+- **Store** - Grid-based marketplace for browsing and purchasing games (SPEC.md Section 3)
+- **Library** - Multi-view library for owned and wishlisted items with Cloud Services (SPEC.md Section 4)
+- **Editor Suite** - Complete game development environment with AI assistance (SPEC.md Section 6)
+- **Autonomous Development System** - AI agents that continuously analyze, improve, and evolve codebases
+
+The autonomous development system operates as a continuous daemon that discovers development tasks, creates GitHub issues, implements changes using AI (Claude Agent SDK), evaluates results, and auto-merges successful changes.
+
+## WebEDT Platform Components
+
+| Component | SPEC Section | Description |
+|-----------|--------------|-------------|
+| Dashboard | Section 2 | Personalized widget-based homepage with drag-and-drop customization |
+| Store | Section 3 | Grid marketplace with search, filtering, wishlists, ratings, and commerce |
+| Library | Section 4 | Multi-view (Grid/List/Compact) library with collections, favorites, and pagination |
+| Editor Suite | Section 6 | AI-powered development tools (Chat, Code, Images, Sounds, Scenes, Preview) |
 
 ### High-Level Architecture
 
@@ -658,3 +675,7 @@ pm2 start autonomous-dev --name "auto-dev" -- start
 - [Configuration Guide](./configuration.md) - Complete configuration reference
 - [API Reference](./api-reference.md) - Detailed API documentation
 - [Troubleshooting Guide](./troubleshooting.md) - Common issues and solutions
+
+---
+
+*Documentation last updated: December 2025*

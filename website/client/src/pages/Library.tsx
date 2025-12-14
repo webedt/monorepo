@@ -2,13 +2,16 @@ import { useState, useRef, useEffect } from 'react';
 import { useLibrary } from '@/hooks/useLibrary';
 import { useLibraryPreferences } from '@/hooks/useLibraryPreferences';
 import {
-  LibraryViewSelector,
+  LibraryViewToggle,
   LibraryFilters,
+  LibraryGridView,
+  LibraryListView,
+  LibraryCompactView,
 } from '@/components/library';
-import { GridView, ListView, CompactListView } from '@/components/LibraryViews';
 import type { LibraryItem } from '@/types/library';
 
 // Mock library items - in production these would come from an API
+// Enhanced with different states: favorites, wishlisted, varied play counts, and dates
 const mockLibraryItems: LibraryItem[] = [
   {
     id: 1,
@@ -19,6 +22,7 @@ const mockLibraryItems: LibraryItem[] = [
     purchasedDate: '2025-11-15',
     lastPlayedDate: '2025-12-10',
     playCount: 45,
+    isWishlisted: false,
   },
   {
     id: 3,
@@ -29,6 +33,7 @@ const mockLibraryItems: LibraryItem[] = [
     purchasedDate: '2025-11-10',
     lastPlayedDate: '2025-12-08',
     playCount: 32,
+    isWishlisted: true, // Wishlisted item for testing filter
   },
   {
     id: 5,
@@ -39,6 +44,7 @@ const mockLibraryItems: LibraryItem[] = [
     purchasedDate: '2025-11-05',
     lastPlayedDate: '2025-12-12',
     playCount: 67,
+    isWishlisted: false,
   },
   {
     id: 6,
@@ -49,6 +55,7 @@ const mockLibraryItems: LibraryItem[] = [
     purchasedDate: '2025-10-28',
     lastPlayedDate: '2025-12-11',
     playCount: 89,
+    isWishlisted: true, // Wishlisted item for testing filter
   },
   {
     id: 7,
@@ -59,6 +66,7 @@ const mockLibraryItems: LibraryItem[] = [
     purchasedDate: '2025-10-15',
     lastPlayedDate: '2025-12-05',
     playCount: 23,
+    isWishlisted: false,
   },
   {
     id: 8,
@@ -69,6 +77,7 @@ const mockLibraryItems: LibraryItem[] = [
     purchasedDate: '2025-09-20',
     lastPlayedDate: '2025-12-01',
     playCount: 15,
+    isWishlisted: true, // Wishlisted item for testing filter
   },
   {
     id: 9,
@@ -78,6 +87,7 @@ const mockLibraryItems: LibraryItem[] = [
     thumbnail: 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&h=300&fit=crop',
     purchasedDate: '2025-09-01',
     playCount: 8,
+    isWishlisted: false,
   },
   {
     id: 10,
@@ -88,6 +98,50 @@ const mockLibraryItems: LibraryItem[] = [
     purchasedDate: '2025-08-15',
     lastPlayedDate: '2025-11-20',
     playCount: 12,
+    isWishlisted: false,
+  },
+  {
+    id: 11,
+    title: 'Database Manager',
+    description: 'Powerful database administration and query optimization tool',
+    price: '$49.99',
+    thumbnail: 'https://images.unsplash.com/photo-1544383835-bda2bc66a55d?w=400&h=300&fit=crop',
+    purchasedDate: '2025-12-01',
+    lastPlayedDate: '2025-12-13',
+    playCount: 5,
+    isWishlisted: false,
+  },
+  {
+    id: 12,
+    title: 'API Testing Suite',
+    description: 'Comprehensive API testing and documentation platform',
+    price: '$29.99',
+    thumbnail: 'https://images.unsplash.com/photo-1555949963-ff9fe0c870eb?w=400&h=300&fit=crop',
+    purchasedDate: '2025-12-05',
+    lastPlayedDate: '2025-12-14',
+    playCount: 3,
+    isWishlisted: true, // Recently added wishlisted item
+  },
+  {
+    id: 13,
+    title: 'Terminal Pro',
+    description: 'Enhanced terminal emulator with split views and custom themes',
+    price: 'Free',
+    thumbnail: 'https://images.unsplash.com/photo-1629654297299-c8506221ca97?w=400&h=300&fit=crop',
+    purchasedDate: '2025-07-01',
+    playCount: 156, // Most used item
+    isWishlisted: false,
+  },
+  {
+    id: 14,
+    title: 'Screenshot Tool',
+    description: 'Capture, annotate, and share screenshots instantly',
+    price: 'Free',
+    thumbnail: 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=400&h=300&fit=crop',
+    purchasedDate: '2025-06-15',
+    lastPlayedDate: '2025-11-01',
+    playCount: 78,
+    isWishlisted: false,
   },
 ];
 
@@ -270,7 +324,7 @@ export default function Library() {
               totalItems={totalItems}
               displayedItems={items.length}
             />
-            <LibraryViewSelector viewMode={viewMode} onViewModeChange={setViewMode} />
+            <LibraryViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
           </div>
         </div>
 
@@ -295,7 +349,7 @@ export default function Library() {
           <>
             {/* Grid View - Thumbnail-based grid layout (SPEC.md Section 4.2) */}
             {viewMode === 'grid' && (
-              <GridView
+              <LibraryGridView
                 items={items}
                 isFavorite={isFavorite}
                 onToggleFavorite={toggleFavorite}
@@ -312,7 +366,7 @@ export default function Library() {
 
             {/* List View - Standard list with more details (SPEC.md Section 4.2) */}
             {viewMode === 'detailed' && (
-              <ListView
+              <LibraryListView
                 items={items}
                 sortField={sortField}
                 sortDirection={sortDirection}
@@ -332,7 +386,7 @@ export default function Library() {
 
             {/* Compact List View - Dense list for power users (SPEC.md Section 4.2) */}
             {viewMode === 'minimal' && (
-              <CompactListView
+              <LibraryCompactView
                 items={items}
                 sortField={sortField}
                 sortDirection={sortDirection}

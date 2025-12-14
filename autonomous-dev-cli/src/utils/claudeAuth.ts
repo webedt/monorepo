@@ -20,6 +20,24 @@ interface RefreshTokenResponse {
   expires_in: number; // Seconds
 }
 
+interface OAuthErrorResponse {
+  error: string;
+  error_description?: string;
+}
+
+/**
+ * Error thrown when the refresh token is invalid or expired.
+ * This is an unrecoverable error - the user must re-authenticate.
+ */
+export class InvalidRefreshTokenError extends Error {
+  public readonly isUnrecoverable = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidRefreshTokenError';
+  }
+}
+
 /**
  * Refresh a Claude OAuth access token using the refresh token.
  * Returns updated ClaudeAuth object with new tokens.
@@ -45,6 +63,29 @@ export async function refreshClaudeToken(refreshToken: string): Promise<ClaudeAu
       status: response.status,
       error: errorText,
     });
+
+    // Check for invalid_grant error - this means the refresh token is expired/revoked
+    // and cannot be used again. The user must re-authenticate.
+    if (response.status === 400) {
+      try {
+        const errorJson = JSON.parse(errorText) as OAuthErrorResponse;
+        if (errorJson.error === 'invalid_grant') {
+          logger.error('Refresh token is invalid or expired - user must re-authenticate', {
+            errorDescription: errorJson.error_description,
+          });
+          throw new InvalidRefreshTokenError(
+            `Refresh token is invalid or expired: ${errorJson.error_description || 'No description provided'}. ` +
+            'Please re-authenticate with Claude.'
+          );
+        }
+      } catch (parseError) {
+        // If we can't parse the error, fall through to generic error handling
+        if (parseError instanceof InvalidRefreshTokenError) {
+          throw parseError;
+        }
+      }
+    }
+
     throw new Error(`Failed to refresh Claude token: ${response.status} ${errorText}`);
   }
 

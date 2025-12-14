@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect, useMemo } from 'react';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { sessionsApi, githubApi } from '@/lib/api';
 import { useAuthStore, useSessionLastPageStore, useRecentReposStore, type SessionPageName } from '@/lib/store';
@@ -53,12 +53,16 @@ export default function Sessions() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Chat input state
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [selectedRepo, setSelectedRepo] = useState('');
   const [baseBranch, setBaseBranch] = useState('main');
 
+  // Use standard query for sessions (API doesn't support pagination yet)
   const { data, isLoading, error } = useQuery({
     queryKey: ['sessions'],
     queryFn: sessionsApi.list,
@@ -70,7 +74,34 @@ export default function Sessions() {
     },
   });
 
-  const sessions: ChatSession[] = data?.data?.sessions || [];
+  const allSessions: ChatSession[] = data?.data?.sessions || [];
+
+  // Filter sessions based on search query
+  const sessions = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return allSessions;
+    }
+    const query = searchQuery.toLowerCase();
+    return allSessions.filter((session) => {
+      // Search in user request (title)
+      if (session.userRequest?.toLowerCase().includes(query)) {
+        return true;
+      }
+      // Search in repository URL
+      if (session.repositoryUrl?.toLowerCase().includes(query)) {
+        return true;
+      }
+      // Search in branch name
+      if (session.branch?.toLowerCase().includes(query)) {
+        return true;
+      }
+      // Search in status
+      if (session.status?.toLowerCase().includes(query)) {
+        return true;
+      }
+      return false;
+    });
+  }, [allSessions, searchQuery]);
 
   // Load repositories
   const { data: reposData, isLoading: isLoadingRepos } = useQuery({
@@ -302,6 +333,58 @@ export default function Sessions() {
           <p className="text-sm text-base-content/70">
             Quick start below, or view and manage all my sessions
           </p>
+        </div>
+
+        {/* Search bar */}
+        <div className="max-w-md mx-auto mb-6">
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg
+                className="h-5 w-5 text-base-content/50"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <input
+              type="text"
+              placeholder="Search sessions by title, repository, branch, or status..."
+              className="input input-bordered w-full pl-10"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                onClick={() => setSearchQuery('')}
+                title="Clear search"
+              >
+                <svg
+                  className="h-5 w-5 text-base-content/50 hover:text-base-content"
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <p className="text-sm text-base-content/70 mt-2 text-center">
+              Found {sessions.length} session{sessions.length !== 1 ? 's' : ''} matching "{searchQuery}"
+            </p>
+          )}
         </div>
 
         {/* Quick start chat input */}

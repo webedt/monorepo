@@ -91,7 +91,7 @@ import {
 } from './errors/executor-errors.js';
 import { join } from 'path';
 import chalk from 'chalk';
-import { refreshClaudeToken, shouldRefreshToken } from './utils/claudeAuth.js';
+import { refreshClaudeToken, shouldRefreshToken, InvalidRefreshTokenError } from './utils/claudeAuth.js';
 
 /**
  * Aggregated service health for all external dependencies
@@ -170,6 +170,9 @@ export class Daemon implements DaemonStateProvider {
   private isShuttingDown: boolean = false;
   private shutdownTimeoutMs: number = 60000; // Default 60 second timeout
   private signalHandlersRegistered: boolean = false;
+
+  // Claude auth state - tracks if refresh token is permanently invalid
+  private claudeAuthInvalid: boolean = false;
 
   constructor(options: DaemonOptions = {}) {
     this.options = options;
@@ -1429,6 +1432,21 @@ export class Daemon implements DaemonStateProvider {
         );
       }
 
+      // Skip Claude token refresh if already marked as invalid
+      if (this.claudeAuthInvalid) {
+        logger.error('Claude authentication is invalid - daemon cannot continue. Please re-authenticate with Claude.');
+        throw new StructuredError(
+          ErrorCode.CLAUDE_AUTH_FAILED,
+          'Claude authentication is invalid - refresh token expired or revoked. Please re-authenticate.',
+          {
+            recoveryActions: [
+              { description: 'Re-authenticate with Claude through the web interface', automatic: false },
+              { description: 'Update Claude credentials in the database', automatic: false },
+            ],
+          }
+        );
+      }
+
       // Proactively refresh Claude token if it's about to expire
       if (this.config.credentials.claudeAuth.expiresAt &&
           shouldRefreshToken(this.config.credentials.claudeAuth.expiresAt)) {
@@ -1445,6 +1463,26 @@ export class Daemon implements DaemonStateProvider {
             logger.info('Claude token proactively refreshed (no database update - no userId)');
           }
         } catch (refreshError) {
+          // Check if this is an unrecoverable error (invalid/expired refresh token)
+          if (refreshError instanceof InvalidRefreshTokenError) {
+            this.claudeAuthInvalid = true;
+            logger.error('Claude refresh token is invalid or expired - daemon cannot continue', {
+              error: refreshError.message,
+            });
+            throw new StructuredError(
+              ErrorCode.CLAUDE_AUTH_FAILED,
+              'Claude refresh token is invalid or expired. Please re-authenticate.',
+              {
+                cause: refreshError,
+                recoveryActions: [
+                  { description: 'Re-authenticate with Claude through the web interface', automatic: false },
+                  { description: 'Update Claude credentials in the database', automatic: false },
+                ],
+              }
+            );
+          }
+
+          // For other errors, log warning and continue (will retry on demand)
           logger.warn('Failed to proactively refresh Claude token, will retry on demand', {
             error: refreshError instanceof Error ? refreshError.message : String(refreshError),
           });
@@ -1480,13 +1518,26 @@ export class Daemon implements DaemonStateProvider {
         issueCount: existingIssues.length,
       });
 
+      // Check if we have pending issues to work on (not in-progress)
+      const pendingIssues = existingIssues.filter((i) => !i.labels.includes('in-progress'));
+      const hasPendingIssues = pendingIssues.length > 0;
+
       // Check if we have capacity for more issues
       const availableSlots = this.config.discovery.maxOpenIssues - existingIssues.length;
 
-      // STEP 2: Discover new tasks (if we have capacity)
+      // STEP 2: Discover new tasks (ONLY if no pending issues exist)
+      // This ensures we work through existing backlog before creating new tasks
       let newIssues: Issue[] = [];
 
-      if (availableSlots > 0 && !this.options.dryRun) {
+      if (hasPendingIssues) {
+        logger.info(`Found ${pendingIssues.length} pending issues - skipping task discovery to work on existing backlog`, {
+          pendingCount: pendingIssues.length,
+          pendingIssues: pendingIssues.map(i => `#${i.number}: ${i.title}`).slice(0, 5),
+        });
+        this.progressManager.setPhase('discover-tasks', 2);
+        logger.cyclePhase('discover-tasks', 2, 6);
+        logger.info('Skipping discovery - processing existing issues first');
+      } else if (availableSlots > 0 && !this.options.dryRun) {
         logger.cyclePhase('discover-tasks', 2, 6);
         this.progressManager.setPhase('discover-tasks', 2);
 
@@ -1685,9 +1736,9 @@ export class Daemon implements DaemonStateProvider {
           // Mark as degraded but continue with existing issues
           degraded = true;
         }
-      } else if (availableSlots <= 0) {
+      } else if (availableSlots <= 0 && !hasPendingIssues) {
         logger.info('Max open issues reached, skipping discovery');
-      } else {
+      } else if (this.options.dryRun) {
         logger.info('Dry run - skipping issue creation');
       }
 
@@ -1714,6 +1765,23 @@ export class Daemon implements DaemonStateProvider {
           }
         }
 
+        // Create token refresh callback for workers
+        const workerTokenRefresh = async (currentRefreshToken: string) => {
+          logger.info('Refreshing Claude tokens via worker callback');
+          const newAuth = await refreshClaudeToken(currentRefreshToken);
+
+          // Update in-memory config so subsequent workers get fresh tokens
+          this.config.credentials.claudeAuth = newAuth;
+
+          // Update database if we have a userId
+          if (this.userId) {
+            await updateUserClaudeAuth(this.userId, newAuth);
+            logger.info('Claude tokens updated in database via worker refresh', { userId: this.userId });
+          }
+
+          return newAuth;
+        };
+
         // Create worker pool and execute
         // NOTE: Workers load spec context (SPEC.md/STATUS.md) from the cloned repo
         this.currentWorkerPool = createWorkerPool({
@@ -1739,6 +1807,8 @@ export class Daemon implements DaemonStateProvider {
             conflictStrategy: this.config.merge.conflictStrategy,
             mergeMethod: this.config.merge.mergeMethod,
           },
+          // Token refresh callback for workers to refresh tokens before execution
+          onTokenRefresh: workerTokenRefresh,
         });
 
         const workerTasks: WorkerTask[] = issuesToWork.map((issue) => ({

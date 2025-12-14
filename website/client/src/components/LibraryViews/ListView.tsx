@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { LibraryItem, Collection, SortField, SortDirection } from '@/types/library';
+import type { CloudSyncState } from '@/types/cloudServices';
+import { CloudSyncIndicatorCompact } from '@/components/library';
 
 export interface ListViewProps {
   items: LibraryItem[];
@@ -16,6 +18,8 @@ export interface ListViewProps {
   collectionMenuItemId: number | null;
   onSetCollectionMenuItemId: (itemId: number | null) => void;
   collectionMenuRef: React.RefObject<HTMLDivElement>;
+  // Cloud sync props (optional, for future integration)
+  getCloudSyncState?: (itemId: number) => CloudSyncState;
 }
 
 /**
@@ -37,6 +41,7 @@ export default function ListView({
   collectionMenuItemId,
   onSetCollectionMenuItemId,
   collectionMenuRef,
+  getCloudSyncState,
 }: ListViewProps) {
   const navigate = useNavigate();
 
@@ -224,7 +229,13 @@ export default function ListView({
           <div className="flex-1 min-w-0">
             <h3 className="text-lg font-semibold text-base-content">{item.title}</h3>
             <p className="text-sm text-base-content/70 mt-1">{item.description}</p>
-            <p className="text-xs text-success font-semibold mt-2">Owned</p>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-xs text-success font-semibold">Owned</span>
+              {/* Cloud Sync Indicator */}
+              {getCloudSyncState && (
+                <CloudSyncIndicatorCompact syncState={getCloudSyncState(item.id)} />
+              )}
+            </div>
           </div>
 
           {/* Price and Actions */}

@@ -1,6 +1,8 @@
 # Configuration Guide
 
-This guide provides comprehensive documentation for all configuration options in the Autonomous Development System.
+This guide provides comprehensive documentation for all configuration options in the WebEDT Platform and Autonomous Development System.
+
+For platform feature specifications, see SPEC.md (Dashboard: Section 2, Store: Section 3, Library: Section 4, Editor Suite: Section 6).
 
 ## Table of Contents
 
@@ -769,3 +771,7 @@ autonomous-dev help-config
 - [Architecture Documentation](./architecture.md) - System architecture overview
 - [API Reference](./api-reference.md) - Detailed API documentation
 - [Troubleshooting Guide](./troubleshooting.md) - Common issues and solutions
+
+---
+
+*Documentation last updated: December 2025*

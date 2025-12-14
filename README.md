@@ -12,16 +12,30 @@ WebEDT is a web-based game development platform that enables users to browse and
 
 ### Platform Features
 
-- **Dashboard** - Customizable widget-based homepage with drag-and-drop arrangement
-- **Store** - Grid-based marketplace with search, filtering, wishlists, and trailer previews
-- **Library** - Multi-view game library (grid, list, compact) with collections and favorites
+- **Dashboard** - Personalized aggregation hub separate from the Store
+  - Customizable widget system with drag-and-drop arrangement
+  - Widgets: Recently Played, Editor Quick Access, Store Highlights, Library Favorites, Community Activity, Session Activity
+  - Layout saved per user, adapts based on player vs. editor preferences
+- **Store** - Grid-based marketplace for browsing and purchasing games
+  - Grid view layout with thumbnails, prices, Play Now/View Trailer buttons, wishlist option
+  - Trailer auto-play on hover (Netflix/YouTube style)
+  - Universal search across all fields, filter dropdowns for category/genre/price
+  - Stripe and PayPal payment integration
+  - Wishlist with sale notifications, ratings & reviews, creator analytics
+- **Library** - Multi-view library visible only when logged in (hidden for unauthenticated users)
+  - Three view modes: Grid View (thumbnail-based), List View (standard with details), Compact List View (dense for power users)
+  - Filtering: All items, Recently added, Recently played, Most used, Favorites, By collection/folder, Wishlisted items
+  - Sorting: Title, Date Added, Last Played, Play Count (ascending/descending with column header toggle)
+  - Organization: Quick Favorite star icon accessible from any view, Custom Collections/Folders with full CRUD
+  - Navigation: Pagination controls for large libraries
+  - Cloud Services: Cloud saves (planned), Leaderboards API (planned), Achievement system (future), Voice chat library (future)
 - **Editor Suite** - Complete game development environment with AI assistance
-  - Chat - AI-powered development assistant
-  - Code - VS Code-style editor with syntax highlighting
-  - Images - Image editor, sprite sheets, animations
-  - Sounds - Wave editor, SFX generator, track mixer
-  - Scenes - Object prefabs and scene composition
-  - Preview - Live preview of your current branch
+  - Chat - AI-powered development assistant with verbosity modes
+  - Code - VS Code-style editor with syntax highlighting, multi-file editing, Git diff
+  - Images - Image editor with layers, sprite sheet editor, frame/bone animation editors
+  - Sounds - Wave editor, SFXR-style SFX generator, multi-track mixer/DAW
+  - Scenes - Object prefabs with component system, 2D/UI scene composition
+  - Preview - Live preview of your current branch with hot reload
 
 ### Autonomous Development Features
 
@@ -218,11 +232,11 @@ The **Website** is a React-based frontend that provides the complete WebEDT plat
 - **Deployment**: Dokploy (self-hosted)
 
 **Key Features:**
-- **Dashboard**: Customizable widget-based homepage with drag-and-drop arrangement
-- **Store**: Grid marketplace with search, filtering, wishlists, and trailer previews
-- **Library**: Multi-view (grid, list, compact) with collections, favorites, and sorting
-- **Editor Suite**: AI-powered development tools for Chat, Code, Images, Sounds, Scenes
-- **Sessions**: Git-based session management with real-time collaboration
+- **Dashboard**: Personalized aggregation hub with customizable drag-and-drop widgets (Recently Played, Editor Quick Access, Store Highlights, Library Favorites, Community Activity, Session Activity) - adapts based on player vs. editor preferences
+- **Store**: Grid marketplace with trailer auto-play on hover, universal search, category/genre/price filtering, wishlists with sale notifications, ratings & reviews, creator analytics, and Stripe/PayPal integration
+- **Library**: Three view modes (Grid, List, Compact) with filtering by recently added/played, most used, favorites, collections, and wishlisted items; Quick Favorite star icon, Custom Collections/Folders with CRUD, pagination controls, and Cloud Services (cloud saves, leaderboards API)
+- **Editor Suite**: AI-powered development tools for Chat (with verbosity modes), Code (multi-file with Git diff), Images (layers, sprites, animations), Sounds (wave editor, SFX generator, DAW), Scenes (prefabs, 2D/UI)
+- **Sessions**: Git-branch-based session management that persists indefinitely across all editor tools
 
 **Workflows:**
 - `website-deploy-dokploy.yml` - Deploys to Dokploy on non-main branch pushes
@@ -371,6 +385,7 @@ For detailed documentation on each project, see the [docs/](./docs/) directory o
 
 | Project | Documentation |
 |---------|---------------|
+| **Website** | [README](./website/README.md) - WebEDT frontend with Dashboard, Store, Library, and Editor |
 | **Autonomous Dev CLI** | [README](./autonomous-dev-cli/README.md) \| [Quick Start](./autonomous-dev-cli/docs/quick-start.md) \| [Configuration](./autonomous-dev-cli/docs/configuration.md) |
 | **AI Coding Worker** | [README](./ai-coding-worker/README.md) |
 | **Internal API Server** | [README](./internal-api-server/README.md) |
@@ -653,7 +668,11 @@ We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for gu
 
 MIT License - see individual project directories for full license text.
 
-Copyright (c) 2024 ETdoFresh
+Copyright (c) 2024-2025 ETdoFresh
+
+---
+
+*Documentation last updated: December 2025*
 
 ## Migration from Separate Repos
 

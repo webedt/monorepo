@@ -16,6 +16,7 @@ interface ToolbarProps {
   onPrimaryColorChange: (color: string) => void;
   onSecondaryColorChange: (color: string) => void;
   onZoomChange: (zoom: number) => void;
+  onResetPan?: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onClear: () => void;
@@ -53,6 +54,7 @@ export default function Toolbar({
   onPrimaryColorChange,
   onSecondaryColorChange,
   onZoomChange,
+  onResetPan,
   onUndo,
   onRedo,
   onClear,
@@ -207,12 +209,24 @@ export default function Toolbar({
             +
           </button>
         </div>
-        <button
-          className="btn btn-xs btn-ghost w-full mt-1"
-          onClick={onFitToScreen}
-        >
-          Fit to Screen
-        </button>
+        <div className="flex gap-1 mt-1">
+          <button
+            className="btn btn-xs btn-ghost flex-1"
+            onClick={onFitToScreen}
+            title="Fit canvas to screen"
+          >
+            Fit
+          </button>
+          {onResetPan && (
+            <button
+              className="btn btn-xs btn-ghost flex-1"
+              onClick={onResetPan}
+              title="Reset pan position"
+            >
+              Center
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Actions */}

@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { LibraryItem, Collection, SortField, SortDirection } from '@/types/library';
+import type { CloudSyncState } from '@/types/cloudServices';
+import { CloudSyncIndicatorCompact } from '@/components/library';
 
 export interface CompactListViewProps {
   items: LibraryItem[];
@@ -16,6 +18,8 @@ export interface CompactListViewProps {
   collectionMenuItemId: number | null;
   onSetCollectionMenuItemId: (itemId: number | null) => void;
   collectionMenuRef: React.RefObject<HTMLDivElement>;
+  // Cloud sync props (optional, for future integration)
+  getCloudSyncState?: (itemId: number) => CloudSyncState;
 }
 
 /**
@@ -37,6 +41,7 @@ export default function CompactListView({
   collectionMenuItemId,
   onSetCollectionMenuItemId,
   collectionMenuRef,
+  getCloudSyncState,
 }: CompactListViewProps) {
   const navigate = useNavigate();
 
@@ -220,9 +225,12 @@ export default function CompactListView({
             {renderFavoriteButton(item)}
           </div>
 
-          {/* Title */}
-          <div className="flex-1 min-w-0">
+          {/* Title and Cloud Sync */}
+          <div className="flex-1 min-w-0 flex items-center gap-2">
             <h3 className="text-sm font-medium text-base-content truncate">{item.title}</h3>
+            {getCloudSyncState && (
+              <CloudSyncIndicatorCompact syncState={getCloudSyncState(item.id)} />
+            )}
           </div>
 
           {/* Price */}

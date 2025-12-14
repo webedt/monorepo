@@ -81,7 +81,7 @@ autonomous-dev start
 
 | Project | Description | Location |
 |---------|-------------|----------|
-| **Website** | React frontend with Dashboard, Store, Library, and Editor | [README](../website/README.md) |
+| **Website** | React frontend with personalized Dashboard, Store marketplace, multi-view Library, and complete Editor Suite | [README](../website/README.md) |
 | **Autonomous Dev CLI** | Main orchestration tool for autonomous development | [README](../autonomous-dev-cli/README.md) |
 | **AI Coding Worker** | LLM execution service for code generation | [README](../ai-coding-worker/README.md) |
 | **Internal API Server** | Central backend service for API, storage, auth | [README](../internal-api-server/README.md) |
@@ -127,61 +127,123 @@ For detailed architecture information, see the [Architecture Guide](./architectu
 
 ### Dashboard (Homepage)
 
-The Dashboard serves as a personalized aggregation hub that pulls content from multiple sections of the platform.
+The Dashboard is a separate page from the Store, serving as a personalized aggregation hub that pulls content from multiple sections of the platform (SPEC.md Section 2).
 
-**Key Features:**
-- **Customizable Widget System** - Drag-and-drop widget arrangement, choose which sections appear
-- **Available Widgets:**
-  - Recently Played - Your recently played games
-  - Editor Quick Access - Recent sessions, quick-start options
-  - Store Highlights - Featured and new items
-  - Library Favorites - Quick access to favorited items
-  - Community Activity - Recent channel messages
-  - Session Activity - Active/recent editor sessions
-- **Personalization** - Adapts based on user preferences, layout saved per user
+**Layout (Section 2.1):**
+- **Customizable Widget System** - Drag-and-drop widget arrangement
+- Choose which sections appear on your dashboard
+- Layout saved per user for persistent personalization
+
+**Available Widgets/Sections (Section 2.2):**
+- **Recently Played** - User's recently played games
+- **Editor Quick Access** - Recent sessions, quick-start options
+- **Store Highlights** - Featured and new items
+- **Library Favorites** - Quick access to favorited items
+- **Community Activity** - Recent channel messages
+- **Session Activity** - Active/recent editor sessions
+
+**Personalization (Section 2.3):**
+- Adapts based on user preferences (player vs. editor focus)
+- Default landing page configurable in settings
 
 ### Store (Marketplace)
 
-The Store provides a grid-based marketplace for browsing and purchasing games.
+The Store provides a grid-based marketplace for browsing and purchasing games (SPEC.md Section 3).
 
-**Key Features:**
-- **Grid View Layout** - Thumbnails with price, play button, trailer, and wishlist options
-- **Trailer Auto-play** - Netflix/YouTube style hover preview
-- **Universal Search** - Single search box across all fields (title, description, tags, creator)
-- **Filter Dropdowns** - Category, genre, price range filtering
-- **Wishlist** - Add items to personal wishlist with sale notifications
-- **Ratings & Reviews** - Star-based rating system with written reviews
+**Layout & Display (Section 3.1):**
+- Grid view layout with thumbnails
+- Each item displays: thumbnail image, price (or "Free" badge), "Play Now" button, "View Trailer" button/link, and wishlist button
+
+**Hover Behavior (Section 3.2):**
+- **Trailer Auto-play** - When hovering over an item with a trailer, automatically play the trailer video (Netflix/YouTube style)
+
+**Search & Filtering (Section 3.3):**
+- **Universal Search Box** - Single text input that searches across all fields (title, description, tags, creator, etc.)
+- **Filter Dropdowns** - Category, genre, price range, etc.
+- **Categories/Tags/Genres** - Admin-configurable taxonomy system for organizing items
+
+**Pricing & Commerce (Section 3.4):**
+- **Payment Providers** - Stripe and PayPal integration
+- **Pricing Options** - Free items, paid items, sales/discounts, bundles (items can also be purchased individually)
+
+**Wishlist (Section 3.5):**
+- Add items to personal wishlist
+- Wishlist notifications (price drops, sales)
+- Wishlist visible in user library
+
+**Ratings & Reviews (Section 3.6):**
+- User rating system (star-based or similar)
+- Written reviews with review moderation
+
+**Creator Analytics (Section 3.7):**
+- Views/impressions, wishlist adds, conversion rates
+- Revenue tracking, download/play counts
+
+**Publishing Pipeline (Section 3.8):**
+- Mechanism for developers to publish projects from editor to store
+- Support for publishing as individual or organization/studio
 
 ### Library
 
-The Library displays your purchased and wishlisted items with multiple view options.
+The Library displays your purchased and wishlisted items with multiple view options. Per SPEC.md Section 4, the library link/tab is only visible when the user is logged in and is hidden for unauthenticated users.
 
-**Key Features:**
-- **Three View Modes:**
-  - Grid View - Thumbnail-based grid layout
-  - List View - Standard list with more details
-  - Compact List View - Dense list for power users
-- **Filtering & Sorting:**
-  - All items, Recently added, Recently played
-  - Most used, Favorites, Wishlisted items
-  - By collection/folder
-- **Organization Features:**
-  - Quick Favorite - Star/favorite icon accessible from any view
-  - Custom Collections/Folders - User-created organizational folders
-  - Pagination support
-- **Visibility** - Library only visible when user is logged in
+**View Options (Three View Modes):**
+1. **Grid View** - Thumbnail-based grid layout with visual item cards
+2. **List View** - Standard list with more details including description and metadata
+3. **Compact List View** - Dense list for power users with minimal visual elements
+
+**Filtering & Sorting:**
+- All items - View complete library
+- Recently added - Sort by purchase date
+- Recently played - Sort by last played date
+- Most used - Sort by play count
+- Favorites - Filter to starred items only
+- By collection/folder - Filter by user-created collections
+- Wishlisted items - View items on wishlist
+
+**Sorting Options:**
+- Title (A-Z, Z-A)
+- Date Added (Newest/Oldest)
+- Last Played (Recent/Oldest)
+- Play Count (Most/Least)
+
+**Sorting Direction:**
+- Click column headers to toggle ascending/descending sort
+
+**Organization Features:**
+- **Quick Favorite** - Star/favorite icon accessible directly from any view (click to toggle)
+- **Custom Collections/Folders** - User-created organizational folders with create/delete/add/remove functionality
+- **Pagination or Infinite Scroll** - Navigate through large libraries with page controls
+
+**Cloud Services (Section 4.5):**
+- **Cloud Saves** - Synced across devices (web-based games sync inherently; API for native games planned)
+- **Shared Platform Libraries for Games:**
+  - Cloud save API (planned)
+  - Leaderboards API (planned)
+  - Achievement system (future)
+  - Voice chat library for games (future)
 
 ### Editor Suite
 
 The Editor provides a complete game development environment with AI assistance.
 
+**Session Management:**
+- Each session is tied to a Git branch
+- User selects a repository and base branch
+- Sessions persist across all editor tools
+- Sessions never auto-expire
+
 **Components:**
-- **Chat** - AI-powered development assistant
-- **Code Editor** - VS Code-style interface with syntax highlighting
-- **Images** - Image editor, sprite sheet editor, frame animation editor
-- **Sounds** - Wave editor, sound effects generator, track editor
-- **Scenes** - Object editor (prefabs), scene editor with 2D/UI support
-- **Preview** - Live preview of your current branch
+- **Chat** - AI-powered development assistant with verbosity modes
+- **Code Editor** - VS Code-style interface with syntax highlighting, multi-file editing, and Git integration
+- **Images** - Image editor (canvas with layers), sprite sheet editor, frame animation editor, bone animation editor
+- **Sounds** - Wave editor, sound effects generator (SFXR-style), track editor (multi-track mixer/DAW)
+- **Scenes** - Object editor (prefabs with component system), scene editor with 2D/UI support
+- **Preview** - Live preview of your current branch with hot reload
+
+**Target Runtimes:**
+- **Web (TypeScript/JavaScript)** - HTML, CSS, JS/TS games running directly in browser
+- **Love2D** - Lua games running via Love.js in an embedded panel
 
 For complete platform specifications, see [SPEC.md](../SPEC.md).
 
@@ -426,3 +488,4 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 ---
 
 *Documentation last updated: December 2025*
+*Updated for Dashboard (Section 2), Store (Section 3), and Library (Section 4) features per SPEC.md*

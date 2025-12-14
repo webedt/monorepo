@@ -25,7 +25,7 @@ export interface User {
   imageResizeMaxDimension: number;
   voiceCommandKeywords: string[];
   stopListeningAfterSubmit: boolean;
-  defaultLandingPage: 'store' | 'library' | 'community' | 'sessions';
+  defaultLandingPage: 'dashboard' | 'store' | 'library' | 'community' | 'sessions';
   preferredModel?: string | null;
   chatVerbosityLevel: ChatVerbosityLevel; // Controls how much detail to show in chat
   imageAiProvider?: ImageAiProvider;      // User's preferred image AI provider

@@ -330,7 +330,7 @@ export const userApi = {
       body: { stopAfterSubmit },
     }),
 
-  updateDefaultLandingPage: (landingPage: 'store' | 'library' | 'community' | 'sessions') =>
+  updateDefaultLandingPage: (landingPage: 'dashboard' | 'store' | 'library' | 'community' | 'sessions') =>
     fetchApi('/api/user/default-landing-page', {
       method: 'POST',
       body: { landingPage },

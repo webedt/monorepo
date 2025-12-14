@@ -25,6 +25,7 @@ import SceneEditor from '@/pages/SceneEditor';
 import Preview from '@/pages/Preview';
 import ItemPage from '@/pages/ItemPage';
 import LibraryItemPage from '@/pages/LibraryItemPage';
+import StoreItemDetail from '@/pages/StoreItemDetail';
 import SplitViewRouter from '@/components/SplitViewRouter';
 import ImageEditor from '@/pages/editor/ImageEditor';
 
@@ -99,7 +100,7 @@ function App() {
     // App routes that should not be treated as path-based deployment prefixes
     const appRoutes = ['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin',
                        'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
-                       'item', 'store', 'quick-setup', 'dashboard', 'landing'];
+                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor'];
 
     if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
       // Check for /github/ prefix pattern: /github/owner/repo/branch/
@@ -194,6 +195,14 @@ function App() {
               }
             />
             <Route
+              path="/editor/sessions"
+              element={
+                <ProtectedRoute>
+                  <Sessions />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/trash"
               element={
                 <ProtectedRoute>
@@ -238,6 +247,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ItemPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/store/:id"
+              element={
+                <ProtectedRoute>
+                  <StoreItemDetail />
                 </ProtectedRoute>
               }
             />
@@ -286,6 +303,14 @@ function App() {
           />
           <Route
             path="/image-editor"
+            element={
+              <ProtectedRoute>
+                <ImageEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/editor/images"
             element={
               <ProtectedRoute>
                 <ImageEditor />

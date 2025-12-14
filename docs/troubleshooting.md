@@ -1,6 +1,12 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and resolve common issues with the Autonomous Development System.
+This guide helps you diagnose and resolve common issues with the WebEDT Platform and Autonomous Development System.
+
+For platform feature documentation, see:
+- Dashboard: SPEC.md Section 2
+- Store/Marketplace: SPEC.md Section 3
+- Library: SPEC.md Section 4
+- Editor Suite: SPEC.md Section 6
 
 ## Table of Contents
 
@@ -857,3 +863,7 @@ Times out with: "Discovery timeout after 300000ms"
 - [Architecture Documentation](./architecture.md) - System architecture overview
 - [Configuration Guide](./configuration.md) - Complete configuration reference
 - [API Reference](./api-reference.md) - Detailed API documentation
+
+---
+
+*Documentation last updated: December 2025*

@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { LibraryItem, Collection } from '@/types/library';
+import type { CloudSyncState } from '@/types/cloudServices';
+import { CloudSyncIndicatorCompact } from '@/components/library';
 
 export interface GridViewProps {
   items: LibraryItem[];
@@ -13,6 +15,8 @@ export interface GridViewProps {
   collectionMenuItemId: number | null;
   onSetCollectionMenuItemId: (itemId: number | null) => void;
   collectionMenuRef: React.RefObject<HTMLDivElement>;
+  // Cloud sync props (optional, for future integration)
+  getCloudSyncState?: (itemId: number) => CloudSyncState;
 }
 
 /**
@@ -31,6 +35,7 @@ export default function GridView({
   collectionMenuItemId,
   onSetCollectionMenuItemId,
   collectionMenuRef,
+  getCloudSyncState,
 }: GridViewProps) {
   const navigate = useNavigate();
 
@@ -202,9 +207,15 @@ export default function GridView({
               {item.description}
             </p>
 
-            {/* Price with Icons */}
+            {/* Status with Icons */}
             <div className="flex items-center justify-between">
-              <div className="text-sm text-success font-semibold">Owned</div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-success font-semibold">Owned</span>
+                {/* Cloud Sync Indicator */}
+                {getCloudSyncState && (
+                  <CloudSyncIndicatorCompact syncState={getCloudSyncState(item.id)} />
+                )}
+              </div>
               <div className="flex gap-2">
                 {/* Collection Menu */}
                 {renderCollectionMenu(item)}
