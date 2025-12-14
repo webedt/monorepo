@@ -1846,6 +1846,26 @@ export class Daemon implements DaemonStateProvider {
           if (!result.success) {
             // Handle failed task execution
             await this.github.issues.removeLabel(result.issue.number, 'in-progress');
+
+            // Check if the feature was already implemented - close issue with success message
+            if (result.alreadyImplemented) {
+              logger.info(`Feature already implemented for issue #${result.issue.number} - closing issue`, {
+                issueNumber: result.issue.number,
+                branchName: result.branchName,
+              });
+
+              await this.github.issues.closeIssue(
+                result.issue.number,
+                `✅ Issue closed - feature already implemented.\n\nClaude investigated and determined that the requested functionality already exists in the codebase. No changes were needed.`
+              );
+
+              // Count as success for metrics since the feature exists
+              tasksCompleted++;
+              tasksFailed--;
+              continue;
+            }
+
+            // Regular failure - add needs-review label and error comment
             const labelResult = await this.github.issues.addLabelsWithFallback(result.issue.number, ['needs-review']);
             if (labelResult.degraded) {
               degraded = true;

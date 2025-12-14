@@ -46,6 +46,9 @@ function createMockClient(overrides: Record<string, any> = {}): GitHubClient {
       lastSuccessfulCall: new Date(),
     })),
     isAvailable: mock.fn(() => true),
+    execute: mock.fn(async <T>(operation: () => Promise<T>) => {
+      return operation();
+    }),
     executeWithFallback: mock.fn(async <T>(operation: () => Promise<T>, fallback: T) => {
       try {
         const value = await operation();
@@ -53,6 +56,9 @@ function createMockClient(overrides: Record<string, any> = {}): GitHubClient {
       } catch (error) {
         return { value: fallback, degraded: true };
       }
+    }),
+    getCachedOrFetch: mock.fn(async <T>(_type: string, _key: string, fetcher: () => Promise<T>) => {
+      return fetcher();
     }),
     ...overrides,
   } as unknown as GitHubClient;

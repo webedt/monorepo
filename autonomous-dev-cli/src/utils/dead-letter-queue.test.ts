@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -75,8 +75,8 @@ describe('DeadLetterQueue', () => {
         reprocessAttempts: 0,
       };
 
-      const fs = require('fs');
-      fs.writeFileSync(
+      // Use writeFileSync which is imported at the top
+      writeFileSync(
         join(persistDir, 'dlq', 'dlq.json'),
         JSON.stringify([mockEntry])
       );
@@ -391,14 +391,20 @@ describe('DeadLetterQueue', () => {
     it('should remove entries older than retention period', () => {
       const queue = new DeadLetterQueue({
         enablePersistence: false,
-        retentionDays: 0, // Immediate expiration for testing
+        retentionDays: 1, // 1 day retention
       }, testDir);
 
-      // Add entry with old timestamp
-      const oldEntry = createMockEntryData({ taskId: 'old' });
-      queue.addEntry(oldEntry);
+      // Add an entry - it will have current timestamp
+      const id = queue.addEntry(createMockEntryData({ taskId: 'old' }));
 
-      // Wait a bit then cleanup
+      // Manually set the entry's createdAt to be older than retention period
+      // Access internal entries map to modify for testing
+      const entry = queue.getEntry(id);
+      if (entry) {
+        // Set createdAt to 2 days ago (older than 1 day retention)
+        (entry as any).createdAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      }
+
       const removed = queue.cleanupExpired();
       assert.strictEqual(removed, 1);
       assert.strictEqual(queue.getStats().totalEntries, 0);
