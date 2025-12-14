@@ -186,6 +186,7 @@ export default function ImageEditor() {
           onPrimaryColorChange={canvas.setPrimaryColor}
           onSecondaryColorChange={canvas.setSecondaryColor}
           onZoomChange={canvas.setZoom}
+          onResetPan={canvas.resetPan}
           onUndo={canvas.undo}
           onRedo={canvas.redo}
           onClear={canvas.clearCanvas}
@@ -202,11 +203,15 @@ export default function ImageEditor() {
           width={canvas.canvasState.width}
           height={canvas.canvasState.height}
           zoom={canvas.canvasState.zoom}
+          panX={canvas.canvasState.panX}
+          panY={canvas.canvasState.panY}
           selection={canvas.selection}
+          isPanning={canvas.isPanning}
           onMouseDown={canvas.handleMouseDown}
           onMouseMove={canvas.handleMouseMove}
           onMouseUp={canvas.handleMouseUp}
           onMouseLeave={canvas.handleMouseLeave}
+          onWheel={canvas.handleWheel}
         />
 
         {/* Layer Panel */}

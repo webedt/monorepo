@@ -99,7 +99,7 @@ function App() {
     // App routes that should not be treated as path-based deployment prefixes
     const appRoutes = ['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin',
                        'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
-                       'item', 'store', 'quick-setup', 'dashboard', 'landing'];
+                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor'];
 
     if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
       // Check for /github/ prefix pattern: /github/owner/repo/branch/
@@ -286,6 +286,14 @@ function App() {
           />
           <Route
             path="/image-editor"
+            element={
+              <ProtectedRoute>
+                <ImageEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/editor/images"
             element={
               <ProtectedRoute>
                 <ImageEditor />
