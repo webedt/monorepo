@@ -17,20 +17,32 @@ function getApiBaseUrl(): string {
   }
 
   // Detect from current pathname for path-based routing
-  // Example: https://webedt.etdofresh.com/webedt/website/branch/ -> /webedt/website/branch
-  // Example: https://github.etdofresh.com/webedt/monorepo/branch/ -> /webedt/monorepo/branch
+  // Patterns:
+  //   /github/owner/repo/branch/...  (preview via /github prefix)
+  //   /owner/repo/branch/...         (standard path-based)
+  //   /owner/repo/website/branch/... (monorepo website folder)
   const pathname = window.location.pathname;
   const pathSegments = pathname.split('/').filter(Boolean);
 
-  // Check if we're in a path-based deployment (3+ path segments)
-  // and first segment is not a route name
-  if (pathSegments.length >= 3 && !['login', 'register', 'session', 'settings'].includes(pathSegments[0])) {
-    // Check for monorepo pattern: /owner/repo/website/branch/
-    if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
+  // Check if we're in a path-based deployment and first segment is not a route name
+  const appRoutes = ['login', 'register', 'session', 'sessions', 'settings', 'new-session',
+                     'code', 'images', 'sound', 'scene-editor', 'preview', 'quick-setup', 'item'];
+
+  if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
+    // Check for /github/ prefix pattern: /github/owner/repo/branch/
+    if (pathSegments[0] === 'github' && pathSegments.length >= 4) {
       cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
-    } else {
-      // Standard format: /owner/repo/branch/...
+    }
+    // Check for monorepo pattern: /owner/repo/website/branch/
+    else if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
+      cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
+    }
+    // Standard format: /owner/repo/branch/...
+    else if (pathSegments.length >= 3) {
       cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+    } else {
+      // Not enough segments for path-based routing
+      cachedApiBaseUrl = '';
     }
   } else {
     // Default to empty string for root-based deployments
