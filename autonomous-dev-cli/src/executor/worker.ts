@@ -1662,16 +1662,6 @@ export class Worker {
       for await (const message of stream) {
         const typedMessage = message as unknown as ClaudeSDKMessage;
 
-        // Log ALL messages in verbose mode for debugging
-        if (isDebugModeEnabled()) {
-          const rawMsg = message as Record<string, unknown>;
-          this.log.debug(`Claude message: ${typedMessage.type}${rawMsg.subtype ? `/${rawMsg.subtype}` : ''}`, {
-            type: typedMessage.type,
-            subtype: rawMsg.subtype,
-            hasContent: !!('message' in typedMessage && (typedMessage as any).message?.content),
-          });
-        }
-
         if (!validateSDKMessage(typedMessage)) {
           this.log.warn('Received invalid SDK message structure', {
             messageType: typeof message === 'object' && message !== null
