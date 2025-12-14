@@ -326,3 +326,7 @@ After setting up your GitHub token:
 1. [Set up Claude API credentials](./claude-setup.md)
 2. [Run the Quick Start guide](./quick-start.md)
 3. [Review Security Best Practices](./security.md)
+
+---
+
+*Documentation last updated: December 14, 2025*

@@ -387,3 +387,7 @@ After setting up Claude credentials:
 - [Anthropic Documentation](https://docs.anthropic.com/)
 - [Claude Console](https://console.anthropic.com/)
 - [Troubleshooting Guide](./troubleshooting.md)
+
+---
+
+*Documentation last updated: December 14, 2025*

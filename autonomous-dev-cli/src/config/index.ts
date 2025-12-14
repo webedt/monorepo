@@ -772,7 +772,7 @@ export function loadConfig(configPath?: string, options: Omit<LoadConfigOptions,
   };
 
   envConfig.daemon = {
-    loopIntervalMs: parseInt(process.env.LOOP_INTERVAL_MS || '60000', 10),
+    loopIntervalMs: parseInt(process.env.LOOP_INTERVAL_MS || '5000', 10),
     pauseBetweenCycles: process.env.PAUSE_BETWEEN_CYCLES !== 'false',
   };
 
