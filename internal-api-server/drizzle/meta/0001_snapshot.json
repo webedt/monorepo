@@ -1,0 +1,175 @@
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true },
+        "email": { "name": "email", "type": "text", "primaryKey": false, "notNull": true },
+        "display_name": { "name": "display_name", "type": "text", "primaryKey": false, "notNull": false },
+        "password_hash": { "name": "password_hash", "type": "text", "primaryKey": false, "notNull": true },
+        "github_id": { "name": "github_id", "type": "text", "primaryKey": false, "notNull": false },
+        "github_access_token": { "name": "github_access_token", "type": "text", "primaryKey": false, "notNull": false },
+        "claude_auth": { "name": "claude_auth", "type": "jsonb", "primaryKey": false, "notNull": false },
+        "codex_auth": { "name": "codex_auth", "type": "jsonb", "primaryKey": false, "notNull": false },
+        "gemini_auth": { "name": "gemini_auth", "type": "jsonb", "primaryKey": false, "notNull": false },
+        "openrouter_api_key": { "name": "openrouter_api_key", "type": "text", "primaryKey": false, "notNull": false },
+        "autocomplete_enabled": { "name": "autocomplete_enabled", "type": "boolean", "primaryKey": false, "notNull": true, "default": true },
+        "autocomplete_model": { "name": "autocomplete_model", "type": "text", "primaryKey": false, "notNull": false, "default": "'openai/gpt-oss-120b:cerebras'" },
+        "image_ai_keys": { "name": "image_ai_keys", "type": "jsonb", "primaryKey": false, "notNull": false },
+        "image_ai_provider": { "name": "image_ai_provider", "type": "text", "primaryKey": false, "notNull": false, "default": "'openrouter'" },
+        "image_ai_model": { "name": "image_ai_model", "type": "text", "primaryKey": false, "notNull": false, "default": "'google/gemini-2.5-flash-image'" },
+        "preferred_provider": { "name": "preferred_provider", "type": "text", "primaryKey": false, "notNull": true, "default": "'claude'" },
+        "image_resize_max_dimension": { "name": "image_resize_max_dimension", "type": "integer", "primaryKey": false, "notNull": true, "default": 1024 },
+        "voice_command_keywords": { "name": "voice_command_keywords", "type": "jsonb", "primaryKey": false, "notNull": false, "default": "'[]'::jsonb" },
+        "stop_listening_after_submit": { "name": "stop_listening_after_submit", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "default_landing_page": { "name": "default_landing_page", "type": "text", "primaryKey": false, "notNull": true, "default": "'store'" },
+        "preferred_model": { "name": "preferred_model", "type": "text", "primaryKey": false, "notNull": false },
+        "chat_verbosity_level": { "name": "chat_verbosity_level", "type": "text", "primaryKey": false, "notNull": true, "default": "'verbose'" },
+        "is_admin": { "name": "is_admin", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "created_at": { "name": "created_at", "type": "timestamp", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_email_unique": { "name": "users_email_unique", "columns": ["email"], "nullsNotDistinct": false },
+        "users_github_id_unique": { "name": "users_github_id_unique", "columns": ["github_id"], "nullsNotDistinct": false }
+      }
+    },
+    "public.sessions": {
+      "name": "sessions",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true },
+        "user_id": { "name": "user_id", "type": "text", "primaryKey": false, "notNull": true },
+        "expires_at": { "name": "expires_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true }
+      },
+      "indexes": {
+        "idx_sessions_user_id": { "name": "idx_sessions_user_id", "columns": ["user_id"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "sessions_user_id_users_id_fk": {
+          "name": "sessions_user_id_users_id_fk",
+          "tableFrom": "sessions",
+          "columnsFrom": ["user_id"],
+          "tableTo": "users",
+          "columnsTo": ["id"],
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.chat_sessions": {
+      "name": "chat_sessions",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true },
+        "user_id": { "name": "user_id", "type": "text", "primaryKey": false, "notNull": true },
+        "session_path": { "name": "session_path", "type": "text", "primaryKey": false, "notNull": false },
+        "repository_owner": { "name": "repository_owner", "type": "text", "primaryKey": false, "notNull": false },
+        "repository_name": { "name": "repository_name", "type": "text", "primaryKey": false, "notNull": false },
+        "user_request": { "name": "user_request", "type": "text", "primaryKey": false, "notNull": true },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "default": "'pending'" },
+        "repository_url": { "name": "repository_url", "type": "text", "primaryKey": false, "notNull": false },
+        "base_branch": { "name": "base_branch", "type": "text", "primaryKey": false, "notNull": false },
+        "branch": { "name": "branch", "type": "text", "primaryKey": false, "notNull": false },
+        "provider": { "name": "provider", "type": "text", "primaryKey": false, "notNull": false, "default": "'claude'" },
+        "provider_session_id": { "name": "provider_session_id", "type": "text", "primaryKey": false, "notNull": false },
+        "issue_number": { "name": "issue_number", "type": "integer", "primaryKey": false, "notNull": false },
+        "auto_commit": { "name": "auto_commit", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "locked": { "name": "locked", "type": "boolean", "primaryKey": false, "notNull": true, "default": false },
+        "created_at": { "name": "created_at", "type": "timestamp", "primaryKey": false, "notNull": true, "default": "now()" },
+        "completed_at": { "name": "completed_at", "type": "timestamp", "primaryKey": false, "notNull": false },
+        "deleted_at": { "name": "deleted_at", "type": "timestamp", "primaryKey": false, "notNull": false },
+        "worker_last_activity": { "name": "worker_last_activity", "type": "timestamp", "primaryKey": false, "notNull": false }
+      },
+      "indexes": {
+        "idx_chat_sessions_user_id": { "name": "idx_chat_sessions_user_id", "columns": ["user_id"], "isUnique": false },
+        "idx_chat_sessions_status": { "name": "idx_chat_sessions_status", "columns": ["status"], "isUnique": false },
+        "idx_chat_sessions_issue_number": { "name": "idx_chat_sessions_issue_number", "columns": ["issue_number"], "isUnique": false },
+        "idx_chat_sessions_issue_repo": { "name": "idx_chat_sessions_issue_repo", "columns": ["issue_number", "repository_owner", "repository_name"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "chat_sessions_user_id_users_id_fk": {
+          "name": "chat_sessions_user_id_users_id_fk",
+          "tableFrom": "chat_sessions",
+          "columnsFrom": ["user_id"],
+          "tableTo": "users",
+          "columnsTo": ["id"],
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "chat_sessions_session_path_unique": { "name": "chat_sessions_session_path_unique", "columns": ["session_path"], "nullsNotDistinct": false }
+      }
+    },
+    "public.messages": {
+      "name": "messages",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "chat_session_id": { "name": "chat_session_id", "type": "text", "primaryKey": false, "notNull": true },
+        "type": { "name": "type", "type": "text", "primaryKey": false, "notNull": true },
+        "content": { "name": "content", "type": "text", "primaryKey": false, "notNull": true },
+        "images": { "name": "images", "type": "jsonb", "primaryKey": false, "notNull": false },
+        "timestamp": { "name": "timestamp", "type": "timestamp", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {
+        "idx_messages_chat_session_id": { "name": "idx_messages_chat_session_id", "columns": ["chat_session_id"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "messages_chat_session_id_chat_sessions_id_fk": {
+          "name": "messages_chat_session_id_chat_sessions_id_fk",
+          "tableFrom": "messages",
+          "columnsFrom": ["chat_session_id"],
+          "tableTo": "chat_sessions",
+          "columnsTo": ["id"],
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.events": {
+      "name": "events",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "chat_session_id": { "name": "chat_session_id", "type": "text", "primaryKey": false, "notNull": true },
+        "event_type": { "name": "event_type", "type": "text", "primaryKey": false, "notNull": true },
+        "event_data": { "name": "event_data", "type": "jsonb", "primaryKey": false, "notNull": true },
+        "timestamp": { "name": "timestamp", "type": "timestamp", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {
+        "idx_events_chat_session_id": { "name": "idx_events_chat_session_id", "columns": ["chat_session_id"], "isUnique": false },
+        "idx_events_timestamp": { "name": "idx_events_timestamp", "columns": ["timestamp"], "isUnique": false }
+      },
+      "foreignKeys": {
+        "events_chat_session_id_chat_sessions_id_fk": {
+          "name": "events_chat_session_id_chat_sessions_id_fk",
+          "tableFrom": "events",
+          "columnsFrom": ["chat_session_id"],
+          "tableTo": "chat_sessions",
+          "columnsTo": ["id"],
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  }
+}
