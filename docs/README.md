@@ -484,4 +484,4 @@ We welcome contributions! See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-*Documentation last updated: December 2025 (Updated for Library View Options and Filtering per SPEC.md Sections 4.2-4.4)*
+*Documentation last updated: December 2025 (Updated for Dashboard, Store, and Library features per SPEC.md Sections 2-4)*

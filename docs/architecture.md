@@ -658,3 +658,7 @@ pm2 start autonomous-dev --name "auto-dev" -- start
 - [Configuration Guide](./configuration.md) - Complete configuration reference
 - [API Reference](./api-reference.md) - Detailed API documentation
 - [Troubleshooting Guide](./troubleshooting.md) - Common issues and solutions
+
+---
+
+*Documentation last updated: December 2025*

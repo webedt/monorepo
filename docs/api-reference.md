@@ -967,3 +967,7 @@ GET /health
 - [Architecture Documentation](./architecture.md) - System architecture overview
 - [Configuration Guide](./configuration.md) - Complete configuration reference
 - [Troubleshooting Guide](./troubleshooting.md) - Common issues and solutions
+
+---
+
+*Documentation last updated: December 2025*
