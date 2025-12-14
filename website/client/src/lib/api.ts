@@ -85,7 +85,7 @@ async function fetchApi<T = any>(endpoint: string, options: ApiOptions = {}): Pr
 
   const response = await fetch(fullUrl, config);
 
-  console.log(`[fetchApi] Response for ${endpoint}:`, {
+  console.log(`[fetchApi] Response for ${fullUrl}:`, {
     status: response.status,
     ok: response.ok,
     statusText: response.statusText
@@ -93,7 +93,7 @@ async function fetchApi<T = any>(endpoint: string, options: ApiOptions = {}): Pr
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    console.error(`[fetchApi] Error for ${endpoint}:`, error);
+    console.error(`[fetchApi] Error for ${fullUrl}:`, error);
     throw new Error(error.error || 'Request failed');
   }
 
