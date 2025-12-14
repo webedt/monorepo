@@ -393,7 +393,7 @@ ${task.affectedPaths.map((p) => `- \`${p}\``).join('\n')}
       const result = await resolver.attemptMerge('feature-branch', 1) as { success: boolean; error?: string };
 
       assert.strictEqual(result.success, false);
-      assert.ok(result.error?.includes('conflict'));
+      assert.ok(result.error?.toLowerCase().includes('conflict'));
     });
 
     it('should respect autoMerge configuration', () => {

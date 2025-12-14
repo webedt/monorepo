@@ -49,6 +49,9 @@ function createMockClient(overrides: Record<string, any> = {}): GitHubClient {
       lastSuccessfulCall: new Date(),
     })),
     isAvailable: mock.fn(() => true),
+    execute: mock.fn(async <T>(operation: () => Promise<T>) => {
+      return operation();
+    }),
     executeWithFallback: mock.fn(async <T>(operation: () => Promise<T>, fallback: T) => {
       try {
         const value = await operation();

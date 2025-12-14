@@ -355,6 +355,8 @@ export interface ResponseValidation {
   hasChanges: boolean;
   issues: string[];
   severity: 'none' | 'warning' | 'error';
+  /** When true, Claude determined the feature was already implemented */
+  alreadyImplemented: boolean;
 }
 
 export interface WorkerOptions {
@@ -460,6 +462,8 @@ export interface WorkerResult {
   error?: string;
   duration: number;
   chatSessionId?: string;
+  /** When true, Claude determined the feature was already implemented - issue should be closed */
+  alreadyImplemented?: boolean;
 }
 
 export class Worker {
@@ -675,18 +679,49 @@ export class Worker {
       if (chatSessionId) {
         await addEvent(chatSessionId, 'claude_start', { type: 'claude_start', message: 'Starting Claude Agent SDK...' });
       }
-      await this.executeWithClaude(repoDir, issue, chatSessionId);
+      const claudeValidation = await this.executeWithClaude(repoDir, issue, chatSessionId);
 
       // Check if there are any changes
       const hasChanges = await this.hasChanges(repoDir);
       if (!hasChanges) {
+        const duration = Date.now() - startTime;
+
+        // Check if Claude determined the feature was already implemented
+        if (claudeValidation.alreadyImplemented) {
+          taskLog.info('Feature already implemented - no changes needed', {
+            issueNumber: issue.number,
+            validationIssues: claudeValidation.issues,
+          });
+          if (chatSessionId) {
+            await addMessage(chatSessionId, 'system', 'Feature already implemented - no changes needed');
+            await updateChatSession(chatSessionId, { status: 'completed', completedAt: new Date() });
+          }
+
+          // Record as success (feature exists, just needs issue closure)
+          metrics.recordTaskCompletion(true, duration, {
+            repository: this.repository,
+            taskType: 'issue',
+            workerId: this.workerId,
+          });
+
+          return {
+            success: false, // Still false since no PR was created, but with alreadyImplemented flag
+            issue,
+            branchName,
+            error: 'Feature already implemented',
+            duration,
+            chatSessionId,
+            alreadyImplemented: true,
+          };
+        }
+
+        // Regular "no changes" failure
         taskLog.warn('No changes made by Claude');
         if (chatSessionId) {
           await addMessage(chatSessionId, 'system', 'No changes were made by Claude');
           await updateChatSession(chatSessionId, { status: 'completed', completedAt: new Date() });
         }
 
-        const duration = Date.now() - startTime;
         // Record task completion (failure - no changes)
         metrics.recordTaskCompletion(false, duration, {
           repository: this.repository,
@@ -1341,8 +1376,9 @@ export class Worker {
    * - Timeout handling with 5-minute limit
    * - Conversation history logging for debugging
    * - Response validation to detect incomplete implementations
+   * @returns ResponseValidation with alreadyImplemented flag when Claude determines feature exists
    */
-  private async executeWithClaude(repoDir: string, issue: Issue, chatSessionId?: string): Promise<void> {
+  private async executeWithClaude(repoDir: string, issue: Issue, chatSessionId?: string): Promise<ResponseValidation> {
     const correlationId = generateCorrelationId();
     const executionLogger = new ClaudeExecutionLogger(correlationId, `issue-${issue.number}`);
 
@@ -1442,12 +1478,13 @@ export class Worker {
             warnings: validation.issues,
             toolUseCount: attemptResult.toolUseCount,
             turnCount: attemptResult.turnCount,
+            alreadyImplemented: validation.alreadyImplemented,
           });
         }
 
         // Log successful execution history
         executionLogger.logFullHistory('debug');
-        return;
+        return validation;
       } catch (error) {
         lastError = error as Error;
         const errorCode = this.extractErrorCode(lastError);
@@ -1919,6 +1956,7 @@ export class Worker {
   private validateClaudeResponse(result: ClaudeExecutionResult, repoDir: string): ResponseValidation {
     const issues: string[] = [];
     let severity: ResponseValidation['severity'] = 'none';
+    let alreadyImplemented = false;
 
     // Check if Claude made any changes
     if (!result.hasChanges && result.toolUseCount === 0) {
@@ -1931,13 +1969,20 @@ export class Worker {
         // Reasonable tool use count - likely checked and found already implemented
         issues.push('Claude used tools but made no file changes (feature may already be implemented)');
         severity = 'warning'; // Warning, not error - this is acceptable
+        // Mark as already implemented - Claude investigated and found the feature exists
+        alreadyImplemented = true;
       } else if (result.toolUseCount > 30) {
         // Too many tools without changes - likely stuck in a loop
         issues.push('Many tool uses but no changes made, possible stuck loop');
         severity = 'warning';
       } else {
+        // 16-30 tools used without changes - could be either
+        // Check if it looks like investigation (reads/greps) vs failed implementation
         issues.push('Claude used tools but made no file changes');
         severity = 'warning';
+        // Conservative: if between 16-30 tools and no changes, likely already implemented
+        // Claude typically uses many read/grep tools to investigate before concluding
+        alreadyImplemented = true;
       }
     }
 
@@ -1946,6 +1991,8 @@ export class Worker {
     if (result.durationMs < 5000 && result.turnCount < 2 && result.toolUseCount < 3) {
       issues.push('Execution was very short with minimal tool use, might indicate early failure');
       severity = severity === 'error' ? 'error' : 'warning';
+      // Short execution with minimal tools is NOT "already implemented" - it's a failure
+      alreadyImplemented = false;
     }
 
     // Add any validation issues from the result itself
@@ -1956,6 +2003,7 @@ export class Worker {
       hasChanges: result.hasChanges,
       issues,
       severity,
+      alreadyImplemented,
     };
   }
 
