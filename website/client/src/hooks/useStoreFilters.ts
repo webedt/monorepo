@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type {
   StoreItem,
   StoreCategory,
@@ -18,9 +19,16 @@ export interface StoreFilterState {
   sortDirection: SortDirection;
 }
 
+export interface ActiveFilter {
+  type: 'search' | 'category' | 'genre' | 'priceRange' | 'onSale';
+  label: string;
+  value: string;
+}
+
 export interface UseStoreFiltersReturn {
   // Filter state
   searchQuery: string;
+  debouncedSearchQuery: string;
   selectedCategory: StoreCategory | 'all';
   selectedGenre: StoreGenre | 'all';
   selectedPriceRange: PriceRange;
@@ -34,6 +42,7 @@ export interface UseStoreFiltersReturn {
   filteredItems: StoreItem[];
   sortedItems: StoreItem[];
   hasActiveFilters: boolean;
+  activeFilters: ActiveFilter[];
 
   // Actions
   setSearchQuery: (query: string) => void;
@@ -43,6 +52,63 @@ export interface UseStoreFiltersReturn {
   setShowOnSaleOnly: (showOnSale: boolean) => void;
   handleSort: (field: Exclude<StoreSortField, null>) => void;
   clearFilters: () => void;
+  clearFilter: (type: ActiveFilter['type']) => void;
+}
+
+// Label mappings for active filter display
+const categoryLabels: Record<StoreCategory | 'all', string> = {
+  all: 'All Categories',
+  games: 'Games',
+  tools: 'Tools',
+  assets: 'Assets',
+  templates: 'Templates',
+  plugins: 'Plugins',
+  audio: 'Audio',
+  other: 'Other',
+};
+
+const genreLabels: Record<StoreGenre | 'all', string> = {
+  all: 'All Genres',
+  action: 'Action',
+  adventure: 'Adventure',
+  puzzle: 'Puzzle',
+  racing: 'Racing',
+  strategy: 'Strategy',
+  simulation: 'Simulation',
+  rpg: 'RPG',
+  platformer: 'Platformer',
+  shooter: 'Shooter',
+  sports: 'Sports',
+  casual: 'Casual',
+  educational: 'Educational',
+  other: 'Other',
+};
+
+const priceRangeLabels: Record<PriceRange, string> = {
+  all: 'All Prices',
+  free: 'Free',
+  under5: 'Under $5',
+  under10: 'Under $10',
+  under25: 'Under $25',
+  under50: 'Under $50',
+  over50: 'Over $50',
+};
+
+// Custom hook for debouncing values
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
 }
 
 /**
@@ -50,27 +116,103 @@ export interface UseStoreFiltersReturn {
  * Implements filtering and sorting logic for the store catalog.
  * As per SPEC.md Section 3.3 - Search & Filtering.
  *
+ * Features:
+ * - URL query parameter synchronization for bookmarkable searches
+ * - Debounced search for improved performance
+ * - Active filter tracking for clear display
+ *
  * @param items - Array of store items to filter and sort
  * @returns Filter state, computed results, and actions
  */
 export function useStoreFilters(items: StoreItem[]): UseStoreFiltersReturn {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isInitialMount = useRef(true);
+
+  // Initialize state from URL params or defaults
+  const getInitialCategory = (): StoreCategory | 'all' => {
+    const param = searchParams.get('category');
+    if (param && param in categoryLabels) {
+      return param as StoreCategory | 'all';
+    }
+    return 'all';
+  };
+
+  const getInitialGenre = (): StoreGenre | 'all' => {
+    const param = searchParams.get('genre');
+    if (param && param in genreLabels) {
+      return param as StoreGenre | 'all';
+    }
+    return 'all';
+  };
+
+  const getInitialPriceRange = (): PriceRange => {
+    const param = searchParams.get('price');
+    if (param && param in priceRangeLabels) {
+      return param as PriceRange;
+    }
+    return 'all';
+  };
+
   // Search and filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<StoreCategory | 'all'>('all');
-  const [selectedGenre, setSelectedGenre] = useState<StoreGenre | 'all'>('all');
-  const [selectedPriceRange, setSelectedPriceRange] = useState<PriceRange>('all');
-  const [showOnSaleOnly, setShowOnSaleOnly] = useState(false);
+  const [searchQuery, setSearchQueryInternal] = useState(searchParams.get('q') || '');
+  const [selectedCategory, setSelectedCategoryInternal] = useState<StoreCategory | 'all'>(getInitialCategory);
+  const [selectedGenre, setSelectedGenreInternal] = useState<StoreGenre | 'all'>(getInitialGenre);
+  const [selectedPriceRange, setSelectedPriceRangeInternal] = useState<PriceRange>(getInitialPriceRange);
+  const [showOnSaleOnly, setShowOnSaleOnlyInternal] = useState(searchParams.get('sale') === 'true');
 
   // Sort state
-  const [sortField, setSortField] = useState<StoreSortField>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [sortField, setSortField] = useState<StoreSortField>(
+    (searchParams.get('sortBy') as StoreSortField) || null
+  );
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    (searchParams.get('sortDir') as SortDirection) || null
+  );
 
-  // Filter items based on search and filters
+  // Debounced search query for filtering (300ms delay)
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
+
+  // Sync state changes to URL params
+  useEffect(() => {
+    // Skip the initial mount to avoid overwriting URL params
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    const params = new URLSearchParams();
+
+    if (searchQuery) {
+      params.set('q', searchQuery);
+    }
+    if (selectedCategory !== 'all') {
+      params.set('category', selectedCategory);
+    }
+    if (selectedGenre !== 'all') {
+      params.set('genre', selectedGenre);
+    }
+    if (selectedPriceRange !== 'all') {
+      params.set('price', selectedPriceRange);
+    }
+    if (showOnSaleOnly) {
+      params.set('sale', 'true');
+    }
+    if (sortField) {
+      params.set('sortBy', sortField);
+    }
+    if (sortDirection) {
+      params.set('sortDir', sortDirection);
+    }
+
+    // Update URL without triggering navigation
+    setSearchParams(params, { replace: true });
+  }, [searchQuery, selectedCategory, selectedGenre, selectedPriceRange, showOnSaleOnly, sortField, sortDirection, setSearchParams]);
+
+  // Filter items based on search and filters (use debounced search query)
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      // Search filter - searches across multiple fields
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
+      // Search filter - searches across multiple fields (using debounced value)
+      if (debouncedSearchQuery) {
+        const query = debouncedSearchQuery.toLowerCase();
         const searchableText = [
           item.title,
           item.description,
@@ -129,7 +271,7 @@ export function useStoreFilters(items: StoreItem[]): UseStoreFiltersReturn {
 
       return true;
     });
-  }, [items, searchQuery, selectedCategory, selectedGenre, selectedPriceRange, showOnSaleOnly]);
+  }, [items, debouncedSearchQuery, selectedCategory, selectedGenre, selectedPriceRange, showOnSaleOnly]);
 
   // Sort items
   const sortedItems = useMemo(() => {
@@ -181,15 +323,57 @@ export function useStoreFilters(items: StoreItem[]): UseStoreFiltersReturn {
     });
   }, []);
 
+  // Wrapper functions to update state
+  const setSearchQuery = useCallback((query: string) => {
+    setSearchQueryInternal(query);
+  }, []);
+
+  const setSelectedCategory = useCallback((category: StoreCategory | 'all') => {
+    setSelectedCategoryInternal(category);
+  }, []);
+
+  const setSelectedGenre = useCallback((genre: StoreGenre | 'all') => {
+    setSelectedGenreInternal(genre);
+  }, []);
+
+  const setSelectedPriceRange = useCallback((priceRange: PriceRange) => {
+    setSelectedPriceRangeInternal(priceRange);
+  }, []);
+
+  const setShowOnSaleOnly = useCallback((showOnSale: boolean) => {
+    setShowOnSaleOnlyInternal(showOnSale);
+  }, []);
+
   // Clear all filters
   const clearFilters = useCallback(() => {
-    setSearchQuery('');
-    setSelectedCategory('all');
-    setSelectedGenre('all');
-    setSelectedPriceRange('all');
-    setShowOnSaleOnly(false);
+    setSearchQueryInternal('');
+    setSelectedCategoryInternal('all');
+    setSelectedGenreInternal('all');
+    setSelectedPriceRangeInternal('all');
+    setShowOnSaleOnlyInternal(false);
     setSortField(null);
     setSortDirection(null);
+  }, []);
+
+  // Clear a specific filter
+  const clearFilter = useCallback((type: ActiveFilter['type']) => {
+    switch (type) {
+      case 'search':
+        setSearchQueryInternal('');
+        break;
+      case 'category':
+        setSelectedCategoryInternal('all');
+        break;
+      case 'genre':
+        setSelectedGenreInternal('all');
+        break;
+      case 'priceRange':
+        setSelectedPriceRangeInternal('all');
+        break;
+      case 'onSale':
+        setShowOnSaleOnlyInternal(false);
+        break;
+    }
   }, []);
 
   // Check if any filters are active
@@ -200,9 +384,57 @@ export function useStoreFilters(items: StoreItem[]): UseStoreFiltersReturn {
     selectedPriceRange !== 'all' ||
     showOnSaleOnly;
 
+  // Build list of active filters for display
+  const activeFilters = useMemo((): ActiveFilter[] => {
+    const filters: ActiveFilter[] = [];
+
+    if (searchQuery) {
+      filters.push({
+        type: 'search',
+        label: 'Search',
+        value: searchQuery,
+      });
+    }
+
+    if (selectedCategory !== 'all') {
+      filters.push({
+        type: 'category',
+        label: 'Category',
+        value: categoryLabels[selectedCategory],
+      });
+    }
+
+    if (selectedGenre !== 'all') {
+      filters.push({
+        type: 'genre',
+        label: 'Genre',
+        value: genreLabels[selectedGenre],
+      });
+    }
+
+    if (selectedPriceRange !== 'all') {
+      filters.push({
+        type: 'priceRange',
+        label: 'Price',
+        value: priceRangeLabels[selectedPriceRange],
+      });
+    }
+
+    if (showOnSaleOnly) {
+      filters.push({
+        type: 'onSale',
+        label: 'On Sale',
+        value: 'Yes',
+      });
+    }
+
+    return filters;
+  }, [searchQuery, selectedCategory, selectedGenre, selectedPriceRange, showOnSaleOnly]);
+
   return {
     // Filter state
     searchQuery,
+    debouncedSearchQuery,
     selectedCategory,
     selectedGenre,
     selectedPriceRange,
@@ -216,6 +448,7 @@ export function useStoreFilters(items: StoreItem[]): UseStoreFiltersReturn {
     filteredItems,
     sortedItems,
     hasActiveFilters,
+    activeFilters,
 
     // Actions
     setSearchQuery,
@@ -225,5 +458,6 @@ export function useStoreFilters(items: StoreItem[]): UseStoreFiltersReturn {
     setShowOnSaleOnly,
     handleSort,
     clearFilters,
+    clearFilter,
   };
 }
