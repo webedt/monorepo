@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { LibraryItem, Collection, SortField, SortDirection } from '@/types/library';
+import type { CloudSyncState } from '@/types/cloudServices';
+import { CloudSyncIndicatorCompact } from '@/components/library';
 
 export interface CompactListViewProps {
   items: LibraryItem[];
@@ -16,6 +18,9 @@ export interface CompactListViewProps {
   collectionMenuItemId: number | null;
   onSetCollectionMenuItemId: (itemId: number | null) => void;
   collectionMenuRef: React.RefObject<HTMLDivElement>;
+  // Cloud sync props
+  getCloudSyncState?: (itemId: number) => CloudSyncState;
+  onSyncItem?: (itemId: number) => void;
 }
 
 /**
