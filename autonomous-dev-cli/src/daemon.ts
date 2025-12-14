@@ -1407,6 +1407,9 @@ export class Daemon implements DaemonStateProvider {
     let prsMerged = 0;
     let degraded = false;
 
+    // Track issues marked as in-progress for cleanup on error
+    const inProgressIssues: Issue[] = [];
+
     // Update service health at start of cycle
     this.logServiceHealthStatus();
 
@@ -1763,6 +1766,8 @@ export class Daemon implements DaemonStateProvider {
           if (labelResult.degraded) {
             degraded = true;
           }
+          // Track for cleanup on error
+          inProgressIssues.push(issue);
         }
 
         // Create token refresh callback for workers
@@ -2122,6 +2127,20 @@ export class Daemon implements DaemonStateProvider {
     } catch (error: unknown) {
       errors.push(getErrorMessage(error));
       const finalHealth = this.updateServiceHealth();
+
+      // Clean up in-progress labels on issues that were marked before the error
+      if (inProgressIssues.length > 0 && this.github) {
+        logger.warn(`Cleaning up in-progress labels from ${inProgressIssues.length} issues due to cycle error`);
+        for (const issue of inProgressIssues) {
+          try {
+            await this.github.issues.removeLabel(issue.number, 'in-progress');
+            logger.debug(`Removed in-progress label from issue #${issue.number}`);
+          } catch (cleanupError) {
+            // Don't fail cleanup, just log
+            logger.warn(`Failed to remove in-progress label from issue #${issue.number}: ${getErrorMessage(cleanupError)}`);
+          }
+        }
+      }
 
       return {
         success: false,

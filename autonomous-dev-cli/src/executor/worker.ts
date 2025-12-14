@@ -3,9 +3,13 @@ import {
   type ContentBlock,
   type ClaudeSDKMessage,
   type ResultMessage,
+  type ToolResultBlock,
   isTextBlock,
   isToolUseBlock,
+  isToolResultBlock,
   isResultMessage,
+  isUserMessage,
+  isErrorMessage,
   validateSDKMessage,
   extractToolUseInfo,
   extractTextContent,
@@ -1621,6 +1625,16 @@ export class Worker {
       for await (const message of stream) {
         const typedMessage = message as unknown as ClaudeSDKMessage;
 
+        // Log ALL messages in verbose mode for debugging
+        if (isDebugModeEnabled()) {
+          const rawMsg = message as Record<string, unknown>;
+          this.log.debug(`Claude message: ${typedMessage.type}${rawMsg.subtype ? `/${rawMsg.subtype}` : ''}`, {
+            type: typedMessage.type,
+            subtype: rawMsg.subtype,
+            hasContent: !!('message' in typedMessage && (typedMessage as any).message?.content),
+          });
+        }
+
         if (!validateSDKMessage(typedMessage)) {
           this.log.warn('Received invalid SDK message structure', {
             messageType: typeof message === 'object' && message !== null
@@ -1698,6 +1712,16 @@ export class Worker {
                 assistantTextBuffer += text + '\n';
                 executionLogger.recordAssistantText(text);
                 executionTracker.recordAssistantText(text);
+
+                // Log assistant thinking/text in verbose mode
+                if (isDebugModeEnabled() && text.trim()) {
+                  // Truncate very long text for console output
+                  const displayText = text.length > 500 ? text.slice(0, 500) + '...' : text;
+                  this.log.debug(`Claude thinking: ${displayText.replace(/\n/g, ' ').trim()}`, {
+                    workerId: this.workerId,
+                    textLength: text.length,
+                  });
+                }
               }
             }
           }
@@ -1745,6 +1769,36 @@ export class Worker {
             hasChanges: hasWriteOperations,
             validationIssues: [],
           };
+        } else if (isUserMessage(typedMessage)) {
+          // User messages contain tool results - log them in verbose mode
+          if (isDebugModeEnabled()) {
+            const content = typedMessage.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (isToolResultBlock(block as ContentBlock)) {
+                  const resultBlock = block as ToolResultBlock;
+                  const resultContent = typeof resultBlock.content === 'string'
+                    ? resultBlock.content
+                    : JSON.stringify(resultBlock.content);
+                  const displayContent = resultContent.length > 300
+                    ? resultContent.slice(0, 300) + '...'
+                    : resultContent;
+                  this.log.debug(`Tool result${resultBlock.is_error ? ' (ERROR)' : ''}: ${displayContent.replace(/\n/g, ' ').trim()}`, {
+                    workerId: this.workerId,
+                    toolUseId: resultBlock.tool_use_id,
+                    isError: resultBlock.is_error,
+                    contentLength: resultContent.length,
+                  });
+                }
+              }
+            }
+          }
+        } else if (isErrorMessage(typedMessage)) {
+          // Log error messages from Claude
+          this.log.error(`Claude error: ${typedMessage.error.message}`, {
+            workerId: this.workerId,
+            errorType: typedMessage.error.type,
+          });
         }
       }
 
@@ -1871,20 +1925,27 @@ export class Worker {
       issues.push('Claude made no file changes and used no tools');
       severity = 'error';
     } else if (!result.hasChanges) {
-      issues.push('Claude used tools but made no file changes');
-      severity = 'warning';
+      // If Claude used tools but made no changes, check if it's a reasonable amount
+      // This could indicate the feature was already implemented (valid) or a stuck loop (invalid)
+      if (result.toolUseCount <= 15) {
+        // Reasonable tool use count - likely checked and found already implemented
+        issues.push('Claude used tools but made no file changes (feature may already be implemented)');
+        severity = 'warning'; // Warning, not error - this is acceptable
+      } else if (result.toolUseCount > 30) {
+        // Too many tools without changes - likely stuck in a loop
+        issues.push('Many tool uses but no changes made, possible stuck loop');
+        severity = 'warning';
+      } else {
+        issues.push('Claude used tools but made no file changes');
+        severity = 'warning';
+      }
     }
 
     // Check for very short execution (might indicate immediate failure)
-    if (result.durationMs < 5000 && result.turnCount < 2) {
-      issues.push('Execution was very short, might indicate early failure');
+    // But only if no tools were used - quick completion with some tools is fine
+    if (result.durationMs < 5000 && result.turnCount < 2 && result.toolUseCount < 3) {
+      issues.push('Execution was very short with minimal tool use, might indicate early failure');
       severity = severity === 'error' ? 'error' : 'warning';
-    }
-
-    // Check for excessive tool use without changes (might indicate stuck loop)
-    if (result.toolUseCount > 20 && !result.hasChanges) {
-      issues.push('Many tool uses but no changes made, possible stuck loop');
-      severity = 'warning';
     }
 
     // Add any validation issues from the result itself
@@ -2098,17 +2159,34 @@ Do NOT use paths like \`/code/\`, \`/workspace/\`, or any other assumed paths. A
 
 ${issue.body || 'No description provided.'}
 ${specSection}
+## CRITICAL: Check If Already Implemented
+
+**BEFORE doing any implementation work**, you MUST check if the feature described in this issue is already implemented:
+
+1. Search for existing files/components mentioned in the issue (e.g., if issue says "Create Store.tsx", check if \`Store.tsx\` already exists)
+2. Read the existing files to verify they implement the requested functionality
+3. Check the router/routes to see if the page/feature is already wired up
+
+**If the feature is ALREADY IMPLEMENTED:**
+- Do NOT make any changes
+- Do NOT run npm install or npm build
+- Simply finish immediately - the task is already done
+- The system will detect "no changes" and handle it appropriately
+
+**Only proceed with implementation if the feature is genuinely missing or incomplete.**
+
 ## Instructions
 
 1. First, run \`pwd\` to confirm your working directory, then explore the codebase
 2. Read \`./CLAUDE.md\` (relative path) if it exists for project-specific guidelines
-3. ${hasExistingFiles ? 'Review the existing implementation files listed above' : 'Identify related files that may need modification'}
-4. Implement the changes described in the issue
-5. Follow existing code style and conventions
-6. Make sure your changes are complete and working
-7. Do NOT create or modify test files unless specifically asked
-8. Do NOT modify unrelated files
-9. Keep changes focused and minimal
+3. **Check if the feature already exists** (see above) - if yes, stop here
+4. ${hasExistingFiles ? 'Review the existing implementation files listed above' : 'Identify related files that may need modification'}
+5. Implement the changes described in the issue
+6. Follow existing code style and conventions
+7. Make sure your changes are complete and working
+8. Do NOT create or modify test files unless specifically asked
+9. Do NOT modify unrelated files
+10. Keep changes focused and minimal
 
 ## Build Verification (REQUIRED)
 

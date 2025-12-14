@@ -1,11 +1,6 @@
 name: Autonomous Dev CLI Tests
 
 on:
-  push:
-    branches: [main, develop]
-    paths:
-      - 'autonomous-dev-cli/**'
-      - '.github/workflows/autonomous-dev-cli-test.yml'
   pull_request:
     branches: [main, develop]
     paths:
