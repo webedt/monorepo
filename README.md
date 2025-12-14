@@ -28,7 +28,7 @@ WebEDT is a web-based game development platform that enables users to browse and
   - Sorting: Title, Date Added, Last Played, Play Count (ascending/descending with column header toggle)
   - Organization: Quick Favorite star icon accessible from any view, Custom Collections/Folders with full CRUD
   - Navigation: Pagination controls for large libraries
-  - Cloud Services: Cloud saves synced across devices, Leaderboards API, Achievement system (future), Voice chat library (future)
+  - Cloud Services: Cloud saves (planned), Leaderboards API (planned), Achievement system (future), Voice chat library (future)
 - **Editor Suite** - Complete game development environment with AI assistance
   - Chat - AI-powered development assistant with verbosity modes
   - Code - VS Code-style editor with syntax highlighting, multi-file editing, Git diff

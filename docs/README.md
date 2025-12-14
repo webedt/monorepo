@@ -216,10 +216,10 @@ The Library displays your purchased and wishlisted items with multiple view opti
 - **Pagination or Infinite Scroll** - Navigate through large libraries with page controls
 
 **Cloud Services (Section 4.5):**
-- **Cloud Saves** - Synced across devices automatically (web-based games sync inherently)
+- **Cloud Saves** - Synced across devices (web-based games sync inherently; API for native games planned)
 - **Shared Platform Libraries for Games:**
-  - Cloud save API
-  - Leaderboards API
+  - Cloud save API (planned)
+  - Leaderboards API (planned)
   - Achievement system (future)
   - Voice chat library for games (future)
 
