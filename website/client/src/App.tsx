@@ -25,6 +25,7 @@ import SceneEditor from '@/pages/SceneEditor';
 import Preview from '@/pages/Preview';
 import ItemPage from '@/pages/ItemPage';
 import LibraryItemPage from '@/pages/LibraryItemPage';
+import StoreItemDetail from '@/pages/StoreItemDetail';
 import SplitViewRouter from '@/components/SplitViewRouter';
 import ImageEditor from '@/pages/editor/ImageEditor';
 
@@ -246,6 +247,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ItemPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/store/:id"
+              element={
+                <ProtectedRoute>
+                  <StoreItemDetail />
                 </ProtectedRoute>
               }
             />
