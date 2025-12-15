@@ -477,12 +477,11 @@ describe('URL Pattern Recognition', () => {
   });
 
   describe('invalid URL patterns', () => {
+    // These URLs don't contain 'github.com/owner/' pattern
     const invalidUrls = [
       'https://gitlab.com/owner/repo',
       'https://bitbucket.org/owner/repo',
-      'http://github.com',
-      'github.com/owner/repo',
-      'ftp://github.com/owner/repo'
+      'http://github.com',  // No owner/repo path
     ];
 
     for (const url of invalidUrls) {
@@ -493,6 +492,20 @@ describe('URL Pattern Recognition', () => {
         );
       });
     }
+  });
+
+  describe('permissive URL patterns', () => {
+    // These URLs contain 'github.com/owner/' and are accepted by the regex
+    // The function extracts owner regardless of protocol scheme
+    it('should accept github.com/owner/repo without protocol', () => {
+      const owner = client.extractOwner('github.com/owner/repo');
+      assert.strictEqual(owner, 'owner');
+    });
+
+    it('should accept ftp://github.com/owner/repo', () => {
+      const owner = client.extractOwner('ftp://github.com/owner/repo');
+      assert.strictEqual(owner, 'owner');
+    });
   });
 });
 

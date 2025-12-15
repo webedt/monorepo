@@ -475,6 +475,7 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       branch TEXT,
       provider TEXT DEFAULT 'claude',
       provider_session_id TEXT,
+      issue_number INTEGER,
       auto_commit BOOLEAN NOT NULL DEFAULT FALSE,
       locked BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -506,6 +507,8 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON chat_sessions(status);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_number ON chat_sessions(issue_number);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_repo ON chat_sessions(issue_number, repository_owner, repository_name);
     CREATE INDEX IF NOT EXISTS idx_messages_chat_session_id ON messages(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_chat_session_id ON events(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);

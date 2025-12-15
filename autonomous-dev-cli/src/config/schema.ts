@@ -242,6 +242,24 @@ export const ConfigSchema = z.object({
       .default(30),
     /** Working directory for task execution - validated for path traversal */
     workDir: safePathString.default('/tmp/autonomous-dev'),
+    /**
+     * Use Claude Remote Sessions API instead of local Claude Agent SDK.
+     * When enabled, execution is delegated to Anthropic's hosted infrastructure.
+     * Anthropic handles git operations (clone, branch, commit, push) directly.
+     * (default: false)
+     */
+    useRemoteSessions: z.boolean().default(false),
+    /**
+     * Environment ID for Claude Remote Sessions (required when useRemoteSessions is true).
+     * Can also be set via CLAUDE_ENVIRONMENT_ID environment variable.
+     * Example: env_011CUubbAJQDeejWqiLomwqf
+     */
+    claudeEnvironmentId: z.string().optional(),
+    /**
+     * Model to use for Claude execution.
+     * Default: claude-sonnet-4-20250514
+     */
+    claudeModel: z.string().default('claude-sonnet-4-20250514'),
   }).describe('Task execution settings'),
 
   /**
@@ -593,6 +611,8 @@ export const defaultConfig: Partial<Config> = {
     parallelWorkers: 4,
     timeoutMinutes: 30,
     workDir: '/tmp/autonomous-dev',
+    useRemoteSessions: false,
+    claudeModel: 'claude-sonnet-4-20250514',
   },
   evaluation: {
     requireBuild: true,

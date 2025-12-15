@@ -25,6 +25,7 @@ import './db/index.js';
 
 // Import routes
 import executeRoutes from './routes/execute.js';
+import executeRemoteRoutes from './routes/executeRemote.js';
 import resumeRoutes from './routes/resume.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
@@ -293,6 +294,7 @@ app.get('/metrics', (req, res) => {
 
 // Add routes
 app.use('/api', executeRoutes);
+app.use('/api/execute-remote', executeRemoteRoutes);  // Claude Remote Sessions endpoint
 app.use('/api', resumeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);

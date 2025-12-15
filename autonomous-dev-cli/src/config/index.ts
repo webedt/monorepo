@@ -751,6 +751,9 @@ export function loadConfig(configPath?: string, options: Omit<LoadConfigOptions,
     parallelWorkers: parseInt(process.env.PARALLEL_WORKERS || '4', 10),
     timeoutMinutes: parseInt(process.env.TIMEOUT_MINUTES || '30', 10),
     workDir: process.env.WORK_DIR || '/tmp/autonomous-dev',
+    useRemoteSessions: process.env.USE_REMOTE_SESSIONS === 'true',
+    claudeEnvironmentId: process.env.CLAUDE_ENVIRONMENT_ID,
+    claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
   };
 
   envConfig.evaluation = {

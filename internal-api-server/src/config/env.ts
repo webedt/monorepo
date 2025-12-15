@@ -69,11 +69,17 @@ export const SESSION_SECRET = process.env.SESSION_SECRET || 'development-secret-
 // Feature flags
 export const USE_NEW_ARCHITECTURE = process.env.USE_NEW_ARCHITECTURE === 'true';
 
+// Claude Remote Sessions configuration
+export const CLAUDE_ENVIRONMENT_ID = process.env.CLAUDE_ENVIRONMENT_ID || '';
+export const CLAUDE_API_BASE_URL = process.env.CLAUDE_API_BASE_URL || 'https://api.anthropic.com';
+export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL || 'claude-sonnet-4-20250514';
+
 /**
  * Validate required environment variables
  */
-export function validateEnv(): { valid: boolean; errors: string[] } {
+export function validateEnv(): { valid: boolean; errors: string[]; warnings: string[] } {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   if (NODE_ENV === 'production') {
     if (!MINIO_ROOT_USER) errors.push('MINIO_ROOT_USER is required in production');
@@ -83,9 +89,15 @@ export function validateEnv(): { valid: boolean; errors: string[] } {
     }
   }
 
+  // Claude Remote Sessions validation
+  if (!CLAUDE_ENVIRONMENT_ID) {
+    warnings.push('CLAUDE_ENVIRONMENT_ID not set - Claude Remote Sessions will not work');
+  }
+
   return {
     valid: errors.length === 0,
-    errors
+    errors,
+    warnings
   };
 }
 
@@ -113,4 +125,7 @@ export function logEnvConfig(): void {
   console.log(`  MINIO_ROOT_PASSWORD=${redact(MINIO_ROOT_PASSWORD)}`);
   console.log(`  SESSION_SECRET=${redact(SESSION_SECRET)}`);
   console.log(`  USE_NEW_ARCHITECTURE=${USE_NEW_ARCHITECTURE}`);
+  console.log(`  CLAUDE_ENVIRONMENT_ID=${CLAUDE_ENVIRONMENT_ID || 'not set'}`);
+  console.log(`  CLAUDE_API_BASE_URL=${CLAUDE_API_BASE_URL}`);
+  console.log(`  CLAUDE_DEFAULT_MODEL=${CLAUDE_DEFAULT_MODEL}`);
 }

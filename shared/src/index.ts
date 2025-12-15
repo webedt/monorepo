@@ -29,3 +29,20 @@ export {
   readWebedtConfig,
 } from './previewUrlHelper.js';
 export type { WebedtConfig } from './previewUrlHelper.js';
+
+// Claude Remote Sessions API
+export { ClaudeRemoteClient, ClaudeRemoteError } from './claudeRemote/index.js';
+export type {
+  ClaudeAuth,
+  ClaudeRemoteClientConfig,
+  CreateSessionParams,
+  CreateSessionResult,
+  Session as ClaudeSession,
+  SessionStatus as ClaudeSessionStatus,
+  SessionEvent,
+  SessionEventType,
+  EventsResponse,
+  EventCallback,
+  PollOptions,
+  SessionResult,
+} from './claudeRemote/index.js';

@@ -8,6 +8,13 @@
       "when": 1702500000000,
       "tag": "0000_initial_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1702600000000,
+      "tag": "0001_add_issue_number",
+      "breakpoints": true
     }
   ]
 }
