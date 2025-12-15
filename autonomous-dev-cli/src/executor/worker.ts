@@ -98,6 +98,11 @@ import {
 } from '../db/index.js';
 import { loadSpecContext, type SpecContext } from '../discovery/spec-reader.js';
 import { refreshClaudeToken, shouldRefreshToken, InvalidRefreshTokenError } from '../utils/claudeAuth.js';
+import {
+  ClaudeRemoteClient,
+  type SessionEvent,
+  type SessionResult,
+} from '@webedt/shared';
 
 /**
  * Callback for refreshing Claude OAuth tokens.
@@ -425,6 +430,16 @@ export interface WorkerOptions {
    * and the refreshed tokens will be persisted.
    */
   onTokenRefresh?: TokenRefreshCallback;
+  /**
+   * Use Claude Remote Sessions API instead of local Claude Agent SDK.
+   * When enabled, execution is delegated to Anthropic's hosted infrastructure.
+   */
+  useRemoteSessions?: boolean;
+  /**
+   * Environment ID for Claude Remote Sessions (required when useRemoteSessions is true).
+   * Example: env_011CUubbAJQDeejWqiLomwqf
+   */
+  claudeEnvironmentId?: string;
 }
 
 /**
@@ -1429,13 +1444,25 @@ export class Worker {
       }
 
       try {
-        attemptResult = await this.executeSingleClaudeAttempt(
-          repoDir,
-          issue,
-          timeoutMs,
-          chatSessionId,
-          executionLogger
-        );
+        // Choose execution method based on options
+        if (this.options.useRemoteSessions) {
+          // Use Claude Remote Sessions API (Anthropic-hosted)
+          attemptResult = await this.executeRemoteClaudeAttempt(
+            issue,
+            timeoutMs,
+            chatSessionId,
+            executionLogger
+          );
+        } else {
+          // Use local Claude Agent SDK
+          attemptResult = await this.executeSingleClaudeAttempt(
+            repoDir,
+            issue,
+            timeoutMs,
+            chatSessionId,
+            executionLogger
+          );
+        }
 
         // Validate the response
         const validation = this.validateClaudeResponse(attemptResult, repoDir);
@@ -1937,6 +1964,264 @@ export class Worker {
       // This ensures cleanup happens even when errors occur
       clearTimeout(timeoutId);
       cleanupAbort();
+    }
+  }
+
+  /**
+   * Execute Claude task using Remote Sessions API (Anthropic-hosted infrastructure).
+   * This delegates all execution to Anthropic's servers.
+   */
+  private async executeRemoteClaudeAttempt(
+    issue: Issue,
+    timeoutMs: number,
+    chatSessionId: string | undefined,
+    executionLogger: ClaudeExecutionLogger
+  ): Promise<ClaudeExecutionResult> {
+    const attemptStartTime = Date.now();
+    const correlationId = generateCorrelationId();
+
+    // Validate required options for remote sessions
+    if (!this.options.claudeEnvironmentId) {
+      throw new ClaudeExecutorError(
+        'Claude Environment ID is required for remote sessions. Set claudeEnvironmentId in worker options.',
+        {
+          claudeErrorType: 'api',
+          toolsUsed: 0,
+          turnsCompleted: 0,
+          context: { operation: 'remote_session_init', issueNumber: issue.number },
+        }
+      );
+    }
+
+    this.log.info('Starting Claude Remote Session execution', {
+      issueNumber: issue.number,
+      workerId: this.workerId,
+      correlationId,
+      environmentId: this.options.claudeEnvironmentId,
+    });
+
+    const prompt = this.buildPrompt(issue);
+
+    // Create the remote client
+    const client = new ClaudeRemoteClient({
+      accessToken: this.options.claudeAuth.accessToken,
+      environmentId: this.options.claudeEnvironmentId,
+    });
+
+    let toolUseCount = 0;
+    let turnCount = 0;
+    let hasWriteOperations = false;
+    let assistantTextBuffer = '';
+    let sessionResult: SessionResult | undefined;
+
+    try {
+      // Create abort controller for timeout
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => {
+        abortController.abort();
+      }, timeoutMs);
+
+      // Event callback to process remote session events
+      const onEvent = async (event: SessionEvent): Promise<void> => {
+        if (event.type === 'tool_use' && event.tool_use) {
+          toolUseCount++;
+          const toolName = event.tool_use.name;
+          const toolInput = event.tool_use.input as Record<string, unknown>;
+
+          // Track write operations
+          if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
+            hasWriteOperations = true;
+          }
+
+          // Log progress
+          if (toolUseCount % 10 === 0 || toolUseCount <= 3) {
+            const elapsed = Math.round((Date.now() - attemptStartTime) / 1000);
+            this.log.info(`Claude Remote progress: ${toolUseCount} tools, ${turnCount} turns (${elapsed}s)`, {
+              issueNumber: issue.number,
+              workerId: this.workerId,
+            });
+          }
+
+          this.log.claudeToolUse(toolName, toolInput, {
+            correlationId,
+            workerId: this.workerId,
+            issueNumber: issue.number,
+            turnCount,
+            toolCount: toolUseCount,
+          });
+
+          metrics.recordToolUsage(toolName, {
+            repository: this.repository,
+            workerId: this.workerId,
+          });
+
+          executionLogger.recordToolUse(toolName, toolInput);
+
+          if (chatSessionId) {
+            await addEvent(chatSessionId, 'tool_use', {
+              type: 'tool_use',
+              tool: toolName,
+              input: this.sanitizeToolInput(toolName, toolInput),
+              toolCount: toolUseCount,
+              turnCount,
+              source: 'claude-remote',
+            });
+          }
+        } else if (event.type === 'assistant' && event.message) {
+          turnCount++;
+          const content = event.message.content;
+          if (typeof content === 'string') {
+            assistantTextBuffer += content + '\n';
+            executionLogger.recordAssistantText(content);
+          } else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'text' && block.text) {
+                assistantTextBuffer += block.text + '\n';
+                executionLogger.recordAssistantText(block.text);
+              }
+            }
+          }
+
+          // Periodically flush assistant text
+          if (chatSessionId && assistantTextBuffer.length > 500) {
+            await addMessage(chatSessionId, 'assistant', assistantTextBuffer.trim());
+            assistantTextBuffer = '';
+          }
+        } else if (event.type === 'result') {
+          // Extract result info if available
+          if (event.total_cost_usd !== undefined) {
+            this.log.info('Claude Remote session cost', {
+              totalCost: event.total_cost_usd,
+              issueNumber: issue.number,
+            });
+          }
+        } else if (event.type === 'env_manager_log' && event.data?.message) {
+          // Log environment manager events (cloning, etc.)
+          this.log.debug(`Remote env: ${event.data.message}`, {
+            issueNumber: issue.number,
+            workerId: this.workerId,
+          });
+        }
+      };
+
+      // Execute the remote session
+      sessionResult = await client.execute(
+        {
+          prompt,
+          gitUrl: this.options.repoUrl,
+        },
+        onEvent,
+        {
+          pollIntervalMs: 2000,
+          abortSignal: abortController.signal,
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      const duration = Date.now() - attemptStartTime;
+
+      this.log.info('Claude Remote execution completed', {
+        duration,
+        toolUseCount,
+        turnCount,
+        sessionId: sessionResult.sessionId,
+        branch: sessionResult.branch,
+        totalCost: sessionResult.totalCost,
+      });
+
+      metrics.recordClaudeApiCall('executeTask', true, duration, {
+        repository: this.repository,
+        workerId: this.workerId,
+      });
+
+      if (chatSessionId) {
+        if (assistantTextBuffer.trim()) {
+          await addMessage(chatSessionId, 'assistant', assistantTextBuffer.trim());
+        }
+        await addEvent(chatSessionId, 'claude_complete', {
+          type: 'claude_complete',
+          message: `Claude Remote completed in ${Math.round(duration / 1000)}s`,
+          duration_ms: duration,
+          toolUseCount,
+          turnCount,
+          remoteSessionId: sessionResult.sessionId,
+          branch: sessionResult.branch,
+          totalCost: sessionResult.totalCost,
+        });
+      }
+
+      return {
+        success: sessionResult.status === 'completed' || sessionResult.status === 'idle',
+        toolUseCount,
+        turnCount,
+        durationMs: duration,
+        hasChanges: hasWriteOperations || !!sessionResult.branch,
+        validationIssues: [],
+      };
+
+    } catch (error) {
+      const duration = Date.now() - attemptStartTime;
+
+      // Check for abort/timeout
+      if (error instanceof Error && error.name === 'AbortError') {
+        const timeoutError = new ClaudeExecutorError(
+          `Claude Remote execution timed out after ${Math.round(timeoutMs / 1000)} seconds`,
+          {
+            claudeErrorType: 'timeout',
+            toolsUsed: toolUseCount,
+            turnsCompleted: turnCount,
+            context: {
+              operation: 'remote_session_execution',
+              issueNumber: issue.number,
+            },
+          }
+        );
+
+        this.log.error('Claude Remote execution timeout', {
+          issueNumber: issue.number,
+          duration,
+          toolUseCount,
+          turnCount,
+        });
+
+        metrics.recordClaudeApiCall('executeTask', false, duration, {
+          repository: this.repository,
+          workerId: this.workerId,
+        });
+
+        throw timeoutError;
+      }
+
+      // Wrap other errors
+      const wrappedError = new ClaudeExecutorError(
+        `Claude Remote execution failed: ${getErrorMessage(error)}`,
+        {
+          claudeErrorType: 'api',
+          toolsUsed: toolUseCount,
+          turnsCompleted: turnCount,
+          context: {
+            operation: 'remote_session_execution',
+            issueNumber: issue.number,
+          },
+          cause: error instanceof Error ? error : undefined,
+        }
+      );
+
+      this.log.error('Claude Remote execution failed', {
+        issueNumber: issue.number,
+        duration,
+        toolUseCount,
+        turnCount,
+        error: getErrorMessage(error),
+      });
+
+      metrics.recordClaudeApiCall('executeTask', false, duration, {
+        repository: this.repository,
+        workerId: this.workerId,
+      });
+
+      throw wrappedError;
     }
   }
 

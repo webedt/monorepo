@@ -74,8 +74,12 @@ export const chatSessions = pgTable('chat_sessions', {
   repositoryUrl: text('repository_url'),
   baseBranch: text('base_branch'),
   branch: text('branch'), // Working branch name - populated when branch is created
-  provider: text('provider').default('claude'), // 'claude' | 'codex' | 'copilot' | 'gemini'
+  provider: text('provider').default('claude'), // 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote'
   providerSessionId: text('provider_session_id'), // Claude SDK session ID for conversation resume
+  // Claude Remote Sessions fields
+  remoteSessionId: text('remote_session_id'), // Anthropic session ID (e.g., session_01S7DYYtwgMZ3gbAmjMmMpnA)
+  remoteWebUrl: text('remote_web_url'), // URL to view session in claude.ai (e.g., https://claude.ai/code/session_xxx)
+  totalCost: text('total_cost'), // Cost in USD (stored as string for precision)
   issueNumber: integer('issue_number'), // GitHub issue number linked to this session
   autoCommit: boolean('auto_commit').default(false).notNull(),
   locked: boolean('locked').default(false).notNull(),

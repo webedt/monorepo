@@ -590,20 +590,21 @@ describe('Index Refresh Logic', () => {
   });
 
   it('should use raw porcelain status for reliable detection', () => {
-    // Porcelain format: ' M src/file.ts' for modified
+    // Porcelain format: ' M src/file.ts' for modified (XY where X=staged, Y=unstaged)
+    // Note: Don't use trim() on porcelain output as it removes leading spaces from status codes
     const rawStatus = ' M src/index.ts\n?? new-file.ts\n D deleted.ts';
 
-    const lines = rawStatus.trim().split('\n');
+    const lines = rawStatus.split('\n').filter(line => line.length > 0);
     assert.strictEqual(lines.length, 3);
 
-    // Modified file
-    assert.ok(lines[0].startsWith(' M'));
+    // Modified file (unstaged modification: ' M')
+    assert.ok(lines[0].startsWith(' M'), `Expected line to start with ' M', got: '${lines[0]}'`);
 
     // Untracked file
-    assert.ok(lines[1].startsWith('??'));
+    assert.ok(lines[1].startsWith('??'), `Expected line to start with '??', got: '${lines[1]}'`);
 
-    // Deleted file
-    assert.ok(lines[2].startsWith(' D'));
+    // Deleted file (unstaged deletion: ' D')
+    assert.ok(lines[2].startsWith(' D'), `Expected line to start with ' D', got: '${lines[2]}'`);
   });
 
   it('should detect changes from both raw and structured status', () => {

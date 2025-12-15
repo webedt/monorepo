@@ -910,7 +910,7 @@ describe('Default Config', () => {
   });
 
   it('should have sensible daemon defaults', () => {
-    assert.strictEqual(defaultConfig.daemon?.loopIntervalMs, 60000);
+    assert.strictEqual(defaultConfig.daemon?.loopIntervalMs, 5000);
     assert.strictEqual(defaultConfig.daemon?.pauseBetweenCycles, true);
   });
 });
