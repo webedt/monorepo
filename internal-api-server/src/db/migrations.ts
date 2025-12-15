@@ -67,7 +67,8 @@ const EXPECTED_TABLES = [
     name: 'chat_sessions',
     requiredColumns: [
       'id', 'user_id', 'session_path', 'repository_owner', 'repository_name',
-      'user_request', 'status', 'created_at'
+      'user_request', 'status', 'created_at', 'remote_session_id', 'remote_web_url',
+      'total_cost', 'issue_number'
     ]
   },
   {
@@ -516,6 +517,91 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_events_chat_session_id ON events(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
   `);
+}
+
+/**
+ * Column definitions for auto-migration
+ * Maps table.column to the SQL definition for adding the column
+ */
+const COLUMN_DEFINITIONS: Record<string, string> = {
+  // chat_sessions columns
+  'chat_sessions.remote_session_id': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS remote_session_id TEXT',
+  'chat_sessions.remote_web_url': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS remote_web_url TEXT',
+  'chat_sessions.total_cost': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_cost TEXT',
+  'chat_sessions.issue_number': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS issue_number INTEGER',
+  'chat_sessions.provider': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS provider TEXT DEFAULT \'claude\'',
+  'chat_sessions.provider_session_id': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS provider_session_id TEXT',
+  'chat_sessions.deleted_at': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP',
+  'chat_sessions.worker_last_activity': 'ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS worker_last_activity TIMESTAMP',
+  // users columns (for future additions)
+  'users.openrouter_api_key': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS openrouter_api_key TEXT',
+  'users.autocomplete_enabled': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS autocomplete_enabled BOOLEAN NOT NULL DEFAULT TRUE',
+  'users.autocomplete_model': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS autocomplete_model TEXT DEFAULT \'openai/gpt-oss-120b:cerebras\'',
+  'users.image_ai_keys': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_keys JSONB',
+  'users.image_ai_provider': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_provider TEXT DEFAULT \'openrouter\'',
+  'users.image_ai_model': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_model TEXT DEFAULT \'google/gemini-2.5-flash-image\'',
+  'users.is_admin': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE',
+};
+
+/**
+ * Index definitions for auto-migration
+ */
+const INDEX_DEFINITIONS: string[] = [
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_number ON chat_sessions(issue_number)',
+  'CREATE INDEX IF NOT EXISTS idx_chat_sessions_issue_repo ON chat_sessions(issue_number, repository_owner, repository_name)',
+];
+
+/**
+ * Ensure the database schema is up to date by adding any missing columns
+ * This runs after initial schema creation or migrations to handle schema drift
+ */
+export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; indexesCreated: string[]; errors: string[] }> {
+  const columnsAdded: string[] = [];
+  const indexesCreated: string[] = [];
+  const errors: string[] = [];
+
+  // Check for missing columns and add them
+  for (const [key, alterSql] of Object.entries(COLUMN_DEFINITIONS)) {
+    const [tableName, columnName] = key.split('.');
+
+    try {
+      // Check if column exists
+      const result = await pool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns
+          WHERE table_schema = 'public'
+          AND table_name = $1
+          AND column_name = $2
+        );
+      `, [tableName, columnName]);
+
+      if (!result.rows[0].exists) {
+        // Column doesn't exist, add it
+        await pool.query(alterSql);
+        columnsAdded.push(`${tableName}.${columnName}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`Failed to add ${tableName}.${columnName}: ${errorMessage}`);
+    }
+  }
+
+  // Create any missing indexes
+  for (const indexSql of INDEX_DEFINITIONS) {
+    try {
+      await pool.query(indexSql);
+      // Extract index name from SQL for logging
+      const match = indexSql.match(/CREATE INDEX IF NOT EXISTS (\w+)/);
+      if (match) {
+        indexesCreated.push(match[1]);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`Failed to create index: ${errorMessage}`);
+    }
+  }
+
+  return { columnsAdded, indexesCreated, errors };
 }
 
 /**

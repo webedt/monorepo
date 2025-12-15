@@ -26,6 +26,7 @@ import {
   formatSchemaErrors,
   getDatabaseDiagnostics,
   getCurrentMigrationVersion,
+  ensureSchemaUpToDate,
   type MigrationResult,
   type SchemaValidationResult,
 } from './migrations.js';
@@ -115,6 +116,36 @@ async function initializeDatabase(): Promise<void> {
       }
     } else {
       console.log('  Migrations skipped (SKIP_MIGRATIONS=true)');
+    }
+
+    // Auto-migrate: add any missing columns
+    console.log('');
+    console.log('Checking for schema updates...');
+    const schemaUpdate = await ensureSchemaUpToDate(pool);
+
+    if (schemaUpdate.columnsAdded.length > 0) {
+      console.log('  Added missing columns:');
+      for (const col of schemaUpdate.columnsAdded) {
+        console.log(`    ✅ ${col}`);
+      }
+    }
+
+    if (schemaUpdate.indexesCreated.length > 0) {
+      console.log('  Created indexes:');
+      for (const idx of schemaUpdate.indexesCreated) {
+        console.log(`    ✅ ${idx}`);
+      }
+    }
+
+    if (schemaUpdate.errors.length > 0) {
+      console.warn('  Schema update warnings:');
+      for (const err of schemaUpdate.errors) {
+        console.warn(`    ⚠️  ${err}`);
+      }
+    }
+
+    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.errors.length === 0) {
+      console.log('  ✅ Schema is up to date');
     }
 
     // Validate schema
@@ -318,6 +349,7 @@ export {
   validateSchema,
   formatSchemaErrors,
   getCurrentMigrationVersion,
+  ensureSchemaUpToDate,
   type MigrationResult,
   type SchemaValidationResult,
 } from './migrations.js';
