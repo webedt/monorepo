@@ -1,0 +1,8 @@
+{
+  "name": "claude-web-cli",
+  "type": "module",
+  "description": "Claude Web CLI - Pure HTTPS tools for Claude remote sessions",
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
