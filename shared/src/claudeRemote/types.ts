@@ -129,7 +129,10 @@ export interface SessionEvent {
   // Environment manager log
   data?: {
     type?: string;
-    message?: string;
+    category?: string;
+    content?: string;  // Actual message content from env_manager_log
+    message?: string;  // Alternative message field
+    level?: string;
     extra?: Record<string, unknown>;
   };
 }

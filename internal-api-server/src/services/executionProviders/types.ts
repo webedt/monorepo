@@ -54,6 +54,9 @@ export interface ExecutionEvent {
   // Error event
   error?: string;
   code?: string;
+
+  // Raw event from provider (for debugging/pass-through)
+  rawEvent?: unknown;
 }
 
 /**

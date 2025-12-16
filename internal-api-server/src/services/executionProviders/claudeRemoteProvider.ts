@@ -46,125 +46,18 @@ function extractTextContent(message: any): string | undefined {
 }
 
 /**
- * Map Anthropic session events to our ExecutionEvent format
+ * Pass through raw Anthropic session events with minimal wrapping
+ * This allows the frontend to receive events exactly as they come from the API
  */
-function mapSessionEvent(event: SessionEvent, source: string): ExecutionEvent {
-  const timestamp = new Date().toISOString();
-
-  switch (event.type) {
-    case 'user': {
-      // Extract actual user message content
-      const userContent = extractTextContent(event.message);
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: 'user_message',
-        message: userContent ? `User: ${userContent.slice(0, 100)}${userContent.length > 100 ? '...' : ''}` : 'User message received',
-      };
-    }
-
-    case 'assistant':
-      return {
-        type: 'assistant_message',
-        timestamp,
-        source,
-        content: event.message?.content,
-      };
-
-    case 'result':
-      return {
-        type: 'completed',
-        timestamp,
-        source,
-        totalCost: event.total_cost_usd,
-        duration_ms: event.duration_ms,
-      };
-
-    case 'tool_use': {
-      // Show tool name and input summary
-      const toolName = event.tool_use?.name || 'unknown';
-      const toolInput = event.tool_use?.input;
-      let inputSummary = '';
-      if (toolInput) {
-        // Try to extract meaningful info from input
-        if (typeof toolInput === 'object') {
-          const keys = Object.keys(toolInput);
-          if (keys.includes('command')) {
-            inputSummary = `: ${toolInput.command}`;
-          } else if (keys.includes('path') || keys.includes('file_path')) {
-            inputSummary = `: ${toolInput.path || toolInput.file_path}`;
-          } else if (keys.includes('content') && typeof toolInput.content === 'string') {
-            inputSummary = ` (${toolInput.content.length} chars)`;
-          }
-        }
-      }
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: 'tool_use',
-        message: `Tool: ${toolName}${inputSummary}`,
-      };
-    }
-
-    case 'tool_result': {
-      const isError = event.tool_use_result?.is_error;
-      const stdout = event.tool_use_result?.stdout;
-      const stderr = event.tool_use_result?.stderr;
-      let message = 'Tool completed';
-
-      if (isError) {
-        message = `Tool error: ${stderr || stdout || 'Unknown error'}`;
-        // Truncate long error messages
-        if (message.length > 200) {
-          message = message.slice(0, 200) + '...';
-        }
-      } else if (stdout) {
-        // Show a preview of the output
-        const preview = stdout.slice(0, 100);
-        message = `Result: ${preview}${stdout.length > 100 ? '...' : ''}`;
-      }
-
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: 'tool_result',
-        message,
-      };
-    }
-
-    case 'env_manager_log': {
-      // Show actual message from environment manager
-      const envMessage = event.data?.message;
-      const envType = event.data?.type || 'env_manager';
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: envType,
-        message: envMessage || `Environment: ${envType}`,
-      };
-    }
-
-    case 'error':
-      return {
-        type: 'error',
-        timestamp,
-        source,
-        error: event.data?.message || 'Unknown error',
-      };
-
-    default:
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: event.type,
-        message: `Event: ${event.type}`,
-      };
-  }
+function passRawEvent(event: SessionEvent, source: string): ExecutionEvent {
+  // Pass raw event directly - no mapping, no transformation
+  // Just add source and timestamp for tracking
+  return {
+    type: 'raw_event' as any, // Use raw_event type to indicate pass-through
+    timestamp: new Date().toISOString(),
+    source,
+    rawEvent: event, // The actual raw event from Anthropic API
+  };
 }
 
 /**
@@ -257,12 +150,12 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         sessionName: title,
       });
 
-      // Poll for events
+      // Poll for events - pass raw events directly
       const result = await client.pollSession(
         sessionId,
         async (event) => {
-          const mappedEvent = mapSessionEvent(event, source);
-          await onEvent(mappedEvent);
+          const rawEvent = passRawEvent(event, source);
+          await onEvent(rawEvent);
         },
         { abortSignal }
       );
