@@ -41,6 +41,24 @@ export interface UserRequestContent {
 // ============================================================================
 
 /**
+ * Extract repository owner from GitHub URL
+ * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
+ */
+function extractRepoOwner(repoUrl: string): string | null {
+  const match = repoUrl.match(/github\.com\/([^\/]+)\//);
+  return match ? match[1] : null;
+}
+
+/**
+ * Extract repository name from GitHub URL
+ * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
+ */
+function extractRepoName(repoUrl: string): string | null {
+  const match = repoUrl.match(/\/([^\/]+?)(\.git)?$/);
+  return match ? match[1] : null;
+}
+
+/**
  * Serialize userRequest for storage
  */
 function serializeUserRequest(userRequest: string | UserRequestContent[]): string {
@@ -104,6 +122,15 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     }
 
     let repoUrl = github?.repoUrl;
+    const baseBranch = github?.branch || 'main'; // Client sends base branch as "branch"
+
+    // Extract owner and repo name from URL (for PR functionality)
+    let repositoryOwner: string | null = null;
+    let repositoryName: string | null = null;
+    if (repoUrl) {
+      repositoryOwner = extractRepoOwner(repoUrl);
+      repositoryName = extractRepoName(repoUrl);
+    }
 
     logger.info('Execute Remote request received', {
       component: 'ExecuteRemoteRoute',
@@ -206,6 +233,14 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             chatSessionId,
             repositoryUrl: repoUrl,
           });
+
+          // Also extract owner/name if not already set (backward compatibility)
+          if (!repositoryOwner && repoUrl) {
+            repositoryOwner = extractRepoOwner(repoUrl);
+          }
+          if (!repositoryName && repoUrl) {
+            repositoryName = extractRepoName(repoUrl);
+          }
         }
 
         // Check if we're resuming
@@ -226,7 +261,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     }
 
     if (!chatSession) {
-      // Create new session
+      // Create new session with repository info for PR functionality
       const [newSession] = await db.insert(chatSessions).values({
         id: chatSessionId,
         userId: user.id,
@@ -234,6 +269,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         status: 'running',
         provider: 'claude-remote',
         repositoryUrl: repoUrl,
+        repositoryOwner: repositoryOwner,
+        repositoryName: repositoryName,
+        baseBranch: baseBranch,
       }).returning();
       chatSession = newSession;
     } else {
