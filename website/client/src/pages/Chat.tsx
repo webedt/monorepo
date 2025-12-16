@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, getApiBaseUrl } from '@/lib/api';
 import type { GitHubPullRequest } from '@/shared';
 import { useEventSource } from '@/hooks/useEventSource';
-import { useBrowserNotification, getNotificationPrefs } from '@/hooks/useBrowserNotification';
+import { useBrowserNotification } from '@/hooks/useBrowserNotification';
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
@@ -419,8 +419,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Get worker store for robust execution tracking
   const workerStore = useWorkerStore();
 
-  // Browser notification for session completion
-  const { permission: notificationPermission, requestPermission, showSessionCompletedNotification } = useBrowserNotification();
+  // Browser notification for session completion (DEBUG: Unused but keeping for later)
+  const { permission: _notificationPermission, requestPermission: _requestPermission, showSessionCompletedNotification: _showSessionCompletedNotification } = useBrowserNotification();
 
   // Sync local state with global store
   useEffect(() => {
@@ -525,11 +525,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       return sessionsApi.get(sessionId);
     },
     enabled: !!sessionId && sessionId !== 'new',
-    // Poll every 2 seconds if session is running or pending
-    refetchInterval: (query) => {
-      const session = query.state.data?.data;
-      return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
-    },
+    // DEBUG: Disable polling entirely
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
   // Load user messages from messages table (user-submitted messages)
@@ -542,11 +540,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       return sessionsApi.getMessages(sessionId);
     },
     enabled: !!sessionId && sessionId !== 'new',
-    refetchInterval: () => {
-      if (isExecuting) return false;
-      const session = sessionDetailsData?.data;
-      return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
-    },
+    // DEBUG: Disable polling entirely
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
   // Load existing session events if sessionId provided (raw SSE events for replay)
@@ -564,15 +560,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     enabled: !!sessionId && sessionId !== 'new',
     // Don't use cached data - always fetch fresh on mount
     staleTime: 0,
-    // Poll every 2 seconds if session is running or pending, but NOT while SSE stream is active
-    // This prevents duplicate messages from both SSE and polling
-    refetchInterval: () => {
-      // Don't poll while SSE stream is active to avoid duplicates
-      if (isExecuting) return false;
-
-      const session = sessionDetailsData?.data;
-      return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
-    },
+    // DEBUG: Disable polling entirely to prevent state interference
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
   // Log events query state changes
@@ -582,52 +572,49 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
-  // Sync isExecuting with session status when returning to a running session
-  // When returning to a running/pending session, show the Processing panel AND connect to live stream
-  // This gives users visual feedback that the session is still processing and shows live events
+  // DEBUG: Disabled entire session status sync to prevent automatic state changes
+  // This was causing reconnection loops and state interference during debugging
   useEffect(() => {
-    if (session?.status === 'running' || session?.status === 'pending') {
-      // Set isExecuting=true for running/pending sessions to show Processing panel
-      // This handles the case when users navigate back to an in-progress session
-      if (!isExecuting) {
-        console.log('[Chat] Syncing isExecuting with session status:', session.status);
-        setIsExecuting(true);
-        // Also sync the global worker store to keep stop/interrupt button working
-        if (currentSessionId) {
-          workerStore.startExecution(currentSessionId);
-          console.log('[Chat] Synced worker store for running session:', currentSessionId);
-        }
-      }
+    console.log('[Chat] DEBUG: Session status sync useEffect - DISABLED. Status:', session?.status);
+    // if (session?.status === 'running' || session?.status === 'pending') {
+    //   // Set isExecuting=true for running/pending sessions to show Processing panel
+    //   // This handles the case when users navigate back to an in-progress session
+    //   if (!isExecuting) {
+    //     console.log('[Chat] Syncing isExecuting with session status:', session.status);
+    //     setIsExecuting(true);
+    //     // Also sync the global worker store to keep stop/interrupt button working
+    //     if (currentSessionId) {
+    //       workerStore.startExecution(currentSessionId);
+    //       console.log('[Chat] Synced worker store for running session:', currentSessionId);
+    //     }
+    //   }
 
-      // If we don't have an active stream, try to connect to the live stream
-      // This allows users to see live events when they return to a running session
-      if (!streamUrl && currentSessionId && !isReconnecting) {
-        console.log('[Chat] Attempting to connect to live stream for running session:', currentSessionId);
-        setIsReconnecting(true); // Mark as reconnection attempt
-        const reconnectStreamUrl = sessionsApi.getStreamUrl(currentSessionId);
-        setStreamMethod('GET'); // Stream endpoint uses GET
-        setStreamBody(null);
-        setStreamUrl(reconnectStreamUrl);
-      }
-    } else if (session?.status === 'completed' || session?.status === 'error') {
-      // Reset isExecuting when session is completed/errored
-      // Previously we checked `!streamUrl` to avoid race conditions, but this caused
-      // the processing indicator to get stuck if the stream ended without properly
-      // clearing state. Now we always clear isExecuting and also clear streamUrl
-      // to ensure consistent state cleanup.
-      if (isExecuting) {
-        console.log('[Chat] Session completed, setting isExecuting to false');
-        setIsExecuting(false);
-        setStreamUrl(null); // Also clear streamUrl to ensure consistent state
-        setIsReconnecting(false); // Clear reconnection flag
-        // Also clear the global worker store
-        workerStore.stopExecution();
-        console.log('[Chat] Cleared worker store for completed/errored session');
-        // Refetch events to ensure we have all stored events from the database
-        refetchEvents();
-        console.log('[Chat] Triggered events refetch after session completion');
-      }
-    }
+    //   // If we don't have an active stream, try to connect to the live stream
+    //   // This allows users to see live events when they return to a running session
+    //   if (!streamUrl && currentSessionId && !isReconnecting) {
+    //     console.log('[Chat] Attempting to connect to live stream for running session:', currentSessionId);
+    //     setIsReconnecting(true); // Mark as reconnection attempt
+    //     const reconnectStreamUrl = sessionsApi.getStreamUrl(currentSessionId);
+    //     setStreamMethod('GET'); // Stream endpoint uses GET
+    //     setStreamBody(null);
+    //     setStreamUrl(reconnectStreamUrl);
+    //   }
+    // } else if (session?.status === 'completed' || session?.status === 'error') {
+    //   // DEBUG: Disabled all state changes on session completion
+    //   console.log('[Chat] DEBUG: Session status changed to', session?.status, '- NOT clearing state');
+    //   // if (isExecuting) {
+    //   //   console.log('[Chat] Session completed, setting isExecuting to false');
+    //   //   setIsExecuting(false);
+    //   //   setStreamUrl(null); // Also clear streamUrl to ensure consistent state
+    //   //   setIsReconnecting(false); // Clear reconnection flag
+    //   //   // Also clear the global worker store
+    //   //   workerStore.stopExecution();
+    //   //   console.log('[Chat] Cleared worker store for completed/errored session');
+    //   //   // Refetch events to ensure we have all stored events from the database
+    //   //   refetchEvents();
+    //   //   console.log('[Chat] Triggered events refetch after session completion');
+    //   // }
+    // }
   }, [session?.status, isExecuting, currentSessionId, streamUrl, isReconnecting, refetchEvents]);
 
   // Load current session details to check if locked
@@ -1414,35 +1401,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       console.log('[Chat] SSE stream connected, worker store updated');
     },
     onCompleted: (data) => {
-      setIsExecuting(false);
-      setStreamUrl(null);
-      setIsReconnecting(false); // Clear reconnection flag
-      // Clear global worker state
-      workerStore.stopExecution();
-      // Note: wasStreamingRef.current stays true until merge effect handles the scroll
-      console.log('[Chat] SSE stream completed, worker store cleared');
-
-      // Show browser notification if enabled (only when tab is not focused)
-      const notificationPrefs = getNotificationPrefs();
-      if (notificationPrefs.enabled && notificationPrefs.onSessionComplete) {
-        const repoName = session?.repositoryName
-          ? `${session.repositoryOwner}/${session.repositoryName}`
-          : selectedRepo || undefined;
-
-        // If permission not yet requested, request it now (on first session completion)
-        if (notificationPermission === 'default') {
-          requestPermission().then((perm) => {
-            if (perm === 'granted') {
-              showSessionCompletedNotification(data?.websiteSessionId, repoName);
-            }
-          });
-        } else {
-          showSessionCompletedNotification(data?.websiteSessionId, repoName);
-        }
-      }
-
-      // DEBUG: Skip all completion handling to prevent page refresh
-      console.log('[Chat] DEBUG: Skipping completion handling, data:', data);
+      // DEBUG: Disabled ALL state changes to prevent page refresh
+      console.log('[Chat] DEBUG: onCompleted called, NOT changing any state. Data:', JSON.stringify(data, null, 2));
+      // setIsExecuting(false);
+      // setStreamUrl(null);
+      // setIsReconnecting(false);
+      // workerStore.stopExecution();
       // Capture session ID from completion event
       // if (data?.websiteSessionId) {
       //   console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
@@ -1488,40 +1452,11 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }, 100);
     },
     onError: (error) => {
-      console.error('Stream error:', error);
-
-      // If this was a reconnection attempt, don't show an error to the user
-      // The polling mechanism will continue to work
-      if (isReconnecting) {
-        console.log('[Chat] Reconnection failed, falling back to polling');
-        setIsReconnecting(false);
-        setStreamUrl(null);
-        // Don't clear isExecuting - let the session status polling handle that
-        // Don't show error message to user for reconnection failures
-        return;
-      }
-
-      messageIdCounter.current += 1;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + messageIdCounter.current,
-          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-          type: 'error',
-          content: error.message,
-          timestamp: new Date(),
-        },
-      ]);
-      setIsExecuting(false);
-      setStreamUrl(null);
-      // Clear global worker state on error
-      workerStore.stopExecution();
-      console.log('[Chat] SSE stream error, worker store cleared');
-
-      // Refocus input after error (with delay to ensure DOM updates)
-      setTimeout(() => {
-        chatInputRef.current?.focus();
-      }, 100);
+      // DEBUG: Log error but don't change state
+      console.log('[Chat] DEBUG: onError called, NOT changing state. Error:', error.message);
+      // setIsExecuting(false);
+      // setStreamUrl(null);
+      // workerStore.stopExecution();
     },
     autoReconnect: false, // Disable auto-reconnect to prevent infinite loops
   });
