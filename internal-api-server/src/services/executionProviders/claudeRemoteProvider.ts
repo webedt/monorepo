@@ -23,29 +23,6 @@ import type {
 } from './types.js';
 
 /**
- * Extract text content from message (handles both string and content blocks)
- */
-function extractTextContent(message: any): string | undefined {
-  if (!message?.content) return undefined;
-
-  // If content is a string, return it
-  if (typeof message.content === 'string') {
-    return message.content;
-  }
-
-  // If content is an array of content blocks, extract text
-  if (Array.isArray(message.content)) {
-    const textParts = message.content
-      .filter((block: any) => block.type === 'text')
-      .map((block: any) => block.text)
-      .filter(Boolean);
-    return textParts.length > 0 ? textParts.join('\n') : undefined;
-  }
-
-  return undefined;
-}
-
-/**
  * Pass through raw Anthropic session events with minimal wrapping
  * This allows the frontend to receive events exactly as they come from the API
  */
@@ -249,13 +226,13 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       const session = await client.getSession(remoteSessionId);
       const webUrl = `https://claude.ai/code/${remoteSessionId}`;
 
-      // Resume session
+      // Resume session - pass raw events directly
       const result = await client.resume(
         remoteSessionId,
         prompt,
         async (event) => {
-          const mappedEvent = mapSessionEvent(event, source);
-          await onEvent(mappedEvent);
+          const rawEvent = passRawEvent(event, source);
+          await onEvent(rawEvent);
         },
         { abortSignal }
       );
