@@ -46,7 +46,8 @@ const ALLOWED_API_ROUTES = [
   '/api/user',           // User settings
   '/api/sessions',       // Session management (public endpoints)
   '/api/github',         // GitHub OAuth & repos
-  '/api/execute',        // AI execution
+  '/api/execute',        // AI execution (local worker)
+  '/api/execute-remote', // AI execution (Claude Remote Sessions API)
   '/api/resume',         // Session replay
   '/api/transcribe',     // Audio transcription
   '/api/admin',          // Admin (requires admin auth anyway)
@@ -152,8 +153,10 @@ const apiProxyOptions: Options = {
 
         // Rewrite the Path in each Set-Cookie header
         const rewrittenCookies = setCookie.map(cookie => {
-          // Replace Path=/ or Path=/anything with our computed path
-          return cookie.replace(/Path=\/[^;]*/i, `Path=${cookiePath}`).replace(/Path=\//i, `Path=${cookiePath}`);
+          // Replace Path=/... with our computed path
+          // Regex matches Path= followed by / and any non-semicolon chars (or end of string)
+          // Using a single regex to avoid double-replacement issues
+          return cookie.replace(/Path=\/[^;]*/gi, `Path=${cookiePath}`);
         });
 
         proxyRes.headers['set-cookie'] = rewrittenCookies;
