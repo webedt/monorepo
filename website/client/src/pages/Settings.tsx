@@ -102,7 +102,7 @@ export default function Settings() {
   const [codexError, setCodexError] = useState('');
   const [geminiAuthJson, setGeminiAuthJson] = useState('');
   const [geminiError, setGeminiError] = useState('');
-  const [preferredProvider, setPreferredProvider] = useState<'claude' | 'codex' | 'gemini'>(user?.preferredProvider as any || 'claude');
+  const [preferredProvider, setPreferredProvider] = useState<'claude' | 'codex' | 'gemini' | 'claude-remote'>(user?.preferredProvider as any || 'claude');
   const [imageResizeDimension, setImageResizeDimension] = useState(user?.imageResizeMaxDimension || 1024);
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [defaultLandingPage, setDefaultLandingPage] = useState<'dashboard' | 'store' | 'library' | 'community' | 'sessions'>(user?.defaultLandingPage || 'store');
@@ -976,10 +976,11 @@ export default function Settings() {
                     </div>
                     <select
                       value={preferredProvider}
-                      onChange={(e) => setPreferredProvider(e.target.value as 'claude' | 'codex' | 'gemini')}
+                      onChange={(e) => setPreferredProvider(e.target.value as 'claude' | 'codex' | 'gemini' | 'claude-remote')}
                       className="select select-bordered w-full max-w-md"
                     >
-                      <option value="claude">Claude (Anthropic) - Default</option>
+                      <option value="claude">Claude (Local Worker) - Default</option>
+                      <option value="claude-remote">Claude Remote (Anthropic Cloud)</option>
                       <option value="codex">Codex (OpenAI)</option>
                       <option value="gemini">Gemini (Google)</option>
                     </select>
@@ -987,6 +988,12 @@ export default function Settings() {
                       <span className="text-sm text-base-content/60">
                         {preferredProvider === 'claude' && !user?.claudeAuth && (
                           <span className="text-warning">⚠️ Claude credentials not configured</span>
+                        )}
+                        {preferredProvider === 'claude-remote' && !user?.claudeAuth && (
+                          <span className="text-warning">⚠️ Claude credentials not configured</span>
+                        )}
+                        {preferredProvider === 'claude-remote' && user?.claudeAuth && (
+                          <span className="text-info">Runs on Anthropic's infrastructure (requires GitHub repo)</span>
                         )}
                         {preferredProvider === 'codex' && !user?.codexAuth && (
                           <span className="text-warning">⚠️ Codex credentials not configured</span>

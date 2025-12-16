@@ -12,8 +12,8 @@ import { db, chatSessions, messages, users, events } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '../lib/claudeAuth.js';
-import { logger, getEventEmoji } from '@webedt/shared';
-import { CLAUDE_ENVIRONMENT_ID } from '../config/env.js';
+import { logger, getEventEmoji, fetchEnvironmentIdFromSessions } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import {
   getExecutionProvider,
@@ -39,6 +39,24 @@ export interface UserRequestContent {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Extract repository owner from GitHub URL
+ * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
+ */
+function extractRepoOwner(repoUrl: string): string | null {
+  const match = repoUrl.match(/github\.com\/([^\/]+)\//);
+  return match ? match[1] : null;
+}
+
+/**
+ * Extract repository name from GitHub URL
+ * Supports: https://github.com/owner/repo or https://github.com/owner/repo.git
+ */
+function extractRepoName(repoUrl: string): string | null {
+  const match = repoUrl.match(/\/([^\/]+?)(\.git)?$/);
+  return match ? match[1] : null;
+}
 
 /**
  * Serialize userRequest for storage
@@ -103,7 +121,16 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
     }
 
-    const repoUrl = github?.repoUrl;
+    let repoUrl = github?.repoUrl;
+    const baseBranch = github?.branch || 'main'; // Client sends base branch as "branch"
+
+    // Extract owner and repo name from URL (for PR functionality)
+    let repositoryOwner: string | null = null;
+    let repositoryName: string | null = null;
+    if (repoUrl) {
+      repositoryOwner = extractRepoOwner(repoUrl);
+      repositoryName = extractRepoName(repoUrl);
+    }
 
     logger.info('Execute Remote request received', {
       component: 'ExecuteRemoteRoute',
@@ -119,18 +146,14 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       return;
     }
 
-    if (!repoUrl) {
-      res.status(400).json({ success: false, error: 'github.repoUrl is required' });
+    // For resume requests, we may not have github.repoUrl - will get it from existing session
+    // Only validate repoUrl for new sessions (no websiteSessionId)
+    if (!repoUrl && !websiteSessionId) {
+      res.status(400).json({ success: false, error: 'github.repoUrl is required for new sessions' });
       return;
     }
 
-    // Check for Claude environment ID
-    if (!CLAUDE_ENVIRONMENT_ID) {
-      res.status(500).json({ success: false, error: 'CLAUDE_ENVIRONMENT_ID not configured' });
-      return;
-    }
-
-    // Get user's Claude auth
+    // Get user's Claude auth first (needed for auto-detecting environment ID)
     const [userData] = await db
       .select()
       .from(users)
@@ -159,6 +182,33 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       return;
     }
 
+    // Get environment ID - from config or auto-detect from user's recent sessions
+    let environmentId = CLAUDE_ENVIRONMENT_ID;
+    if (!environmentId) {
+      logger.info('CLAUDE_ENVIRONMENT_ID not configured, attempting auto-detection from user sessions', {
+        component: 'ExecuteRemoteRoute',
+      });
+
+      const detectedEnvId = await fetchEnvironmentIdFromSessions(
+        claudeAuth.accessToken,
+        CLAUDE_API_BASE_URL
+      );
+
+      if (detectedEnvId) {
+        environmentId = detectedEnvId;
+        logger.info('Auto-detected environment ID from user sessions', {
+          component: 'ExecuteRemoteRoute',
+          environmentId: environmentId.slice(0, 10) + '...',
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first, or ask an admin to configure CLAUDE_ENVIRONMENT_ID.'
+        });
+        return;
+      }
+    }
+
     // Create or load chat session
     const chatSessionId = websiteSessionId || uuidv4();
     const prompt = extractPrompt(userRequest);
@@ -175,6 +225,24 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       if (existingSession) {
         chatSession = existingSession;
 
+        // Get repoUrl from existing session if not provided in request
+        if (!repoUrl && existingSession.repositoryUrl) {
+          repoUrl = existingSession.repositoryUrl;
+          logger.info('Using repositoryUrl from existing session', {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+            repositoryUrl: repoUrl,
+          });
+
+          // Also extract owner/name if not already set (backward compatibility)
+          if (!repositoryOwner && repoUrl) {
+            repositoryOwner = extractRepoOwner(repoUrl);
+          }
+          if (!repositoryName && repoUrl) {
+            repositoryName = extractRepoName(repoUrl);
+          }
+        }
+
         // Check if we're resuming
         if (existingSession.remoteSessionId) {
           logger.info('Resuming existing remote session', {
@@ -186,8 +254,14 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
     }
 
+    // Final validation - ensure we have repoUrl (either from request or existing session)
+    if (!repoUrl) {
+      res.status(400).json({ success: false, error: 'github.repoUrl is required' });
+      return;
+    }
+
     if (!chatSession) {
-      // Create new session
+      // Create new session with repository info for PR functionality
       const [newSession] = await db.insert(chatSessions).values({
         id: chatSessionId,
         userId: user.id,
@@ -195,6 +269,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         status: 'running',
         provider: 'claude-remote',
         repositoryUrl: repoUrl,
+        repositoryOwner: repositoryOwner,
+        repositoryName: repositoryName,
+        baseBranch: baseBranch,
       }).returning();
       chatSession = newSession;
     } else {
@@ -221,13 +298,32 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     const sendEvent = async (event: ExecutionEvent) => {
       if (clientDisconnected) return;
 
-      // Apply emoji decoration
-      const decoratedEvent = {
-        ...event,
-        message: event.message ? `${getEventEmoji(event)} ${event.message}` : undefined,
-      };
+      // For raw_event types, pass through without decoration
+      // This allows the frontend to receive events exactly as they come from the API
+      const isRawEvent = event.type === 'raw_event' || (event as any).rawEvent;
 
-      const eventData = `data: ${JSON.stringify(decoratedEvent)}\n\n`;
+      let eventToSend: any;
+      if (isRawEvent) {
+        // Pass through raw event without any transformation
+        eventToSend = event;
+      } else {
+        // Apply emoji decoration for non-raw events
+        eventToSend = {
+          ...event,
+          message: event.message ? `${getEventEmoji(event)} ${event.message}` : undefined,
+        };
+      }
+
+      const eventData = `data: ${JSON.stringify(eventToSend)}\n\n`;
+
+      // Log SSE event for debugging
+      logger.info('SSE event', {
+        component: 'ExecuteRemoteRoute',
+        chatSessionId,
+        eventType: event.type,
+        isRawEvent,
+        eventData: JSON.stringify(eventToSend),
+      });
 
       try {
         res.write(eventData);
@@ -247,7 +343,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Broadcast to other listeners
-      sessionEventBroadcaster.broadcast(chatSessionId, event.type, decoratedEvent);
+      sessionEventBroadcaster.broadcast(chatSessionId, event.type, eventToSend);
     };
 
     // Set up heartbeat
@@ -262,6 +358,18 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         clearInterval(heartbeatInterval);
       }
     }, 30000);
+
+    // Send session-created event for new sessions (client needs this to track session ID)
+    if (!websiteSessionId) {
+      const sessionCreatedData = { websiteSessionId: chatSessionId };
+      logger.info('SSE event: session-created', {
+        component: 'ExecuteRemoteRoute',
+        chatSessionId,
+        eventData: JSON.stringify(sessionCreatedData),
+      });
+      res.write(`event: session-created\n`);
+      res.write(`data: ${JSON.stringify(sessionCreatedData)}\n\n`);
+    }
 
     // Get execution provider
     const provider = getExecutionProvider();
@@ -278,6 +386,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             remoteSessionId: chatSession.remoteSessionId,
             prompt,
             claudeAuth,
+            environmentId,
           },
           sendEvent
         );
@@ -290,6 +399,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             prompt,
             gitUrl: repoUrl,
             claudeAuth,
+            environmentId,
           },
           sendEvent
         );
@@ -314,6 +424,23 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         branch: result.branch,
         totalCost: result.totalCost,
       });
+
+      // Send final completion event with websiteSessionId (client needs this to track session)
+      const completedData = {
+        websiteSessionId: chatSessionId,
+        completed: true,
+        branch: result.branch,
+        totalCost: result.totalCost,
+        remoteSessionId: result.remoteSessionId,
+        remoteWebUrl: result.remoteWebUrl,
+      };
+      logger.info('SSE event: completed', {
+        component: 'ExecuteRemoteRoute',
+        chatSessionId,
+        eventData: JSON.stringify(completedData),
+      });
+      res.write(`event: completed\n`);
+      res.write(`data: ${JSON.stringify(completedData)}\n\n`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

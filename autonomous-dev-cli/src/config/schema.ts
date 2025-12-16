@@ -257,9 +257,9 @@ export const ConfigSchema = z.object({
     claudeEnvironmentId: z.string().optional(),
     /**
      * Model to use for Claude execution.
-     * Default: claude-sonnet-4-20250514
+     * Default: claude-opus-4-5-20251101
      */
-    claudeModel: z.string().default('claude-sonnet-4-20250514'),
+    claudeModel: z.string().default('claude-opus-4-5-20251101'),
   }).describe('Task execution settings'),
 
   /**
@@ -280,7 +280,7 @@ export const ConfigSchema = z.object({
     /** URLs for smoke tests (array of URLs) */
     smokeTestUrls: z.array(z.string()).default([]),
     /** URL pattern for preview deployments. Use {owner}, {repo}, {branch} placeholders */
-    previewUrlPattern: z.string().default('https://github.etdofresh.com/{owner}/{repo}/{branch}/'),
+    previewUrlPattern: z.string().default('https://webedt.etdofresh.com/github/{owner}/{repo}/{branch}/'),
   }).describe('Quality evaluation settings'),
 
   /**
@@ -612,7 +612,7 @@ export const defaultConfig: Partial<Config> = {
     timeoutMinutes: 30,
     workDir: '/tmp/autonomous-dev',
     useRemoteSessions: false,
-    claudeModel: 'claude-sonnet-4-20250514',
+    claudeModel: 'claude-opus-4-5-20251101',
   },
   evaluation: {
     requireBuild: true,
@@ -621,7 +621,7 @@ export const defaultConfig: Partial<Config> = {
     requireSmokeTests: false,
     healthCheckUrls: [],
     smokeTestUrls: [],
-    previewUrlPattern: 'https://github.etdofresh.com/{owner}/{repo}/{branch}/',
+    previewUrlPattern: 'https://webedt.etdofresh.com/github/{owner}/{repo}/{branch}/',
   },
   merge: {
     autoMerge: true,

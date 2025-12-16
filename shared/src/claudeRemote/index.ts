@@ -5,7 +5,8 @@
  * allowing execution of Claude Code tasks on Anthropic's infrastructure.
  */
 
-export { ClaudeRemoteClient } from './claudeRemoteClient.js';
+export { ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from './claudeRemoteClient.js';
+export { generateTitle, generateTitleSync } from './titleGenerator.js';
 export type {
   ClaudeAuth,
   ClaudeRemoteClientConfig,
@@ -22,5 +23,9 @@ export type {
   PollOptions,
   SessionResult,
   GitOutcomeInfo,
+  GeneratedTitle,
+  TitleGeneratorConfig,
+  TitleGenerationEvent,
+  TitleGenerationCallback,
 } from './types.js';
 export { ClaudeRemoteError } from './types.js';

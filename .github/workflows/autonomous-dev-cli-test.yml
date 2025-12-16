@@ -14,7 +14,7 @@ defaults:
 jobs:
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     strategy:
       matrix:
@@ -46,7 +46,7 @@ jobs:
 
   lint:
     name: Lint & Format Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repository
@@ -67,7 +67,7 @@ jobs:
 
   build:
     name: Build Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [test, lint]
 
     steps:
@@ -96,7 +96,7 @@ jobs:
 
   security:
     name: Security Audit
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repository
@@ -116,7 +116,7 @@ jobs:
   # Required status check for branch protection
   ci-complete:
     name: CI Complete
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [test, lint, build]
     if: always()
     defaults:

@@ -8,8 +8,8 @@ on:
       - ".github/workflows/ai-coding-worker-docker-build-push.yml"
 
 env:
-  REGISTRY: dockerregistry.etdofresh.com
-  IMAGE_NAME: ai-coding-worker
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/ai-coding-worker
   INTERNAL_API_URL: http://internal-api-server:3000
 
 jobs:
@@ -44,12 +44,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
-          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels)
         id: meta

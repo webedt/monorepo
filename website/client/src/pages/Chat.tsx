@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, getApiBaseUrl } from '@/lib/api';
 import type { GitHubPullRequest } from '@/shared';
 import { useEventSource } from '@/hooks/useEventSource';
-import { useBrowserNotification, getNotificationPrefs } from '@/hooks/useBrowserNotification';
+import { useBrowserNotification } from '@/hooks/useBrowserNotification';
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
@@ -419,8 +419,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Get worker store for robust execution tracking
   const workerStore = useWorkerStore();
 
-  // Browser notification for session completion
-  const { permission: notificationPermission, requestPermission, showSessionCompletedNotification } = useBrowserNotification();
+  // Browser notification for session completion (DEBUG: Unused but keeping for later)
+  const { permission: _notificationPermission, requestPermission: _requestPermission, showSessionCompletedNotification: _showSessionCompletedNotification } = useBrowserNotification();
 
   // Sync local state with global store
   useEffect(() => {
@@ -525,11 +525,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       return sessionsApi.get(sessionId);
     },
     enabled: !!sessionId && sessionId !== 'new',
-    // Poll every 2 seconds if session is running or pending
-    refetchInterval: (query) => {
-      const session = query.state.data?.data;
-      return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
-    },
+    // DEBUG: Disable polling entirely
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
   // Load user messages from messages table (user-submitted messages)
@@ -542,11 +540,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       return sessionsApi.getMessages(sessionId);
     },
     enabled: !!sessionId && sessionId !== 'new',
-    refetchInterval: () => {
-      if (isExecuting) return false;
-      const session = sessionDetailsData?.data;
-      return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
-    },
+    // DEBUG: Disable polling entirely
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
   // Load existing session events if sessionId provided (raw SSE events for replay)
@@ -564,15 +560,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     enabled: !!sessionId && sessionId !== 'new',
     // Don't use cached data - always fetch fresh on mount
     staleTime: 0,
-    // Poll every 2 seconds if session is running or pending, but NOT while SSE stream is active
-    // This prevents duplicate messages from both SSE and polling
-    refetchInterval: () => {
-      // Don't poll while SSE stream is active to avoid duplicates
-      if (isExecuting) return false;
-
-      const session = sessionDetailsData?.data;
-      return session?.status === 'running' || session?.status === 'pending' ? 2000 : false;
-    },
+    // DEBUG: Disable polling entirely to prevent state interference
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
   // Log events query state changes
@@ -582,52 +572,49 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   const session: ChatSession | undefined = sessionDetailsData?.data;
 
-  // Sync isExecuting with session status when returning to a running session
-  // When returning to a running/pending session, show the Processing panel AND connect to live stream
-  // This gives users visual feedback that the session is still processing and shows live events
+  // DEBUG: Disabled entire session status sync to prevent automatic state changes
+  // This was causing reconnection loops and state interference during debugging
   useEffect(() => {
-    if (session?.status === 'running' || session?.status === 'pending') {
-      // Set isExecuting=true for running/pending sessions to show Processing panel
-      // This handles the case when users navigate back to an in-progress session
-      if (!isExecuting) {
-        console.log('[Chat] Syncing isExecuting with session status:', session.status);
-        setIsExecuting(true);
-        // Also sync the global worker store to keep stop/interrupt button working
-        if (currentSessionId) {
-          workerStore.startExecution(currentSessionId);
-          console.log('[Chat] Synced worker store for running session:', currentSessionId);
-        }
-      }
+    console.log('[Chat] DEBUG: Session status sync useEffect - DISABLED. Status:', session?.status);
+    // if (session?.status === 'running' || session?.status === 'pending') {
+    //   // Set isExecuting=true for running/pending sessions to show Processing panel
+    //   // This handles the case when users navigate back to an in-progress session
+    //   if (!isExecuting) {
+    //     console.log('[Chat] Syncing isExecuting with session status:', session.status);
+    //     setIsExecuting(true);
+    //     // Also sync the global worker store to keep stop/interrupt button working
+    //     if (currentSessionId) {
+    //       workerStore.startExecution(currentSessionId);
+    //       console.log('[Chat] Synced worker store for running session:', currentSessionId);
+    //     }
+    //   }
 
-      // If we don't have an active stream, try to connect to the live stream
-      // This allows users to see live events when they return to a running session
-      if (!streamUrl && currentSessionId && !isReconnecting) {
-        console.log('[Chat] Attempting to connect to live stream for running session:', currentSessionId);
-        setIsReconnecting(true); // Mark as reconnection attempt
-        const reconnectStreamUrl = sessionsApi.getStreamUrl(currentSessionId);
-        setStreamMethod('GET'); // Stream endpoint uses GET
-        setStreamBody(null);
-        setStreamUrl(reconnectStreamUrl);
-      }
-    } else if (session?.status === 'completed' || session?.status === 'error') {
-      // Reset isExecuting when session is completed/errored
-      // Previously we checked `!streamUrl` to avoid race conditions, but this caused
-      // the processing indicator to get stuck if the stream ended without properly
-      // clearing state. Now we always clear isExecuting and also clear streamUrl
-      // to ensure consistent state cleanup.
-      if (isExecuting) {
-        console.log('[Chat] Session completed, setting isExecuting to false');
-        setIsExecuting(false);
-        setStreamUrl(null); // Also clear streamUrl to ensure consistent state
-        setIsReconnecting(false); // Clear reconnection flag
-        // Also clear the global worker store
-        workerStore.stopExecution();
-        console.log('[Chat] Cleared worker store for completed/errored session');
-        // Refetch events to ensure we have all stored events from the database
-        refetchEvents();
-        console.log('[Chat] Triggered events refetch after session completion');
-      }
-    }
+    //   // If we don't have an active stream, try to connect to the live stream
+    //   // This allows users to see live events when they return to a running session
+    //   if (!streamUrl && currentSessionId && !isReconnecting) {
+    //     console.log('[Chat] Attempting to connect to live stream for running session:', currentSessionId);
+    //     setIsReconnecting(true); // Mark as reconnection attempt
+    //     const reconnectStreamUrl = sessionsApi.getStreamUrl(currentSessionId);
+    //     setStreamMethod('GET'); // Stream endpoint uses GET
+    //     setStreamBody(null);
+    //     setStreamUrl(reconnectStreamUrl);
+    //   }
+    // } else if (session?.status === 'completed' || session?.status === 'error') {
+    //   // DEBUG: Disabled all state changes on session completion
+    //   console.log('[Chat] DEBUG: Session status changed to', session?.status, '- NOT clearing state');
+    //   // if (isExecuting) {
+    //   //   console.log('[Chat] Session completed, setting isExecuting to false');
+    //   //   setIsExecuting(false);
+    //   //   setStreamUrl(null); // Also clear streamUrl to ensure consistent state
+    //   //   setIsReconnecting(false); // Clear reconnection flag
+    //   //   // Also clear the global worker store
+    //   //   workerStore.stopExecution();
+    //   //   console.log('[Chat] Cleared worker store for completed/errored session');
+    //   //   // Refetch events to ensure we have all stored events from the database
+    //   //   refetchEvents();
+    //   //   console.log('[Chat] Triggered events refetch after session completion');
+    //   // }
+    // }
   }, [session?.status, isExecuting, currentSessionId, streamUrl, isReconnecting, refetchEvents]);
 
   // Load current session details to check if locked
@@ -1264,10 +1251,21 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         console.log('[Chat] Filtered params for resuming session:', params);
       }
 
+      // Add user's preferred provider
+      const provider = user?.preferredProvider || 'claude';
+      if (provider) {
+        params.provider = provider;
+      }
+
       // Always use POST
       setStreamMethod('POST');
       setStreamBody(params);
-      setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+      // Use execute-remote endpoint for claude-remote provider
+      const executeUrl = provider === 'claude-remote'
+        ? `${getApiBaseUrl()}/api/execute-remote`
+        : `${getApiBaseUrl()}/api/execute`;
+      setStreamUrl(executeUrl);
 
       setIsExecuting(true);
 
@@ -1364,228 +1362,30 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         return; // Skip replayed events - they're already displayed from the database query
       }
 
-      // Extract content from various possible locations
-      let content: string | null = null;
-      let messageType: 'assistant' | 'system' = 'assistant';
-      let eventLabel = '';
-      let model: string | undefined = undefined;
-      const source: string | undefined = data?.source;
-
       // Skip if data is undefined or null
       if (!data) {
         console.log('Skipping event with no data:', event);
         return;
       }
 
-      // Handle git commit and pull progress events
-      // These events may have nested data structure: { data: { message: "..." }, type: "...", timestamp: "..." }
-      // Note: Emojis are now embedded in the message by ai-coding-worker's emojiMapper
-      if (eventType === 'commit_progress') {
-        const message = data.data?.message || data.message;
-        content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-        messageType = 'system';
-      } else if (eventType === 'github_pull_progress') {
-        const message = data.data?.message || data.message;
-        content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-        messageType = 'system';
-      }
-      // Extract content from different event types (matching server-side logic)
-      else if (data.type === 'message' && data.message) {
-        content = data.message;
-        messageType = 'system';
-      } else if (data.type === 'session_name' && data.sessionName) {
-        // Session name - auto-save if not manually edited
-        const newTitle = data.sessionName;
-        // Use message from backend (has emoji from emojiMapper) or construct our own
-        content = data.message || `📝 Session: ${newTitle}`;
-        messageType = 'system';
+      // DEBUG: Log raw JSON for all events
+      console.log('[SSE RAW EVENT]', eventType, JSON.stringify(data, null, 2));
 
-        // Auto-update the session title if:
-        // 1. User hasn't manually edited the title
-        // 2. Current title is the default "Resumed session" OR matches a previous auto-generated title
-        if (sessionId && session && !hasUserEditedTitleRef.current) {
-          const currentTitle = session.userRequest;
-          const isDefaultTitle = currentTitle === 'Resumed session';
-          const isPreviousAutoTitle = autoGeneratedTitleRef.current && currentTitle === autoGeneratedTitleRef.current;
-
-          if (isDefaultTitle || isPreviousAutoTitle || !autoGeneratedTitleRef.current) {
-            console.log('[Chat] Auto-updating session title to:', newTitle);
-            autoGeneratedTitleRef.current = newTitle;
-            if (sessionId !== 'new') {
-              updateMutation.mutate({ id: sessionId, title: newTitle });
-            }
-          }
-        }
-      } else if (data.type === 'branch_created' && data.branchName) {
-        // Branch created - update session with the new branch name
-        const newBranch = data.branchName;
-        // Use message from backend (has emoji from emojiMapper) or construct our own
-        content = data.message || `🌿 Branch created: ${newBranch}`;
-        messageType = 'system';
-
-        // Update the session's branch in the database
-        if (sessionId && sessionId !== 'new') {
-          console.log('[Chat] Updating session branch to:', newBranch);
-          updateMutation.mutate({ id: sessionId, branch: newBranch });
-        }
-      } else if (data.type === 'assistant_message' && data.data) {
-        const msgData = data.data;
-
-        // Extract model information if present (check both locations)
-        if (data.model) {
-          model = data.model;
-        } else if (msgData.type === 'assistant' && msgData.message?.model) {
-          model = msgData.message.model;
-        }
-
-        // Handle assistant message with Claude response
-        if (msgData.type === 'assistant' && msgData.message?.content) {
-          const contentBlocks = msgData.message.content;
-          if (Array.isArray(contentBlocks)) {
-            // First check for tool_use blocks to show file operations
-            const toolUseBlocks = contentBlocks.filter((block: any) => block.type === 'tool_use');
-            if (toolUseBlocks.length > 0) {
-              // Create status messages for file operations
-              const toolMessages: string[] = [];
-              for (const toolBlock of toolUseBlocks) {
-                const toolName = toolBlock.name;
-                const toolInput = toolBlock.input || {};
-
-                if (toolName === 'Read') {
-                  // Prefer relative_path (added by backend) over file_path
-                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-                  toolMessages.push(`📖 Reading: ${displayPath}`);
-                } else if (toolName === 'Write') {
-                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-                  toolMessages.push(`📝 Writing: ${displayPath}`);
-                } else if (toolName === 'Edit') {
-                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-                  toolMessages.push(`✏️ Editing: ${displayPath}`);
-                } else if (toolName === 'Grep') {
-                  const pattern = toolInput.pattern || '';
-                  toolMessages.push(`🔍 Searching for: "${pattern}"`);
-                } else if (toolName === 'Glob') {
-                  const pattern = toolInput.pattern || '';
-                  toolMessages.push(`📁 Finding files: ${pattern}`);
-                } else if (toolName === 'Bash') {
-                  const cmd = toolInput.command || '';
-                  const shortCmd = cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd;
-                  toolMessages.push(`⚡ Running: ${shortCmd}`);
-                } else if (toolName === 'WebFetch') {
-                  const url = toolInput.url || '';
-                  toolMessages.push(`🌐 Fetching: ${url}`);
-                } else if (toolName === 'WebSearch') {
-                  const query = toolInput.query || '';
-                  toolMessages.push(`🔎 Searching web: "${query}"`);
-                } else if (toolName === 'Task') {
-                  const desc = toolInput.description || 'subtask';
-                  toolMessages.push(`🤖 Launching agent: ${desc}`);
-                }
-              }
-
-              if (toolMessages.length > 0) {
-                const toolContent = toolMessages.join('\n');
-                // Add source label if present
-                const toolSourceLabel = formatSourceLabel(source);
-                const toolFinalContent = toolSourceLabel ? `${toolSourceLabel} ${toolContent}` : toolContent;
-                // Create and add the tool message immediately
-                messageIdCounter.current += 1;
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: Date.now() + messageIdCounter.current,
-                    chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-                    type: 'system',
-                    content: toolFinalContent,
-                    timestamp: new Date(),
-                    model,
-                  },
-                ]);
-                // Don't return here - continue to process text blocks if any
-              }
-            }
-
-            // Then extract text content as before
-            const textParts = contentBlocks
-              .filter((block: any) => block.type === 'text' && block.text)
-              .map((block: any) => block.text);
-            if (textParts.length > 0) {
-              content = textParts.join('\n');
-              eventLabel = '🤖';
-            } else {
-              // If we already showed tool messages, skip showing empty text
-              return;
-            }
-          }
-        }
-        // Skip result type - content already displayed from assistant message
-        else if (msgData.type === 'result') {
-          console.log('[Chat] Skipping result message (already displayed from assistant message)');
-          return;
-        }
-        // Skip system init messages
-        else if (msgData.type === 'system' && msgData.subtype === 'init') {
-          console.log('[Chat] Skipping system init message');
-          return;
-        }
-      }
-      // Fallback to direct fields - treat as system status messages
-      else if (typeof data === 'string') {
-        content = data;
-        messageType = 'system';
-      } else if (data.message) {
-        content = data.message;
-        messageType = 'system';
-      } else if (data.content) {
-        if (Array.isArray(data.content)) {
-          const textBlocks = data.content
-            .filter((block: any) => block.type === 'text' && block.text)
-            .map((block: any) => block.text);
-          if (textBlocks.length > 0) {
-            content = textBlocks.join('\n');
-            messageType = 'system';
-          }
-        } else if (typeof data.content === 'string') {
-          content = data.content;
-          messageType = 'system';
-        }
-      } else if (data.text) {
-        content = data.text;
-        messageType = 'system';
-      } else if (data.result) {
-        content = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
-        messageType = 'system';
-      }
-
-      // Skip if no meaningful content
-      if (!content) {
-        console.log('Skipping event with no content:', event);
-        console.log('Data keys:', typeof data === 'object' ? Object.keys(data) : typeof data);
-        return;
-      }
-
-      // Add source label and event label if present
-      const sourceLabel = formatSourceLabel(source);
-      let finalContent = content;
-      if (sourceLabel || eventLabel) {
-        const prefix = [sourceLabel, eventLabel].filter(Boolean).join(' ');
-        finalContent = `${prefix} ${content}`;
-      }
-
+      // DEBUG: Always show raw JSON as a message for debugging
+      const rawJsonContent = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
       messageIdCounter.current += 1;
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now() + messageIdCounter.current,
           chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-          type: messageType,
-          content: finalContent,
+          type: 'system',
+          content: rawJsonContent,
           timestamp: new Date(),
-          model,
         },
       ]);
-      // Record heartbeat for every message received (keeps worker state fresh)
       workerStore.recordHeartbeat();
+      // DEBUG MODE: Skip all other processing - just show raw JSON
     },
     onConnected: () => {
       setIsExecuting(true);
@@ -1601,33 +1401,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       console.log('[Chat] SSE stream connected, worker store updated');
     },
     onCompleted: (data) => {
+      console.log('[Chat] onCompleted called. Data:', JSON.stringify(data, null, 2));
+      // Re-enable state changes for proper completion detection
       setIsExecuting(false);
       setStreamUrl(null);
-      setIsReconnecting(false); // Clear reconnection flag
-      // Clear global worker state
+      setIsReconnecting(false);
       workerStore.stopExecution();
-      // Note: wasStreamingRef.current stays true until merge effect handles the scroll
-      console.log('[Chat] SSE stream completed, worker store cleared');
-
-      // Show browser notification if enabled (only when tab is not focused)
-      const notificationPrefs = getNotificationPrefs();
-      if (notificationPrefs.enabled && notificationPrefs.onSessionComplete) {
-        const repoName = session?.repositoryName
-          ? `${session.repositoryOwner}/${session.repositoryName}`
-          : selectedRepo || undefined;
-
-        // If permission not yet requested, request it now (on first session completion)
-        if (notificationPermission === 'default') {
-          requestPermission().then((perm) => {
-            if (perm === 'granted') {
-              showSessionCompletedNotification(data?.websiteSessionId, repoName);
-            }
-          });
-        } else {
-          showSessionCompletedNotification(data?.websiteSessionId, repoName);
-        }
-      }
-
       // Capture session ID from completion event
       if (data?.websiteSessionId) {
         console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
@@ -1638,13 +1417,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           console.log('[Chat] Locking fields after first submission');
           setIsLocked(true);
         }
-        // Invalidate queries to refetch session data and messages from database
-        // This syncs the final state after SSE stream completes
-        queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
-        queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
-
-        // Note: Scroll handling is now done in the messages merge effect (useEffect on eventsData/messagesData)
-        // which properly preserves scroll position or scrolls to bottom based on user's position
+        // Invalidate sessions list to update sidebar
+        queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
         // Navigate to the session URL if not already there
         if (!sessionId || sessionId !== data.websiteSessionId) {
@@ -1664,40 +1438,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }, 100);
     },
     onError: (error) => {
-      console.error('Stream error:', error);
-
-      // If this was a reconnection attempt, don't show an error to the user
-      // The polling mechanism will continue to work
-      if (isReconnecting) {
-        console.log('[Chat] Reconnection failed, falling back to polling');
-        setIsReconnecting(false);
-        setStreamUrl(null);
-        // Don't clear isExecuting - let the session status polling handle that
-        // Don't show error message to user for reconnection failures
-        return;
-      }
-
-      messageIdCounter.current += 1;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + messageIdCounter.current,
-          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-          type: 'error',
-          content: error.message,
-          timestamp: new Date(),
-        },
-      ]);
+      console.log('[Chat] onError called. Error:', error.message);
       setIsExecuting(false);
       setStreamUrl(null);
-      // Clear global worker state on error
       workerStore.stopExecution();
-      console.log('[Chat] SSE stream error, worker store cleared');
-
-      // Refocus input after error (with delay to ensure DOM updates)
-      setTimeout(() => {
-        chatInputRef.current?.focus();
-      }, 100);
     },
     autoReconnect: false, // Disable auto-reconnect to prevent infinite loops
   });
@@ -1803,6 +1547,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       userRequest: userRequestParam,
     };
 
+    // Add user's preferred provider
+    const provider = user?.preferredProvider || 'claude';
+    if (provider) {
+      requestParams.provider = provider;
+    }
+
     if (currentSessionId) {
       requestParams.websiteSessionId = currentSessionId;
       console.log('[Chat] Continuing existing session:', currentSessionId);
@@ -1826,11 +1576,17 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Debug: Log the exact parameters being sent
     console.log('[Chat] Final request parameters:', JSON.stringify(requestParams, null, 2));
     console.log('[Chat] Parameters being sent:', Object.keys(requestParams));
+    console.log('[Chat] Using provider:', provider);
 
     // Always use POST to allow reading error body in response
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+    // Use execute-remote endpoint for claude-remote provider
+    const executeUrl = provider === 'claude-remote'
+      ? `${getApiBaseUrl()}/api/execute-remote`
+      : `${getApiBaseUrl()}/api/execute`;
+    setStreamUrl(executeUrl);
 
     setInput('');
     setImages([]);
@@ -1864,6 +1620,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       userRequest: lastRequest.input,
     };
 
+    // Add user's preferred provider
+    const provider = user?.preferredProvider || 'claude';
+    if (provider) {
+      requestParams.provider = provider;
+    }
+
     if (currentSessionId) {
       requestParams.websiteSessionId = currentSessionId;
       console.log('[Chat] Retrying with existing session:', currentSessionId);
@@ -1889,7 +1651,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Always use POST
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+    // Use execute-remote endpoint for claude-remote provider
+    const executeUrl = provider === 'claude-remote'
+      ? `${getApiBaseUrl()}/api/execute-remote`
+      : `${getApiBaseUrl()}/api/execute`;
+    setStreamUrl(executeUrl);
   };
 
   // Handle interrupting current job
@@ -1945,6 +1712,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           userRequest: nextMessage.input,
         };
 
+        // Add user's preferred provider
+        const provider = user?.preferredProvider || 'claude';
+        if (provider) {
+          requestParams.provider = provider;
+        }
+
         if (currentSessionId) {
           requestParams.websiteSessionId = currentSessionId;
         }
@@ -1995,7 +1768,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
         setStreamMethod('POST');
         setStreamBody(requestParams);
-        setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+        // Use execute-remote endpoint for claude-remote provider
+        const executeUrl = provider === 'claude-remote'
+          ? `${getApiBaseUrl()}/api/execute-remote`
+          : `${getApiBaseUrl()}/api/execute`;
+        setStreamUrl(executeUrl);
       }, 500);
     }
   }, [isExecuting, messageQueue.length, currentSessionId, sessionId]);

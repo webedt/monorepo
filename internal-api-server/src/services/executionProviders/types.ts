@@ -16,8 +16,10 @@ export type ExecutionEventType =
   | 'assistant_message'
   | 'session_name'
   | 'session_created'
+  | 'title_generation'
   | 'completed'
-  | 'error';
+  | 'error'
+  | 'raw_event';
 
 /**
  * Event emitted during execution
@@ -46,6 +48,12 @@ export interface ExecutionEvent {
   remoteSessionId?: string;
   remoteWebUrl?: string;
 
+  // Title generation event
+  method?: 'dust' | 'openrouter' | 'session' | 'local';
+  status?: 'trying' | 'success' | 'failed' | 'skipped';
+  title?: string;
+  branch_name?: string;
+
   // Completed event
   branch?: string;
   totalCost?: number;
@@ -54,6 +62,9 @@ export interface ExecutionEvent {
   // Error event
   error?: string;
   code?: string;
+
+  // Raw event from provider (for debugging/pass-through)
+  rawEvent?: unknown;
 }
 
 /**
@@ -72,6 +83,8 @@ export interface ExecuteParams {
   model?: string;
   /** Claude auth credentials */
   claudeAuth: ClaudeAuth;
+  /** Environment ID for Claude Remote (optional, uses config default if not provided) */
+  environmentId?: string;
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
 }
@@ -90,6 +103,8 @@ export interface ResumeParams {
   prompt: string;
   /** Claude auth credentials */
   claudeAuth: ClaudeAuth;
+  /** Environment ID for Claude Remote (optional, uses config default if not provided) */
+  environmentId?: string;
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
 }

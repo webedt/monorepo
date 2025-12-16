@@ -113,15 +113,15 @@ The Express server acts as a facade that:
 Path-based routing via Dokploy:
 
 ```
-https://github.etdofresh.com/{owner}/{repo}/{branch}/
+https://webedit.etdofresh.com/github/{owner}/{repo}/{branch}/
 ```
 
 **IMPORTANT:** For branch names containing slashes (`/`), replace them with hyphens (`-`) in the URL.
 
 **Examples:**
-- `https://github.etdofresh.com/webedt/monorepo/main/`
-- `https://github.etdofresh.com/webedt/monorepo/feature-branch/`
-- Branch `claude/fix-bug-123` → `https://github.etdofresh.com/webedt/monorepo/claude-fix-bug-123/`
+- `https://webedit.etdofresh.com/github/webedt/monorepo/main/`
+- `https://webedit.etdofresh.com/github/webedt/monorepo/feature-branch/`
+- Branch `claude/fix-bug-123` → `https://webedit.etdofresh.com/github/webedt/monorepo/claude-fix-bug-123/`
 
 ---
 
@@ -420,7 +420,7 @@ docker service logs <service-name> -f
 **Links:**
 
 GitHub Branch: [https://github.com/webedt/monorepo/tree/{branch}](https://github.com/webedt/monorepo/tree/{branch})
-Live Site: [https://github.etdofresh.com/webedt/monorepo/{branch-with-slashes-as-hyphens}/](https://github.etdofresh.com/webedt/monorepo/{branch-with-slashes-as-hyphens}/)
+Live Site: [https://webedit.etdofresh.com/github/webedt/monorepo/{branch-with-slashes-as-hyphens}/](https://webedit.etdofresh.com/github/webedt/monorepo/{branch-with-slashes-as-hyphens}/)
 ```
 
 **NOTE:** For the Live Site URL, replace any slashes (`/`) in the branch name with hyphens (`-`).

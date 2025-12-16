@@ -19,14 +19,14 @@ echo "No pre-configuration needed - credentials are written when requests are re
 # Build the image
 echo ""
 echo "Building ai-coding-worker image..."
-docker build -t dockerregistry.etdofresh.com/ai-coding-worker:latest .
-echo "✓ Image built: dockerregistry.etdofresh.com/ai-coding-worker:latest"
+docker build -t ghcr.io/webedt/monorepo/ai-coding-worker:latest .
+echo "✓ Image built: ghcr.io/webedt/monorepo/ai-coding-worker:latest"
 
 # Push to registry
 echo ""
 echo "Pushing image to registry..."
-docker push dockerregistry.etdofresh.com/ai-coding-worker:latest
-echo "✓ Image pushed to dockerregistry.etdofresh.com"
+docker push ghcr.io/webedt/monorepo/ai-coding-worker:latest
+echo "✓ Image pushed to ghcr.io"
 
 # Deploy the stack
 echo ""

@@ -417,7 +417,7 @@ import { unstable_v2_resumeSession, query } from '@anthropic-ai/claude-agent-sdk
 
 // Using unstable_v2_resumeSession
 const session = unstable_v2_resumeSession(sessionId, {
-  model: 'claude-sonnet-4-5-20250929',
+  model: 'claude-opus-4-5-20251101',
 });
 
 for await (const message of session.receive()) {
@@ -811,7 +811,7 @@ A complete CLI for managing Claude remote sessions via pure HTTPS (no `claude` C
 |----------|-------------|
 | `CLAUDE_ENVIRONMENT_ID` | Environment ID (required) |
 | `CLAUDE_GIT_URL` | Git repository URL (required) |
-| `CLAUDE_MODEL` | Model to use (default: claude-sonnet-4-5-20250929) |
+| `CLAUDE_MODEL` | Model to use (default: claude-opus-4-5-20251101) |
 | `CLAUDE_ORG_UUID` | Organization UUID (optional) |
 
 **Output JSONL Event Types:**

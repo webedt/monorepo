@@ -418,7 +418,7 @@ The `previewUrlPattern` supports placeholders:
 - `{repo}` - Repository name
 - `{branch}` - Branch name
 
-Default: `https://github.etdofresh.com/{owner}/{repo}/{branch}/`
+Default: `https://webedt.etdofresh.com/github/{owner}/{repo}/{branch}/`
 
 #### Merge Settings (`merge`)
 

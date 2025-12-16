@@ -9,10 +9,12 @@ import {
   ClaudeRemoteClient,
   type SessionEvent,
   type CreateSessionParams,
+  type TitleGenerationEvent,
+  generateTitle,
 } from '@webedt/shared';
 import { logger } from '@webedt/shared';
 import type { ClaudeAuth } from '../../lib/claudeAuth.js';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL } from '../../config/env.js';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL, CLAUDE_ORG_UUID, CLAUDE_COOKIES, OPENROUTER_API_KEY } from '../../config/env.js';
 import type {
   ExecutionProvider,
   ExecuteParams,
@@ -23,84 +25,18 @@ import type {
 } from './types.js';
 
 /**
- * Map Anthropic session events to our ExecutionEvent format
+ * Pass through raw Anthropic session events with minimal wrapping
+ * This allows the frontend to receive events exactly as they come from the API
  */
-function mapSessionEvent(event: SessionEvent, source: string): ExecutionEvent {
-  const timestamp = new Date().toISOString();
-
-  switch (event.type) {
-    case 'user':
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: 'user_message',
-        message: 'User message received',
-      };
-
-    case 'assistant':
-      return {
-        type: 'assistant_message',
-        timestamp,
-        source,
-        content: event.message?.content,
-      };
-
-    case 'result':
-      return {
-        type: 'completed',
-        timestamp,
-        source,
-        totalCost: event.total_cost_usd,
-        duration_ms: event.duration_ms,
-      };
-
-    case 'tool_use':
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: 'tool_use',
-        message: `Using tool: ${event.tool_use?.name || 'unknown'}`,
-      };
-
-    case 'tool_result':
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: 'tool_result',
-        message: event.tool_use_result?.is_error
-          ? `Tool error: ${event.tool_use_result.stderr || 'Unknown error'}`
-          : 'Tool completed',
-      };
-
-    case 'env_manager_log':
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: event.data?.type || 'env_manager',
-        message: event.data?.message || 'Environment manager event',
-      };
-
-    case 'error':
-      return {
-        type: 'error',
-        timestamp,
-        source,
-        error: event.data?.message || 'Unknown error',
-      };
-
-    default:
-      return {
-        type: 'message',
-        timestamp,
-        source,
-        stage: event.type,
-        message: `Event: ${event.type}`,
-      };
-  }
+function passRawEvent(event: SessionEvent, source: string): ExecutionEvent {
+  // Pass raw event directly - no mapping, no transformation
+  // Just add source and timestamp for tracking
+  return {
+    type: 'raw_event',
+    timestamp: new Date().toISOString(),
+    source,
+    rawEvent: event, // The actual raw event from Anthropic API
+  };
 }
 
 /**
@@ -112,10 +48,10 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
   /**
    * Create a ClaudeRemoteClient with the given auth
    */
-  private createClient(claudeAuth: ClaudeAuth): ClaudeRemoteClient {
+  private createClient(claudeAuth: ClaudeAuth, environmentId?: string): ClaudeRemoteClient {
     return new ClaudeRemoteClient({
       accessToken: claudeAuth.accessToken,
-      environmentId: CLAUDE_ENVIRONMENT_ID,
+      environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,
       model: CLAUDE_DEFAULT_MODEL,
     });
@@ -128,7 +64,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     params: ExecuteParams,
     onEvent: ExecutionEventCallback
   ): Promise<ExecutionResult> {
-    const { chatSessionId, prompt, gitUrl, model, claudeAuth, abortSignal } = params;
+    const { chatSessionId, prompt, gitUrl, model, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
     logger.info('Starting Claude Remote execution', {
@@ -155,13 +91,49 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       message: 'Creating Claude remote session...',
     });
 
-    const client = this.createClient(claudeAuth);
+    const client = this.createClient(claudeAuth, environmentId);
 
-    // Create session params
+    // Generate title with 4-method fallback:
+    // 1. claude.ai dust endpoint (fastest, requires cookies)
+    // 2. OpenRouter API (fast, requires OPENROUTER_API_KEY)
+    // 3. Temp Sonnet session (reliable, uses OAuth)
+    // 4. Local fallback (instant)
+    const generatedTitle = await generateTitle(
+      prompt,
+      {
+        claudeCookies: CLAUDE_COOKIES || undefined,
+        orgUuid: CLAUDE_ORG_UUID || undefined,
+        openRouterApiKey: OPENROUTER_API_KEY || undefined,
+        accessToken: claudeAuth.accessToken,
+        environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || undefined,
+      },
+      // Emit title generation progress events
+      async (event: TitleGenerationEvent) => {
+        await onEvent({
+          type: 'title_generation',
+          timestamp: new Date().toISOString(),
+          source,
+          method: event.method,
+          status: event.status,
+          title: event.title,
+          branch_name: event.branch_name,
+        });
+      }
+    );
+
+    logger.info('Generated session title and branch', {
+      component: 'ClaudeRemoteProvider',
+      title: generatedTitle.title,
+      branch_name: generatedTitle.branch_name,
+      source: generatedTitle.source,
+    });
+
+    // Create session params with generated title
     const createParams: CreateSessionParams = {
       prompt,
       gitUrl,
       model: model || CLAUDE_DEFAULT_MODEL,
+      title: generatedTitle.title,
     };
 
     try {
@@ -193,12 +165,12 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         sessionName: title,
       });
 
-      // Poll for events
+      // Poll for events - pass raw events directly
       const result = await client.pollSession(
         sessionId,
         async (event) => {
-          const mappedEvent = mapSessionEvent(event, source);
-          await onEvent(mappedEvent);
+          const rawEvent = passRawEvent(event, source);
+          await onEvent(rawEvent);
         },
         { abortSignal }
       );
@@ -258,7 +230,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     params: ResumeParams,
     onEvent: ExecutionEventCallback
   ): Promise<ExecutionResult> {
-    const { chatSessionId, remoteSessionId, prompt, claudeAuth, abortSignal } = params;
+    const { chatSessionId, remoteSessionId, prompt, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
     logger.info('Resuming Claude Remote session', {
@@ -285,20 +257,20 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       message: 'Resuming session...',
     });
 
-    const client = this.createClient(claudeAuth);
+    const client = this.createClient(claudeAuth, environmentId);
 
     try {
       // Get current session info
       const session = await client.getSession(remoteSessionId);
       const webUrl = `https://claude.ai/code/${remoteSessionId}`;
 
-      // Resume session
+      // Resume session - pass raw events directly
       const result = await client.resume(
         remoteSessionId,
         prompt,
         async (event) => {
-          const mappedEvent = mapSessionEvent(event, source);
-          await onEvent(mappedEvent);
+          const rawEvent = passRawEvent(event, source);
+          await onEvent(rawEvent);
         },
         { abortSignal }
       );

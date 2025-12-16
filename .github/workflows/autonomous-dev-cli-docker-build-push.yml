@@ -9,8 +9,8 @@ on:
       - ".github/workflows/autonomous-dev-cli-docker-build-push.yml"
 
 env:
-  REGISTRY: dockerregistry.etdofresh.com
-  IMAGE_NAME: autonomous-dev-cli
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/autonomous-dev-cli
 
 jobs:
   build-and-push:
@@ -38,12 +38,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
-          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels)
         id: meta

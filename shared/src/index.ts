@@ -31,7 +31,7 @@ export {
 export type { WebedtConfig } from './previewUrlHelper.js';
 
 // Claude Remote Sessions API
-export { ClaudeRemoteClient, ClaudeRemoteError } from './claudeRemote/index.js';
+export { ClaudeRemoteClient, ClaudeRemoteError, fetchEnvironmentIdFromSessions, generateTitle, generateTitleSync } from './claudeRemote/index.js';
 export type {
   ClaudeAuth,
   ClaudeRemoteClientConfig,
@@ -45,4 +45,8 @@ export type {
   EventCallback,
   PollOptions,
   SessionResult,
+  GeneratedTitle,
+  TitleGeneratorConfig,
+  TitleGenerationEvent,
+  TitleGenerationCallback,
 } from './claudeRemote/index.js';

@@ -69,7 +69,7 @@ export interface GeminiAuth {
 export type ProviderAuth = ClaudeAuth | CodexAuth | GeminiAuth;
 
 // Provider types
-export type AIProvider = 'claude' | 'codex' | 'gemini';
+export type AIProvider = 'claude' | 'codex' | 'gemini' | 'claude-remote';
 
 // Session types
 export interface ChatSession {

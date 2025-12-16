@@ -181,16 +181,16 @@ function emit(event) {
   console.log(JSON.stringify(event));
 }
 
-// Generate title from prompt
-function generateTitle(prompt) {
-  const title = prompt.slice(0, 50).replace(/\n/g, ' ').trim();
-  return title.length < prompt.length ? title + '...' : title;
-}
+// === Title Generation ===
+// Four methods with fallback chain:
+// 1. claude.ai dust endpoint (fastest, ~1s, requires browser cookies)
+// 2. OpenRouter API (fast, ~1-2s, requires OPENROUTER_API_KEY)
+// 3. Temp Sonnet session via API (reliable, ~8-10s, uses OAuth)
+// 4. Local fallback (instant, uses Title Case truncation)
 
-// Generate branch prefix from prompt (server will append unique suffix)
-function generateBranchPrefix(prompt) {
-  // Extract first few words, clean up, convert to kebab-case
-  const words = prompt.slice(0, 40)
+// Generate branch name from title (used by all methods)
+function generateBranchFromTitle(title) {
+  const words = title.slice(0, 40)
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .trim()
@@ -200,12 +200,269 @@ function generateBranchPrefix(prompt) {
   return `claude/${words || 'session'}`;
 }
 
+// Method 4: Local fallback - convert prompt to Title Case
+function generateTitleLocal(prompt) {
+  // Clean and truncate prompt
+  const cleaned = prompt.slice(0, 50).replace(/\n/g, ' ').trim();
+
+  // Convert to Title Case
+  return cleaned
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+// Method 1: claude.ai dust endpoint (requires cookies from env) - returns { title, branch_name }
+async function generateTitleViaDust(prompt, orgUuid) {
+  const cookies = process.env.CLAUDE_COOKIES;
+  if (!cookies) return null;
+
+  const url = `${CLAUDE_AI_URL}/api/organizations/${orgUuid}/dust/generate_title_and_branch`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': cookies,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Origin': CLAUDE_AI_URL,
+        'Referer': `${CLAUDE_AI_URL}/code`,
+        'anthropic-client-platform': 'web_claude_ai',
+        'anthropic-client-version': '1.0.0',
+      },
+      body: JSON.stringify({ first_session_message: prompt })
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    // dust endpoint returns { title, branch_name } directly
+    if (data.title && data.branch_name) {
+      return { title: data.title, branch_name: data.branch_name };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Method 2: OpenRouter API (uses x-ai/grok-4.1-fast) - returns { title, branch_name }
+async function generateTitleViaOpenRouter(prompt) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return null;
+
+  const titlePrompt = `Generate a title and git branch name for this coding request. Respond with ONLY valid JSON, no other text:
+{"title": "Short descriptive title", "branch_name": "claude/kebab-case-branch"}
+
+Rules:
+- Title: 3-6 words, concise, sentence case
+- Branch: starts with "claude/", kebab-case, 2-4 words after prefix
+
+Request: "${prompt}"`;
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'x-ai/grok-4.1-fast',
+        messages: [{ role: 'user', content: titlePrompt }],
+        max_tokens: 100,
+      })
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (content) {
+      // Try to parse JSON from response
+      const jsonMatch = content.match(/\{[\s\S]*?"title"[\s\S]*?"branch_name"[\s\S]*?\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.title && parsed.branch_name) {
+            return parsed;
+          }
+        } catch {}
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Method 3: Create temp Sonnet session via API - returns { title, branch_name }
+async function generateTitleViaSession(prompt, accessToken, orgUuid, environmentId) {
+  // Use same JSON format as OpenRouter for consistency
+  const titlePrompt = `Generate a title and git branch name for this coding request. Respond with ONLY valid JSON, no other text:
+{"title": "Short descriptive title", "branch_name": "claude/kebab-case-branch"}
+
+Rules:
+- Title: 3-6 words, concise, sentence case
+- Branch: starts with "claude/", kebab-case, 2-4 words after prefix
+
+Request: "${prompt}"`;
+
+  const payload = {
+    events: [{
+      type: 'event',
+      data: {
+        uuid: randomUUID(),
+        session_id: '',
+        type: 'user',
+        parent_tool_use_id: null,
+        message: { role: 'user', content: titlePrompt }
+      }
+    }],
+    environment_id: environmentId,
+    session_context: { model: 'claude-sonnet-4-20250514' }
+  };
+
+  try {
+    // Create session
+    const createRes = await fetch(`${BASE_URL}/v1/sessions`, {
+      method: 'POST',
+      headers: buildHeaders(accessToken, orgUuid),
+      body: JSON.stringify(payload)
+    });
+
+    if (!createRes.ok) return null;
+    const session = await createRes.json();
+
+    // Poll for completion (max 60 seconds)
+    for (let i = 0; i < 30; i++) {
+      const statusRes = await fetch(`${BASE_URL}/v1/sessions/${session.id}`, {
+        headers: buildHeaders(accessToken, orgUuid)
+      });
+      const status = await statusRes.json();
+
+      if (status.session_status === 'idle' || status.session_status === 'completed') {
+        // Get events and extract response
+        const eventsRes = await fetch(`${BASE_URL}/v1/sessions/${session.id}/events`, {
+          headers: buildHeaders(accessToken, orgUuid)
+        });
+        const events = await eventsRes.json();
+
+        let result = null;
+        for (const event of (events.data || [])) {
+          if (event.type === 'assistant' && event.message?.content) {
+            for (const block of event.message.content) {
+              if (block.type === 'text' && block.text) {
+                // Parse JSON from response (same logic as OpenRouter)
+                const jsonMatch = block.text.match(/\{[\s\S]*?"title"[\s\S]*?"branch_name"[\s\S]*?\}/);
+                if (jsonMatch) {
+                  try {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    if (parsed.title && parsed.branch_name) {
+                      result = parsed;
+                    }
+                  } catch {}
+                }
+              }
+            }
+          }
+        }
+
+        // Archive the temp session
+        await fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
+          method: 'POST',
+          headers: buildHeaders(accessToken, orgUuid),
+          body: JSON.stringify({})
+        }).catch(() => {});
+
+        return result;
+      }
+
+      if (status.session_status === 'failed') {
+        // Archive and return null
+        await fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
+          method: 'POST',
+          headers: buildHeaders(accessToken, orgUuid),
+          body: JSON.stringify({})
+        }).catch(() => {});
+        return null;
+      }
+
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // Timeout - archive and return null
+    await fetch(`${BASE_URL}/v1/sessions/${session.id}/archive`, {
+      method: 'POST',
+      headers: buildHeaders(accessToken, orgUuid),
+      body: JSON.stringify({})
+    }).catch(() => {});
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Main function: try all four methods in order, returns { title, branch_name }
+async function generateTitleAndBranch(prompt, accessToken, orgUuid, environmentId) {
+  let result = null;
+
+  // Method 1: Try claude.ai dust endpoint (fastest) - returns { title, branch_name }
+  if (orgUuid) {
+    emit({ type: 'title_generation', method: 'dust', status: 'trying' });
+    result = await generateTitleViaDust(prompt, orgUuid);
+    if (result) {
+      emit({ type: 'title_generation', method: 'dust', status: 'success', ...result });
+    } else {
+      emit({ type: 'title_generation', method: 'dust', status: 'failed' });
+    }
+  }
+
+  // Method 2: Try OpenRouter API (fast) - returns { title, branch_name }
+  if (!result) {
+    emit({ type: 'title_generation', method: 'openrouter', status: 'trying' });
+    result = await generateTitleViaOpenRouter(prompt);
+    if (result) {
+      emit({ type: 'title_generation', method: 'openrouter', status: 'success', ...result });
+    } else {
+      emit({ type: 'title_generation', method: 'openrouter', status: 'failed' });
+    }
+  }
+
+  // Method 3: Try temp Sonnet session (reliable but slower) - returns { title, branch_name }
+  if (!result && accessToken && environmentId) {
+    emit({ type: 'title_generation', method: 'session', status: 'trying' });
+    result = await generateTitleViaSession(prompt, accessToken, orgUuid, environmentId);
+    if (result) {
+      emit({ type: 'title_generation', method: 'session', status: 'success', ...result });
+    } else {
+      emit({ type: 'title_generation', method: 'session', status: 'failed' });
+    }
+  }
+
+  // Method 4: Local fallback (instant)
+  if (!result) {
+    emit({ type: 'title_generation', method: 'local', status: 'using' });
+    const localTitle = generateTitleLocal(prompt);
+    result = { title: localTitle, branch_name: generateBranchFromTitle(localTitle) };
+    emit({ type: 'title_generation', method: 'local', status: 'success', ...result });
+  }
+
+  return result;
+}
+
 // === API Functions ===
 
-async function createSession(accessToken, orgUuid, prompt, environmentId) {
+async function createSession(accessToken, orgUuid, prompt, environmentId, titleInfo = null) {
   const eventUuid = randomUUID();
-  const title = generateTitle(prompt);
-  const branchPrefix = generateBranchPrefix(prompt);
+
+  // Use provided titleInfo or generate locally as fallback
+  const title = titleInfo?.title || generateTitleLocal(prompt);
+  const branchPrefix = titleInfo?.branch_name || generateBranchFromTitle(title);
+
   const repoMatch = gitUrl.match(/github\.com\/([^\/]+\/[^\/]+)/);
   const repoName = repoMatch ? repoMatch[1].replace(/\.git$/, '') : 'unknown/repo';
 
@@ -565,11 +822,16 @@ async function cmdCreate(prompt) {
   emit({ type: 'status', status: 'starting', prompt });
   emit({ type: 'config', environmentId, gitUrl, model, hasOrgUuid: !!orgUuid });
 
-  const session = await createSession(creds.accessToken, orgUuid, prompt, environmentId);
+  // Generate title and branch using fallback chain
+  const titleInfo = await generateTitleAndBranch(prompt, creds.accessToken, orgUuid, environmentId);
+
+  const session = await createSession(creds.accessToken, orgUuid, prompt, environmentId, titleInfo);
   emit({
     type: 'session_created',
     sessionId: session.id,
     environmentId: session.environment_id,
+    title: titleInfo.title,
+    branch: titleInfo.branch_name,
     webUrl: `https://claude.ai/code/${session.id}`
   });
 
@@ -724,6 +986,19 @@ async function cmdModels() {
   });
 }
 
+async function cmdGenerateTitle(prompt) {
+  const creds = getCredentials();
+  const orgUuid = getOrgUuid();
+  const environmentId = await getEnvironmentId(creds.accessToken, orgUuid);
+
+  const result = await generateTitleAndBranch(prompt, creds.accessToken, orgUuid, environmentId);
+  emit({
+    type: 'title_result',
+    title: result.title,
+    branch_name: result.branch_name
+  });
+}
+
 async function cmdListEnvs() {
   const creds = getCredentials();
   const orgUuid = getOrgUuid();
@@ -774,6 +1049,7 @@ function printUsage() {
 
 Usage:
   claude-session "prompt"                      Create new session and run prompt
+  claude-session generate-title "prompt"       Generate title and branch name only
   claude-session list [limit] [before_id]      List sessions (default: 20, use lastId for pagination)
   claude-session envs                          List available environments
   claude-session models                        List available models
@@ -789,6 +1065,14 @@ Environment Variables:
   CLAUDE_GIT_URL         Git repository URL (auto-detected from git remote)
   CLAUDE_MODEL           Model (default: claude-opus-4-5-20251101)
   CLAUDE_ORG_UUID        Organization UUID (optional, auto-detected)
+  CLAUDE_COOKIES         Browser cookies for claude.ai (enables fast title generation)
+  OPENROUTER_API_KEY     OpenRouter API key (enables fast title generation via Grok)
+
+Title Generation Methods (in order of preference):
+  1. claude.ai dust endpoint - fastest (~1s), requires CLAUDE_COOKIES
+  2. OpenRouter API          - fast (~1-2s), requires OPENROUTER_API_KEY
+  3. Temp Sonnet session     - reliable (~8-10s), uses OAuth credentials
+  4. Local fallback          - instant, uses Title Case truncation
 
 Output: JSONL (one JSON object per line)`);
 }
@@ -819,6 +1103,12 @@ async function main() {
 
       case 'models':
         await cmdModels();
+        break;
+
+      case 'generate-title':
+      case 'title':
+        if (!args[1]) throw new Error('Usage: generate-title "prompt"');
+        await cmdGenerateTitle(args.slice(1).join(' '));
         break;
 
       case 'archive':

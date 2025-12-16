@@ -2,14 +2,17 @@ name: Internal API Server - Build and Push Docker Image
 
 on:
   push:
+    branches:
+      - main
+      - 'local/**'
     paths:
       - "internal-api-server/**"
       - "shared/**"
       - ".github/workflows/internal-api-server-docker-build-push.yml"
 
 env:
-  REGISTRY: dockerregistry.etdofresh.com
-  IMAGE_NAME: internal-api-server
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/internal-api-server
   INTERNAL_API_URL: http://internal-api-server:3000
 
 jobs:
@@ -37,6 +40,7 @@ jobs:
           echo "- GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID != '' && '✅ Set' || '❌ Not set' }}"
           echo "- GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET != '' && '✅ Set' || '❌ Not set' }}"
           echo "- OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
           echo ""
           echo "### Variables"
           echo "- DOKPLOY_URL: ${{ vars.DOKPLOY_URL || '❌ Not set' }}"
@@ -53,12 +57,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
-          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels)
         id: meta
@@ -69,7 +73,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/local/') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -91,7 +95,7 @@ jobs:
         run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
 
       - name: Configure Compose Environment Variables
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
@@ -105,10 +109,11 @@ jobs:
           MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
           MINIO_BUCKET: ${{ vars.MINIO_BUCKET || 'sessions' }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://github.etdofresh.com,https://webedt.etdofresh.com' }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://webedt.etdofresh.com' }}
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           # Skip if COMPOSE_ID is not set
           if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
@@ -137,6 +142,7 @@ jobs:
           GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
           GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
           OPENAI_API_KEY=${OPENAI_API_KEY}
+          OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
           ENVEOF
           )
 
@@ -158,6 +164,7 @@ jobs:
           echo "  ✅ GITHUB_CLIENT_ID=***"
           echo "  ✅ GITHUB_CLIENT_SECRET=***"
           echo "  ✅ OPENAI_API_KEY=***"
+          echo "  ✅ OPENROUTER_API_KEY=***"
           echo ""
 
           # Update compose environment variables
@@ -184,7 +191,7 @@ jobs:
           fi
 
       - name: Deploy to Dokploy
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
@@ -246,44 +253,8 @@ jobs:
             exit 0
           fi
 
-      - name: Cleanup old registry tags
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        env:
-          REGISTRY: ${{ env.REGISTRY }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
-        run: |
-          echo "🧹 Cleaning up old registry tags..."
-
-          # Get all tags except latest, main, dev, buildcache
-          TAGS=$(curl -s "https://${REGISTRY}/v2/${IMAGE_NAME}/tags/list" | jq -r '.tags[]' 2>/dev/null || echo "")
-
-          DELETED=0
-          for TAG in $TAGS; do
-            # Keep latest, main, dev, and buildcache tags
-            if [[ "$TAG" == "latest" || "$TAG" == "main" || "$TAG" == "dev" || "$TAG" == "buildcache" ]]; then
-              echo "  KEEP: $TAG"
-              continue
-            fi
-
-            # Delete old SHA and branch tags
-            DIGEST=$(curl -sI -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-              "https://${REGISTRY}/v2/${IMAGE_NAME}/manifests/${TAG}" 2>/dev/null | \
-              grep -i "docker-content-digest" | awk '{print $2}' | tr -d '\r\n')
-
-            if [ -n "$DIGEST" ]; then
-              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-                "https://${REGISTRY}/v2/${IMAGE_NAME}/manifests/${DIGEST}")
-              if [ "$HTTP_CODE" -eq 202 ]; then
-                echo "  DELETE: $TAG"
-                ((DELETED++))
-              fi
-            fi
-          done
-
-          echo "✅ Deleted $DELETED old tags"
-
       - name: Deployment Summary
-        if: always() && github.ref == 'refs/heads/main'
+        if: always()
         run: |
           echo "## Internal API Server Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

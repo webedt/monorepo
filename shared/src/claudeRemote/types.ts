@@ -129,7 +129,10 @@ export interface SessionEvent {
   // Environment manager log
   data?: {
     type?: string;
-    message?: string;
+    category?: string;
+    content?: string;  // Actual message content from env_manager_log
+    message?: string;  // Alternative message field
+    level?: string;
     extra?: Record<string, unknown>;
   };
 }
@@ -232,3 +235,46 @@ export class ClaudeRemoteError extends Error {
     this.name = 'ClaudeRemoteError';
   }
 }
+
+/**
+ * Result from title generation
+ */
+export interface GeneratedTitle {
+  title: string;
+  branch_name: string;
+  source: 'dust' | 'openrouter' | 'session' | 'fallback';
+}
+
+/**
+ * Configuration for title generator
+ */
+export interface TitleGeneratorConfig {
+  /** Claude.ai browser cookies (for dust endpoint) */
+  claudeCookies?: string;
+  /** Organization UUID for Claude.ai */
+  orgUuid?: string;
+  /** OpenRouter API key (for fast title generation via Grok) */
+  openRouterApiKey?: string;
+  /** Access token for API calls (for session-based generation) */
+  accessToken?: string;
+  /** Environment ID for session-based generation */
+  environmentId?: string;
+}
+
+/**
+ * Event emitted during title generation process
+ */
+export interface TitleGenerationEvent {
+  type: 'title_generation';
+  method: 'dust' | 'openrouter' | 'session' | 'local';
+  status: 'trying' | 'success' | 'failed' | 'skipped';
+  /** Title (only present on success) */
+  title?: string;
+  /** Branch name (only present on success) */
+  branch_name?: string;
+}
+
+/**
+ * Callback for title generation progress events
+ */
+export type TitleGenerationCallback = (event: TitleGenerationEvent) => void | Promise<void>;

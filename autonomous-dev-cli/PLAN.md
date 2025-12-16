@@ -425,7 +425,7 @@ autonomous-dev-cli/
 ### 5. Preview URL Integration
 **Why:** Your Dokploy setup already creates preview URLs per branch
 **Use:** Health checks and smoke tests hit the preview URL
-**Pattern:** `https://github.etdofresh.com/{owner}/{repo}/{branch}/`
+**Pattern:** `https://webedt.etdofresh.com/github/{owner}/{repo}/{branch}/`
 
 ## Questions Resolved
 

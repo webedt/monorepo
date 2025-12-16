@@ -115,7 +115,7 @@ interface ExecuteRequest {
 
   // Optional: Provider-specific options
   providerOptions?: {
-    model?: string;           // e.g., "claude-sonnet-4-5-20250929"
+    model?: string;           // e.g., "claude-opus-4-5-20251101"
     skipPermissions?: boolean;
     permissionMode?: "bypassPermissions" | "default";
   };

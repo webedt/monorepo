@@ -6,7 +6,7 @@
 set -e  # Exit on error
 
 # Configuration
-REGISTRY="dockerregistry.etdofresh.com"
+REGISTRY="ghcr.io/webedt/monorepo"
 IMAGE_NAME="ai-coding-worker"
 SERVICE_NAME="webedt-app-ai-coding-workers-gy4wew_ai-coding-worker"
 SSH_HOST="ehub2023"

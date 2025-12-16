@@ -5,8 +5,8 @@ ARG BUILD_COMMIT_SHA=unknown
 ARG BUILD_TIMESTAMP=unknown
 ARG BUILD_IMAGE_TAG=unknown
 
-# Install git (may be needed for certain operations)
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+# Install git, python3, and build tools (needed for bcrypt native compilation on ARM64)
+RUN apt-get update && apt-get install -y git python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app

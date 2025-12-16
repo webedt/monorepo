@@ -18,7 +18,7 @@ export const BUILD_IMAGE_TAG = process.env.BUILD_IMAGE_TAG || 'unknown';
 // CORS configuration
 // Default includes production domains if ALLOWED_ORIGINS not explicitly set
 const DEFAULT_ORIGINS = NODE_ENV === 'production'
-  ? ['https://webedt.etdofresh.com', 'https://github.etdofresh.com']
+  ? ['https://webedt.etdofresh.com']
   : ['http://localhost:5173', 'http://localhost:3000'];
 export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || DEFAULT_ORIGINS;
 
@@ -72,7 +72,10 @@ export const USE_NEW_ARCHITECTURE = process.env.USE_NEW_ARCHITECTURE === 'true';
 // Claude Remote Sessions configuration
 export const CLAUDE_ENVIRONMENT_ID = process.env.CLAUDE_ENVIRONMENT_ID || '';
 export const CLAUDE_API_BASE_URL = process.env.CLAUDE_API_BASE_URL || 'https://api.anthropic.com';
-export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL || 'claude-sonnet-4-20250514';
+export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL || 'claude-opus-4-5-20251101';
+export const CLAUDE_ORG_UUID = process.env.CLAUDE_ORG_UUID || '';  // For title generation endpoint
+export const CLAUDE_COOKIES = process.env.CLAUDE_COOKIES || '';  // Browser cookies for fast title generation
+export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // OpenRouter API key for title generation
 
 /**
  * Validate required environment variables
