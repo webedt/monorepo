@@ -143,6 +143,9 @@ export class ClaudeRemoteClient {
     const repoName = this.extractRepoName(gitUrl);
     const sessionModel = model || this.model;
 
+    // Claude API requires git URLs without .git suffix
+    const cleanGitUrl = gitUrl.replace(/\.git$/, '');
+
     const payload = {
       title: sessionTitle,
       events: [{
@@ -157,7 +160,7 @@ export class ClaudeRemoteClient {
       }],
       environment_id: this.environmentId,
       session_context: {
-        sources: [{ type: 'git_repository', url: gitUrl }],
+        sources: [{ type: 'git_repository', url: cleanGitUrl }],
         outcomes: [{
           type: 'git_repository',
           git_info: {
