@@ -138,7 +138,11 @@ export class AIWorkerClient {
     provider: string,
     authentication: string
   ): Promise<{ title: string; branchName: string }> {
-    const prompt = `Based on the following user request, generate BOTH a session title and a git branch name.
+    const prompt = `SUMMARIZE the core intent of the following user request into a session title and git branch name.
+
+IMPORTANT: Do NOT just use the first few words. Analyze the FULL request and identify:
+1. What is the main ACTION being requested? (add, fix, update, refactor, etc.)
+2. What is the TARGET of that action? (auth, UI, API, title generation, etc.)
 
 User request:
 ${userRequest.substring(0, 1000)}
@@ -146,20 +150,25 @@ ${userRequest.substring(0, 1000)}
 Parent branch: ${parentBranch}
 
 Return your response in this EXACT format (two lines only, no other text):
-TITLE: [3-6 word human-readable title]
-BRANCH: [lowercase-hyphenated-branch-name]
+TITLE: [3-6 word summary of the core intent]
+BRANCH: [lowercase-hyphenated-summary]
 
 Rules for TITLE:
-- 3-6 words, human-readable, descriptive
-- Capitalize properly
-- No special characters except spaces
-- Keep concise, max 80 characters (shorter is better)
+- 3-6 words that capture the MAIN PURPOSE, not just the first words
+- Start with an action verb when possible (Add, Fix, Update, Improve, etc.)
+- Capitalize properly (Title Case)
+- Max 80 characters
 
 Rules for BRANCH:
-- Lowercase only, use hyphens as separators
-- Max 40 characters, no special characters
-- Only the descriptive part (no "claude/" prefix)
-- Focus on the main action or feature
+- Lowercase, hyphen-separated summary of the same concept as the title
+- Max 40 characters, no special characters except hyphens
+- Only the descriptive part (no "claude/" prefix - that's added later)
+- Should match the title's meaning (e.g., title "Fix Auth Bug" → branch "fix-auth-bug")
+
+Examples:
+- "I want to update the prompt that generates the title..." → TITLE: Improve Title Generation Prompt / BRANCH: improve-title-generation
+- "Can you help me fix the bug where users can't log in..." → TITLE: Fix User Login Bug / BRANCH: fix-user-login-bug
+- "Please add dark mode to the settings page..." → TITLE: Add Settings Dark Mode / BRANCH: add-settings-dark-mode
 
 Return ONLY the two lines in the exact format above:`;
 
