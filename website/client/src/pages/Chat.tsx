@@ -1439,105 +1439,127 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           console.log('[Chat] Updating session branch to:', newBranch);
           updateMutation.mutate({ id: sessionId, branch: newBranch });
         }
-      } else if (data.type === 'assistant_message' && data.data) {
-        const msgData = data.data;
+      } else if (data.type === 'assistant_message' && (data.data || data.content)) {
+        // Handle both formats:
+        // 1. AI Coding Worker format: { type: 'assistant_message', data: { type: 'assistant', message: { content: [...] } } }
+        // 2. Claude Remote format: { type: 'assistant_message', content: [...] }
 
-        // Extract model information if present (check both locations)
-        if (data.model) {
-          model = data.model;
-        } else if (msgData.type === 'assistant' && msgData.message?.model) {
-          model = msgData.message.model;
+        let contentBlocks: any[] | null = null;
+
+        if (data.content && Array.isArray(data.content)) {
+          // Claude Remote format - content is directly on data
+          contentBlocks = data.content;
+        } else if (data.data) {
+          // AI Coding Worker format - content is nested
+          const msgData = data.data;
+
+          // Extract model information if present (check both locations)
+          if (data.model) {
+            model = data.model;
+          } else if (msgData.type === 'assistant' && msgData.message?.model) {
+            model = msgData.message.model;
+          }
+
+          // Handle assistant message with Claude response
+          if (msgData.type === 'assistant' && msgData.message?.content) {
+            contentBlocks = msgData.message.content;
+          }
+          // Skip result type - content already displayed from assistant message
+          else if (msgData.type === 'result') {
+            console.log('[Chat] Skipping result message (already displayed from assistant message)');
+            return;
+          }
+          // Skip system init messages
+          else if (msgData.type === 'system' && msgData.subtype === 'init') {
+            console.log('[Chat] Skipping system init message');
+            return;
+          }
         }
 
-        // Handle assistant message with Claude response
-        if (msgData.type === 'assistant' && msgData.message?.content) {
-          const contentBlocks = msgData.message.content;
-          if (Array.isArray(contentBlocks)) {
-            // First check for tool_use blocks to show file operations
-            const toolUseBlocks = contentBlocks.filter((block: any) => block.type === 'tool_use');
-            if (toolUseBlocks.length > 0) {
-              // Create status messages for file operations
-              const toolMessages: string[] = [];
-              for (const toolBlock of toolUseBlocks) {
-                const toolName = toolBlock.name;
-                const toolInput = toolBlock.input || {};
+        if (contentBlocks && Array.isArray(contentBlocks)) {
+          // First check for tool_use blocks to show file operations
+          const toolUseBlocks = contentBlocks.filter((block: any) => block.type === 'tool_use');
+          if (toolUseBlocks.length > 0) {
+            // Create status messages for file operations
+            const toolMessages: string[] = [];
+            for (const toolBlock of toolUseBlocks) {
+              const toolName = toolBlock.name;
+              const toolInput = toolBlock.input || {};
 
-                if (toolName === 'Read') {
-                  // Prefer relative_path (added by backend) over file_path
-                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-                  toolMessages.push(`📖 Reading: ${displayPath}`);
-                } else if (toolName === 'Write') {
-                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-                  toolMessages.push(`📝 Writing: ${displayPath}`);
-                } else if (toolName === 'Edit') {
-                  const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-                  toolMessages.push(`✏️ Editing: ${displayPath}`);
-                } else if (toolName === 'Grep') {
-                  const pattern = toolInput.pattern || '';
-                  toolMessages.push(`🔍 Searching for: "${pattern}"`);
-                } else if (toolName === 'Glob') {
-                  const pattern = toolInput.pattern || '';
-                  toolMessages.push(`📁 Finding files: ${pattern}`);
-                } else if (toolName === 'Bash') {
-                  const cmd = toolInput.command || '';
-                  const shortCmd = cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd;
-                  toolMessages.push(`⚡ Running: ${shortCmd}`);
-                } else if (toolName === 'WebFetch') {
-                  const url = toolInput.url || '';
-                  toolMessages.push(`🌐 Fetching: ${url}`);
-                } else if (toolName === 'WebSearch') {
-                  const query = toolInput.query || '';
-                  toolMessages.push(`🔎 Searching web: "${query}"`);
-                } else if (toolName === 'Task') {
-                  const desc = toolInput.description || 'subtask';
-                  toolMessages.push(`🤖 Launching agent: ${desc}`);
-                }
-              }
-
-              if (toolMessages.length > 0) {
-                const toolContent = toolMessages.join('\n');
-                // Add source label if present
-                const toolSourceLabel = formatSourceLabel(source);
-                const toolFinalContent = toolSourceLabel ? `${toolSourceLabel} ${toolContent}` : toolContent;
-                // Create and add the tool message immediately
-                messageIdCounter.current += 1;
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: Date.now() + messageIdCounter.current,
-                    chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-                    type: 'system',
-                    content: toolFinalContent,
-                    timestamp: new Date(),
-                    model,
-                  },
-                ]);
-                // Don't return here - continue to process text blocks if any
+              if (toolName === 'Read') {
+                // Prefer relative_path (added by backend) over file_path
+                const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                toolMessages.push(`📖 Reading: ${displayPath}`);
+              } else if (toolName === 'Write') {
+                const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                toolMessages.push(`📝 Writing: ${displayPath}`);
+              } else if (toolName === 'Edit') {
+                const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
+                toolMessages.push(`✏️ Editing: ${displayPath}`);
+              } else if (toolName === 'Grep') {
+                const pattern = toolInput.pattern || '';
+                toolMessages.push(`🔍 Searching for: "${pattern}"`);
+              } else if (toolName === 'Glob') {
+                const pattern = toolInput.pattern || '';
+                toolMessages.push(`📁 Finding files: ${pattern}`);
+              } else if (toolName === 'Bash') {
+                const cmd = toolInput.command || '';
+                const shortCmd = cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd;
+                toolMessages.push(`⚡ Running: ${shortCmd}`);
+              } else if (toolName === 'WebFetch') {
+                const url = toolInput.url || '';
+                toolMessages.push(`🌐 Fetching: ${url}`);
+              } else if (toolName === 'WebSearch') {
+                const query = toolInput.query || '';
+                toolMessages.push(`🔎 Searching web: "${query}"`);
+              } else if (toolName === 'Task') {
+                const desc = toolInput.description || 'subtask';
+                toolMessages.push(`🤖 Launching agent: ${desc}`);
               }
             }
 
-            // Then extract text content as before
-            const textParts = contentBlocks
-              .filter((block: any) => block.type === 'text' && block.text)
-              .map((block: any) => block.text);
-            if (textParts.length > 0) {
-              content = textParts.join('\n');
-              eventLabel = '🤖';
+            if (toolMessages.length > 0) {
+              const toolContent = toolMessages.join('\n');
+              // Add source label if present
+              const toolSourceLabel = formatSourceLabel(source);
+              const toolFinalContent = toolSourceLabel ? `${toolSourceLabel} ${toolContent}` : toolContent;
+              // Create and add the tool message immediately
+              messageIdCounter.current += 1;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: Date.now() + messageIdCounter.current,
+                  chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+                  type: 'system',
+                  content: toolFinalContent,
+                  timestamp: new Date(),
+                  model,
+                },
+              ]);
+              // Don't return here - continue to process text blocks if any
+            }
+          }
+
+          // Then extract text content as before
+          const textParts = contentBlocks
+            .filter((block: any) => block.type === 'text' && block.text)
+            .map((block: any) => block.text);
+          if (textParts.length > 0) {
+            content = textParts.join('\n');
+            eventLabel = '🤖';
+          }
+          // Check for thinking blocks (Claude Remote extended thinking)
+          else {
+            const thinkingBlocks = contentBlocks.filter((block: any) => block.type === 'thinking' && block.thinking);
+            if (thinkingBlocks.length > 0) {
+              // Show a brief thinking indicator
+              content = '💭 Thinking...';
+              messageType = 'system';
             } else {
-              // If we already showed tool messages, skip showing empty text
+              // If we already showed tool messages, skip showing empty content
               return;
             }
           }
-        }
-        // Skip result type - content already displayed from assistant message
-        else if (msgData.type === 'result') {
-          console.log('[Chat] Skipping result message (already displayed from assistant message)');
-          return;
-        }
-        // Skip system init messages
-        else if (msgData.type === 'system' && msgData.subtype === 'init') {
-          console.log('[Chat] Skipping system init message');
-          return;
         }
       }
       // Fallback to direct fields - treat as system status messages
@@ -1651,8 +1673,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
         // Invalidate queries to refetch session data and messages from database
         // This syncs the final state after SSE stream completes
+        // IMPORTANT: Must invalidate 'session-details' which is used for session.status checks
+        queryClient.invalidateQueries({ queryKey: ['session-details', data.websiteSessionId] });
         queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
         queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
+        // Also invalidate sessions list to update sidebar
+        queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
         // Note: Scroll handling is now done in the messages merge effect (useEffect on eventsData/messagesData)
         // which properly preserves scroll position or scrolls to bottom based on user's position
