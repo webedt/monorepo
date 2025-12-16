@@ -93,209 +93,31 @@ function clearDraft(sessionId: string) {
   }
 }
 
-// Helper to format source indicator
-// Only shows source labels in verbose mode
-function formatSourceLabel(source?: string, verbosityLevel?: ChatVerbosityLevel): string {
-  // Only show source prefixes in verbose mode
-  if (verbosityLevel !== 'verbose') return '';
-  if (!source) return '';
-  const sourceMap: Record<string, string> = {
-    'github-worker': '[github-worker]',
-    'ai-coding-worker': '[ai-coding-worker]',
-    'storage-worker': '[storage-worker]',
-    'claude-agent-sdk': '[claude]',
-    'codex-sdk': '[codex]',
-  };
-  return sourceMap[source] || `[${source}]`;
-}
-
 // Helper to convert raw SSE events from database to displayable messages
-function convertEventToMessage(event: DbEvent, sessionId: string, verbosityLevel?: ChatVerbosityLevel): Message | null {
+// SIMPLIFIED: Just display raw JSON for all events - no custom formatting
+function convertEventToMessage(event: DbEvent, sessionId: string, _verbosityLevel?: ChatVerbosityLevel): Message | null {
   const eventType = event.eventType;
   const data = event.eventData;
 
-  let content: string | null = null;
-  let messageType: 'assistant' | 'system' = 'assistant';
-  let eventLabel = '';
-  let model: string | undefined = undefined;
-  let source: string | undefined = data?.source;
-
-  // Debug: log every event conversion attempt
-  console.log('[convertEventToMessage] Processing event:', {
-    eventType,
-    dataType: data?.type,
-    hasData: !!data,
-    hasDataData: !!data?.data
-  });
-
   // Skip if data is undefined or null
   if (!data) {
-    console.log('[convertEventToMessage] Skipping - no data');
     return null;
   }
 
-  // Handle git commit and pull progress events
-  // These events may have nested data structure: { data: { message: "..." }, type: "...", timestamp: "..." }
-  // Note: Emojis are now embedded in the message by ai-coding-worker's emojiMapper
-  if (eventType === 'commit_progress') {
-    const message = data.data?.message || data.message;
-    content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-    messageType = 'system';
-  } else if (eventType === 'github_pull_progress') {
-    const message = data.data?.message || data.message;
-    content = typeof data === 'string' ? data : (message || JSON.stringify(data));
-    messageType = 'system';
-  }
-  // Extract content from different event types
-  else if (data.type === 'message' && data.message) {
-    content = data.message;
-    messageType = 'system';
-  } else if (data.type === 'session_name' && data.sessionName) {
-    // Use message from backend (has emoji from emojiMapper) or construct our own
-    content = data.message || `📝 Session: ${data.sessionName}`;
-    messageType = 'system';
-  } else if (data.type === 'assistant_message' && data.data) {
-    const msgData = data.data;
-
-    // Extract model information if present (check both locations)
-    if (data.model) {
-      model = data.model;
-    } else if (msgData.type === 'assistant' && msgData.message?.model) {
-      model = msgData.message.model;
-    }
-
-    // Handle assistant message with Claude response
-    if (msgData.type === 'assistant' && msgData.message?.content) {
-      const contentBlocks = msgData.message.content;
-      if (Array.isArray(contentBlocks)) {
-        // First check for tool_use blocks to show file operations
-        const toolUseBlocks = contentBlocks.filter((block: any) => block.type === 'tool_use');
-        if (toolUseBlocks.length > 0) {
-          // Create status messages for file operations
-          const toolMessages: string[] = [];
-          for (const toolBlock of toolUseBlocks) {
-            const toolName = toolBlock.name;
-            const toolInput = toolBlock.input || {};
-
-            if (toolName === 'Read') {
-              // Prefer relative_path (added by backend) over file_path
-              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-              toolMessages.push(`📖 Reading: ${displayPath}`);
-            } else if (toolName === 'Write') {
-              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-              toolMessages.push(`📝 Writing: ${displayPath}`);
-            } else if (toolName === 'Edit') {
-              const displayPath = toolInput.relative_path || toolInput.file_path || 'unknown file';
-              toolMessages.push(`✏️ Editing: ${displayPath}`);
-            } else if (toolName === 'Grep') {
-              const pattern = toolInput.pattern || '';
-              toolMessages.push(`🔍 Searching for: "${pattern}"`);
-            } else if (toolName === 'Glob') {
-              const pattern = toolInput.pattern || '';
-              toolMessages.push(`📁 Finding files: ${pattern}`);
-            } else if (toolName === 'Bash') {
-              const cmd = toolInput.command || '';
-              const shortCmd = cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd;
-              toolMessages.push(`⚡ Running: ${shortCmd}`);
-            } else if (toolName === 'WebFetch') {
-              const url = toolInput.url || '';
-              toolMessages.push(`🌐 Fetching: ${url}`);
-            } else if (toolName === 'WebSearch') {
-              const query = toolInput.query || '';
-              toolMessages.push(`🔎 Searching web: "${query}"`);
-            } else if (toolName === 'Task') {
-              const desc = toolInput.description || 'subtask';
-              toolMessages.push(`🤖 Launching agent: ${desc}`);
-            }
-          }
-
-          if (toolMessages.length > 0) {
-            content = toolMessages.join('\n');
-            messageType = 'system';
-            // Add source label if present (only in verbose mode)
-            const toolSourceLabel = formatSourceLabel(source, verbosityLevel);
-            const toolFinalContent = toolSourceLabel ? `${toolSourceLabel} ${content}` : content;
-            return {
-              id: event.id,
-              chatSessionId: sessionId,
-              type: messageType,
-              content: toolFinalContent,
-              timestamp: new Date(event.timestamp),
-              model,
-            };
-          }
-        }
-
-        // If no tool_use, extract text content as before
-        const textParts = contentBlocks
-          .filter((block: any) => block.type === 'text' && block.text)
-          .map((block: any) => block.text);
-        if (textParts.length > 0) {
-          content = textParts.join('\n');
-          eventLabel = '🤖';
-        }
-      }
-    }
-    // Skip result type - content already displayed from assistant message
-    else if (msgData.type === 'result') {
-      return null;
-    }
-    // Skip system init messages
-    else if (msgData.type === 'system' && msgData.subtype === 'init') {
-      return null;
-    }
-  }
-  // Fallback to direct fields - treat as system status messages
-  else if (typeof data === 'string') {
-    content = data;
-    messageType = 'system';
-  } else if (data.message) {
-    content = data.message;
-    messageType = 'system';
-  } else if (data.content) {
-    if (Array.isArray(data.content)) {
-      const textBlocks = data.content
-        .filter((block: any) => block.type === 'text' && block.text)
-        .map((block: any) => block.text);
-      if (textBlocks.length > 0) {
-        content = textBlocks.join('\n');
-        messageType = 'system';
-      }
-    } else if (typeof data.content === 'string') {
-      content = data.content;
-      messageType = 'system';
-    }
-  } else if (data.text) {
-    content = data.text;
-    messageType = 'system';
-  } else if (data.result) {
-    content = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
-    messageType = 'system';
-  }
-
-  // Skip if no meaningful content
-  if (!content) {
-    console.log('[convertEventToMessage] Skipping - no content extracted', { eventType, dataType: data?.type });
+  // Skip control events that don't need to be displayed
+  if (eventType === 'connected' || eventType === 'completed' || eventType === 'heartbeat') {
     return null;
   }
 
-  // Add source label and event label if present (source label only in verbose mode)
-  const sourceLabel = formatSourceLabel(source, verbosityLevel);
-  let finalContent = content;
-  if (sourceLabel || eventLabel) {
-    const prefix = [sourceLabel, eventLabel].filter(Boolean).join(' ');
-    finalContent = `${prefix} ${content}`;
-  }
-
-  console.log('[convertEventToMessage] Returning message:', { eventType, contentLength: finalContent.length, messageType });
+  // Display all events as raw JSON - simple and flat
+  const content = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
 
   return {
     id: event.id,
     chatSessionId: sessionId,
-    type: messageType,
-    content: finalContent,
+    type: 'system',
+    content,
     timestamp: new Date(event.timestamp),
-    model,
   };
 }
 

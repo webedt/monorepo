@@ -25,18 +25,18 @@ import type {
 } from './types.js';
 
 /**
- * Pass through raw Anthropic session events with minimal wrapping
- * This allows the frontend to receive events exactly as they come from the API
+ * Pass through raw Anthropic session events directly
+ * Flatten the event structure - no wrapper, just add source and timestamp
+ * This keeps remote events at the same level as our intermediary events
  */
 function passRawEvent(event: SessionEvent, source: string): ExecutionEvent {
-  // Pass raw event directly - no mapping, no transformation
-  // Just add source and timestamp for tracking
+  // Spread the event and add our tracking fields
+  // This flattens the structure so all events have the same shape
   return {
-    type: 'raw_event',
+    ...event,
     timestamp: new Date().toISOString(),
     source,
-    rawEvent: event, // The actual raw event from Anthropic API
-  };
+  } as ExecutionEvent;
 }
 
 /**

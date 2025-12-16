@@ -295,24 +295,16 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no');
 
     // Helper to send SSE events
+    // All events are now passed through directly with the same flat structure
     const sendEvent = async (event: ExecutionEvent) => {
       if (clientDisconnected) return;
 
-      // For raw_event types, pass through without decoration
-      // This allows the frontend to receive events exactly as they come from the API
-      const isRawEvent = event.type === 'raw_event' || (event as any).rawEvent;
-
-      let eventToSend: any;
-      if (isRawEvent) {
-        // Pass through raw event without any transformation
-        eventToSend = event;
-      } else {
-        // Apply emoji decoration for non-raw events
-        eventToSend = {
-          ...event,
-          message: event.message ? `${getEventEmoji(event)} ${event.message}` : undefined,
-        };
-      }
+      // All events have the same flat structure now
+      // Apply emoji decoration for events that have a message field
+      const eventToSend = {
+        ...event,
+        message: event.message ? `${getEventEmoji(event)} ${event.message}` : undefined,
+      };
 
       const eventData = `data: ${JSON.stringify(eventToSend)}\n\n`;
 
@@ -321,7 +313,6 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         component: 'ExecuteRemoteRoute',
         chatSessionId,
         eventType: event.type,
-        isRawEvent,
         eventData: JSON.stringify(eventToSend),
       });
 
