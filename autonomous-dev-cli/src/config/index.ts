@@ -753,7 +753,7 @@ export function loadConfig(configPath?: string, options: Omit<LoadConfigOptions,
     workDir: process.env.WORK_DIR || '/tmp/autonomous-dev',
     useRemoteSessions: process.env.USE_REMOTE_SESSIONS === 'true',
     claudeEnvironmentId: process.env.CLAUDE_ENVIRONMENT_ID,
-    claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+    claudeModel: process.env.CLAUDE_MODEL || 'claude-opus-4-5-20251101',
   };
 
   envConfig.evaluation = {

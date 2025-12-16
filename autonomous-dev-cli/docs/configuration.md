@@ -50,7 +50,7 @@ The first file found is used. If no file is found, the CLI uses environment vari
     "requireSmokeTests": "boolean (default: false)",
     "healthCheckUrls": "string[] (default: [])",
     "smokeTestUrls": "string[] (default: [])",
-    "previewUrlPattern": "string (default: 'https://github.etdofresh.com/{owner}/{repo}/{branch}/')"
+    "previewUrlPattern": "string (default: 'https://webedt.etdofresh.com/github/{owner}/{repo}/{branch}/')"
   },
   "merge": {
     "autoMerge": "boolean (default: true)",
