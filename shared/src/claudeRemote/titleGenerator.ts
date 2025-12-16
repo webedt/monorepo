@@ -18,12 +18,21 @@ const CLAUDE_AI_URL = 'https://claude.ai';
 const CLAUDE_API_BASE_URL = 'https://api.anthropic.com';
 
 // JSON prompt used by methods 2 and 3 for consistency
-const JSON_PROMPT_TEMPLATE = `Generate a title and git branch name for this coding request. Respond with ONLY valid JSON, no other text:
-{"title": "Short descriptive title", "branch_name": "claude/kebab-case-branch"}
+const JSON_PROMPT_TEMPLATE = `Generate a title and git branch name that SUMMARIZE the core intent of this coding request. Do NOT just use the first few words - analyze the full request and create a concise summary.
+
+Respond with ONLY valid JSON, no other text:
+{"title": "Concise summary title", "branch_name": "claude/summarized-intent"}
 
 Rules:
-- Title: 3-6 words, concise, sentence case
-- Branch: starts with "claude/", kebab-case, 2-4 words after prefix
+- Title: 3-6 words that capture the MAIN PURPOSE of the request
+- Branch: starts with "claude/", kebab-case, 2-4 words summarizing the key action
+- Title and branch should express the same concept (branch is kebab-case version of title idea)
+- Focus on WHAT is being done, not HOW the user phrased it
+
+Examples:
+- "I want to update the prompt that generates..." → Title: "Improve Title Generation Prompt", Branch: "claude/improve-title-generation"
+- "Can you help me fix the bug where..." → Title: "Fix Authentication Bug", Branch: "claude/fix-auth-bug"
+- "Please add a new feature for..." → Title: "Add Export Feature", Branch: "claude/add-export-feature"
 
 Request: "{{PROMPT}}"`;
 
@@ -42,16 +51,52 @@ function generateBranchFromTitle(title: string): string {
 }
 
 /**
- * Method 4: Local fallback - convert prompt to Title Case
+ * Method 4: Local fallback - extract key action words from prompt
+ * Attempts basic summarization by removing filler words and extracting the core intent
  */
 function generateTitleLocal(prompt: string): { title: string; branch_name: string } {
-  // Clean and truncate prompt
-  const cleaned = prompt.slice(0, 50).replace(/\n/g, ' ').trim();
+  // Common filler words to remove for better summarization
+  const fillerWords = new Set([
+    'i', 'want', 'to', 'the', 'a', 'an', 'please', 'can', 'you', 'help', 'me',
+    'with', 'for', 'this', 'that', 'it', 'is', 'be', 'are', 'was', 'were',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+    'may', 'might', 'must', 'shall', 'need', 'just', 'also', 'so', 'if', 'when',
+    'where', 'how', 'what', 'which', 'who', 'why', 'all', 'each', 'every', 'both',
+    'few', 'more', 'most', 'other', 'some', 'such', 'no', 'not', 'only', 'same',
+    'than', 'too', 'very', 'just', 'but', 'and', 'or', 'as', 'at', 'by', 'from',
+    'in', 'into', 'of', 'on', 'out', 'over', 'through', 'under', 'up', 'down',
+    'about', 'after', 'before', 'between', 'during', 'like', 'make', 'sure'
+  ]);
+
+  // Clean the prompt
+  const cleaned = prompt
+    .replace(/\n/g, ' ')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .toLowerCase()
+    .trim();
+
+  // Extract meaningful words (non-filler words)
+  const words = cleaned.split(/\s+/).filter(word =>
+    word.length > 2 && !fillerWords.has(word)
+  );
+
+  // Take up to 5 meaningful words for the title
+  const titleWords = words.slice(0, 5);
+
+  // If we didn't get enough meaningful words, use original approach
+  if (titleWords.length < 2) {
+    const fallbackWords = cleaned.split(/\s+/).slice(0, 5);
+    const title = fallbackWords
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+    return {
+      title: title || 'New Session',
+      branch_name: generateBranchFromTitle(title || 'session'),
+    };
+  }
 
   // Convert to Title Case
-  const title = cleaned
-    .toLowerCase()
-    .split(' ')
+  const title = titleWords
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 
