@@ -1038,14 +1038,41 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       remoteSession?: { success: boolean; message: string };
     } = {};
 
+    // Log session details for debugging branch deletion
+    logger.info('Session deletion - checking cleanup conditions', {
+      component: 'Sessions',
+      sessionId,
+      branch: session.branch || undefined,
+      repositoryOwner: session.repositoryOwner || undefined,
+      repositoryName: session.repositoryName || undefined,
+      provider: session.provider || undefined,
+      hasGithubToken: !!authReq.user?.githubAccessToken,
+    });
+
     // Delete GitHub branch if it exists
     if (authReq.user?.githubAccessToken && session.branch && session.repositoryOwner && session.repositoryName) {
+      logger.info('Attempting to delete GitHub branch', {
+        component: 'Sessions',
+        sessionId,
+        branch: session.branch,
+        owner: session.repositoryOwner,
+        repo: session.repositoryName,
+      });
       cleanupResults.branch = await deleteGitHubBranch(
         authReq.user.githubAccessToken,
         session.repositoryOwner,
         session.repositoryName,
         session.branch
       );
+    } else {
+      logger.info('Skipping branch deletion - missing required fields', {
+        component: 'Sessions',
+        sessionId,
+        hasBranch: !!session.branch,
+        hasOwner: !!session.repositoryOwner,
+        hasRepoName: !!session.repositoryName,
+        hasGithubToken: !!authReq.user?.githubAccessToken,
+      });
     }
 
     // Delete from storage worker if sessionPath exists
