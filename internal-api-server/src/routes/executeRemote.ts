@@ -268,6 +268,14 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       const eventData = `data: ${JSON.stringify(decoratedEvent)}\n\n`;
 
+      // Log SSE event for debugging
+      logger.info('SSE event', {
+        component: 'ExecuteRemoteRoute',
+        chatSessionId,
+        eventType: event.type,
+        eventData: JSON.stringify(decoratedEvent),
+      });
+
       try {
         res.write(eventData);
       } catch (error) {
@@ -301,6 +309,18 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         clearInterval(heartbeatInterval);
       }
     }, 30000);
+
+    // Send session-created event for new sessions (client needs this to track session ID)
+    if (!websiteSessionId) {
+      const sessionCreatedData = { websiteSessionId: chatSessionId };
+      logger.info('SSE event: session-created', {
+        component: 'ExecuteRemoteRoute',
+        chatSessionId,
+        eventData: JSON.stringify(sessionCreatedData),
+      });
+      res.write(`event: session-created\n`);
+      res.write(`data: ${JSON.stringify(sessionCreatedData)}\n\n`);
+    }
 
     // Get execution provider
     const provider = getExecutionProvider();
@@ -355,6 +375,23 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         branch: result.branch,
         totalCost: result.totalCost,
       });
+
+      // Send final completion event with websiteSessionId (client needs this to track session)
+      const completedData = {
+        websiteSessionId: chatSessionId,
+        completed: true,
+        branch: result.branch,
+        totalCost: result.totalCost,
+        remoteSessionId: result.remoteSessionId,
+        remoteWebUrl: result.remoteWebUrl,
+      };
+      logger.info('SSE event: completed', {
+        component: 'ExecuteRemoteRoute',
+        chatSessionId,
+        eventData: JSON.stringify(completedData),
+      });
+      res.write(`event: completed\n`);
+      res.write(`data: ${JSON.stringify(completedData)}\n\n`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -12,12 +12,14 @@ import type { ChatSession } from '../db/schema.js';
 import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient } from '@webedt/shared';
 import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
 import { GitHubOperations } from '../services/github/operations.js';
 import { storageService } from '../services/storage/storageService.js';
+import { ensureValidToken, type ClaudeAuth } from '../lib/claudeAuth.js';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../config/env.js';
 
 const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
 
@@ -75,6 +77,37 @@ async function deleteFromStorageWorker(sessionPath: string): Promise<{ success: 
   } catch (error) {
     logger.error(`Error deleting storage session ${sessionPath}`, error as Error, { component: 'Sessions' });
     return { success: false, message: 'Error deleting from storage' };
+  }
+}
+
+// Helper function to archive Claude Remote session
+async function archiveClaudeRemoteSession(
+  remoteSessionId: string,
+  claudeAuth: ClaudeAuth,
+  environmentId?: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    // Refresh token if needed
+    const refreshedAuth = await ensureValidToken(claudeAuth);
+
+    const client = new ClaudeRemoteClient({
+      accessToken: refreshedAuth.accessToken,
+      environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
+      baseUrl: CLAUDE_API_BASE_URL,
+    });
+
+    await client.archiveSession(remoteSessionId);
+    logger.info(`Archived Claude Remote session ${remoteSessionId}`, { component: 'Sessions' });
+    return { success: true, message: 'Remote session archived' };
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    // 404 means session doesn't exist (already archived or never existed)
+    if (err.status === 404) {
+      logger.info(`Claude Remote session ${remoteSessionId} not found (already archived)`, { component: 'Sessions' });
+      return { success: true, message: 'Remote session already archived or does not exist' };
+    }
+    logger.error(`Failed to archive Claude Remote session ${remoteSessionId}`, error as Error, { component: 'Sessions' });
+    return { success: false, message: 'Failed to archive remote session' };
   }
 }
 
@@ -786,9 +819,11 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
     const cleanupResults: {
       branches: { sessionId: string; success: boolean; message: string }[];
       storage: { sessionPath: string; success: boolean; message: string }[];
+      remoteSessions: { remoteSessionId: string; success: boolean; message: string }[];
     } = {
       branches: [],
-      storage: []
+      storage: [],
+      remoteSessions: []
     };
 
     // Delete GitHub branches for all sessions that have branch info
@@ -815,6 +850,20 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         return { sessionPath: session.sessionPath!, ...result };
       });
     cleanupResults.storage = await Promise.all(storageDeletions);
+
+    // Archive Claude Remote sessions
+    if (authReq.user?.claudeAuth) {
+      const remoteSessionArchives = sessions
+        .filter((s: ChatSession) => s.provider === 'claude-remote' && s.remoteSessionId)
+        .map(async (session: ChatSession) => {
+          const result = await archiveClaudeRemoteSession(
+            session.remoteSessionId!,
+            authReq.user!.claudeAuth as ClaudeAuth
+          );
+          return { remoteSessionId: session.remoteSessionId!, ...result };
+        });
+      cleanupResults.remoteSessions = await Promise.all(remoteSessionArchives);
+    }
 
     // Soft delete all sessions from database
     await db
@@ -986,6 +1035,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     const cleanupResults: {
       branch?: { success: boolean; message: string };
       storage?: { success: boolean; message: string };
+      remoteSession?: { success: boolean; message: string };
     } = {};
 
     // Delete GitHub branch if it exists
@@ -1001,6 +1051,14 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     // Delete from storage worker if sessionPath exists
     if (session.sessionPath) {
       cleanupResults.storage = await deleteFromStorageWorker(session.sessionPath);
+    }
+
+    // Archive Claude Remote session if it exists
+    if (session.provider === 'claude-remote' && session.remoteSessionId && authReq.user?.claudeAuth) {
+      cleanupResults.remoteSession = await archiveClaudeRemoteSession(
+        session.remoteSessionId,
+        authReq.user.claudeAuth as ClaudeAuth
+      );
     }
 
     // Soft delete session from database
