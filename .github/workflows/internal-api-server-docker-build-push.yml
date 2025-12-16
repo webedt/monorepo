@@ -2,6 +2,9 @@ name: Internal API Server - Build and Push Docker Image
 
 on:
   push:
+    branches:
+      - main
+      - 'local/**'
     paths:
       - "internal-api-server/**"
       - "shared/**"
