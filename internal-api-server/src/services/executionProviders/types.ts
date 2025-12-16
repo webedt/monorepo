@@ -9,6 +9,7 @@ import type { ClaudeAuth } from '../../lib/claudeAuth.js';
 
 /**
  * Event types emitted during execution
+ * Includes our intermediary event types plus any type from remote sessions
  */
 export type ExecutionEventType =
   | 'connected'
@@ -19,10 +20,12 @@ export type ExecutionEventType =
   | 'title_generation'
   | 'completed'
   | 'error'
-  | 'raw_event';
+  | string; // Allow any type from remote sessions (e.g., 'system', 'user', 'assistant', 'result', etc.)
 
 /**
  * Event emitted during execution
+ * Base fields are always present, but events may include any additional fields
+ * from remote sessions (these are passed through directly without wrapping)
  */
 export interface ExecutionEvent {
   type: ExecutionEventType;
@@ -63,8 +66,9 @@ export interface ExecutionEvent {
   error?: string;
   code?: string;
 
-  // Raw event from provider (for debugging/pass-through)
-  rawEvent?: unknown;
+  // Allow any additional fields from remote sessions
+  // Events are now passed through directly (no raw_event wrapper)
+  [key: string]: unknown;
 }
 
 /**
