@@ -1606,6 +1606,30 @@ export default function Settings() {
                           </div>
                         </label>
                       </div>
+
+                      <div className="form-control">
+                        <label className="label cursor-pointer justify-start gap-4">
+                          <input
+                            type="checkbox"
+                            checked={notificationPrefs.soundOnComplete}
+                            onChange={(e) => {
+                              const newPrefs = { ...notificationPrefs, soundOnComplete: e.target.checked };
+                              setNotificationPrefsState(newPrefs);
+                              setNotificationPrefs(newPrefs);
+                            }}
+                            disabled={!notificationPrefs.enabled}
+                            className="checkbox checkbox-primary"
+                          />
+                          <div>
+                            <span className={`label-text font-medium ${!notificationPrefs.enabled ? 'opacity-50' : ''}`}>
+                              Sound on completion
+                            </span>
+                            <p className={`text-sm text-base-content/60 ${!notificationPrefs.enabled ? 'opacity-50' : ''}`}>
+                              Play a sound when a coding session finishes
+                            </p>
+                          </div>
+                        </label>
+                      </div>
                     </>
                   )}
                 </div>

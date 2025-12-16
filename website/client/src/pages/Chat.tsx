@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sessionsApi, githubApi, getApiBaseUrl } from '@/lib/api';
 import type { GitHubPullRequest } from '@/shared';
 import { useEventSource } from '@/hooks/useEventSource';
-import { useBrowserNotification } from '@/hooks/useBrowserNotification';
+import { useBrowserNotification, playNotificationSound, getNotificationPrefs } from '@/hooks/useBrowserNotification';
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
@@ -242,8 +242,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   // Get worker store for robust execution tracking
   const workerStore = useWorkerStore();
 
-  // Browser notification for session completion (DEBUG: Unused but keeping for later)
-  const { permission: _notificationPermission, requestPermission: _requestPermission, showSessionCompletedNotification: _showSessionCompletedNotification } = useBrowserNotification();
+  // Browser notification and sound for session completion
+  const { showSessionCompletedNotification } = useBrowserNotification();
 
   // Sync local state with global store
   useEffect(() => {
@@ -1315,6 +1315,18 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     },
     onCompleted: (data) => {
       console.log('[Chat] onCompleted called. Data:', JSON.stringify(data, null, 2));
+
+      // Play notification sound (respects user preferences)
+      playNotificationSound();
+
+      // Show browser notification (respects user preferences)
+      const prefs = getNotificationPrefs();
+      if (prefs.enabled && prefs.onSessionComplete) {
+        // Extract repo name from URL (e.g., "https://github.com/owner/repo" -> "repo")
+        const repoName = selectedRepo ? selectedRepo.split('/').pop() : undefined;
+        showSessionCompletedNotification(data?.websiteSessionId, repoName);
+      }
+
       // Re-enable state changes for proper completion detection
       setIsExecuting(false);
       setStreamUrl(null);

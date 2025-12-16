@@ -157,11 +157,13 @@ const NOTIFICATION_PREFS_KEY = 'browserNotificationPrefs';
 interface NotificationPrefs {
   enabled: boolean;
   onSessionComplete: boolean;
+  soundOnComplete: boolean;
 }
 
 const DEFAULT_PREFS: NotificationPrefs = {
   enabled: true,
   onSessionComplete: true,
+  soundOnComplete: true,
 };
 
 export function getNotificationPrefs(): NotificationPrefs {
@@ -182,5 +184,27 @@ export function setNotificationPrefs(prefs: Partial<NotificationPrefs>): void {
     localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify({ ...current, ...prefs }));
   } catch (e) {
     console.warn('[NotificationPrefs] Failed to save:', e);
+  }
+}
+
+/**
+ * Play a notification sound when a session completes.
+ * Respects user preferences - only plays if enabled.
+ */
+export function playNotificationSound(): void {
+  const prefs = getNotificationPrefs();
+  if (!prefs.enabled || !prefs.soundOnComplete) {
+    return;
+  }
+
+  try {
+    const audio = new Audio('/sounds/session-complete.mp3');
+    audio.volume = 0.5;
+    audio.play().catch((e) => {
+      // Browsers may block autoplay - this is expected behavior
+      console.debug('[NotificationSound] Playback blocked:', e);
+    });
+  } catch (e) {
+    console.debug('[NotificationSound] Failed to play:', e);
   }
 }
