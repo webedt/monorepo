@@ -323,11 +323,11 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
     const { provider } = req.body;
 
     // Validate provider is one of the valid options
-    const validProviders = ['claude', 'codex', 'copilot', 'gemini'];
+    const validProviders = ['claude', 'codex', 'copilot', 'gemini', 'claude-remote'];
     if (!validProviders.includes(provider)) {
       res.status(400).json({
         success: false,
-        error: 'Invalid provider. Must be one of: claude, codex, copilot, gemini',
+        error: 'Invalid provider. Must be one of: claude, codex, copilot, gemini, claude-remote',
       });
       return;
     }

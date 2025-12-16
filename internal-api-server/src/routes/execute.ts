@@ -27,7 +27,7 @@ import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import { workerCoordinator, WorkerAssignment, AcquireWorkerOptions } from '../services/workerCoordinator/workerCoordinator.js';
 
 // Define types locally (were previously in @webedt/shared)
-export type AIProvider = 'claude' | 'codex' | 'copilot' | 'gemini';
+export type AIProvider = 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote';
 export type ProviderAuth = ClaudeAuth | CodexAuth | { apiKey: string };
 
 const router = Router();
