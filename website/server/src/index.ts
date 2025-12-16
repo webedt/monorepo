@@ -21,7 +21,7 @@ if (!INTERNAL_API_URL) {
 
 // CORS configuration
 const ALLOWED_ORIGINS = NODE_ENV === 'production'
-  ? ['https://webedit.etdofresh.com']
+  ? ['https://webedt.etdofresh.com']
   : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:3001'];
 
 app.use(cors({
