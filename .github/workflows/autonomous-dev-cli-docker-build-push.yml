@@ -9,8 +9,8 @@ on:
       - ".github/workflows/autonomous-dev-cli-docker-build-push.yml"
 
 env:
-  REGISTRY: dockerregistry.etdofresh.com
-  IMAGE_NAME: autonomous-dev-cli
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/autonomous-dev-cli
 
 jobs:
   build-and-push:

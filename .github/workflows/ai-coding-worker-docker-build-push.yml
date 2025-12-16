@@ -8,8 +8,8 @@ on:
       - ".github/workflows/ai-coding-worker-docker-build-push.yml"
 
 env:
-  REGISTRY: dockerregistry.etdofresh.com
-  IMAGE_NAME: ai-coding-worker
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/ai-coding-worker
   INTERNAL_API_URL: http://internal-api-server:3000
 
 jobs:

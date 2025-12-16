@@ -183,11 +183,11 @@ When you update the code and need to redeploy:
 npm run build
 
 # 2. Build and push Docker image
-docker build -t dockerregistry.etdofresh.com/ai-coding-worker:latest .
-docker push dockerregistry.etdofresh.com/ai-coding-worker:latest
+docker build -t ghcr.io/webedt/monorepo/ai-coding-worker:latest .
+docker push ghcr.io/webedt/monorepo/ai-coding-worker:latest
 
 # 3. Update the service (rolling update)
-docker service update --image dockerregistry.etdofresh.com/ai-coding-worker:latest webedt-app-ai-coding-workers-gy4wew_ai-coding-worker
+docker service update --image ghcr.io/webedt/monorepo/ai-coding-worker:latest webedt-app-ai-coding-workers-gy4wew_ai-coding-worker
 ```
 
 Or use the automated script:
