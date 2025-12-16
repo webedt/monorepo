@@ -9,10 +9,12 @@ import { db, users, chatSessions, events } from '../db/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
+import { logger, ClaudeRemoteClient } from '@webedt/shared';
 import { GitHubOperations } from '../services/github/operations.js';
 import { StorageService } from '../services/storage/storageService.js';
 import { AIWorkerClient } from '../services/aiWorker/aiWorkerClient.js';
+import { ensureValidToken, type ClaudeAuth } from '../lib/claudeAuth.js';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../config/env.js';
 
 const router = Router();
 
@@ -37,6 +39,37 @@ function getRequestOrigin(req: Request): string {
   const protocol = req.protocol || 'https';
   const host = req.get('host') || req.get('x-forwarded-host') || '';
   return `${protocol}://${host}`;
+}
+
+// Helper function to archive Claude Remote session
+async function archiveClaudeRemoteSession(
+  remoteSessionId: string,
+  claudeAuth: ClaudeAuth,
+  environmentId?: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    // Refresh token if needed
+    const refreshedAuth = await ensureValidToken(claudeAuth);
+
+    const client = new ClaudeRemoteClient({
+      accessToken: refreshedAuth.accessToken,
+      environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
+      baseUrl: CLAUDE_API_BASE_URL,
+    });
+
+    await client.archiveSession(remoteSessionId);
+    logger.info(`Archived Claude Remote session ${remoteSessionId}`, { component: 'GitHub' });
+    return { success: true, message: 'Remote session archived' };
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    // 404 means session doesn't exist (already archived or never existed)
+    if (err.status === 404) {
+      logger.info(`Claude Remote session ${remoteSessionId} not found (already archived)`, { component: 'GitHub' });
+      return { success: true, message: 'Remote session already archived or does not exist' };
+    }
+    logger.error(`Failed to archive Claude Remote session ${remoteSessionId}`, error as Error, { component: 'GitHub' });
+    return { success: false, message: 'Failed to archive remote session' };
+  }
 }
 
 // Initiate GitHub OAuth
@@ -826,12 +859,13 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
       }
     );
 
-    // If sessionId provided, soft-delete the session (move to trash)
+    // If sessionId provided, archive remote session (if applicable) and soft-delete
     if (sessionId) {
       try {
-        await db
-          .update(chatSessions)
-          .set({ deletedAt: new Date() })
+        // Fetch session details to check if it's a claude-remote session
+        const [session] = await db
+          .select()
+          .from(chatSessions)
           .where(
             and(
               eq(chatSessions.id, sessionId),
@@ -839,11 +873,33 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
               isNull(chatSessions.deletedAt)
             )
           );
-        logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
-          component: 'GitHub'
-        });
+
+        if (session) {
+          // Archive Claude Remote session if applicable
+          if (session.provider === 'claude-remote' && session.remoteSessionId && authReq.user?.claudeAuth) {
+            const archiveResult = await archiveClaudeRemoteSession(
+              session.remoteSessionId,
+              authReq.user.claudeAuth as ClaudeAuth
+            );
+            logger.info(`Archive remote session result: ${archiveResult.message}`, {
+              component: 'GitHub',
+              sessionId,
+              remoteSessionId: session.remoteSessionId
+            });
+          }
+
+          // Soft-delete the session (move to trash)
+          await db
+            .update(chatSessions)
+            .set({ deletedAt: new Date() })
+            .where(eq(chatSessions.id, sessionId));
+
+          logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
+            component: 'GitHub'
+          });
+        }
       } catch (sessionError) {
-        logger.warn(`Failed to soft-delete session ${sessionId} after Auto PR`, {
+        logger.warn(`Failed to cleanup session ${sessionId} after Auto PR`, {
           component: 'GitHub',
           error: sessionError instanceof Error ? sessionError.message : String(sessionError)
         });
