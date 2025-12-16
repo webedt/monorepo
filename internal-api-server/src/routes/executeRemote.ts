@@ -333,6 +333,45 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         logger.warn('Failed to store event', { component: 'ExecuteRemoteRoute', error });
       }
 
+      // Save title and branch to database immediately when generated
+      // This ensures they're saved even if user disconnects
+      if (event.type === 'session_name' && (event as any).sessionName) {
+        try {
+          await db.update(chatSessions)
+            .set({ userRequest: (event as any).sessionName })
+            .where(eq(chatSessions.id, chatSessionId));
+          logger.info('Session title saved to database', {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+            title: (event as any).sessionName,
+          });
+        } catch (err) {
+          logger.error('Failed to save session title', err, {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+          });
+        }
+      }
+
+      // Also capture title from title_generation events (success status)
+      if (event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
+        try {
+          await db.update(chatSessions)
+            .set({ userRequest: (event as any).title })
+            .where(eq(chatSessions.id, chatSessionId));
+          logger.info('Session title saved to database from title_generation', {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+            title: (event as any).title,
+          });
+        } catch (err) {
+          logger.error('Failed to save session title from title_generation', err, {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+          });
+        }
+      }
+
       // Broadcast to other listeners
       sessionEventBroadcaster.broadcast(chatSessionId, event.type, eventToSend);
     };
