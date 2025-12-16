@@ -676,6 +676,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
       refetchPr();
 
+      // Invalidate sessions cache since the session was soft-deleted
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['sessions', 'deleted'] });
+
       // If session was soft-deleted, redirect to sessions list after a short delay
       if (sessionId && sessionId !== 'new') {
         setTimeout(() => {
