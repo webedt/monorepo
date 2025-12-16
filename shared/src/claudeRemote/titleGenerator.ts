@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { GeneratedTitle, TitleGeneratorConfig } from './types.js';
+import type { GeneratedTitle, TitleGeneratorConfig, TitleGenerationEvent, TitleGenerationCallback } from './types.js';
 
 // Constants
 const CLAUDE_AI_URL = 'https://claude.ai';
@@ -303,6 +303,18 @@ async function trySonnetSession(
 }
 
 /**
+ * Helper to emit title generation events
+ */
+async function emit(
+  onProgress: TitleGenerationCallback | undefined,
+  event: TitleGenerationEvent
+): Promise<void> {
+  if (onProgress) {
+    await onProgress(event);
+  }
+}
+
+/**
  * Generate a title and branch name for a session with 4-method fallback
  *
  * Methods (in order of preference):
@@ -310,31 +322,84 @@ async function trySonnetSession(
  * 2. OpenRouter API          - fast (~1-2s), requires OPENROUTER_API_KEY
  * 3. Temp Sonnet session     - reliable (~8-10s), uses OAuth credentials
  * 4. Local fallback          - instant, uses Title Case truncation
+ *
+ * @param prompt - The user's prompt to generate a title for
+ * @param config - Configuration for title generation methods
+ * @param onProgress - Optional callback for progress events
  */
 export async function generateTitle(
   prompt: string,
-  config: TitleGeneratorConfig = {}
+  config: TitleGeneratorConfig = {},
+  onProgress?: TitleGenerationCallback
 ): Promise<GeneratedTitle> {
   // Method 1: Try claude.ai dust endpoint (fastest)
-  const dustResult = await tryDustEndpoint(prompt, config);
-  if (dustResult) {
-    return { ...dustResult, source: 'dust' };
+  if (config.claudeCookies && config.orgUuid) {
+    await emit(onProgress, { type: 'title_generation', method: 'dust', status: 'trying' });
+    const dustResult = await tryDustEndpoint(prompt, config);
+    if (dustResult) {
+      await emit(onProgress, {
+        type: 'title_generation',
+        method: 'dust',
+        status: 'success',
+        title: dustResult.title,
+        branch_name: dustResult.branch_name,
+      });
+      return { ...dustResult, source: 'dust' };
+    }
+    await emit(onProgress, { type: 'title_generation', method: 'dust', status: 'failed' });
+  } else {
+    await emit(onProgress, { type: 'title_generation', method: 'dust', status: 'skipped' });
   }
 
   // Method 2: Try OpenRouter API (fast)
-  const openRouterResult = await tryOpenRouter(prompt, config);
-  if (openRouterResult) {
-    return { ...openRouterResult, source: 'openrouter' };
+  if (config.openRouterApiKey) {
+    await emit(onProgress, { type: 'title_generation', method: 'openrouter', status: 'trying' });
+    const openRouterResult = await tryOpenRouter(prompt, config);
+    if (openRouterResult) {
+      await emit(onProgress, {
+        type: 'title_generation',
+        method: 'openrouter',
+        status: 'success',
+        title: openRouterResult.title,
+        branch_name: openRouterResult.branch_name,
+      });
+      return { ...openRouterResult, source: 'openrouter' };
+    }
+    await emit(onProgress, { type: 'title_generation', method: 'openrouter', status: 'failed' });
+  } else {
+    await emit(onProgress, { type: 'title_generation', method: 'openrouter', status: 'skipped' });
   }
 
   // Method 3: Try temp Sonnet session (reliable but slower)
-  const sessionResult = await trySonnetSession(prompt, config);
-  if (sessionResult) {
-    return { ...sessionResult, source: 'session' };
+  if (config.accessToken && config.environmentId) {
+    await emit(onProgress, { type: 'title_generation', method: 'session', status: 'trying' });
+    const sessionResult = await trySonnetSession(prompt, config);
+    if (sessionResult) {
+      await emit(onProgress, {
+        type: 'title_generation',
+        method: 'session',
+        status: 'success',
+        title: sessionResult.title,
+        branch_name: sessionResult.branch_name,
+      });
+      return { ...sessionResult, source: 'session' };
+    }
+    await emit(onProgress, { type: 'title_generation', method: 'session', status: 'failed' });
+  } else {
+    await emit(onProgress, { type: 'title_generation', method: 'session', status: 'skipped' });
   }
 
   // Method 4: Local fallback (instant)
-  return { ...generateTitleLocal(prompt), source: 'fallback' };
+  await emit(onProgress, { type: 'title_generation', method: 'local', status: 'trying' });
+  const localResult = generateTitleLocal(prompt);
+  await emit(onProgress, {
+    type: 'title_generation',
+    method: 'local',
+    status: 'success',
+    title: localResult.title,
+    branch_name: localResult.branch_name,
+  });
+  return { ...localResult, source: 'fallback' };
 }
 
 /**

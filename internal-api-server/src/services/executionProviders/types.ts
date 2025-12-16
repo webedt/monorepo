@@ -16,6 +16,7 @@ export type ExecutionEventType =
   | 'assistant_message'
   | 'session_name'
   | 'session_created'
+  | 'title_generation'
   | 'completed'
   | 'error'
   | 'raw_event';
@@ -46,6 +47,12 @@ export interface ExecutionEvent {
   // Session created event
   remoteSessionId?: string;
   remoteWebUrl?: string;
+
+  // Title generation event
+  method?: 'dust' | 'openrouter' | 'session' | 'local';
+  status?: 'trying' | 'success' | 'failed' | 'skipped';
+  title?: string;
+  branch_name?: string;
 
   // Completed event
   branch?: string;

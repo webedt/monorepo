@@ -47,4 +47,6 @@ export type {
   SessionResult,
   GeneratedTitle,
   TitleGeneratorConfig,
+  TitleGenerationEvent,
+  TitleGenerationCallback,
 } from './claudeRemote/index.js';

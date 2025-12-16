@@ -9,6 +9,7 @@ import {
   ClaudeRemoteClient,
   type SessionEvent,
   type CreateSessionParams,
+  type TitleGenerationEvent,
   generateTitle,
 } from '@webedt/shared';
 import { logger } from '@webedt/shared';
@@ -97,13 +98,28 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     // 2. OpenRouter API (fast, requires OPENROUTER_API_KEY)
     // 3. Temp Sonnet session (reliable, uses OAuth)
     // 4. Local fallback (instant)
-    const generatedTitle = await generateTitle(prompt, {
-      claudeCookies: CLAUDE_COOKIES || undefined,
-      orgUuid: CLAUDE_ORG_UUID || undefined,
-      openRouterApiKey: OPENROUTER_API_KEY || undefined,
-      accessToken: claudeAuth.accessToken,
-      environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || undefined,
-    });
+    const generatedTitle = await generateTitle(
+      prompt,
+      {
+        claudeCookies: CLAUDE_COOKIES || undefined,
+        orgUuid: CLAUDE_ORG_UUID || undefined,
+        openRouterApiKey: OPENROUTER_API_KEY || undefined,
+        accessToken: claudeAuth.accessToken,
+        environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || undefined,
+      },
+      // Emit title generation progress events
+      async (event: TitleGenerationEvent) => {
+        await onEvent({
+          type: 'title_generation',
+          timestamp: new Date().toISOString(),
+          source,
+          method: event.method,
+          status: event.status,
+          title: event.title,
+          branch_name: event.branch_name,
+        });
+      }
+    );
 
     logger.info('Generated session title and branch', {
       component: 'ClaudeRemoteProvider',

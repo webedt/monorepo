@@ -260,3 +260,21 @@ export interface TitleGeneratorConfig {
   /** Environment ID for session-based generation */
   environmentId?: string;
 }
+
+/**
+ * Event emitted during title generation process
+ */
+export interface TitleGenerationEvent {
+  type: 'title_generation';
+  method: 'dust' | 'openrouter' | 'session' | 'local';
+  status: 'trying' | 'success' | 'failed' | 'skipped';
+  /** Title (only present on success) */
+  title?: string;
+  /** Branch name (only present on success) */
+  branch_name?: string;
+}
+
+/**
+ * Callback for title generation progress events
+ */
+export type TitleGenerationCallback = (event: TitleGenerationEvent) => void | Promise<void>;

@@ -25,5 +25,7 @@ export type {
   GitOutcomeInfo,
   GeneratedTitle,
   TitleGeneratorConfig,
+  TitleGenerationEvent,
+  TitleGenerationCallback,
 } from './types.js';
 export { ClaudeRemoteError } from './types.js';
