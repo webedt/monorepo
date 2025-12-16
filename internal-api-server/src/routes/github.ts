@@ -862,6 +862,13 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
     // If sessionId provided, archive remote session (if applicable) and soft-delete
     if (sessionId) {
       try {
+        logger.info('Auto PR session cleanup starting', {
+          component: 'GitHub',
+          sessionId,
+          userId: authReq.user!.id,
+          hasClaudeAuth: !!authReq.user?.claudeAuth
+        });
+
         // Fetch session details to check if it's a claude-remote session
         const [session] = await db
           .select()
@@ -875,6 +882,14 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
           );
 
         if (session) {
+          logger.info('Session found for cleanup', {
+            component: 'GitHub',
+            sessionId,
+            provider: session.provider ?? undefined,
+            remoteSessionId: session.remoteSessionId ?? 'none',
+            hasClaudeAuth: !!authReq.user?.claudeAuth
+          });
+
           // Archive Claude Remote session if applicable
           if (session.provider === 'claude-remote' && session.remoteSessionId && authReq.user?.claudeAuth) {
             const archiveResult = await archiveClaudeRemoteSession(
@@ -884,7 +899,18 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
             logger.info(`Archive remote session result: ${archiveResult.message}`, {
               component: 'GitHub',
               sessionId,
-              remoteSessionId: session.remoteSessionId
+              remoteSessionId: session.remoteSessionId ?? undefined,
+              success: archiveResult.success
+            });
+          } else {
+            // Log why archiving was skipped
+            logger.info('Skipping remote session archive - conditions not met', {
+              component: 'GitHub',
+              sessionId,
+              provider: session.provider ?? undefined,
+              isClaudeRemote: session.provider === 'claude-remote',
+              hasRemoteSessionId: !!session.remoteSessionId,
+              hasClaudeAuth: !!authReq.user?.claudeAuth
             });
           }
 
@@ -897,6 +923,12 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
           logger.info(`Session ${sessionId} moved to trash after successful Auto PR`, {
             component: 'GitHub'
           });
+        } else {
+          logger.warn('Session not found for cleanup - may have wrong userId or already deleted', {
+            component: 'GitHub',
+            sessionId,
+            userId: authReq.user!.id
+          });
         }
       } catch (sessionError) {
         logger.warn(`Failed to cleanup session ${sessionId} after Auto PR`, {
@@ -904,6 +936,10 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
           error: sessionError instanceof Error ? sessionError.message : String(sessionError)
         });
       }
+    } else {
+      logger.info('No sessionId provided for Auto PR cleanup', {
+        component: 'GitHub'
+      });
     }
 
     logger.info(`Auto PR completed for ${owner}/${repo}: ${branch} -> ${base}`, {
