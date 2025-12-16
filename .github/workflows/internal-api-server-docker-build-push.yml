@@ -164,6 +164,7 @@ jobs:
           echo "  ✅ GITHUB_CLIENT_ID=***"
           echo "  ✅ GITHUB_CLIENT_SECRET=***"
           echo "  ✅ OPENAI_API_KEY=***"
+          echo "  ✅ OPENROUTER_API_KEY=***"
           echo ""
 
           # Update compose environment variables
