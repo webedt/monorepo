@@ -12,8 +12,8 @@ import { db, chatSessions, messages, users, events } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '../lib/claudeAuth.js';
-import { logger, getEventEmoji } from '@webedt/shared';
-import { CLAUDE_ENVIRONMENT_ID } from '../config/env.js';
+import { logger, getEventEmoji, fetchEnvironmentIdFromSessions } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import {
   getExecutionProvider,
@@ -124,13 +124,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       return;
     }
 
-    // Check for Claude environment ID
-    if (!CLAUDE_ENVIRONMENT_ID) {
-      res.status(500).json({ success: false, error: 'CLAUDE_ENVIRONMENT_ID not configured' });
-      return;
-    }
-
-    // Get user's Claude auth
+    // Get user's Claude auth first (needed for auto-detecting environment ID)
     const [userData] = await db
       .select()
       .from(users)
@@ -157,6 +151,33 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       logger.error('Failed to refresh Claude token', error, { component: 'ExecuteRemoteRoute' });
       res.status(401).json({ success: false, error: 'Claude token expired. Please reconnect your Claude account.' });
       return;
+    }
+
+    // Get environment ID - from config or auto-detect from user's recent sessions
+    let environmentId = CLAUDE_ENVIRONMENT_ID;
+    if (!environmentId) {
+      logger.info('CLAUDE_ENVIRONMENT_ID not configured, attempting auto-detection from user sessions', {
+        component: 'ExecuteRemoteRoute',
+      });
+
+      const detectedEnvId = await fetchEnvironmentIdFromSessions(
+        claudeAuth.accessToken,
+        CLAUDE_API_BASE_URL
+      );
+
+      if (detectedEnvId) {
+        environmentId = detectedEnvId;
+        logger.info('Auto-detected environment ID from user sessions', {
+          component: 'ExecuteRemoteRoute',
+          environmentId: environmentId.slice(0, 10) + '...',
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first, or ask an admin to configure CLAUDE_ENVIRONMENT_ID.'
+        });
+        return;
+      }
     }
 
     // Create or load chat session
@@ -278,6 +299,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             remoteSessionId: chatSession.remoteSessionId,
             prompt,
             claudeAuth,
+            environmentId,
           },
           sendEvent
         );
@@ -290,6 +312,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             prompt,
             gitUrl: repoUrl,
             claudeAuth,
+            environmentId,
           },
           sendEvent
         );

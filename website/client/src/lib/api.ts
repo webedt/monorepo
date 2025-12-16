@@ -300,7 +300,7 @@ export const userApi = {
       method: 'DELETE',
     }),
 
-  updatePreferredProvider: (provider: 'claude' | 'codex' | 'copilot' | 'gemini') =>
+  updatePreferredProvider: (provider: 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote') =>
     fetchApi('/api/user/preferred-provider', {
       method: 'POST',
       body: { provider },
@@ -817,7 +817,7 @@ export const storageWorkerApi = storageApi;
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;
-  provider?: 'claude' | 'codex' | 'copilot' | 'gemini';
+  provider?: 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote';
   github?: {
     repoUrl: string;
     branch: string;
@@ -825,6 +825,11 @@ export function createExecuteEventSource(data: {
   autoCommit?: boolean;
   websiteSessionId?: string;
 }) {
+  // If provider is claude-remote, use the execute-remote endpoint
+  if (data.provider === 'claude-remote') {
+    return createExecuteRemoteEventSource(data);
+  }
+
   const params = new URLSearchParams();
 
   // Add non-github params directly
@@ -850,6 +855,42 @@ export function createExecuteEventSource(data: {
   console.log('[API] Creating EventSource with URL:', fullUrl);
   console.log('[API] API_BASE_URL:', getApiBaseUrl());
   console.log('[API] Selected provider:', data.provider || 'default');
+
+  return new EventSource(fullUrl, {
+    withCredentials: true,
+  });
+}
+
+// Execute Remote API (Claude Remote Sessions - SSE)
+// Uses Anthropic's Remote Sessions API instead of local ai-coding-worker
+export function createExecuteRemoteEventSource(data: {
+  userRequest: string;
+  provider?: string;
+  github?: {
+    repoUrl: string;
+    branch: string;
+  };
+  autoCommit?: boolean;
+  websiteSessionId?: string;
+}) {
+  const params = new URLSearchParams();
+
+  // Add params
+  if (data.userRequest !== undefined) {
+    params.append('userRequest', String(data.userRequest));
+  }
+  if (data.websiteSessionId !== undefined) {
+    params.append('websiteSessionId', String(data.websiteSessionId));
+  }
+
+  // GitHub is required for execute-remote
+  if (data.github) {
+    params.append('github', JSON.stringify(data.github));
+  }
+
+  const fullUrl = `${getApiBaseUrl()}/api/execute-remote?${params}`;
+  console.log('[API] Creating Claude Remote EventSource with URL:', fullUrl);
+  console.log('[API] API_BASE_URL:', getApiBaseUrl());
 
   return new EventSource(fullUrl, {
     withCredentials: true,

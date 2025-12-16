@@ -25,6 +25,42 @@ const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_POLLS = 300; // 10 minutes at 2s intervals
 
 /**
+ * Fetch environment ID from a user's recent sessions
+ * This is used when CLAUDE_ENVIRONMENT_ID is not configured
+ */
+export async function fetchEnvironmentIdFromSessions(
+  accessToken: string,
+  baseUrl: string = DEFAULT_BASE_URL,
+  orgUuid?: string
+): Promise<string | null> {
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${accessToken}`,
+    'anthropic-version': '2023-06-01',
+    'anthropic-beta': 'ccr-byoc-2025-07-29',
+    'Content-Type': 'application/json',
+  };
+  if (orgUuid) {
+    headers['x-organization-uuid'] = orgUuid;
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/sessions?limit=1`, {
+      headers
+    });
+    if (!response.ok) return null;
+
+    const data = await response.json() as { data?: Session[] };
+    const sessions = data.data || [];
+    if (sessions.length > 0 && sessions[0].environment_id) {
+      return sessions[0].environment_id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Client for interacting with Claude Remote Sessions API
  */
 export class ClaudeRemoteClient {

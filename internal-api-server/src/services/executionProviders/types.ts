@@ -72,6 +72,8 @@ export interface ExecuteParams {
   model?: string;
   /** Claude auth credentials */
   claudeAuth: ClaudeAuth;
+  /** Environment ID for Claude Remote (optional, uses config default if not provided) */
+  environmentId?: string;
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
 }
@@ -90,6 +92,8 @@ export interface ResumeParams {
   prompt: string;
   /** Claude auth credentials */
   claudeAuth: ClaudeAuth;
+  /** Environment ID for Claude Remote (optional, uses config default if not provided) */
+  environmentId?: string;
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
 }

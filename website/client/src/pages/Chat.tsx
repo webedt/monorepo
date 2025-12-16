@@ -1264,10 +1264,21 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         console.log('[Chat] Filtered params for resuming session:', params);
       }
 
+      // Add user's preferred provider
+      const provider = user?.preferredProvider || 'claude';
+      if (provider) {
+        params.provider = provider;
+      }
+
       // Always use POST
       setStreamMethod('POST');
       setStreamBody(params);
-      setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+      // Use execute-remote endpoint for claude-remote provider
+      const executeUrl = provider === 'claude-remote'
+        ? `${getApiBaseUrl()}/api/execute-remote`
+        : `${getApiBaseUrl()}/api/execute`;
+      setStreamUrl(executeUrl);
 
       setIsExecuting(true);
 
@@ -1803,6 +1814,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       userRequest: userRequestParam,
     };
 
+    // Add user's preferred provider
+    const provider = user?.preferredProvider || 'claude';
+    if (provider) {
+      requestParams.provider = provider;
+    }
+
     if (currentSessionId) {
       requestParams.websiteSessionId = currentSessionId;
       console.log('[Chat] Continuing existing session:', currentSessionId);
@@ -1826,11 +1843,17 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Debug: Log the exact parameters being sent
     console.log('[Chat] Final request parameters:', JSON.stringify(requestParams, null, 2));
     console.log('[Chat] Parameters being sent:', Object.keys(requestParams));
+    console.log('[Chat] Using provider:', provider);
 
     // Always use POST to allow reading error body in response
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+    // Use execute-remote endpoint for claude-remote provider
+    const executeUrl = provider === 'claude-remote'
+      ? `${getApiBaseUrl()}/api/execute-remote`
+      : `${getApiBaseUrl()}/api/execute`;
+    setStreamUrl(executeUrl);
 
     setInput('');
     setImages([]);
@@ -1864,6 +1887,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       userRequest: lastRequest.input,
     };
 
+    // Add user's preferred provider
+    const provider = user?.preferredProvider || 'claude';
+    if (provider) {
+      requestParams.provider = provider;
+    }
+
     if (currentSessionId) {
       requestParams.websiteSessionId = currentSessionId;
       console.log('[Chat] Retrying with existing session:', currentSessionId);
@@ -1889,7 +1918,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Always use POST
     setStreamMethod('POST');
     setStreamBody(requestParams);
-    setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+    // Use execute-remote endpoint for claude-remote provider
+    const executeUrl = provider === 'claude-remote'
+      ? `${getApiBaseUrl()}/api/execute-remote`
+      : `${getApiBaseUrl()}/api/execute`;
+    setStreamUrl(executeUrl);
   };
 
   // Handle interrupting current job
@@ -1945,6 +1979,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           userRequest: nextMessage.input,
         };
 
+        // Add user's preferred provider
+        const provider = user?.preferredProvider || 'claude';
+        if (provider) {
+          requestParams.provider = provider;
+        }
+
         if (currentSessionId) {
           requestParams.websiteSessionId = currentSessionId;
         }
@@ -1995,7 +2035,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
         setStreamMethod('POST');
         setStreamBody(requestParams);
-        setStreamUrl(`${getApiBaseUrl()}/api/execute`);
+
+        // Use execute-remote endpoint for claude-remote provider
+        const executeUrl = provider === 'claude-remote'
+          ? `${getApiBaseUrl()}/api/execute-remote`
+          : `${getApiBaseUrl()}/api/execute`;
+        setStreamUrl(executeUrl);
       }, 500);
     }
   }, [isExecuting, messageQueue.length, currentSessionId, sessionId]);

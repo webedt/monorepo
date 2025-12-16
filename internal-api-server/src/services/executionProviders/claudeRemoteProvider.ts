@@ -112,10 +112,10 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
   /**
    * Create a ClaudeRemoteClient with the given auth
    */
-  private createClient(claudeAuth: ClaudeAuth): ClaudeRemoteClient {
+  private createClient(claudeAuth: ClaudeAuth, environmentId?: string): ClaudeRemoteClient {
     return new ClaudeRemoteClient({
       accessToken: claudeAuth.accessToken,
-      environmentId: CLAUDE_ENVIRONMENT_ID,
+      environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,
       model: CLAUDE_DEFAULT_MODEL,
     });
@@ -128,7 +128,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     params: ExecuteParams,
     onEvent: ExecutionEventCallback
   ): Promise<ExecutionResult> {
-    const { chatSessionId, prompt, gitUrl, model, claudeAuth, abortSignal } = params;
+    const { chatSessionId, prompt, gitUrl, model, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
     logger.info('Starting Claude Remote execution', {
@@ -155,7 +155,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       message: 'Creating Claude remote session...',
     });
 
-    const client = this.createClient(claudeAuth);
+    const client = this.createClient(claudeAuth, environmentId);
 
     // Create session params
     const createParams: CreateSessionParams = {
@@ -258,7 +258,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
     params: ResumeParams,
     onEvent: ExecutionEventCallback
   ): Promise<ExecutionResult> {
-    const { chatSessionId, remoteSessionId, prompt, claudeAuth, abortSignal } = params;
+    const { chatSessionId, remoteSessionId, prompt, claudeAuth, environmentId, abortSignal } = params;
     const source = this.name;
 
     logger.info('Resuming Claude Remote session', {
@@ -285,7 +285,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       message: 'Resuming session...',
     });
 
-    const client = this.createClient(claudeAuth);
+    const client = this.createClient(claudeAuth, environmentId);
 
     try {
       // Get current session info

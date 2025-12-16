@@ -5,7 +5,7 @@
  * allowing execution of Claude Code tasks on Anthropic's infrastructure.
  */
 
-export { ClaudeRemoteClient } from './claudeRemoteClient.js';
+export { ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from './claudeRemoteClient.js';
 export type {
   ClaudeAuth,
   ClaudeRemoteClientConfig,
