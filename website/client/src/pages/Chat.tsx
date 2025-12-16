@@ -1235,16 +1235,22 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         updateMutation.mutate({ id: currentSessionId, title: data.sessionName });
       }
 
-      // Extract actual branch name with ID from raw_event events
+      // Extract actual branch name with ID from session events
       // The actual branch (with ID suffix like 'claude/fix-bug-XYZ123') appears in:
       // 1. env_manager_log args containing '--append-system-prompt' with branch name
       // 2. Git output showing commit/push to the branch
-      if (data.type === 'raw_event' && data.rawEvent && currentSessionId) {
-        const rawEvent = data.rawEvent;
+      // Note: Events can come in two formats:
+      //   - Flat format (new): { type: 'env_manager_log', data: {...} }
+      //   - Wrapped format (old): { type: 'raw_event', rawEvent: { type: 'env_manager_log', data: {...} } }
+      if (currentSessionId) {
+        // Handle both flat and wrapped event formats
+        const eventType = data.type === 'raw_event' ? data.rawEvent?.type : data.type;
+        const eventData = data.type === 'raw_event' ? data.rawEvent?.data : data.data;
+        const toolUseResult = data.type === 'raw_event' ? data.rawEvent?.tool_use_result : data.tool_use_result;
 
         // Check for branch in env_manager_log args (earliest source)
-        if (rawEvent.type === 'env_manager_log' && rawEvent.data?.extra?.args) {
-          const args = rawEvent.data.extra.args;
+        if (eventType === 'env_manager_log' && eventData?.extra?.args) {
+          const args = eventData.extra.args;
           const appendPromptIndex = args.findIndex((arg: string) => arg === '--append-system-prompt');
           if (appendPromptIndex !== -1 && args[appendPromptIndex + 1]) {
             const promptText = args[appendPromptIndex + 1];
@@ -1259,8 +1265,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
 
         // Check for branch in git commit/push output (backup source)
-        if (rawEvent.tool_use_result?.stdout) {
-          const stdout = rawEvent.tool_use_result.stdout;
+        if (toolUseResult?.stdout) {
+          const stdout = toolUseResult.stdout;
           // Match git commit output: "[branch-name hash]"
           const commitMatch = stdout.match(/^\[([^\s\]]+)\s+[a-f0-9]+\]/m);
           if (commitMatch && commitMatch[1].startsWith('claude/')) {
