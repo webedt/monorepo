@@ -276,6 +276,7 @@ export const TAGLINES = [
   "Umbredit, edit, edit, eh, eh.",
   "I kissed a girl and I edit.",
   "They tried to make me go to edit, but I said 'No, no, no'.",
+  "They tried to make me edit in rehab, but I said 'No, no, no'.",
   "I edit so hard and got so far, but in the end it doesn't even matter.",
   "Crawling in my skin, these edits they will not heal.",
   "Let the edits hit the floor.",
