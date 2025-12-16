@@ -298,20 +298,31 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     const sendEvent = async (event: ExecutionEvent) => {
       if (clientDisconnected) return;
 
-      // Apply emoji decoration
-      const decoratedEvent = {
-        ...event,
-        message: event.message ? `${getEventEmoji(event)} ${event.message}` : undefined,
-      };
+      // For raw_event types, pass through without decoration
+      // This allows the frontend to receive events exactly as they come from the API
+      const isRawEvent = event.type === 'raw_event' || (event as any).rawEvent;
 
-      const eventData = `data: ${JSON.stringify(decoratedEvent)}\n\n`;
+      let eventToSend: any;
+      if (isRawEvent) {
+        // Pass through raw event without any transformation
+        eventToSend = event;
+      } else {
+        // Apply emoji decoration for non-raw events
+        eventToSend = {
+          ...event,
+          message: event.message ? `${getEventEmoji(event)} ${event.message}` : undefined,
+        };
+      }
+
+      const eventData = `data: ${JSON.stringify(eventToSend)}\n\n`;
 
       // Log SSE event for debugging
       logger.info('SSE event', {
         component: 'ExecuteRemoteRoute',
         chatSessionId,
         eventType: event.type,
-        eventData: JSON.stringify(decoratedEvent),
+        isRawEvent,
+        eventData: JSON.stringify(eventToSend),
       });
 
       try {
@@ -332,7 +343,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Broadcast to other listeners
-      sessionEventBroadcaster.broadcast(chatSessionId, event.type, decoratedEvent);
+      sessionEventBroadcaster.broadcast(chatSessionId, event.type, eventToSend);
     };
 
     // Set up heartbeat

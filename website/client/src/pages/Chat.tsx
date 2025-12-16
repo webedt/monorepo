@@ -1401,62 +1401,47 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       console.log('[Chat] SSE stream connected, worker store updated');
     },
     onCompleted: (data) => {
-      // DEBUG: Disabled ALL state changes to prevent page refresh
-      console.log('[Chat] DEBUG: onCompleted called, NOT changing any state. Data:', JSON.stringify(data, null, 2));
-      // setIsExecuting(false);
-      // setStreamUrl(null);
-      // setIsReconnecting(false);
-      // workerStore.stopExecution();
+      console.log('[Chat] onCompleted called. Data:', JSON.stringify(data, null, 2));
+      // Re-enable state changes for proper completion detection
+      setIsExecuting(false);
+      setStreamUrl(null);
+      setIsReconnecting(false);
+      workerStore.stopExecution();
       // Capture session ID from completion event
-      // if (data?.websiteSessionId) {
-      //   console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
-      //   setCurrentSessionId(data.websiteSessionId);
-      //   // Lock the fields after first submission completes
-      //   // This prevents users from changing repo/branch after a session has started
-      //   if (!isLocked && selectedRepo) {
-      //     console.log('[Chat] Locking fields after first submission');
-      //     setIsLocked(true);
-      //   }
-      //   // Invalidate queries to refetch session data and messages from database
-      //   // This syncs the final state after SSE stream completes
-      //   // IMPORTANT: Must invalidate 'session-details' which is used for session.status checks
-      //   queryClient.invalidateQueries({ queryKey: ['session-details', data.websiteSessionId] });
-      //   queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
-      //   queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
-      //   // Also invalidate by current sessionId (from route) in case they differ
-      //   if (sessionId && sessionId !== data.websiteSessionId) {
-      //     queryClient.invalidateQueries({ queryKey: ['session-details', sessionId] });
-      //     queryClient.invalidateQueries({ queryKey: ['currentSession', sessionId] });
-      //   }
-      //   // Also invalidate sessions list to update sidebar
-      //   queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      if (data?.websiteSessionId) {
+        console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
+        setCurrentSessionId(data.websiteSessionId);
+        // Lock the fields after first submission completes
+        // This prevents users from changing repo/branch after a session has started
+        if (!isLocked && selectedRepo) {
+          console.log('[Chat] Locking fields after first submission');
+          setIsLocked(true);
+        }
+        // Invalidate sessions list to update sidebar
+        queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
-      //   // Note: Scroll handling is now done in the messages merge effect (useEffect on eventsData/messagesData)
-      //   // which properly preserves scroll position or scrolls to bottom based on user's position
-
-      //   // Navigate to the session URL if not already there
-      //   if (!sessionId || sessionId !== data.websiteSessionId) {
-      //     console.log('[Chat] Navigating to session:', data.websiteSessionId);
-      //     // Preserve the section path (e.g., /session/new/chat -> /session/{id}/chat)
-      //     const currentPath = location.pathname;
-      //     const section = currentPath.split('/').pop(); // Get the last segment
-      //     const targetPath = section && section !== 'new' && section !== data.websiteSessionId
-      //       ? `/session/${data.websiteSessionId}/${section}`
-      //       : `/session/${data.websiteSessionId}/chat`;
-      //     navigate(targetPath, { replace: true });
-      //   }
-      // }
+        // Navigate to the session URL if not already there
+        if (!sessionId || sessionId !== data.websiteSessionId) {
+          console.log('[Chat] Navigating to session:', data.websiteSessionId);
+          // Preserve the section path (e.g., /session/new/chat -> /session/{id}/chat)
+          const currentPath = location.pathname;
+          const section = currentPath.split('/').pop(); // Get the last segment
+          const targetPath = section && section !== 'new' && section !== data.websiteSessionId
+            ? `/session/${data.websiteSessionId}/${section}`
+            : `/session/${data.websiteSessionId}/chat`;
+          navigate(targetPath, { replace: true });
+        }
+      }
       // Refocus input after processing completes (with delay to ensure DOM updates)
       setTimeout(() => {
         chatInputRef.current?.focus();
       }, 100);
     },
     onError: (error) => {
-      // DEBUG: Log error but don't change state
-      console.log('[Chat] DEBUG: onError called, NOT changing state. Error:', error.message);
-      // setIsExecuting(false);
-      // setStreamUrl(null);
-      // workerStore.stopExecution();
+      console.log('[Chat] onError called. Error:', error.message);
+      setIsExecuting(false);
+      setStreamUrl(null);
+      workerStore.stopExecution();
     },
     autoReconnect: false, // Disable auto-reconnect to prevent infinite loops
   });

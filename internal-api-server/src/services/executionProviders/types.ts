@@ -17,7 +17,8 @@ export type ExecutionEventType =
   | 'session_name'
   | 'session_created'
   | 'completed'
-  | 'error';
+  | 'error'
+  | 'raw_event';
 
 /**
  * Event emitted during execution

@@ -30,7 +30,7 @@ function passRawEvent(event: SessionEvent, source: string): ExecutionEvent {
   // Pass raw event directly - no mapping, no transformation
   // Just add source and timestamp for tracking
   return {
-    type: 'raw_event' as any, // Use raw_event type to indicate pass-through
+    type: 'raw_event',
     timestamp: new Date().toISOString(),
     source,
     rawEvent: event, // The actual raw event from Anthropic API
