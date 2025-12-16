@@ -94,7 +94,7 @@ jobs:
         run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
 
       - name: Configure Compose Environment Variables
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
@@ -187,7 +187,7 @@ jobs:
           fi
 
       - name: Deploy to Dokploy
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
@@ -250,7 +250,7 @@ jobs:
           fi
 
       - name: Deployment Summary
-        if: always() && github.ref == 'refs/heads/main'
+        if: always()
         run: |
           echo "## Internal API Server Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
