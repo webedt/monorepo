@@ -6,6 +6,7 @@
  */
 
 export { ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from './claudeRemoteClient.js';
+export { generateTitle, generateTitleSync } from './titleGenerator.js';
 export type {
   ClaudeAuth,
   ClaudeRemoteClientConfig,
@@ -22,5 +23,7 @@ export type {
   PollOptions,
   SessionResult,
   GitOutcomeInfo,
+  GeneratedTitle,
+  TitleGeneratorConfig,
 } from './types.js';
 export { ClaudeRemoteError } from './types.js';

@@ -20,7 +20,7 @@ import {
 } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'claude-opus-4-5-20251101';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_POLLS = 300; // 10 minutes at 2s intervals
 

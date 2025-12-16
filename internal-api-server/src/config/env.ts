@@ -72,7 +72,8 @@ export const USE_NEW_ARCHITECTURE = process.env.USE_NEW_ARCHITECTURE === 'true';
 // Claude Remote Sessions configuration
 export const CLAUDE_ENVIRONMENT_ID = process.env.CLAUDE_ENVIRONMENT_ID || '';
 export const CLAUDE_API_BASE_URL = process.env.CLAUDE_API_BASE_URL || 'https://api.anthropic.com';
-export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL || 'claude-sonnet-4-20250514';
+export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL || 'claude-opus-4-5-20251101';
+export const CLAUDE_ORG_UUID = process.env.CLAUDE_ORG_UUID || '';  // For title generation endpoint
 
 /**
  * Validate required environment variables

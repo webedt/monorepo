@@ -235,3 +235,25 @@ export class ClaudeRemoteError extends Error {
     this.name = 'ClaudeRemoteError';
   }
 }
+
+/**
+ * Result from title generation
+ */
+export interface GeneratedTitle {
+  title: string;
+  source: 'claude_ai' | 'haiku' | 'fallback';
+}
+
+/**
+ * Configuration for title generator
+ */
+export interface TitleGeneratorConfig {
+  /** Claude.ai session cookie (for generate_title_and_branch endpoint) */
+  sessionCookie?: string;
+  /** Organization UUID for Claude.ai */
+  orgUuid?: string;
+  /** Anthropic API key for Haiku fallback */
+  anthropicApiKey?: string;
+  /** Access token for API calls */
+  accessToken?: string;
+}
