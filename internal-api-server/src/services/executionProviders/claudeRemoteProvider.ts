@@ -128,12 +128,13 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       source: generatedTitle.source,
     });
 
-    // Create session params with generated title
+    // Create session params with generated title and branch
     const createParams: CreateSessionParams = {
       prompt,
       gitUrl,
       model: model || CLAUDE_DEFAULT_MODEL,
       title: generatedTitle.title,
+      branchPrefix: generatedTitle.branch_name,
     };
 
     try {
