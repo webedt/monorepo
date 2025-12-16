@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import SessionLayout from '@/components/SessionLayout';
 import { useEmbedded } from '@/contexts/EmbeddedContext';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useSceneEditor } from '@/hooks/useSceneEditor';
 import { SceneCanvas, SceneToolbar, SceneHierarchy, ScenePropertyPanel } from '@/components/editor/scene';
-import type { Scene, SceneFile } from '@/types/scene';
+import type { SceneFile } from '@/types/scene';
 
 interface GitHubRepo {
   id: number;
@@ -43,7 +43,6 @@ export function SceneEditorContent({ sessionId: sessionIdProp, isEmbedded: _isEm
   const sessionId = sessionIdProp ?? sessionIdParam;
   const location = useLocation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   // Get pre-selected settings from navigation state
   const preSelectedSettings = (location.state as { preSelectedSettings?: PreSelectedSettings } | null)?.preSelectedSettings;

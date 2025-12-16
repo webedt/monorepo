@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Scene,
   SceneObject,
@@ -105,9 +105,6 @@ export function useSceneEditor(initialScene?: Scene): UseSceneEditorReturn {
   // History state
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-
-  // Refs for canvas calculations
-  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Save current state to history
   const saveToHistory = useCallback((action: string) => {
