@@ -1368,6 +1368,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         return;
       }
 
+      // Capture branch from title_generation events (has branch_name field)
+      // This updates the session early so PR buttons appear during streaming
+      if (data.type === 'title_generation' && data.branch_name && currentSessionId) {
+        console.log('[Chat] Captured branch from title_generation:', data.branch_name);
+        updateMutation.mutate({ id: currentSessionId, branch: data.branch_name });
+      }
+
       // DEBUG: Log raw JSON for all events
       console.log('[SSE RAW EVENT]', eventType, JSON.stringify(data, null, 2));
 
@@ -1419,6 +1426,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
         // Invalidate sessions list to update sidebar
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
+
+        // Capture branch from completed event and update session
+        // This ensures PR buttons appear even if title_generation was missed
+        if (data.branch) {
+          console.log('[Chat] Captured branch from completed event:', data.branch);
+          updateMutation.mutate({ id: data.websiteSessionId, branch: data.branch });
+        }
 
         // Navigate to the session URL if not already there
         if (!sessionId || sessionId !== data.websiteSessionId) {
