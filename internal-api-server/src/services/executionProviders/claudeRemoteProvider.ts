@@ -13,7 +13,7 @@ import {
 } from '@webedt/shared';
 import { logger } from '@webedt/shared';
 import type { ClaudeAuth } from '../../lib/claudeAuth.js';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL, CLAUDE_ORG_UUID } from '../../config/env.js';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL, CLAUDE_ORG_UUID, CLAUDE_COOKIES, OPENROUTER_API_KEY } from '../../config/env.js';
 import type {
   ExecutionProvider,
   ExecuteParams,
@@ -92,18 +92,23 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
 
     const client = this.createClient(claudeAuth, environmentId);
 
-    // Generate title with 3-tier fallback
-    // 1. Try Claude.ai endpoint (likely won't work with API auth)
-    // 2. Try Haiku model
-    // 3. Fallback to sanitized prompt
+    // Generate title with 4-method fallback:
+    // 1. claude.ai dust endpoint (fastest, requires cookies)
+    // 2. OpenRouter API (fast, requires OPENROUTER_API_KEY)
+    // 3. Temp Sonnet session (reliable, uses OAuth)
+    // 4. Local fallback (instant)
     const generatedTitle = await generateTitle(prompt, {
-      accessToken: claudeAuth.accessToken,
+      claudeCookies: CLAUDE_COOKIES || undefined,
       orgUuid: CLAUDE_ORG_UUID || undefined,
+      openRouterApiKey: OPENROUTER_API_KEY || undefined,
+      accessToken: claudeAuth.accessToken,
+      environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || undefined,
     });
 
-    logger.info('Generated session title', {
+    logger.info('Generated session title and branch', {
       component: 'ClaudeRemoteProvider',
       title: generatedTitle.title,
+      branch_name: generatedTitle.branch_name,
       source: generatedTitle.source,
     });
 

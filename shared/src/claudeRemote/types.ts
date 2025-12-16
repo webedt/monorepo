@@ -241,19 +241,22 @@ export class ClaudeRemoteError extends Error {
  */
 export interface GeneratedTitle {
   title: string;
-  source: 'claude_ai' | 'haiku' | 'fallback';
+  branch_name: string;
+  source: 'dust' | 'openrouter' | 'session' | 'fallback';
 }
 
 /**
  * Configuration for title generator
  */
 export interface TitleGeneratorConfig {
-  /** Claude.ai session cookie (for generate_title_and_branch endpoint) */
-  sessionCookie?: string;
+  /** Claude.ai browser cookies (for dust endpoint) */
+  claudeCookies?: string;
   /** Organization UUID for Claude.ai */
   orgUuid?: string;
-  /** Anthropic API key for Haiku fallback */
-  anthropicApiKey?: string;
-  /** Access token for API calls */
+  /** OpenRouter API key (for fast title generation via Grok) */
+  openRouterApiKey?: string;
+  /** Access token for API calls (for session-based generation) */
   accessToken?: string;
+  /** Environment ID for session-based generation */
+  environmentId?: string;
 }

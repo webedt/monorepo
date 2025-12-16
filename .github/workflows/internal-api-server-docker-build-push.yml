@@ -40,6 +40,7 @@ jobs:
           echo "- GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID != '' && '✅ Set' || '❌ Not set' }}"
           echo "- GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET != '' && '✅ Set' || '❌ Not set' }}"
           echo "- OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
+          echo "- OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
           echo ""
           echo "### Variables"
           echo "- DOKPLOY_URL: ${{ vars.DOKPLOY_URL || '❌ Not set' }}"
@@ -112,6 +113,7 @@ jobs:
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           # Skip if COMPOSE_ID is not set
           if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
@@ -140,6 +142,7 @@ jobs:
           GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
           GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
           OPENAI_API_KEY=${OPENAI_API_KEY}
+          OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
           ENVEOF
           )
 
