@@ -1388,10 +1388,32 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         return;
       }
 
+      // Handle Claude Remote provider-specific events
+      // These events have a specific structure with type field directly on data
+      if (data.type === 'connected') {
+        // Provider connected event
+        content = `🔗 Connected to ${data.provider || 'execution provider'}`;
+        messageType = 'system';
+      } else if (data.type === 'session_created') {
+        // Remote session created event - has remoteSessionId and remoteWebUrl
+        content = `✨ Remote session created`;
+        if (data.remoteWebUrl) {
+          content += ` - [View on Claude.ai](${data.remoteWebUrl})`;
+        }
+        messageType = 'system';
+      } else if (data.type === 'completed' && data.totalCost !== undefined) {
+        // Completion event with cost info
+        const costStr = typeof data.totalCost === 'number' ? `$${data.totalCost.toFixed(4)}` : data.totalCost;
+        content = `✅ Completed (cost: ${costStr})`;
+        if (data.branch) {
+          content += ` - Branch: ${data.branch}`;
+        }
+        messageType = 'system';
+      }
       // Handle git commit and pull progress events
       // These events may have nested data structure: { data: { message: "..." }, type: "...", timestamp: "..." }
       // Note: Emojis are now embedded in the message by ai-coding-worker's emojiMapper
-      if (eventType === 'commit_progress') {
+      else if (eventType === 'commit_progress') {
         const message = data.data?.message || data.message;
         content = typeof data === 'string' ? data : (message || JSON.stringify(data));
         messageType = 'system';
@@ -1677,6 +1699,11 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         queryClient.invalidateQueries({ queryKey: ['session-details', data.websiteSessionId] });
         queryClient.invalidateQueries({ queryKey: ['currentSession', data.websiteSessionId] });
         queryClient.invalidateQueries({ queryKey: ['session', String(data.websiteSessionId)] });
+        // Also invalidate by current sessionId (from route) in case they differ
+        if (sessionId && sessionId !== data.websiteSessionId) {
+          queryClient.invalidateQueries({ queryKey: ['session-details', sessionId] });
+          queryClient.invalidateQueries({ queryKey: ['currentSession', sessionId] });
+        }
         // Also invalidate sessions list to update sidebar
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
