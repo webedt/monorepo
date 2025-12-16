@@ -493,17 +493,20 @@ export const sessionsApi = {
       body: data,
     }),
 
-  // Get the URL for streaming events from a running session (for reconnection)
-  getStreamUrl: (id: string) => `${getApiBaseUrl()}/api/sessions/${id}/stream`,
+  // Get the URL for streaming events from a session (SSE endpoint)
+  // Pattern: GET /api/sessions/:id/events/stream
+  // Aligns with Claude's /v1/sessions/:id/events pattern
+  getStreamUrl: (id: string) => `${getApiBaseUrl()}/api/sessions/${id}/events/stream`,
 
-  // Check if a session has an active stream
+  // Check if a session stream is available
+  // Returns true if session exists (stream will replay events and/or provide live updates)
   checkStreamActive: async (id: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/sessions/${id}/stream`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/sessions/${id}/events/stream`, {
         method: 'HEAD',
         credentials: 'include',
       });
-      // 200 means there's an active stream, 204 means no active stream
+      // 200 means stream is available
       return response.status === 200;
     } catch {
       return false;

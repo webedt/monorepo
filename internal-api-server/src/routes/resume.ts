@@ -1,7 +1,13 @@
 /**
  * Resume Route
- * Allows reconnection to in-progress or completed sessions
- * Replays stored events from database
+ *
+ * DEPRECATED: Use GET /api/sessions/:id/events/stream instead
+ * This route is kept for backwards compatibility only.
+ *
+ * The canonical endpoint for streaming session events is:
+ *   GET /api/sessions/:id/events/stream
+ *
+ * This follows Claude's API pattern of /v1/sessions/:id/events
  */
 
 import { Router, Request, Response } from 'express';
@@ -18,13 +24,17 @@ const router = Router();
 /**
  * GET /resume/:sessionId
  *
- * Reconnect to a session and replay stored events
+ * DEPRECATED: Use GET /api/sessions/:id/events/stream instead
+ *
+ * This endpoint is kept for backwards compatibility.
+ * New implementations should use the canonical endpoint:
+ *   GET /api/sessions/:id/events/stream
  *
  * Flow:
  * 1. Load session from database
- * 2. If session is 'running': Check if AI Worker is still active, reconnect or mark as completed
+ * 2. If session is 'running': Check if AI Worker is still active
  * 3. Replay stored events from database
- * 4. If session is 'completed' or 'error': Return full event history
+ * 4. Subscribe to live events if session is still running
  */
 router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;

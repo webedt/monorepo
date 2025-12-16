@@ -1233,9 +1233,21 @@ router.post('/:id/worker-status', async (req: Request, res: Response) => {
   }
 });
 
-// Stream events for a running session (SSE endpoint for reconnection)
-// This provides HYBRID replay + live: first sends stored events, then subscribes to live
-router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
+/**
+ * Stream events handler for SSE endpoint
+ *
+ * This provides HYBRID replay + live streaming:
+ * 1. Replays ALL stored events from database (wrapped in replay_start/replay_end)
+ * 2. If session is running, subscribes to live events
+ * 3. Returns completed event when done
+ *
+ * Flow:
+ * - Client connects to this endpoint
+ * - First, all stored events are sent (marked with _replayed: true)
+ * - If session is still running, live events are streamed until completion
+ * - If session is completed/error, sends completed event and closes connection
+ */
+const streamEventsHandler = async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const sessionId = req.params.id;
@@ -1262,7 +1274,7 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Check if the session is currently active in broadcaster
+    // Check if the session is currently active in broadcaster (for live events)
     const isActive = sessionEventBroadcaster.isSessionActive(sessionId);
 
     // Also check DB-backed activity for running sessions (handles server restart case)
@@ -1271,15 +1283,9 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
     const isRecentlyActive = session.status === 'running' && workerLastActivity &&
       (Date.now() - new Date(workerLastActivity).getTime() < activityThresholdMs);
 
-    // If session is not active and not recently active, return 204 (no content)
-    if (!isActive && !isRecentlyActive) {
-      logger.info(`Stream request for inactive session ${sessionId}`, { component: 'Sessions' });
-      res.status(204).end();
-      return;
-    }
-
-    logger.info(`Client reconnecting to session stream: ${sessionId}`, {
+    logger.info(`Streaming events for session: ${sessionId}`, {
       component: 'Sessions',
+      status: session.status,
       isActive,
       isRecentlyActive
     });
@@ -1292,9 +1298,21 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
       'X-Accel-Buffering': 'no'
     });
 
-    // Send a connected event
+    // Send a connected event with session info
     res.write(`event: connected\n`);
-    res.write(`data: ${JSON.stringify({ reconnected: true, sessionId })}\n\n`);
+    res.write(`data: ${JSON.stringify({
+      sessionId,
+      status: session.status,
+      isLive: isActive || isRecentlyActive,
+      sessionPath: session.sessionPath,
+      branch: session.branch,
+      baseBranch: session.baseBranch,
+      repositoryOwner: session.repositoryOwner,
+      repositoryName: session.repositoryName,
+      userRequest: session.userRequest,
+      createdAt: session.createdAt,
+      completedAt: session.completedAt
+    })}\n\n`);
 
     // PHASE 1: Replay stored events from database
     const storedEvents = await db
@@ -1333,10 +1351,16 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
       timestamp: new Date().toISOString()
     })}\n\n`);
 
-    // PHASE 2: Subscribe to live events (only if session is still active)
+    // PHASE 2: Handle based on session status
     if (isActive) {
-      // Generate a unique subscriber ID
+      // Session is actively streaming - subscribe to live events
       const subscriberId = uuidv4();
+
+      res.write(`data: ${JSON.stringify({
+        type: 'live_stream_start',
+        message: 'Now receiving live events',
+        timestamp: new Date().toISOString()
+      })}\n\n`);
 
       // Subscribe to session events
       const unsubscribe = sessionEventBroadcaster.subscribe(sessionId, subscriberId, (event) => {
@@ -1349,6 +1373,18 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
 
           // Write the live event in SSE format
           res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+
+          // If this is a completed event, end the connection
+          if (event.eventType === 'completed') {
+            res.write(`event: completed\n`);
+            res.write(`data: ${JSON.stringify({
+              websiteSessionId: sessionId,
+              completed: true,
+              replayed: false
+            })}\n\n`);
+            res.end();
+            unsubscribe();
+          }
         } catch (err) {
           logger.error(`Error writing to stream for subscriber ${subscriberId}`, err as Error, { component: 'Sessions' });
           unsubscribe();
@@ -1367,14 +1403,14 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
         unsubscribe();
       });
     } else {
-      // Session is not in active broadcaster but was recently active
-      // Send completion event since we can't subscribe to live stream
+      // Session is not actively streaming (completed, error, or orphaned)
+      // Send completion event and close connection
       res.write(`event: completed\n`);
       res.write(`data: ${JSON.stringify({
         websiteSessionId: sessionId,
         completed: true,
         replayed: true,
-        note: 'Live stream not available, events replayed from database'
+        status: session.status
       })}\n\n`);
       res.end();
     }
@@ -1385,6 +1421,14 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response) => {
       res.status(500).json({ success: false, error: 'Failed to stream session events' });
     }
   }
-});
+};
+
+// Register the stream events endpoint
+// Primary: GET /api/sessions/:id/events/stream (aligns with Claude's /v1/sessions/:id/events pattern)
+router.get('/:id/events/stream', requireAuth, streamEventsHandler);
+
+// Backwards compatibility: GET /api/sessions/:id/stream
+// DEPRECATED: Use /api/sessions/:id/events/stream instead
+router.get('/:id/stream', requireAuth, streamEventsHandler);
 
 export default router;
