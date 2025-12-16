@@ -208,6 +208,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const previousSessionIdRef = useRef<string | undefined>(undefined); // Track session changes for initial scroll
   const isInitialSessionLoadRef = useRef(false); // Track initial session load to skip scroll preservation
   const wasStreamingRef = useRef(false); // Track if we were streaming, to preserve scroll when stream ends
+  const shouldAutoScrollDuringStreamRef = useRef(true); // Track if we should auto-scroll during active streaming
   const pendingUserMessagesRef = useRef<Message[]>([]); // Track user messages added locally but not yet in DB
   const [lastRequest, setLastRequest] = useState<{
     input: string;
@@ -903,7 +904,20 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       const distanceFromBottom = maxScroll - scrollPosition;
 
       // Track if user is near bottom (within 150px) for smart auto-scroll
+      const wasNearBottom = isNearBottomRef.current;
       isNearBottomRef.current = distanceFromBottom < 150;
+
+      // If user manually scrolls away from bottom during streaming, disable auto-scroll
+      // This allows users to read previous messages without being pulled to bottom
+      if (isExecuting && wasNearBottom && !isNearBottomRef.current) {
+        shouldAutoScrollDuringStreamRef.current = false;
+        console.log('[Chat] User scrolled away during streaming, disabling auto-scroll');
+      }
+      // If user scrolls back to bottom during streaming, re-enable auto-scroll
+      else if (isExecuting && !wasNearBottom && isNearBottomRef.current) {
+        shouldAutoScrollDuringStreamRef.current = true;
+        console.log('[Chat] User scrolled back to bottom during streaming, enabling auto-scroll');
+      }
 
       // At bottom or closer to bottom -> show "scroll to top"
       // At top or closer to top -> show "scroll to bottom"
@@ -930,21 +944,27 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Add scroll listener
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [messages.length]); // Re-attach when messages change
+  }, [messages.length, isExecuting]); // Re-attach when messages change or execution state changes
 
   // Smart auto-scroll: only scroll to bottom when messages change AND user is near bottom
   // Note: During streaming, new messages are added via setMessages in the SSE handler,
   // which triggers this effect. After stream completion, messages are updated via the
   // merge effect which handles its own scrolling - we use isNearBottomRef to coordinate.
   useEffect(() => {
-    // Only auto-scroll if user is near the bottom - respect their scroll position
-    // The merge effect handles scroll for DB-fetched messages, so this primarily
-    // handles live streaming messages. Using 'smooth' behavior for streaming gives
-    // a nice UX as messages come in.
+    // During active streaming, use the captured scroll position from when streaming started
+    // This prevents "falling behind" during rapid message updates
+    if (isExecuting && shouldAutoScrollDuringStreamRef.current && !isInitialSessionLoadRef.current) {
+      // Use instant scroll during streaming for better performance with rapid updates
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      return;
+    }
+
+    // For non-streaming updates, only auto-scroll if user is near the bottom
+    // Using 'smooth' behavior gives a nice UX for normal interactions
     if (isNearBottomRef.current && !isInitialSessionLoadRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, isExecuting]);
 
   // Scroll to bottom when entering a session (e.g., from My Sessions page)
   // This ensures users see the latest messages when opening an existing session
@@ -1015,6 +1035,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       hasUserEditedTitleRef.current = false;
       pendingUserMessagesRef.current = []; // Clear pending messages for new session
       wasStreamingRef.current = false; // Clear streaming flag for new session
+      shouldAutoScrollDuringStreamRef.current = true; // Reset auto-scroll flag for new session
 
       // Reset local isExecuting only if there's no active worker in global store
       // This prevents losing track of executing workers during navigation
@@ -1282,6 +1303,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       workerStore.setActiveStream(true);
       // Track that we're now streaming - used to preserve scroll when stream ends
       wasStreamingRef.current = true;
+      // Capture if user is near bottom when streaming starts - if they are, we'll auto-scroll during streaming
+      shouldAutoScrollDuringStreamRef.current = isNearBottomRef.current;
+      console.log('[Chat] SSE stream connected, shouldAutoScrollDuringStream:', shouldAutoScrollDuringStreamRef.current);
       // Clear reconnection flag on successful connection
       if (isReconnecting) {
         console.log('[Chat] Reconnection successful, now receiving live events');
@@ -1376,6 +1400,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Set executing state immediately to prevent duplicate submissions
     setIsExecuting(true);
+
+    // When user submits a message, they're at the bottom of the chat - enable auto-scroll
+    shouldAutoScrollDuringStreamRef.current = true;
 
     // Start execution in global worker store (for the session we're about to use)
     const targetSessionId = currentSessionId || 'pending-new-session';
@@ -1495,6 +1522,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   const handleRetry = () => {
     if (!lastRequest || isExecuting) return;
+
+    // When user retries, they're at the bottom of the chat - enable auto-scroll
+    shouldAutoScrollDuringStreamRef.current = true;
 
     // Add user message for retry
     messageIdCounter.current += 1;
@@ -1655,6 +1685,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
         // Set executing state and start stream
         setIsExecuting(true);
+
+        // Enable auto-scroll for queued messages
+        shouldAutoScrollDuringStreamRef.current = true;
 
         // Start worker tracking for queued message
         if (currentSessionId) {
