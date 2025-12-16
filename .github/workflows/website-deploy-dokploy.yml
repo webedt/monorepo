@@ -437,7 +437,7 @@ jobs:
             REPO="${{ steps.metadata.outputs.repo }}"
             PROJECT="${{ steps.metadata.outputs.project }}"
             BRANCH="${{ steps.metadata.outputs.branch }}"
-            DOMAIN="webedit.etdofresh.com"
+            DOMAIN="webedt.etdofresh.com"
             PATH_PREFIX="/github/${OWNER}/${REPO}/${BRANCH}/"
 
             # Check if domain already exists to avoid duplicates
