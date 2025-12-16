@@ -103,7 +103,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
     }
 
-    const repoUrl = github?.repoUrl;
+    let repoUrl = github?.repoUrl;
 
     logger.info('Execute Remote request received', {
       component: 'ExecuteRemoteRoute',
@@ -119,8 +119,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       return;
     }
 
-    if (!repoUrl) {
-      res.status(400).json({ success: false, error: 'github.repoUrl is required' });
+    // For resume requests, we may not have github.repoUrl - will get it from existing session
+    // Only validate repoUrl for new sessions (no websiteSessionId)
+    if (!repoUrl && !websiteSessionId) {
+      res.status(400).json({ success: false, error: 'github.repoUrl is required for new sessions' });
       return;
     }
 
@@ -196,6 +198,16 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       if (existingSession) {
         chatSession = existingSession;
 
+        // Get repoUrl from existing session if not provided in request
+        if (!repoUrl && existingSession.repositoryUrl) {
+          repoUrl = existingSession.repositoryUrl;
+          logger.info('Using repositoryUrl from existing session', {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+            repositoryUrl: repoUrl,
+          });
+        }
+
         // Check if we're resuming
         if (existingSession.remoteSessionId) {
           logger.info('Resuming existing remote session', {
@@ -205,6 +217,12 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           });
         }
       }
+    }
+
+    // Final validation - ensure we have repoUrl (either from request or existing session)
+    if (!repoUrl) {
+      res.status(400).json({ success: false, error: 'github.repoUrl is required' });
+      return;
     }
 
     if (!chatSession) {

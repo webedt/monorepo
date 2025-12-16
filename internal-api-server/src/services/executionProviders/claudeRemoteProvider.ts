@@ -23,20 +23,46 @@ import type {
 } from './types.js';
 
 /**
+ * Extract text content from message (handles both string and content blocks)
+ */
+function extractTextContent(message: any): string | undefined {
+  if (!message?.content) return undefined;
+
+  // If content is a string, return it
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+
+  // If content is an array of content blocks, extract text
+  if (Array.isArray(message.content)) {
+    const textParts = message.content
+      .filter((block: any) => block.type === 'text')
+      .map((block: any) => block.text)
+      .filter(Boolean);
+    return textParts.length > 0 ? textParts.join('\n') : undefined;
+  }
+
+  return undefined;
+}
+
+/**
  * Map Anthropic session events to our ExecutionEvent format
  */
 function mapSessionEvent(event: SessionEvent, source: string): ExecutionEvent {
   const timestamp = new Date().toISOString();
 
   switch (event.type) {
-    case 'user':
+    case 'user': {
+      // Extract actual user message content
+      const userContent = extractTextContent(event.message);
       return {
         type: 'message',
         timestamp,
         source,
         stage: 'user_message',
-        message: 'User message received',
+        message: userContent ? `User: ${userContent.slice(0, 100)}${userContent.length > 100 ? '...' : ''}` : 'User message received',
       };
+    }
 
     case 'assistant':
       return {
@@ -55,34 +81,72 @@ function mapSessionEvent(event: SessionEvent, source: string): ExecutionEvent {
         duration_ms: event.duration_ms,
       };
 
-    case 'tool_use':
+    case 'tool_use': {
+      // Show tool name and input summary
+      const toolName = event.tool_use?.name || 'unknown';
+      const toolInput = event.tool_use?.input;
+      let inputSummary = '';
+      if (toolInput) {
+        // Try to extract meaningful info from input
+        if (typeof toolInput === 'object') {
+          const keys = Object.keys(toolInput);
+          if (keys.includes('command')) {
+            inputSummary = `: ${toolInput.command}`;
+          } else if (keys.includes('path') || keys.includes('file_path')) {
+            inputSummary = `: ${toolInput.path || toolInput.file_path}`;
+          } else if (keys.includes('content') && typeof toolInput.content === 'string') {
+            inputSummary = ` (${toolInput.content.length} chars)`;
+          }
+        }
+      }
       return {
         type: 'message',
         timestamp,
         source,
         stage: 'tool_use',
-        message: `Using tool: ${event.tool_use?.name || 'unknown'}`,
+        message: `Tool: ${toolName}${inputSummary}`,
       };
+    }
 
-    case 'tool_result':
+    case 'tool_result': {
+      const isError = event.tool_use_result?.is_error;
+      const stdout = event.tool_use_result?.stdout;
+      const stderr = event.tool_use_result?.stderr;
+      let message = 'Tool completed';
+
+      if (isError) {
+        message = `Tool error: ${stderr || stdout || 'Unknown error'}`;
+        // Truncate long error messages
+        if (message.length > 200) {
+          message = message.slice(0, 200) + '...';
+        }
+      } else if (stdout) {
+        // Show a preview of the output
+        const preview = stdout.slice(0, 100);
+        message = `Result: ${preview}${stdout.length > 100 ? '...' : ''}`;
+      }
+
       return {
         type: 'message',
         timestamp,
         source,
         stage: 'tool_result',
-        message: event.tool_use_result?.is_error
-          ? `Tool error: ${event.tool_use_result.stderr || 'Unknown error'}`
-          : 'Tool completed',
+        message,
       };
+    }
 
-    case 'env_manager_log':
+    case 'env_manager_log': {
+      // Show actual message from environment manager
+      const envMessage = event.data?.message;
+      const envType = event.data?.type || 'env_manager';
       return {
         type: 'message',
         timestamp,
         source,
-        stage: event.data?.type || 'env_manager',
-        message: event.data?.message || 'Environment manager event',
+        stage: envType,
+        message: envMessage || `Environment: ${envType}`,
       };
+    }
 
     case 'error':
       return {
