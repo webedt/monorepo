@@ -6,7 +6,8 @@
 import * as os from 'os';
 
 // Server configuration
-export const PORT = parseInt(process.env.PORT || '3000', 10);
+// API_PORT takes precedence over PORT for clarity in monorepo setup
+export const PORT = parseInt(process.env.API_PORT || process.env.PORT || '3001', 10);
 export const NODE_ENV = process.env.NODE_ENV || 'development';
 export const CONTAINER_ID = os.hostname();
 

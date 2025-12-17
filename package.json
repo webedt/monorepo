@@ -10,43 +10,40 @@
     "install:server": "cd website/server && npm install",
     "install:api": "cd internal-api-server && npm install",
     "install:worker": "cd ai-coding-worker && npm install",
-
     "build": "npm run build:shared && npm run build:client && npm run build:server && npm run build:api && npm run build:worker",
     "build:shared": "cd shared && npm run build",
     "build:client": "cd website/client && npm run build",
     "build:server": "cd website/server && npm run build",
     "build:api": "cd internal-api-server && npm run build",
     "build:worker": "cd ai-coding-worker && npm run build",
-
-    "dev": "concurrently -n client,server,api -c blue,green,yellow \"npm run dev:client\" \"npm run dev:server\" \"npm run dev:api\"",
+    "predev": "node scripts/predev.js",
+    "dev": "dotenv -- concurrently -n client,server,api -c blue,green,yellow \"npm run dev:client\" \"npm run dev:server\" \"npm run dev:api\"",
     "dev:client": "cd website/client && npm run dev",
     "dev:server": "cd website/server && npm run dev",
     "dev:api": "cd internal-api-server && npm run dev",
     "dev:client-only": "cd website/client && npm run dev",
-
-    "docker:db": "docker run -d --name webedt-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=webedt postgres:15",
-    "docker:db:stop": "docker stop webedt-postgres && docker rm webedt-postgres",
+    "docker:db": "docker start webedt-postgres 2>/dev/null || docker run -d --name webedt-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=webedt postgres:15",
+    "docker:db:stop": "docker stop webedt-postgres || true",
+    "docker:db:rm": "docker stop webedt-postgres 2>/dev/null; docker rm webedt-postgres 2>/dev/null || true",
     "dev:worker": "cd ai-coding-worker && npm run dev",
-
     "start": "node scripts/start.js",
     "start:server": "cd website/server && npm start",
     "start:api": "cd internal-api-server && npm start",
     "start:worker": "cd ai-coding-worker && npm start",
-
     "clean": "npm run clean:shared && npm run clean:client && npm run clean:server && npm run clean:api && npm run clean:worker",
     "clean:shared": "cd shared && npm run clean || true",
     "clean:client": "cd website/client && npm run clean || true",
     "clean:server": "cd website/server && rm -rf dist || true",
     "clean:api": "cd internal-api-server && npm run clean || true",
     "clean:worker": "cd ai-coding-worker && rm -rf dist || true",
-
     "db:generate": "cd internal-api-server && npm run db:generate",
     "db:migrate": "cd internal-api-server && npm run db:migrate",
     "db:push": "cd internal-api-server && npm run db:push",
     "db:studio": "cd internal-api-server && npm run db:studio"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "dotenv-cli": "^11.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
