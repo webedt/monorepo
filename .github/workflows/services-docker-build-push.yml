@@ -201,6 +201,8 @@ jobs:
           # Configure path-based domain routing
           DOMAIN="webedt.etdofresh.com"
           PATH_PREFIX="/github/${OWNER}/${REPO}/${BRANCH}/"
+          # Normalize path for comparison (remove trailing slash)
+          PATH_NORMALIZED="${PATH_PREFIX%/}"
 
           # Check if domain already exists
           APP_DETAILS=$(curl -s -X 'POST' \
@@ -210,8 +212,19 @@ jobs:
             -H "x-api-key: ${DOKPLOY_API_KEY}" \
             -d "{\"json\": {\"applicationId\": \"${APP_ID}\"}}")
 
-          DOMAIN_EXISTS=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" --arg path "$PATH_PREFIX" \
-            '.result.data.json.domains[]? | select(.host == $domain and .path == $path) | .domainId' | head -n1)
+          # Debug: Show existing domains
+          EXISTING_DOMAINS=$(echo "$APP_DETAILS" | jq -r '.result.data.json.domains[]? | "\(.host) \(.path)"' 2>/dev/null || echo "")
+          if [ -n "$EXISTING_DOMAINS" ]; then
+            echo "📋 Existing domains:"
+            echo "$EXISTING_DOMAINS" | while read line; do echo "   - $line"; done
+          fi
+
+          # Check for existing domain (compare with and without trailing slash)
+          DOMAIN_EXISTS=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" --arg path "$PATH_PREFIX" --arg pathNorm "$PATH_NORMALIZED" \
+            '.result.data.json.domains[]? | select(.host == $domain and (.path == $path or .path == $pathNorm or .path == ($pathNorm + "/"))) | .domainId' | head -n1)
+
+          echo "🔍 Checking for domain: ${DOMAIN}${PATH_PREFIX}"
+          echo "   Domain exists check result: '${DOMAIN_EXISTS}'"
 
           if [ -z "$DOMAIN_EXISTS" ] || [ "$DOMAIN_EXISTS" = "null" ]; then
             echo "🌐 Creating domain: https://${DOMAIN}${PATH_PREFIX}"
@@ -236,7 +249,7 @@ jobs:
 
             echo "✅ Domain created"
           else
-            echo "ℹ️  Domain already exists"
+            echo "ℹ️  Domain already exists (ID: ${DOMAIN_EXISTS})"
           fi
 
           echo "application_id=${APP_ID}" >> $GITHUB_OUTPUT
