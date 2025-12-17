@@ -154,7 +154,7 @@ jobs:
             fi
           fi
 
-          # Configure GitHub provider to build from services/Dockerfile
+          # Configure GitHub provider for build
           echo "🔗 Configuring GitHub provider..."
           REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
           REPO_NAME="${GITHUB_REPOSITORY##*/}"
@@ -190,7 +190,7 @@ jobs:
                 \"applicationId\": \"${APP_ID}\",
                 \"replicas\": 1,
                 \"buildType\": \"dockerfile\",
-                \"dockerfile\": \"services/Dockerfile\",
+                \"dockerfile\": \"Dockerfile\",
                 \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_COMMIT_SHA=${BUILD_SHA}\",
                 \"autoDeploy\": false
               }
@@ -318,7 +318,7 @@ jobs:
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
           echo "🚀 Deploying ${APP_NAME}..."
-          echo "   Dokploy will build the Docker image from root using services/Dockerfile"
+          echo "   Dokploy will build the Docker image from root Dockerfile"
 
           RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
             "${DOKPLOY_URL}/api/trpc/application.deploy" \
@@ -344,7 +344,7 @@ jobs:
           echo "- **Application**: ${{ steps.metadata.outputs.app_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Path**: services/Dockerfile" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Path**: Dockerfile (root)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ job.status }}" = "success" ]; then
             echo "✅ Deployment triggered successfully" >> $GITHUB_STEP_SUMMARY
