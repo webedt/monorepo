@@ -539,7 +539,7 @@ const executeHandler = async (req: Request, res: Response) => {
               codingAssistantProvider: providerName,
               codingAssistantAuthentication: providerAuth
             },
-            (event) => {
+            async (event) => {
               // Forward progress events with endpoint context
               const eventType = event.type === 'progress' ? 'message' : event.type;
               sendEvent({
@@ -550,6 +550,56 @@ const executeHandler = async (req: Request, res: Response) => {
                 endpoint: event.endpoint,
                 source: 'internal-api-server'
               });
+
+              // Save title and branch to database immediately when generated
+              // This ensures they're saved even if user disconnects before initSession completes
+              const eventData = event.data as { sessionName?: string; branchName?: string; sessionPath?: string } | undefined;
+              if (event.type === 'session_name' && eventData?.sessionName) {
+                try {
+                  await db
+                    .update(chatSessions)
+                    .set({ userRequest: eventData.sessionName })
+                    .where(eq(chatSessions.id, chatSession.id));
+                  logger.info('Session title saved to database', {
+                    component: 'ExecuteRoute',
+                    sessionId: chatSession.id,
+                    title: eventData.sessionName
+                  });
+                } catch (err) {
+                  logger.error('Failed to save session title', err as Error, {
+                    component: 'ExecuteRoute',
+                    sessionId: chatSession.id
+                  });
+                }
+              }
+
+              if (event.type === 'branch_created' && eventData?.branchName) {
+                try {
+                  const sessionPath = eventData.sessionPath || generateSessionPath(
+                    chatSession.repositoryOwner || parseRepoUrl(effectiveRepoUrl).owner,
+                    chatSession.repositoryName || parseRepoUrl(effectiveRepoUrl).repo,
+                    eventData.branchName
+                  );
+                  await db
+                    .update(chatSessions)
+                    .set({
+                      branch: eventData.branchName,
+                      sessionPath: sessionPath
+                    })
+                    .where(eq(chatSessions.id, chatSession.id));
+                  logger.info('Branch info saved to database', {
+                    component: 'ExecuteRoute',
+                    sessionId: chatSession.id,
+                    branch: eventData.branchName,
+                    sessionPath
+                  });
+                } catch (err) {
+                  logger.error('Failed to save branch info', err as Error, {
+                    component: 'ExecuteRoute',
+                    sessionId: chatSession.id
+                  });
+                }
+              }
             }
           );
 
