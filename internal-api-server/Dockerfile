@@ -6,7 +6,14 @@ ARG BUILD_TIMESTAMP=unknown
 ARG BUILD_IMAGE_TAG=unknown
 
 # Install git, python3, and build tools (needed for bcrypt native compilation on ARM64)
-RUN apt-get update && apt-get install -y git python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Uses retry logic for transient network failures
+RUN for i in 1 2 3 4 5; do \
+        rm -rf /var/lib/apt/lists/* && \
+        apt-get update && \
+        apt-get install -y git python3 make g++ && \
+        break || { echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; sleep $((i * 2)); }; \
+    done && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
