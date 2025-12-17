@@ -58,8 +58,11 @@ RUN npm run build
 # =============================================================================
 FROM node:20-slim AS api-build
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Install build dependencies (with retry for transient network failures)
+RUN for i in 1 2 3 4 5; do \
+        apt-get update && break || { echo "Retry $i/5 apt-get update..."; sleep $((i * 2)); }; \
+    done && \
+    apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -119,13 +122,16 @@ ARG BUILD_COMMIT_SHA
 ARG BUILD_TIMESTAMP
 ARG BUILD_IMAGE_TAG
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    python3 \
-    make \
-    g++ \
+# Install runtime dependencies (with retry for transient network failures)
+RUN for i in 1 2 3 4 5; do \
+        apt-get update && break || { echo "Retry $i/5 apt-get update..."; sleep $((i * 2)); }; \
+    done && \
+    apt-get install -y \
+        git \
+        curl \
+        python3 \
+        make \
+        g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI (direct binary download - avoids apt repository timeout issues)
