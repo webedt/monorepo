@@ -278,3 +278,13 @@ export interface TitleGenerationEvent {
  * Callback for title generation progress events
  */
 export type TitleGenerationCallback = (event: TitleGenerationEvent) => void | Promise<void>;
+
+/**
+ * Response from GET /v1/sessions (list)
+ */
+export interface ListSessionsResponse {
+  data: Session[];
+  first_id?: string;
+  last_id?: string;
+  has_more: boolean;
+}
