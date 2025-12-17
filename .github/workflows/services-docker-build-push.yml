@@ -2,9 +2,6 @@ name: Services - Build and Deploy Consolidated Image
 
 on:
   push:
-    branches:
-      - main
-      - 'local/**'
     paths:
       - "services/**"
       - "internal-api-server/**"
@@ -12,13 +9,16 @@ on:
       - "website/**"
       - "shared/**"
       - ".github/workflows/services-docker-build-push.yml"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [deploy-main]
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}/services
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: self-hosted
     permissions:
       contents: read
@@ -37,14 +37,21 @@ jobs:
           echo ""
           echo "### Variables"
           echo "- DOKPLOY_URL: ${{ vars.DOKPLOY_URL || '❌ Not set' }}"
-          echo "- DOKPLOY_SERVICES_COMPOSE_ID: ${{ vars.DOKPLOY_SERVICES_COMPOSE_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_PROJECT_ID: ${{ vars.DOKPLOY_PROJECT_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_ENVIRONMENT_ID: ${{ vars.DOKPLOY_ENVIRONMENT_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_SERVER_ID: ${{ vars.DOKPLOY_SERVER_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_GITHUB_ID: ${{ vars.DOKPLOY_GITHUB_ID || '❌ Not set' }}"
           echo ""
           echo "### Environment"
           echo "- REGISTRY: ${{ env.REGISTRY }}"
           echo "- IMAGE_NAME: ${{ env.IMAGE_NAME }}"
+          echo "- Branch: ${{ github.ref_name }}"
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'repository_dispatch' && 'main' || github.ref }}
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -83,7 +90,59 @@ jobs:
           echo "📦 Version: ${BUILD_VERSION}"
           echo "📅 Timestamp: ${BUILD_TIMESTAMP}"
 
-      - name: Extract metadata (tags, labels)
+      - name: Generate deployment metadata
+        id: metadata
+        run: |
+          # Extract repository owner and name
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]' | tr '/' '-')
+          REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+
+          # Get branch name (handle both push and PR events)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BRANCH=$(echo "${{ github.head_ref }}" | tr '/' '-')
+          else
+            BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | tr '/' '-')
+          fi
+
+          # Get short SHA
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          # Application name in Dokploy
+          APP_NAME="${OWNER}-${REPO}-services-${BRANCH}"
+
+          # DNS subdomain limit is 63 characters
+          MAX_LENGTH=63
+
+          # Progressive fallback strategy for DOMAIN name
+          CANDIDATE="${OWNER}-${REPO}-services-${BRANCH}"
+          if [ ${#CANDIDATE} -le $MAX_LENGTH ]; then
+            DOMAIN_NAME="$CANDIDATE"
+          else
+            CANDIDATE="${REPO}-services-${BRANCH}"
+            if [ ${#CANDIDATE} -le $MAX_LENGTH ]; then
+              DOMAIN_NAME="$CANDIDATE"
+            else
+              # Use hash as last resort
+              HASH=$(echo "${OWNER}-${REPO}-services-${BRANCH}" | sha256sum | cut -c1-$MAX_LENGTH)
+              DOMAIN_NAME="${HASH}"
+            fi
+          fi
+
+          echo "owner=${OWNER}" >> $GITHUB_OUTPUT
+          echo "repo=${REPO}" >> $GITHUB_OUTPUT
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "app_name=${APP_NAME}" >> $GITHUB_OUTPUT
+          echo "domain_name=${DOMAIN_NAME}" >> $GITHUB_OUTPUT
+
+          echo "📊 Deployment Metadata:"
+          echo "  - Owner: ${OWNER}"
+          echo "  - Repo: ${REPO}"
+          echo "  - Branch: ${BRANCH}"
+          echo "  - App Name: ${APP_NAME}"
+          echo "  - Domain Name: ${DOMAIN_NAME}"
+
+      - name: Extract Docker metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -92,7 +151,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix=sha-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/local/') }}
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -114,12 +173,193 @@ jobs:
       - name: Image digest
         run: echo "Image pushed with digest ${{ steps.build-and-push.outputs.digest }}"
 
-      - name: Configure Compose Environment Variables
+      - name: Get or Create Dokploy Application
+        id: dokploy_app
         if: github.event_name != 'pull_request'
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          COMPOSE_ID: ${{ vars.DOKPLOY_SERVICES_COMPOSE_ID }}
+          DOKPLOY_PROJECT_ID: ${{ vars.DOKPLOY_PROJECT_ID }}
+          DOKPLOY_ENVIRONMENT_ID: ${{ vars.DOKPLOY_ENVIRONMENT_ID }}
+          DOKPLOY_GITHUB_ID: ${{ vars.DOKPLOY_GITHUB_ID }}
+          DOKPLOY_SERVER_ID: ${{ vars.DOKPLOY_SERVER_ID }}
+          APP_NAME: ${{ steps.metadata.outputs.app_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_BRANCH: ${{ github.ref_name }}
+          OWNER: ${{ steps.metadata.outputs.owner }}
+          REPO: ${{ steps.metadata.outputs.repo }}
+          BRANCH: ${{ steps.metadata.outputs.branch }}
+        run: |
+          # Strip trailing slash from DOKPLOY_URL if present
+          DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          echo "🔍 Checking if application '${APP_NAME}' exists..."
+
+          # Get all projects to find if our application exists
+          PROJECTS=$(curl -s -X 'GET' \
+            "${DOKPLOY_URL}/api/project.all" \
+            -H 'accept: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}")
+
+          # Try to find existing application by name
+          APP_ID=$(echo "$PROJECTS" | jq -r --arg name "$APP_NAME" '
+            .[] | select(.projectId == env.DOKPLOY_PROJECT_ID) |
+            .environments[]? | select(.environmentId == env.DOKPLOY_ENVIRONMENT_ID) |
+            .applications[]? | select(.name == $name) | .applicationId
+          ' | head -n1)
+
+          if [ -n "$APP_ID" ] && [ "$APP_ID" != "null" ]; then
+            echo "✅ Found existing application: ${APP_ID}"
+            echo "app_created=false" >> $GITHUB_OUTPUT
+          else
+            echo "📦 Application not found. Creating new application..."
+
+            # Create new application
+            CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+              "${DOKPLOY_URL}/api/trpc/application.create" \
+              -H 'accept: application/json' \
+              -H 'Content-Type: application/json' \
+              -H "x-api-key: ${DOKPLOY_API_KEY}" \
+              -d "{
+                \"json\": {
+                  \"name\": \"${APP_NAME}\",
+                  \"projectId\": \"${DOKPLOY_PROJECT_ID}\",
+                  \"environmentId\": \"${DOKPLOY_ENVIRONMENT_ID}\",
+                  \"serverId\": \"${DOKPLOY_SERVER_ID}\"
+                }
+              }")
+
+            CREATE_HTTP_CODE=$(echo "$CREATE_RESPONSE" | tail -n1)
+            CREATE_BODY=$(echo "$CREATE_RESPONSE" | sed '$d')
+
+            if [ "$CREATE_HTTP_CODE" -ge 200 ] && [ "$CREATE_HTTP_CODE" -lt 300 ]; then
+              APP_ID=$(echo "$CREATE_BODY" | jq -r '.result.data.json.applicationId // .result.data.applicationId // .applicationId')
+              echo "✅ Application created successfully: ${APP_ID}"
+              echo "app_created=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Failed to create application (HTTP ${CREATE_HTTP_CODE})"
+              echo "Response: ${CREATE_BODY}"
+              exit 1
+            fi
+          fi
+
+          # Configure GitHub provider to build from services/Dockerfile
+          echo "🔗 Configuring GitHub provider..."
+          REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+
+          GITHUB_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/application.saveGithubProvider" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"applicationId\": \"${APP_ID}\",
+                \"githubId\": \"${DOKPLOY_GITHUB_ID}\",
+                \"repository\": \"${REPO_NAME}\",
+                \"owner\": \"${REPO_OWNER}\",
+                \"branch\": \"${GITHUB_BRANCH}\",
+                \"buildPath\": \"services\",
+                \"enableSubmodules\": false,
+                \"autoDeploy\": false
+              }
+            }")
+
+          GITHUB_HTTP_CODE=$(echo "$GITHUB_RESPONSE" | tail -n1)
+          if [ "$GITHUB_HTTP_CODE" -ge 200 ] && [ "$GITHUB_HTTP_CODE" -lt 300 ]; then
+            echo "✅ GitHub provider configured (buildPath: services)"
+          else
+            echo "⚠️  Warning: Failed to configure GitHub provider (HTTP ${GITHUB_HTTP_CODE})"
+          fi
+
+          # Update deployment settings
+          BUILD_VERSION="${{ steps.version.outputs.version }}"
+          BUILD_TIMESTAMP="${{ steps.version.outputs.timestamp }}"
+          BUILD_SHA="${{ github.sha }}"
+
+          UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/application.update" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"applicationId\": \"${APP_ID}\",
+                \"replicas\": 1,
+                \"buildType\": \"dockerfile\",
+                \"dockerfile\": \"Dockerfile\",
+                \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_COMMIT_SHA=${BUILD_SHA}\",
+                \"autoDeploy\": false
+              }
+            }")
+
+          UPDATE_HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
+          if [ "$UPDATE_HTTP_CODE" -ge 200 ] && [ "$UPDATE_HTTP_CODE" -lt 300 ]; then
+            echo "✅ Deployment settings updated"
+          else
+            echo "⚠️  Warning: Failed to update deployment settings"
+          fi
+
+          # Configure path-based domain routing
+          DOMAIN="webedt.etdofresh.com"
+          PATH_PREFIX="/github/${OWNER}/${REPO}/${BRANCH}/"
+
+          # Check if domain already exists
+          APP_DETAILS=$(curl -s -X 'POST' \
+            "${DOKPLOY_URL}/api/trpc/application.one" \
+            -H 'accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H "x-api-key: ${DOKPLOY_API_KEY}" \
+            -d "{
+              \"json\": {
+                \"applicationId\": \"${APP_ID}\"
+              }
+            }")
+
+          DOMAIN_EXISTS=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" --arg path "$PATH_PREFIX" \
+            '.result.data.json.domains[]? | select(.host == $domain and .path == $path) | .domainId' | head -n1)
+
+          if [ -z "$DOMAIN_EXISTS" ] || [ "$DOMAIN_EXISTS" = "null" ]; then
+            echo "🌐 Creating domain with path: https://${DOMAIN}${PATH_PREFIX}"
+
+            DOMAIN_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+              "${DOKPLOY_URL}/api/trpc/domain.create" \
+              -H 'accept: application/json' \
+              -H 'Content-Type: application/json' \
+              -H "x-api-key: ${DOKPLOY_API_KEY}" \
+              -d "{
+                \"json\": {
+                  \"applicationId\": \"${APP_ID}\",
+                  \"host\": \"${DOMAIN}\",
+                  \"path\": \"${PATH_PREFIX}\",
+                  \"port\": 3000,
+                  \"https\": true,
+                  \"certificateType\": \"letsencrypt\",
+                  \"domainType\": \"application\",
+                  \"stripPath\": true
+                }
+              }")
+
+            DOMAIN_HTTP_CODE=$(echo "$DOMAIN_RESPONSE" | tail -n1)
+            if [ "$DOMAIN_HTTP_CODE" -ge 200 ] && [ "$DOMAIN_HTTP_CODE" -lt 300 ]; then
+              echo "✅ Domain created: https://${DOMAIN}${PATH_PREFIX}"
+            else
+              echo "⚠️  Warning: Failed to create domain"
+            fi
+          else
+            echo "ℹ️  Domain already exists: https://${DOMAIN}${PATH_PREFIX}"
+          fi
+
+          echo "application_id=${APP_ID}" >> $GITHUB_OUTPUT
+          echo "domain=${DOMAIN}${PATH_PREFIX}" >> $GITHUB_OUTPUT
+
+      - name: Configure Environment Variables
+        if: github.event_name != 'pull_request'
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
           # Database
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # MinIO Storage
@@ -141,20 +381,9 @@ jobs:
           # Claude Remote Sessions
           CLAUDE_ENVIRONMENT_ID: ${{ secrets.CLAUDE_ENVIRONMENT_ID }}
         run: |
-          # Skip if COMPOSE_ID is not set
-          if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
-            echo "⚠️ DOKPLOY_SERVICES_COMPOSE_ID not set, skipping environment configuration"
-            echo "📦 Image was pushed successfully to registry"
-            echo "ℹ️ To enable auto-deployment:"
-            echo "   1. Create a Compose in Dokploy for services"
-            echo "   2. Set DOKPLOY_SERVICES_COMPOSE_ID variable in GitHub"
-            exit 0
-          fi
-
-          # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
-          echo "🔧 Configuring environment variables for services..."
+          echo "🔧 Configuring environment variables..."
 
           # Build environment variables string
           ENV_VARS=$(cat <<ENVEOF
@@ -182,41 +411,31 @@ jobs:
           ENVEOF
           )
 
-          # Remove leading whitespace and escape for JSON
           ENV_VARS_CLEANED=$(echo "$ENV_VARS" | sed 's/^[[:space:]]*//')
           ENV_VARS_ESCAPED=$(echo "$ENV_VARS_CLEANED" | jq -Rs .)
 
           echo "  ✅ NODE_ENV=production"
-          echo "  ✅ WEBSITE_PORT=3000"
-          echo "  ✅ API_PORT=3001"
           echo "  ✅ WORKER_POOL_MODE=local"
-          echo "  ✅ WORKER_POOL_SIZE=2"
           echo "  ✅ DATABASE_URL=***"
           echo "  ✅ MINIO_ENDPOINT=${MINIO_ENDPOINT}"
-          echo "  ✅ SESSION_SECRET=***"
-          echo ""
 
-          # Update compose environment variables
           UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
-            "${DOKPLOY_URL}/api/trpc/compose.update" \
+            "${DOKPLOY_URL}/api/trpc/application.update" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \
             -H "x-api-key: ${DOKPLOY_API_KEY}" \
             -d "{
               \"json\": {
-                \"composeId\": \"${COMPOSE_ID}\",
+                \"applicationId\": \"${APPLICATION_ID}\",
                 \"env\": ${ENV_VARS_ESCAPED}
               }
             }")
 
           UPDATE_HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
-          UPDATE_BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
-
           if [ "$UPDATE_HTTP_CODE" -ge 200 ] && [ "$UPDATE_HTTP_CODE" -lt 300 ]; then
-            echo "✅ Environment variables configured successfully"
+            echo "✅ Environment variables configured"
           else
-            echo "⚠️  Warning: Failed to set environment variables (HTTP ${UPDATE_HTTP_CODE})"
-            echo "Response: ${UPDATE_BODY}"
+            echo "⚠️  Warning: Failed to set environment variables"
           fi
 
       - name: Deploy to Dokploy
@@ -224,30 +443,21 @@ jobs:
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          COMPOSE_ID: ${{ vars.DOKPLOY_SERVICES_COMPOSE_ID }}
+          APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
+          APP_NAME: ${{ steps.metadata.outputs.app_name }}
         run: |
-          # Skip deployment if COMPOSE_ID is not set
-          if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
-            echo "⚠️ DOKPLOY_SERVICES_COMPOSE_ID not set or set to 'skip'"
-            echo "📦 Image was pushed successfully to registry"
-            exit 0
-          fi
-
-          # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
-          echo "🚀 Deploying services to Dokploy..."
-          echo "Compose ID: ${COMPOSE_ID}"
+          echo "🚀 Deploying ${APP_NAME} to Dokploy..."
 
-          # Trigger deployment
           RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
-            "${DOKPLOY_URL}/api/trpc/compose.deploy" \
+            "${DOKPLOY_URL}/api/trpc/application.deploy" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \
             -H "x-api-key: ${DOKPLOY_API_KEY}" \
             -d "{
               \"json\": {
-                \"composeId\": \"${COMPOSE_ID}\"
+                \"applicationId\": \"${APPLICATION_ID}\"
               }
             }")
 
@@ -255,19 +465,13 @@ jobs:
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           echo "Response Code: ${HTTP_CODE}"
-          echo "Response Body: ${BODY}"
 
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            if echo "$BODY" | grep -qi "error"; then
-              echo "⚠️ Dokploy returned an error in response body"
-              echo "📦 Image was pushed successfully - manual deployment may be required"
-              exit 0
-            fi
             echo "✅ Deployment triggered successfully!"
           else
-            echo "⚠️ Deployment API call failed with status code: ${HTTP_CODE}"
-            echo "📦 Image was pushed successfully - manual deployment may be required"
-            exit 0
+            echo "❌ Deployment failed with status code: ${HTTP_CODE}"
+            echo "Response: ${BODY}"
+            exit 1
           fi
 
       - name: Deployment Summary
@@ -275,10 +479,11 @@ jobs:
         run: |
           echo "## Consolidated Services Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.metadata.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application ID**: ${{ steps.dokploy_app.outputs.application_id }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Included Services" >> $GITHUB_STEP_SUMMARY
           echo "- Website (React frontend + static serving)" >> $GITHUB_STEP_SUMMARY
@@ -287,6 +492,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ job.status }}" = "success" ]; then
             echo "✅ Build and deployment completed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🌐 **Live Site**: https://${{ steps.dokploy_app.outputs.domain }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**GitHub Branch**: https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Build or deployment failed" >> $GITHUB_STEP_SUMMARY
           fi
