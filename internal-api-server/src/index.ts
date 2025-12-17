@@ -36,6 +36,7 @@ import adminRoutes from './routes/admin.js';
 import transcribeRoutes from './routes/transcribe.js';
 import completionsRoutes from './routes/completions.js';
 import imageGenRoutes from './routes/imageGen.js';
+import internalSessionsRoutes from './routes/internalSessions.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './db/index.js';
@@ -305,6 +306,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api', transcribeRoutes);
 app.use('/api/completions', completionsRoutes);
 app.use('/api/image-gen', imageGenRoutes);
+app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Sessions management
 
 // Note: Static file serving removed - handled by website-server facade
 
@@ -386,6 +388,17 @@ app.listen(PORT, () => {
   console.log('  POST /api/completions                  - Code completions (autocomplete)');
   console.log('  POST /api/user/openrouter-api-key      - Set OpenRouter API key');
   console.log('  POST /api/user/autocomplete-settings   - Update autocomplete settings');
+  console.log('');
+  console.log('  GET  /api/internal/sessions            - List Claude Remote sessions');
+  console.log('  POST /api/internal/sessions            - Create new session (SSE)');
+  console.log('  GET  /api/internal/sessions/:id/status - Get session status from DB');
+  console.log('  GET  /api/internal/sessions/:id/events - Get session events from DB');
+  console.log('  GET  /api/internal/sessions/:id        - Stream/reconnect to session');
+  console.log('  POST /api/internal/sessions/:id        - Resume session (SSE)');
+  console.log('  PATCH /api/internal/sessions/:id       - Rename session');
+  console.log('  POST /api/internal/sessions/:id/archive- Archive session');
+  console.log('  DELETE /api/internal/sessions/:id      - Delete session from DB');
+  console.log('  POST /api/internal/sessions/:id/interrupt - Interrupt session');
   console.log('='.repeat(60));
 
   // Schedule periodic orphan cleanup

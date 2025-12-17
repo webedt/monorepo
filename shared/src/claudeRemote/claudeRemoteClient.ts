@@ -13,6 +13,7 @@ import {
   Session,
   SessionEvent,
   EventsResponse,
+  ListSessionsResponse,
   SessionResult,
   EventCallback,
   PollOptions,
@@ -216,6 +217,32 @@ export class ClaudeRemoteClient {
     }
 
     return response.json() as Promise<Session>;
+  }
+
+  /**
+   * List sessions with pagination
+   */
+  async listSessions(limit: number = 20, before?: string): Promise<ListSessionsResponse> {
+    const url = new URL(`${this.baseUrl}/v1/sessions`);
+    url.searchParams.set('limit', String(limit));
+    if (before) {
+      url.searchParams.set('before', before);
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: this.buildHeaders()
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new ClaudeRemoteError(
+        `Failed to list sessions: ${response.status} ${text}`,
+        response.status,
+        text
+      );
+    }
+
+    return response.json() as Promise<ListSessionsResponse>;
   }
 
   /**

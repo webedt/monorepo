@@ -18,6 +18,7 @@ export type {
   SessionEventType,
   ContentBlock,
   EventsResponse,
+  ListSessionsResponse,
   ResumeSessionParams,
   EventCallback,
   PollOptions,
