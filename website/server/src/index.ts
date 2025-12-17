@@ -104,13 +104,24 @@ const apiProxyOptions: Options = {
   // Cookie handling for session persistence
   cookieDomainRewrite: '',  // Remove domain restriction so cookies work across proxy
   // Preserve the full path including /api prefix
-  // http-proxy-middleware v3 receives the full path in pathRewrite, so we need to handle both cases
+  // Handle both direct /api/... paths and path-prefixed /github/owner/repo/branch/api/... paths
   pathRewrite: (path, req) => {
     // Log the incoming path for debugging
     console.log(`[Proxy pathRewrite] Received path: ${path}, req.url: ${req.url}`);
 
-    // If path already starts with /api, return as-is
-    // If not, prepend /api (this handles the case where Express strips the mount point)
+    // Extract the /api/... portion from the path, stripping any prefix
+    // This handles:
+    //   /api/auth/session -> /api/auth/session
+    //   /github/owner/repo/branch/api/auth/session -> /api/auth/session
+    //   /owner/repo/branch/api/auth/session -> /api/auth/session
+    const apiMatch = path.match(/\/api(\/.*)?$/);
+    if (apiMatch) {
+      const rewrittenPath = apiMatch[0];
+      console.log(`[Proxy pathRewrite] Rewritten to: ${rewrittenPath}`);
+      return rewrittenPath;
+    }
+
+    // Fallback: if path starts with /api, return as-is; otherwise prepend /api
     const rewrittenPath = path.startsWith('/api') ? path : '/api' + path;
     console.log(`[Proxy pathRewrite] Rewritten to: ${rewrittenPath}`);
     return rewrittenPath;
@@ -165,12 +176,15 @@ const apiProxyOptions: Options = {
   },
 };
 
-// API proxy with route filtering
-app.use('/api', (req, res, next) => {
-  const fullPath = '/api' + req.path;
+// Helper function to handle API proxy requests with route filtering
+function handleApiProxy(req: express.Request, res: express.Response, next: express.NextFunction) {
+  // Extract just the /api/... part from the path (handles both direct and prefixed paths)
+  const originalUrl = req.originalUrl;
+  const apiMatch = originalUrl.match(/\/api(\/[^?]*)?/);
+  const fullPath = apiMatch ? apiMatch[0] : '/api' + req.path;
 
   // Log ALL API requests for debugging (temporarily enabled in production)
-  console.log(`[API Request] ${req.method} ${fullPath}`);
+  console.log(`[API Request] ${req.method} ${fullPath} (originalUrl: ${originalUrl})`);
 
   // Block internal-only routes
   if (isBlockedRoute(fullPath)) {
@@ -192,7 +206,25 @@ app.use('/api', (req, res, next) => {
 
   // Proxy the request
   next();
+}
+
+// Path-prefixed API routes: /github/:owner/:repo/:branch/api/*
+// This handles preview deployments where the app is served at a path prefix
+app.use('/github/:owner/:repo/:branch/api', handleApiProxy, createProxyMiddleware(apiProxyOptions));
+
+// Standard owner/repo/branch pattern: /:owner/:repo/:branch/api/*
+// Note: This is a catch-all for 3-segment prefixes, placed after /github to avoid conflicts
+app.use('/:segment1/:segment2/:segment3/api', (req, res, next) => {
+  // Skip if segment1 is 'github' (handled above) or if it looks like an app route
+  const segment1 = req.params.segment1;
+  if (segment1 === 'github' || segment1 === 'api') {
+    return next('route');
+  }
+  handleApiProxy(req, res, next);
 }, createProxyMiddleware(apiProxyOptions));
+
+// Direct API routes: /api/*
+app.use('/api', handleApiProxy, createProxyMiddleware(apiProxyOptions));
 
 // Serve static files from the client build
 const clientDistPath = path.join(__dirname, '../../client/dist');
