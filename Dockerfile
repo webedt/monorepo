@@ -1,8 +1,8 @@
 # =============================================================================
-# WebEDT Consolidated Services - Single Image Build
+# WebEDT Monorepo - Single Image Build
 # =============================================================================
-# This Dockerfile builds all services into a single image:
-# - Website (React client + API facade)
+# Builds all services into one image:
+# - Website (React client + Express server)
 # - Internal API Server
 # - AI Coding Workers
 # =============================================================================
@@ -20,9 +20,10 @@ FROM node:20-slim AS shared-build
 
 WORKDIR /app/shared
 COPY shared/package*.json ./
+RUN npm install
 COPY shared/tsconfig.json ./
 COPY shared/src ./src
-RUN npm install && npm run build
+RUN npm run build
 
 # =============================================================================
 # Stage 2: Build website client (React)
@@ -35,7 +36,7 @@ ARG BUILD_COMMIT_SHA
 
 WORKDIR /app/client
 COPY website/client/package*.json ./
-COPY website/client/*.tgz ./
+COPY website/client/*.tgz ./ 2>/dev/null || true
 RUN npm install
 
 COPY website/client/ .
@@ -54,76 +55,54 @@ RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
 RUN npm run build
 
 # =============================================================================
-# Stage 3: Build internal-api-server
+# Stage 3: Build website server (Express)
+# =============================================================================
+FROM node:20-slim AS server-build
+
+WORKDIR /app/server
+COPY website/server/package*.json ./
+RUN npm install
+COPY website/server/tsconfig.json ./
+COPY website/server/src ./src
+RUN npm run build
+
+# =============================================================================
+# Stage 4: Build internal-api-server
 # =============================================================================
 FROM node:20-slim AS api-build
 
-# Install build dependencies (with retry for transient network failures)
-# Retries entire apt-get update && install process, clearing cache between attempts
-# Uses explicit success tracking to fail if all retries are exhausted
-RUN apt_success=false && \
-    for i in 1 2 3 4 5; do \
-        rm -rf /var/lib/apt/lists/* && \
-        if apt-get update && apt-get install -y python3 make g++; then \
-            apt_success=true; \
-            break; \
-        fi; \
-        echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; \
-        sleep $((i * 2)); \
-    done && \
-    if [ "$apt_success" = "false" ]; then \
-        echo "ERROR: All apt-get install attempts failed"; \
-        exit 1; \
-    fi && \
-    rm -rf /var/lib/apt/lists/*
+# Install build dependencies for native modules
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy shared package
+# Copy shared package first
 COPY --from=shared-build /app/shared ./shared
 
 # Build internal-api-server
 WORKDIR /app/internal-api-server
 COPY internal-api-server/package*.json ./
-COPY internal-api-server/tsconfig.json ./
 RUN npm install
+COPY internal-api-server/tsconfig.json ./
 COPY internal-api-server/src ./src
 RUN npm run build
 
 # =============================================================================
-# Stage 4: Build ai-coding-worker
+# Stage 5: Build ai-coding-worker
 # =============================================================================
 FROM node:20-slim AS worker-build
 
 WORKDIR /app
 
-# Copy shared package
+# Copy shared package first
 COPY --from=shared-build /app/shared ./shared
 
 # Build ai-coding-worker
 WORKDIR /app/ai-coding-worker
 COPY ai-coding-worker/package*.json ./
+RUN npm install
 COPY ai-coding-worker/tsconfig.json ./
-RUN npm install
 COPY ai-coding-worker/src ./src
-RUN npm run build
-
-# =============================================================================
-# Stage 5: Build services (main entry point)
-# =============================================================================
-FROM node:20-slim AS services-build
-
-WORKDIR /app
-
-# Copy shared package
-COPY --from=shared-build /app/shared ./shared
-
-# Build services
-WORKDIR /app/services
-COPY services/package*.json ./
-COPY services/tsconfig.json ./
-RUN npm install
-COPY services/src ./src
 RUN npm run build
 
 # =============================================================================
@@ -135,33 +114,20 @@ ARG BUILD_COMMIT_SHA
 ARG BUILD_TIMESTAMP
 ARG BUILD_IMAGE_TAG
 
-# Cache bust using build timestamp to ensure apt-get uses fresh layers
-RUN echo "Build timestamp: ${BUILD_TIMESTAMP:-none}"
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install runtime dependencies (with retry for transient network failures)
-# Retries entire apt-get update && install process, clearing cache between attempts
-# Uses explicit success tracking to fail if all retries are exhausted
-RUN apt_success=false && \
-    for i in 1 2 3 4 5; do \
-        rm -rf /var/lib/apt/lists/* && \
-        if apt-get update && apt-get install -y git curl python3 make g++; then \
-            apt_success=true; \
-            break; \
-        fi; \
-        echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; \
-        sleep $((i * 2)); \
-    done && \
-    if [ "$apt_success" = "false" ]; then \
-        echo "ERROR: All apt-get install attempts failed"; \
-        exit 1; \
-    fi && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install GitHub CLI (direct binary download - avoids apt repository timeout issues)
+# Install GitHub CLI
 RUN GH_VERSION="2.63.2" && \
     ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "arm64" ]; then ARCH="arm64"; else ARCH="amd64"; fi && \
-    curl -fsSL --retry 3 --retry-delay 5 "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o /tmp/gh.tar.gz && \
+    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o /tmp/gh.tar.gz && \
     tar -xzf /tmp/gh.tar.gz -C /tmp && \
     mv /tmp/gh_${GH_VERSION}_linux_${ARCH}/bin/gh /usr/local/bin/gh && \
     chmod +x /usr/local/bin/gh && \
@@ -179,11 +145,16 @@ RUN mkdir -p /workspace && chown -R worker:worker /workspace
 
 WORKDIR /app
 
-# Copy shared package (with node_modules and dist)
+# Copy shared package
 COPY --from=shared-build /app/shared ./shared
 
 # Copy website client build
 COPY --from=client-build /app/client/dist ./website/client/dist
+
+# Copy website server
+COPY --from=server-build /app/server/dist ./website/server/dist
+COPY --from=server-build /app/server/node_modules ./website/server/node_modules
+COPY --from=server-build /app/server/package.json ./website/server/
 
 # Copy internal-api-server
 COPY --from=api-build /app/internal-api-server/dist ./internal-api-server/dist
@@ -195,10 +166,8 @@ COPY --from=worker-build /app/ai-coding-worker/dist ./ai-coding-worker/dist
 COPY --from=worker-build /app/ai-coding-worker/node_modules ./ai-coding-worker/node_modules
 COPY --from=worker-build /app/ai-coding-worker/package.json ./ai-coding-worker/
 
-# Copy services (main entry point)
-COPY --from=services-build /app/services/dist ./services/dist
-COPY --from=services-build /app/services/node_modules ./services/node_modules
-COPY --from=services-build /app/services/package.json ./services/
+# Copy orchestrator script
+COPY scripts/start.js ./scripts/start.js
 
 # Configure git for worker processes
 RUN git config --global user.email "worker@webedt.local" && \
@@ -208,22 +177,19 @@ RUN git config --global user.email "worker@webedt.local" && \
 ENV NODE_ENV=production
 ENV WEBSITE_PORT=3000
 ENV API_PORT=3001
-ENV WORKER_BASE_PORT=5001
+ENV WORKER_PORT=5001
 ENV WORKER_POOL_SIZE=2
 ENV WORKSPACE_DIR=/workspace
 ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
 ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
 ENV BUILD_IMAGE_TAG=$BUILD_IMAGE_TAG
 
-# Expose main port
+# Expose main port (website)
 EXPOSE 3000
-
-# Set working directory
-WORKDIR /app/services
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
-# Start the consolidated services
-CMD ["node", "dist/index.js"]
+# Start all services via orchestrator
+CMD ["node", "scripts/start.js"]
