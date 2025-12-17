@@ -1,4 +1,4 @@
-name: Website - Cleanup Dokploy App on Branch Delete
+name: Services - Cleanup Dokploy App on Branch Delete
 
 on:
   delete:
@@ -21,8 +21,8 @@ jobs:
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]' | tr '/' '-')
           REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
 
-          # Add project name for monorepo
-          PROJECT="website"
+          # Add project name for monorepo - must match deploy workflow (services-docker-build-push.yml)
+          PROJECT="services"
 
           # Get deleted branch name (preserve case to match deploy workflow)
           BRANCH=$(echo "${{ github.event.ref }}" | tr '/' '-')
@@ -55,6 +55,8 @@ jobs:
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
           echo "🔍 Looking for application '${APP_NAME}'..."
+          echo "   Project ID: ${DOKPLOY_PROJECT_ID}"
+          echo "   Environment ID: ${DOKPLOY_ENVIRONMENT_ID}"
 
           # Get all projects to find our application
           PROJECTS=$(curl -s -X 'GET' \
@@ -62,11 +64,23 @@ jobs:
             -H 'accept: application/json' \
             -H "x-api-key: ${DOKPLOY_API_KEY}")
 
-          # Find the application ID by name
-          APP_ID=$(echo "$PROJECTS" | jq -r --arg name "$APP_NAME" '
-            .[] | select(.projectId == env.DOKPLOY_PROJECT_ID) |
-            .environments[]? | select(.environmentId == env.DOKPLOY_ENVIRONMENT_ID) |
-            .applications[]? | select(.name == $name) | .applicationId
+          # Debug: Show available applications in our project
+          echo "📋 Applications in project:"
+          echo "$PROJECTS" | jq -r \
+            --arg projectId "$DOKPLOY_PROJECT_ID" \
+            --arg envId "$DOKPLOY_ENVIRONMENT_ID" \
+            '.[] | select(.projectId == $projectId) |
+             .environments[]? | select(.environmentId == $envId) |
+             .applications[]? | "   - \(.name) (\(.applicationId))"' 2>/dev/null || echo "   (none found or parse error)"
+
+          # Find the application ID by name (use --arg for reliable variable passing)
+          APP_ID=$(echo "$PROJECTS" | jq -r \
+            --arg name "$APP_NAME" \
+            --arg projectId "$DOKPLOY_PROJECT_ID" \
+            --arg envId "$DOKPLOY_ENVIRONMENT_ID" \
+            '.[] | select(.projectId == $projectId) |
+             .environments[]? | select(.environmentId == $envId) |
+             .applications[]? | select(.name == $name) | .applicationId
           ' | head -n1)
 
           if [ -n "$APP_ID" ] && [ "$APP_ID" != "null" ]; then
