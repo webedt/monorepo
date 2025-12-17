@@ -23,6 +23,7 @@ interface SyncStats {
   lastSyncTime: Date | null;
   totalSyncs: number;
   totalImported: number;
+  totalUpdated: number;
   totalErrors: number;
   isRunning: boolean;
 }
@@ -31,6 +32,7 @@ const syncStats: SyncStats = {
   lastSyncTime: null,
   totalSyncs: 0,
   totalImported: 0,
+  totalUpdated: 0,
   totalErrors: 0,
   isRunning: false,
 };
@@ -56,10 +58,11 @@ function mapStatus(anthropicStatus: string): string {
  */
 async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof users.$inferSelect['claudeAuth']>): Promise<{
   imported: number;
+  updated: number;
   errors: number;
   skipped: number;
 }> {
-  const result = { imported: 0, errors: 0, skipped: 0 };
+  const result = { imported: 0, updated: 0, errors: 0, skipped: 0 };
 
   try {
     // Refresh token if needed
@@ -79,6 +82,98 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
       environmentId: CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,
     });
+
+    // First, check and update any "running" sessions that may have completed
+    const runningSessions = await db
+      .select({
+        id: chatSessions.id,
+        remoteSessionId: chatSessions.remoteSessionId,
+      })
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.userId, userId),
+          eq(chatSessions.status, 'running'),
+          isNotNull(chatSessions.remoteSessionId)
+        )
+      );
+
+    for (const runningSession of runningSessions) {
+      if (!runningSession.remoteSessionId) continue;
+
+      try {
+        // Check status with Anthropic API
+        const remoteSession = await client.getSession(runningSession.remoteSessionId);
+        const newStatus = mapStatus(remoteSession.session_status);
+
+        // If status changed from running to something else, update it
+        if (newStatus !== 'running') {
+          // Fetch any new events
+          const eventsResponse = await client.getEvents(runningSession.remoteSessionId);
+          const remoteEvents = eventsResponse.data || [];
+
+          // Get existing event UUIDs for this session
+          const existingEvents = await db
+            .select({ eventData: events.eventData })
+            .from(events)
+            .where(eq(events.chatSessionId, runningSession.id));
+
+          const existingUuids = new Set(
+            existingEvents.map(e => (e.eventData as any)?.uuid).filter(Boolean)
+          );
+
+          // Insert any new events
+          let newEventsCount = 0;
+          for (const event of remoteEvents) {
+            if (event.uuid && !existingUuids.has(event.uuid)) {
+              await db.insert(events).values({
+                chatSessionId: runningSession.id,
+                eventType: event.type,
+                eventData: event,
+                timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
+              });
+              newEventsCount++;
+            }
+          }
+
+          // Extract total cost from result event
+          let totalCost: string | undefined;
+          const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd);
+          if (resultEvent?.total_cost_usd) {
+            totalCost = resultEvent.total_cost_usd.toFixed(6);
+          }
+
+          // Extract branch from session context
+          const gitOutcome = remoteSession.session_context?.outcomes?.find(o => o.type === 'git_repository');
+          const branch = gitOutcome?.git_info?.branches?.[0];
+
+          // Update session status
+          await db
+            .update(chatSessions)
+            .set({
+              status: newStatus,
+              completedAt: new Date(remoteSession.updated_at),
+              totalCost: totalCost || undefined,
+              branch: branch || undefined,
+            })
+            .where(eq(chatSessions.id, runningSession.id));
+
+          result.updated++;
+          logger.info(`[SessionSync] Updated session ${runningSession.id} from running to ${newStatus}`, {
+            component: 'SessionSync',
+            remoteSessionId: runningSession.remoteSessionId,
+            newEventsCount,
+            totalCost
+          });
+        }
+      } catch (error) {
+        result.errors++;
+        logger.error(`[SessionSync] Failed to check/update running session ${runningSession.id}`, error as Error, {
+          component: 'SessionSync',
+          remoteSessionId: runningSession.remoteSessionId
+        });
+      }
+    }
 
     // Fetch active sessions from Anthropic (skip archived)
     const remoteSessions = await client.listSessions(CLAUDE_SYNC_LIMIT);
@@ -255,6 +350,7 @@ async function runSync(): Promise<void> {
     });
 
     let totalImported = 0;
+    let totalUpdated = 0;
     let totalErrors = 0;
     let totalSkipped = 0;
 
@@ -263,12 +359,14 @@ async function runSync(): Promise<void> {
 
       const result = await syncUserSessions(user.id, user.claudeAuth);
       totalImported += result.imported;
+      totalUpdated += result.updated;
       totalErrors += result.errors;
       totalSkipped += result.skipped;
     }
 
     syncStats.totalSyncs++;
     syncStats.totalImported += totalImported;
+    syncStats.totalUpdated += totalUpdated;
     syncStats.totalErrors += totalErrors;
     syncStats.lastSyncTime = new Date();
 
@@ -276,6 +374,7 @@ async function runSync(): Promise<void> {
     logger.info(`[SessionSync] Sync completed in ${durationMs}ms`, {
       component: 'SessionSync',
       imported: totalImported,
+      updated: totalUpdated,
       errors: totalErrors,
       skipped: totalSkipped,
       users: usersWithClaudeAuth.length
