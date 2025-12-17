@@ -60,12 +60,21 @@ FROM node:20-slim AS api-build
 
 # Install build dependencies (with retry for transient network failures)
 # Retries entire apt-get update && install process, clearing cache between attempts
-RUN for i in 1 2 3 4 5; do \
+# Uses explicit success tracking to fail if all retries are exhausted
+RUN apt_success=false && \
+    for i in 1 2 3 4 5; do \
         rm -rf /var/lib/apt/lists/* && \
-        apt-get update && \
-        apt-get install -y python3 make g++ && \
-        break || { echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; sleep $((i * 2)); }; \
+        if apt-get update && apt-get install -y python3 make g++; then \
+            apt_success=true; \
+            break; \
+        fi; \
+        echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; \
+        sleep $((i * 2)); \
     done && \
+    if [ "$apt_success" = "false" ]; then \
+        echo "ERROR: All apt-get install attempts failed"; \
+        exit 1; \
+    fi && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -131,12 +140,21 @@ RUN echo "Build timestamp: ${BUILD_TIMESTAMP:-none}"
 
 # Install runtime dependencies (with retry for transient network failures)
 # Retries entire apt-get update && install process, clearing cache between attempts
-RUN for i in 1 2 3 4 5; do \
+# Uses explicit success tracking to fail if all retries are exhausted
+RUN apt_success=false && \
+    for i in 1 2 3 4 5; do \
         rm -rf /var/lib/apt/lists/* && \
-        apt-get update && \
-        apt-get install -y git curl python3 make g++ && \
-        break || { echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; sleep $((i * 2)); }; \
+        if apt-get update && apt-get install -y git curl python3 make g++; then \
+            apt_success=true; \
+            break; \
+        fi; \
+        echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; \
+        sleep $((i * 2)); \
     done && \
+    if [ "$apt_success" = "false" ]; then \
+        echo "ERROR: All apt-get install attempts failed"; \
+        exit 1; \
+    fi && \
     rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI (direct binary download - avoids apt repository timeout issues)
