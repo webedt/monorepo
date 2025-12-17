@@ -589,5 +589,60 @@ class WorkerCoordinator {
   }
 }
 
+// Import local worker pool for single-image mode
+import { localWorkerPool } from './localWorkerPool.js';
+import { WORKER_POOL_MODE } from '../../config/env.js';
+
+// Docker Swarm coordinator singleton
+const dockerSwarmCoordinator = new WorkerCoordinator();
+
+/**
+ * Unified worker coordinator interface
+ * Routes to either Docker Swarm or Local worker pool based on WORKER_POOL_MODE
+ */
+interface UnifiedWorkerCoordinator {
+  acquireWorker(jobId: string, options?: AcquireWorkerOptions): Promise<WorkerAssignment | null>;
+  releaseWorker(workerId: string, jobId: string): void;
+  markWorkerFailed(workerId: string, jobId: string, error: string): void;
+  getStatus(): {
+    totalWorkers: number;
+    freeWorkers: number;
+    busyWorkers: number;
+    workers: Array<{
+      id: string;
+      containerId: string;
+      status: WorkerStatus;
+      lastAssigned: number | null;
+    }>;
+  };
+}
+
+// Create unified coordinator that delegates based on mode
+const createUnifiedCoordinator = (): UnifiedWorkerCoordinator => {
+  const isLocalMode = WORKER_POOL_MODE === 'local';
+
+  logger.info('Worker coordinator mode', {
+    component: 'WorkerCoordinator',
+    mode: WORKER_POOL_MODE,
+    isLocalMode
+  });
+
+  if (isLocalMode) {
+    return {
+      acquireWorker: (jobId, options) => localWorkerPool.acquireWorker(jobId, options),
+      releaseWorker: (workerId, jobId) => localWorkerPool.releaseWorker(workerId, jobId),
+      markWorkerFailed: (workerId, jobId, error) => localWorkerPool.markWorkerFailed(workerId, jobId, error),
+      getStatus: () => localWorkerPool.getStatus()
+    };
+  }
+
+  return {
+    acquireWorker: (jobId, options) => dockerSwarmCoordinator.acquireWorker(jobId, options),
+    releaseWorker: (workerId, jobId) => dockerSwarmCoordinator.releaseWorker(workerId, jobId),
+    markWorkerFailed: (workerId, jobId, error) => dockerSwarmCoordinator.markWorkerFailed(workerId, jobId, error),
+    getStatus: () => dockerSwarmCoordinator.getStatus()
+  };
+};
+
 // Export singleton instance
-export const workerCoordinator = new WorkerCoordinator();
+export const workerCoordinator = createUnifiedCoordinator();

@@ -55,6 +55,12 @@ export const WORKER_NO_CAPACITY_MAX_RETRIES = parseInt(
   process.env.WORKER_NO_CAPACITY_MAX_RETRIES || '10', 10
 ); // Max retries when no workers available
 
+// Local worker pool configuration (for single-image deployment)
+// When WORKER_POOL_MODE='local', use local workers instead of Docker Swarm
+export const WORKER_POOL_MODE = process.env.WORKER_POOL_MODE || 'swarm'; // 'swarm' | 'local'
+export const WORKER_BASE_PORT = parseInt(process.env.WORKER_BASE_PORT || '5001', 10);
+export const WORKER_POOL_SIZE = parseInt(process.env.WORKER_POOL_SIZE || '2', 10);
+
 // Orphan session cleanup configuration
 export const ORPHAN_SESSION_TIMEOUT_MINUTES = parseInt(process.env.ORPHAN_SESSION_TIMEOUT_MINUTES || '30', 10);
 export const ORPHAN_CLEANUP_INTERVAL_MINUTES = parseInt(process.env.ORPHAN_CLEANUP_INTERVAL_MINUTES || '5', 10);
@@ -122,8 +128,11 @@ export function logEnvConfig(): void {
   console.log(`  MINIO_BUCKET=${MINIO_BUCKET}`);
   console.log(`  AI_WORKER_PORT=${AI_WORKER_PORT}`);
   console.log(`  USE_WORKER_COORDINATOR=${USE_WORKER_COORDINATOR}`);
+  console.log(`  WORKER_POOL_MODE=${WORKER_POOL_MODE}`);
   console.log(`  WORKER_SWARM_SERVICE_NAME=${WORKER_SWARM_SERVICE_NAME}`);
   console.log(`  DOCKER_SOCKET_PATH=${DOCKER_SOCKET_PATH}`);
+  console.log(`  WORKER_BASE_PORT=${WORKER_BASE_PORT}`);
+  console.log(`  WORKER_POOL_SIZE=${WORKER_POOL_SIZE}`);
   console.log(`  MINIO_ROOT_USER=${redact(MINIO_ROOT_USER)}`);
   console.log(`  MINIO_ROOT_PASSWORD=${redact(MINIO_ROOT_PASSWORD)}`);
   console.log(`  SESSION_SECRET=${redact(SESSION_SECRET)}`);
