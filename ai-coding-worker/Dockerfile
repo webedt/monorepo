@@ -6,11 +6,19 @@ ARG BUILD_TIMESTAMP=unknown
 ARG BUILD_IMAGE_TAG=unknown
 
 # Install git (required for cloning repositories) and GitHub CLI (for Copilot)
-RUN apt-get update && apt-get install -y git curl && \
+# Uses retry logic for transient network failures
+RUN for i in 1 2 3 4 5; do \
+        rm -rf /var/lib/apt/lists/* && \
+        apt-get update && \
+        apt-get install -y git curl && \
+        break || { echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; sleep $((i * 2)); }; \
+    done && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-    apt-get update && apt-get install -y gh && \
+    for i in 1 2 3 4 5; do \
+        apt-get update && apt-get install -y gh && break || { echo "Retry $i/5 gh install failed, waiting $((i * 2))s..."; sleep $((i * 2)); }; \
+    done && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Gemini CLI globally (for OAuth-based Gemini access)

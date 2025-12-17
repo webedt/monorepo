@@ -59,10 +59,14 @@ RUN npm run build
 FROM node:20-slim AS api-build
 
 # Install build dependencies (with retry for transient network failures)
+# Retries entire apt-get update && install process, clearing cache between attempts
 RUN for i in 1 2 3 4 5; do \
-        apt-get update && break || { echo "Retry $i/5 apt-get update..."; sleep $((i * 2)); }; \
+        rm -rf /var/lib/apt/lists/* && \
+        apt-get update && \
+        apt-get install -y python3 make g++ && \
+        break || { echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; sleep $((i * 2)); }; \
     done && \
-    apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -122,17 +126,18 @@ ARG BUILD_COMMIT_SHA
 ARG BUILD_TIMESTAMP
 ARG BUILD_IMAGE_TAG
 
+# Cache bust using build timestamp to ensure apt-get uses fresh layers
+RUN echo "Build timestamp: ${BUILD_TIMESTAMP:-none}"
+
 # Install runtime dependencies (with retry for transient network failures)
+# Retries entire apt-get update && install process, clearing cache between attempts
 RUN for i in 1 2 3 4 5; do \
-        apt-get update && break || { echo "Retry $i/5 apt-get update..."; sleep $((i * 2)); }; \
+        rm -rf /var/lib/apt/lists/* && \
+        apt-get update && \
+        apt-get install -y git curl python3 make g++ && \
+        break || { echo "Retry $i/5 apt install failed, waiting $((i * 2))s..."; sleep $((i * 2)); }; \
     done && \
-    apt-get install -y \
-        git \
-        curl \
-        python3 \
-        make \
-        g++ \
-    && rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI (direct binary download - avoids apt repository timeout issues)
 RUN GH_VERSION="2.63.2" && \
