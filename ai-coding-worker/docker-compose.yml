@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   ai-coding-worker:
-    image: ghcr.io/webedt/monorepo/ai-coding-worker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     expose:
       - "5000"
     environment:

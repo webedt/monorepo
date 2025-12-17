@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   internal-api-server:
-    image: ghcr.io/webedt/monorepo/internal-api-server:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       PORT: 3000
       NODE_ENV: production
