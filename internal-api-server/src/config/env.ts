@@ -84,6 +84,13 @@ export const CLAUDE_ORG_UUID = process.env.CLAUDE_ORG_UUID || '';  // For title 
 export const CLAUDE_COOKIES = process.env.CLAUDE_COOKIES || '';  // Browser cookies for fast title generation
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // OpenRouter API key for title generation
 
+// Background sync configuration
+// Automatically syncs Claude Remote sessions from Anthropic API
+export const CLAUDE_SYNC_ENABLED = process.env.CLAUDE_SYNC_ENABLED !== 'false';  // Enabled by default
+export const CLAUDE_SYNC_INTERVAL_MS = parseInt(process.env.CLAUDE_SYNC_INTERVAL_MS || '300000', 10);  // 5 minutes
+export const CLAUDE_SYNC_INITIAL_DELAY_MS = parseInt(process.env.CLAUDE_SYNC_INITIAL_DELAY_MS || '5000', 10);  // 5 seconds after startup
+export const CLAUDE_SYNC_LIMIT = parseInt(process.env.CLAUDE_SYNC_LIMIT || '50', 10);  // Max sessions to fetch per sync
+
 /**
  * Validate required environment variables
  */

@@ -14,6 +14,8 @@ import {
   BUILD_IMAGE_TAG,
   ORPHAN_SESSION_TIMEOUT_MINUTES,
   ORPHAN_CLEANUP_INTERVAL_MINUTES,
+  CLAUDE_SYNC_ENABLED,
+  CLAUDE_SYNC_INTERVAL_MS,
   validateEnv,
   logEnvConfig
 } from './config/env.js';
@@ -52,6 +54,9 @@ import {
   metrics,
   circuitBreakerRegistry,
 } from './utils/index.js';
+
+// Import background sync service
+import { startBackgroundSync, stopBackgroundSync } from './services/claudeSessionSync.js';
 
 /**
  * Clean up orphaned sessions that are stuck in 'running' status
@@ -412,17 +417,27 @@ app.listen(PORT, () => {
   setInterval(() => {
     cleanupOrphanedSessions();
   }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+
+  // Start Claude session background sync
+  if (CLAUDE_SYNC_ENABLED) {
+    logger.info(`Starting Claude session sync: interval=${Math.round(CLAUDE_SYNC_INTERVAL_MS / 1000 / 60)}min`);
+    startBackgroundSync();
+  } else {
+    logger.info('Claude session sync is disabled');
+  }
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down gracefully...');
   healthMonitor.stopPeriodicChecks();
+  stopBackgroundSync();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   logger.info('SIGINT received, shutting down gracefully...');
   healthMonitor.stopPeriodicChecks();
+  stopBackgroundSync();
   process.exit(0);
 });
