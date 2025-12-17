@@ -37,59 +37,72 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
   const data = event.data || {};
   const [showAllTools, setShowAllTools] = useState(false);
 
-  // Extract meaningful content based on event type
-  const renderContent = () => {
+  // Check if this event type should render inline (single line with header)
+  const isInlineEvent = ['connected', 'message', 'title_generation', 'session_name', 'session_created', 'env_manager_log', 'tool_progress'].includes(event.eventType);
+
+  // Render inline content (appears on same line as timestamp/emoji/label)
+  const renderInlineContent = () => {
     switch (event.eventType) {
       case 'connected':
         return (
-          <span className="text-sm">
-            Provider: <span className="font-mono text-xs bg-base-300 px-1 rounded">{data.provider || 'unknown'}</span>
-          </span>
+          <span className="font-mono text-xs bg-base-300 px-1 rounded">{data.provider || 'unknown'}</span>
         );
 
       case 'message':
         return (
-          <div>
+          <>
             <span className="badge badge-sm badge-outline mr-2">{data.stage}</span>
-            <span className="text-sm">{data.message}</span>
-          </div>
+            <span>{data.message}</span>
+          </>
         );
 
       case 'title_generation':
         return (
-          <div className="text-sm">
+          <>
             <span className={`badge badge-sm mr-2 ${data.status === 'success' ? 'badge-success' : data.status === 'skipped' ? 'badge-ghost' : data.status === 'trying' ? 'badge-warning' : 'badge-error'}`}>
               {data.status}
             </span>
             <span className="font-mono text-xs">{data.method}</span>
             {data.title && <span className="ml-2 text-success">→ "{data.title}"</span>}
-          </div>
+          </>
         );
 
       case 'session_created':
-        return (
-          <div className="text-sm space-y-1">
-            {data.remoteWebUrl && (
-              <a href={data.remoteWebUrl} target="_blank" rel="noopener noreferrer" className="link link-primary text-xs">
-                {data.remoteWebUrl}
-              </a>
-            )}
-          </div>
-        );
+        return data.remoteWebUrl ? (
+          <a href={data.remoteWebUrl} target="_blank" rel="noopener noreferrer" className="link link-primary text-xs">
+            {data.remoteWebUrl}
+          </a>
+        ) : null;
 
       case 'session_name':
-        return <span className="text-sm font-medium">{data.sessionName}</span>;
+        return <span className="font-medium">{data.sessionName}</span>;
 
       case 'env_manager_log':
         return (
-          <div className="text-sm">
+          <>
             <span className={`badge badge-xs mr-2 ${data.data?.level === 'error' ? 'badge-error' : data.data?.level === 'info' ? 'badge-info' : 'badge-ghost'}`}>
               {data.data?.level || 'log'}
             </span>
             <span className="opacity-80">{data.data?.content || data.data?.message || JSON.stringify(data.data)}</span>
-          </div>
+          </>
         );
 
+      case 'tool_progress':
+        return (
+          <>
+            <span className="font-mono">{data.tool_name}</span>
+            <span className="opacity-70"> — {data.elapsed_time_seconds}s elapsed</span>
+          </>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  // Render block content (appears below the header line)
+  const renderBlockContent = () => {
+    switch (event.eventType) {
       case 'system':
         return (
           <div className="text-xs space-y-1">
@@ -108,6 +121,14 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
                 </button>
               )}
             </div>
+            {data.system && (
+              <details className="mt-1">
+                <summary className="cursor-pointer opacity-50 hover:opacity-100">View system prompt</summary>
+                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-96 whitespace-pre-wrap">
+                  {data.system}
+                </pre>
+              </details>
+            )}
             <ExpandableJson data={data} summary="View full system init" />
           </div>
         );
@@ -186,13 +207,6 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
         );
       }
 
-      case 'tool_progress':
-        return (
-          <span className="text-sm opacity-70">
-            <span className="font-mono">{data.tool_name}</span> — {data.elapsed_time_seconds}s elapsed
-          </span>
-        );
-
       case 'result':
         return (
           <div className="text-sm space-y-1">
@@ -224,6 +238,22 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
     }
   };
 
+  // For inline events: timestamp, emoji, label, and content all on one line
+  // For block events: header on first line, content below
+  if (isInlineEvent) {
+    return (
+      <div className="border-l-2 border-base-300 pl-3 py-2 hover:bg-base-200/30 transition-colors">
+        <div className="flex items-center gap-2 text-sm flex-wrap">
+          <span className="font-mono text-xs opacity-60">{time}</span>
+          <span className={`font-medium ${style.color}`}>
+            {style.emoji} {style.label}
+          </span>
+          <span className={style.color}>{renderInlineContent()}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border-l-2 border-base-300 pl-3 py-2 hover:bg-base-200/30 transition-colors">
       <div className="flex items-center gap-2 text-xs opacity-60 mb-1">
@@ -233,7 +263,7 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
         </span>
       </div>
       <div className={style.color}>
-        {renderContent()}
+        {renderBlockContent()}
       </div>
     </div>
   );
