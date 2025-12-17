@@ -2051,18 +2051,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
             {showRawJson ? (
-              /* Raw JSON view - just JSON lines, no formatting */
-              <div className="font-mono text-xs space-y-0 bg-base-300 rounded-lg p-2 overflow-x-auto">
-                {rawEvents.length === 0 ? (
-                  <div className="text-base-content/50 p-4 text-center">No events yet. Start a session to see raw JSON stream.</div>
-                ) : (
-                  rawEvents.map((event, index) => (
-                    <div key={index} className="py-0.5 border-b border-base-content/10 last:border-0">
-                      <span className="text-primary">{JSON.stringify({ type: event.eventType, ...event.data })}</span>
-                    </div>
-                  ))
-                )}
-              </div>
+              /* Raw JSON view - pure JSON lines only */
+              <pre className="font-mono text-xs whitespace-pre-wrap break-all">
+{rawEvents.length === 0
+  ? 'No events yet.'
+  : rawEvents.map((event) => JSON.stringify({ type: event.eventType, ...event.data })).join('\n\n')}
+              </pre>
             ) : (
               /* Normal formatted view */
               <div className="max-w-4xl mx-auto space-y-4">
