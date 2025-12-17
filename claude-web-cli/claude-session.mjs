@@ -129,9 +129,36 @@ async function getEnvironmentId(accessToken, orgUuid) {
   throw new Error('No environment found. Set CLAUDE_ENVIRONMENT_ID or create a session at claude.ai/code first.');
 }
 
-// Read credentials
+// Read credentials from macOS Keychain
+function getCredentialsFromKeychain() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const result = execSync(
+      'security find-generic-password -s "Claude Code-credentials" -w',
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    return JSON.parse(result);
+  } catch {
+    return null;
+  }
+}
+
+// Read credentials (Keychain on macOS, file elsewhere)
 function getCredentials() {
+  // Try Keychain first (macOS)
+  const keychainCreds = getCredentialsFromKeychain();
+  if (keychainCreds?.claudeAiOauth?.accessToken) {
+    return {
+      accessToken: keychainCreds.claudeAiOauth.accessToken,
+      expiresAt: keychainCreds.claudeAiOauth.expiresAt,
+    };
+  }
+
+  // Fall back to file (Linux/Windows or if Keychain fails)
   const credPath = join(homedir(), '.claude', '.credentials.json');
+  if (!existsSync(credPath)) {
+    throw new Error('No OAuth credentials found. Run "claude login" first.');
+  }
   const creds = JSON.parse(readFileSync(credPath, 'utf-8'));
   if (!creds.claudeAiOauth?.accessToken) {
     throw new Error('No OAuth credentials found. Run "claude login" first.');
@@ -145,6 +172,12 @@ function getCredentials() {
 // Get organization UUID
 function getOrgUuid() {
   if (process.env.CLAUDE_ORG_UUID) return process.env.CLAUDE_ORG_UUID;
+  // Try Keychain first (macOS)
+  const keychainCreds = getCredentialsFromKeychain();
+  if (keychainCreds?.oauthAccount?.organizationUuid) {
+    return keychainCreds.oauthAccount.organizationUuid;
+  }
+  // Try credentials file
   try {
     const credPath = join(homedir(), '.claude', '.credentials.json');
     const creds = JSON.parse(readFileSync(credPath, 'utf-8'));
