@@ -38,6 +38,14 @@ app.get('/health', (req, res) => {
   });
 });
 
+// JSON body parser for API routes
+// This is needed so we can re-stream the body to the proxy
+// Without this, http-proxy-middleware doesn't forward POST bodies correctly
+// for path-prefixed routes like /github/owner/repo/branch/api/*
+app.use('/github/:owner/:repo/:branch/api', express.json({ limit: '10mb' }));
+app.use('/:segment1/:segment2/:segment3/api', express.json({ limit: '10mb' }));
+app.use('/api', express.json({ limit: '10mb' }));
+
 // Define which API routes are allowed to be proxied (whitelist)
 // This controls what the public can access - internal-only routes are blocked
 const ALLOWED_API_ROUTES = [
@@ -140,6 +148,18 @@ const apiProxyOptions: Options = {
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
+
+      // Re-stream the body if it was parsed by express.json()
+      // This is necessary because express.json() consumes the body stream
+      // and http-proxy-middleware needs the body to be written to proxyReq
+      const body = (req as express.Request).body;
+      if (body && Object.keys(body).length > 0) {
+        const bodyData = JSON.stringify(body);
+        proxyReq.setHeader('Content-Type', 'application/json');
+        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+        proxyReq.write(bodyData);
+      }
+
       // Log proxied requests (always, for debugging)
       console.log(`[Proxy proxyReq] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${proxyReq.path}`);
     },
