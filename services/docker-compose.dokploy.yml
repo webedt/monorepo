@@ -1,0 +1,79 @@
+version: '3.8'
+
+# Dokploy Compose configuration for consolidated WebEDT services
+# This pulls from GitHub Container Registry instead of building locally
+
+services:
+  webedt-services:
+    image: ghcr.io/webedt/monorepo/services:latest
+    container_name: webedt-services
+    ports:
+      - "3000:3000"
+    environment:
+      # Server configuration
+      NODE_ENV: production
+      WEBSITE_PORT: 3000
+      API_PORT: 3001
+
+      # Worker configuration (local mode for single-image deployment)
+      WORKER_POOL_MODE: local
+      WORKER_POOL_SIZE: ${WORKER_POOL_SIZE:-2}
+      WORKER_BASE_PORT: 5001
+      WORKSPACE_DIR: /workspace
+
+      # Database (required)
+      DATABASE_URL: ${DATABASE_URL}
+
+      # MinIO Storage (required)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-sessions}
+
+      # Authentication (required)
+      SESSION_SECRET: ${SESSION_SECRET}
+
+      # GitHub OAuth (required)
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+
+      # CORS
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://webedt.etdofresh.com}
+
+      # Claude Remote Sessions (optional)
+      CLAUDE_ENVIRONMENT_ID: ${CLAUDE_ENVIRONMENT_ID:-}
+      CLAUDE_API_BASE_URL: ${CLAUDE_API_BASE_URL:-https://api.anthropic.com}
+      CLAUDE_DEFAULT_MODEL: ${CLAUDE_DEFAULT_MODEL:-claude-opus-4-5-20251101}
+
+      # OpenRouter (optional)
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+
+      # OpenAI (optional - for transcription)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+    volumes:
+      - workspace-data:/workspace
+    networks:
+      - dokploy-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webedt-services.rule=Host(`webedt.etdofresh.com`)"
+      - "traefik.http.routers.webedt-services.entrypoints=websecure"
+      - "traefik.http.routers.webedt-services.tls.certresolver=letsencrypt"
+      - "traefik.http.services.webedt-services.loadbalancer.server.port=3000"
+
+volumes:
+  workspace-data:
+
+networks:
+  dokploy-network:
+    external: true

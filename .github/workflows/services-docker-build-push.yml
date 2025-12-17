@@ -1,4 +1,4 @@
-name: Internal API Server - Build and Push Docker Image
+name: Services - Build and Deploy Consolidated Image
 
 on:
   push:
@@ -6,17 +6,19 @@ on:
       - main
       - 'local/**'
     paths:
+      - "services/**"
       - "internal-api-server/**"
+      - "ai-coding-worker/**"
+      - "website/**"
       - "shared/**"
-      - ".github/workflows/internal-api-server-docker-build-push.yml"
+      - ".github/workflows/services-docker-build-push.yml"
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/internal-api-server
-  INTERNAL_API_URL: http://internal-api-server:3000
+  IMAGE_NAME: ${{ github.repository }}/services
 
 jobs:
-  build-and-push-internal-api-server:
+  build-and-push:
     runs-on: self-hosted
     permissions:
       contents: read
@@ -28,28 +30,18 @@ jobs:
           echo "## Configuration"
           echo ""
           echo "### Secrets (availability check)"
-          echo "- DOCKER_REGISTRY_USERNAME: ${{ secrets.DOCKER_REGISTRY_USERNAME != '' && '✅ Set' || '❌ Not set' }}"
-          echo "- DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_REGISTRY_PASSWORD != '' && '✅ Set' || '❌ Not set' }}"
           echo "- DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
-          echo ""
-          echo "### Internal API Server Secrets"
           echo "- DATABASE_URL: ${{ secrets.DATABASE_URL != '' && '✅ Set' || '❌ Not set' }}"
           echo "- MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER != '' && '✅ Set' || '❌ Not set' }}"
-          echo "- MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD != '' && '✅ Set' || '❌ Not set' }}"
           echo "- SESSION_SECRET: ${{ secrets.SESSION_SECRET != '' && '✅ Set' || '❌ Not set' }}"
-          echo "- GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID != '' && '✅ Set' || '❌ Not set' }}"
-          echo "- GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET != '' && '✅ Set' || '❌ Not set' }}"
-          echo "- OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
-          echo "- OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY != '' && '✅ Set' || '❌ Not set' }}"
           echo ""
           echo "### Variables"
           echo "- DOKPLOY_URL: ${{ vars.DOKPLOY_URL || '❌ Not set' }}"
-          echo "- DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID || '❌ Not set' }}"
+          echo "- DOKPLOY_SERVICES_COMPOSE_ID: ${{ vars.DOKPLOY_SERVICES_COMPOSE_ID || '❌ Not set' }}"
           echo ""
           echo "### Environment"
           echo "- REGISTRY: ${{ env.REGISTRY }}"
           echo "- IMAGE_NAME: ${{ env.IMAGE_NAME }}"
-          echo "- INTERNAL_API_URL: ${{ env.INTERNAL_API_URL }}"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -63,6 +55,33 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate version metadata
+        id: version
+        run: |
+          # Calculate version from git tags
+          if DESCRIBE=$(git describe --tags --long --match "v*.*.*" 2>/dev/null); then
+            if [[ "$DESCRIBE" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-([0-9]+)-g([a-f0-9]+)$ ]]; then
+              MAJOR="${BASH_REMATCH[1]}"
+              MINOR="${BASH_REMATCH[2]}"
+              COMMITS_SINCE="${BASH_REMATCH[4]}"
+              BUILD_VERSION="${MAJOR}.${MINOR}.${COMMITS_SINCE}"
+            fi
+          fi
+
+          # Fallback: count all commits
+          if [ -z "$BUILD_VERSION" ]; then
+            COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+            BUILD_VERSION="0.0.${COMMIT_COUNT}"
+          fi
+
+          BUILD_TIMESTAMP=$(git log -1 --format=%cI HEAD 2>/dev/null || echo "")
+
+          echo "version=${BUILD_VERSION}" >> $GITHUB_OUTPUT
+          echo "timestamp=${BUILD_TIMESTAMP}" >> $GITHUB_OUTPUT
+
+          echo "📦 Version: ${BUILD_VERSION}"
+          echo "📅 Timestamp: ${BUILD_TIMESTAMP}"
 
       - name: Extract metadata (tags, labels)
         id: meta
@@ -79,15 +98,16 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./internal-api-server/Dockerfile
+          file: ./services/Dockerfile
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BUILD_COMMIT_SHA=${{ github.sha }}
-            BUILD_TIMESTAMP=${{ github.event.head_commit.timestamp }}
+            BUILD_TIMESTAMP=${{ steps.version.outputs.timestamp }}
             BUILD_IMAGE_TAG=${{ github.ref_name }}
+            BUILD_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
@@ -99,37 +119,52 @@ jobs:
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID }}
-          # Internal API Server secrets
+          COMPOSE_ID: ${{ vars.DOKPLOY_SERVICES_COMPOSE_ID }}
+          # Database
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # MinIO Storage
           MINIO_ENDPOINT: ${{ vars.MINIO_ENDPOINT || 'webedt-app-minio-0fslch-minio-1' }}
           MINIO_PORT: ${{ vars.MINIO_PORT || '9000' }}
           MINIO_USE_SSL: ${{ vars.MINIO_USE_SSL || 'false' }}
           MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
           MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
           MINIO_BUCKET: ${{ vars.MINIO_BUCKET || 'sessions' }}
+          # Authentication
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://webedt.etdofresh.com' }}
+          # GitHub OAuth
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
           GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
+          # Optional API keys
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Claude Remote Sessions
+          CLAUDE_ENVIRONMENT_ID: ${{ secrets.CLAUDE_ENVIRONMENT_ID }}
         run: |
           # Skip if COMPOSE_ID is not set
           if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
-            echo "⚠️ COMPOSE_ID not set, skipping environment configuration"
+            echo "⚠️ DOKPLOY_SERVICES_COMPOSE_ID not set, skipping environment configuration"
+            echo "📦 Image was pushed successfully to registry"
+            echo "ℹ️ To enable auto-deployment:"
+            echo "   1. Create a Compose in Dokploy for services"
+            echo "   2. Set DOKPLOY_SERVICES_COMPOSE_ID variable in GitHub"
             exit 0
           fi
 
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
-          echo "🔧 Configuring environment variables for internal-api-server..."
+          echo "🔧 Configuring environment variables for services..."
 
-          # Build environment variables string using heredoc
+          # Build environment variables string
           ENV_VARS=$(cat <<ENVEOF
-          PORT=3000
           NODE_ENV=production
+          WEBSITE_PORT=3000
+          API_PORT=3001
+          WORKER_POOL_MODE=local
+          WORKER_POOL_SIZE=2
+          WORKER_BASE_PORT=5001
+          WORKSPACE_DIR=/workspace
           DATABASE_URL=${DATABASE_URL}
           MINIO_ENDPOINT=${MINIO_ENDPOINT}
           MINIO_PORT=${MINIO_PORT}
@@ -143,28 +178,22 @@ jobs:
           GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
           OPENAI_API_KEY=${OPENAI_API_KEY}
           OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+          CLAUDE_ENVIRONMENT_ID=${CLAUDE_ENVIRONMENT_ID}
           ENVEOF
           )
 
-          # Remove leading whitespace from each line and escape for JSON
+          # Remove leading whitespace and escape for JSON
           ENV_VARS_CLEANED=$(echo "$ENV_VARS" | sed 's/^[[:space:]]*//')
           ENV_VARS_ESCAPED=$(echo "$ENV_VARS_CLEANED" | jq -Rs .)
 
-          echo "  ✅ PORT=3000"
           echo "  ✅ NODE_ENV=production"
+          echo "  ✅ WEBSITE_PORT=3000"
+          echo "  ✅ API_PORT=3001"
+          echo "  ✅ WORKER_POOL_MODE=local"
+          echo "  ✅ WORKER_POOL_SIZE=2"
           echo "  ✅ DATABASE_URL=***"
           echo "  ✅ MINIO_ENDPOINT=${MINIO_ENDPOINT}"
-          echo "  ✅ MINIO_PORT=${MINIO_PORT}"
-          echo "  ✅ MINIO_USE_SSL=${MINIO_USE_SSL}"
-          echo "  ✅ MINIO_ROOT_USER=***"
-          echo "  ✅ MINIO_ROOT_PASSWORD=***"
-          echo "  ✅ MINIO_BUCKET=${MINIO_BUCKET}"
           echo "  ✅ SESSION_SECRET=***"
-          echo "  ✅ ALLOWED_ORIGINS=${ALLOWED_ORIGINS}"
-          echo "  ✅ GITHUB_CLIENT_ID=***"
-          echo "  ✅ GITHUB_CLIENT_SECRET=***"
-          echo "  ✅ OPENAI_API_KEY=***"
-          echo "  ✅ OPENROUTER_API_KEY=***"
           echo ""
 
           # Update compose environment variables
@@ -195,25 +224,22 @@ jobs:
         env:
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          COMPOSE_ID: ${{ vars.DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID }}
+          COMPOSE_ID: ${{ vars.DOKPLOY_SERVICES_COMPOSE_ID }}
         run: |
-          # Skip deployment if COMPOSE_ID is not set or set to "skip"
+          # Skip deployment if COMPOSE_ID is not set
           if [ -z "$COMPOSE_ID" ] || [ "$COMPOSE_ID" = "skip" ]; then
-            echo "⚠️ DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID not set or set to 'skip'"
+            echo "⚠️ DOKPLOY_SERVICES_COMPOSE_ID not set or set to 'skip'"
             echo "📦 Image was pushed successfully to registry"
-            echo "ℹ️ To enable auto-deployment:"
-            echo "   1. Create a Compose in Dokploy for internal-api-server"
-            echo "   2. Set DOKPLOY_INTERNAL_API_SERVER_COMPOSE_ID variable in GitHub"
             exit 0
           fi
 
           # Strip trailing slash from DOKPLOY_URL if present
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
-          echo "🚀 Deploying internal-api-server to Dokploy..."
+          echo "🚀 Deploying services to Dokploy..."
           echo "Compose ID: ${COMPOSE_ID}"
 
-          # Trigger deployment using tRPC endpoint (compose.deploy for stack deployments)
+          # Trigger deployment
           RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
             "${DOKPLOY_URL}/api/trpc/compose.deploy" \
             -H 'accept: application/json' \
@@ -232,35 +258,32 @@ jobs:
           echo "Response Body: ${BODY}"
 
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            # Check if response contains error (Dokploy returns 200 with error in body sometimes)
-            if echo "$BODY" | grep -qi "error\|Github Provider not found"; then
-              echo ""
+            if echo "$BODY" | grep -qi "error"; then
               echo "⚠️ Dokploy returned an error in response body"
-              echo "This usually means the Compose in Dokploy needs to be reconfigured:"
-              echo "   - Change source from 'GitHub' to 'Raw' or 'Docker Registry'"
-              echo "   - Or configure a GitHub provider in Dokploy settings"
-              echo ""
-              echo "📦 Image was pushed successfully - manual deployment required"
-              # Don't fail - image push succeeded
+              echo "📦 Image was pushed successfully - manual deployment may be required"
               exit 0
             fi
             echo "✅ Deployment triggered successfully!"
           else
-            echo ""
             echo "⚠️ Deployment API call failed with status code: ${HTTP_CODE}"
             echo "📦 Image was pushed successfully - manual deployment may be required"
-            # Don't fail the build - image was pushed successfully
             exit 0
           fi
 
       - name: Deployment Summary
         if: always()
         run: |
-          echo "## Internal API Server Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "## Consolidated Services Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Included Services" >> $GITHUB_STEP_SUMMARY
+          echo "- Website (React frontend + static serving)" >> $GITHUB_STEP_SUMMARY
+          echo "- Internal API Server (all API routes)" >> $GITHUB_STEP_SUMMARY
+          echo "- AI Coding Workers (local worker pool)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ job.status }}" = "success" ]; then
             echo "✅ Build and deployment completed successfully" >> $GITHUB_STEP_SUMMARY
