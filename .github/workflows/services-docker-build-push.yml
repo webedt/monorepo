@@ -171,13 +171,13 @@ jobs:
                 \"repository\": \"${REPO_NAME}\",
                 \"owner\": \"${REPO_OWNER}\",
                 \"branch\": \"${GITHUB_BRANCH}\",
-                \"buildPath\": \"services\",
+                \"buildPath\": \".\",
                 \"enableSubmodules\": false,
                 \"autoDeploy\": false
               }
             }" > /dev/null
 
-          echo "✅ GitHub provider configured (buildPath: services)"
+          echo "✅ GitHub provider configured (buildPath: root)"
 
           # Update deployment settings
           curl -s -X 'POST' \
@@ -190,7 +190,7 @@ jobs:
                 \"applicationId\": \"${APP_ID}\",
                 \"replicas\": 1,
                 \"buildType\": \"dockerfile\",
-                \"dockerfile\": \"Dockerfile\",
+                \"dockerfile\": \"services/Dockerfile\",
                 \"buildArgs\": \"BUILD_VERSION=${BUILD_VERSION}\nBUILD_TIMESTAMP=${BUILD_TIMESTAMP}\nBUILD_COMMIT_SHA=${BUILD_SHA}\",
                 \"autoDeploy\": false
               }
@@ -318,7 +318,7 @@ jobs:
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
           echo "🚀 Deploying ${APP_NAME}..."
-          echo "   Dokploy will build the Docker image from services/Dockerfile"
+          echo "   Dokploy will build the Docker image from root using services/Dockerfile"
 
           RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
             "${DOKPLOY_URL}/api/trpc/application.deploy" \
