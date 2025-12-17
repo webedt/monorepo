@@ -773,6 +773,16 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Convert raw events to displayable messages
     const dbEvents: DbEvent[] = eventsData?.data?.events || [];
 
+    // Populate rawEvents from database events for the raw JSON view
+    // This ensures raw events are available when returning to a session
+    if (dbEvents.length > 0) {
+      setRawEvents(dbEvents.map(event => ({
+        eventType: event.eventType,
+        data: event.eventData,
+        timestamp: new Date(event.timestamp)
+      })));
+    }
+
     // Debug logging - use primitive values for production visibility
     console.log(`[Chat] Merging messages: sessionId=${sessionId}, rawMessagesCount=${messagesData?.data?.messages?.length || 0}, filteredDbMessagesCount=${dbMessages.length}, rawEventsCount=${dbEvents.length}`);
 
@@ -1041,6 +1051,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
+      setRawEvents([]); // Clear raw events for new session
       setInput('');
       setImages([]);
       setSelectedRepo('');
