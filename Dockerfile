@@ -128,7 +128,7 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Install GitHub CLI (using direct binary download for reliability)
+# Install GitHub CLI (direct binary download - avoids apt repository timeout issues)
 RUN GH_VERSION="2.63.2" && \
     ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "arm64" ]; then ARCH="arm64"; else ARCH="amd64"; fi && \
