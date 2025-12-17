@@ -22,6 +22,10 @@
     "dev:client": "cd website/client && npm run dev",
     "dev:server": "cd website/server && npm run dev",
     "dev:api": "cd internal-api-server && npm run dev",
+    "dev:client-only": "cd website/client && npm run dev",
+
+    "docker:db": "docker run -d --name webedt-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=webedt postgres:15",
+    "docker:db:stop": "docker stop webedt-postgres && docker rm webedt-postgres",
     "dev:worker": "cd ai-coding-worker && npm run dev",
 
     "start": "node scripts/start.js",
