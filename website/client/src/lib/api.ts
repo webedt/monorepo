@@ -525,6 +525,24 @@ export const sessionsApi = {
     fetchApi(`/api/sessions/${id}/init-repository`, {
       method: 'POST',
     }),
+
+  // Sync sessions from Anthropic's Claude Remote API
+  // Imports any sessions created on claude.ai that don't exist locally
+  sync: (params?: { activeOnly?: boolean; limit?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.activeOnly !== undefined) queryParams.append('activeOnly', String(params.activeOnly));
+    if (params?.limit) queryParams.append('limit', String(params.limit));
+    const queryString = queryParams.toString();
+    return fetchApi(`/api/sessions/sync${queryString ? `?${queryString}` : ''}`, {
+      method: 'POST',
+    });
+  },
+
+  // Sync events for a specific session from Anthropic API
+  syncEvents: (id: string) =>
+    fetchApi(`/api/sessions/${id}/sync-events`, {
+      method: 'POST',
+    }),
 };
 
 // Admin API
