@@ -222,6 +222,16 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   } | null>(null);
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
+  // Raw JSON view toggle - persisted to localStorage
+  const [showRawJson, setShowRawJson] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('chatShowRawJson') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  // Store raw events for the raw JSON view (separate from formatted messages)
+  const [rawEvents, setRawEvents] = useState<Array<{ eventType: string; data: any; timestamp: Date }>>([]);
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
   const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
   const [copyChatSuccess, setCopyChatSuccess] = useState(false);
@@ -244,6 +254,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Browser notification and sound for session completion
   const { showSessionCompletedNotification } = useBrowserNotification();
+
+  // Persist showRawJson to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatShowRawJson', showRawJson ? 'true' : 'false');
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [showRawJson]);
 
   // Sync local state with global store
   useEffect(() => {
@@ -1289,10 +1308,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
       }
 
-      // DEBUG: Log raw JSON for all events
-      console.log('[SSE RAW EVENT]', eventType, JSON.stringify(data, null, 2));
+      // Store raw event for the raw JSON view
+      setRawEvents((prev) => [
+        ...prev,
+        { eventType, data, timestamp: new Date() },
+      ]);
 
-      // DEBUG: Always show raw JSON as a message for debugging
+      // Also add as a formatted message for the normal view
       const rawJsonContent = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
       messageIdCounter.current += 1;
       setMessages((prev) => [
@@ -1306,7 +1328,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         },
       ]);
       workerStore.recordHeartbeat();
-      // DEBUG MODE: Skip all other processing - just show raw JSON
     },
     onConnected: () => {
       setIsExecuting(true);
@@ -2014,29 +2035,58 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       ) : (
         /* Messages area with bottom input panel */
         <>
+          {/* Raw JSON toggle button */}
+          <div className="flex justify-end px-4 py-2 border-b border-base-300 bg-base-200/50">
+            <button
+              onClick={() => setShowRawJson(!showRawJson)}
+              className={`btn btn-xs ${showRawJson ? 'btn-primary' : 'btn-ghost'}`}
+              title={showRawJson ? 'Switch to formatted view' : 'Switch to raw JSON view'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+              {showRawJson ? 'Formatted' : 'Raw JSON'}
+            </button>
+          </div>
+
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
-            <div className="max-w-4xl mx-auto space-y-4">
-              {messages
-                .filter((message) => shouldShowMessage(message, user?.chatVerbosityLevel || 'verbose'))
-                .map((message) => (
-                message.type === 'system' ? (
-                  // Compact inline status update - no panel, faint text, inline timestamp
-                  <div key={message.id} className="text-xs text-base-content/40 py-0.5">
-                    <span className="opacity-60">{new Date(message.timestamp).toLocaleTimeString()}</span>
-                    <span className="mx-2">•</span>
-                    <LinkifyText text={message.content} className="opacity-80" />
-                  </div>
+            {showRawJson ? (
+              /* Raw JSON view - just JSON lines, no formatting */
+              <div className="font-mono text-xs space-y-0 bg-base-300 rounded-lg p-2 overflow-x-auto">
+                {rawEvents.length === 0 ? (
+                  <div className="text-base-content/50 p-4 text-center">No events yet. Start a session to see raw JSON stream.</div>
                 ) : (
-                  <ChatMessage
-                    key={message.id}
-                    message={{ ...message, images: message.images ?? undefined }}
-                    userName={user?.displayName || user?.email}
-                    onImageClick={setViewingImage}
-                    onRetry={handleRetry}
-                    showRetry={message.type === 'error' && !!lastRequest && !isExecuting}
-                  />
-                )
-              ))}
+                  rawEvents.map((event, index) => (
+                    <div key={index} className="py-0.5 border-b border-base-content/10 last:border-0">
+                      <span className="text-primary">{JSON.stringify({ type: event.eventType, ...event.data })}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              /* Normal formatted view */
+              <div className="max-w-4xl mx-auto space-y-4">
+                {messages
+                  .filter((message) => shouldShowMessage(message, user?.chatVerbosityLevel || 'verbose'))
+                  .map((message) => (
+                  message.type === 'system' ? (
+                    // Compact inline status update - no panel, faint text, inline timestamp
+                    <div key={message.id} className="text-xs text-base-content/40 py-0.5">
+                      <span className="opacity-60">{new Date(message.timestamp).toLocaleTimeString()}</span>
+                      <span className="mx-2">•</span>
+                      <LinkifyText text={message.content} className="opacity-80" />
+                    </div>
+                  ) : (
+                    <ChatMessage
+                      key={message.id}
+                      message={{ ...message, images: message.images ?? undefined }}
+                      userName={user?.displayName || user?.email}
+                      onImageClick={setViewingImage}
+                      onRetry={handleRetry}
+                      showRetry={message.type === 'error' && !!lastRequest && !isExecuting}
+                    />
+                  )
+                ))}
 
               {isExecuting && (
                 <div className="flex justify-start">
@@ -2103,7 +2153,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               )}
 
               <div ref={messagesEndRef} />
-            </div>
+              </div>
+            )}
 
             {/* Floating scroll buttons */}
             {showScrollToTop && (
