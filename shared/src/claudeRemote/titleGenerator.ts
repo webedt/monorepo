@@ -171,7 +171,7 @@ async function tryDustEndpoint(
 }
 
 /**
- * Method 2: OpenRouter API (uses x-ai/grok-4.1-fast)
+ * Method 2: OpenRouter API (uses google/gemini-3-flash-preview)
  * Returns { title, branch_name } via JSON prompt
  */
 async function tryOpenRouter(
@@ -194,7 +194,7 @@ async function tryOpenRouter(
         'Authorization': `Bearer ${openRouterApiKey}`,
       },
       body: JSON.stringify({
-        model: 'x-ai/grok-4.1-fast',
+        model: 'google/gemini-3-flash-preview',
         messages: [{ role: 'user', content: titlePrompt }],
         max_tokens: 100,
       }),

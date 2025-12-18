@@ -281,7 +281,7 @@ async function generateTitleViaDust(prompt, orgUuid) {
   }
 }
 
-// Method 2: OpenRouter API (uses x-ai/grok-4.1-fast) - returns { title, branch_name }
+// Method 2: OpenRouter API (uses google/gemini-3-flash-preview) - returns { title, branch_name }
 async function generateTitleViaOpenRouter(prompt) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
@@ -303,7 +303,7 @@ Request: "${prompt}"`;
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'x-ai/grok-4.1-fast',
+        model: 'google/gemini-3-flash-preview',
         messages: [{ role: 'user', content: titlePrompt }],
         max_tokens: 100,
       })
@@ -1099,7 +1099,7 @@ Environment Variables:
   CLAUDE_MODEL           Model (default: claude-opus-4-5-20251101)
   CLAUDE_ORG_UUID        Organization UUID (optional, auto-detected)
   CLAUDE_COOKIES         Browser cookies for claude.ai (enables fast title generation)
-  OPENROUTER_API_KEY     OpenRouter API key (enables fast title generation via Grok)
+  OPENROUTER_API_KEY     OpenRouter API key (enables fast title generation via Gemini)
 
 Title Generation Methods (in order of preference):
   1. claude.ai dust endpoint - fastest (~1s), requires CLAUDE_COOKIES
