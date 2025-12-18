@@ -8,7 +8,10 @@
       "Bash(dir:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npx tsc)",
+      "Bash(npm test:*)",
+      "Bash(gh pr create:*\")"
     ],
     "deny": [],
     "ask": []

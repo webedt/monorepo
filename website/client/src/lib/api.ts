@@ -439,10 +439,11 @@ export const sessionsApi = {
     }),
 
   // Create an event (for streaming-style logs that show up in Chat)
-  createEvent: (id: string, eventType: string, eventData: any) =>
+  // eventData should be the raw event object containing 'type' field
+  createEvent: (id: string, eventData: any) =>
     fetchApi(`/api/sessions/${id}/events`, {
       method: 'POST',
-      body: { eventType, eventData },
+      body: { eventData },
     }),
 
   update: (id: string, data: { userRequest?: string; branch?: string }) =>

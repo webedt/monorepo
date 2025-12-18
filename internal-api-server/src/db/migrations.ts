@@ -554,10 +554,38 @@ const INDEX_DEFINITIONS: string[] = [
  * Ensure the database schema is up to date by adding any missing columns
  * This runs after initial schema creation or migrations to handle schema drift
  */
-export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; indexesCreated: string[]; errors: string[] }> {
+export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdded: string[]; columnsRemoved: string[]; indexesCreated: string[]; errors: string[] }> {
   const columnsAdded: string[] = [];
+  const columnsRemoved: string[] = [];
   const indexesCreated: string[] = [];
   const errors: string[] = [];
+
+  // Drop deprecated columns
+  const COLUMNS_TO_DROP: { table: string; column: string }[] = [
+    { table: 'events', column: 'event_type' }, // eventType is now stored inside event_data JSON
+  ];
+
+  for (const { table, column } of COLUMNS_TO_DROP) {
+    try {
+      // Check if column exists before dropping
+      const result = await pool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns
+          WHERE table_schema = 'public'
+          AND table_name = $1
+          AND column_name = $2
+        );
+      `, [table, column]);
+
+      if (result.rows[0].exists) {
+        await pool.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+        columnsRemoved.push(`${table}.${column}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`Failed to drop ${table}.${column}: ${errorMessage}`);
+    }
+  }
 
   // Check for missing columns and add them
   for (const [key, alterSql] of Object.entries(COLUMN_DEFINITIONS)) {
@@ -600,7 +628,7 @@ export async function ensureSchemaUpToDate(pool: pg.Pool): Promise<{ columnsAdde
     }
   }
 
-  return { columnsAdded, indexesCreated, errors };
+  return { columnsAdded, columnsRemoved, indexesCreated, errors };
 }
 
 /**
