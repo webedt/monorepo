@@ -43,6 +43,36 @@ function shouldSkipAssistant(events: RawEvent[], currentIndex: number): boolean 
   return assistantText === resultText;
 }
 
+// Helper to build a map of tool_use_id -> tool_result content
+function buildToolResultMap(events: RawEvent[]): Map<string, any> {
+  const map = new Map<string, any>();
+  for (const event of events) {
+    // Check for tool_result in message.content array (user events with tool results)
+    const content = event.message?.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === 'tool_result' && block.tool_use_id) {
+          // Store the result content and any tool_use_result data
+          map.set(block.tool_use_id, {
+            content: block.content,
+            is_error: block.is_error,
+            tool_use_result: event.tool_use_result
+          });
+        }
+      }
+    }
+  }
+  return map;
+}
+
+// Helper to check if an event is a tool_result-only user event (should be hidden when paired with tool_use)
+function isToolResultOnlyEvent(event: RawEvent): boolean {
+  if (event.type !== 'user') return false;
+  const content = event.message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.length > 0 && content.every((block: any) => block.type === 'tool_result');
+}
+
 // Component to render a list of events with deduplication and filtering
 export function FormattedEventList({
   events,
@@ -51,11 +81,19 @@ export function FormattedEventList({
   events: RawEvent[];
   filters?: Record<string, boolean>;
 }) {
+  // Build map of tool results for pairing with tool uses
+  const toolResultMap = buildToolResultMap(events);
+
   return (
     <>
       {events.map((event, index) => {
         // Skip assistant messages that are duplicated in the result
         if (shouldSkipAssistant(events, index)) {
+          return null;
+        }
+
+        // Skip tool_result-only user events (they'll be shown inline with tool_use)
+        if (isToolResultOnlyEvent(event)) {
           return null;
         }
 
@@ -80,7 +118,7 @@ export function FormattedEventList({
           }
         }
 
-        return <FormattedEvent key={index} event={event} filters={filters} />;
+        return <FormattedEvent key={index} event={event} filters={filters} toolResultMap={toolResultMap} />;
       })}
     </>
   );
@@ -175,7 +213,7 @@ function getStatusSummary(eventType: string, event: any): string {
 }
 
 // Format a raw event for display
-export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filters?: Record<string, boolean> }) {
+export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: RawEvent; filters?: Record<string, boolean>; toolResultMap?: Map<string, any> }) {
   const eventType = event.type;
   const emoji = getEventEmoji(eventType);
   const time = event.timestamp.toLocaleTimeString();
@@ -264,6 +302,11 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
               if (block.name === 'Bash') {
                 const description = block.input?.description || 'Running command';
                 const command = block.input?.command || '';
+                const toolResult = toolResultMap?.get(block.id);
+                const resultContent = toolResult?.tool_use_result?.stdout || toolResult?.content || '';
+                const hasError = toolResult?.is_error || toolResult?.tool_use_result?.stderr;
+                const stderrContent = toolResult?.tool_use_result?.stderr || '';
+
                 return (
                   <div key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100 font-mono bg-base-300 rounded p-2">
                     <div className="flex items-center gap-1 text-base-content/80">
@@ -272,6 +315,17 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
                       <span>{description}</span>
                     </div>
                     <pre className="mt-1 text-base-content/70 overflow-auto whitespace-pre-wrap">{command}</pre>
+                    {toolResult && (
+                      <details className="mt-2">
+                        <summary className={`cursor-pointer text-xs ${hasError ? 'text-error' : 'text-base-content/60'} hover:text-base-content/80`}>
+                          {hasError ? '❌ Output (error)' : '📤 Output'}
+                        </summary>
+                        <pre className={`mt-1 p-2 rounded overflow-auto max-h-48 text-xs whitespace-pre-wrap ${hasError ? 'bg-error/10 text-error' : 'bg-base-200 text-base-content/70'}`}>
+                          {stderrContent && <span className="text-error">{stderrContent}</span>}
+                          {resultContent}
+                        </pre>
+                      </details>
+                    )}
                   </div>
                 );
               }
