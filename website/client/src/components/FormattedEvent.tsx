@@ -317,25 +317,19 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const stderrContent = toolResult?.tool_use_result?.stderr || '';
 
                 return (
-                  <div key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100 font-mono bg-base-300 rounded p-2">
-                    <div className="flex items-center gap-1 text-base-content/80">
-                      <span>🔨</span>
-                      <span className="font-semibold">Bash:</span>
-                      <span>{description}</span>
-                    </div>
-                    <pre className="mt-1 text-base-content/70 overflow-auto whitespace-pre-wrap">{command}</pre>
+                  <details key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100">
+                    <summary className="cursor-pointer font-mono flex items-center gap-2">
+                      <span className="opacity-50">{time}</span>
+                      <span>🔨</span> Bash: <span className="text-base-content/80">{command}</span>{' '}
+                      <span className="text-base-content/50">// {description}</span>
+                    </summary>
                     {toolResult && (
-                      <details className="mt-2">
-                        <summary className={`cursor-pointer text-xs ${hasError ? 'text-error' : 'text-base-content/60'} hover:text-base-content/80`}>
-                          {hasError ? '❌ Output (error)' : '📤 Output'}
-                        </summary>
-                        <pre className={`mt-1 p-2 rounded overflow-auto max-h-48 text-xs whitespace-pre-wrap ${hasError ? 'bg-error/10 text-error' : 'bg-base-200 text-base-content/70'}`}>
-                          {stderrContent && <span className="text-error">{stderrContent}</span>}
-                          {resultContent}
-                        </pre>
-                      </details>
+                      <pre className={`mt-1 ml-4 p-2 rounded overflow-auto max-h-48 text-xs whitespace-pre-wrap ${hasError ? 'bg-error/10 text-error' : 'bg-base-300 text-base-content/70'}`}>
+                        {stderrContent && <span className="text-error">{stderrContent}</span>}
+                        {resultContent}
+                      </pre>
                     )}
-                  </div>
+                  </details>
                 );
               }
               // Default formatting for other tools
