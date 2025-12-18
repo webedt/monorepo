@@ -11,7 +11,7 @@
       "Bash(git push:*)",
       "Bash(npx tsc)",
       "Bash(npm test:*)",
-      "Bash(gh pr create --title \"Remove eventType wrapper from SSE events and drop event_type column\" --body \"$(cat <<''EOF''\n## Summary\n- Add migration to automatically drop the `event_type` column from the events table on startup\n- Update `useEventSource` hook to pass raw events directly without wrapping in `{eventType, data}`\n- Update `Chat.tsx` to consume raw events with `type` field directly\n- Update `FormattedEvent` component to read `type` from the event object instead of `eventType`\n- Update API client `createEvent` function to accept raw event data\n\n## Technical Details\nEvents are now stored and transmitted as raw JSON objects containing the `type` field directly, rather than being wrapped in `{eventType, data}`. This simplifies event handling and reduces data duplication since the event type was stored twice (once in the `event_type` column and again inside `event_data.type`).\n\n### Database Migration\nThe `ensureSchemaUpToDate` function now includes a step to drop deprecated columns. On server startup, if the `event_type` column exists in the events table, it will be automatically dropped.\n\n## Test plan\n- [x] Build passes for internal-api-server\n- [x] Build passes for website client\n- [x] All 219 schema tests pass\n- [ ] Verify existing sessions still display events correctly\n- [ ] Verify new sessions store and display events properly\n- [ ] Verify reconnection/replay of events works correctly\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\nEOF\n)\")"
+      "Bash(gh pr create:*\")"
     ],
     "deny": [],
     "ask": []
