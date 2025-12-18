@@ -139,6 +139,23 @@ function getStatusSummary(eventType: string, data: any): string {
       return safeString(data.data?.content) || safeString(data.data?.message);
     case 'system':
       return `${safeString(data.model) || 'unknown model'} • ${data.tools?.length || 0} tools`;
+    case 'tool_use':
+      return safeString(data.name) || safeString(data.tool_name) || 'tool';
+    case 'tool_result': {
+      // Tool results can have various formats - try to extract meaningful content
+      const content = data.content;
+      if (typeof content === 'string') {
+        return content.substring(0, 80) + (content.length > 80 ? '...' : '');
+      }
+      if (Array.isArray(content)) {
+        // Handle array of content blocks (like text blocks)
+        const textBlock = content.find((block: any) => block.type === 'text');
+        if (textBlock?.text) {
+          return textBlock.text.substring(0, 80) + (textBlock.text.length > 80 ? '...' : '');
+        }
+      }
+      return safeString(data.tool_use_id) || 'result';
+    }
     case 'tool_progress':
       return `${safeString(data.tool_name)} (${data.elapsed_time_seconds}s)`;
     case 'result':
@@ -148,6 +165,10 @@ function getStatusSummary(eventType: string, data: any): string {
     case 'error':
       return safeString(data.message) || safeString(data.error) || 'Error occurred';
     default:
+      // For any unhandled event types, try to extract something meaningful
+      if (data.message) return safeString(data.message);
+      if (data.content) return safeString(data.content);
+      if (data.text) return safeString(data.text);
       return '';
   }
 }
