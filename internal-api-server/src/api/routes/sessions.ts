@@ -1456,7 +1456,10 @@ const streamEventsHandler = async (req: Request, res: Response) => {
     })}\n\n`);
 
     // PHASE 2: Handle based on session status
-    if (isActive) {
+    // Subscribe to live events if session is active in broadcaster OR has recent DB activity
+    // This handles the case where the broadcaster might not have the session (e.g., server restart)
+    // but the worker is still actively streaming events
+    if (isActive || isRecentlyActive) {
       // Session is actively streaming - subscribe to live events
       const subscriberId = uuidv4();
 
