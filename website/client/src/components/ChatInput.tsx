@@ -1109,7 +1109,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             </svg>
           </button>
 
-          {/* Submit/Stop/Queue button */}
+          {/* Submit/Stop button */}
           <button
             type={effectiveIsExecuting && !input.trim() && images.length === 0 ? 'button' : 'submit'}
             onClick={effectiveIsExecuting && !input.trim() && images.length === 0 ? onInterrupt : undefined}
@@ -1117,15 +1117,11 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
             className={`btn btn-circle ${
               effectiveIsExecuting && !input.trim() && images.length === 0
                 ? 'btn-error'
-                : effectiveIsExecuting
-                ? 'btn-warning'
                 : 'btn-primary'
             }`}
             title={
               effectiveIsExecuting && !input.trim() && images.length === 0
                 ? 'Stop current job'
-                : effectiveIsExecuting
-                ? 'Queue this message'
                 : 'Send message (Enter at end, Cmd/Ctrl+Enter, or click)'
             }
           >
@@ -1139,18 +1135,8 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
               >
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
-            ) : effectiveIsExecuting ? (
-              // Queue icon when executing and input has text
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className="w-5 h-5"
-              >
-                <path d="M5.625 3.75a2.625 2.625 0 100 5.25h12.75a2.625 2.625 0 000-5.25H5.625zM3.75 11.25a.75.75 0 000 1.5h16.5a.75.75 0 000-1.5H3.75zM3 15.75a.75.75 0 01.75-.75h16.5a.75.75 0 010 1.5H3.75a.75.75 0 01-.75-.75zM3.75 18.75a.75.75 0 000 1.5h16.5a.75.75 0 000-1.5H3.75z" />
-              </svg>
             ) : (
-              // Send icon when not executing
+              // Send icon
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"

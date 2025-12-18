@@ -299,11 +299,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [showScrollToPresent, setShowScrollToPresent] = useState(false);
 
-  // Message queue and interruption state
-  const [messageQueue, setMessageQueue] = useState<Array<{
-    input: string;
-    images: ImageAttachment[];
-  }>>([]);
 
   // Get repo store actions
   const repoStore = useRepoStore();
@@ -1525,33 +1520,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     if (!input.trim() && images.length === 0) return;
 
-    // If a job is currently executing, queue the message
-    if (isExecuting) {
-      const newMessage = {
-        input: input.trim(),
-        images: [...images],
-      };
-      setMessageQueue([...messageQueue, newMessage]);
-
-      // Clear input
-      setInput('');
-      setImages([]);
-
-      // Show confirmation
-      messageIdCounter.current += 1;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + messageIdCounter.current,
-          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-          type: 'system',
-          content: `📋 Message queued (${messageQueue.length + 1} in queue)`,
-          timestamp: new Date(),
-        },
-      ]);
-      return;
-    }
-
     // Set executing state immediately to prevent duplicate submissions
     setIsExecuting(true);
 
@@ -1711,88 +1679,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   };
 
-
-  // Process the next message in the queue
-  useEffect(() => {
-    if (!isExecuting && messageQueue.length > 0) {
-      const nextMessage = messageQueue[0];
-      setMessageQueue((prev) => prev.slice(1));
-
-      // Create a synthetic form event
-      setTimeout(() => {
-        // Build request parameters directly instead of relying on state
-        const requestParams: any = {
-          userRequest: nextMessage.input,
-        };
-
-        // Add user's preferred provider
-        const provider = user?.preferredProvider || 'claude';
-        if (provider) {
-          requestParams.provider = provider;
-        }
-
-        if (currentSessionId) {
-          requestParams.websiteSessionId = currentSessionId;
-        }
-
-        // Add user message
-        messageIdCounter.current += 1;
-        const userMessage: Message = {
-          id: Date.now() + messageIdCounter.current,
-          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-          type: 'user',
-          content: nextMessage.input || (nextMessage.images.length > 0 ? `[${nextMessage.images.length} image${nextMessage.images.length > 1 ? 's' : ''} attached]` : ''),
-          images: nextMessage.images.length > 0 ? nextMessage.images : undefined,
-          timestamp: new Date(),
-        };
-
-        // Track this as a pending message so it won't be lost when the merge effect runs
-        pendingUserMessagesRef.current = [...pendingUserMessagesRef.current, userMessage];
-
-        setMessages((prev) => [...prev, userMessage]);
-
-        // Handle images in request if present
-        if (nextMessage.images.length > 0) {
-          const contentBlocks: any[] = [];
-          if (nextMessage.input) {
-            contentBlocks.push({ type: 'text', text: nextMessage.input });
-          }
-          nextMessage.images.forEach((image) => {
-            contentBlocks.push({
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: image.mediaType,
-                data: image.data,
-              },
-            });
-          });
-          requestParams.userRequest = contentBlocks;
-        }
-
-        // Set executing state and start stream
-        setIsExecuting(true);
-
-        // Enable auto-scroll for queued messages
-        shouldAutoScrollDuringStreamRef.current = true;
-
-        // Start worker tracking for queued message
-        if (currentSessionId) {
-          workerStore.startExecution(currentSessionId);
-          console.log('[Chat] Started worker tracking for queued message, session:', currentSessionId);
-        }
-
-        setStreamMethod('POST');
-        setStreamBody(requestParams);
-
-        // Use execute-remote endpoint for claude-remote provider
-        const executeUrl = provider === 'claude-remote'
-          ? `${getApiBaseUrl()}/api/execute-remote`
-          : `${getApiBaseUrl()}/api/execute`;
-        setStreamUrl(executeUrl);
-      }, 500);
-    }
-  }, [isExecuting, messageQueue.length, currentSessionId, sessionId]);
 
   // Create title actions (Copy Chat, Edit, and Delete buttons) for the title line
   const titleActions = session && messages.length > 0 && (
@@ -2243,50 +2129,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                           </div>
                         )}
                       </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Queue status indicator */}
-              {messageQueue.length > 0 && (
-                <div className="flex justify-center my-4">
-                  <div className="bg-info/10 border border-info/30 rounded-lg inline-flex flex-col items-stretch gap-3 py-4 px-5 max-w-3xl w-full mx-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-info/20">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-info shrink-0 w-5 h-5">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                      </svg>
-                      <span className="text-sm font-semibold text-info">
-                        {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {messageQueue.map((queuedMsg, index) => (
-                        <div key={index} className="flex items-center gap-3 bg-base-200/50 hover:bg-base-200 rounded-lg px-4 py-3 group transition-colors">
-                          <span className="text-sm font-mono font-semibold text-info min-w-[2rem]">
-                            {index + 1}.
-                          </span>
-                          <span className="text-sm flex-1 line-clamp-2 break-words" title={queuedMsg.input}>
-                            {queuedMsg.input || `[${queuedMsg.images.length} image${queuedMsg.images.length > 1 ? 's' : ''}]`}
-                          </span>
-                          {queuedMsg.images.length > 0 && queuedMsg.input && (
-                            <span className="text-sm font-medium opacity-70 shrink-0">
-                              +{queuedMsg.images.length} 🖼️
-                            </span>
-                          )}
-                          <button
-                            onClick={() => {
-                              setMessageQueue((prev) => prev.filter((_, i) => i !== index));
-                            }}
-                            className="btn btn-ghost btn-sm btn-circle shrink-0 hover:btn-error transition-all"
-                            title="Remove from queue"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      ))}
                     </div>
                   </div>
                 </div>
