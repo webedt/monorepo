@@ -29,6 +29,7 @@ import LibraryItemPage from '@/pages/LibraryItemPage';
 import StoreItemDetail from '@/pages/StoreItemDetail';
 import SplitViewRouter from '@/components/SplitViewRouter';
 import ImageEditor from '@/pages/editor/ImageEditor';
+import Workspace from '@/pages/Workspace';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -102,7 +103,7 @@ function App() {
     // App routes that should not be treated as path-based deployment prefixes
     const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'trash', 'settings', 'admin',
                        'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
-                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor'];
+                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace'];
 
     if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
       // Check for /github/ prefix pattern: /github/owner/repo/branch/
@@ -218,6 +219,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Trash />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/workspace"
+              element={
+                <ProtectedRoute>
+                  <Workspace />
                 </ProtectedRoute>
               }
             />

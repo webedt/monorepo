@@ -93,15 +93,25 @@ export default function Layout() {
     ? user.email.substring(0, 2).toUpperCase()
     : '??';
 
-  // Detect if we're in editor mode (on /agents or /session/*)
+  // Detect if we're in editor mode (on /agents, /session/*, /workspace, or /github/*)
   // Settings page respects the 'from' URL parameter to show the correct navbar
   const settingsOrigin = searchParams.get('from');
   const isEditorMode = location.pathname === '/agents' ||
                        location.pathname === '/sessions' || // Backwards compat redirect
                        location.pathname === '/trash' ||
+                       location.pathname === '/workspace' ||
                        location.pathname.startsWith('/session/') ||
                        location.pathname.startsWith('/quick-setup/') ||
+                       location.pathname.startsWith('/github/') ||
                        (location.pathname === '/settings' && settingsOrigin === 'editor');
+
+  // Parse GitHub workspace route: /github/:owner/:repo/:branch/:page
+  const githubRouteMatch = location.pathname.match(/^\/github\/([^/]+)\/([^/]+)\/([^/]+)/);
+  const workspaceContext = githubRouteMatch ? {
+    owner: githubRouteMatch[1],
+    repo: githubRouteMatch[2],
+    branch: githubRouteMatch[3]
+  } : null;
 
   // Store mode navigation items
   const storeNavItems: NavItem[] = [
@@ -138,6 +148,12 @@ export default function Layout() {
       label: 'Agents',
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 13h8v8H3v-8zm0-10h8v8H3V3zm10 0h8v8h-8V3zm0 10h8v8h-8v-8z"/></svg>,
       isActive: location.pathname === '/agents' || location.pathname === '/sessions'
+    },
+    {
+      to: '/workspace',
+      label: 'Workspace',
+      icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>,
+      isActive: location.pathname === '/workspace' || location.pathname.startsWith('/github/')
     },
     {
       to: '/quick-setup/chat',
@@ -454,8 +470,35 @@ export default function Layout() {
         <div className="bg-base-100 border-b border-base-300">
           <div className="px-4 py-2">
             <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-xs">
-              {isConnected ? (
-                /* Show repository/branch info as pill when connected */
+              {workspaceContext ? (
+                /* Show workspace branch context when on /github/* routes */
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full">
+                    <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
+                    <span className="text-base-content/70">
+                      {workspaceContext.owner}/{workspaceContext.repo}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 bg-primary/10 rounded-full">
+                    <svg className="w-3 h-3 text-primary" fill="currentColor" viewBox="0 0 16 16">
+                      <path fillRule="evenodd" d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V6A2.5 2.5 0 0110 8.5H6a1 1 0 00-1 1v1.128a2.251 2.251 0 11-1.5 0V5.372a2.25 2.25 0 111.5 0v1.836A2.492 2.492 0 016 7h4a1 1 0 001-1v-.628A2.25 2.25 0 019.5 3.25zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zM3.5 3.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0z"/>
+                    </svg>
+                    <span className="text-primary font-medium">
+                      {decodeURIComponent(workspaceContext.branch)}
+                    </span>
+                  </div>
+                  <Link
+                    to="/workspace"
+                    className="text-base-content/50 hover:text-base-content/70 transition-colors"
+                    title="Change branch"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                    </svg>
+                  </Link>
+                </div>
+              ) : isConnected ? (
+                /* Show repository/branch info as pill when connected (legacy agent mode) */
                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full">
                   <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
                   <span className="text-base-content/70">
