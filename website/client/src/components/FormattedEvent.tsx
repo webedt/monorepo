@@ -237,12 +237,10 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       <div className="my-1">
         {/* Thinking blocks as status lines with brain emoji */}
         {thinkingBlocks.map((block: any, i: number) => (
-          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-center gap-2">
-            <span className="font-mono opacity-50">{time}</span>
-            <span>🧠</span>
-            <span className="opacity-70 italic">
-              <ExpandableText text={block.thinking || ''} maxLength={100} />
-            </span>
+          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-start gap-2">
+            <span className="font-mono opacity-50 shrink-0">{time}</span>
+            <span className="shrink-0">🧠</span>
+            <span className="opacity-70 italic whitespace-pre-wrap">{block.thinking || ''}</span>
           </div>
         ))}
         {/* Main assistant message bubble - blue */}
