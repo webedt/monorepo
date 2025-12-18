@@ -352,6 +352,30 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                   </div>
                 );
               }
+              // Special formatting for Write tool
+              if (block.name === 'Write') {
+                const toolResult = toolResultMap?.get(block.id);
+                const fileContent = block.input?.content || toolResult?.tool_use_result?.content || null;
+                const filePath = block.input?.file_path || toolResult?.tool_use_result?.filePath || 'unknown';
+                const lineCount = fileContent ? fileContent.split('\n').length : null;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs bg-base-200 rounded border-l-2 border-green-400">
+                    <summary className="opacity-70 py-1 px-2 cursor-pointer hover:opacity-100 list-none flex items-center gap-1">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span className="font-medium">✏️ Write:</span>{' '}
+                      <span className="font-mono text-green-400">{filePath}</span>
+                      {lineCount && <span className="opacity-50 ml-1">({lineCount} lines)</span>}
+                    </summary>
+                    {fileContent && (
+                      <pre className="p-2 bg-base-300 rounded-b overflow-auto max-h-96 text-xs whitespace-pre-wrap border-t border-base-300">
+                        {fileContent}
+                      </pre>
+                    )}
+                  </details>
+                );
+              }
               // Default formatting for other tools
               return (
                 <details key={`tool-${i}`} className="text-xs opacity-60">
