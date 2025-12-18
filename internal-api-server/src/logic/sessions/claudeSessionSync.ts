@@ -6,7 +6,7 @@
  */
 
 import { db, chatSessions, events, users } from '../db/index.js';
-import { eq, and, isNotNull, isNull } from 'drizzle-orm';
+import { eq, and, or, isNotNull, isNull, gte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { ClaudeRemoteClient, generateSessionPath, logger } from '@webedt/shared';
 import { ensureValidToken } from '../auth/claudeAuth.js';
@@ -248,7 +248,145 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
 
         const status = mapStatus(remoteSession.session_status);
 
-        // Create chat session in database
+        // Check for existing session that might match this remote session
+        // This prevents duplicates when a session was created via the website
+        // and is now being synced from Claude's API
+        const remoteCreatedAt = new Date(remoteSession.created_at);
+        const fiveMinutesBefore = new Date(remoteCreatedAt.getTime() - 5 * 60 * 1000);
+        const fiveMinutesAfter = new Date(remoteCreatedAt.getTime() + 5 * 60 * 1000);
+
+        let matchingExistingSession = null;
+
+        // First, try to match by branch (most specific)
+        if (branch && repositoryOwner && repositoryName) {
+          const branchMatches = await db
+            .select()
+            .from(chatSessions)
+            .where(
+              and(
+                eq(chatSessions.userId, userId),
+                eq(chatSessions.repositoryOwner, repositoryOwner),
+                eq(chatSessions.repositoryName, repositoryName),
+                eq(chatSessions.branch, branch),
+                isNull(chatSessions.remoteSessionId), // Only match sessions without remoteSessionId
+                isNull(chatSessions.deletedAt)
+              )
+            )
+            .limit(1);
+
+          if (branchMatches.length > 0) {
+            matchingExistingSession = branchMatches[0];
+            logger.info(`[SessionSync] Found matching session by branch`, {
+              component: 'SessionSync',
+              existingSessionId: matchingExistingSession.id,
+              remoteSessionId: remoteSession.id,
+              branch,
+              repositoryOwner,
+              repositoryName
+            });
+          }
+        }
+
+        // If no branch match, try matching by repo + time window + status
+        if (!matchingExistingSession && repositoryOwner && repositoryName) {
+          const repoTimeMatches = await db
+            .select()
+            .from(chatSessions)
+            .where(
+              and(
+                eq(chatSessions.userId, userId),
+                eq(chatSessions.repositoryOwner, repositoryOwner),
+                eq(chatSessions.repositoryName, repositoryName),
+                isNull(chatSessions.remoteSessionId), // Only match sessions without remoteSessionId
+                isNull(chatSessions.deletedAt),
+                or(
+                  eq(chatSessions.status, 'pending'),
+                  eq(chatSessions.status, 'running')
+                ),
+                gte(chatSessions.createdAt, fiveMinutesBefore)
+              )
+            )
+            .limit(1);
+
+          if (repoTimeMatches.length > 0) {
+            matchingExistingSession = repoTimeMatches[0];
+            logger.info(`[SessionSync] Found matching session by repo and time window`, {
+              component: 'SessionSync',
+              existingSessionId: matchingExistingSession.id,
+              remoteSessionId: remoteSession.id,
+              repositoryOwner,
+              repositoryName
+            });
+          }
+        }
+
+        // If we found a matching session, link it to the remote session instead of creating duplicate
+        if (matchingExistingSession) {
+          // Extract total cost from result event
+          let totalCost: string | undefined;
+          const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd);
+          if (resultEvent?.total_cost_usd) {
+            totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+          }
+
+          // Update existing session with remote session info
+          await db
+            .update(chatSessions)
+            .set({
+              remoteSessionId: remoteSession.id,
+              remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
+              status: status,
+              branch: branch || matchingExistingSession.branch,
+              totalCost: totalCost || matchingExistingSession.totalCost,
+              completedAt: status === 'completed' || status === 'error'
+                ? new Date(remoteSession.updated_at)
+                : matchingExistingSession.completedAt,
+            })
+            .where(eq(chatSessions.id, matchingExistingSession.id));
+
+          // Import any missing events
+          const existingEventUuids = new Set(
+            (await db
+              .select({ eventData: events.eventData })
+              .from(events)
+              .where(eq(events.chatSessionId, matchingExistingSession.id)))
+              .map(e => (e.eventData as any)?.uuid)
+              .filter(Boolean)
+          );
+
+          let newEventsCount = 0;
+          for (const event of sessionEvents) {
+            if (event.uuid && !existingEventUuids.has(event.uuid)) {
+              await db.insert(events).values({
+                chatSessionId: matchingExistingSession.id,
+                eventData: event,
+                timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
+              });
+              newEventsCount++;
+            }
+          }
+
+          // Notify subscribers about the update
+          sessionListBroadcaster.notifyStatusChanged(userId, {
+            id: matchingExistingSession.id,
+            status,
+            totalCost,
+            branch,
+          });
+
+          result.updated++;
+          logger.info(`[SessionSync] Linked existing session to remote session (prevented duplicate)`, {
+            component: 'SessionSync',
+            existingSessionId: matchingExistingSession.id,
+            remoteSessionId: remoteSession.id,
+            newEventsCount,
+            status
+          });
+
+          continue; // Skip creating a new session
+        }
+
+        // No matching session found, create a new one
         const sessionId = uuidv4();
         const sessionPath = repositoryOwner && repositoryName && branch
           ? generateSessionPath(repositoryOwner, repositoryName, branch)
