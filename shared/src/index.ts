@@ -23,6 +23,8 @@ export {
   parseSessionPath,
   sessionPathToDir,
   validateSessionPath,
+  normalizeRepoName,
+  normalizeRepoUrl,
 } from './sessionPathHelper.js';
 
 // Preview URL Helper

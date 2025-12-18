@@ -8,7 +8,7 @@
 import { db, chatSessions, events, users } from '../db/index.js';
 import { eq, and, or, isNotNull, isNull, gte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { ClaudeRemoteClient, generateSessionPath, logger } from '@webedt/shared';
+import { ClaudeRemoteClient, generateSessionPath, logger, normalizeRepoUrl } from '@webedt/shared';
 import { ensureValidToken } from '../auth/claudeAuth.js';
 import { sessionListBroadcaster } from './sessionListBroadcaster.js';
 import {
@@ -232,7 +232,8 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
         let branch: string | undefined;
 
         if (gitSource?.url) {
-          repositoryUrl = gitSource.url;
+          // Normalize URL to prevent duplicates (remove .git suffix)
+          repositoryUrl = normalizeRepoUrl(gitSource.url);
           const match = gitSource.url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
           if (match) {
             repositoryOwner = match[1];

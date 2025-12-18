@@ -12,7 +12,7 @@ import { db, chatSessions, messages, users, events } from '../../logic/db/index.
 import { eq } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '../../logic/auth/claudeAuth.js';
-import { logger, fetchEnvironmentIdFromSessions } from '@webedt/shared';
+import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
@@ -144,7 +144,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
     }
 
-    let repoUrl = github?.repoUrl;
+    // Normalize repo URL to prevent duplicates (remove .git suffix)
+    let repoUrl = github?.repoUrl ? normalizeRepoUrl(github.repoUrl) : undefined;
     const baseBranch = github?.branch || 'main'; // Client sends base branch as "branch"
 
     // Extract owner and repo name from URL (for PR functionality)
