@@ -855,6 +855,57 @@ export const storageApi = {
 // Backwards compatibility alias
 export const storageWorkerApi = storageApi;
 
+// Live Chat API (branch-based workspace chat)
+export const liveChatApi = {
+  // Get messages for a branch-based live chat
+  getMessages: (owner: string, repo: string, branch: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi(`/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/messages${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Add a message to a branch-based live chat
+  addMessage: (owner: string, repo: string, branch: string, data: {
+    role: 'user' | 'assistant';
+    content: string;
+    images?: Array<{ id: string; data: string; mediaType: string; fileName?: string }>;
+  }) =>
+    fetchApi(`/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/messages`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  // Clear all messages for a branch-based live chat
+  clearMessages: (owner: string, repo: string, branch: string) =>
+    fetchApi(`/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/messages`, {
+      method: 'DELETE',
+    }),
+
+  // Get execute URL for SSE streaming
+  getExecuteUrl: (owner: string, repo: string, branch: string) =>
+    `${getApiBaseUrl()}/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/execute`,
+
+  // Create an EventSource for live chat execution
+  createExecuteEventSource: (owner: string, repo: string, branch: string, data: {
+    message: string;
+    images?: Array<{ id: string; data: string; mediaType: string; fileName?: string }>;
+  }) => {
+    const params = new URLSearchParams();
+    params.append('message', data.message);
+    if (data.images) {
+      params.append('images', JSON.stringify(data.images));
+    }
+
+    const fullUrl = `${getApiBaseUrl()}/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/execute?${params}`;
+    console.log('[LiveChat] Creating EventSource with URL:', fullUrl);
+
+    return new EventSource(fullUrl, {
+      withCredentials: true,
+    });
+  },
+};
+
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;

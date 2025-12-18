@@ -115,6 +115,31 @@ export const events = pgTable('events', {
   timestamp: timestamp('timestamp').defaultNow().notNull(),
 });
 
+// Live Chat messages - branch-based chat messages for workspace collaboration
+export const liveChatMessages = pgTable('live_chat_messages', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  owner: text('owner').notNull(), // GitHub repo owner
+  repo: text('repo').notNull(), // GitHub repo name
+  branch: text('branch').notNull(), // Branch name
+  role: text('role').notNull(), // 'user' | 'assistant'
+  content: text('content').notNull(),
+  toolCalls: json('tool_calls').$type<Array<{
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+  }>>(), // For assistant tool use
+  images: json('images').$type<Array<{
+    id: string;
+    data: string;
+    mediaType: string;
+    fileName?: string;
+  }>>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -125,3 +150,5 @@ export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type Event = typeof events.$inferSelect;
 export type NewEvent = typeof events.$inferInsert;
+export type LiveChatMessage = typeof liveChatMessages.$inferSelect;
+export type NewLiveChatMessage = typeof liveChatMessages.$inferInsert;
