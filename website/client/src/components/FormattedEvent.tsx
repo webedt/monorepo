@@ -108,31 +108,45 @@ function getEventEmoji(type: string): string {
   return emojis[type] || '📦';
 }
 
+// Helper to safely stringify a value for display
+function safeString(value: any, maxLength = 200): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  // For objects/arrays, stringify them
+  try {
+    const str = JSON.stringify(value);
+    return str.length > maxLength ? str.substring(0, maxLength) + '...' : str;
+  } catch {
+    return '[complex object]';
+  }
+}
+
 // Get a brief summary for status events (one line)
 function getStatusSummary(eventType: string, data: any): string {
   switch (eventType) {
     case 'connected':
-      return data.provider || 'unknown';
+      return safeString(data.provider) || 'unknown';
     case 'message':
-      return data.message || '';
+      return safeString(data.message);
     case 'title_generation':
-      return data.title ? `"${data.title}"` : data.method || '';
+      return data.title ? `"${safeString(data.title)}"` : safeString(data.method);
     case 'session_created':
       return 'Session started';
     case 'session_name':
-      return data.sessionName || '';
+      return safeString(data.sessionName);
     case 'env_manager_log':
-      return data.data?.content || data.data?.message || '';
+      return safeString(data.data?.content) || safeString(data.data?.message);
     case 'system':
-      return `${data.model || 'unknown model'} • ${data.tools?.length || 0} tools`;
+      return `${safeString(data.model) || 'unknown model'} • ${data.tools?.length || 0} tools`;
     case 'tool_progress':
-      return `${data.tool_name} (${data.elapsed_time_seconds}s)`;
+      return `${safeString(data.tool_name)} (${data.elapsed_time_seconds}s)`;
     case 'result':
-      return data.result?.substring(0, 80) || 'Completed';
+      return safeString(data.result)?.substring(0, 80) || 'Completed';
     case 'completed':
-      return data.branch ? `Branch: ${data.branch}` : 'Done';
+      return data.branch ? `Branch: ${safeString(data.branch)}` : 'Done';
     case 'error':
-      return data.message || data.error || 'Error occurred';
+      return safeString(data.message) || safeString(data.error) || 'Error occurred';
     default:
       return '';
   }
