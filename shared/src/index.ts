@@ -9,6 +9,10 @@ export type { SessionMetadata, StorageSessionInfo, AIProvider } from './types.js
 export { logger } from './logger.js';
 export type { LogContext } from './logger.js';
 
+// Log Capture (for /api/logs endpoint)
+export { logCapture } from './logCapture.js';
+export type { CapturedLog, LogFilter } from './logCapture.js';
+
 // Emoji Mapper
 export { getEventEmoji, applyEmoji } from './emojiMapper.js';
 

@@ -39,6 +39,7 @@ import transcribeRoutes from './routes/transcribe.js';
 import completionsRoutes from './routes/completions.js';
 import imageGenRoutes from './routes/imageGen.js';
 import internalSessionsRoutes from './routes/internalSessions.js';
+import logsRoutes from './routes/logs.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './db/index.js';
@@ -312,6 +313,7 @@ app.use('/api', transcribeRoutes);
 app.use('/api/completions', completionsRoutes);
 app.use('/api/image-gen', imageGenRoutes);
 app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Sessions management
+app.use('/api', logsRoutes);  // Debug logs endpoint
 
 // Note: Static file serving removed - handled by website-server facade
 
@@ -404,6 +406,10 @@ app.listen(PORT, () => {
   console.log('  POST /api/internal/sessions/:id/archive- Archive session');
   console.log('  DELETE /api/internal/sessions/:id      - Delete session from DB');
   console.log('  POST /api/internal/sessions/:id/interrupt - Interrupt session');
+  console.log('');
+  console.log('  GET  /api/logs                         - Get captured logs');
+  console.log('  DELETE /api/logs                       - Clear captured logs');
+  console.log('  GET  /api/logs/status                  - Get log capture status');
   console.log('='.repeat(60));
 
   // Schedule periodic orphan cleanup

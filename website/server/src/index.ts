@@ -59,6 +59,7 @@ const ALLOWED_API_ROUTES = [
   '/api/transcribe',     // Audio transcription
   '/api/admin',          // Admin (requires admin auth anyway)
   '/api/storage',        // Storage operations (file listing, read, write, delete)
+  '/api/logs',           // Debug logs (for debugging, may disable in production)
 ];
 
 // Block internal-only routes explicitly

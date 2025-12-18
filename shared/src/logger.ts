@@ -2,6 +2,8 @@
  * Simple structured logger for WebEDT services
  */
 
+import { logCapture } from './logCapture.js';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 interface LogContext {
@@ -39,20 +41,24 @@ class Logger {
   }
 
   debug(message: string, context?: LogContext): void {
+    logCapture.capture('debug', message, context);
     if (process.env.LOG_LEVEL === 'debug') {
       console.log(this.formatMessage('debug', message, context));
     }
   }
 
   info(message: string, context?: LogContext): void {
+    logCapture.capture('info', message, context);
     console.log(this.formatMessage('info', message, context));
   }
 
   warn(message: string, context?: LogContext): void {
+    logCapture.capture('warn', message, context);
     console.warn(this.formatMessage('warn', message, context));
   }
 
   error(message: string, error?: Error | unknown, context?: LogContext): void {
+    logCapture.capture('error', message, context, error);
     console.error(this.formatMessage('error', message, context));
     if (error) {
       if (error instanceof Error) {
