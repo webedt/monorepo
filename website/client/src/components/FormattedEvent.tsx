@@ -1,6 +1,46 @@
 import { ExpandableJson } from './ExpandableContent';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
+// Content block types for structured multimodal content
+interface TextBlock {
+  type: 'text';
+  text: string;
+}
+
+interface ImageBlock {
+  type: 'image';
+  source: {
+    type: 'base64' | 'url';
+    media_type?: string;
+    data?: string;
+    url?: string;
+  };
+}
+
+type ContentBlock = TextBlock | ImageBlock;
+
+// Helper to parse message content - handles both array and JSON string formats
+function parseContent(content: unknown): ContentBlock[] | null {
+  // Already an array
+  if (Array.isArray(content)) {
+    return content as ContentBlock[];
+  }
+
+  // JSON string that might contain an array
+  if (typeof content === 'string' && content.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) {
+        return parsed as ContentBlock[];
+      }
+    } catch {
+      // Not valid JSON
+    }
+  }
+
+  return null;
+}
+
 // Raw event type for formatted view - now uses type directly instead of eventType wrapper
 interface RawEvent {
   type: string;
@@ -221,27 +261,16 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
 
   // User and Assistant get special chat bubble treatment
   if (eventType === 'user') {
-    const content = event.message?.content;
+    const rawContent = event.message?.content;
 
-    // Handle string content
-    if (typeof content === 'string') {
-      return (
-        <div className="flex justify-end my-2">
-          <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
-            <div className="text-sm">
-              <MarkdownRenderer content={content} />
-            </div>
-            <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
-          </div>
-        </div>
-      );
-    }
+    // Try to parse as array of content blocks (handles both array and JSON string)
+    const contentBlocks = parseContent(rawContent);
 
-    // Handle array content (text + images)
-    if (Array.isArray(content)) {
-      const textBlocks = content.filter((block: any) => block.type === 'text');
-      const imageBlocks = content.filter((block: any) => block.type === 'image');
-      const textContent = textBlocks.map((block: any) => block.text || '').join('\n').trim();
+    if (contentBlocks) {
+      // Successfully parsed as content blocks - extract text and images
+      const textBlocks = contentBlocks.filter((block): block is TextBlock => block.type === 'text');
+      const imageBlocks = contentBlocks.filter((block): block is ImageBlock => block.type === 'image');
+      const textContent = textBlocks.map(block => block.text || '').join('\n').trim();
 
       return (
         <div className="flex justify-end my-2">
@@ -253,7 +282,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
             )}
             {imageBlocks.length > 0 && (
               <div className={`flex flex-wrap gap-2 ${textContent ? 'mt-2' : ''}`}>
-                {imageBlocks.map((block: any, i: number) => {
+                {imageBlocks.map((block, i) => {
                   const source = block.source;
                   if (source?.type === 'base64' && source?.data && source?.media_type) {
                     return (
@@ -285,12 +314,26 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
       );
     }
 
+    // Handle plain string content (not a JSON array)
+    if (typeof rawContent === 'string') {
+      return (
+        <div className="flex justify-end my-2">
+          <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
+            <div className="text-sm">
+              <MarkdownRenderer content={rawContent} />
+            </div>
+            <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+          </div>
+        </div>
+      );
+    }
+
     // Fallback for unknown content types
     return (
       <div className="flex justify-end my-2">
         <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
           <div className="text-sm">
-            <MarkdownRenderer content={JSON.stringify(content)} />
+            <MarkdownRenderer content={rawContent ? JSON.stringify(rawContent) : ''} />
           </div>
           <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
         </div>
