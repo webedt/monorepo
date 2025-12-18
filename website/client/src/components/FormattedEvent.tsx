@@ -652,6 +652,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                       <span className="text-base-content/50">▶</span>
                       <span>🔍 Grep:</span>
                       <span className="font-mono text-purple-400">{pattern}</span>
+                      {path && path !== 'cwd' && <span className="opacity-50">in {path}</span>}
                       {fileType && <span className="opacity-50">in *.{fileType}</span>}
                       {glob && <span className="opacity-50">({glob})</span>}
                       {numFiles !== undefined && <span className="opacity-50">({numFiles} files)</span>}
