@@ -72,6 +72,25 @@ export interface ExecutionEvent {
 }
 
 /**
+ * Content block types for multimodal messages
+ */
+export interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface ImageContentBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+export type ContentBlock = TextContentBlock | ImageContentBlock;
+
+/**
  * Parameters for executing an AI request
  */
 export interface ExecuteParams {
@@ -79,8 +98,8 @@ export interface ExecuteParams {
   userId: string;
   /** Chat session ID in our database */
   chatSessionId: string;
-  /** User's prompt/request */
-  prompt: string;
+  /** User's prompt/request - can be string or content blocks with images */
+  prompt: string | ContentBlock[];
   /** GitHub repository URL */
   gitUrl: string;
   /** Model to use (optional) */
@@ -103,8 +122,8 @@ export interface ResumeParams {
   chatSessionId: string;
   /** Remote session ID from provider */
   remoteSessionId: string;
-  /** New prompt/message to send */
-  prompt: string;
+  /** New prompt/message to send - can be string or content blocks with images */
+  prompt: string | ContentBlock[];
   /** Claude auth credentials */
   claudeAuth: ClaudeAuth;
   /** Environment ID for Claude Remote (optional, uses config default if not provided) */

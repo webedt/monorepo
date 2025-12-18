@@ -212,7 +212,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Create or load chat session
     const chatSessionId = websiteSessionId || uuidv4();
-    const prompt = extractPrompt(userRequest);
+    // Keep original userRequest (string or content blocks) for API calls
+    // Only extract text-only version for title generation and storage
+    const textPrompt = extractPrompt(userRequest);
     const serializedRequest = serializeUserRequest(userRequest);
 
     if (websiteSessionId) {
@@ -408,12 +410,13 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       if (chatSession.remoteSessionId) {
         // Resume existing session
+        // Pass full userRequest (may include images as content blocks)
         result = await provider.resume(
           {
             userId: user.id,
             chatSessionId,
             remoteSessionId: chatSession.remoteSessionId,
-            prompt,
+            prompt: userRequest,
             claudeAuth,
             environmentId,
           },
@@ -421,11 +424,12 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         );
       } else {
         // Execute new session
+        // Pass full userRequest (may include images as content blocks)
         result = await provider.execute(
           {
             userId: user.id,
             chatSessionId,
-            prompt,
+            prompt: userRequest,
             gitUrl: repoUrl,
             claudeAuth,
             environmentId,
