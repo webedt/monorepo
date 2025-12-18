@@ -97,24 +97,16 @@ async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: n
     for (const session of stuckSessions) {
       try {
         // Check if session has a 'completed' event stored (worker finished but callback failed)
-        const completedEvents = await db
+        // eventData is a JSON column containing the raw event with a 'type' field
+        const allEvents = await db
           .select()
-          .from(events)
-          .where(
-            and(
-              eq(events.chatSessionId, session.id),
-              eq(events.eventType, 'completed')
-            )
-          )
-          .limit(1);
-
-        // Check if session has any events at all (worker started processing)
-        const eventCountResult = await db
-          .select({ count: count() })
           .from(events)
           .where(eq(events.chatSessionId, session.id));
 
-        const totalEvents = eventCountResult[0]?.count || 0;
+        const completedEvents = allEvents.filter(e => (e.eventData as any)?.type === 'completed');
+
+        // Check if session has any events at all (worker started processing)
+        const totalEvents = allEvents.length;
 
         // Determine the appropriate status:
         // - If there's a 'completed' event, mark as completed

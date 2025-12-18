@@ -13,12 +13,11 @@ import { FormattedEventList, type RawEvent } from '@/components/FormattedEvent';
 import type { Message, GitHubRepository, ChatSession, ChatVerbosityLevel } from '@/shared';
 
 
-// Database event type
+// Database event type - eventData contains the raw event with type field inside
 interface DbEvent {
   id: number;
   chatSessionId: string;
-  eventType: string;
-  eventData: any;
+  eventData: any; // Raw event JSON containing 'type' field
   timestamp: Date;
 }
 
@@ -70,8 +69,9 @@ function clearDraft(sessionId: string) {
 // Helper to convert raw SSE events from database to displayable messages
 // SIMPLIFIED: Just display raw JSON for all events - no custom formatting
 function convertEventToMessage(event: DbEvent, sessionId: string, _verbosityLevel?: ChatVerbosityLevel): Message | null {
-  const eventType = event.eventType;
   const data = event.eventData;
+  // Type is now inside the eventData JSON
+  const eventType = data?.type;
 
   // Skip if data is undefined or null
   if (!data) {
@@ -817,10 +817,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Populate rawEvents from database events for the raw JSON view
     // This ensures raw events are available when returning to a session
+    // eventData now contains the raw event with type field inside
     if (dbEvents.length > 0) {
       setRawEvents(dbEvents.map(event => ({
-        eventType: event.eventType,
-        data: event.eventData,
+        ...event.eventData,
         timestamp: new Date(event.timestamp)
       })));
     }
@@ -1206,24 +1206,26 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     body: streamBody,
     onMessage: (event) => {
       // Log all events to see what we're receiving
+      // Event is now the raw event with 'type' field directly (no eventType/data wrapper)
       console.log('Received SSE event:', event);
 
-      const { eventType, data } = event;
+      // Get event type from the raw event
+      const eventType = event.type;
 
       // Handle session-created event - update URL to the actual session ID
-      if (eventType === 'session-created' && data?.websiteSessionId) {
-        console.log('[Chat] Session created with ID:', data.websiteSessionId);
-        setCurrentSessionId(data.websiteSessionId);
+      if (eventType === 'session-created' && event.websiteSessionId) {
+        console.log('[Chat] Session created with ID:', event.websiteSessionId);
+        setCurrentSessionId(event.websiteSessionId);
 
         // Navigate to the actual session URL if we're on /session/new
         if (!sessionId || sessionId === 'new') {
-          console.log('[Chat] Navigating to session:', data.websiteSessionId);
+          console.log('[Chat] Navigating to session:', event.websiteSessionId);
           // Preserve the section path (e.g., /session/new/chat -> /session/{id}/chat)
           const currentPath = location.pathname;
           const section = currentPath.split('/').pop(); // Get the last segment
           const targetPath = section && section !== 'new'
-            ? `/session/${data.websiteSessionId}/${section}`
-            : `/session/${data.websiteSessionId}/chat`;
+            ? `/session/${event.websiteSessionId}/${section}`
+            : `/session/${event.websiteSessionId}/chat`;
           navigate(targetPath, { replace: true });
         }
 
@@ -1243,10 +1245,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       // Handle replay markers from reconnection
-      if (data?.type === 'replay_start') {
-        console.log('[Chat] Starting event replay, total events:', data.totalEvents);
+      if (eventType === 'replay_start') {
+        console.log('[Chat] Starting event replay, total events:', event.totalEvents);
         // Show a system message that we're replaying
-        if (data.totalEvents > 0) {
+        if (event.totalEvents > 0) {
           messageIdCounter.current += 1;
           setMessages((prev) => [
             ...prev,
@@ -1254,14 +1256,14 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               id: Date.now() + messageIdCounter.current,
               chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
               type: 'system',
-              content: `📜 Replaying ${data.totalEvents} previous events...`,
+              content: `📜 Replaying ${event.totalEvents} previous events...`,
               timestamp: new Date(),
             },
           ]);
         }
         return;
       }
-      if (data?.type === 'replay_end') {
+      if (eventType === 'replay_end') {
         console.log('[Chat] Replay complete, now receiving live events');
         // Refetch events from database to ensure we have all events
         // This is critical because:
@@ -1276,39 +1278,39 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Skip replayed events that we already have (de-duplicate)
       // Replayed events were already fetched from the database and converted to messages
       // in the merge effect, so we don't need to process them again
-      if (data?._replayed) {
+      if (event._replayed) {
         workerStore.recordHeartbeat();
         return; // Skip replayed events - they're already displayed from the database query
       }
 
-      // Skip if data is undefined or null
-      if (!data) {
+      // Skip if event is undefined or has no type
+      if (!event || !eventType) {
         console.log('Skipping event with no data:', event);
         return;
       }
 
       // Capture title and branch from title_generation events for UI display
       // Note: Backend now saves the title to DB immediately when generated
-      if (data.type === 'title_generation' && data.status === 'success' && currentSessionId) {
+      if (eventType === 'title_generation' && event.status === 'success' && currentSessionId) {
         // Capture generated title for UI (but don't overwrite user-edited title)
-        if (data.title && !hasUserEditedTitleRef.current) {
-          console.log('[Chat] Captured title from title_generation:', data.title);
-          autoGeneratedTitleRef.current = data.title;
+        if (event.title && !hasUserEditedTitleRef.current) {
+          console.log('[Chat] Captured title from title_generation:', event.title);
+          autoGeneratedTitleRef.current = event.title;
           // Title is saved by backend - no need to call API
         }
         // Branch name captured for UI display only
         // Backend saves the actual branch with ID suffix
-        if (data.branch_name) {
-          console.log('[Chat] Captured branch from title_generation:', data.branch_name);
+        if (event.branch_name) {
+          console.log('[Chat] Captured branch from title_generation:', event.branch_name);
           // Branch is saved by backend - no need to call API
         }
       }
 
       // Capture title from session_name events for UI display
       // Note: Backend now saves the title to DB immediately when generated, so we only update the local ref here
-      if (data.type === 'session_name' && data.sessionName && currentSessionId && !hasUserEditedTitleRef.current) {
-        console.log('[Chat] Captured title from session_name:', data.sessionName);
-        autoGeneratedTitleRef.current = data.sessionName;
+      if (eventType === 'session_name' && event.sessionName && currentSessionId && !hasUserEditedTitleRef.current) {
+        console.log('[Chat] Captured title from session_name:', event.sessionName);
+        autoGeneratedTitleRef.current = event.sessionName;
         // Title is saved by backend in progress callback - no need to call API
       }
 
@@ -1321,12 +1323,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       //   - Wrapped format (old): { type: 'raw_event', rawEvent: { type: 'env_manager_log', data: {...} } }
       if (currentSessionId) {
         // Handle both flat and wrapped event formats
-        const eventType = data.type === 'raw_event' ? data.rawEvent?.type : data.type;
-        const eventData = data.type === 'raw_event' ? data.rawEvent?.data : data.data;
-        const toolUseResult = data.type === 'raw_event' ? data.rawEvent?.tool_use_result : data.tool_use_result;
+        const innerEventType = eventType === 'raw_event' ? event.rawEvent?.type : eventType;
+        const eventData = eventType === 'raw_event' ? event.rawEvent?.data : event.data;
+        const toolUseResult = eventType === 'raw_event' ? event.rawEvent?.tool_use_result : event.tool_use_result;
 
         // Check for branch in env_manager_log args (earliest source)
-        if (eventType === 'env_manager_log' && eventData?.extra?.args) {
+        if (innerEventType === 'env_manager_log' && eventData?.extra?.args) {
           const args = eventData.extra.args;
           const appendPromptIndex = args.findIndex((arg: string) => arg === '--append-system-prompt');
           if (appendPromptIndex !== -1 && args[appendPromptIndex + 1]) {
@@ -1361,14 +1363,14 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
       }
 
-      // Store raw event for the raw JSON view
+      // Store raw event for the raw JSON view (no longer wrapped)
       setRawEvents((prev) => [
         ...prev,
-        { eventType, data, timestamp: new Date() },
+        { ...event, timestamp: new Date() },
       ]);
 
       // Also add as a formatted message for the normal view
-      const rawJsonContent = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+      const rawJsonContent = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(event, null, 2)}\n\`\`\``;
       messageIdCounter.current += 1;
       setMessages((prev) => [
         ...prev,
@@ -2117,7 +2119,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                   <div className="space-y-2">
                     {rawEvents.map((event, index) => (
                       <pre key={index} className="bg-base-300 p-3 rounded-lg overflow-auto whitespace-pre-wrap break-words">
-                        {JSON.stringify({ eventType: event.eventType, data: event.data }, null, 2)}
+                        {JSON.stringify(event, null, 2)}
                       </pre>
                     ))}
                   </div>

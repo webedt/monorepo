@@ -190,19 +190,19 @@ sessionCommand
       let cleaned = 0;
 
       for (const session of stuckSessions) {
-        // Check if session has a completed event
-        const completedEvents = await db
+        // Check if session has a completed event (eventType is inside eventData JSON)
+        const sessionEvents = await db
           .select()
           .from(events)
-          .where(
-            and(
-              eq(events.chatSessionId, session.id),
-              eq(events.eventType, 'completed')
-            )
-          )
-          .limit(1);
+          .where(eq(events.chatSessionId, session.id));
 
-        const newStatus = completedEvents.length > 0 ? 'completed' : 'error';
+        // Check for completed event in the eventData JSON
+        const hasCompletedEvent = sessionEvents.some(e => {
+          const data = e.eventData as { type?: string } | null;
+          return data?.type === 'completed';
+        });
+
+        const newStatus = hasCompletedEvent ? 'completed' : 'error';
 
         await db
           .update(chatSessions)

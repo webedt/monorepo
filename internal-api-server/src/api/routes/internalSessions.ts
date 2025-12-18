@@ -155,15 +155,14 @@ function sendSSE(res: Response, event: Record<string, unknown>): void {
 /**
  * Store event in database
  */
-async function storeEvent(chatSessionId: string, eventType: string, eventData: Record<string, unknown>): Promise<void> {
+async function storeEvent(chatSessionId: string, eventData: Record<string, unknown>): Promise<void> {
   try {
     await db.insert(events).values({
       chatSessionId,
-      eventType,
       eventData,
     });
   } catch (error) {
-    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType });
+    logger.warn('Failed to store event', { component: 'InternalSessions', error, chatSessionId, eventType: (eventData as any).type });
   }
 }
 
@@ -265,7 +264,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     // Send session created event
     const sessionCreatedEvent = { type: 'session_created', chatSessionId, timestamp: new Date().toISOString() };
     sendSSE(res, sessionCreatedEvent);
-    await storeEvent(chatSessionId, 'session_created', sessionCreatedEvent);
+    await storeEvent(chatSessionId, sessionCreatedEvent);
 
     // Generate title
     const titleInfo = await generateTitle(
@@ -281,7 +280,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         if (clientDisconnected) return;
         const titleEvent = { ...event, timestamp: new Date().toISOString() };
         sendSSE(res, titleEvent);
-        await storeEvent(chatSessionId!, event.type, titleEvent);
+        await storeEvent(chatSessionId!, titleEvent);
       }
     );
 
@@ -314,7 +313,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
     };
     sendSSE(res, remoteCreatedEvent);
-    await storeEvent(chatSessionId, 'remote_session_created', remoteCreatedEvent);
+    await storeEvent(chatSessionId, remoteCreatedEvent);
 
     // Poll for events
     try {
@@ -324,7 +323,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           if (clientDisconnected) return;
           const eventWithTimestamp = { ...event, timestamp: new Date().toISOString() };
           sendSSE(res, eventWithTimestamp);
-          await storeEvent(chatSessionId!, event.type, eventWithTimestamp);
+          await storeEvent(chatSessionId!, eventWithTimestamp);
         },
         { abortSignal: abortController.signal }
       );
@@ -351,7 +350,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         timestamp: new Date().toISOString(),
       };
       sendSSE(res, completedEvent);
-      await storeEvent(chatSessionId, 'completed', completedEvent);
+      await storeEvent(chatSessionId, completedEvent);
 
     } catch (pollError) {
       if (abortController.signal.aborted) {
@@ -363,7 +362,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           timestamp: new Date().toISOString(),
         };
         sendSSE(res, interruptedEvent);
-        await storeEvent(chatSessionId, 'interrupted', interruptedEvent);
+        await storeEvent(chatSessionId, interruptedEvent);
       } else {
         throw pollError;
       }
@@ -394,7 +393,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         res.status(500).json({ success: false, error: errorEvent.error });
       } else {
         sendSSE(res, errorEvent);
-        await storeEvent(chatSessionId, 'error', errorEvent);
+        await storeEvent(chatSessionId, errorEvent);
         res.end();
       }
 
@@ -487,12 +486,12 @@ router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
       .where(eq(events.chatSessionId, id))
       .orderBy(asc(events.id));
 
+    // eventData contains the raw event with type field inside
     res.json({
       success: true,
       data: sessionEvents.map(e => ({
         id: e.id,
-        type: e.eventType,
-        data: e.eventData,
+        eventData: e.eventData,
         timestamp: e.timestamp,
       })),
     });
@@ -590,7 +589,7 @@ const streamHandler = async (req: Request, res: Response) => {
                 seenEventIds.add(event.uuid);
                 const eventWithTimestamp = { ...event, timestamp: new Date().toISOString() };
                 sendSSE(res, eventWithTimestamp);
-                await storeEvent(id, event.type, eventWithTimestamp);
+                await storeEvent(id, eventWithTimestamp);
               },
               { skipExistingEvents: true }
             );
@@ -698,7 +697,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
     // Send resuming event
     const resumingEvent = { type: 'resuming', sessionId: id, timestamp: new Date().toISOString() };
     sendSSE(res, resumingEvent);
-    await storeEvent(id, 'resuming', resumingEvent);
+    await storeEvent(id, resumingEvent);
 
     // Store user message event
     const userMessageEvent = {
@@ -707,7 +706,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
     };
     sendSSE(res, userMessageEvent);
-    await storeEvent(id, 'user_message', userMessageEvent);
+    await storeEvent(id, userMessageEvent);
 
     // Create client and resume session
     const client = createClient(claudeAuth);
@@ -720,7 +719,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
           if (clientDisconnected) return;
           const eventWithTimestamp = { ...event, timestamp: new Date().toISOString() };
           sendSSE(res, eventWithTimestamp);
-          await storeEvent(id, event.type, eventWithTimestamp);
+          await storeEvent(id, eventWithTimestamp);
         },
         { abortSignal: abortController.signal }
       );
@@ -747,7 +746,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
         timestamp: new Date().toISOString(),
       };
       sendSSE(res, completedEvent);
-      await storeEvent(id, 'completed', completedEvent);
+      await storeEvent(id, completedEvent);
 
     } catch (resumeError) {
       if (abortController.signal.aborted) {
@@ -757,7 +756,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
           timestamp: new Date().toISOString(),
         };
         sendSSE(res, interruptedEvent);
-        await storeEvent(id, 'interrupted', interruptedEvent);
+        await storeEvent(id, interruptedEvent);
       } else {
         throw resumeError;
       }
@@ -787,7 +786,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
       res.status(500).json({ success: false, error: errorEvent.error });
     } else {
       sendSSE(res, errorEvent);
-      await storeEvent(id, 'error', errorEvent);
+      await storeEvent(id, errorEvent);
       res.end();
     }
 
@@ -1009,7 +1008,7 @@ router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) =
       .where(eq(chatSessions.id, id));
 
     // Store interrupt event
-    await storeEvent(id, 'interrupted', {
+    await storeEvent(id, {
       type: 'interrupted',
       sessionId: id,
       wasActive,

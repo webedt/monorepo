@@ -478,15 +478,15 @@ router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const sessionId = req.params.id;
-    const { eventType, eventData } = req.body;
+    const { eventData } = req.body;
 
     if (!sessionId) {
       res.status(400).json({ success: false, error: 'Invalid session ID' });
       return;
     }
 
-    if (!eventType || eventData === undefined) {
-      res.status(400).json({ success: false, error: 'eventType and eventData are required' });
+    if (eventData === undefined) {
+      res.status(400).json({ success: false, error: 'eventData is required' });
       return;
     }
 
@@ -512,7 +512,6 @@ router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
       .insert(events)
       .values({
         chatSessionId: sessionId,
-        eventType,
         eventData,
       })
       .returning();
@@ -1739,7 +1738,6 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
         for (const event of sessionEvents) {
           await db.insert(events).values({
             chatSessionId: sessionId,
-            eventType: event.type,
             eventData: event,
             timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
           });
@@ -1911,7 +1909,6 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     for (const event of newEvents) {
       await db.insert(events).values({
         chatSessionId: sessionId,
-        eventType: event.type,
         eventData: event,
         timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
       });

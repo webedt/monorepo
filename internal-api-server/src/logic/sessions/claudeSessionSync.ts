@@ -10,6 +10,7 @@ import { eq, and, isNotNull, isNull } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { ClaudeRemoteClient, generateSessionPath, logger } from '@webedt/shared';
 import { ensureValidToken } from '../auth/claudeAuth.js';
+import { sessionListBroadcaster } from './sessionListBroadcaster.js';
 import {
   CLAUDE_ENVIRONMENT_ID,
   CLAUDE_API_BASE_URL,
@@ -128,7 +129,6 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             if (event.uuid && !existingUuids.has(event.uuid)) {
               await db.insert(events).values({
                 chatSessionId: runningSession.id,
-                eventType: event.type,
                 eventData: event,
                 timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
               });
@@ -157,6 +157,14 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
               branch: branch || undefined,
             })
             .where(eq(chatSessions.id, runningSession.id));
+
+          // Notify subscribers about status change
+          sessionListBroadcaster.notifyStatusChanged(userId, {
+            id: runningSession.id,
+            status: newStatus,
+            totalCost: totalCost || undefined,
+            branch: branch || undefined,
+          });
 
           result.updated++;
           logger.info(`[SessionSync] Updated session ${runningSession.id} from running to ${newStatus}`, {
@@ -260,7 +268,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           totalCost = resultEvent.total_cost_usd.toFixed(6);
         }
 
-        await db.insert(chatSessions).values({
+        const [importedSession] = await db.insert(chatSessions).values({
           id: sessionId,
           userId,
           userRequest,
@@ -278,13 +286,15 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           completedAt: status === 'completed' || status === 'error'
             ? new Date(remoteSession.updated_at)
             : undefined,
-        });
+        }).returning();
+
+        // Notify subscribers about imported session
+        sessionListBroadcaster.notifySessionCreated(userId, importedSession);
 
         // Import events
         for (const event of sessionEvents) {
           await db.insert(events).values({
             chatSessionId: sessionId,
-            eventType: event.type,
             eventData: event,
             timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
           });

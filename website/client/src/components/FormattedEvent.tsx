@@ -1,15 +1,16 @@
 import { ExpandableText, ExpandableJson } from './ExpandableContent';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
-// Raw event type for formatted view
+// Raw event type for formatted view - now uses type directly instead of eventType wrapper
 interface RawEvent {
-  eventType: string;
-  data: any;
+  type: string;
   timestamp: Date;
+  [key: string]: any; // Allow other properties from the raw event
 }
 
 // Helper to extract text content from assistant message
-function getAssistantTextContent(data: any): string {
-  const content = data?.message?.content;
+function getAssistantTextContent(event: RawEvent): string {
+  const content = event?.message?.content;
   if (!content || !Array.isArray(content)) return '';
 
   return content
@@ -22,25 +23,55 @@ function getAssistantTextContent(data: any): string {
 // Helper to check if last assistant message matches result
 function shouldSkipAssistant(events: RawEvent[], currentIndex: number): boolean {
   const event = events[currentIndex];
-  if (event.eventType !== 'assistant') return false;
+  if (event.type !== 'assistant') return false;
 
   // Find the next result event after this assistant
-  const resultEvent = events.slice(currentIndex + 1).find(e => e.eventType === 'result');
+  const resultEvent = events.slice(currentIndex + 1).find(e => e.type === 'result');
   if (!resultEvent) return false;
 
   // Check if there are any other assistant events between this one and the result
   const eventsAfter = events.slice(currentIndex + 1);
-  const nextAssistantIndex = eventsAfter.findIndex(e => e.eventType === 'assistant');
-  const resultIndex = eventsAfter.findIndex(e => e.eventType === 'result');
+  const nextAssistantIndex = eventsAfter.findIndex(e => e.type === 'assistant');
+  const resultIndex = eventsAfter.findIndex(e => e.type === 'result');
 
   // If there's another assistant before the result, don't skip this one
   if (nextAssistantIndex !== -1 && nextAssistantIndex < resultIndex) return false;
 
   // Compare the text content
-  const assistantText = getAssistantTextContent(event.data);
-  const resultText = (resultEvent.data?.result || '').trim();
+  const assistantText = getAssistantTextContent(event);
+  const resultText = (resultEvent?.result || '').trim();
 
   return assistantText === resultText;
+}
+
+// Helper to build a map of tool_use_id -> tool_result content
+function buildToolResultMap(events: RawEvent[]): Map<string, any> {
+  const map = new Map<string, any>();
+  for (const event of events) {
+    // Check for tool_result in message.content array (user events with tool results)
+    const content = event.message?.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === 'tool_result' && block.tool_use_id) {
+          // Store the result content and any tool_use_result data
+          map.set(block.tool_use_id, {
+            content: block.content,
+            is_error: block.is_error,
+            tool_use_result: event.tool_use_result
+          });
+        }
+      }
+    }
+  }
+  return map;
+}
+
+// Helper to check if an event is a tool_result-only user event (should be hidden when paired with tool_use)
+function isToolResultOnlyEvent(event: RawEvent): boolean {
+  if (event.type !== 'user') return false;
+  const content = event.message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.length > 0 && content.every((block: any) => block.type === 'tool_result');
 }
 
 // Component to render a list of events with deduplication and filtering
@@ -51,6 +82,9 @@ export function FormattedEventList({
   events: RawEvent[];
   filters?: Record<string, boolean>;
 }) {
+  // Build map of tool results for pairing with tool uses
+  const toolResultMap = buildToolResultMap(events);
+
   return (
     <>
       {events.map((event, index) => {
@@ -59,8 +93,13 @@ export function FormattedEventList({
           return null;
         }
 
-        // Apply filters
-        const eventType = event.eventType;
+        // Skip tool_result-only user events (they'll be shown inline with tool_use)
+        if (isToolResultOnlyEvent(event)) {
+          return null;
+        }
+
+        // Apply filters - type is now directly on the event
+        const eventType = event.type;
 
         // Check if this event type is filtered out
         if (filters[eventType] === false) {
@@ -71,7 +110,7 @@ export function FormattedEventList({
         // but we want to filter them separately
         if (eventType === 'assistant' && filters.thinking === false) {
           // Check if this assistant event has thinking blocks
-          const content = event.data?.message?.content;
+          const content = event.message?.content;
           if (Array.isArray(content)) {
             const hasOnlyThinking = content.every((block: any) => block.type === 'thinking');
             if (hasOnlyThinking) {
@@ -80,7 +119,7 @@ export function FormattedEventList({
           }
         }
 
-        return <FormattedEvent key={index} event={event} filters={filters} />;
+        return <FormattedEvent key={index} event={event} filters={filters} toolResultMap={toolResultMap} />;
       })}
     </>
   );
@@ -123,27 +162,28 @@ function safeString(value: any, maxLength = 200): string {
 }
 
 // Get a brief summary for status events (one line)
-function getStatusSummary(eventType: string, data: any): string {
+// Now takes the raw event directly (with type and other properties at top level)
+function getStatusSummary(eventType: string, event: any): string {
   switch (eventType) {
     case 'connected':
-      return safeString(data.provider) || 'unknown';
+      return safeString(event.provider) || 'unknown';
     case 'message':
-      return safeString(data.message);
+      return safeString(event.message);
     case 'title_generation':
-      return data.title ? `"${safeString(data.title)}"` : safeString(data.method);
+      return event.title ? `"${safeString(event.title)}"` : safeString(event.method);
     case 'session_created':
       return 'Session started';
     case 'session_name':
-      return safeString(data.sessionName);
+      return safeString(event.sessionName);
     case 'env_manager_log':
-      return safeString(data.data?.content) || safeString(data.data?.message);
+      return safeString(event.data?.content) || safeString(event.data?.message);
     case 'system':
-      return `${safeString(data.model) || 'unknown model'} • ${data.tools?.length || 0} tools`;
+      return `${safeString(event.model) || 'unknown model'} • ${event.tools?.length || 0} tools`;
     case 'tool_use':
-      return safeString(data.name) || safeString(data.tool_name) || 'tool';
+      return safeString(event.name) || safeString(event.tool_name) || 'tool';
     case 'tool_result': {
       // Tool results can have various formats - try to extract meaningful content
-      const content = data.content;
+      const content = event.content;
       if (typeof content === 'string') {
         return content.substring(0, 80) + (content.length > 80 ? '...' : '');
       }
@@ -154,42 +194,42 @@ function getStatusSummary(eventType: string, data: any): string {
           return textBlock.text.substring(0, 80) + (textBlock.text.length > 80 ? '...' : '');
         }
       }
-      return safeString(data.tool_use_id) || 'result';
+      return safeString(event.tool_use_id) || 'result';
     }
     case 'tool_progress':
-      return `${safeString(data.tool_name)} (${data.elapsed_time_seconds}s)`;
+      return `${safeString(event.tool_name)} (${event.elapsed_time_seconds}s)`;
     case 'result':
-      return safeString(data.result)?.substring(0, 80) || 'Completed';
+      return safeString(event.result)?.substring(0, 80) || 'Completed';
     case 'completed':
-      return data.branch ? `Branch: ${safeString(data.branch)}` : 'Done';
+      return event.branch ? `Branch: ${safeString(event.branch)}` : 'Done';
     case 'error':
-      return safeString(data.message) || safeString(data.error) || 'Error occurred';
+      return safeString(event.message) || safeString(event.error) || 'Error occurred';
     default:
       // For any unhandled event types, try to extract something meaningful
-      if (data.message) return safeString(data.message);
-      if (data.content) return safeString(data.content);
-      if (data.text) return safeString(data.text);
+      if (event.message) return safeString(event.message);
+      if (event.content) return safeString(event.content);
+      if (event.text) return safeString(event.text);
       return '';
   }
 }
 
 // Format a raw event for display
-export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filters?: Record<string, boolean> }) {
-  const emoji = getEventEmoji(event.eventType);
+export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: RawEvent; filters?: Record<string, boolean>; toolResultMap?: Map<string, any> }) {
+  const eventType = event.type;
+  const emoji = getEventEmoji(eventType);
   const time = event.timestamp.toLocaleTimeString();
-  const data = event.data || {};
 
   // User and Assistant get special chat bubble treatment
-  if (event.eventType === 'user') {
-    const userContent = typeof data.message?.content === 'string'
-      ? data.message.content
-      : JSON.stringify(data.message?.content);
+  if (eventType === 'user') {
+    const userContent = typeof event.message?.content === 'string'
+      ? event.message.content
+      : JSON.stringify(event.message?.content);
 
     return (
       <div className="flex justify-end my-2">
         <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
-          <div className="text-sm whitespace-pre-wrap">
-            <ExpandableText text={userContent || ''} maxLength={500} />
+          <div className="text-sm">
+            <MarkdownRenderer content={userContent || ''} />
           </div>
           <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
         </div>
@@ -197,8 +237,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
     );
   }
 
-  if (event.eventType === 'assistant') {
-    const content = data.message?.content;
+  if (eventType === 'assistant') {
+    const content = event.message?.content;
     if (!content) return null;
 
     // Handle string content (simple text response)
@@ -206,8 +246,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       return (
         <div className="flex justify-start my-2">
           <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
-            <div className="text-sm whitespace-pre-wrap">
-              <ExpandableText text={content} maxLength={500} />
+            <div className="text-sm">
+              <MarkdownRenderer content={content} />
             </div>
             <div className="text-xs opacity-40 mt-1">{time}</div>
           </div>
@@ -236,12 +276,10 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       <div className="my-1">
         {/* Thinking blocks as status lines with brain emoji */}
         {thinkingBlocks.map((block: any, i: number) => (
-          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-center gap-2">
-            <span className="font-mono opacity-50">{time}</span>
-            <span>🧠</span>
-            <span className="opacity-70 italic">
-              <ExpandableText text={block.thinking || ''} maxLength={100} />
-            </span>
+          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-start gap-2">
+            <span className="font-mono opacity-50 shrink-0">{time}</span>
+            <span className="shrink-0">🧠</span>
+            <span className="opacity-70 italic whitespace-pre-wrap">{block.thinking || ''}</span>
           </div>
         ))}
         {/* Main assistant message bubble - blue */}
@@ -249,8 +287,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
           <div className="flex justify-start my-1">
             <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
               {textBlocks.map((block: any, i: number) => (
-                <div key={`text-${i}`} className="text-sm whitespace-pre-wrap">
-                  <ExpandableText text={block.text || ''} maxLength={500} />
+                <div key={`text-${i}`} className="text-sm">
+                  <MarkdownRenderer content={block.text || ''} />
                 </div>
               ))}
               <div className="text-xs opacity-40 mt-1">{time}</div>
@@ -259,17 +297,142 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
         )}
         {/* Tool use shown as compact inline items */}
         {toolBlocks.length > 0 && (
-          <div className="ml-4 mt-1 space-y-1">
-            {toolBlocks.map((block: any, i: number) => (
-              <details key={`tool-${i}`} className="text-xs opacity-60">
-                <summary className="cursor-pointer hover:opacity-100">
-                  🔨 {block.name}
-                </summary>
-                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
-                  {JSON.stringify(block.input, null, 2)}
-                </pre>
-              </details>
-            ))}
+          <div className="mt-1 space-y-1">
+            {toolBlocks.map((block: any, i: number) => {
+              // Special formatting for Read tool
+              if (block.name === 'Read') {
+                const toolResult = toolResultMap?.get(block.id);
+                const fileContent = toolResult?.tool_use_result?.file?.content || null;
+                const numLines = toolResult?.tool_use_result?.file?.numLines || null;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>📖 Read:</span>
+                      <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
+                      {numLines && <span className="opacity-50">({numLines} lines)</span>}
+                    </summary>
+                    {fileContent && (
+                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
+                        {fileContent}
+                      </pre>
+                    )}
+                  </details>
+                );
+              }
+              // Special formatting for Bash tool
+              if (block.name === 'Bash') {
+                const description = block.input?.description || 'Running command';
+                const command = block.input?.command || '';
+                const toolResult = toolResultMap?.get(block.id);
+                const resultContent = toolResult?.tool_use_result?.stdout || toolResult?.content || '';
+                const hasError = toolResult?.is_error || toolResult?.tool_use_result?.stderr;
+                const stderrContent = toolResult?.tool_use_result?.stderr || '';
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100">
+                    <summary className="cursor-pointer font-mono flex items-center gap-2">
+                      <span className="opacity-50">{time}</span>
+                      <span>🔨</span> Bash: <span className="text-base-content/80">{command}</span>{' '}
+                      <span className="text-base-content/50">// {description}</span>
+                    </summary>
+                    {toolResult && (
+                      <pre className={`mt-1 ml-4 p-2 rounded overflow-auto max-h-48 text-xs whitespace-pre-wrap ${hasError ? 'bg-error/10 text-error' : 'bg-base-300 text-base-content/70'}`}>
+                        {stderrContent && <span className="text-error">{stderrContent}</span>}
+                        {resultContent}
+                      </pre>
+                    )}
+                  </details>
+                );
+              }
+              // Special formatting for Edit tool
+              if (block.name === 'Edit') {
+                const toolResult = toolResultMap?.get(block.id);
+                const filePath = block.input?.file_path || toolResult?.tool_use_result?.filePath || 'unknown';
+                const oldString = block.input?.old_string || toolResult?.tool_use_result?.oldString || '';
+                const newString = block.input?.new_string || toolResult?.tool_use_result?.newString || '';
+                const structuredPatch = toolResult?.tool_use_result?.structuredPatch;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>📝 Edit:</span>
+                      <span className="font-mono text-yellow-400">{filePath}</span>
+                    </summary>
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {structuredPatch && structuredPatch.length > 0 ? (
+                        <pre className="whitespace-pre-wrap">
+                          {structuredPatch.map((hunk: any, hunkIdx: number) => (
+                            <span key={hunkIdx}>
+                              {hunk.lines?.map((line: string, lineIdx: number) => {
+                                const isRemoval = line.startsWith('-');
+                                const isAddition = line.startsWith('+');
+                                return (
+                                  <span
+                                    key={lineIdx}
+                                    className={isRemoval ? 'text-red-400 bg-red-400/10' : isAddition ? 'text-green-400 bg-green-400/10' : ''}
+                                  >
+                                    {line}{'\n'}
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          ))}
+                        </pre>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="text-red-400 bg-red-400/10 p-1 rounded">
+                            <span className="opacity-50">- </span>{oldString}
+                          </div>
+                          <div className="text-green-400 bg-green-400/10 p-1 rounded">
+                            <span className="opacity-50">+ </span>{newString}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                );
+              }
+              // Special formatting for Write tool
+              if (block.name === 'Write') {
+                const toolResult = toolResultMap?.get(block.id);
+                const fileContent = block.input?.content || toolResult?.tool_use_result?.content || null;
+                const filePath = block.input?.file_path || toolResult?.tool_use_result?.filePath || 'unknown';
+                const lineCount = fileContent ? fileContent.split('\n').length : null;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>✏️ Write:</span>
+                      <span className="font-mono text-green-400">{filePath}</span>
+                      {lineCount && <span className="opacity-50">({lineCount} lines)</span>}
+                    </summary>
+                    {fileContent && (
+                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
+                        {fileContent}
+                      </pre>
+                    )}
+                  </details>
+                );
+              }
+              // Default formatting for other tools
+              return (
+                <details key={`tool-${i}`} className="text-xs opacity-60">
+                  <summary className="cursor-pointer hover:opacity-100">
+                    🔨 {block.name}
+                  </summary>
+                  <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
+                    {JSON.stringify(block.input, null, 2)}
+                  </pre>
+                </details>
+              );
+            })}
           </div>
         )}
       </div>
@@ -277,16 +440,16 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
   }
 
   // Result event - blue bubble like assistant messages
-  if (event.eventType === 'result') {
+  if (eventType === 'result') {
     return (
       <div className="flex justify-start my-2">
         <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
-          <div className="text-sm whitespace-pre-wrap">
-            <ExpandableText text={data.result || ''} maxLength={500} />
+          <div className="text-sm">
+            <MarkdownRenderer content={event.result || ''} />
           </div>
           <div className="text-xs opacity-40 mt-1">
             {time}
-            {data.total_cost_usd && ` • $${data.total_cost_usd.toFixed(4)} • ${data.num_turns} turns • ${(data.duration_ms / 1000).toFixed(1)}s`}
+            {event.total_cost_usd && ` • $${event.total_cost_usd.toFixed(4)} • ${event.num_turns} turns • ${(event.duration_ms / 1000).toFixed(1)}s`}
           </div>
         </div>
       </div>
@@ -294,46 +457,46 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
   }
 
   // All other events: single line with expandable details
-  const summary = getStatusSummary(event.eventType, data);
-  const hasDetails = ['system', 'env_manager_log', 'completed', 'error'].includes(event.eventType)
-    || (event.eventType === 'env_manager_log' && data.data?.extra?.args);
+  const summary = getStatusSummary(eventType, event);
+  const hasDetails = ['system', 'env_manager_log', 'completed', 'error'].includes(eventType)
+    || (eventType === 'env_manager_log' && event.data?.extra?.args);
 
   // Render expandable details content
   const renderDetails = () => {
-    switch (event.eventType) {
+    switch (eventType) {
       case 'system':
         return (
           <div className="text-xs space-y-1 mt-2 pl-4 border-l border-base-300">
-            <div><span className="opacity-50">cwd:</span> {data.cwd}</div>
-            <div><span className="opacity-50">model:</span> {data.model}</div>
-            {data.claude_code_version && <div><span className="opacity-50">version:</span> {data.claude_code_version}</div>}
-            {data.permissionMode && <div><span className="opacity-50">permissions:</span> {data.permissionMode}</div>}
-            {data.tools?.length > 0 && (
+            <div><span className="opacity-50">cwd:</span> {event.cwd}</div>
+            <div><span className="opacity-50">model:</span> {event.model}</div>
+            {event.claude_code_version && <div><span className="opacity-50">version:</span> {event.claude_code_version}</div>}
+            {event.permissionMode && <div><span className="opacity-50">permissions:</span> {event.permissionMode}</div>}
+            {event.tools?.length > 0 && (
               <details>
-                <summary className="cursor-pointer opacity-50 hover:opacity-100">Tools ({data.tools.length})</summary>
+                <summary className="cursor-pointer opacity-50 hover:opacity-100">Tools ({event.tools.length})</summary>
                 <div className="mt-1 flex flex-wrap gap-1">
-                  {data.tools.map((tool: string) => (
+                  {event.tools.map((tool: string) => (
                     <span key={tool} className="badge badge-xs badge-outline">{tool}</span>
                   ))}
                 </div>
               </details>
             )}
-            {data.mcp_servers?.length > 0 && (
+            {event.mcp_servers?.length > 0 && (
               <details>
-                <summary className="cursor-pointer opacity-50 hover:opacity-100">MCP Servers ({data.mcp_servers.length})</summary>
+                <summary className="cursor-pointer opacity-50 hover:opacity-100">MCP Servers ({event.mcp_servers.length})</summary>
                 <div className="mt-1 flex flex-wrap gap-1">
-                  {data.mcp_servers.map((server: { name: string }) => (
+                  {event.mcp_servers.map((server: { name: string }) => (
                     <span key={server.name} className="badge badge-xs badge-outline">{server.name}</span>
                   ))}
                 </div>
               </details>
             )}
-            <ExpandableJson data={data} summary="View raw data" />
+            <ExpandableJson data={event} summary="View raw data" />
           </div>
         );
 
       case 'env_manager_log': {
-        const args = data.data?.extra?.args as string[] | undefined;
+        const args = event.data?.extra?.args as string[] | undefined;
         const appendSystemPromptIndex = args?.findIndex((arg: string) => arg === '--append-system-prompt');
         const systemPrompt = appendSystemPromptIndex !== undefined && appendSystemPromptIndex >= 0 && args
           ? args[appendSystemPromptIndex + 1]
@@ -352,7 +515,7 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
                 </pre>
               </details>
             )}
-            <ExpandableJson data={data} summary="View raw data" />
+            <ExpandableJson data={event} summary="View raw data" />
           </div>
         );
       }
@@ -361,7 +524,7 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       case 'error':
         return (
           <div className="text-xs mt-2 pl-4 border-l border-base-300">
-            <ExpandableJson data={data} summary="View details" />
+            <ExpandableJson data={event} summary="View details" />
           </div>
         );
 

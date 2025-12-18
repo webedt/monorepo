@@ -15,6 +15,7 @@ import { ensureValidToken, ClaudeAuth } from '../../logic/auth/claudeAuth.js';
 import { logger, fetchEnvironmentIdFromSessions } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
+import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
 import {
   getExecutionProvider,
   type ExecutionEvent,
@@ -274,11 +275,17 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         baseBranch: baseBranch,
       }).returning();
       chatSession = newSession;
+
+      // Notify subscribers about new session
+      sessionListBroadcaster.notifySessionCreated(user.id, chatSession);
     } else {
       // Update existing session
       await db.update(chatSessions)
         .set({ status: 'running', userRequest: serializedRequest })
         .where(eq(chatSessions.id, chatSessionId));
+
+      // Notify subscribers about status change
+      sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSessionId, status: 'running' });
     }
 
     // Store user message
@@ -319,7 +326,6 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       try {
         await db.insert(events).values({
           chatSessionId,
-          eventType: event.type,
           eventData: event,
         });
       } catch (error) {
@@ -429,9 +435,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Update session with result
+      const finalStatus = result.status === 'completed' ? 'completed' : 'error';
       await db.update(chatSessions)
         .set({
-          status: result.status === 'completed' ? 'completed' : 'error',
+          status: finalStatus,
           branch: result.branch,
           remoteSessionId: result.remoteSessionId,
           remoteWebUrl: result.remoteWebUrl,
@@ -439,6 +446,16 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           completedAt: new Date(),
         })
         .where(eq(chatSessions.id, chatSessionId));
+
+      // Notify subscribers about completion
+      sessionListBroadcaster.notifyStatusChanged(user.id, {
+        id: chatSessionId,
+        status: finalStatus,
+        branch: result.branch,
+        remoteSessionId: result.remoteSessionId,
+        remoteWebUrl: result.remoteWebUrl,
+        totalCost: result.totalCost?.toString(),
+      });
 
       logger.info('Execute Remote completed', {
         component: 'ExecuteRemoteRoute',
@@ -477,6 +494,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       await db.update(chatSessions)
         .set({ status: 'error' })
         .where(eq(chatSessions.id, chatSessionId));
+
+      // Notify subscribers about error status
+      sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSessionId, status: 'error' });
 
       // Send error event
       await sendEvent({

@@ -336,10 +336,10 @@ router.get('/sessions/:sessionId/events', requireAuth, async (req: Request, res:
       .orderBy(asc(events.id));
 
     // Format response to match what client expects (data.events, data.total)
+    // eventData contains the raw event with type field inside
     const formattedEvents = storedEvents.map((e: typeof storedEvents[number]) => ({
       id: e.id,
       chatSessionId: session[0].id,
-      eventType: e.eventType,
       eventData: e.eventData,
       timestamp: e.timestamp
     }));

@@ -130,6 +130,13 @@ async function initializeDatabase(): Promise<void> {
       }
     }
 
+    if (schemaUpdate.columnsRemoved.length > 0) {
+      console.log('  Removed deprecated columns:');
+      for (const col of schemaUpdate.columnsRemoved) {
+        console.log(`    🗑️  ${col}`);
+      }
+    }
+
     if (schemaUpdate.indexesCreated.length > 0) {
       console.log('  Created indexes:');
       for (const idx of schemaUpdate.indexesCreated) {
@@ -144,7 +151,7 @@ async function initializeDatabase(): Promise<void> {
       }
     }
 
-    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.errors.length === 0) {
+    if (schemaUpdate.columnsAdded.length === 0 && schemaUpdate.columnsRemoved.length === 0 && schemaUpdate.errors.length === 0) {
       console.log('  ✅ Schema is up to date');
     }
 
