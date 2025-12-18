@@ -68,13 +68,10 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
     }
     inactivityTimeoutRef.current = setTimeout(() => {
       console.warn(`[SSE] No activity for ${inactivityTimeout / 1000}s - stream may be hung`);
-      // Notify via message so user sees something
+      // Notify via message so user sees something - pass raw event directly
       onMessageRef.current?.({
-        eventType: 'system',
-        data: {
-          type: 'message',
-          message: `⚠️ No response received for ${Math.round(inactivityTimeout / 60000)} minutes. The session may be stuck. You can try sending a new message.`
-        }
+        type: 'system',
+        message: `⚠️ No response received for ${Math.round(inactivityTimeout / 60000)} minutes. The session may be stuck. You can try sending a new message.`
       });
       // Trigger completion to allow user to continue
       hasExplicitlyClosedRef.current = true;
@@ -184,14 +181,11 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
 
           console.log(`[SSE] Scheduling retry in ${retryAfter} seconds...`);
 
-          // Notify user we're retrying
+          // Notify user we're retrying - pass raw event directly
           try {
             onMessageRef.current?.({
-              eventType: 'system',
-              data: {
-                type: 'message',
-                message: `⏳ Worker is busy, retrying in ${retryAfter} seconds (attempt ${retryAttemptRef.current}/${maxRetryAttempts})...`
-              }
+              type: 'system',
+              message: `⏳ Worker is busy, retrying in ${retryAfter} seconds (attempt ${retryAttemptRef.current}/${maxRetryAttempts})...`
             });
           } catch (msgErr) {
             console.error('[SSE] Failed to send retry notification message:', msgErr);
@@ -337,6 +331,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
     }
   };
 
+  // Handle SSE events and pass raw event data directly without wrapper
   const handleSSEEvent = (eventType: string, data: string) => {
     if (eventType === 'completed') {
       hasExplicitlyClosedRef.current = true;
@@ -356,15 +351,18 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         disconnect();
       } catch (e) {
         console.debug('[SSE] Could not parse error event data as JSON, forwarding as message', e);
-        onMessageRef.current?.({ eventType: 'error', data });
+        // Pass raw event with type field
+        onMessageRef.current?.({ type: 'error', rawData: data });
       }
     } else {
       try {
+        // Parse and pass raw event directly - the event already has a 'type' field
         const parsed = JSON.parse(data);
-        onMessageRef.current?.({ eventType, data: parsed });
+        onMessageRef.current?.(parsed);
       } catch (e) {
         console.debug(`[SSE] Could not parse ${eventType} event data as JSON, forwarding raw`, e);
-        onMessageRef.current?.({ eventType, data });
+        // For unparseable data, create a raw event with the eventType as type
+        onMessageRef.current?.({ type: eventType, rawData: data });
       }
     }
   };
@@ -385,22 +383,24 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         // Reset inactivity timeout on any message
         resetInactivityTimeout();
         try {
+          // Parse and pass raw event directly
           const data = JSON.parse(event.data);
-          onMessageRef.current?.({ eventType: 'message', data });
+          onMessageRef.current?.(data);
         } catch (e) {
           console.debug('[SSE] Could not parse message event data as JSON, forwarding raw', e);
-          onMessageRef.current?.({ eventType: 'message', data: event.data });
+          onMessageRef.current?.({ type: 'message', rawData: event.data });
         }
       };
 
       es.addEventListener('connected', (event: MessageEvent) => {
         resetInactivityTimeout();
         try {
+          // Parse and pass raw event directly
           const data = JSON.parse(event.data);
-          onMessageRef.current?.({ eventType: 'connected', data });
+          onMessageRef.current?.(data);
         } catch (e) {
           console.debug('[SSE] Could not parse connected event data as JSON, forwarding raw', e);
-          onMessageRef.current?.({ eventType: 'connected', data: event.data });
+          onMessageRef.current?.({ type: 'connected', rawData: event.data });
         }
       });
 
@@ -411,11 +411,12 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
         es.addEventListener(eventType, (event: MessageEvent) => {
           resetInactivityTimeout();
           try {
+            // Parse and pass raw event directly
             const data = JSON.parse(event.data);
-            onMessageRef.current?.({ eventType, data });
+            onMessageRef.current?.(data);
           } catch (e) {
             console.debug(`[SSE] Could not parse ${eventType} event data as JSON, forwarding raw`, e);
-            onMessageRef.current?.({ eventType, data: event.data });
+            onMessageRef.current?.({ type: eventType, rawData: event.data });
           }
         });
       });
@@ -424,7 +425,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
       es.addEventListener('heartbeat', () => {
         resetInactivityTimeout();
         // Forward heartbeat to message handler so it can be processed by the component
-        onMessageRef.current?.({ eventType: 'heartbeat', data: {} });
+        onMessageRef.current?.({ type: 'heartbeat' });
       });
 
       es.addEventListener('completed', (event: MessageEvent) => {
@@ -458,7 +459,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
           disconnect();
         } catch (e) {
           console.debug('[SSE] Could not parse error event data as JSON, forwarding as message', e);
-          onMessageRef.current?.({ eventType: 'error', data: event.data });
+          onMessageRef.current?.({ type: 'error', rawData: event.data });
         }
       });
 
