@@ -148,10 +148,12 @@ function isToolResultOnlyEvent(event: RawEvent): boolean {
 // Component to render a list of events with deduplication and filtering
 export function FormattedEventList({
   events,
-  filters = {}
+  filters = {},
+  showTimestamps = true
 }: {
   events: RawEvent[];
   filters?: Record<string, boolean>;
+  showTimestamps?: boolean;
 }) {
   // Build map of tool results for pairing with tool uses
   const toolResultMap = buildToolResultMap(events);
@@ -190,7 +192,7 @@ export function FormattedEventList({
           }
         }
 
-        return <FormattedEvent key={index} event={event} filters={filters} toolResultMap={toolResultMap} />;
+        return <FormattedEvent key={index} event={event} filters={filters} toolResultMap={toolResultMap} showTimestamps={showTimestamps} />;
       })}
     </>
   );
@@ -285,7 +287,7 @@ function getStatusSummary(eventType: string, event: any): string {
 }
 
 // Format a raw event for display
-export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: RawEvent; filters?: Record<string, boolean>; toolResultMap?: Map<string, any> }) {
+export function FormattedEvent({ event, filters = {}, toolResultMap, showTimestamps = true }: { event: RawEvent; filters?: Record<string, boolean>; toolResultMap?: Map<string, any>; showTimestamps?: boolean }) {
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const eventType = event.type;
   const emoji = getEventEmoji(eventType);
@@ -351,7 +353,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                   })}
                 </div>
               )}
-              <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+              {showTimestamps && <div className="text-xs opacity-40 mt-1 text-right">{time}</div>}
             </div>
           </div>
         </>
@@ -366,7 +368,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
             <div className="text-sm">
               <MarkdownRenderer content={rawContent} />
             </div>
-            <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+            {showTimestamps && <div className="text-xs opacity-40 mt-1 text-right">{time}</div>}
           </div>
         </div>
       );
@@ -379,7 +381,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
           <div className="text-sm">
             <MarkdownRenderer content={rawContent ? JSON.stringify(rawContent) : ''} />
           </div>
-          <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+          {showTimestamps && <div className="text-xs opacity-40 mt-1 text-right">{time}</div>}
         </div>
       </div>
     );
@@ -397,7 +399,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
             <div className="text-sm">
               <MarkdownRenderer content={content} />
             </div>
-            <div className="text-xs opacity-40 mt-1">{time}</div>
+            {showTimestamps && <div className="text-xs opacity-40 mt-1">{time}</div>}
           </div>
         </div>
       );
@@ -425,7 +427,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
         {/* Thinking blocks as status lines with brain emoji - truncated with expand option */}
         {thinkingBlocks.map((block: any, i: number) => (
           <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-start gap-2">
-            <span className="font-mono opacity-50 shrink-0">{time}</span>
+            {showTimestamps && <span className="font-mono opacity-50 shrink-0">{time}</span>}
             <span className="shrink-0">🧠</span>
             <ExpandableThinking text={block.thinking || ''} maxLength={256} />
           </div>
@@ -439,7 +441,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                   <MarkdownRenderer content={block.text || ''} />
                 </div>
               ))}
-              <div className="text-xs opacity-40 mt-1">{time}</div>
+              {showTimestamps && <div className="text-xs opacity-40 mt-1">{time}</div>}
             </div>
           </div>
         )}
@@ -458,7 +460,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>📖 Read:</span>
                       <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
@@ -498,7 +500,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>💻 Bash:</span>
                       <span className="font-mono text-green-400">{displayCommand}</span>
@@ -546,7 +548,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>📝 Edit:</span>
                       <span className="font-mono text-yellow-400">{filePath}</span>
@@ -605,7 +607,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>✏️ Write:</span>
                       <span className="font-mono text-green-400">{filePath}</span>
@@ -644,7 +646,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>🔍 Grep:</span>
                       <span className="font-mono text-purple-400">{pattern}</span>
@@ -689,7 +691,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>📂 Glob:</span>
                       <span className="font-mono text-cyan-400">{pattern}</span>
@@ -733,7 +735,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>📋 TodoWrite:</span>
                       <span className="opacity-50">({newTodos.length} items)</span>
@@ -786,7 +788,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
                     <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                      <span className="font-mono opacity-50">{time}</span>
+                      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                       <span className="text-base-content/50">▶</span>
                       <span>{subagentEmoji[subagentType] || '🤖'} Task:</span>
                       <span className="text-orange-400">{description}</span>
@@ -834,7 +836,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
               return (
                 <details key={`tool-${i}`} className="text-xs text-base-content/60">
                   <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
-                    <span className="font-mono opacity-50">{time}</span>
+                    {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
                     <span className="text-base-content/50">▶</span>
                     <span>🔨 {block.name}</span>
                   </summary>
@@ -875,8 +877,8 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
             <MarkdownRenderer content={event.result || ''} />
           </div>
           <div className="text-xs opacity-40 mt-1">
-            {time}
-            {event.total_cost_usd && ` • $${event.total_cost_usd.toFixed(4)} • ${event.num_turns} turns • ${(event.duration_ms / 1000).toFixed(1)}s`}
+            {showTimestamps && time}
+            {event.total_cost_usd && `${showTimestamps ? ' • ' : ''}$${event.total_cost_usd.toFixed(4)} • ${event.num_turns} turns • ${(event.duration_ms / 1000).toFixed(1)}s`}
           </div>
         </div>
       </div>
@@ -965,7 +967,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
     return (
       <details className="py-1 text-xs text-base-content/60">
         <summary className="cursor-pointer hover:text-base-content/80 flex items-center gap-2">
-          <span className="font-mono opacity-50">{time}</span>
+          {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
           <span>{emoji}</span>
           <span className="opacity-70">{summary}</span>
         </summary>
@@ -977,7 +979,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
   // Simple one-line status (no expandable details)
   return (
     <div className="py-1 text-xs text-base-content/60 flex items-center gap-2">
-      <span className="font-mono opacity-50">{time}</span>
+      {showTimestamps && <span className="font-mono opacity-50">{time}</span>}
       <span>{emoji}</span>
       <span className="opacity-70">{summary}</span>
     </div>
