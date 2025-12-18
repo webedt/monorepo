@@ -1,4 +1,4 @@
-import { ExpandableText, ExpandableJson } from './ExpandableContent';
+import { ExpandableJson } from './ExpandableContent';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 // Raw event type for formatted view - now uses type directly instead of eventType wrapper
