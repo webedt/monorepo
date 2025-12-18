@@ -261,16 +261,34 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
         {/* Tool use shown as compact inline items */}
         {toolBlocks.length > 0 && (
           <div className="ml-4 mt-1 space-y-1">
-            {toolBlocks.map((block: any, i: number) => (
-              <details key={`tool-${i}`} className="text-xs opacity-60">
-                <summary className="cursor-pointer hover:opacity-100">
-                  🔨 {block.name}
-                </summary>
-                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
-                  {JSON.stringify(block.input, null, 2)}
-                </pre>
-              </details>
-            ))}
+            {toolBlocks.map((block: any, i: number) => {
+              // Special formatting for Bash tool
+              if (block.name === 'Bash') {
+                const description = block.input?.description || 'Running command';
+                const command = block.input?.command || '';
+                return (
+                  <div key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100 font-mono bg-base-300 rounded p-2">
+                    <div className="flex items-center gap-1 text-base-content/80">
+                      <span>🔨</span>
+                      <span className="font-semibold">Bash:</span>
+                      <span>{description}</span>
+                    </div>
+                    <pre className="mt-1 text-base-content/70 overflow-auto whitespace-pre-wrap">{command}</pre>
+                  </div>
+                );
+              }
+              // Default formatting for other tools
+              return (
+                <details key={`tool-${i}`} className="text-xs opacity-60">
+                  <summary className="cursor-pointer hover:opacity-100">
+                    🔨 {block.name}
+                  </summary>
+                  <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
+                    {JSON.stringify(block.input, null, 2)}
+                  </pre>
+                </details>
+              );
+            })}
           </div>
         )}
       </div>
