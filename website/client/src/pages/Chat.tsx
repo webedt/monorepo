@@ -291,6 +291,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       return false;
     }
   });
+  // Widescreen mode toggle - persisted to localStorage
+  // When enabled, removes max-width constraint on message container for full-width display
+  const [isWidescreen, setIsWidescreen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('chatWidescreen') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
   const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
   const [copyChatSuccess, setCopyChatSuccess] = useState(false);
@@ -344,6 +353,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Ignore localStorage errors
     }
   }, [isChatMaximized]);
+
+  // Persist isWidescreen to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatWidescreen', isWidescreen ? 'true' : 'false');
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [isWidescreen]);
 
   // Sync local state with global store
   useEffect(() => {
@@ -1989,6 +2007,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                 onShowTimestampsChange={setShowTimestamps}
                 showRawJson={showRawJson}
                 onShowRawJsonChange={setShowRawJson}
+                isWidescreen={isWidescreen}
+                onWidescreenChange={setIsWidescreen}
                 prLoading={prLoading}
                 prSuccess={prSuccess}
                 prError={prError}
@@ -2092,6 +2112,17 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               </svg>
               Raw JSON
             </button>
+            {/* Widescreen toggle */}
+            <button
+              onClick={() => setIsWidescreen(!isWidescreen)}
+              className={`btn btn-xs ${isWidescreen ? 'btn-primary' : 'btn-ghost'}`}
+              title={isWidescreen ? 'Switch to normal width' : 'Switch to widescreen mode'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              Wide
+            </button>
               </div>
             </>
           )}
@@ -2099,7 +2130,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
             {showRawJson ? (
               /* Raw JSON stream view - clean JSON objects only */
-              <div className="max-w-4xl mx-auto font-mono text-xs">
+              <div className={`${isWidescreen ? '' : 'max-w-4xl'} mx-auto font-mono text-xs`}>
                 {rawEvents.length === 0 ? (
                   <div className="text-center text-base-content/50 py-8 font-sans">
                     No events yet.
@@ -2117,7 +2148,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               </div>
             ) : (
               /* Normal formatted view - uses FormattedEvent for rawEvents */
-              <div className="max-w-4xl mx-auto space-y-1">
+              <div className={`${isWidescreen ? '' : 'max-w-4xl'} mx-auto space-y-1`}>
                 {rawEvents.length === 0 ? (
                   <div className="text-center text-base-content/50 py-8">
                     No events yet.
