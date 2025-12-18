@@ -284,6 +284,7 @@ export const TAGLINES = [
   "Your edit is a wonderland.",
   "I gotta feeling... that edit's gonna be a good edit.",
   "Who let the edits out?",
+  "Who let the dogs edit?",
   "Stacy's edit has got it going on.",
   "I believe in a thing called edit.",
   "We could have had it all... rolling in the edits.",
