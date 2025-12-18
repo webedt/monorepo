@@ -198,30 +198,20 @@ jobs:
           # Normalize path for comparison (remove trailing slash)
           PATH_NORMALIZED="${PATH_PREFIX%/}"
 
-          # Check if domain already exists
-          APP_DETAILS=$(curl -s -X 'POST' \
-            "${DOKPLOY_URL}/api/trpc/application.one" \
+          # Fetch domains using the dedicated domain.byApplicationId endpoint
+          echo "🔍 Fetching domains for application ${APP_ID}..."
+          DOMAINS_RESPONSE=$(curl -s -X 'GET' \
+            "${DOKPLOY_URL}/api/domain.byApplicationId?applicationId=${APP_ID}" \
             -H 'accept: application/json' \
-            -H 'Content-Type: application/json' \
-            -H "x-api-key: ${DOKPLOY_API_KEY}" \
-            -d "{\"json\": {\"applicationId\": \"${APP_ID}\"}}")
+            -H "x-api-key: ${DOKPLOY_API_KEY}")
 
-          # Debug: Show full domains response for debugging
-          echo "📋 Application details domains field:"
-          echo "$APP_DETAILS" | jq '.result.data.json.domains // .result.data.domains // []' 2>/dev/null || echo "Could not parse domains"
+          # Debug: Show domains response
+          echo "📋 Domains for this application:"
+          echo "$DOMAINS_RESPONSE" | jq '.' 2>/dev/null || echo "Could not parse domains response"
 
-          # Debug: Show existing domains
-          EXISTING_DOMAINS=$(echo "$APP_DETAILS" | jq -r '(.result.data.json.domains // .result.data.domains // [])[] | "\(.host) \(.path)"' 2>/dev/null || echo "")
-          if [ -n "$EXISTING_DOMAINS" ]; then
-            echo "📋 Existing domains:"
-            echo "$EXISTING_DOMAINS" | while read line; do echo "   - $line"; done
-          fi
-
-          # Check for existing domain - try multiple response formats and path variations
-          # Also match on just the host if path matching fails (to catch existing domains)
-          DOMAIN_EXISTS=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" --arg path "$PATH_PREFIX" --arg pathNorm "$PATH_NORMALIZED" '
-            (.result.data.json.domains // .result.data.domains // [])[]
-            | select(.host == $domain and (.path == $path or .path == $pathNorm or .path == ($pathNorm + "/")))
+          # Check for existing domain matching our target path
+          DOMAIN_EXISTS=$(echo "$DOMAINS_RESPONSE" | jq -r --arg domain "$DOMAIN" --arg path "$PATH_PREFIX" --arg pathNorm "$PATH_NORMALIZED" '
+            .[] | select(.host == $domain and (.path == $path or .path == $pathNorm or .path == ($pathNorm + "/")))
             | .domainId
           ' 2>/dev/null | head -n1)
 
@@ -229,20 +219,17 @@ jobs:
           echo "   Domain exists check result: '${DOMAIN_EXISTS}'"
 
           if [ -z "$DOMAIN_EXISTS" ] || [ "$DOMAIN_EXISTS" = "null" ]; then
-            # Double-check by listing all domains for this application to be safe
-            ALL_APP_DOMAINS=$(echo "$APP_DETAILS" | jq -r '(.result.data.json.domains // .result.data.domains // []) | length' 2>/dev/null || echo "0")
+            # Check total domains count
+            ALL_APP_DOMAINS=$(echo "$DOMAINS_RESPONSE" | jq 'length' 2>/dev/null || echo "0")
             echo "   Total domains on this application: ${ALL_APP_DOMAINS}"
 
             if [ "$ALL_APP_DOMAINS" -gt 0 ]; then
               echo "⚠️  Application already has ${ALL_APP_DOMAINS} domain(s), checking if any match our target..."
-              # Show what domains exist
-              echo "$APP_DETAILS" | jq -r '(.result.data.json.domains // .result.data.domains // [])[] | "   Found: \(.host)\(.path)"' 2>/dev/null
+              echo "$DOMAINS_RESPONSE" | jq -r '.[] | "   Found: \(.host)\(.path)"' 2>/dev/null
 
               # More lenient check - if ANY domain exists for this host, skip creation
-              HOST_MATCH=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" '
-                (.result.data.json.domains // .result.data.domains // [])[]
-                | select(.host == $domain)
-                | .domainId
+              HOST_MATCH=$(echo "$DOMAINS_RESPONSE" | jq -r --arg domain "$DOMAIN" '
+                .[] | select(.host == $domain) | .domainId
               ' 2>/dev/null | head -n1)
 
               if [ -n "$HOST_MATCH" ] && [ "$HOST_MATCH" != "null" ]; then
