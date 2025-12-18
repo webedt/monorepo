@@ -346,6 +346,56 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                   </details>
                 );
               }
+              // Special formatting for Edit tool
+              if (block.name === 'Edit') {
+                const toolResult = toolResultMap?.get(block.id);
+                const filePath = block.input?.file_path || toolResult?.tool_use_result?.filePath || 'unknown';
+                const oldString = block.input?.old_string || toolResult?.tool_use_result?.oldString || '';
+                const newString = block.input?.new_string || toolResult?.tool_use_result?.newString || '';
+                const structuredPatch = toolResult?.tool_use_result?.structuredPatch;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs bg-base-200 rounded border-l-2 border-yellow-400">
+                    <summary className="opacity-70 py-1 px-2 cursor-pointer hover:opacity-100 list-none flex items-center gap-1">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span className="font-medium">📝 Edit:</span>{' '}
+                      <span className="font-mono text-yellow-400">{filePath}</span>
+                    </summary>
+                    <div className="p-2 bg-base-300 rounded-b overflow-auto max-h-96 text-xs border-t border-base-300">
+                      {structuredPatch && structuredPatch.length > 0 ? (
+                        <pre className="whitespace-pre-wrap">
+                          {structuredPatch.map((hunk: any, hunkIdx: number) => (
+                            <span key={hunkIdx}>
+                              {hunk.lines?.map((line: string, lineIdx: number) => {
+                                const isRemoval = line.startsWith('-');
+                                const isAddition = line.startsWith('+');
+                                return (
+                                  <span
+                                    key={lineIdx}
+                                    className={isRemoval ? 'text-red-400 bg-red-400/10' : isAddition ? 'text-green-400 bg-green-400/10' : ''}
+                                  >
+                                    {line}{'\n'}
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          ))}
+                        </pre>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="text-red-400 bg-red-400/10 p-1 rounded">
+                            <span className="opacity-50">- </span>{oldString}
+                          </div>
+                          <div className="text-green-400 bg-green-400/10 p-1 rounded">
+                            <span className="opacity-50">+ </span>{newString}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                );
+              }
               // Special formatting for Write tool
               if (block.name === 'Write') {
                 const toolResult = toolResultMap?.get(block.id);
