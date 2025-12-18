@@ -1,7 +1,63 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import type { Message } from '@/shared';
 import type { ImageAttachment } from '@/components/ChatInput';
+
+// Content block types for structured multimodal content
+interface TextBlock {
+  type: 'text';
+  text: string;
+}
+
+interface ImageBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+type ContentBlock = TextBlock | ImageBlock;
+
+interface ParsedContent {
+  text: string;
+  inlineImages: Array<{ data: string; mediaType: string }>;
+}
+
+// Parse message content to handle structured content blocks
+function parseMessageContent(content: string): ParsedContent {
+  // Try to detect if content is a JSON array of content blocks
+  if (content.startsWith('[') && content.includes('"type"')) {
+    try {
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) {
+        const textParts: string[] = [];
+        const inlineImages: Array<{ data: string; mediaType: string }> = [];
+
+        for (const block of parsed as ContentBlock[]) {
+          if (block.type === 'text' && 'text' in block) {
+            textParts.push(block.text);
+          } else if (block.type === 'image' && 'source' in block) {
+            inlineImages.push({
+              data: block.source.data,
+              mediaType: block.source.media_type,
+            });
+          }
+        }
+
+        return {
+          text: textParts.join('\n'),
+          inlineImages,
+        };
+      }
+    } catch {
+      // Not valid JSON, treat as regular text
+    }
+  }
+
+  return { text: content, inlineImages: [] };
+}
 
 interface ChatMessageProps {
   message: Message & { images?: ImageAttachment[] };
@@ -20,10 +76,13 @@ export function ChatMessage({ message, userName, onImageClick, onRetry, showRetr
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const messageRef = useRef<HTMLDivElement>(null);
 
-  // Copy message content to clipboard
+  // Parse structured content blocks from message content
+  const parsedContent = useMemo(() => parseMessageContent(message.content), [message.content]);
+
+  // Copy message content to clipboard (copy just the text, not images)
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await navigator.clipboard.writeText(parsedContent.text || message.content);
       setCopySuccess(true);
       setShowContextMenu(false);
       setTimeout(() => setCopySuccess(false), 2000);
@@ -180,11 +239,55 @@ export function ChatMessage({ message, userName, onImageClick, onRetry, showRetr
           </div>
         )}
 
-        <div className="text-sm">
-          <MarkdownRenderer content={message.content} />
-        </div>
+        {/* Display text content - use parsed text if we have structured content */}
+        {parsedContent.text && (
+          <div className="text-sm">
+            <MarkdownRenderer content={parsedContent.text} />
+          </div>
+        )}
 
-        {/* Display images if present */}
+        {/* Display inline images from structured content blocks */}
+        {parsedContent.inlineImages.length > 0 && (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {parsedContent.inlineImages.map((image, index) => (
+              <div
+                key={`inline-${index}`}
+                className="relative group cursor-pointer"
+                onClick={() =>
+                  onImageClick?.({
+                    data: image.data,
+                    mediaType: image.mediaType,
+                    fileName: `image-${index + 1}`,
+                  })
+                }
+              >
+                <img
+                  src={`data:${image.mediaType};base64,${image.data}`}
+                  alt={`Attached image ${index + 1}`}
+                  className="w-full h-32 object-cover rounded border border-white/20 group-hover:border-white/40 transition-colors"
+                />
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded flex items-center justify-center">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-8 w-8 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"
+                    />
+                  </svg>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Display images from message.images array (for messages created in current session) */}
         {message.images && message.images.length > 0 && (
           <div className="mt-2 grid grid-cols-2 gap-2">
             {message.images.map((image) => (
