@@ -814,16 +814,22 @@ export function FormattedEvent({ event, filters = {}, toolResultMap, showTimesta
                               <pre className="mt-1 p-2 bg-base-200 rounded whitespace-pre-wrap">{prompt}</pre>
                             </details>
                           )}
-                          {content && Array.isArray(content) && content.length > 0 && (
-                            <div className="mt-2 border-t border-base-content/10 pt-2">
-                              <div className="opacity-50 mb-1">Result:</div>
-                              {content.map((item: { type: string; text?: string }, idx: number) => (
-                                item.type === 'text' && item.text ? (
-                                  <pre key={idx} className="whitespace-pre-wrap">{item.text}</pre>
-                                ) : null
-                              ))}
-                            </div>
-                          )}
+                          {content && Array.isArray(content) && content.length > 0 && (() => {
+                            // Filter out content items that match the prompt to avoid duplication
+                            const filteredContent = content.filter((item: { type: string; text?: string }) =>
+                              !(item.type === 'text' && item.text && prompt && item.text.trim() === prompt.trim())
+                            );
+                            return filteredContent.length > 0 ? (
+                              <div className="mt-2 border-t border-base-content/10 pt-2">
+                                <div className="opacity-50 mb-1">Result:</div>
+                                {filteredContent.map((item: { type: string; text?: string }, idx: number) => (
+                                  item.type === 'text' && item.text ? (
+                                    <pre key={idx} className="whitespace-pre-wrap">{item.text}</pre>
+                                  ) : null
+                                ))}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       )}
                     </div>
