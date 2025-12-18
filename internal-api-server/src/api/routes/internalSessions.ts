@@ -683,9 +683,10 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Update session status
+    // Update session status only - don't overwrite the session title (userRequest)
+    // The title should remain as the initial generated title until user renames it
     await db.update(chatSessions)
-      .set({ status: 'running', userRequest: prompt })
+      .set({ status: 'running' })
       .where(eq(chatSessions.id, id));
 
     // Register active stream
