@@ -21,7 +21,7 @@ import { ensureValidGeminiToken, isValidGeminiAuth } from '../../logic/auth/gemi
 import type { GeminiAuth } from '../../logic/auth/lucia.js';
 import { StorageService } from '../../logic/storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../../logic/github/operations.js';
-import { logger, generateSessionPath, getEventEmoji } from '@webedt/shared';
+import { logger, generateSessionPath, getEventEmoji, normalizeRepoUrl } from '@webedt/shared';
 import { WORKSPACE_DIR } from '../../logic/config/env.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
@@ -135,7 +135,8 @@ const executeHandler = async (req: Request, res: Response) => {
       }
     }
 
-    const repoUrl = github?.repoUrl;
+    // Normalize repo URL to prevent duplicates (remove .git suffix)
+    const repoUrl = github?.repoUrl ? normalizeRepoUrl(github.repoUrl) : undefined;
     const branch = github?.branch || 'main';
 
     logger.info('Execute request received', {

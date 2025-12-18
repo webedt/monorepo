@@ -12,7 +12,7 @@ import type { ChatSession } from '../../logic/db/schema.js';
 import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient, normalizeRepoName, normalizeRepoUrl } from '@webedt/shared';
 import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
@@ -323,15 +323,21 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
       return;
     }
 
+    // Normalize repository name and URL to prevent duplicates (remove .git suffix)
+    const normalizedRepoName = normalizeRepoName(repositoryName);
+    const normalizedRepoUrl = repositoryUrl
+      ? normalizeRepoUrl(repositoryUrl)
+      : `https://github.com/${repositoryOwner}/${normalizedRepoName}`;
+
     // Generate UUID for the session
     const sessionId = crypto.randomUUID();
-    const repoUrl = repositoryUrl || `https://github.com/${repositoryOwner}/${repositoryName}.git`;
+    const repoUrl = normalizedRepoUrl;
     const effectiveBaseBranch = baseBranch || 'main';
 
-    logger.info(`Creating code session ${sessionId} for ${repositoryOwner}/${repositoryName}`, {
+    logger.info(`Creating code session ${sessionId} for ${repositoryOwner}/${normalizedRepoName}`, {
       component: 'Sessions',
       sessionId,
-      repoUrl,
+      repoUrl: normalizedRepoUrl,
       baseBranch: effectiveBaseBranch
     });
 
@@ -367,8 +373,8 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
       }
     );
 
-    // Generate session path using the branch name from initResult
-    const sessionPath = generateSessionPath(repositoryOwner, repositoryName, initResult.branchName);
+    // Generate session path using the branch name from initResult (using normalized repo name)
+    const sessionPath = generateSessionPath(repositoryOwner, normalizedRepoName, initResult.branchName);
 
     // Create the session with 'completed' status - code sessions don't have active AI processing
     const [chatSession] = await db
@@ -378,9 +384,9 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
         userId: authReq.user!.id,
         userRequest: initResult.sessionTitle || title || 'Code editing session',
         status: 'completed',
-        repositoryUrl: repoUrl,
+        repositoryUrl: normalizedRepoUrl,
         repositoryOwner,
-        repositoryName,
+        repositoryName: normalizedRepoName,
         baseBranch: effectiveBaseBranch,
         branch: initResult.branchName,
         sessionPath,
@@ -395,7 +401,7 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
       .values({
         chatSessionId: sessionId,
         type: 'user',
-        content: `Started code editing session on repository ${repositoryOwner}/${repositoryName}`,
+        content: `Started code editing session on repository ${repositoryOwner}/${normalizedRepoName}`,
       });
 
     logger.info(`Created code session ${sessionId} with branch ${initResult.branchName}`, {

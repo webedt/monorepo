@@ -10,6 +10,22 @@
 const SESSION_PATH_SEPARATOR = '__';
 
 /**
+ * Normalize a repository name by removing the .git suffix if present.
+ * This ensures consistent storage and comparison of repository names.
+ */
+export function normalizeRepoName(repoName: string): string {
+  return repoName.replace(/\.git$/, '');
+}
+
+/**
+ * Normalize a GitHub repository URL by removing the .git suffix if present.
+ * This ensures consistent storage and comparison of repository URLs.
+ */
+export function normalizeRepoUrl(repoUrl: string): string {
+  return repoUrl.replace(/\.git$/, '');
+}
+
+/**
  * Parse GitHub repository URL to extract owner and repository name
  * Supports formats:
  * - https://github.com/owner/repo
