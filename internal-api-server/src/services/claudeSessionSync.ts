@@ -128,7 +128,6 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             if (event.uuid && !existingUuids.has(event.uuid)) {
               await db.insert(events).values({
                 chatSessionId: runningSession.id,
-                eventType: event.type,
                 eventData: event,
                 timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
               });
@@ -284,7 +283,6 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
         for (const event of sessionEvents) {
           await db.insert(events).values({
             chatSessionId: sessionId,
-            eventType: event.type,
             eventData: event,
             timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
           });

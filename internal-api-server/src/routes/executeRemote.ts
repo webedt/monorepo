@@ -319,7 +319,6 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       try {
         await db.insert(events).values({
           chatSessionId,
-          eventType: event.type,
           eventData: event,
         });
       } catch (error) {

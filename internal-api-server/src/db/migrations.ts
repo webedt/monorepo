@@ -77,7 +77,7 @@ const EXPECTED_TABLES = [
   },
   {
     name: 'events',
-    requiredColumns: ['id', 'chat_session_id', 'event_type', 'event_data', 'timestamp']
+    requiredColumns: ['id', 'chat_session_id', 'event_data', 'timestamp']
   }
 ];
 
@@ -502,7 +502,6 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS events (
       id SERIAL PRIMARY KEY,
       chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-      event_type TEXT NOT NULL,
       event_data JSONB NOT NULL,
       timestamp TIMESTAMP NOT NULL DEFAULT NOW()
     );

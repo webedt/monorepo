@@ -226,11 +226,6 @@ describe('Database Schema', () => {
       assert.strictEqual(events.chatSessionId.name, 'chat_session_id');
     });
 
-    it('should have eventType field', () => {
-      assert.ok(events.eventType);
-      assert.strictEqual(events.eventType.name, 'event_type');
-    });
-
     it('should have eventData JSON field', () => {
       assert.ok(events.eventData);
       assert.strictEqual(events.eventData.name, 'event_data');
@@ -444,25 +439,23 @@ describe('Type Inference', () => {
       const event: Event = {
         id: 1,
         chatSessionId: 'chat-123',
-        eventType: 'session_start',
         eventData: { type: 'session_start' },
         timestamp: new Date()
       };
 
-      assert.strictEqual(event.eventType, 'session_start');
+      assert.strictEqual((event.eventData as any).type, 'session_start');
     });
 
     it('should infer NewEvent insert type', () => {
       const newEvent: NewEvent = {
         chatSessionId: 'chat-123',
-        eventType: 'tool_use',
         eventData: { type: 'tool_use', tool: 'Read' }
       };
 
-      assert.strictEqual(newEvent.eventType, 'tool_use');
+      assert.strictEqual((newEvent.eventData as any).type, 'tool_use');
     });
 
-    it('should support various event types', () => {
+    it('should support various event types in eventData', () => {
       const eventTypes = [
         'session_start',
         'setup_progress',
@@ -475,9 +468,9 @@ describe('Type Inference', () => {
         'error'
       ];
 
-      for (const eventType of eventTypes) {
-        const evt: Partial<Event> = { eventType };
-        assert.strictEqual(evt.eventType, eventType);
+      for (const type of eventTypes) {
+        const evt: Partial<Event> = { eventData: { type } };
+        assert.strictEqual((evt.eventData as any).type, type);
       }
     });
   });
