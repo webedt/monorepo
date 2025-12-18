@@ -12,7 +12,7 @@ import { db, chatSessions, messages, users, events } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '../lib/claudeAuth.js';
-import { logger, getEventEmoji, fetchEnvironmentIdFromSessions } from '@webedt/shared';
+import { logger, fetchEnvironmentIdFromSessions } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
 import {
@@ -295,25 +295,18 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no');
 
     // Helper to send SSE events
-    // All events are now passed through directly with the same flat structure
+    // Pass events through directly without modification - frontend handles all formatting
     const sendEvent = async (event: ExecutionEvent) => {
       if (clientDisconnected) return;
 
-      // All events have the same flat structure now
-      // Apply emoji decoration for events that have a message field
-      const eventToSend = {
-        ...event,
-        message: event.message ? `${getEventEmoji(event)} ${event.message}` : undefined,
-      };
-
-      const eventData = `data: ${JSON.stringify(eventToSend)}\n\n`;
+      const eventData = `data: ${JSON.stringify(event)}\n\n`;
 
       // Log SSE event for debugging
       logger.info('SSE event', {
         component: 'ExecuteRemoteRoute',
         chatSessionId,
         eventType: event.type,
-        eventData: JSON.stringify(eventToSend),
+        eventData: JSON.stringify(event),
       });
 
       try {
@@ -373,7 +366,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Broadcast to other listeners
-      sessionEventBroadcaster.broadcast(chatSessionId, event.type, eventToSend);
+      sessionEventBroadcaster.broadcast(chatSessionId, event.type, event);
     };
 
     // Set up heartbeat
