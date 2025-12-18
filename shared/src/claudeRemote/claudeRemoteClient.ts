@@ -103,18 +103,34 @@ export class ClaudeRemoteClient {
   }
 
   /**
+   * Extract text from prompt (handles both string and content blocks)
+   */
+  private extractTextFromPrompt(prompt: string | Array<{ type: string; text?: string }>): string {
+    if (typeof prompt === 'string') {
+      return prompt;
+    }
+    // Extract text from content blocks
+    return prompt
+      .filter(block => block.type === 'text' && block.text)
+      .map(block => block.text)
+      .join('\n');
+  }
+
+  /**
    * Generate a title from the prompt
    */
-  private generateTitle(prompt: string): string {
-    const title = prompt.slice(0, 50).replace(/\n/g, ' ').trim();
-    return title.length < prompt.length ? title + '...' : title;
+  private generateTitle(prompt: string | Array<{ type: string; text?: string }>): string {
+    const text = this.extractTextFromPrompt(prompt);
+    const title = text.slice(0, 50).replace(/\n/g, ' ').trim();
+    return title.length < text.length ? title + '...' : title;
   }
 
   /**
    * Generate a branch prefix from the prompt
    */
-  private generateBranchPrefix(prompt: string): string {
-    const words = prompt.slice(0, 40)
+  private generateBranchPrefix(prompt: string | Array<{ type: string; text?: string }>): string {
+    const text = this.extractTextFromPrompt(prompt);
+    const words = text.slice(0, 40)
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, '')
       .trim()
@@ -147,6 +163,10 @@ export class ClaudeRemoteClient {
     // Claude API requires git URLs without .git suffix
     const cleanGitUrl = gitUrl.replace(/\.git$/, '');
 
+    // Handle both string prompts and content blocks (for images)
+    // The API expects content to be either a string or an array of content blocks
+    const messageContent = prompt;
+
     const payload = {
       title: sessionTitle,
       events: [{
@@ -156,7 +176,7 @@ export class ClaudeRemoteClient {
           session_id: '',
           type: 'user',
           parent_tool_use_id: null,
-          message: { role: 'user', content: prompt }
+          message: { role: 'user', content: messageContent }
         }
       }],
       environment_id: this.environmentId,
@@ -267,15 +287,19 @@ export class ClaudeRemoteClient {
 
   /**
    * Send a message to resume a session
+   * Supports both string messages and content blocks (for images)
    */
-  async sendMessage(sessionId: string, message: string): Promise<void> {
+  async sendMessage(sessionId: string, message: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>): Promise<void> {
+    // The API accepts content as either a string or an array of content blocks
+    const messageContent = message;
+
     const payload = {
       events: [{
         type: 'user',
         uuid: randomUUID(),
         session_id: sessionId,
         parent_tool_use_id: null,
-        message: { role: 'user', content: message }
+        message: { role: 'user', content: messageContent }
       }]
     };
 
@@ -548,10 +572,11 @@ export class ClaudeRemoteClient {
 
   /**
    * Resume a session with a new message
+   * Supports both string messages and content blocks (for images)
    */
   async resume(
     sessionId: string,
-    message: string,
+    message: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>,
     onEvent: EventCallback,
     options: PollOptions = {}
   ): Promise<SessionResult> {

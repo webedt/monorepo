@@ -33,8 +33,8 @@ export interface ClaudeRemoteClientConfig {
  * Parameters for creating a new session
  */
 export interface CreateSessionParams {
-  /** User's prompt/request */
-  prompt: string;
+  /** User's prompt/request - can be string or content blocks with images */
+  prompt: string | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>;
   /** GitHub repository URL (e.g., https://github.com/owner/repo) */
   gitUrl: string;
   /** Model to use (overrides default) */
@@ -149,6 +149,36 @@ export type SessionEventType =
   | 'env_manager_log'
   | 'system'
   | 'error';
+
+/**
+ * Image source for base64 encoded images
+ */
+export interface ImageSource {
+  type: 'base64';
+  media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  data: string;
+}
+
+/**
+ * Image content block for user messages
+ */
+export interface ImageContentBlock {
+  type: 'image';
+  source: ImageSource;
+}
+
+/**
+ * Text content block for user messages
+ */
+export interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+/**
+ * User message content - can be string or array of content blocks
+ */
+export type UserMessageContent = string | Array<TextContentBlock | ImageContentBlock>;
 
 /**
  * Content block in assistant message
