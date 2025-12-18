@@ -261,16 +261,28 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
         {/* Tool use shown as compact inline items */}
         {toolBlocks.length > 0 && (
           <div className="ml-4 mt-1 space-y-1">
-            {toolBlocks.map((block: any, i: number) => (
-              <details key={`tool-${i}`} className="text-xs opacity-60">
-                <summary className="cursor-pointer hover:opacity-100">
-                  🔨 {block.name}
-                </summary>
-                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
-                  {JSON.stringify(block.input, null, 2)}
-                </pre>
-              </details>
-            ))}
+            {toolBlocks.map((block: any, i: number) => {
+              // Special formatting for Read tool
+              if (block.name === 'Read') {
+                return (
+                  <div key={`tool-${i}`} className="text-xs opacity-70 py-1 px-2 bg-base-200 rounded border-l-2 border-blue-400">
+                    <span className="font-medium">📖 Read:</span>{' '}
+                    <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
+                  </div>
+                );
+              }
+              // Default rendering for other tools
+              return (
+                <details key={`tool-${i}`} className="text-xs opacity-60">
+                  <summary className="cursor-pointer hover:opacity-100">
+                    🔨 {block.name}
+                  </summary>
+                  <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
+                    {JSON.stringify(block.input, null, 2)}
+                  </pre>
+                </details>
+              );
+            })}
           </div>
         )}
       </div>
