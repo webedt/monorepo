@@ -36,7 +36,9 @@ ARG BUILD_COMMIT_SHA
 
 WORKDIR /app/client
 COPY website/client/package*.json ./
-COPY website/client/*.tgz ./ 2>/dev/null || true
+# Copy local tarballs if they exist (using shell to handle missing files gracefully)
+RUN --mount=type=bind,source=website/client,target=/tmp/client \
+    find /tmp/client -maxdepth 1 -name "*.tgz" -exec cp {} ./ \; 2>/dev/null || true
 RUN npm install
 
 COPY website/client/ .
