@@ -232,7 +232,7 @@ export const TAGLINES = [
   "It’s gonna be legen— wait for it —edit.",
   "Have you met Edit?",
   "Edit accepted!",
-  "Editted.",
+  "Editored.",
   "Nothing edit happens after 2 a.m.",
   "Kids, this is the story of how I met your edit.",
   "New edits are always better.",
