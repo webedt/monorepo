@@ -258,19 +258,67 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
             </div>
           </div>
         )}
-        {/* Tool use shown as compact inline items */}
+        {/* Tool use shown as compact inline items with special formatting */}
         {toolBlocks.length > 0 && (
-          <div className="ml-4 mt-1 space-y-1">
-            {toolBlocks.map((block: any, i: number) => (
-              <details key={`tool-${i}`} className="text-xs opacity-60">
-                <summary className="cursor-pointer hover:opacity-100">
-                  🔨 {block.name}
-                </summary>
-                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
-                  {JSON.stringify(block.input, null, 2)}
-                </pre>
-              </details>
-            ))}
+          <div className="mt-1 space-y-1">
+            {toolBlocks.map((block: any, i: number) => {
+              const toolName = block.name;
+              const input = block.input || {};
+
+              // Get the primary display text based on tool type
+              let primaryText = '';
+              let secondaryText = '';
+
+              if (toolName === 'Bash') {
+                primaryText = input.command || '';
+                secondaryText = input.description || '';
+              } else if (toolName === 'Read' || toolName === 'Edit' || toolName === 'Write') {
+                primaryText = input.file_path || '';
+                if (toolName === 'Read' && input.limit) {
+                  secondaryText = `(${input.limit} lines)`;
+                }
+              } else if (toolName === 'Grep') {
+                primaryText = input.pattern || '';
+                if (input.path) {
+                  secondaryText = `in ${input.path}`;
+                }
+              } else if (toolName === 'Glob') {
+                primaryText = input.pattern || '';
+                if (input.path) {
+                  secondaryText = `in ${input.path}`;
+                }
+              } else {
+                // For other tools, show a summary of the input
+                primaryText = Object.entries(input)
+                  .slice(0, 2)
+                  .map(([k, v]) => `${k}: ${typeof v === 'string' ? v.substring(0, 50) : JSON.stringify(v)}`)
+                  .join(', ');
+              }
+
+              // Truncate long commands/paths
+              const maxPrimaryLength = 80;
+              const displayPrimary = primaryText.length > maxPrimaryLength
+                ? primaryText.substring(0, maxPrimaryLength) + '...'
+                : primaryText;
+
+              return (
+                <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                  <summary className="cursor-pointer hover:text-base-content/80 flex items-center gap-2">
+                    <span className="font-mono opacity-50">{time}</span>
+                    <span className="text-primary">▶</span>
+                    <span className="text-info">■</span>
+                    <span className="font-semibold">{toolName}:</span>
+                    <span className="opacity-70 font-mono truncate">{displayPrimary}</span>
+                    {secondaryText && (
+                      <span className="opacity-50 ml-auto shrink-0">// {secondaryText}</span>
+                    )}
+                  </summary>
+                  <pre className="mt-1 ml-6 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
+                    {JSON.stringify(input, null, 2)}
+                  </pre>
+                </details>
+              );
+            })}
           </div>
         )}
       </div>
