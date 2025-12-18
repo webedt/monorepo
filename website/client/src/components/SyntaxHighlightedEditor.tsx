@@ -56,7 +56,7 @@ export const SyntaxHighlightedEditor = memo(function SyntaxHighlightedEditor({
       const html = document.documentElement;
       const theme = html.getAttribute('data-theme');
       // Check for common dark theme names
-      const darkThemes = ['dark', 'dracula', 'night', 'coffee', 'forest', 'black', 'luxury', 'halloween', 'business', 'synthwave', 'cyberpunk', 'dim', 'sunset'];
+      const darkThemes = ['dark', 'biotin', 'dracula', 'night', 'coffee', 'forest', 'black', 'luxury', 'halloween', 'business', 'synthwave', 'cyberpunk', 'dim', 'sunset'];
       setIsDarkMode(theme ? darkThemes.some(t => theme.toLowerCase().includes(t)) : true);
     };
 
