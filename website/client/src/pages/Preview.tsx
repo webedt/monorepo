@@ -318,8 +318,12 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
   const existingPr = prData?.find((pr: GitHubPullRequest) => pr.state === 'open');
   const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged === true);
 
+  // Use session.baseBranch if available, otherwise default to 'main'
+  // This enables PR buttons for synced Claude Remote sessions that may not have baseBranch stored
+  const effectiveBaseBranch = session?.baseBranch || 'main';
+
   const handleCreatePR = async () => {
-    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !effectiveBaseBranch) {
       setPrError('Missing repository information');
       return;
     }
@@ -335,7 +339,7 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
         session.repositoryName,
         {
           head: session.branch,
-          base: session.baseBranch,
+          base: effectiveBaseBranch,
           userRequest: session.userRequest,
         }
       );
@@ -347,7 +351,7 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
         {
           title: prContent.data.title,
           head: session.branch,
-          base: session.baseBranch,
+          base: effectiveBaseBranch,
           body: prContent.data.body,
         }
       );
@@ -368,7 +372,7 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
   };
 
   const handleAutoPR = async () => {
-    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !effectiveBaseBranch) {
       setPrError('Missing repository information');
       return;
     }
@@ -384,7 +388,7 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
         session.repositoryName,
         {
           head: session.branch,
-          base: session.baseBranch,
+          base: effectiveBaseBranch,
           userRequest: session.userRequest,
         }
       );
@@ -395,7 +399,7 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
         session.repositoryName,
         session.branch,
         {
-          base: session.baseBranch,
+          base: effectiveBaseBranch,
           title: prContent.data.title,
           body: prContent.data.body,
           sessionId: sessionId && sessionId !== 'new' ? sessionId : undefined,
@@ -486,7 +490,7 @@ export default function Preview({ isEmbedded: isEmbeddedProp = false }: PreviewP
   );
 
   // Create PR actions for the branch line
-  const prActions = session && session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
+  const prActions = session && session.branch && effectiveBaseBranch && session.repositoryOwner && session.repositoryName && (
     <>
       {/* View PR button - show only if PR is open */}
       {existingPr && (

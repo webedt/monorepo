@@ -566,7 +566,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged === true);
 
   const handleCreatePR = async () => {
-    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
+    // Use session.baseBranch if available, otherwise fall back to local baseBranch state
+    const createPrBaseBranch = session?.baseBranch || baseBranch;
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !createPrBaseBranch) {
       setPrError('Missing repository information');
       return;
     }
@@ -580,9 +582,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         session.repositoryOwner,
         session.repositoryName,
         {
-          title: session.userRequest || `Merge ${session.branch} into ${session.baseBranch}`,
+          title: session.userRequest || `Merge ${session.branch} into ${createPrBaseBranch}`,
           head: session.branch,
-          base: session.baseBranch,
+          base: createPrBaseBranch,
         }
       );
       setPrSuccess(`PR #${response.data.number} created successfully!`);
@@ -664,7 +666,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   };
 
   const handleAutoPR = async () => {
-    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !session?.baseBranch) {
+    // Use session.baseBranch if available, otherwise fall back to local baseBranch state
+    const autoPrBaseBranch = session?.baseBranch || baseBranch;
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !autoPrBaseBranch) {
       setPrError('Missing repository information');
       return;
     }
@@ -694,8 +698,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         session.repositoryName,
         session.branch,
         {
-          base: session.baseBranch,
-          title: session.userRequest || `Merge ${session.branch} into ${session.baseBranch}`,
+          base: autoPrBaseBranch,
+          title: session.userRequest || `Merge ${session.branch} into ${autoPrBaseBranch}`,
           sessionId: sessionId && sessionId !== 'new' ? sessionId : undefined,
         }
       );
@@ -708,7 +712,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       progressSteps += `1. ${results.pr ? `✓ Found/created PR #${results.pr.number}` : '✓ Checked PR status'}\n`;
       progressSteps += `2. ✓ ${results.mergeBase?.message || 'Updated branch with base'}\n`;
       progressSteps += `3. ✓ Waited for PR to become mergeable\n`;
-      progressSteps += `4. ✓ Merged PR #${results.pr?.number} into ${session.baseBranch}\n`;
+      progressSteps += `4. ✓ Merged PR #${results.pr?.number} into ${autoPrBaseBranch}\n`;
       if (sessionId && sessionId !== 'new') {
         progressSteps += `5. ✓ Session moved to trash\n`;
       }
@@ -1810,7 +1814,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   );
 
   // Create PR actions for the branch line
-  const prActions = session && messages.length > 0 && session.branch && session.baseBranch && session.repositoryOwner && session.repositoryName && (
+  // Use session.baseBranch if available, otherwise fall back to local baseBranch state (defaults to 'main')
+  // This enables PR buttons for synced Claude Remote sessions that may not have baseBranch stored
+  const effectiveBaseBranch = session?.baseBranch || baseBranch;
+  const prActions = session && messages.length > 0 && session.branch && effectiveBaseBranch && session.repositoryOwner && session.repositoryName && (
     <>
       {/* View PR button - show only if PR is open */}
       {existingPr && (
