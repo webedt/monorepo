@@ -66,7 +66,7 @@ Replace the tightly-coupled "sessions" concept with two distinct systems:
 │  │  (Anthropic)    │  │  (Anthropic)    │  │  (Anthropic)    │     │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘     │
 │                                                                     │
-│  Storage: PostgreSQL (agent metadata) + MinIO (workspace tarballs)  │
+│  Storage: PostgreSQL (metadata) + GitHub API (direct clone/push)    │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -80,7 +80,7 @@ Replace the tightly-coupled "sessions" concept with two distinct systems:
 │  │  Code | Images | Sounds | Scenes | Live Chat | Preview        │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 │                                                                     │
-│  Storage: GitHub API (files) + Local/PostgreSQL (Live Chat only)   │
+│  Storage: GitHub API (files) + MinIO (Live Chat workspace state)   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -97,9 +97,12 @@ ALTER TABLE chat_sessions RENAME TO agents;
 -- Rename columns for clarity
 ALTER TABLE agents RENAME COLUMN user_request TO task_request;
 
+-- Remove session_path (no longer needed - no MinIO for agents)
+ALTER TABLE agents DROP COLUMN session_path;
+
 -- Keep existing columns:
 -- id, user_id, task_request, status, branch (auto-generated),
--- session_path (for MinIO storage), repository_*, created_at, etc.
+-- repository_*, created_at, etc.
 ```
 
 ### New Table: `live_chat_messages`
@@ -153,8 +156,8 @@ CREATE INDEX idx_live_chat_branch ON live_chat_messages(owner, repo, branch);
 ### Phase 4: GitHub API Integration (Medium Risk)
 1. Switch Code editor to use GitHub API for file operations
 2. Switch Images/Sounds/Scenes to use GitHub API
-3. Remove MinIO dependency for live workspace files
-4. Keep MinIO only for agent workspace tarballs
+3. Remove MinIO dependency from Remote Task Agents (use direct GitHub clone/push)
+4. Keep MinIO only for Live Chat workspace state
 
 ### Phase 5: Live Chat Implementation (High Complexity)
 1. Create `live_chat_messages` table
@@ -281,14 +284,15 @@ Navigate to /github/:owner/:repo/:branch/code
 
 ## Storage Strategy
 
-### Remote Task Agents (unchanged)
+### Remote Task Agents (simplified)
 - **PostgreSQL**: Agent metadata, messages, status
-- **MinIO**: Workspace tarballs (for agent execution)
+- **GitHub API**: Direct clone/commit/push (no MinIO tarballs)
+- **No MinIO**: Agents work directly with GitHub
 
 ### Live Workspace (new)
 - **GitHub API**: All file operations (code, images, sounds, scenes)
-- **PostgreSQL**: Live Chat messages only
-- **No MinIO**: Live workspace doesn't use tarball storage
+- **PostgreSQL**: Live Chat messages
+- **MinIO**: Live Chat workspace state (for local LLM execution context)
 
 ---
 
