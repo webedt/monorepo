@@ -66,6 +66,7 @@ const typeEmojis: Record<string, string> = {
   'tool_result': '📋',
   'completed': '✅',
   'error': '❌',
+  'input_preview': '👁️',
 };
 
 // Source-specific default emojis
