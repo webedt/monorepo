@@ -101,6 +101,7 @@ The Express server acts as a facade that:
 - `/api/resume` - Session replay
 - `/api/transcribe` - Audio transcription
 - `/api/admin` - Admin (requires admin auth)
+- `/api/logs` - Debug logs (for debugging)
 
 **Blocked Routes (internal only):**
 - `/api/storage/sessions/*/upload` - Only ai-worker should upload
@@ -199,6 +200,9 @@ internal-api-server/
 | `/api/storage/*` | - | Storage operations (files, sessions) |
 | `/api/admin/*` | - | Admin user management |
 | `/api/transcribe` | POST | Audio transcription (OpenAI Whisper) |
+| `/api/logs` | GET | View captured server logs |
+| `/api/logs` | DELETE | Clear captured logs |
+| `/api/logs/status` | GET | Log capture status |
 
 ### Environment Variables
 
@@ -412,6 +416,84 @@ docker service logs <service-name> -f
 
 ---
 
+## Viewing Server Logs via API
+
+The `/api/logs` endpoint exposes captured server logs for debugging.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/logs` | GET | Get captured logs with optional filtering |
+| `/api/logs` | DELETE | Clear all captured logs |
+| `/api/logs/status` | GET | Get log capture status |
+
+### Query Parameters (GET /api/logs)
+
+| Parameter | Description |
+|-----------|-------------|
+| `level` | Filter by log level: `debug`, `info`, `warn`, `error` |
+| `component` | Filter by component name |
+| `sessionId` | Filter by session ID |
+| `since` | Filter logs after this ISO timestamp |
+| `limit` | Max logs to return (default: 100, max: 1000) |
+
+### Example Usage
+
+```bash
+# Get all logs (default limit 100)
+curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs"
+
+# Get error logs only
+curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?level=error"
+
+# Get logs for a specific session
+curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?sessionId=abc123"
+
+# Get logs since a specific time
+curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?since=2025-01-15T10:00:00Z"
+
+# Get last 50 logs
+curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?limit=50"
+
+# Combine filters
+curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?level=error&limit=20"
+
+# Clear all logs
+curl -X DELETE "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs"
+
+# Check log capture status
+curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs/status"
+```
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "logs": [
+      {
+        "timestamp": "2025-01-15T10:30:00.000Z",
+        "level": "info",
+        "component": "execute",
+        "message": "Starting execution",
+        "sessionId": "abc123"
+      }
+    ],
+    "total": 150,
+    "filtered": 25,
+    "status": {
+      "enabled": true,
+      "count": 150,
+      "maxLogs": 1000
+    }
+  }
+}
+```
+
+---
+
 ## Links After Tasks
 
 **CRITICAL:** After code changes, commits, or pushes, ALWAYS display:
@@ -466,4 +548,4 @@ This repo supports long-running autonomous development via the autonomous CLI.
 
 ---
 
-*Documentation last updated: 2025-12-14*
+*Documentation last updated: 2025-12-17*
