@@ -30,6 +30,14 @@ import StoreItemDetail from '@/pages/StoreItemDetail';
 import SplitViewRouter from '@/components/SplitViewRouter';
 import ImageEditor from '@/pages/editor/ImageEditor';
 import Workspace from '@/pages/Workspace';
+import {
+  WorkspaceCode,
+  WorkspaceImages,
+  WorkspaceSounds,
+  WorkspaceScenes,
+  WorkspaceChat,
+  WorkspacePreview,
+} from '@/pages/workspace';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -101,9 +109,10 @@ function App() {
     const pathSegments = pathname.split('/').filter(Boolean);
 
     // App routes that should not be treated as path-based deployment prefixes
+    // Note: 'github' is included because /github/:owner/:repo/:branch/* are workspace routes
     const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'trash', 'settings', 'admin',
                        'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
-                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace'];
+                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace', 'github'];
 
     if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
       // Check for /github/ prefix pattern: /github/owner/repo/branch/
@@ -420,6 +429,61 @@ function App() {
                 <SplitViewRouter />
               </ProtectedRoute>
             }
+          />
+
+          {/* Live Workspace routes - /github/:owner/:repo/:branch/:page */}
+          <Route
+            path="/github/:owner/:repo/:branch/code"
+            element={
+              <ProtectedRoute>
+                <WorkspaceCode />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/images"
+            element={
+              <ProtectedRoute>
+                <WorkspaceImages />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/sounds"
+            element={
+              <ProtectedRoute>
+                <WorkspaceSounds />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/scenes"
+            element={
+              <ProtectedRoute>
+                <WorkspaceScenes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/chat"
+            element={
+              <ProtectedRoute>
+                <WorkspaceChat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/preview"
+            element={
+              <ProtectedRoute>
+                <WorkspacePreview />
+              </ProtectedRoute>
+            }
+          />
+          {/* Default workspace route redirects to code */}
+          <Route
+            path="/github/:owner/:repo/:branch"
+            element={<Navigate to="code" replace />}
           />
 
           <Route path="*" element={<Navigate to="/" replace />} />
