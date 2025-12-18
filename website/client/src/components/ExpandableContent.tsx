@@ -49,3 +49,35 @@ export function ExpandableJson({ data, summary, defaultOpen = false }: { data: a
     </details>
   );
 }
+
+// Expandable thinking component - shows truncated thinking with expand option
+// Uses details/summary for native collapsible behavior
+export function ExpandableThinking({
+  text,
+  maxLength = 256,
+  className = ''
+}: {
+  text: string;
+  maxLength?: number;
+  className?: string
+}) {
+  const needsTruncate = text.length > maxLength;
+
+  if (!needsTruncate) {
+    return <span className={`opacity-70 italic whitespace-pre-wrap ${className}`}>{text}</span>;
+  }
+
+  const truncatedText = text.substring(0, maxLength);
+
+  return (
+    <details className={`inline ${className}`}>
+      <summary className="cursor-pointer list-none">
+        <span className="opacity-70 italic">{truncatedText}</span>
+        <span className="text-primary hover:underline text-xs ml-1">...</span>
+      </summary>
+      <div className="opacity-70 italic whitespace-pre-wrap mt-1 pl-2 border-l-2 border-base-content/20">
+        {text}
+      </div>
+    </details>
+  );
+}
