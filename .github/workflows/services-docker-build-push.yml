@@ -1,4 +1,4 @@
-name: Services - Deploy to Dokploy
+name: Deploy to Dokploy
 
 on:
   push:
