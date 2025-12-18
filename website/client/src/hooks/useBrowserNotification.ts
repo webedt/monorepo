@@ -47,18 +47,44 @@ export function useBrowserNotification(): UseBrowserNotificationReturn {
     return Notification.permission as NotificationPermission;
   });
 
-  // Listen for permission changes (e.g., user changes in browser settings)
+  // Listen for permission changes using Permissions API (no polling needed)
   useEffect(() => {
     if (!isSupported) return;
 
-    // Update state if permission changes externally
-    const checkPermission = () => {
-      setPermission(Notification.permission as NotificationPermission);
+    let permissionStatus: PermissionStatus | null = null;
+
+    const handlePermissionChange = () => {
+      // Map PermissionState to NotificationPermission
+      // PermissionState: 'granted' | 'denied' | 'prompt'
+      // NotificationPermission: 'granted' | 'denied' | 'default'
+      const state = permissionStatus?.state;
+      if (state === 'prompt') {
+        setPermission('default');
+      } else if (state === 'granted' || state === 'denied') {
+        setPermission(state);
+      }
     };
 
-    // Check periodically in case user changed settings
-    const interval = setInterval(checkPermission, 5000);
-    return () => clearInterval(interval);
+    // Use Permissions API to listen for changes without polling
+    navigator.permissions
+      .query({ name: 'notifications' })
+      .then((status) => {
+        permissionStatus = status;
+        handlePermissionChange(); // Sync initial state
+        status.addEventListener('change', handlePermissionChange);
+      })
+      .catch(() => {
+        // Permissions API not supported, fall back to reading Notification.permission
+        // This is a one-time read, no polling - permission changes won't be detected
+        // but this is acceptable for older browsers
+        setPermission(Notification.permission as NotificationPermission);
+      });
+
+    return () => {
+      if (permissionStatus) {
+        permissionStatus.removeEventListener('change', handlePermissionChange);
+      }
+    };
   }, [isSupported]);
 
   const requestPermission = useCallback(async (): Promise<NotificationPermission> => {
