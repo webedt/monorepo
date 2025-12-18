@@ -51,7 +51,7 @@ export function ExpandableJson({ data, summary, defaultOpen = false }: { data: a
 }
 
 // Expandable thinking component - shows truncated thinking with expand option
-// Uses details/summary for native collapsible behavior
+// Toggles between truncated and full text on click (doesn't show both)
 export function ExpandableThinking({
   text,
   maxLength = 256,
@@ -61,6 +61,7 @@ export function ExpandableThinking({
   maxLength?: number;
   className?: string
 }) {
+  const [expanded, setExpanded] = useState(false);
   const needsTruncate = text.length > maxLength;
 
   if (!needsTruncate) {
@@ -70,14 +71,21 @@ export function ExpandableThinking({
   const truncatedText = text.substring(0, maxLength);
 
   return (
-    <details className={`inline ${className}`}>
-      <summary className="cursor-pointer list-none">
-        <span className="opacity-70 italic">{truncatedText}</span>
-        <span className="text-primary hover:underline text-xs ml-1">...</span>
-      </summary>
-      <div className="opacity-70 italic whitespace-pre-wrap mt-1 pl-2 border-l-2 border-base-content/20">
-        {text}
-      </div>
-    </details>
+    <span
+      className={`cursor-pointer ${className}`}
+      onClick={() => setExpanded(!expanded)}
+    >
+      {expanded ? (
+        <>
+          <span className="opacity-70 italic whitespace-pre-wrap">{text}</span>
+          <span className="text-primary hover:underline text-xs ml-1">[collapse]</span>
+        </>
+      ) : (
+        <>
+          <span className="opacity-70 italic">{truncatedText}</span>
+          <span className="text-primary hover:underline text-xs ml-1">...</span>
+        </>
+      )}
+    </span>
   );
 }

@@ -13,14 +13,11 @@ function ImagePreviewModal({
   onClose: () => void;
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
       <div className="relative max-w-[90vw] max-h-[90vh]">
         <button
           onClick={onClose}
-          className="absolute -top-10 right-0 text-white/80 hover:text-white text-2xl font-bold"
+          className="absolute -top-12 right-0 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/90 hover:text-white text-xl transition-colors"
           aria-label="Close preview"
         >
           ✕
@@ -28,8 +25,7 @@ function ImagePreviewModal({
         <img
           src={src}
           alt={alt}
-          className="max-w-full max-h-[90vh] object-contain rounded-lg"
-          onClick={(e) => e.stopPropagation()}
+          className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
         />
       </div>
     </div>
