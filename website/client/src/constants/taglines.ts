@@ -9,6 +9,7 @@ export const TAGLINES = [
   "Much wow. Many edits.",
   "I can haz edits?",
   "This is the way… to edit.",
+  "Edit is the way.",
   "With great power comes great edits.",
   "Edit long and prosper.",
   "The cake is a lie; but the edits are real.",
