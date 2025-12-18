@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 const THEMES = [
   'light',
   'dark',
+  'biotin',
   'cupcake',
   'bumblebee',
   'emerald',
@@ -40,6 +41,7 @@ type Theme = typeof THEMES[number];
 const THEME_EMOJIS: Record<Theme, string> = {
   light: '☀️',
   dark: '🌙',
+  biotin: '💜',
   cupcake: '🧁',
   bumblebee: '🐝',
   emerald: '💎',

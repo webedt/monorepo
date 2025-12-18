@@ -113,6 +113,28 @@ export default function SessionLayout({
   const isLoadingRepos = isLoadingReposProp ?? isLoadingReposQuery;
   const isLocked = isLockedProp ?? (repoStore.isLocked || (!!sessionId && !!sessionData?.data));
 
+  // Get repository display name with fallbacks:
+  // 1. Look up from repositories list by cloneUrl
+  // 2. Use session's repositoryName if available
+  // 3. Extract from URL if possible (e.g., "https://github.com/owner/repo.git" -> "owner/repo")
+  // 4. Fall back to "unknown"
+  const repositoryDisplayName = (() => {
+    // Try lookup first
+    const foundRepo = repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo);
+    if (foundRepo?.fullName) return foundRepo.fullName;
+
+    // Use session's stored repositoryName
+    if (sessionData?.data?.repositoryName) return sessionData.data.repositoryName;
+
+    // Try to extract from URL as last resort
+    if (selectedRepo) {
+      const match = selectedRepo.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/);
+      if (match) return match[1];
+    }
+
+    return 'unknown';
+  })();
+
   const handleLogout = async () => {
     try {
       await authApi.logout();
@@ -775,7 +797,7 @@ export default function SessionLayout({
                 >
                   <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
                   <span className={`text-base-content/70 ${branchExpanded ? '' : 'truncate'}`}>
-                    {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || 'unknown'}/{baseBranch}
+                    {repositoryDisplayName}/{baseBranch}
                     {branch && (
                       <> → <span className="font-medium">{branchExpanded || branch.length <= 20 ? branch : branch.substring(0, 20) + '…'}</span></>
                     )}
