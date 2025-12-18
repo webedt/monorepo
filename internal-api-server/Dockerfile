@@ -40,14 +40,14 @@ COPY internal-api-server/src ./src
 RUN npm run build
 
 # Set environment variables
-ENV PORT=3000
+ENV PORT=3001
 ENV NODE_ENV=production
 ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
 ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
 ENV BUILD_IMAGE_TAG=$BUILD_IMAGE_TAG
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3001
 
 # Start the server
 CMD ["npm", "start"]

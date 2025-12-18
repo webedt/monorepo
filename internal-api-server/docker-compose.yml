@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      PORT: 3000
+      PORT: 3001
       NODE_ENV: production
 
       # Database (external PostgreSQL)
