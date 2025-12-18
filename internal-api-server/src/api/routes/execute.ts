@@ -13,7 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import { db, chatSessions, messages, users, events } from '../../logic/db/index.js';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, isNull } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '../../logic/auth/claudeAuth.js';
 import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../../logic/auth/codexAuth.js';
@@ -241,34 +241,97 @@ const executeHandler = async (req: Request, res: Response) => {
         }
       }
 
-      const sessionUuid = uuidv4();
+      // Check for existing pending/running session for same repo/branch to prevent duplicates
+      // This handles rapid double-clicks, page refreshes, and race conditions with sync
+      if (repositoryOwner && repositoryName) {
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        const existingActiveSession = await db
+          .select()
+          .from(chatSessions)
+          .where(
+            and(
+              eq(chatSessions.userId, user.id),
+              eq(chatSessions.repositoryOwner, repositoryOwner),
+              eq(chatSessions.repositoryName, repositoryName),
+              eq(chatSessions.baseBranch, branch),
+              or(
+                eq(chatSessions.status, 'pending'),
+                eq(chatSessions.status, 'running')
+              ),
+              isNull(chatSessions.deletedAt)
+            )
+          )
+          .limit(1);
 
-      chatSession = (await db
-        .insert(chatSessions)
-        .values({
-          id: sessionUuid,
-          userId: user.id,
-          userRequest: serializeUserRequest(userRequest),
-          status: 'pending',
-          repositoryUrl: repoUrl || null,
-          repositoryOwner,
-          repositoryName,
-          baseBranch: branch,
-          branch: null,
-          provider: selectedProvider,
-          sessionPath: null,
-          autoCommit: true,
-          locked: false
-        })
-        .returning())[0];
+        if (existingActiveSession.length > 0) {
+          const existing = existingActiveSession[0];
+          logger.info('Found existing active session, reusing instead of creating duplicate', {
+            component: 'ExecuteRoute',
+            existingSessionId: existing.id,
+            repositoryOwner,
+            repositoryName,
+            baseBranch: branch,
+            status: existing.status
+          });
 
-      logger.info('Created new session', {
-        component: 'ExecuteRoute',
-        sessionId: chatSession.id
-      });
+          // Reuse the existing session
+          chatSession = existing;
 
-      // Notify subscribers of new session
-      sessionListBroadcaster.notifySessionCreated(user.id, chatSession);
+          // Update status to running if it was pending
+          if (existing.status === 'pending') {
+            await db
+              .update(chatSessions)
+              .set({ status: 'running' })
+              .where(eq(chatSessions.id, existing.id));
+          }
+
+          // Send session-created event with existing session ID
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+          });
+
+          res.write(`event: session-created\n`);
+          res.write(`data: ${JSON.stringify({ websiteSessionId: existing.id, reused: true })}\n\n`);
+
+          // Continue with execution using existing session
+          // Skip to store user message section
+        }
+      }
+
+      // Only create new session if we didn't find an existing one to reuse
+      if (!chatSession) {
+        const sessionUuid = uuidv4();
+
+        chatSession = (await db
+          .insert(chatSessions)
+          .values({
+            id: sessionUuid,
+            userId: user.id,
+            userRequest: serializeUserRequest(userRequest),
+            status: 'pending',
+            repositoryUrl: repoUrl || null,
+            repositoryOwner,
+            repositoryName,
+            baseBranch: branch,
+            branch: null,
+            provider: selectedProvider,
+            sessionPath: null,
+            autoCommit: true,
+            locked: false
+          })
+          .returning())[0];
+
+        logger.info('Created new session', {
+          component: 'ExecuteRoute',
+          sessionId: chatSession.id
+        });
+
+        // Notify subscribers of new session
+        sessionListBroadcaster.notifySessionCreated(user.id, chatSession);
+      }
     }
 
     // Store user message
