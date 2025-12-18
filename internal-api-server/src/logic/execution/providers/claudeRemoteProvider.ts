@@ -22,7 +22,22 @@ import type {
   ExecutionResult,
   ExecutionEventCallback,
   ExecutionEvent,
+  ContentBlock,
 } from './types.js';
+
+/**
+ * Extract text from prompt (handles both string and content blocks)
+ */
+function extractTextFromPrompt(prompt: string | ContentBlock[]): string {
+  if (typeof prompt === 'string') {
+    return prompt;
+  }
+  // Extract text from content blocks
+  return prompt
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text' && 'text' in block)
+    .map(block => block.text)
+    .join('\n');
+}
 
 /**
  * Pass through raw Anthropic session events directly
@@ -93,13 +108,16 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
 
     const client = this.createClient(claudeAuth, environmentId);
 
+    // Extract text from prompt for title generation (images can't be used for title)
+    const textPrompt = extractTextFromPrompt(prompt);
+
     // Generate title with 4-method fallback:
     // 1. claude.ai dust endpoint (fastest, requires cookies)
     // 2. OpenRouter API (fast, requires OPENROUTER_API_KEY)
     // 3. Temp Sonnet session (reliable, uses OAuth)
     // 4. Local fallback (instant)
     const generatedTitle = await generateTitle(
-      prompt,
+      textPrompt,
       {
         claudeCookies: CLAUDE_COOKIES || undefined,
         orgUuid: CLAUDE_ORG_UUID || undefined,
