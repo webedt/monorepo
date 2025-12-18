@@ -233,7 +233,7 @@ export interface TitleGeneratorConfig {
   claudeCookies?: string;
   /** Organization UUID for Claude.ai */
   orgUuid?: string;
-  /** OpenRouter API key (for fast title generation via Grok) */
+  /** OpenRouter API key (for fast title generation via Gemini) */
   openRouterApiKey?: string;
   /** Access token for API calls (for session-based generation) */
   accessToken?: string;
