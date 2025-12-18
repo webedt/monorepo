@@ -78,6 +78,18 @@ const EXPECTED_TABLES = [
   {
     name: 'events',
     requiredColumns: ['id', 'chat_session_id', 'event_data', 'timestamp']
+  },
+  {
+    name: 'live_chat_messages',
+    requiredColumns: ['id', 'user_id', 'owner', 'repo', 'branch', 'role', 'content', 'created_at']
+  },
+  {
+    name: 'workspace_presence',
+    requiredColumns: ['id', 'user_id', 'owner', 'repo', 'branch', 'heartbeat_at', 'updated_at']
+  },
+  {
+    name: 'workspace_events',
+    requiredColumns: ['id', 'user_id', 'owner', 'repo', 'branch', 'event_type', 'created_at']
   }
 ];
 
@@ -515,6 +527,59 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_messages_chat_session_id ON messages(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_chat_session_id ON events(chat_session_id);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+
+    -- Live Chat messages table (branch-based chat)
+    CREATE TABLE IF NOT EXISTS live_chat_messages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tool_calls JSONB,
+      images JSONB,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    -- Workspace presence table (ephemeral UPSERT)
+    CREATE TABLE IF NOT EXISTS workspace_presence (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      page TEXT,
+      cursor_x INTEGER,
+      cursor_y INTEGER,
+      selection JSONB,
+      heartbeat_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    -- Workspace events table (append-only log)
+    CREATE TABLE IF NOT EXISTS workspace_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      page TEXT,
+      path TEXT,
+      payload JSONB,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    -- Create indexes for workspace tables
+    CREATE INDEX IF NOT EXISTS idx_live_chat_messages_branch ON live_chat_messages(owner, repo, branch);
+    CREATE INDEX IF NOT EXISTS idx_live_chat_messages_user ON live_chat_messages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_live_chat_messages_created ON live_chat_messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_workspace_presence_branch ON workspace_presence(owner, repo, branch);
+    CREATE INDEX IF NOT EXISTS idx_workspace_presence_heartbeat ON workspace_presence(heartbeat_at);
+    CREATE INDEX IF NOT EXISTS idx_workspace_events_branch ON workspace_events(owner, repo, branch);
+    CREATE INDEX IF NOT EXISTS idx_workspace_events_created ON workspace_events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_workspace_events_type ON workspace_events(event_type);
   `);
 }
 
