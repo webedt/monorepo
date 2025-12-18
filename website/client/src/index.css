@@ -21,6 +21,26 @@ body {
   min-height: 100vh;
 }
 
+/* Disable horizontal scrolling on mobile devices */
+@media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
+  /* Allow horizontal scroll for images that need it (zoomed or oversized) */
+  .image-scrollable {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Ensure content doesn't cause horizontal overflow */
+  #root {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+}
+
 /* Apply pixel font for retro theme */
 [data-theme='retro'] {
   font-family: 'VT323', monospace;
@@ -77,11 +97,14 @@ body {
 .markdown-content {
   word-wrap: break-word;
   overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 .markdown-content pre {
   white-space: pre-wrap;
   word-break: break-word;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .markdown-content code {
@@ -93,4 +116,27 @@ body {
   display: block;
   padding: 0;
   background: transparent;
+}
+
+/* Mobile-specific markdown handling */
+@media (max-width: 768px) {
+  .markdown-content {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .markdown-content pre {
+    max-width: calc(100vw - 2rem);
+  }
+
+  .markdown-content img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Allow horizontal scrolling specifically for large images in a wrapper */
+  .markdown-content .image-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
