@@ -237,12 +237,10 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       <div className="my-1">
         {/* Thinking blocks as status lines with brain emoji */}
         {thinkingBlocks.map((block: any, i: number) => (
-          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-center gap-2">
-            <span className="font-mono opacity-50">{time}</span>
-            <span>🧠</span>
-            <span className="opacity-70 italic">
-              <ExpandableText text={block.thinking || ''} maxLength={100} />
-            </span>
+          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-start gap-2">
+            <span className="font-mono opacity-50 shrink-0">{time}</span>
+            <span className="shrink-0">🧠</span>
+            <span className="opacity-70 italic whitespace-pre-wrap">{block.thinking || ''}</span>
           </div>
         ))}
         {/* Main assistant message bubble - blue */}
@@ -271,7 +269,22 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
                   </div>
                 );
               }
-              // Default rendering for other tools
+              // Special formatting for Bash tool
+              if (block.name === 'Bash') {
+                const description = block.input?.description || 'Running command';
+                const command = block.input?.command || '';
+                return (
+                  <div key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100 font-mono bg-base-300 rounded p-2">
+                    <div className="flex items-center gap-1 text-base-content/80">
+                      <span>🔨</span>
+                      <span className="font-semibold">Bash:</span>
+                      <span>{description}</span>
+                    </div>
+                    <pre className="mt-1 text-base-content/70 overflow-auto whitespace-pre-wrap">{command}</pre>
+                  </div>
+                );
+              }
+              // Default formatting for other tools
               return (
                 <details key={`tool-${i}`} className="text-xs opacity-60">
                   <summary className="cursor-pointer hover:opacity-100">
