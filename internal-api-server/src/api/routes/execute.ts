@@ -425,6 +425,24 @@ const executeHandler = async (req: Request, res: Response) => {
       'X-Accel-Buffering': 'no'
     });
 
+    // Send input preview event immediately so user sees their request was received
+    if (userRequest) {
+      const requestText = serializeUserRequest(userRequest);
+      const previewText = truncateContent(requestText, 200);
+      const inputPreviewEvent = {
+        type: 'input_preview',
+        message: `Request received: ${previewText}`,
+        source: 'internal-api-server:/execute',
+        timestamp: new Date().toISOString(),
+        data: {
+          preview: previewText,
+          originalLength: requestText.length,
+          truncated: requestText.length > 200
+        }
+      };
+      res.write(`data: ${JSON.stringify(inputPreviewEvent)}\n\n`);
+    }
+
     // Send session-created event for new sessions
     if (!websiteSessionId) {
       res.write(`event: session-created\n`);

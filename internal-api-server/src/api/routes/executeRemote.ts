@@ -80,6 +80,15 @@ function serializeUserRequest(userRequest: string | UserRequestContent[]): strin
 }
 
 /**
+ * Truncate content for preview display
+ */
+function truncateContent(content: unknown, maxLength: number = 500): string {
+  const str = typeof content === 'string' ? content : JSON.stringify(content);
+  if (str.length <= maxLength) return str;
+  return str.substring(0, maxLength) + `... (truncated, total length: ${str.length})`;
+}
+
+/**
  * Extract text from userRequest
  */
 function extractPrompt(userRequest: string | UserRequestContent[]): string {
@@ -437,6 +446,23 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         clearInterval(heartbeatInterval);
       }
     }, 30000);
+
+    // Send input preview event immediately so user sees their request was received
+    if (userRequest) {
+      const requestText = serializeUserRequest(userRequest);
+      const previewText = truncateContent(requestText, 200);
+      await sendEvent({
+        type: 'input_preview',
+        message: `Request received: ${previewText}`,
+        source: 'claude-remote',
+        timestamp: new Date().toISOString(),
+        data: {
+          preview: previewText,
+          originalLength: requestText.length,
+          truncated: requestText.length > 200
+        }
+      } as ExecutionEvent);
+    }
 
     // Send session-created event for new sessions (client needs this to track session ID)
     if (!websiteSessionId) {
