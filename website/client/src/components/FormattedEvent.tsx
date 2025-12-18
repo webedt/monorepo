@@ -1,4 +1,5 @@
-import { ExpandableText, ExpandableJson } from './ExpandableContent';
+import { ExpandableJson } from './ExpandableContent';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 // Raw event type for formatted view - now uses type directly instead of eventType wrapper
 interface RawEvent {
@@ -43,6 +44,36 @@ function shouldSkipAssistant(events: RawEvent[], currentIndex: number): boolean 
   return assistantText === resultText;
 }
 
+// Helper to build a map of tool_use_id -> tool_result content
+function buildToolResultMap(events: RawEvent[]): Map<string, any> {
+  const map = new Map<string, any>();
+  for (const event of events) {
+    // Check for tool_result in message.content array (user events with tool results)
+    const content = event.message?.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === 'tool_result' && block.tool_use_id) {
+          // Store the result content and any tool_use_result data
+          map.set(block.tool_use_id, {
+            content: block.content,
+            is_error: block.is_error,
+            tool_use_result: event.tool_use_result
+          });
+        }
+      }
+    }
+  }
+  return map;
+}
+
+// Helper to check if an event is a tool_result-only user event (should be hidden when paired with tool_use)
+function isToolResultOnlyEvent(event: RawEvent): boolean {
+  if (event.type !== 'user') return false;
+  const content = event.message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.length > 0 && content.every((block: any) => block.type === 'tool_result');
+}
+
 // Component to render a list of events with deduplication and filtering
 export function FormattedEventList({
   events,
@@ -51,11 +82,19 @@ export function FormattedEventList({
   events: RawEvent[];
   filters?: Record<string, boolean>;
 }) {
+  // Build map of tool results for pairing with tool uses
+  const toolResultMap = buildToolResultMap(events);
+
   return (
     <>
       {events.map((event, index) => {
         // Skip assistant messages that are duplicated in the result
         if (shouldSkipAssistant(events, index)) {
+          return null;
+        }
+
+        // Skip tool_result-only user events (they'll be shown inline with tool_use)
+        if (isToolResultOnlyEvent(event)) {
           return null;
         }
 
@@ -80,7 +119,7 @@ export function FormattedEventList({
           }
         }
 
-        return <FormattedEvent key={index} event={event} filters={filters} />;
+        return <FormattedEvent key={index} event={event} filters={filters} toolResultMap={toolResultMap} />;
       })}
     </>
   );
@@ -175,7 +214,7 @@ function getStatusSummary(eventType: string, event: any): string {
 }
 
 // Format a raw event for display
-export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filters?: Record<string, boolean> }) {
+export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: RawEvent; filters?: Record<string, boolean>; toolResultMap?: Map<string, any> }) {
   const eventType = event.type;
   const emoji = getEventEmoji(eventType);
   const time = event.timestamp.toLocaleTimeString();
@@ -189,8 +228,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
     return (
       <div className="flex justify-end my-2">
         <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
-          <div className="text-sm whitespace-pre-wrap">
-            <ExpandableText text={userContent || ''} maxLength={500} />
+          <div className="text-sm">
+            <MarkdownRenderer content={userContent || ''} />
           </div>
           <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
         </div>
@@ -207,8 +246,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       return (
         <div className="flex justify-start my-2">
           <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
-            <div className="text-sm whitespace-pre-wrap">
-              <ExpandableText text={content} maxLength={500} />
+            <div className="text-sm">
+              <MarkdownRenderer content={content} />
             </div>
             <div className="text-xs opacity-40 mt-1">{time}</div>
           </div>
@@ -237,12 +276,10 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       <div className="my-1">
         {/* Thinking blocks as status lines with brain emoji */}
         {thinkingBlocks.map((block: any, i: number) => (
-          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-center gap-2">
-            <span className="font-mono opacity-50">{time}</span>
-            <span>🧠</span>
-            <span className="opacity-70 italic">
-              <ExpandableText text={block.thinking || ''} maxLength={100} />
-            </span>
+          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-start gap-2">
+            <span className="font-mono opacity-50 shrink-0">{time}</span>
+            <span className="shrink-0">🧠</span>
+            <span className="opacity-70 italic whitespace-pre-wrap">{block.thinking || ''}</span>
           </div>
         ))}
         {/* Main assistant message bubble - blue */}
@@ -250,8 +287,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
           <div className="flex justify-start my-1">
             <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
               {textBlocks.map((block: any, i: number) => (
-                <div key={`text-${i}`} className="text-sm whitespace-pre-wrap">
-                  <ExpandableText text={block.text || ''} maxLength={500} />
+                <div key={`text-${i}`} className="text-sm">
+                  <MarkdownRenderer content={block.text || ''} />
                 </div>
               ))}
               <div className="text-xs opacity-40 mt-1">{time}</div>
@@ -260,17 +297,142 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
         )}
         {/* Tool use shown as compact inline items */}
         {toolBlocks.length > 0 && (
-          <div className="ml-4 mt-1 space-y-1">
-            {toolBlocks.map((block: any, i: number) => (
-              <details key={`tool-${i}`} className="text-xs opacity-60">
-                <summary className="cursor-pointer hover:opacity-100">
-                  🔨 {block.name}
-                </summary>
-                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
-                  {JSON.stringify(block.input, null, 2)}
-                </pre>
-              </details>
-            ))}
+          <div className="mt-1 space-y-1">
+            {toolBlocks.map((block: any, i: number) => {
+              // Special formatting for Read tool
+              if (block.name === 'Read') {
+                const toolResult = toolResultMap?.get(block.id);
+                const fileContent = toolResult?.tool_use_result?.file?.content || null;
+                const numLines = toolResult?.tool_use_result?.file?.numLines || null;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>📖 Read:</span>
+                      <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
+                      {numLines && <span className="opacity-50">({numLines} lines)</span>}
+                    </summary>
+                    {fileContent && (
+                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
+                        {fileContent}
+                      </pre>
+                    )}
+                  </details>
+                );
+              }
+              // Special formatting for Bash tool
+              if (block.name === 'Bash') {
+                const description = block.input?.description || 'Running command';
+                const command = block.input?.command || '';
+                const toolResult = toolResultMap?.get(block.id);
+                const resultContent = toolResult?.tool_use_result?.stdout || toolResult?.content || '';
+                const hasError = toolResult?.is_error || toolResult?.tool_use_result?.stderr;
+                const stderrContent = toolResult?.tool_use_result?.stderr || '';
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100">
+                    <summary className="cursor-pointer font-mono flex items-center gap-2">
+                      <span className="opacity-50">{time}</span>
+                      <span>🔨</span> Bash: <span className="text-base-content/80">{command}</span>{' '}
+                      <span className="text-base-content/50">// {description}</span>
+                    </summary>
+                    {toolResult && (
+                      <pre className={`mt-1 ml-4 p-2 rounded overflow-auto max-h-48 text-xs whitespace-pre-wrap ${hasError ? 'bg-error/10 text-error' : 'bg-base-300 text-base-content/70'}`}>
+                        {stderrContent && <span className="text-error">{stderrContent}</span>}
+                        {resultContent}
+                      </pre>
+                    )}
+                  </details>
+                );
+              }
+              // Special formatting for Edit tool
+              if (block.name === 'Edit') {
+                const toolResult = toolResultMap?.get(block.id);
+                const filePath = block.input?.file_path || toolResult?.tool_use_result?.filePath || 'unknown';
+                const oldString = block.input?.old_string || toolResult?.tool_use_result?.oldString || '';
+                const newString = block.input?.new_string || toolResult?.tool_use_result?.newString || '';
+                const structuredPatch = toolResult?.tool_use_result?.structuredPatch;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>📝 Edit:</span>
+                      <span className="font-mono text-yellow-400">{filePath}</span>
+                    </summary>
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {structuredPatch && structuredPatch.length > 0 ? (
+                        <pre className="whitespace-pre-wrap">
+                          {structuredPatch.map((hunk: any, hunkIdx: number) => (
+                            <span key={hunkIdx}>
+                              {hunk.lines?.map((line: string, lineIdx: number) => {
+                                const isRemoval = line.startsWith('-');
+                                const isAddition = line.startsWith('+');
+                                return (
+                                  <span
+                                    key={lineIdx}
+                                    className={isRemoval ? 'text-red-400 bg-red-400/10' : isAddition ? 'text-green-400 bg-green-400/10' : ''}
+                                  >
+                                    {line}{'\n'}
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          ))}
+                        </pre>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="text-red-400 bg-red-400/10 p-1 rounded">
+                            <span className="opacity-50">- </span>{oldString}
+                          </div>
+                          <div className="text-green-400 bg-green-400/10 p-1 rounded">
+                            <span className="opacity-50">+ </span>{newString}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                );
+              }
+              // Special formatting for Write tool
+              if (block.name === 'Write') {
+                const toolResult = toolResultMap?.get(block.id);
+                const fileContent = block.input?.content || toolResult?.tool_use_result?.content || null;
+                const filePath = block.input?.file_path || toolResult?.tool_use_result?.filePath || 'unknown';
+                const lineCount = fileContent ? fileContent.split('\n').length : null;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>✏️ Write:</span>
+                      <span className="font-mono text-green-400">{filePath}</span>
+                      {lineCount && <span className="opacity-50">({lineCount} lines)</span>}
+                    </summary>
+                    {fileContent && (
+                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
+                        {fileContent}
+                      </pre>
+                    )}
+                  </details>
+                );
+              }
+              // Default formatting for other tools
+              return (
+                <details key={`tool-${i}`} className="text-xs opacity-60">
+                  <summary className="cursor-pointer hover:opacity-100">
+                    🔨 {block.name}
+                  </summary>
+                  <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
+                    {JSON.stringify(block.input, null, 2)}
+                  </pre>
+                </details>
+              );
+            })}
           </div>
         )}
       </div>
@@ -282,8 +444,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
     return (
       <div className="flex justify-start my-2">
         <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
-          <div className="text-sm whitespace-pre-wrap">
-            <ExpandableText text={event.result || ''} maxLength={500} />
+          <div className="text-sm">
+            <MarkdownRenderer content={event.result || ''} />
           </div>
           <div className="text-xs opacity-40 mt-1">
             {time}

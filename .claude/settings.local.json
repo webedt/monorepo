@@ -12,7 +12,10 @@
       "Bash(npx tsc)",
       "Bash(npm test:*)",
       "Bash(gh pr create:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []
