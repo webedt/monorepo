@@ -396,15 +396,17 @@ export class ClaudeRemoteClient {
   private extractBranchName(events: SessionEvent[]): string | undefined {
     for (const event of events) {
       // Check tool result stdout
-      if (event.tool_use_result?.stdout) {
-        const match = event.tool_use_result.stdout.match(/claude\/[a-zA-Z0-9_-]+/);
+      const toolResult = event.tool_use_result as { stdout?: string } | undefined;
+      if (toolResult?.stdout) {
+        const match = toolResult.stdout.match(/claude\/[a-zA-Z0-9_-]+/);
         if (match) return match[0];
       }
       // Check data extra args
-      if (event.data?.extra && typeof event.data.extra === 'object') {
-        const extra = event.data.extra as Record<string, unknown>;
+      const data = event.data as { extra?: Record<string, unknown> } | undefined;
+      if (data?.extra && typeof data.extra === 'object') {
+        const extra = data.extra;
         if (Array.isArray(extra.args)) {
-          const argsStr = extra.args.join(' ');
+          const argsStr = (extra.args as string[]).join(' ');
           const match = argsStr.match(/branch `(claude\/[a-zA-Z0-9_-]+)`/);
           if (match) return match[1];
         }
@@ -480,10 +482,10 @@ export class ClaudeRemoteClient {
                 status: 'completed',
                 title: title || session.title,
                 branch,
-                totalCost: event.total_cost_usd,
-                durationMs: event.duration_ms,
-                numTurns: event.num_turns,
-                result: event.result,
+                totalCost: event.total_cost_usd as number | undefined,
+                durationMs: event.duration_ms as number | undefined,
+                numTurns: event.num_turns as number | undefined,
+                result: event.result as string | undefined,
               };
             }
           }

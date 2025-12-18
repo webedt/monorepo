@@ -15,7 +15,6 @@ export type {
   Session,
   SessionStatus,
   SessionEvent,
-  SessionEventType,
   ContentBlock,
   EventsResponse,
   ListSessionsResponse,

@@ -91,64 +91,14 @@ export interface GitOutcomeInfo {
 }
 
 /**
- * Event from the session events API
+ * Raw event from Claude Remote sessions API
+ * Events are passed through as-is without transformation
  */
-export interface SessionEvent {
+export type SessionEvent = Record<string, unknown> & {
   uuid: string;
-  type: SessionEventType;
-  session_id?: string;
-  parent_tool_use_id?: string;
+  type: string;
   timestamp?: string;
-
-  // User message event
-  message?: {
-    role: 'user' | 'assistant';
-    content: string | ContentBlock[];
-  };
-
-  // Result event (completion)
-  result?: string;
-  total_cost_usd?: number;
-  duration_ms?: number;
-  num_turns?: number;
-
-  // Tool use event
-  tool_use?: {
-    name: string;
-    input: Record<string, unknown>;
-  };
-
-  // Tool result event
-  tool_use_result?: {
-    tool_use_id: string;
-    stdout?: string;
-    stderr?: string;
-    is_error?: boolean;
-  };
-
-  // Environment manager log
-  data?: {
-    type?: string;
-    category?: string;
-    content?: string;  // Actual message content from env_manager_log
-    message?: string;  // Alternative message field
-    level?: string;
-    extra?: Record<string, unknown>;
-  };
-}
-
-/**
- * Types of events that can be received
- */
-export type SessionEventType =
-  | 'user'
-  | 'assistant'
-  | 'result'
-  | 'tool_use'
-  | 'tool_result'
-  | 'env_manager_log'
-  | 'system'
-  | 'error';
+};
 
 /**
  * Image source for base64 encoded images

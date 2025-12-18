@@ -1698,9 +1698,10 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
 
         // Extract user request from first user event
         let userRequest = remoteSession.title || 'Imported session';
-        const firstUserEvent = sessionEvents.find(e => e.type === 'user' && e.message?.content);
-        if (firstUserEvent?.message?.content) {
-          const content = firstUserEvent.message.content;
+        const firstUserEvent = sessionEvents.find(e => e.type === 'user' && (e.message as any)?.content);
+        const firstUserMessage = firstUserEvent?.message as { content?: unknown } | undefined;
+        if (firstUserMessage?.content) {
+          const content = firstUserMessage.content;
           userRequest = typeof content === 'string'
             ? content.slice(0, 500)
             : JSON.stringify(content).slice(0, 500);
@@ -1710,7 +1711,7 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
         let totalCost: string | undefined;
         const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd);
         if (resultEvent?.total_cost_usd) {
-          totalCost = resultEvent.total_cost_usd.toFixed(6);
+          totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
         }
 
         await db.insert(chatSessions).values({
@@ -1929,7 +1930,7 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     let totalCost = session.totalCost;
     const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd);
     if (resultEvent?.total_cost_usd) {
-      totalCost = resultEvent.total_cost_usd.toFixed(6);
+      totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
     }
 
     if (newStatus !== session.status || totalCost !== session.totalCost) {

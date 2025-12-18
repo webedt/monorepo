@@ -44,7 +44,6 @@ export type {
   Session as ClaudeSession,
   SessionStatus as ClaudeSessionStatus,
   SessionEvent,
-  SessionEventType,
   EventsResponse,
   EventCallback,
   PollOptions,
