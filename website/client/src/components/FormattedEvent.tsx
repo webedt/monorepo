@@ -43,6 +43,47 @@ function shouldSkipAssistant(events: RawEvent[], currentIndex: number): boolean 
   return assistantText === resultText;
 }
 
+// Build a map of tool_use_id -> tool_result from user events
+function buildToolResultMap(events: RawEvent[]): Map<string, any> {
+  const map = new Map<string, any>();
+  for (const event of events) {
+    // Check for tool_use_result at top level (new format)
+    if (event.tool_use_result) {
+      const content = event.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result' && block.tool_use_id) {
+            map.set(block.tool_use_id, {
+              ...block,
+              tool_use_result: event.tool_use_result
+            });
+          }
+        }
+      }
+    }
+    // Also check user events with tool_result content
+    if (event.type === 'user' && event.message?.content) {
+      const content = event.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result' && block.tool_use_id) {
+            map.set(block.tool_use_id, block);
+          }
+        }
+      }
+    }
+  }
+  return map;
+}
+
+// Check if a user event only contains tool_result blocks (should be hidden as standalone)
+function isToolResultOnlyEvent(event: RawEvent): boolean {
+  if (event.type !== 'user') return false;
+  const content = event.message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.length > 0 && content.every((block: any) => block.type === 'tool_result');
+}
+
 // Component to render a list of events with deduplication and filtering
 export function FormattedEventList({
   events,
@@ -51,11 +92,19 @@ export function FormattedEventList({
   events: RawEvent[];
   filters?: Record<string, boolean>;
 }) {
+  // Build tool result map for correlating tool uses with their results
+  const toolResultMap = buildToolResultMap(events);
+
   return (
     <>
       {events.map((event, index) => {
         // Skip assistant messages that are duplicated in the result
         if (shouldSkipAssistant(events, index)) {
+          return null;
+        }
+
+        // Skip user events that only contain tool_result blocks (they're shown with tool uses)
+        if (isToolResultOnlyEvent(event)) {
           return null;
         }
 
@@ -80,7 +129,7 @@ export function FormattedEventList({
           }
         }
 
-        return <FormattedEvent key={index} event={event} filters={filters} />;
+        return <FormattedEvent key={index} event={event} filters={filters} toolResultMap={toolResultMap} />;
       })}
     </>
   );
@@ -175,7 +224,7 @@ function getStatusSummary(eventType: string, event: any): string {
 }
 
 // Format a raw event for display
-export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filters?: Record<string, boolean> }) {
+export function FormattedEvent({ event, filters = {}, toolResultMap = new Map() }: { event: RawEvent; filters?: Record<string, boolean>; toolResultMap?: Map<string, any> }) {
   const eventType = event.type;
   const emoji = getEventEmoji(eventType);
   const time = event.timestamp.toLocaleTimeString();
@@ -262,11 +311,24 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
             {toolBlocks.map((block: any, i: number) => {
               // Special formatting for Read tool
               if (block.name === 'Read') {
+                const toolResult = toolResultMap.get(block.id);
+                const fileContent = toolResult?.tool_use_result?.file?.content || null;
+                const numLines = toolResult?.tool_use_result?.file?.numLines || null;
+
                 return (
-                  <div key={`tool-${i}`} className="text-xs opacity-70 py-1 px-2 bg-base-200 rounded border-l-2 border-blue-400">
-                    <span className="font-medium">📖 Read:</span>{' '}
-                    <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
-                  </div>
+                  <details key={`tool-${i}`} className="text-xs bg-base-200 rounded border-l-2 border-blue-400">
+                    <summary className="opacity-70 py-1 px-2 cursor-pointer hover:opacity-100 list-none flex items-center gap-1">
+                      <span className="text-base-content/50">▶</span>
+                      <span className="font-medium">📖 Read:</span>{' '}
+                      <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
+                      {numLines && <span className="opacity-50 ml-1">({numLines} lines)</span>}
+                    </summary>
+                    {fileContent && (
+                      <pre className="p-2 bg-base-300 rounded-b overflow-auto max-h-96 text-xs whitespace-pre-wrap border-t border-base-300">
+                        {fileContent}
+                      </pre>
+                    )}
+                  </details>
                 );
               }
               // Special formatting for Bash tool
