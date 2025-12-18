@@ -13,6 +13,7 @@ export const TAGLINES = [
   "With great power comes great edits.",
   "Edit long and prosper.",
   "The cake is a lie; but the edits are real.",
+  "The edit is a lie.",
   "404: 'i' not found.",
   "Come with me if you want to edit.",
   "Never gonna give edits up.",
