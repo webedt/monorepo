@@ -55,28 +55,28 @@ body {
 
 /* Biotin theme - inspired by purple shampoo bottle with gold accents */
 [data-theme='biotin'] {
-  --p: 43 74% 52%; /* Primary: gold accent */
-  --pf: 43 74% 45%; /* Primary focus: darker gold */
-  --pc: 265 30% 15%; /* Primary content: dark purple text on gold */
-  --s: 270 45% 35%; /* Secondary: medium purple */
-  --sf: 270 45% 28%; /* Secondary focus: darker purple */
-  --sc: 45 80% 90%; /* Secondary content: light gold text */
-  --a: 45 80% 60%; /* Accent: lighter gold */
-  --af: 45 80% 52%; /* Accent focus */
-  --ac: 265 30% 15%; /* Accent content: dark text */
-  --n: 265 35% 22%; /* Neutral: dark purple-gray */
-  --nf: 265 35% 18%; /* Neutral focus */
-  --nc: 45 60% 85%; /* Neutral content: cream text */
-  --b1: 265 40% 12%; /* Base background: deep purple */
-  --b2: 265 35% 16%; /* Base 200: slightly lighter */
-  --b3: 265 30% 22%; /* Base 300: even lighter */
-  --bc: 45 50% 90%; /* Base content: cream/gold text */
+  --p: 38 75% 55%; /* Primary: warm gold buttons */
+  --pf: 38 75% 45%; /* Primary focus: darker gold */
+  --pc: 270 60% 20%; /* Primary content: dark purple text on gold */
+  --s: 270 55% 40%; /* Secondary: medium purple */
+  --sf: 270 55% 32%; /* Secondary focus: darker purple */
+  --sc: 38 80% 85%; /* Secondary content: gold text */
+  --a: 35 85% 58%; /* Accent: orange-gold */
+  --af: 35 85% 48%; /* Accent focus */
+  --ac: 270 60% 18%; /* Accent content: dark purple text */
+  --n: 270 50% 30%; /* Neutral: purple */
+  --nf: 270 50% 25%; /* Neutral focus */
+  --nc: 38 70% 75%; /* Neutral content: gold text */
+  --b1: 270 55% 22%; /* Base background: rich purple */
+  --b2: 270 50% 28%; /* Base 200: lighter purple */
+  --b3: 270 45% 35%; /* Base 300: even lighter purple */
+  --bc: 38 80% 65%; /* Base content: gold text */
   --in: 195 80% 55%; /* Info: cyan */
   --inc: 195 100% 10%; /* Info content */
   --su: 140 60% 50%; /* Success: green */
   --suc: 140 100% 10%; /* Success content */
-  --wa: 43 90% 55%; /* Warning: gold (matching theme) */
-  --wac: 43 100% 10%; /* Warning content */
+  --wa: 38 90% 55%; /* Warning: gold (matching theme) */
+  --wac: 38 100% 10%; /* Warning content */
   --er: 0 70% 55%; /* Error: red */
   --erc: 0 100% 95%; /* Error content */
   --rounded-box: 1rem;
