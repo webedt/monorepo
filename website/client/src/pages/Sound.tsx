@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import SessionLayout from '@/components/SessionLayout';
+import SessionLayout from '@/components/AgentLayout';
 import { useEmbedded } from '@/contexts/EmbeddedContext';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 

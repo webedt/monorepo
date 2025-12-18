@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
-import SessionsSidebar from './SessionsSidebar';
+import SessionsSidebar from './AgentsSidebar';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/version';
 import type { GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';

@@ -4,7 +4,7 @@ import { authApi } from '@/lib/api';
 import { useState, useRef, useEffect } from 'react';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
-import SessionsSidebar from './SessionsSidebar';
+import AgentsSidebar from './AgentsSidebar';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/version';
 import { TAGLINES } from '@/constants/taglines';
 
@@ -93,10 +93,11 @@ export default function Layout() {
     ? user.email.substring(0, 2).toUpperCase()
     : '??';
 
-  // Detect if we're in editor mode (on /sessions or /session/*)
+  // Detect if we're in editor mode (on /agents or /session/*)
   // Settings page respects the 'from' URL parameter to show the correct navbar
   const settingsOrigin = searchParams.get('from');
-  const isEditorMode = location.pathname === '/sessions' ||
+  const isEditorMode = location.pathname === '/agents' ||
+                       location.pathname === '/sessions' || // Backwards compat redirect
                        location.pathname === '/trash' ||
                        location.pathname.startsWith('/session/') ||
                        location.pathname.startsWith('/quick-setup/') ||
@@ -133,10 +134,10 @@ export default function Layout() {
   // Editor mode navigation items
   const editorNavItems: NavItem[] = [
     {
-      to: '/sessions',
-      label: 'Sessions',
+      to: '/agents',
+      label: 'Agents',
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 13h8v8H3v-8zm0-10h8v8H3V3zm10 0h8v8h-8V3zm0 10h8v8h-8v-8z"/></svg>,
-      isActive: location.pathname === '/sessions'
+      isActive: location.pathname === '/agents' || location.pathname === '/sessions'
     },
     {
       to: '/quick-setup/chat',
@@ -317,7 +318,7 @@ export default function Layout() {
             <div className="flex items-center gap-3">
               {/* Mode Toggle - Switch between Hub and Editor - Desktop Only (inverse of hamburger) */}
               <Link
-                to={isEditorMode ? '/store' : '/sessions'}
+                to={isEditorMode ? '/store' : '/agents'}
                 className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
               >
                 {isEditorMode ? (
@@ -390,13 +391,13 @@ export default function Layout() {
                       📚 Library
                     </Link>
 
-                    {/* My Sessions link */}
+                    {/* My Agents link */}
                     <Link
-                      to="/sessions"
+                      to="/agents"
                       onClick={() => setUserMenuOpen(false)}
                       className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
                     >
-                      📂 My Sessions
+                      📂 My Agents
                     </Link>
 
                     {/* Settings link */}
@@ -477,9 +478,9 @@ export default function Layout() {
       {/* Main Content - with sidebar in editor mode */}
       {isEditorMode ? (
         <div className="flex-1 flex min-h-0">
-          {/* Sessions Sidebar - Desktop only, hidden on mobile */}
+          {/* Agents Sidebar - Desktop only, hidden on mobile */}
           <div className="hidden md:flex">
-            <SessionsSidebar />
+            <AgentsSidebar />
           </div>
           {/* Main content area */}
           <main className="flex-1 min-w-0">

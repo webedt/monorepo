@@ -6,7 +6,7 @@ import { useAuthStore, useSessionLastPageStore, useSessionsSidebarStore, type Se
 import type { ChatSession, GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
 import type { ImageAttachment } from './ChatInput';
-import { useSessionListUpdates } from '@/hooks/useSessionListUpdates';
+import { useAgentListUpdates } from '@/hooks/useAgentListUpdates';
 
 // Helper to get the session URL with last visited page
 function getSessionUrl(sessionId: string, getLastPage: (id: string) => string): string {
@@ -38,7 +38,7 @@ function getPageIcon(page: SessionPageName): React.ReactNode {
   }
 }
 
-export default function SessionsSidebar() {
+export default function AgentsSidebar() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { sessionId: currentSessionId } = useParams();
@@ -62,8 +62,8 @@ export default function SessionsSidebar() {
     queryFn: sessionsApi.list,
   });
 
-  // Subscribe to real-time session updates via SSE (replaces polling)
-  useSessionListUpdates();
+  // Subscribe to real-time agent updates via SSE (replaces polling)
+  useAgentListUpdates();
 
   const sessions: ChatSession[] = data?.data?.sessions || [];
 
@@ -315,7 +315,7 @@ export default function SessionsSidebar() {
       {/* Header with toggle button */}
       <div className="flex items-center justify-between p-2 border-b border-base-300">
         {isExpanded && (
-          <span className="font-medium text-sm text-base-content/80 px-2">My Sessions</span>
+          <span className="font-medium text-sm text-base-content/80 px-2">My Agents</span>
         )}
         <button
           onClick={toggle}
@@ -367,7 +367,7 @@ export default function SessionsSidebar() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onPaste={handlePaste}
-                  placeholder="Start a new session..."
+                  placeholder="Start a new agent..."
                   rows={2}
                   className="textarea textarea-bordered textarea-sm w-full resize-none pr-20"
                   disabled={!hasClaudeAuth}
@@ -407,7 +407,7 @@ export default function SessionsSidebar() {
                     type="submit"
                     disabled={!hasClaudeAuth || (!input.trim() && images.length === 0)}
                     className="btn btn-primary btn-xs btn-circle"
-                    title="Create session"
+                    title="Create agent"
                   >
                     <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
@@ -504,7 +504,7 @@ export default function SessionsSidebar() {
             </form>
           </div>
 
-          {/* Sessions list */}
+          {/* Agents list */}
           <div className="flex-1 overflow-y-auto">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
@@ -525,7 +525,7 @@ export default function SessionsSidebar() {
                     d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
                   />
                 </svg>
-                <p className="mt-2 text-xs text-base-content/50">No sessions yet</p>
+                <p className="mt-2 text-xs text-base-content/50">No agents yet</p>
               </div>
             ) : (
               <ul className="divide-y divide-base-300">
@@ -577,7 +577,7 @@ export default function SessionsSidebar() {
                             deleteMutation.mutate(session.id);
                           }}
                           className="btn btn-ghost btn-xs btn-circle text-error opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Delete session"
+                          title="Delete agent"
                         >
                           <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                             <path
@@ -599,7 +599,7 @@ export default function SessionsSidebar() {
           <div className="border-t border-base-300 p-2">
             <div className="flex items-center justify-between">
               <Link
-                to="/sessions"
+                to="/agents"
                 className="btn btn-ghost btn-xs text-base-content/70"
               >
                 View All
@@ -607,7 +607,7 @@ export default function SessionsSidebar() {
               <Link
                 to="/trash"
                 className="btn btn-ghost btn-xs text-base-content/70"
-                title="View deleted sessions"
+                title="View deleted agents"
               >
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                   <path
@@ -631,14 +631,14 @@ export default function SessionsSidebar() {
               setTimeout(() => textareaRef.current?.focus(), 100);
             }}
             className="btn btn-ghost btn-sm btn-square"
-            title="New session"
+            title="New agent"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
             </svg>
           </button>
 
-          {/* Sessions indicator */}
+          {/* Agents indicator */}
           <div className="divider my-1 w-6"></div>
 
           {isLoading ? (
@@ -647,7 +647,7 @@ export default function SessionsSidebar() {
             <button
               onClick={toggle}
               className="btn btn-ghost btn-sm btn-square relative"
-              title={`${sessions.length} session${sessions.length !== 1 ? 's' : ''}`}
+              title={`${sessions.length} agent${sessions.length !== 1 ? 's' : ''}`}
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 13h8v8H3v-8zm0-10h8v8H3V3zm10 0h8v8h-8V3zm0 10h8v8h-8v-8z"/>
@@ -660,9 +660,9 @@ export default function SessionsSidebar() {
             </button>
           )}
 
-          {/* Running sessions indicator */}
+          {/* Running agents indicator */}
           {sessions.some(s => s.status === 'running') && (
-            <div className="mt-1" title="Running session">
+            <div className="mt-1" title="Running agent">
               <span className="loading loading-spinner loading-xs text-info"></span>
             </div>
           )}

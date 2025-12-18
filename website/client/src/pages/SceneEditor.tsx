@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import SessionLayout from '@/components/SessionLayout';
+import SessionLayout from '@/components/AgentLayout';
 import { useEmbedded } from '@/contexts/EmbeddedContext';
 import { githubApi, sessionsApi, storageWorkerApi } from '@/lib/api';
 import { useSceneEditor } from '@/hooks/useSceneEditor';

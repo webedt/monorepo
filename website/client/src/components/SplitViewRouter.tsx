@@ -1,5 +1,5 @@
 import { useParams, Navigate } from 'react-router-dom';
-import SessionLayout from '@/components/SessionLayout';
+import SessionLayout from '@/components/AgentLayout';
 import SplitLayout, { type SplitPageName, getPageDisplayName } from '@/components/SplitLayout';
 import { useSplitViewStore } from '@/lib/store';
 import { useQuery } from '@tanstack/react-query';
