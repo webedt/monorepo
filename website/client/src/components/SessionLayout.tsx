@@ -29,10 +29,8 @@ const isMobileDevice = () => {
 
 interface SessionLayoutProps {
   selectedRepo?: string;
-  baseBranch?: string;
   branch?: string;
   onRepoChange?: (repo: string) => void;
-  onBaseBranchChange?: (branch: string) => void;
   repositories?: GitHubRepository[];
   isLoadingRepos?: boolean;
   isLocked?: boolean;
@@ -45,10 +43,8 @@ interface SessionLayoutProps {
 
 export default function SessionLayout({
   selectedRepo: selectedRepoProp,
-  baseBranch: baseBranchProp,
   branch: branchProp,
   onRepoChange,
-  onBaseBranchChange,
   repositories: repositoriesProp,
   isLoadingRepos: isLoadingReposProp,
   isLocked: isLockedProp,
@@ -107,7 +103,7 @@ export default function SessionLayout({
 
   // Use data with priority: props > store > session data > defaults
   const selectedRepo = selectedRepoProp ?? (repoStore.selectedRepo || sessionData?.data?.repositoryUrl || '');
-  const baseBranch = baseBranchProp ?? (repoStore.baseBranch || sessionData?.data?.baseBranch || 'main');
+  const baseBranch = sessionData?.data?.baseBranch || 'main';
   const branch = branchProp ?? sessionData?.data?.branch ?? '';
   const repositories = repositoriesProp ?? reposData?.data ?? [];
   const isLoadingRepos = isLoadingReposProp ?? isLoadingReposQuery;
@@ -830,17 +826,6 @@ export default function SessionLayout({
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-base-content/70">Base Branch:</span>
-                <input
-                  type="text"
-                  value={baseBranch}
-                  onChange={(e) => onBaseBranchChange?.(e.target.value)}
-                  className="input input-sm input-bordered w-32"
-                  placeholder="main"
-                />
               </div>
             </div>
           ) : (

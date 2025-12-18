@@ -61,7 +61,6 @@ export default function SplitViewRouter() {
     return (
       <SessionLayout
         selectedRepo={selectedRepoUrl}
-        baseBranch={session?.baseBranch}
         branch={session?.branch}
         isLocked={!!session}
         session={session}

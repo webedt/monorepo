@@ -861,7 +861,6 @@ export function createExecuteEventSource(data: {
   provider?: 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote';
   github?: {
     repoUrl: string;
-    branch: string;
   };
   autoCommit?: boolean;
   websiteSessionId?: string;
@@ -909,7 +908,6 @@ export function createExecuteRemoteEventSource(data: {
   provider?: string;
   github?: {
     repoUrl: string;
-    branch: string;
   };
   autoCommit?: boolean;
   websiteSessionId?: string;

@@ -3438,7 +3438,6 @@ export function ImagesContent({ sessionId: sessionIdProp, isEmbedded = false }: 
   return (
     <SessionLayout
       selectedRepo={selectedRepoUrl}
-      baseBranch={imageSession?.baseBranch}
       branch={imageSession?.branch}
       isLocked={!!imageSession}
       prActions={prActions}

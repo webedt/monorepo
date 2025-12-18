@@ -61,7 +61,6 @@ export default function Sessions() {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [selectedRepo, setSelectedRepo] = useState('');
-  const [baseBranch, setBaseBranch] = useState('main');
 
   // Use standard query for sessions (API doesn't support pagination yet)
   const { data, isLoading, error } = useQuery({
@@ -302,9 +301,8 @@ export default function Sessions() {
         startStream: true,
         streamParams: {
           userRequest: userRequestParam,
-          github: (selectedRepo && baseBranch) ? {
+          github: selectedRepo ? {
             repoUrl: selectedRepo,
-            branch: baseBranch,
           } : undefined,
           autoCommit: true,
         }
@@ -426,8 +424,6 @@ export default function Sessions() {
           isExecuting={false}
           selectedRepo={selectedRepo}
           setSelectedRepo={setSelectedRepo}
-          baseBranch={baseBranch}
-          setBaseBranch={setBaseBranch}
           repositories={repositories}
           isLoadingRepos={isLoadingRepos}
           isLocked={false}

@@ -1,7 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import type { GitHubRepository, User } from '@/shared';
-import { githubApi } from '@/lib/api';
 import { useVoiceRecordingStore, useIsWorkerExecuting, useRecentReposStore } from '@/lib/store';
 
 export interface ImageAttachment {
@@ -20,8 +19,6 @@ interface ChatInputProps {
   isExecuting: boolean;
   selectedRepo: string;
   setSelectedRepo: (value: string) => void;
-  baseBranch?: string;
-  setBaseBranch?: (value: string) => void;
   repositories: GitHubRepository[];
   isLoadingRepos: boolean;
   isLocked: boolean;
@@ -46,8 +43,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   isExecuting,
   selectedRepo,
   setSelectedRepo,
-  baseBranch = 'main',
-  setBaseBranch,
   repositories,
   isLoadingRepos,
   isLocked,
@@ -63,8 +58,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const voiceKeywordsRef = useRef<string[]>([]); // Ref to track current voice keywords (avoids stale closure)
   const repoSearchInputRef = useRef<HTMLInputElement>(null);
   const repoListRef = useRef<HTMLDivElement>(null);
-  const branchSearchInputRef = useRef<HTMLInputElement>(null);
-  const branchListRef = useRef<HTMLDivElement>(null);
   const hasGithubAuth = !!user?.githubAccessToken;
   const hasClaudeAuth = !!user?.claudeAuth;
 
@@ -108,13 +101,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
   const [repoHighlightedIndex, setRepoHighlightedIndex] = useState(-1); // -1 means search input is focused
 
-  // Branch selector state
-  const [branchSearchQuery, setBranchSearchQuery] = useState('');
-  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
-  const [branchHighlightedIndex, setBranchHighlightedIndex] = useState(-1); // -1 means search input is focused
-  const [branches, setBranches] = useState<string[]>([]);
-  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
-
   // Recent repos store
   const { recentRepoUrls, addRecentRepo, removeRecentRepo } = useRecentReposStore();
 
@@ -148,25 +134,10 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
   // Combined filtered repos for keyboard navigation (recent first, then non-recent)
   const filteredRepositories = [...filteredRecentRepos, ...filteredNonRecentRepos];
 
-  // Filter branches based on fuzzy search with space-separated terms
-  const filteredBranches = branches.filter((branchName) => {
-    if (!branchSearchQuery.trim()) return true;
-
-    const searchTerms = branchSearchQuery.toLowerCase().trim().split(/\s+/);
-    const branch = branchName.toLowerCase();
-
-    // Check if all search terms match
-    return searchTerms.every(term => branch.includes(term));
-  });
-
   // Reset highlighted index when search query changes or dropdown opens/closes
   useEffect(() => {
     setRepoHighlightedIndex(-1);
   }, [repoSearchQuery, isRepoDropdownOpen]);
-
-  useEffect(() => {
-    setBranchHighlightedIndex(-1);
-  }, [branchSearchQuery, isBranchDropdownOpen]);
 
   // Handle keyboard navigation for repo dropdown
   const handleRepoKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -234,68 +205,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
       e.preventDefault();
       setIsRepoDropdownOpen(false);
       setRepoSearchQuery('');
-    }
-  };
-
-  // Handle keyboard navigation for branch dropdown
-  const handleBranchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    const totalItems = filteredBranches.length;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (branchHighlightedIndex < totalItems - 1) {
-        const newIndex = branchHighlightedIndex + 1;
-        setBranchHighlightedIndex(newIndex);
-        // Scroll the highlighted item into view
-        const listEl = branchListRef.current;
-        if (listEl) {
-          const items = listEl.querySelectorAll('button');
-          if (items[newIndex]) {
-            items[newIndex].scrollIntoView({ block: 'nearest' });
-          }
-        }
-      }
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (branchHighlightedIndex > -1) {
-        const newIndex = branchHighlightedIndex - 1;
-        setBranchHighlightedIndex(newIndex);
-        if (newIndex === -1) {
-          // Refocus search input
-          branchSearchInputRef.current?.focus();
-        } else {
-          // Scroll the highlighted item into view
-          const listEl = branchListRef.current;
-          if (listEl) {
-            const items = listEl.querySelectorAll('button');
-            if (items[newIndex]) {
-              items[newIndex].scrollIntoView({ block: 'nearest' });
-            }
-          }
-        }
-      }
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (branchHighlightedIndex >= 0 && branchHighlightedIndex < totalItems) {
-        const branchName = filteredBranches[branchHighlightedIndex];
-        if (branchName) {
-          setBaseBranch?.(branchName);
-          setIsBranchDropdownOpen(false);
-          setBranchSearchQuery('');
-        }
-      } else if (branchHighlightedIndex === -1 && totalItems > 0) {
-        // If no item highlighted and there are results, select first one
-        const branchName = filteredBranches[0];
-        if (branchName) {
-          setBaseBranch?.(branchName);
-          setIsBranchDropdownOpen(false);
-          setBranchSearchQuery('');
-        }
-      }
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setIsBranchDropdownOpen(false);
-      setBranchSearchQuery('');
     }
   };
 
@@ -636,31 +545,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
     }
   };
 
-  // Fetch branches for the selected repository
-  const fetchBranches = async () => {
-    if (!selectedRepo) return;
-
-    // Parse owner and repo from the clone URL
-    // Example: https://github.com/owner/repo.git
-    const match = selectedRepo.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-    if (!match) return;
-
-    const [, owner, repo] = match;
-
-    setIsLoadingBranches(true);
-    try {
-      const response = await githubApi.getBranches(owner, repo);
-      const branchNames = response.data.map((b: any) => b.name);
-      setBranches(branchNames);
-      setIsBranchDropdownOpen(true);
-    } catch (error) {
-      console.error('Failed to fetch branches:', error);
-      alert('Failed to fetch branches. Please try again.');
-    } finally {
-      setIsLoadingBranches(false);
-    }
-  };
-
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -670,20 +554,15 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
         setIsRepoDropdownOpen(false);
         setRepoSearchQuery('');
       }
-
-      if (isBranchDropdownOpen && !target.closest('.branch-dropdown')) {
-        setIsBranchDropdownOpen(false);
-        setBranchSearchQuery('');
-      }
     };
 
-    if (isRepoDropdownOpen || isBranchDropdownOpen) {
+    if (isRepoDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
-  }, [isRepoDropdownOpen, isBranchDropdownOpen]);
+  }, [isRepoDropdownOpen]);
 
   // Expose focus method to parent component
   useImperativeHandle(ref, () => ({
@@ -776,19 +655,12 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                 <>
                   {effectiveIsExecuting || isLocked ? (
                     /* Show as text labels when executing or locked */
-                    <>
-                      <span className="badge badge-ghost text-xs flex-shrink-0">
-                        {selectedRepo
-                          ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName ||
-                            'No repository'
-                          : 'No repository'}
-                      </span>
-                      {baseBranch && (
-                        <span className="badge badge-ghost text-xs flex-shrink-0">
-                          {baseBranch}
-                        </span>
-                      )}
-                    </>
+                    <span className="badge badge-ghost text-xs flex-shrink-0">
+                      {selectedRepo
+                        ? sortedRepositories.find((r) => r.cloneUrl === selectedRepo)?.fullName ||
+                          'No repository'
+                        : 'No repository'}
+                    </span>
                   ) : (
                     /* Show as editable controls when not executing and not locked */
                     <>
@@ -926,84 +798,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
                           </div>
                         )}
                       </div>
-
-                      {/* Only show branch inputs when repository is selected */}
-                      {selectedRepo && (
-                        <>
-                          {/* Base Branch */}
-                          <div className="relative branch-dropdown flex-shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!isBranchDropdownOpen && branches.length === 0) {
-                                  fetchBranches();
-                                } else {
-                                  setIsBranchDropdownOpen(!isBranchDropdownOpen);
-                                }
-                              }}
-                              disabled={effectiveIsExecuting || isLocked || isLoadingBranches}
-                              className="btn btn-sm btn-outline normal-case h-7 min-h-0 px-3"
-                              title="Select base branch"
-                            >
-                              <span className="text-xs text-base-content/70 font-medium mr-1">Base Branch:</span>
-                              {isLoadingBranches ? (
-                                <>
-                                  <span className="loading loading-spinner loading-xs"></span>
-                                </>
-                              ) : (
-                                <>
-                                  {baseBranch || 'main'}
-                                  <svg className="w-3.5 h-3.5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                  </svg>
-                                </>
-                              )}
-                            </button>
-                            {isBranchDropdownOpen && (
-                              <div className="absolute top-full left-0 mt-2 w-64 max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
-                                {/* Search input */}
-                                <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
-                                  <input
-                                    ref={branchSearchInputRef}
-                                    type="text"
-                                    placeholder="Search branches..."
-                                    value={branchSearchQuery}
-                                    onChange={(e) => setBranchSearchQuery(e.target.value)}
-                                    onKeyDown={handleBranchKeyDown}
-                                    className="input input-bordered input-xs w-full"
-                                    autoFocus
-                                  />
-                                </div>
-                                {/* Branch list */}
-                                <div ref={branchListRef} className="overflow-y-auto max-h-64">
-                                  {filteredBranches.length > 0 ? (
-                                    filteredBranches.map((branchName, index) => (
-                                      <button
-                                        key={branchName}
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          setBaseBranch?.(branchName);
-                                          setIsBranchDropdownOpen(false);
-                                          setBranchSearchQuery('');
-                                        }}
-                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${branchHighlightedIndex === index ? 'bg-primary text-primary-content' : ''} ${baseBranch === branchName ? 'bg-primary/20 font-semibold' : ''}`}
-                                      >
-                                        {branchName}
-                                      </button>
-                                    ))
-                                  ) : (
-                                    <div className="p-4 text-xs text-base-content/50 text-center">
-                                      {branches.length === 0 ? 'No branches loaded' : 'No branches found'}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      )}
                     </>
                   )}
                 </>

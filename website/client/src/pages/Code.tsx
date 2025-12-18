@@ -54,7 +54,6 @@ interface FileOperationState {
 
 interface PreSelectedSettings {
   repositoryUrl?: string;
-  baseBranch?: string;
 }
 
 type FileNode = {
@@ -455,8 +454,8 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Find the matching repo
       const matchingRepo = repos.find(r => r.cloneUrl === preSelectedSettings.repositoryUrl);
       if (matchingRepo) {
-        // Initialize with the pre-selected repo and branch
-        initializeCodeSessionFromQuickSetup(matchingRepo, preSelectedSettings.baseBranch);
+        // Initialize with the pre-selected repo (uses default branch)
+        initializeCodeSessionFromQuickSetup(matchingRepo);
       }
     }
   }, [preSelectedSettings, repos, codeSession, sessionId]);
@@ -536,13 +535,13 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
     },
   });
 
-  // Initialize Code session from QuickSessionSetup (with pre-selected repo and branch)
-  const initializeCodeSessionFromQuickSetup = async (repo: GitHubRepo, selectedBranch?: string) => {
+  // Initialize Code session from QuickSessionSetup (with pre-selected repo)
+  const initializeCodeSessionFromQuickSetup = async (repo: GitHubRepo) => {
     setIsInitializing(true);
     setInitError(null);
 
     const [owner, repoName] = repo.fullName.split('/');
-    const baseBranch = selectedBranch || repo.defaultBranch;
+    const baseBranch = repo.defaultBranch;
 
     // Generate random ID for branch
     const randomId = Math.random().toString(36).substring(2, 10);
@@ -2690,7 +2689,6 @@ export default function Code({ sessionId: sessionIdProp, isEmbedded = false }: C
   return (
     <SessionLayout
       selectedRepo={selectedRepoUrl}
-      baseBranch={codeSession?.baseBranch}
       branch={codeSession?.branch}
       isLocked={!!codeSession}
       prActions={prActions}

@@ -18,7 +18,7 @@ interface NavItem {
 
 export default function Layout() {
   const { user, isAuthenticated, clearUser } = useAuthStore();
-  const { selectedRepo, baseBranch, isLocked } = useRepoStore();
+  const { selectedRepo, isLocked } = useRepoStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -458,7 +458,7 @@ export default function Layout() {
                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-base-200 rounded-full">
                   <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
                   <span className="text-base-content/70">
-                    {selectedRepo}/{baseBranch}
+                    {selectedRepo}
                   </span>
                 </div>
               ) : (

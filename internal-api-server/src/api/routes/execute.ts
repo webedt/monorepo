@@ -137,7 +137,8 @@ const executeHandler = async (req: Request, res: Response) => {
 
     // Normalize repo URL to prevent duplicates (remove .git suffix)
     const repoUrl = github?.repoUrl ? normalizeRepoUrl(github.repoUrl) : undefined;
-    const branch = github?.branch || 'main';
+    // Base branch is always 'main' - we no longer support custom base branches
+    const baseBranch = 'main';
 
     logger.info('Execute request received', {
       component: 'ExecuteRoute',
@@ -254,7 +255,7 @@ const executeHandler = async (req: Request, res: Response) => {
               eq(chatSessions.userId, user.id),
               eq(chatSessions.repositoryOwner, repositoryOwner),
               eq(chatSessions.repositoryName, repositoryName),
-              eq(chatSessions.baseBranch, branch),
+              eq(chatSessions.baseBranch, baseBranch),
               or(
                 eq(chatSessions.status, 'pending'),
                 eq(chatSessions.status, 'running')
@@ -271,7 +272,7 @@ const executeHandler = async (req: Request, res: Response) => {
             existingSessionId: existing.id,
             repositoryOwner,
             repositoryName,
-            baseBranch: branch,
+            baseBranch,
             status: existing.status
           });
 
@@ -316,7 +317,7 @@ const executeHandler = async (req: Request, res: Response) => {
             repositoryUrl: repoUrl || null,
             repositoryOwner,
             repositoryName,
-            baseBranch: branch,
+            baseBranch,
             branch: null,
             provider: selectedProvider,
             sessionPath: null,
@@ -601,7 +602,7 @@ const executeHandler = async (req: Request, res: Response) => {
       // ========================================================================
 
       const effectiveRepoUrl = repoUrl || chatSession.repositoryUrl;
-      const effectiveBranch = repoUrl ? branch : (chatSession.baseBranch || 'main');
+      const effectiveBaseBranch = chatSession.baseBranch || 'main';
 
       if (effectiveRepoUrl && user.githubAccessToken) {
         // Check if we need to initialize a new session
@@ -620,7 +621,7 @@ const executeHandler = async (req: Request, res: Response) => {
             {
               sessionId: chatSession.id,
               repoUrl: effectiveRepoUrl,
-              branch: effectiveBranch,
+              branch: effectiveBaseBranch,
               userRequest: serializeUserRequest(userRequest),
               githubAccessToken: user.githubAccessToken,
               workspaceRoot: WORKSPACE_DIR,

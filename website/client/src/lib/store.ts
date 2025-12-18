@@ -206,13 +206,11 @@ const REPO_CONNECTION_STORAGE_KEY = 'repoConnectionState';
 
 interface RepoConnectionData {
   selectedRepo: string;
-  baseBranch: string;
 }
 
 interface RepoConnectionState extends RepoConnectionData {
   isLocked: boolean;
   setSelectedRepo: (repo: string) => void;
-  setBaseBranch: (branch: string) => void;
   setIsLocked: (locked: boolean) => void;
   clearRepoConnection: () => void;
 }
@@ -221,7 +219,6 @@ interface RepoConnectionState extends RepoConnectionData {
 function loadRepoConnection(): RepoConnectionData {
   const defaults: RepoConnectionData = {
     selectedRepo: '',
-    baseBranch: '',
   };
 
   try {
@@ -245,7 +242,7 @@ function saveRepoConnection(data: RepoConnectionData) {
   }
 }
 
-export const useRepoStore = create<RepoConnectionState>((set, get) => {
+export const useRepoStore = create<RepoConnectionState>((set) => {
   const initialData = loadRepoConnection();
 
   return {
@@ -254,12 +251,7 @@ export const useRepoStore = create<RepoConnectionState>((set, get) => {
 
     setSelectedRepo: (repo: string) => {
       set({ selectedRepo: repo });
-      saveRepoConnection({ selectedRepo: repo, baseBranch: get().baseBranch });
-    },
-
-    setBaseBranch: (branch: string) => {
-      set({ baseBranch: branch });
-      saveRepoConnection({ selectedRepo: get().selectedRepo, baseBranch: branch });
+      saveRepoConnection({ selectedRepo: repo });
     },
 
     setIsLocked: (locked: boolean) => {
@@ -268,8 +260,8 @@ export const useRepoStore = create<RepoConnectionState>((set, get) => {
     },
 
     clearRepoConnection: () => {
-      set({ selectedRepo: '', baseBranch: '', isLocked: false });
-      saveRepoConnection({ selectedRepo: '', baseBranch: '' });
+      set({ selectedRepo: '', isLocked: false });
+      saveRepoConnection({ selectedRepo: '' });
     },
   };
 });

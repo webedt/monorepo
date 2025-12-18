@@ -156,7 +156,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Normalize repo URL to prevent duplicates (remove .git suffix)
     let repoUrl = github?.repoUrl ? normalizeRepoUrl(github.repoUrl) : undefined;
-    const baseBranch = github?.branch || 'main'; // Client sends base branch as "branch"
+    // Base branch is always 'main' - we no longer support custom base branches
+    // (Anthropic Remote Sessions API doesn't support specifying a base branch anyway)
+    const baseBranch = 'main';
 
     // Extract owner and repo name from URL (for PR functionality)
     let repositoryOwner: string | null = null;
