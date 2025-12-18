@@ -52,7 +52,6 @@ export default function SplitEditor() {
   return (
     <SessionLayout
       selectedRepo={session?.repositoryUrl}
-      baseBranch={session?.baseBranch}
       branch={session?.branch}
       repositories={repositories as GitHubRepository[]}
       isLoadingRepos={isLoadingRepos}

@@ -191,7 +191,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [selectedRepo, setSelectedRepo] = useState('');
-  const [baseBranch, setBaseBranch] = useState('main');
   const [isExecuting, setIsExecuting] = useState(false);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [streamMethod, setStreamMethod] = useState<'GET' | 'POST'>('GET');
@@ -219,7 +218,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [_lastRequest, setLastRequest] = useState<{
     input: string;
     selectedRepo: string;
-    baseBranch: string;
   } | null>(null);
   const [viewingImage, setViewingImage] = useState<{
     data: string;
@@ -328,10 +326,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   useEffect(() => {
     repoStore.setSelectedRepo(selectedRepo);
   }, [selectedRepo]);
-
-  useEffect(() => {
-    repoStore.setBaseBranch(baseBranch);
-  }, [baseBranch]);
 
   useEffect(() => {
     repoStore.setIsLocked(isLocked);
@@ -584,9 +578,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const mergedPr = prData?.find((pr: GitHubPullRequest) => pr.merged === true);
 
   const handleCreatePR = async () => {
-    // Use session.baseBranch if available, otherwise fall back to local baseBranch state
-    const createPrBaseBranch = session?.baseBranch || baseBranch;
-    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !createPrBaseBranch) {
+    // Use session.baseBranch if available, otherwise default to 'main'
+    const createPrBaseBranch = session?.baseBranch || 'main';
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch) {
       setPrError('Missing repository information');
       return;
     }
@@ -684,9 +678,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   };
 
   const handleAutoPR = async () => {
-    // Use session.baseBranch if available, otherwise fall back to local baseBranch state
-    const autoPrBaseBranch = session?.baseBranch || baseBranch;
-    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch || !autoPrBaseBranch) {
+    // Use session.baseBranch if available, otherwise default to 'main'
+    const autoPrBaseBranch = session?.baseBranch || 'main';
+    if (!session?.repositoryOwner || !session?.repositoryName || !session?.branch) {
       setPrError('Missing repository information');
       return;
     }
@@ -945,9 +939,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       if (currentSessionData.data.repositoryUrl) {
         setSelectedRepo(currentSessionData.data.repositoryUrl);
       }
-      if (currentSessionData.data.baseBranch) {
-        setBaseBranch(currentSessionData.data.baseBranch);
-      }
     }
   }, [currentSessionData]);
 
@@ -1153,16 +1144,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Check for pre-selected settings from NewSession hub
     if (state?.preSelectedSettings && !currentSessionId) {
-      const { repositoryUrl, baseBranch: preSelectedBaseBranch, locked } = state.preSelectedSettings;
+      const { repositoryUrl, locked } = state.preSelectedSettings;
 
       console.log('[Chat] Loading pre-selected settings:', state.preSelectedSettings);
 
       if (repositoryUrl) {
         setSelectedRepo(repositoryUrl);
-      }
-
-      if (preSelectedBaseBranch) {
-        setBaseBranch(preSelectedBaseBranch);
       }
 
       if (locked) {
@@ -1534,7 +1521,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     setLastRequest({
       input: input.trim(),
       selectedRepo,
-      baseBranch,
     });
 
     // Add user message
@@ -1609,7 +1595,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       if (selectedRepo) {
         requestParams.github = {
           repoUrl: selectedRepo,
-          branch: baseBranch || 'main',
         };
       }
     } else {
@@ -1832,9 +1817,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   );
 
   // Create PR actions for the branch line
-  // Use session.baseBranch if available, otherwise fall back to local baseBranch state (defaults to 'main')
+  // Use session.baseBranch if available, otherwise default to 'main'
   // This enables PR buttons for synced Claude Remote sessions that may not have baseBranch stored
-  const effectiveBaseBranch = session?.baseBranch || baseBranch;
+  const effectiveBaseBranch = session?.baseBranch || 'main';
   const prActions = session && messages.length > 0 && session.branch && effectiveBaseBranch && session.repositoryOwner && session.repositoryName && (
     <>
       {/* View PR button - show only if PR is open */}
@@ -2036,8 +2021,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
             isExecuting={isExecuting}
             selectedRepo={selectedRepo}
             setSelectedRepo={setSelectedRepo}
-            baseBranch={baseBranch}
-            setBaseBranch={setBaseBranch}
             repositories={repositories}
             isLoadingRepos={isLoadingRepos}
             isLocked={isLocked}
@@ -2312,8 +2295,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                 isExecuting={isExecuting}
                 selectedRepo={selectedRepo}
                 setSelectedRepo={setSelectedRepo}
-                baseBranch={baseBranch}
-                setBaseBranch={setBaseBranch}
                 repositories={repositories}
                 isLoadingRepos={isLoadingRepos}
                 isLocked={isLocked}
@@ -2348,10 +2329,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   return (
     <SessionLayout
       selectedRepo={selectedRepo}
-      baseBranch={baseBranch}
       branch={session?.branch ?? undefined}
       onRepoChange={setSelectedRepo}
-      onBaseBranchChange={setBaseBranch}
       repositories={repositories}
       isLoadingRepos={isLoadingRepos}
       isLocked={isLocked}

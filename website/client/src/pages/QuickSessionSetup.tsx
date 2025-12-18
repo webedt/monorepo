@@ -72,25 +72,16 @@ export default function QuickSessionSetup() {
   const { activity } = useParams<{ activity: ActivityType }>();
   const user = useAuthStore((state) => state.user);
 
-  // Repository and branch state
+  // Repository state
   const [selectedRepo, setSelectedRepo] = useState('');
-  const [branch, setBranch] = useState('main');
 
   // Repository search state
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
 
-  // Branch selector state
-  const [branchSearchQuery, setBranchSearchQuery] = useState('');
-  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
-  const [branches, setBranches] = useState<string[]>([]);
-  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
-
   // Keyboard navigation state
   const [repoHighlightedIndex, setRepoHighlightedIndex] = useState(-1);
-  const [branchHighlightedIndex, setBranchHighlightedIndex] = useState(-1);
   const repoListRef = useRef<HTMLDivElement>(null);
-  const branchListRef = useRef<HTMLDivElement>(null);
 
   const hasGithubAuth = !!user?.githubAccessToken;
 
@@ -139,16 +130,6 @@ export default function QuickSessionSetup() {
   // Combined filtered repos for keyboard navigation (recent first, then non-recent)
   const filteredRepositories = [...filteredRecentRepos, ...filteredNonRecentRepos];
 
-  // Filter branches based on fuzzy search with space-separated terms
-  const filteredBranches = branches.filter((branchName) => {
-    if (!branchSearchQuery.trim()) return true;
-
-    const searchTerms = branchSearchQuery.toLowerCase().trim().split(/\s+/);
-    const branchLower = branchName.toLowerCase();
-
-    return searchTerms.every(term => branchLower.includes(term));
-  });
-
   // Load last selected repo from localStorage when repositories are loaded
   const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
   useEffect(() => {
@@ -175,29 +156,6 @@ export default function QuickSessionSetup() {
     }
   }, [selectedRepo, hasLoadedFromStorage]);
 
-  // Fetch branches for the selected repository
-  const fetchBranches = async () => {
-    if (!selectedRepo) return;
-
-    const match = selectedRepo.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-    if (!match) return;
-
-    const [, owner, repo] = match;
-
-    setIsLoadingBranches(true);
-    try {
-      const response = await githubApi.getBranches(owner, repo);
-      const branchNames = response.data.map((b: any) => b.name);
-      setBranches(branchNames);
-      setIsBranchDropdownOpen(true);
-    } catch (error) {
-      console.error('Failed to fetch branches:', error);
-      alert('Failed to fetch branches. Please try again.');
-    } finally {
-      setIsLoadingBranches(false);
-    }
-  };
-
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -208,30 +166,20 @@ export default function QuickSessionSetup() {
         setRepoSearchQuery('');
         setRepoHighlightedIndex(-1);
       }
-
-      if (isBranchDropdownOpen && !target.closest('.branch-dropdown')) {
-        setIsBranchDropdownOpen(false);
-        setBranchSearchQuery('');
-        setBranchHighlightedIndex(-1);
-      }
     };
 
-    if (isRepoDropdownOpen || isBranchDropdownOpen) {
+    if (isRepoDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
-  }, [isRepoDropdownOpen, isBranchDropdownOpen]);
+  }, [isRepoDropdownOpen]);
 
   // Reset highlighted index when search query or dropdown state changes
   useEffect(() => {
     setRepoHighlightedIndex(-1);
   }, [repoSearchQuery, isRepoDropdownOpen]);
-
-  useEffect(() => {
-    setBranchHighlightedIndex(-1);
-  }, [branchSearchQuery, isBranchDropdownOpen]);
 
   // Scroll highlighted item into view for repos
   useEffect(() => {
@@ -243,17 +191,6 @@ export default function QuickSessionSetup() {
       }
     }
   }, [repoHighlightedIndex]);
-
-  // Scroll highlighted item into view for branches
-  useEffect(() => {
-    if (branchHighlightedIndex >= 0 && branchListRef.current) {
-      const items = branchListRef.current.querySelectorAll('[data-branch-item]');
-      const item = items[branchHighlightedIndex] as HTMLElement;
-      if (item) {
-        item.scrollIntoView({ block: 'nearest' });
-      }
-    }
-  }, [branchHighlightedIndex]);
 
   // Handle keyboard navigation for repo dropdown
   const handleRepoKeyDown = (e: React.KeyboardEvent) => {
@@ -299,45 +236,6 @@ export default function QuickSessionSetup() {
     }
   };
 
-  // Handle keyboard navigation for branch dropdown
-  const handleBranchKeyDown = (e: React.KeyboardEvent) => {
-    const totalItems = filteredBranches.length;
-    if (totalItems === 0) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      e.stopPropagation();
-      setBranchHighlightedIndex((prev) => {
-        const next = prev < totalItems - 1 ? prev + 1 : 0; // wrap to beginning
-        return next;
-      });
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      e.stopPropagation();
-      setBranchHighlightedIndex((prev) => {
-        const next = prev > 0 ? prev - 1 : totalItems - 1; // wrap to end
-        return next;
-      });
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      // If nothing highlighted, select first item
-      const indexToSelect = branchHighlightedIndex >= 0 ? branchHighlightedIndex : 0;
-      const branchName = filteredBranches[indexToSelect];
-      if (branchName) {
-        setBranch(branchName);
-      }
-      setIsBranchDropdownOpen(false);
-      setBranchSearchQuery('');
-      setBranchHighlightedIndex(-1);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setIsBranchDropdownOpen(false);
-      setBranchSearchQuery('');
-      setBranchHighlightedIndex(-1);
-    }
-  };
-
   const handleStart = () => {
     if (!currentActivity) return;
 
@@ -346,7 +244,6 @@ export default function QuickSessionSetup() {
       state: {
         preSelectedSettings: {
           repositoryUrl: selectedRepo || undefined,
-          baseBranch: branch || undefined,
         }
       }
     });
@@ -527,82 +424,6 @@ export default function QuickSessionSetup() {
                       {filteredRecentRepos.length === 0 && filteredNonRecentRepos.length === 0 && (
                         <div className="p-4 text-xs text-base-content/50 text-center">
                           No repositories found
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Base Branch Selector */}
-            <div>
-              <label className="label pb-2">
-                <span className="label-text font-semibold">Base Branch</span>
-              </label>
-              <div className="relative branch-dropdown">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isBranchDropdownOpen && selectedRepo && branches.length === 0) {
-                      fetchBranches();
-                    } else {
-                      setIsBranchDropdownOpen(!isBranchDropdownOpen);
-                    }
-                  }}
-                  className="relative flex items-center justify-between w-full h-12 px-4 border border-base-300 rounded-lg hover:border-base-content/20 transition-colors disabled:opacity-50 bg-transparent text-left"
-                  disabled={!selectedRepo || isLoadingBranches}
-                >
-                  <span className="truncate">
-                    {isLoadingBranches ? 'Loading...' : branch || 'main'}
-                  </span>
-                  {isLoadingBranches ? (
-                    <span className="loading loading-spinner loading-sm ml-2 flex-shrink-0"></span>
-                  ) : (
-                    <svg className="w-4 h-4 ml-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  )}
-                </button>
-                {isBranchDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-2 w-full max-h-80 bg-base-100 rounded-lg shadow-xl border border-base-300 overflow-hidden z-50">
-                    <div className="p-2 sticky top-0 bg-base-100 border-b border-base-300">
-                      <input
-                        type="text"
-                        placeholder="Search branches..."
-                        value={branchSearchQuery}
-                        onChange={(e) => setBranchSearchQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Escape' || e.key === 'Enter') {
-                            e.preventDefault();
-                            handleBranchKeyDown(e);
-                          }
-                        }}
-                        className="input input-bordered input-sm w-full"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="overflow-y-auto max-h-64" ref={branchListRef}>
-                      {filteredBranches.length > 0 ? (
-                        filteredBranches.map((branchName, index) => (
-                          <button
-                            key={branchName}
-                            type="button"
-                            data-branch-item
-                            onClick={() => {
-                              setBranch(branchName);
-                              setIsBranchDropdownOpen(false);
-                              setBranchSearchQuery('');
-                              setBranchHighlightedIndex(-1);
-                            }}
-                            className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${branch === branchName ? 'bg-primary/20 font-semibold' : ''} ${branchHighlightedIndex === index ? 'bg-primary text-primary-content' : ''}`}
-                          >
-                            {branchName}
-                          </button>
-                        ))
-                      ) : (
-                        <div className="p-4 text-xs text-base-content/50 text-center">
-                          {branches.length === 0 ? 'No branches loaded' : 'No branches found'}
                         </div>
                       )}
                     </div>
