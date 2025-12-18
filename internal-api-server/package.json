@@ -4,17 +4,21 @@
   "type": "module",
   "description": "Internal API server for WebEDT - handles API, database, storage, and GitHub operations (not publicly accessible)",
   "main": "dist/index.js",
+  "bin": {
+    "internal-server": "./dist/cli/index.js"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "cli": "tsx src/cli/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:check": "tsx src/scripts/db-check.ts",
-    "db:backup": "tsx src/scripts/db-backup.ts",
-    "db:validate": "tsx src/scripts/db-validate.ts",
+    "db:check": "tsx src/logic/scripts/db-check.ts",
+    "db:backup": "tsx src/logic/scripts/db-backup.ts",
+    "db:validate": "tsx src/logic/scripts/db-validate.ts",
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "node --import tsx --test src/**/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts"
@@ -35,6 +39,7 @@
     "@webedt/shared": "file:../shared",
     "bcrypt": "^5.1.1",
     "better-sse": "^0.13.0",
+    "commander": "^14.0.2",
     "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
