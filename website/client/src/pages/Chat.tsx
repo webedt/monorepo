@@ -675,7 +675,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   };
 
   const handleScrollToPresent = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Use scrollTo on the container instead of scrollIntoView to avoid
+    // scrolling the wrong element when there are nested scrollable containers
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
   };
 
   // Copy entire chat to clipboard
@@ -1041,6 +1046,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         console.log('[Chat] User scrolled back to bottom during streaming, enabling auto-scroll');
       }
 
+      // Hide both buttons if content is not scrollable
+      if (maxScroll <= 10) {
+        setShowScrollToTop(false);
+        setShowScrollToPresent(false);
+        return;
+      }
+
       // At bottom or closer to bottom -> show "scroll to top"
       // At top or closer to top -> show "scroll to bottom"
       const closerToBottom = scrollPosition >= distanceFromBottom;
@@ -1049,24 +1061,23 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         // At/near bottom - show scroll to top
         setShowScrollToTop(true);
         setShowScrollToPresent(false);
-      } else if (!closerToBottom) {
+      } else {
         // At/near top - show scroll to bottom/present
         setShowScrollToTop(false);
         setShowScrollToPresent(true);
-      } else {
-        // Hide both (shouldn't reach here)
-        setShowScrollToTop(false);
-        setShowScrollToPresent(false);
       }
     };
 
-    // Initial check
-    handleScroll();
+    // Initial check after DOM has been updated
+    // Using requestAnimationFrame ensures the layout is calculated correctly
+    requestAnimationFrame(() => {
+      handleScroll();
+    });
 
     // Add scroll listener
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [messages.length, isExecuting]); // Re-attach when messages change or execution state changes
+  }, [rawEvents.length, isExecuting]); // Re-attach when events change or execution state changes
 
   // Smart auto-scroll: only scroll to bottom when messages change AND user is near bottom
   // Note: During streaming, new messages are added via setMessages in the SSE handler,
@@ -2102,6 +2113,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                     ))}
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
             ) : (
               /* Normal formatted view - uses FormattedEvent for rawEvents */
