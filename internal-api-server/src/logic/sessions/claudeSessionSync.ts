@@ -228,6 +228,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
         let repositoryUrl: string | undefined;
         let repositoryOwner: string | undefined;
         let repositoryName: string | undefined;
+        let baseBranch: string | undefined;
         let branch: string | undefined;
 
         if (gitSource?.url) {
@@ -236,6 +237,8 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           if (match) {
             repositoryOwner = match[1];
             repositoryName = match[2].replace(/\.git$/, '');
+            // Default baseBranch to 'main' for GitHub repos (enables PR buttons)
+            baseBranch = 'main';
           }
         }
 
@@ -281,6 +284,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           repositoryUrl,
           repositoryOwner,
           repositoryName,
+          baseBranch,
           branch,
           sessionPath,
           createdAt: new Date(remoteSession.created_at),
