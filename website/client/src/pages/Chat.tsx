@@ -238,6 +238,33 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   });
   // Store raw events for the raw JSON view (separate from formatted messages)
   const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
+
+  // Event type filter - which event types to show in formatted view
+  const [eventFilters, setEventFilters] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('chatEventFilters');
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    // Default: show all
+    return {
+      user: true,
+      assistant: true,
+      result: true,
+      thinking: true,
+      message: true,
+      system: true,
+      connected: true,
+      env_manager_log: true,
+      tool_use: true,
+      tool_result: true,
+      tool_progress: true,
+      completed: true,
+      error: true,
+      title_generation: true,
+      session_name: true,
+      session_created: true,
+    };
+  });
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
   const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
   const [copyChatSuccess, setCopyChatSuccess] = useState(false);
@@ -269,6 +296,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Ignore localStorage errors
     }
   }, [showRawJson]);
+
+  // Persist eventFilters to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatEventFilters', JSON.stringify(eventFilters));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [eventFilters]);
 
   // Sync local state with global store
   useEffect(() => {
@@ -1987,8 +2023,76 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       ) : (
         /* Messages area with bottom input panel */
         <>
-          {/* Raw JSON toggle button */}
-          <div className="flex justify-end px-4 py-2 border-b border-base-300 bg-base-200/50">
+          {/* Toolbar: Filter dropdown and Raw JSON toggle */}
+          <div className="flex justify-end items-center gap-2 px-4 py-2 border-b border-base-300 bg-base-200/50">
+            {/* Event filter dropdown - only show in formatted view */}
+            {!showRawJson && (
+              <div className="dropdown dropdown-end">
+                <label tabIndex={0} className="btn btn-xs btn-ghost gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  Filter
+                </label>
+                <ul tabIndex={0} className="dropdown-content z-[100] p-2 shadow-lg bg-base-200 rounded-box w-44">
+                  {/* All / None inline buttons */}
+                  <li className="flex gap-1 mb-1 pb-1 border-b border-base-300">
+                    <button
+                      className="btn btn-xs btn-ghost flex-1"
+                      onClick={() => setEventFilters(prev => {
+                        const newFilters = { ...prev };
+                        Object.keys(newFilters).forEach(k => newFilters[k] = true);
+                        return newFilters;
+                      })}
+                    >
+                      All
+                    </button>
+                    <span className="text-base-content/30 self-center">/</span>
+                    <button
+                      className="btn btn-xs btn-ghost flex-1"
+                      onClick={() => setEventFilters(prev => {
+                        const newFilters = { ...prev };
+                        Object.keys(newFilters).forEach(k => newFilters[k] = false);
+                        // Always keep core message types visible
+                        newFilters.user = true;
+                        newFilters.assistant = true;
+                        newFilters.result = true;
+                        newFilters.error = true;
+                        return newFilters;
+                      })}
+                    >
+                      None
+                    </button>
+                  </li>
+                  {/* Event type checkboxes - exclude always-visible types */}
+                  {[
+                    { key: 'thinking', emoji: '🧠', label: 'Thinking' },
+                    { key: 'message', emoji: '💬', label: 'Status' },
+                    { key: 'system', emoji: '⚙️', label: 'System' },
+                    { key: 'connected', emoji: '🔌', label: 'Connection' },
+                    { key: 'env_manager_log', emoji: '🔧', label: 'Env Logs' },
+                    { key: 'tool_use', emoji: '🔨', label: 'Tools' },
+                    { key: 'completed', emoji: '🏁', label: 'Completed' },
+                    { key: 'title_generation', emoji: '✨', label: 'Title' },
+                    { key: 'session_name', emoji: '📝', label: 'Session' },
+                  ].map(({ key, emoji, label }) => (
+                    <li key={key}>
+                      <label className="flex items-center gap-2 cursor-pointer px-1 py-0.5">
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-xs"
+                          checked={eventFilters[key] ?? true}
+                          onChange={(e) => setEventFilters(prev => ({ ...prev, [key]: e.target.checked }))}
+                        />
+                        <span>{emoji}</span>
+                        <span className="text-xs">{label}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* Raw JSON toggle */}
             <button
               onClick={() => setShowRawJson(!showRawJson)}
               className={`btn btn-xs ${showRawJson ? 'btn-primary' : 'btn-ghost'}`}
@@ -1997,7 +2101,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
               </svg>
-              {showRawJson ? 'Formatted' : 'Raw JSON'}
+              Raw JSON
             </button>
           </div>
 
@@ -2027,7 +2131,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                     No events yet.
                   </div>
                 ) : (
-                  <FormattedEventList events={rawEvents} />
+                  <FormattedEventList events={rawEvents} filters={eventFilters} />
                 )}
 
               {isExecuting && (

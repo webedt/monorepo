@@ -43,8 +43,14 @@ function shouldSkipAssistant(events: RawEvent[], currentIndex: number): boolean 
   return assistantText === resultText;
 }
 
-// Component to render a list of events with deduplication
-export function FormattedEventList({ events }: { events: RawEvent[] }) {
+// Component to render a list of events with deduplication and filtering
+export function FormattedEventList({
+  events,
+  filters = {}
+}: {
+  events: RawEvent[];
+  filters?: Record<string, boolean>;
+}) {
   return (
     <>
       {events.map((event, index) => {
@@ -52,7 +58,29 @@ export function FormattedEventList({ events }: { events: RawEvent[] }) {
         if (shouldSkipAssistant(events, index)) {
           return null;
         }
-        return <FormattedEvent key={index} event={event} />;
+
+        // Apply filters
+        const eventType = event.eventType;
+
+        // Check if this event type is filtered out
+        if (filters[eventType] === false) {
+          return null;
+        }
+
+        // Special handling for thinking blocks - they're inside assistant events
+        // but we want to filter them separately
+        if (eventType === 'assistant' && filters.thinking === false) {
+          // Check if this assistant event has thinking blocks
+          const content = event.data?.message?.content;
+          if (Array.isArray(content)) {
+            const hasOnlyThinking = content.every((block: any) => block.type === 'thinking');
+            if (hasOnlyThinking) {
+              return null;
+            }
+          }
+        }
+
+        return <FormattedEvent key={index} event={event} filters={filters} />;
       })}
     </>
   );
@@ -111,7 +139,7 @@ function getStatusSummary(eventType: string, data: any): string {
 }
 
 // Format a raw event for display
-export function FormattedEvent({ event }: { event: RawEvent }) {
+export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filters?: Record<string, boolean> }) {
   const emoji = getEventEmoji(event.eventType);
   const time = event.timestamp.toLocaleTimeString();
   const data = event.data || {};
@@ -156,11 +184,15 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
     if (!Array.isArray(content)) return null;
 
     // Separate thinking, text, and tool blocks
-    const thinkingBlocks = content.filter((block: any) => block.type === 'thinking');
+    const thinkingBlocks = filters.thinking !== false
+      ? content.filter((block: any) => block.type === 'thinking')
+      : [];
     const textBlocks = content.filter((block: any) => block.type === 'text');
-    const toolBlocks = content.filter((block: any) => block.type === 'tool_use');
+    const toolBlocks = filters.tool_use !== false
+      ? content.filter((block: any) => block.type === 'tool_use')
+      : [];
 
-    // If no blocks found, render nothing
+    // If no blocks found (after filtering), render nothing
     if (thinkingBlocks.length === 0 && textBlocks.length === 0 && toolBlocks.length === 0) {
       return null;
     }
