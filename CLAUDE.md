@@ -139,51 +139,127 @@ The Internal API Server (`/internal-api-server`) is the central backend service 
 
 ### Directory Structure
 
+The Internal API Server follows a **separation of interfaces from logic** pattern:
+- `api/` - HTTP interface (Express routes and middleware)
+- `cli/` - CLI interface (commander commands)
+- `logic/` - Business logic (all core functionality)
+
 ```
 internal-api-server/
 ├── src/
 │   ├── index.ts                    # Express app entrypoint
-│   ├── auth.ts                     # Lucia authentication
-│   ├── config/
-│   │   └── env.ts                  # Environment configuration
-│   ├── db/
-│   │   ├── index.ts                # PostgreSQL connection
-│   │   └── schema.ts               # Database schema
-│   ├── routes/
-│   │   ├── execute.ts              # Main /execute endpoint
-│   │   ├── resume.ts               # Session replay endpoint
-│   │   ├── sessions.ts             # Session management
-│   │   ├── auth.ts                 # Authentication routes
-│   │   ├── user.ts                 # User management
-│   │   ├── github.ts               # GitHub OAuth
-│   │   ├── storage.ts              # Storage operations
-│   │   ├── admin.ts                # Admin routes
-│   │   └── transcribe.ts           # Audio transcription
-│   ├── services/
-│   │   ├── storage/
-│   │   │   ├── minioClient.ts      # MinIO client
-│   │   │   └── storageService.ts   # Storage operations
-│   │   └── github/
-│   │       ├── gitHelper.ts        # Git operations
-│   │       ├── githubClient.ts     # Repository operations
-│   │       └── operations.ts       # High-level GitHub ops
-│   ├── middleware/
-│   │   └── auth.ts                 # Auth middleware
-│   ├── lib/
-│   │   ├── claudeAuth.ts           # Claude OAuth helpers
-│   │   ├── codexAuth.ts            # Codex auth helpers
-│   │   ├── llmHelper.ts            # LLM naming helpers
-│   │   └── sessionEventBroadcaster.ts
-│   └── utils/
-│       ├── logger.ts               # Structured logging
-│       ├── sessionPathHelper.ts    # Session path utilities
-│       ├── previewUrlHelper.ts     # Preview URL generation
-│       └── emojiMapper.ts          # SSE emoji decoration
+│   │
+│   ├── api/                        # HTTP interface (Express)
+│   │   ├── routes/
+│   │   │   ├── execute.ts          # Main /execute endpoint
+│   │   │   ├── executeRemote.ts    # Claude Remote execution
+│   │   │   ├── resume.ts           # Session replay endpoint
+│   │   │   ├── sessions.ts         # Session management
+│   │   │   ├── auth.ts             # Authentication routes
+│   │   │   ├── user.ts             # User management
+│   │   │   ├── github.ts           # GitHub OAuth
+│   │   │   ├── storage.ts          # Storage operations
+│   │   │   ├── admin.ts            # Admin routes
+│   │   │   ├── completions.ts      # Code completions
+│   │   │   ├── transcribe.ts       # Audio transcription
+│   │   │   ├── imageGen.ts         # Image generation
+│   │   │   ├── internalSessions.ts # Claude Remote session mgmt
+│   │   │   └── logs.ts             # Debug log viewing
+│   │   └── middleware/
+│   │       └── auth.ts             # Auth middleware
+│   │
+│   ├── cli/                        # CLI interface (commander)
+│   │   ├── index.ts                # CLI entry point
+│   │   └── commands/
+│   │       ├── session.ts          # session list/get/delete/cleanup
+│   │       ├── github.ts           # github branches/repos/create-branch/create-pr
+│   │       ├── storage.ts          # storage list/files/read/delete-session
+│   │       └── admin.ts            # admin users/create-user/set-admin
+│   │
+│   └── logic/                      # Business logic (all core functionality)
+│       ├── auth/
+│       │   ├── lucia.ts            # Lucia authentication
+│       │   ├── claudeAuth.ts       # Claude OAuth helpers
+│       │   ├── codexAuth.ts        # Codex auth helpers
+│       │   └── geminiAuth.ts       # Gemini auth helpers
+│       ├── config/
+│       │   └── env.ts              # Environment configuration
+│       ├── db/
+│       │   ├── index.ts            # PostgreSQL connection
+│       │   ├── connection.ts       # Database connection management
+│       │   ├── schema.ts           # Drizzle ORM schema
+│       │   └── migrations.ts       # Database migrations
+│       ├── execution/
+│       │   ├── workerCoordinator.ts # Worker pool management
+│       │   ├── localWorkerPool.ts  # Local worker pool
+│       │   └── providers/          # Execution providers
+│       │       ├── claudeRemoteProvider.ts
+│       │       └── types.ts
+│       ├── github/
+│       │   ├── gitHelper.ts        # Low-level git operations
+│       │   ├── githubClient.ts     # Octokit wrapper
+│       │   └── operations.ts       # High-level GitHub ops
+│       ├── sessions/
+│       │   ├── claudeSessionSync.ts      # Background sync service
+│       │   ├── sessionEventBroadcaster.ts # SSE event broadcasting
+│       │   └── sessionListBroadcaster.ts  # Session list updates
+│       ├── storage/
+│       │   ├── minioClient.ts      # MinIO client
+│       │   └── storageService.ts   # Storage operations
+│       ├── aiWorker/
+│       │   └── aiWorkerClient.ts   # Client for AI worker
+│       ├── utils/
+│       │   ├── logger.ts           # Structured logging
+│       │   ├── metrics.ts          # Performance metrics
+│       │   ├── healthMonitor.ts    # Health check system
+│       │   ├── circuitBreaker.ts   # Circuit breaker pattern
+│       │   ├── recovery.ts         # Session recovery
+│       │   ├── retry.ts            # Retry logic
+│       │   ├── emojiMapper.ts      # SSE emoji decoration
+│       │   ├── previewUrlHelper.ts # Preview URL generation
+│       │   └── sessionPathHelper.ts # Session path utilities
+│       └── scripts/
+│           ├── db-check.ts         # Database health check
+│           ├── db-backup.ts        # Database backup utility
+│           └── db-validate.ts      # Schema validation
+│
 ├── package.json
 ├── tsconfig.json
 ├── Dockerfile
 ├── docker-compose.yml              # Dokploy deployment
 └── swarm.yml                       # Docker Swarm deployment
+```
+
+### CLI Usage
+
+The Internal API Server includes a CLI for debugging and administration:
+
+```bash
+# Run CLI (requires DATABASE_URL env)
+npm run cli -- <command>
+
+# Session commands
+npm run cli -- session list              # List recent sessions
+npm run cli -- session get <id>          # Get session details
+npm run cli -- session delete <id> -f    # Delete a session
+npm run cli -- session cleanup           # Clean orphaned sessions
+
+# GitHub commands (requires GITHUB_TOKEN)
+npm run cli -- github repos              # List repositories
+npm run cli -- github branches <owner> <repo>
+npm run cli -- github create-branch <owner> <repo> <name>
+npm run cli -- github create-pr <owner> <repo> <head> <base>
+
+# Storage commands (requires MinIO connection)
+npm run cli -- storage list              # List sessions in storage
+npm run cli -- storage files <path>      # List files in a session
+npm run cli -- storage exists <path>     # Check if session exists
+
+# Admin commands
+npm run cli -- admin users               # List all users
+npm run cli -- admin user <id>           # Get user details
+npm run cli -- admin create-user <email> <password>
+npm run cli -- admin set-admin <id> true
 ```
 
 ### API Endpoints
@@ -548,4 +624,4 @@ This repo supports long-running autonomous development via the autonomous CLI.
 
 ---
 
-*Documentation last updated: 2025-12-17*
+*Documentation last updated: 2025-12-18*

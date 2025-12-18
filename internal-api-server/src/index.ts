@@ -18,35 +18,35 @@ import {
   CLAUDE_SYNC_INTERVAL_MS,
   validateEnv,
   logEnvConfig
-} from './config/env.js';
+} from './logic/config/env.js';
 
 import { logger } from '@webedt/shared';
 
 // Import database
-import './db/index.js';
+import './logic/db/index.js';
 
 // Import routes
-import executeRoutes from './routes/execute.js';
-import executeRemoteRoutes from './routes/executeRemote.js';
-import resumeRoutes from './routes/resume.js';
-import authRoutes from './routes/auth.js';
-import userRoutes from './routes/user.js';
-import sessionsRoutes from './routes/sessions.js';
-import githubRoutes from './routes/github.js';
-import storageRoutes from './routes/storage.js';
-import adminRoutes from './routes/admin.js';
-import transcribeRoutes from './routes/transcribe.js';
-import completionsRoutes from './routes/completions.js';
-import imageGenRoutes from './routes/imageGen.js';
-import internalSessionsRoutes from './routes/internalSessions.js';
-import logsRoutes from './routes/logs.js';
+import executeRoutes from './api/routes/execute.js';
+import executeRemoteRoutes from './api/routes/executeRemote.js';
+import resumeRoutes from './api/routes/resume.js';
+import authRoutes from './api/routes/auth.js';
+import userRoutes from './api/routes/user.js';
+import sessionsRoutes from './api/routes/sessions.js';
+import githubRoutes from './api/routes/github.js';
+import storageRoutes from './api/routes/storage.js';
+import adminRoutes from './api/routes/admin.js';
+import transcribeRoutes from './api/routes/transcribe.js';
+import completionsRoutes from './api/routes/completions.js';
+import imageGenRoutes from './api/routes/imageGen.js';
+import internalSessionsRoutes from './api/routes/internalSessions.js';
+import logsRoutes from './api/routes/logs.js';
 
 // Import database for orphan cleanup
-import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './db/index.js';
+import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './logic/db/index.js';
 import { eq, and, lt, sql, count } from 'drizzle-orm';
 
 // Import middleware
-import { authMiddleware } from './middleware/auth.js';
+import { authMiddleware } from './api/middleware/auth.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -54,10 +54,10 @@ import {
   createDatabaseHealthCheck,
   metrics,
   circuitBreakerRegistry,
-} from './utils/index.js';
+} from './logic/utils/index.js';
 
 // Import background sync service
-import { startBackgroundSync, stopBackgroundSync } from './services/claudeSessionSync.js';
+import { startBackgroundSync, stopBackgroundSync } from './logic/sessions/claudeSessionSync.js';
 
 /**
  * Clean up orphaned sessions that are stuck in 'running' status
