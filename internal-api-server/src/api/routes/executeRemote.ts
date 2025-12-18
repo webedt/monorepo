@@ -370,7 +370,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       // Save title and branch to database immediately when generated
       // This ensures they're saved even if user disconnects
-      if (event.type === 'session_name' && (event as any).sessionName) {
+      // Only save title for NEW sessions (not on resume/subsequent messages)
+      if (!websiteSessionId && event.type === 'session_name' && (event as any).sessionName) {
         try {
           await db.update(chatSessions)
             .set({ userRequest: (event as any).sessionName })
@@ -389,7 +390,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Also capture title from title_generation events (success status)
-      if (event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
+      // Only save title for NEW sessions (not on resume/subsequent messages)
+      if (!websiteSessionId && event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
         try {
           await db.update(chatSessions)
             .set({ userRequest: (event as any).title })
