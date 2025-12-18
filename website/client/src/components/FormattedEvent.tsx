@@ -217,12 +217,10 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
           <div className="text-sm whitespace-pre-wrap">
             <ExpandableText text={data.result || ''} maxLength={500} />
           </div>
-          {data.total_cost_usd && (
-            <div className="text-xs opacity-50 mt-1">
-              ${data.total_cost_usd.toFixed(4)} • {data.num_turns} turns • {(data.duration_ms / 1000).toFixed(1)}s
-            </div>
-          )}
-          <div className="text-xs opacity-40 mt-1">{time}</div>
+          <div className="text-xs opacity-40 mt-1">
+            {time}
+            {data.total_cost_usd && ` • $${data.total_cost_usd.toFixed(4)} • ${data.num_turns} turns • ${(data.duration_ms / 1000).toFixed(1)}s`}
+          </div>
         </div>
       </div>
     );
