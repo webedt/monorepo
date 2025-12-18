@@ -296,7 +296,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
         )}
         {/* Tool use shown as compact inline items */}
         {toolBlocks.length > 0 && (
-          <div className="ml-4 mt-1 space-y-1">
+          <div className="mt-1 space-y-1">
             {toolBlocks.map((block: any, i: number) => {
               // Special formatting for Read tool
               if (block.name === 'Read') {
@@ -305,16 +305,16 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const numLines = toolResult?.tool_use_result?.file?.numLines || null;
 
                 return (
-                  <details key={`tool-${i}`} className="text-xs bg-base-200 rounded border-l-2 border-blue-400">
-                    <summary className="opacity-70 py-1 px-2 cursor-pointer hover:opacity-100 list-none flex items-center gap-1">
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
                       <span className="font-mono opacity-50">{time}</span>
                       <span className="text-base-content/50">▶</span>
-                      <span className="font-medium">📖 Read:</span>{' '}
+                      <span>📖 Read:</span>
                       <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
-                      {numLines && <span className="opacity-50 ml-1">({numLines} lines)</span>}
+                      {numLines && <span className="opacity-50">({numLines} lines)</span>}
                     </summary>
                     {fileContent && (
-                      <pre className="p-2 bg-base-300 rounded-b overflow-auto max-h-96 text-xs whitespace-pre-wrap border-t border-base-300">
+                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
                         {fileContent}
                       </pre>
                     )}
@@ -361,14 +361,14 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const structuredPatch = toolResult?.tool_use_result?.structuredPatch;
 
                 return (
-                  <details key={`tool-${i}`} className="text-xs bg-base-200 rounded border-l-2 border-yellow-400">
-                    <summary className="opacity-70 py-1 px-2 cursor-pointer hover:opacity-100 list-none flex items-center gap-1">
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
                       <span className="font-mono opacity-50">{time}</span>
                       <span className="text-base-content/50">▶</span>
-                      <span className="font-medium">📝 Edit:</span>{' '}
+                      <span>📝 Edit:</span>
                       <span className="font-mono text-yellow-400">{filePath}</span>
                     </summary>
-                    <div className="p-2 bg-base-300 rounded-b overflow-auto max-h-96 text-xs border-t border-base-300">
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
                       {structuredPatch && structuredPatch.length > 0 ? (
                         <pre className="whitespace-pre-wrap">
                           {structuredPatch.map((hunk: any, hunkIdx: number) => (
@@ -410,16 +410,16 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const lineCount = fileContent ? fileContent.split('\n').length : null;
 
                 return (
-                  <details key={`tool-${i}`} className="text-xs bg-base-200 rounded border-l-2 border-green-400">
-                    <summary className="opacity-70 py-1 px-2 cursor-pointer hover:opacity-100 list-none flex items-center gap-1">
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
                       <span className="font-mono opacity-50">{time}</span>
                       <span className="text-base-content/50">▶</span>
-                      <span className="font-medium">✏️ Write:</span>{' '}
+                      <span>✏️ Write:</span>
                       <span className="font-mono text-green-400">{filePath}</span>
-                      {lineCount && <span className="opacity-50 ml-1">({lineCount} lines)</span>}
+                      {lineCount && <span className="opacity-50">({lineCount} lines)</span>}
                     </summary>
                     {fileContent && (
-                      <pre className="p-2 bg-base-300 rounded-b overflow-auto max-h-96 text-xs whitespace-pre-wrap border-t border-base-300">
+                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
                         {fileContent}
                       </pre>
                     )}
