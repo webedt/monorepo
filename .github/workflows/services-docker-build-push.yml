@@ -2,16 +2,7 @@ name: Services - Deploy to Dokploy
 
 on:
   push:
-    paths:
-      - "services/**"
-      - "internal-api-server/**"
-      - "ai-coding-worker/**"
-      - "website/**"
-      - "shared/**"
-      - ".github/workflows/services-docker-build-push.yml"
   workflow_dispatch:
-  repository_dispatch:
-    types: [deploy-main]
 
 jobs:
   deploy:
@@ -114,11 +105,14 @@ jobs:
             -H "x-api-key: ${DOKPLOY_API_KEY}")
 
           # Try to find existing application by name
-          APP_ID=$(echo "$PROJECTS" | jq -r --arg name "$APP_NAME" '
-            .[] | select(.projectId == env.DOKPLOY_PROJECT_ID) |
-            .environments[]? | select(.environmentId == env.DOKPLOY_ENVIRONMENT_ID) |
+          APP_ID=$(echo "$PROJECTS" | jq -r --arg name "$APP_NAME" --arg projId "$DOKPLOY_PROJECT_ID" --arg envId "$DOKPLOY_ENVIRONMENT_ID" '
+            .[] | select(.projectId == $projId) |
+            .environments[]? | select(.environmentId == $envId) |
             .applications[]? | select(.name == $name) | .applicationId
           ' | head -n1)
+
+          echo "🔍 Looking for application '${APP_NAME}' in project '${DOKPLOY_PROJECT_ID}', environment '${DOKPLOY_ENVIRONMENT_ID}'"
+          echo "   Found APP_ID: '${APP_ID}'"
 
           if [ -n "$APP_ID" ] && [ "$APP_ID" != "null" ]; then
             echo "✅ Found existing application: ${APP_ID}"
@@ -212,42 +206,89 @@ jobs:
             -H "x-api-key: ${DOKPLOY_API_KEY}" \
             -d "{\"json\": {\"applicationId\": \"${APP_ID}\"}}")
 
+          # Debug: Show full domains response for debugging
+          echo "📋 Application details domains field:"
+          echo "$APP_DETAILS" | jq '.result.data.json.domains // .result.data.domains // []' 2>/dev/null || echo "Could not parse domains"
+
           # Debug: Show existing domains
-          EXISTING_DOMAINS=$(echo "$APP_DETAILS" | jq -r '.result.data.json.domains[]? | "\(.host) \(.path)"' 2>/dev/null || echo "")
+          EXISTING_DOMAINS=$(echo "$APP_DETAILS" | jq -r '(.result.data.json.domains // .result.data.domains // [])[] | "\(.host) \(.path)"' 2>/dev/null || echo "")
           if [ -n "$EXISTING_DOMAINS" ]; then
             echo "📋 Existing domains:"
             echo "$EXISTING_DOMAINS" | while read line; do echo "   - $line"; done
           fi
 
-          # Check for existing domain (compare with and without trailing slash)
-          DOMAIN_EXISTS=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" --arg path "$PATH_PREFIX" --arg pathNorm "$PATH_NORMALIZED" \
-            '.result.data.json.domains[]? | select(.host == $domain and (.path == $path or .path == $pathNorm or .path == ($pathNorm + "/"))) | .domainId' | head -n1)
+          # Check for existing domain - try multiple response formats and path variations
+          # Also match on just the host if path matching fails (to catch existing domains)
+          DOMAIN_EXISTS=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" --arg path "$PATH_PREFIX" --arg pathNorm "$PATH_NORMALIZED" '
+            (.result.data.json.domains // .result.data.domains // [])[]
+            | select(.host == $domain and (.path == $path or .path == $pathNorm or .path == ($pathNorm + "/")))
+            | .domainId
+          ' 2>/dev/null | head -n1)
 
           echo "🔍 Checking for domain: ${DOMAIN}${PATH_PREFIX}"
           echo "   Domain exists check result: '${DOMAIN_EXISTS}'"
 
           if [ -z "$DOMAIN_EXISTS" ] || [ "$DOMAIN_EXISTS" = "null" ]; then
-            echo "🌐 Creating domain: https://${DOMAIN}${PATH_PREFIX}"
+            # Double-check by listing all domains for this application to be safe
+            ALL_APP_DOMAINS=$(echo "$APP_DETAILS" | jq -r '(.result.data.json.domains // .result.data.domains // []) | length' 2>/dev/null || echo "0")
+            echo "   Total domains on this application: ${ALL_APP_DOMAINS}"
 
-            curl -s -X 'POST' \
-              "${DOKPLOY_URL}/api/trpc/domain.create" \
-              -H 'accept: application/json' \
-              -H 'Content-Type: application/json' \
-              -H "x-api-key: ${DOKPLOY_API_KEY}" \
-              -d "{
-                \"json\": {
-                  \"applicationId\": \"${APP_ID}\",
-                  \"host\": \"${DOMAIN}\",
-                  \"path\": \"${PATH_PREFIX}\",
-                  \"port\": 3000,
-                  \"https\": true,
-                  \"certificateType\": \"letsencrypt\",
-                  \"domainType\": \"application\",
-                  \"stripPath\": true
-                }
-              }" > /dev/null
+            if [ "$ALL_APP_DOMAINS" -gt 0 ]; then
+              echo "⚠️  Application already has ${ALL_APP_DOMAINS} domain(s), checking if any match our target..."
+              # Show what domains exist
+              echo "$APP_DETAILS" | jq -r '(.result.data.json.domains // .result.data.domains // [])[] | "   Found: \(.host)\(.path)"' 2>/dev/null
 
-            echo "✅ Domain created"
+              # More lenient check - if ANY domain exists for this host, skip creation
+              HOST_MATCH=$(echo "$APP_DETAILS" | jq -r --arg domain "$DOMAIN" '
+                (.result.data.json.domains // .result.data.domains // [])[]
+                | select(.host == $domain)
+                | .domainId
+              ' 2>/dev/null | head -n1)
+
+              if [ -n "$HOST_MATCH" ] && [ "$HOST_MATCH" != "null" ]; then
+                echo "ℹ️  Domain for host ${DOMAIN} already exists (ID: ${HOST_MATCH}), skipping creation"
+              else
+                echo "🌐 Creating domain: https://${DOMAIN}${PATH_PREFIX}"
+                curl -s -X 'POST' \
+                  "${DOKPLOY_URL}/api/trpc/domain.create" \
+                  -H 'accept: application/json' \
+                  -H 'Content-Type: application/json' \
+                  -H "x-api-key: ${DOKPLOY_API_KEY}" \
+                  -d "{
+                    \"json\": {
+                      \"applicationId\": \"${APP_ID}\",
+                      \"host\": \"${DOMAIN}\",
+                      \"path\": \"${PATH_PREFIX}\",
+                      \"port\": 3000,
+                      \"https\": true,
+                      \"certificateType\": \"letsencrypt\",
+                      \"domainType\": \"application\",
+                      \"stripPath\": true
+                    }
+                  }" > /dev/null
+                echo "✅ Domain created"
+              fi
+            else
+              echo "🌐 Creating domain: https://${DOMAIN}${PATH_PREFIX}"
+              curl -s -X 'POST' \
+                "${DOKPLOY_URL}/api/trpc/domain.create" \
+                -H 'accept: application/json' \
+                -H 'Content-Type: application/json' \
+                -H "x-api-key: ${DOKPLOY_API_KEY}" \
+                -d "{
+                  \"json\": {
+                    \"applicationId\": \"${APP_ID}\",
+                    \"host\": \"${DOMAIN}\",
+                    \"path\": \"${PATH_PREFIX}\",
+                    \"port\": 3000,
+                    \"https\": true,
+                    \"certificateType\": \"letsencrypt\",
+                    \"domainType\": \"application\",
+                    \"stripPath\": true
+                  }
+                }" > /dev/null
+              echo "✅ Domain created"
+            fi
           else
             echo "ℹ️  Domain already exists (ID: ${DOMAIN_EXISTS})"
           fi
