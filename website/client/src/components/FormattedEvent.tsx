@@ -1,4 +1,5 @@
 import { ExpandableText, ExpandableJson } from './ExpandableContent';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 // Raw event type for formatted view - now uses type directly instead of eventType wrapper
 interface RawEvent {
@@ -189,8 +190,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
     return (
       <div className="flex justify-end my-2">
         <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
-          <div className="text-sm whitespace-pre-wrap">
-            <ExpandableText text={userContent || ''} maxLength={500} />
+          <div className="text-sm">
+            <MarkdownRenderer content={userContent || ''} />
           </div>
           <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
         </div>
@@ -207,8 +208,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
       return (
         <div className="flex justify-start my-2">
           <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
-            <div className="text-sm whitespace-pre-wrap">
-              <ExpandableText text={content} maxLength={500} />
+            <div className="text-sm">
+              <MarkdownRenderer content={content} />
             </div>
             <div className="text-xs opacity-40 mt-1">{time}</div>
           </div>
@@ -250,8 +251,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
           <div className="flex justify-start my-1">
             <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
               {textBlocks.map((block: any, i: number) => (
-                <div key={`text-${i}`} className="text-sm whitespace-pre-wrap">
-                  <ExpandableText text={block.text || ''} maxLength={500} />
+                <div key={`text-${i}`} className="text-sm">
+                  <MarkdownRenderer content={block.text || ''} />
                 </div>
               ))}
               <div className="text-xs opacity-40 mt-1">{time}</div>
@@ -282,8 +283,8 @@ export function FormattedEvent({ event, filters = {} }: { event: RawEvent; filte
     return (
       <div className="flex justify-start my-2">
         <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
-          <div className="text-sm whitespace-pre-wrap">
-            <ExpandableText text={event.result || ''} maxLength={500} />
+          <div className="text-sm">
+            <MarkdownRenderer content={event.result || ''} />
           </div>
           <div className="text-xs opacity-40 mt-1">
             {time}
