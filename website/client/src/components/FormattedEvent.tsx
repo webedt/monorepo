@@ -300,11 +300,25 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
             {toolBlocks.map((block: any, i: number) => {
               // Special formatting for Read tool
               if (block.name === 'Read') {
+                const toolResult = toolResultMap?.get(block.id);
+                const fileContent = toolResult?.tool_use_result?.file?.content || null;
+                const numLines = toolResult?.tool_use_result?.file?.numLines || null;
+
                 return (
-                  <div key={`tool-${i}`} className="text-xs opacity-70 py-1 px-2 bg-base-200 rounded border-l-2 border-blue-400">
-                    <span className="font-medium">📖 Read:</span>{' '}
-                    <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
-                  </div>
+                  <details key={`tool-${i}`} className="text-xs bg-base-200 rounded border-l-2 border-blue-400">
+                    <summary className="opacity-70 py-1 px-2 cursor-pointer hover:opacity-100 list-none flex items-center gap-1">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span className="font-medium">📖 Read:</span>{' '}
+                      <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
+                      {numLines && <span className="opacity-50 ml-1">({numLines} lines)</span>}
+                    </summary>
+                    {fileContent && (
+                      <pre className="p-2 bg-base-300 rounded-b overflow-auto max-h-96 text-xs whitespace-pre-wrap border-t border-base-300">
+                        {fileContent}
+                      </pre>
+                    )}
+                  </details>
                 );
               }
               // Special formatting for Bash tool
