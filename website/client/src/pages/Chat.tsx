@@ -265,6 +265,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       session_created: true,
     };
   });
+  // Show/hide timestamps in chat - persisted to localStorage
+  const [showTimestamps, setShowTimestamps] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('chatShowTimestamps');
+      return saved === null ? true : saved === 'true'; // Default to true (show timestamps)
+    } catch {
+      return true;
+    }
+  });
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
   const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
   const [copyChatSuccess, setCopyChatSuccess] = useState(false);
@@ -305,6 +314,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Ignore localStorage errors
     }
   }, [eventFilters]);
+
+  // Persist showTimestamps to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatShowTimestamps', showTimestamps ? 'true' : 'false');
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [showTimestamps]);
 
   // Sync local state with global store
   useEffect(() => {
@@ -2101,6 +2119,21 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                 </ul>
               </div>
             )}
+            {/* Timestamps toggle - only show in formatted view */}
+            {!showRawJson && (
+              <label className="flex items-center gap-1 cursor-pointer btn btn-xs btn-ghost">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-xs"
+                  checked={showTimestamps}
+                  onChange={(e) => setShowTimestamps(e.target.checked)}
+                />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Timestamps
+              </label>
+            )}
             {/* Raw JSON toggle */}
             <button
               onClick={() => setShowRawJson(!showRawJson)}
@@ -2140,7 +2173,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
                     No events yet.
                   </div>
                 ) : (
-                  <FormattedEventList events={rawEvents} filters={eventFilters} />
+                  <FormattedEventList events={rawEvents} filters={eventFilters} showTimestamps={showTimestamps} />
                 )}
 
               {isExecuting && (
