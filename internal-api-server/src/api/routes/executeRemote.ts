@@ -398,6 +398,29 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         }
       }
 
+      // CRITICAL: Save remoteSessionId immediately when session_created event is received
+      // This prevents race conditions with background sync that could create duplicates
+      if (event.type === 'session_created' && (event as any).remoteSessionId) {
+        try {
+          await db.update(chatSessions)
+            .set({
+              remoteSessionId: (event as any).remoteSessionId,
+              remoteWebUrl: (event as any).remoteWebUrl,
+            })
+            .where(eq(chatSessions.id, chatSessionId));
+          logger.info('Remote session ID saved to database immediately', {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+            remoteSessionId: (event as any).remoteSessionId,
+          });
+        } catch (err) {
+          logger.error('Failed to save remote session ID', err, {
+            component: 'ExecuteRemoteRoute',
+            chatSessionId,
+          });
+        }
+      }
+
       // Broadcast to other listeners
       sessionEventBroadcaster.broadcast(chatSessionId, event.type, event);
     };

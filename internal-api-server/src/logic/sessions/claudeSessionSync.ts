@@ -258,6 +258,16 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
 
         let matchingExistingSession = null;
 
+        logger.debug(`[SessionSync] Checking for matching local session`, {
+          component: 'SessionSync',
+          remoteSessionId: remoteSession.id,
+          remoteCreatedAt: remoteSession.created_at,
+          branch,
+          repositoryOwner,
+          repositoryName,
+          title: remoteSession.title
+        });
+
         // First, try to match by branch (most specific)
         if (branch && repositoryOwner && repositoryName) {
           const branchMatches = await db
@@ -289,6 +299,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
         }
 
         // If no branch match, try matching by repo + time window + status
+        // Order by createdAt DESC to get the most recent session (most likely to be the one being created)
         if (!matchingExistingSession && repositoryOwner && repositoryName) {
           const repoTimeMatches = await db
             .select()
@@ -307,6 +318,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
                 gte(chatSessions.createdAt, fiveMinutesBefore)
               )
             )
+            .orderBy(chatSessions.createdAt)
             .limit(1);
 
           if (repoTimeMatches.length > 0) {
@@ -314,9 +326,19 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             logger.info(`[SessionSync] Found matching session by repo and time window`, {
               component: 'SessionSync',
               existingSessionId: matchingExistingSession.id,
+              existingCreatedAt: matchingExistingSession.createdAt,
               remoteSessionId: remoteSession.id,
+              remoteCreatedAt: remoteSession.created_at,
               repositoryOwner,
               repositoryName
+            });
+          } else {
+            logger.debug(`[SessionSync] No matching session found by repo+time`, {
+              component: 'SessionSync',
+              remoteSessionId: remoteSession.id,
+              repositoryOwner,
+              repositoryName,
+              timeWindowStart: fiveMinutesBefore.toISOString()
             });
           }
         }
