@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { ExpandableText, ExpandableJson } from './ExpandableContent';
 
 // Raw event type for formatted view
@@ -8,91 +7,297 @@ interface RawEvent {
   timestamp: Date;
 }
 
-// Event emoji and color mapping for formatted raw view
-function getEventStyle(type: string): { emoji: string; color: string; label: string } {
-  const styles: Record<string, { emoji: string; color: string; label: string }> = {
-    connected: { emoji: '🔌', color: 'text-success', label: 'Connected' },
-    message: { emoji: '💬', color: 'text-info', label: 'Message' },
-    title_generation: { emoji: '✨', color: 'text-warning', label: 'Title Generation' },
-    session_created: { emoji: '🎉', color: 'text-success', label: 'Session Created' },
-    session_name: { emoji: '📝', color: 'text-primary', label: 'Session Name' },
-    env_manager_log: { emoji: '🔧', color: 'text-base-content/60', label: 'Environment' },
-    system: { emoji: '⚙️', color: 'text-base-content/70', label: 'System Init' },
-    user: { emoji: '👤', color: 'text-primary', label: 'User' },
-    assistant: { emoji: '🤖', color: 'text-secondary', label: 'Assistant' },
-    tool_use: { emoji: '🔨', color: 'text-accent', label: 'Tool Use' },
-    tool_result: { emoji: '📤', color: 'text-accent/80', label: 'Tool Result' },
-    tool_progress: { emoji: '⏳', color: 'text-warning/70', label: 'Tool Progress' },
-    result: { emoji: '✅', color: 'text-success', label: 'Result' },
-    completed: { emoji: '🏁', color: 'text-success', label: 'Completed' },
-    error: { emoji: '❌', color: 'text-error', label: 'Error' },
-  };
-  return styles[type] || { emoji: '📦', color: 'text-base-content/50', label: type };
+// Helper to extract text content from assistant message
+function getAssistantTextContent(data: any): string {
+  const content = data?.message?.content;
+  if (!content || !Array.isArray(content)) return '';
+
+  return content
+    .filter((block: any) => block.type === 'text')
+    .map((block: any) => block.text || '')
+    .join('\n')
+    .trim();
 }
 
-// Format a raw event for display - with expandable content
+// Helper to check if last assistant message matches result
+function shouldSkipAssistant(events: RawEvent[], currentIndex: number): boolean {
+  const event = events[currentIndex];
+  if (event.eventType !== 'assistant') return false;
+
+  // Find the next result event after this assistant
+  const resultEvent = events.slice(currentIndex + 1).find(e => e.eventType === 'result');
+  if (!resultEvent) return false;
+
+  // Check if there are any other assistant events between this one and the result
+  const eventsAfter = events.slice(currentIndex + 1);
+  const nextAssistantIndex = eventsAfter.findIndex(e => e.eventType === 'assistant');
+  const resultIndex = eventsAfter.findIndex(e => e.eventType === 'result');
+
+  // If there's another assistant before the result, don't skip this one
+  if (nextAssistantIndex !== -1 && nextAssistantIndex < resultIndex) return false;
+
+  // Compare the text content
+  const assistantText = getAssistantTextContent(event.data);
+  const resultText = (resultEvent.data?.result || '').trim();
+
+  return assistantText === resultText;
+}
+
+// Component to render a list of events with deduplication
+export function FormattedEventList({ events }: { events: RawEvent[] }) {
+  return (
+    <>
+      {events.map((event, index) => {
+        // Skip assistant messages that are duplicated in the result
+        if (shouldSkipAssistant(events, index)) {
+          return null;
+        }
+        return <FormattedEvent key={index} event={event} />;
+      })}
+    </>
+  );
+}
+
+// Event emoji mapping
+function getEventEmoji(type: string): string {
+  const emojis: Record<string, string> = {
+    connected: '🔌',
+    message: '💬',
+    title_generation: '✨',
+    session_created: '🎉',
+    session_name: '📝',
+    env_manager_log: '🔧',
+    system: '⚙️',
+    user: '👤',
+    assistant: '🤖',
+    tool_use: '🔨',
+    tool_result: '📤',
+    tool_progress: '⏳',
+    result: '✅',
+    completed: '🏁',
+    error: '❌',
+  };
+  return emojis[type] || '📦';
+}
+
+// Get a brief summary for status events (one line)
+function getStatusSummary(eventType: string, data: any): string {
+  switch (eventType) {
+    case 'connected':
+      return data.provider || 'unknown';
+    case 'message':
+      return data.message || '';
+    case 'title_generation':
+      return data.title ? `"${data.title}"` : data.method || '';
+    case 'session_created':
+      return 'Session started';
+    case 'session_name':
+      return data.sessionName || '';
+    case 'env_manager_log':
+      return data.data?.content || data.data?.message || '';
+    case 'system':
+      return `${data.model || 'unknown model'} • ${data.tools?.length || 0} tools`;
+    case 'tool_progress':
+      return `${data.tool_name} (${data.elapsed_time_seconds}s)`;
+    case 'result':
+      return data.result?.substring(0, 80) || 'Completed';
+    case 'completed':
+      return data.branch ? `Branch: ${data.branch}` : 'Done';
+    case 'error':
+      return data.message || data.error || 'Error occurred';
+    default:
+      return '';
+  }
+}
+
+// Format a raw event for display
 export function FormattedEvent({ event }: { event: RawEvent }) {
-  const style = getEventStyle(event.eventType);
+  const emoji = getEventEmoji(event.eventType);
   const time = event.timestamp.toLocaleTimeString();
   const data = event.data || {};
-  const [showAllTools, setShowAllTools] = useState(false);
 
-  // Check if this event type should render inline (single line with header)
-  const isInlineEvent = ['connected', 'message', 'title_generation', 'session_name', 'session_created', 'env_manager_log', 'tool_progress'].includes(event.eventType);
+  // User and Assistant get special chat bubble treatment
+  if (event.eventType === 'user') {
+    const userContent = typeof data.message?.content === 'string'
+      ? data.message.content
+      : JSON.stringify(data.message?.content);
 
-  // Render inline content (appears on same line as timestamp/emoji/label)
-  const renderInlineContent = () => {
+    return (
+      <div className="flex justify-end my-2">
+        <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
+          <div className="text-sm whitespace-pre-wrap">
+            <ExpandableText text={userContent || ''} maxLength={500} />
+          </div>
+          <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (event.eventType === 'assistant') {
+    const content = data.message?.content;
+    if (!content) return null;
+
+    // Handle string content (simple text response)
+    if (typeof content === 'string') {
+      return (
+        <div className="flex justify-start my-2">
+          <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
+            <div className="text-sm whitespace-pre-wrap">
+              <ExpandableText text={content} maxLength={500} />
+            </div>
+            <div className="text-xs opacity-40 mt-1">{time}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // Handle array content
+    if (!Array.isArray(content)) return null;
+
+    // Separate thinking, text, and tool blocks
+    const thinkingBlocks = content.filter((block: any) => block.type === 'thinking');
+    const textBlocks = content.filter((block: any) => block.type === 'text');
+    const toolBlocks = content.filter((block: any) => block.type === 'tool_use');
+
+    // If no blocks found, render nothing
+    if (thinkingBlocks.length === 0 && textBlocks.length === 0 && toolBlocks.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="my-1">
+        {/* Thinking blocks as status lines with brain emoji */}
+        {thinkingBlocks.map((block: any, i: number) => (
+          <div key={`thinking-${i}`} className="py-1 text-xs text-base-content/60 flex items-center gap-2">
+            <span className="font-mono opacity-50">{time}</span>
+            <span>🧠</span>
+            <span className="opacity-70 italic">
+              <ExpandableText text={block.thinking || ''} maxLength={100} />
+            </span>
+          </div>
+        ))}
+        {/* Main assistant message bubble - blue */}
+        {textBlocks.length > 0 && (
+          <div className="flex justify-start my-1">
+            <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
+              {textBlocks.map((block: any, i: number) => (
+                <div key={`text-${i}`} className="text-sm whitespace-pre-wrap">
+                  <ExpandableText text={block.text || ''} maxLength={500} />
+                </div>
+              ))}
+              <div className="text-xs opacity-40 mt-1">{time}</div>
+            </div>
+          </div>
+        )}
+        {/* Tool use shown as compact inline items */}
+        {toolBlocks.length > 0 && (
+          <div className="ml-4 mt-1 space-y-1">
+            {toolBlocks.map((block: any, i: number) => (
+              <details key={`tool-${i}`} className="text-xs opacity-60">
+                <summary className="cursor-pointer hover:opacity-100">
+                  🔨 {block.name}
+                </summary>
+                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
+                  {JSON.stringify(block.input, null, 2)}
+                </pre>
+              </details>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Result event - blue bubble like assistant messages
+  if (event.eventType === 'result') {
+    return (
+      <div className="flex justify-start my-2">
+        <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
+          <div className="text-sm whitespace-pre-wrap">
+            <ExpandableText text={data.result || ''} maxLength={500} />
+          </div>
+          {data.total_cost_usd && (
+            <div className="text-xs opacity-50 mt-1">
+              ${data.total_cost_usd.toFixed(4)} • {data.num_turns} turns • {(data.duration_ms / 1000).toFixed(1)}s
+            </div>
+          )}
+          <div className="text-xs opacity-40 mt-1">{time}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // All other events: single line with expandable details
+  const summary = getStatusSummary(event.eventType, data);
+  const hasDetails = ['system', 'env_manager_log', 'completed', 'error'].includes(event.eventType)
+    || (event.eventType === 'env_manager_log' && data.data?.extra?.args);
+
+  // Render expandable details content
+  const renderDetails = () => {
     switch (event.eventType) {
-      case 'connected':
+      case 'system':
         return (
-          <span className="font-mono text-xs bg-base-300 px-1 rounded">{data.provider || 'unknown'}</span>
+          <div className="text-xs space-y-1 mt-2 pl-4 border-l border-base-300">
+            <div><span className="opacity-50">cwd:</span> {data.cwd}</div>
+            <div><span className="opacity-50">model:</span> {data.model}</div>
+            {data.claude_code_version && <div><span className="opacity-50">version:</span> {data.claude_code_version}</div>}
+            {data.permissionMode && <div><span className="opacity-50">permissions:</span> {data.permissionMode}</div>}
+            {data.tools?.length > 0 && (
+              <details>
+                <summary className="cursor-pointer opacity-50 hover:opacity-100">Tools ({data.tools.length})</summary>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {data.tools.map((tool: string) => (
+                    <span key={tool} className="badge badge-xs badge-outline">{tool}</span>
+                  ))}
+                </div>
+              </details>
+            )}
+            {data.mcp_servers?.length > 0 && (
+              <details>
+                <summary className="cursor-pointer opacity-50 hover:opacity-100">MCP Servers ({data.mcp_servers.length})</summary>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {data.mcp_servers.map((server: { name: string }) => (
+                    <span key={server.name} className="badge badge-xs badge-outline">{server.name}</span>
+                  ))}
+                </div>
+              </details>
+            )}
+            <ExpandableJson data={data} summary="View raw data" />
+          </div>
         );
 
-      case 'message':
+      case 'env_manager_log': {
+        const args = data.data?.extra?.args as string[] | undefined;
+        const appendSystemPromptIndex = args?.findIndex((arg: string) => arg === '--append-system-prompt');
+        const systemPrompt = appendSystemPromptIndex !== undefined && appendSystemPromptIndex >= 0 && args
+          ? args[appendSystemPromptIndex + 1]
+          : null;
+        const modelIndex = args?.findIndex((arg: string) => arg === '--model');
+        const model = modelIndex !== undefined && modelIndex >= 0 && args ? args[modelIndex + 1] : null;
+
         return (
-          <>
-            <span className="badge badge-sm badge-outline mr-2">{data.stage}</span>
-            <span>{data.message}</span>
-          </>
+          <div className="text-xs space-y-1 mt-2 pl-4 border-l border-base-300">
+            {model && <div><span className="opacity-50">model:</span> {model}</div>}
+            {systemPrompt && (
+              <details>
+                <summary className="cursor-pointer opacity-50 hover:opacity-100">View system prompt</summary>
+                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-96 whitespace-pre-wrap text-xs">
+                  {systemPrompt}
+                </pre>
+              </details>
+            )}
+            <ExpandableJson data={data} summary="View raw data" />
+          </div>
         );
+      }
 
-      case 'title_generation':
+      case 'completed':
+      case 'error':
         return (
-          <>
-            <span className={`badge badge-sm mr-2 ${data.status === 'success' ? 'badge-success' : data.status === 'skipped' ? 'badge-ghost' : data.status === 'trying' ? 'badge-warning' : 'badge-error'}`}>
-              {data.status}
-            </span>
-            <span className="font-mono text-xs">{data.method}</span>
-            {data.title && <span className="ml-2 text-success">→ "{data.title}"</span>}
-          </>
-        );
-
-      case 'session_created':
-        return data.remoteWebUrl ? (
-          <a href={data.remoteWebUrl} target="_blank" rel="noopener noreferrer" className="link link-primary text-xs">
-            {data.remoteWebUrl}
-          </a>
-        ) : null;
-
-      case 'session_name':
-        return <span className="font-medium">{data.sessionName}</span>;
-
-      case 'env_manager_log':
-        return (
-          <>
-            <span className={`badge badge-xs mr-2 ${data.data?.level === 'error' ? 'badge-error' : data.data?.level === 'info' ? 'badge-info' : 'badge-ghost'}`}>
-              {data.data?.level || 'log'}
-            </span>
-            <span className="opacity-80">{data.data?.content || data.data?.message || JSON.stringify(data.data)}</span>
-          </>
-        );
-
-      case 'tool_progress':
-        return (
-          <>
-            <span className="font-mono">{data.tool_name}</span>
-            <span className="opacity-70"> — {data.elapsed_time_seconds}s elapsed</span>
-          </>
+          <div className="text-xs mt-2 pl-4 border-l border-base-300">
+            <ExpandableJson data={data} summary="View details" />
+          </div>
         );
 
       default:
@@ -100,171 +305,26 @@ export function FormattedEvent({ event }: { event: RawEvent }) {
     }
   };
 
-  // Render block content (appears below the header line)
-  const renderBlockContent = () => {
-    switch (event.eventType) {
-      case 'system':
-        return (
-          <div className="text-xs space-y-1">
-            <div><span className="opacity-50">cwd:</span> <span className="font-mono">{data.cwd}</span></div>
-            <div><span className="opacity-50">model:</span> <span className="font-mono">{data.model}</span></div>
-            <div className="flex flex-wrap gap-1">
-              {(showAllTools ? data.tools : data.tools?.slice(0, 8))?.map((tool: string) => (
-                <span key={tool} className="badge badge-xs badge-outline">{tool}</span>
-              ))}
-              {data.tools?.length > 8 && (
-                <button
-                  onClick={() => setShowAllTools(prev => !prev)}
-                  className="badge badge-xs badge-ghost cursor-pointer hover:badge-primary"
-                >
-                  {showAllTools ? 'show less' : `+${data.tools.length - 8}`}
-                </button>
-              )}
-            </div>
-            {data.system && (
-              <details className="mt-1">
-                <summary className="cursor-pointer opacity-50 hover:opacity-100">View system prompt</summary>
-                <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-96 whitespace-pre-wrap">
-                  {data.system}
-                </pre>
-              </details>
-            )}
-            <ExpandableJson data={data} summary="View full system init" />
-          </div>
-        );
-
-      case 'user': {
-        const userContent = typeof data.message?.content === 'string'
-          ? data.message.content
-          : JSON.stringify(data.message?.content);
-        return (
-          <div className="text-sm">
-            {data.isReplay && <span className="badge badge-xs badge-ghost mr-2">replay</span>}
-            <div className="whitespace-pre-wrap">
-              <ExpandableText text={userContent || ''} maxLength={200} />
-            </div>
-          </div>
-        );
-      }
-
-      case 'assistant': {
-        const content = data.message?.content;
-        if (!content) return null;
-        return (
-          <div className="text-sm space-y-1">
-            {content.map((block: any, i: number) => {
-              if (block.type === 'thinking') {
-                return (
-                  <div key={`thinking-${i}`} className="text-xs opacity-60 italic whitespace-pre-wrap">
-                    💭 <ExpandableText text={block.thinking || ''} maxLength={100} />
-                  </div>
-                );
-              }
-              if (block.type === 'text') {
-                return (
-                  <div key={`text-${i}`} className="whitespace-pre-wrap">
-                    <ExpandableText text={block.text || ''} maxLength={300} />
-                  </div>
-                );
-              }
-              if (block.type === 'tool_use') {
-                const inputStr = JSON.stringify(block.input);
-                const isLongInput = inputStr.length > 100;
-                return (
-                  <div key={`tool-${i}`} className="font-mono text-xs bg-base-300 p-2 rounded">
-                    <span className="text-accent">{block.name}</span>
-                    {isLongInput ? (
-                      <details className="inline-block ml-1">
-                        <summary className="cursor-pointer opacity-50 hover:opacity-100">
-                          ({inputStr.substring(0, 60)}...)
-                        </summary>
-                        <pre className="mt-1 p-2 bg-base-200 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
-                          {JSON.stringify(block.input, null, 2)}
-                        </pre>
-                      </details>
-                    ) : (
-                      <span className="opacity-50 ml-1">({inputStr})</span>
-                    )}
-                  </div>
-                );
-              }
-              if (block.type === 'tool_result') {
-                const resultContent = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
-                return (
-                  <details key={`result-${i}`} className="text-xs">
-                    <summary className="cursor-pointer opacity-50 hover:opacity-100 text-accent/80">
-                      📤 tool_result {block.is_error && <span className="badge badge-xs badge-error ml-1">error</span>}
-                    </summary>
-                    <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-96">
-                      {resultContent}
-                    </pre>
-                  </details>
-                );
-              }
-              return null;
-            })}
-          </div>
-        );
-      }
-
-      case 'result':
-        return (
-          <div className="text-sm space-y-1">
-            <div><ExpandableText text={data.result || ''} maxLength={200} /></div>
-            {data.total_cost_usd && (
-              <div className="text-xs opacity-60">
-                💰 ${data.total_cost_usd.toFixed(4)} • {data.num_turns} turns • {(data.duration_ms / 1000).toFixed(1)}s
-              </div>
-            )}
-            <ExpandableJson data={data} summary="View full result data" />
-          </div>
-        );
-
-      case 'completed':
-        return (
-          <div className="text-sm">
-            {data.branch && <span className="badge badge-sm badge-success mr-2">{data.branch}</span>}
-            {data.totalCost && <span className="text-xs opacity-60">💰 ${data.totalCost.toFixed(4)}</span>}
-            <ExpandableJson data={data} summary="View completion data" />
-          </div>
-        );
-
-      case 'control_response':
-        return <ExpandableJson data={data} summary="View JSON" />;
-
-      default:
-        // For unknown types, show a collapsible JSON
-        return <ExpandableJson data={data} summary="View JSON" />;
-    }
-  };
-
-  // For inline events: timestamp, emoji, label, and content all on one line
-  // For block events: header on first line, content below
-  if (isInlineEvent) {
+  // Single line status event
+  if (hasDetails) {
     return (
-      <div className="border-l-2 border-base-300 pl-3 py-2 hover:bg-base-200/30 transition-colors">
-        <div className="flex items-center gap-2 text-sm flex-wrap">
-          <span className="font-mono text-xs opacity-60">{time}</span>
-          <span className={`font-medium ${style.color}`}>
-            {style.emoji} {style.label}
-          </span>
-          <span className={style.color}>{renderInlineContent()}</span>
-        </div>
-      </div>
+      <details className="py-1 text-xs text-base-content/60">
+        <summary className="cursor-pointer hover:text-base-content/80 flex items-center gap-2">
+          <span className="font-mono opacity-50">{time}</span>
+          <span>{emoji}</span>
+          <span className="opacity-70">{summary}</span>
+        </summary>
+        {renderDetails()}
+      </details>
     );
   }
 
+  // Simple one-line status (no expandable details)
   return (
-    <div className="border-l-2 border-base-300 pl-3 py-2 hover:bg-base-200/30 transition-colors">
-      <div className="flex items-center gap-2 text-xs opacity-60 mb-1">
-        <span className="font-mono">{time}</span>
-        <span className={`font-medium ${style.color}`}>
-          {style.emoji} {style.label}
-        </span>
-      </div>
-      <div className={style.color}>
-        {renderBlockContent()}
-      </div>
+    <div className="py-1 text-xs text-base-content/60 flex items-center gap-2">
+      <span className="font-mono opacity-50">{time}</span>
+      <span>{emoji}</span>
+      <span className="opacity-70">{summary}</span>
     </div>
   );
 }

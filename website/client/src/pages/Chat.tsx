@@ -8,38 +8,10 @@ import { useBrowserNotification, playNotificationSound, getNotificationPrefs } f
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
-import { ChatMessage } from '@/components/ChatMessage';
 import SessionLayout from '@/components/SessionLayout';
-import { FormattedEvent, type RawEvent } from '@/components/FormattedEvent';
+import { FormattedEventList, type RawEvent } from '@/components/FormattedEvent';
 import type { Message, GitHubRepository, ChatSession, ChatVerbosityLevel } from '@/shared';
 
-// Helper to render text with clickable links
-function LinkifyText({ text, className }: { text: string; className?: string }) {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const parts = text.split(urlRegex);
-
-  return (
-    <span className={className}>
-      {parts.map((part, i) => {
-        if (part.match(urlRegex)) {
-          return (
-            <a
-              key={i}
-              href={part}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-info underline hover:text-info-content"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {part}
-            </a>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </span>
-  );
-}
 
 // Database event type
 interface DbEvent {
@@ -106,13 +78,45 @@ function convertEventToMessage(event: DbEvent, sessionId: string, _verbosityLeve
     return null;
   }
 
-  // Skip control events that don't need to be displayed
+  // Skip control events that don't need to be displayed in formatted view
   if (eventType === 'connected' || eventType === 'completed' || eventType === 'heartbeat') {
     return null;
   }
 
-  // Display all events as raw JSON - simple and flat
-  const content = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+  // Skip events that are handled by FormattedEvent in the raw view
+  // These don't need to clutter the formatted chat view
+  if (eventType === 'env_manager_log' || eventType === 'system' || eventType === 'title_generation') {
+    return null;
+  }
+
+  // Format content based on event type for cleaner display
+  let content: string;
+  switch (eventType) {
+    case 'message':
+      content = data.message || JSON.stringify(data);
+      break;
+    case 'session_name':
+      content = `Session: ${data.sessionName}`;
+      break;
+    case 'session_created':
+      content = data.remoteWebUrl ? `Session created: ${data.remoteWebUrl}` : 'Session created';
+      break;
+    case 'user':
+      // Skip user events - they're handled as user messages
+      return null;
+    case 'assistant':
+      // Skip assistant events - they're handled as assistant messages
+      return null;
+    case 'result':
+      content = data.result || 'Task completed';
+      break;
+    case 'error':
+      content = `Error: ${data.message || data.error || JSON.stringify(data)}`;
+      break;
+    default:
+      // For unknown types, show a brief summary
+      content = `[${eventType}] ${typeof data === 'string' ? data : ''}`;
+  }
 
   return {
     id: event.id,
@@ -212,7 +216,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const wasStreamingRef = useRef(false); // Track if we were streaming, to preserve scroll when stream ends
   const shouldAutoScrollDuringStreamRef = useRef(true); // Track if we should auto-scroll during active streaming
   const pendingUserMessagesRef = useRef<Message[]>([]); // Track user messages added locally but not yet in DB
-  const [lastRequest, setLastRequest] = useState<{
+  const [_lastRequest, setLastRequest] = useState<{
     input: string;
     selectedRepo: string;
     baseBranch: string;
@@ -1577,71 +1581,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   };
 
-  const handleRetry = () => {
-    if (!lastRequest || isExecuting) return;
-
-    // When user retries, they're at the bottom of the chat - enable auto-scroll
-    shouldAutoScrollDuringStreamRef.current = true;
-
-    // Add user message for retry
-    messageIdCounter.current += 1;
-    const userMessage: Message = {
-      id: Date.now() + messageIdCounter.current,
-      chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-      type: 'user',
-      content: lastRequest.input,
-      timestamp: new Date(),
-    };
-
-    // Track this as a pending message so it won't be lost when the merge effect runs
-    pendingUserMessagesRef.current = [...pendingUserMessagesRef.current, userMessage];
-
-    setMessages((prev) => [...prev, userMessage]);
-
-    // Build request body with saved request data
-    const requestParams: any = {
-      userRequest: lastRequest.input,
-    };
-
-    // Add user's preferred provider
-    const provider = user?.preferredProvider || 'claude';
-    if (provider) {
-      requestParams.provider = provider;
-    }
-
-    if (currentSessionId) {
-      requestParams.websiteSessionId = currentSessionId;
-      console.log('[Chat] Retrying with existing session:', currentSessionId);
-    }
-
-    // Only send repository parameters for new sessions (not resuming)
-    if (!currentSessionId) {
-      if (lastRequest.selectedRepo) {
-        requestParams.repositoryUrl = lastRequest.selectedRepo;
-      }
-
-      if (lastRequest.baseBranch) {
-        requestParams.baseBranch = lastRequest.baseBranch;
-      }
-
-      // Auto-commit is now always enabled
-      requestParams.autoCommit = true;
-    } else {
-      // When resuming, repository is already in the session workspace
-      console.log('[Chat] Retrying resumed session - repository already in workspace');
-    }
-
-    // Always use POST
-    setStreamMethod('POST');
-    setStreamBody(requestParams);
-
-    // Use execute-remote endpoint for claude-remote provider
-    const executeUrl = provider === 'claude-remote'
-      ? `${getApiBaseUrl()}/api/execute-remote`
-      : `${getApiBaseUrl()}/api/execute`;
-    setStreamUrl(executeUrl);
-  };
-
   // Handle interrupting current job
   const handleInterrupt = async () => {
     if (!currentSessionId) return;
@@ -2064,44 +2003,32 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
             {showRawJson ? (
-              /* Formatted event stream view */
-              <div className="max-w-4xl mx-auto">
+              /* Raw JSON stream view - clean JSON objects only */
+              <div className="max-w-4xl mx-auto font-mono text-xs">
                 {rawEvents.length === 0 ? (
-                  <div className="text-center text-base-content/50 py-8">
+                  <div className="text-center text-base-content/50 py-8 font-sans">
                     No events yet.
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     {rawEvents.map((event, index) => (
-                      <FormattedEvent key={index} event={event} />
+                      <pre key={index} className="bg-base-300 p-3 rounded-lg overflow-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify({ eventType: event.eventType, data: event.data }, null, 2)}
+                      </pre>
                     ))}
                   </div>
                 )}
               </div>
             ) : (
-              /* Normal formatted view */
-              <div className="max-w-4xl mx-auto space-y-4">
-                {messages
-                  .filter((message) => shouldShowMessage(message, user?.chatVerbosityLevel || 'verbose'))
-                  .map((message) => (
-                  message.type === 'system' ? (
-                    // Compact inline status update - no panel, faint text, inline timestamp
-                    <div key={message.id} className="text-xs text-base-content/40 py-0.5">
-                      <span className="opacity-60">{new Date(message.timestamp).toLocaleTimeString()}</span>
-                      <span className="mx-2">•</span>
-                      <LinkifyText text={message.content} className="opacity-80" />
-                    </div>
-                  ) : (
-                    <ChatMessage
-                      key={message.id}
-                      message={{ ...message, images: message.images ?? undefined }}
-                      userName={user?.displayName || user?.email}
-                      onImageClick={setViewingImage}
-                      onRetry={handleRetry}
-                      showRetry={message.type === 'error' && !!lastRequest && !isExecuting}
-                    />
-                  )
-                ))}
+              /* Normal formatted view - uses FormattedEvent for rawEvents */
+              <div className="max-w-4xl mx-auto space-y-1">
+                {rawEvents.length === 0 ? (
+                  <div className="text-center text-base-content/50 py-8">
+                    No events yet.
+                  </div>
+                ) : (
+                  <FormattedEventList events={rawEvents} />
+                )}
 
               {isExecuting && (
                 <div className="flex justify-start">

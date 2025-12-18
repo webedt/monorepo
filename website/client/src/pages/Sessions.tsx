@@ -229,9 +229,29 @@ export default function Sessions() {
     },
   });
 
-  // Sync sessions from Anthropic API
+  // Sync sessions from Anthropic API and sync events for all non-trashed sessions
   const syncMutation = useMutation({
-    mutationFn: () => sessionsApi.sync({ activeOnly: true }),
+    mutationFn: async () => {
+      // Step 1: Sync sessions from Anthropic
+      const syncResult = await sessionsApi.sync({ activeOnly: true });
+
+      // Step 2: Get all non-trashed sessions and sync their events
+      const activeSessions = allSessions.filter((s) => !s.deletedAt);
+
+      if (activeSessions.length > 0) {
+        console.log(`[Sync] Syncing events for ${activeSessions.length} session(s)`);
+        // Sync events in parallel
+        const eventSyncPromises = activeSessions.map((session) =>
+          sessionsApi.syncEvents(session.id).catch((err) => {
+            console.warn(`[Sync] Failed to sync events for session ${session.id}:`, err);
+            return null; // Don't fail the whole sync if one session fails
+          })
+        );
+        await Promise.all(eventSyncPromises);
+      }
+
+      return syncResult;
+    },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       const result = data?.data;
