@@ -221,15 +221,76 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
 
   // User and Assistant get special chat bubble treatment
   if (eventType === 'user') {
-    const userContent = typeof event.message?.content === 'string'
-      ? event.message.content
-      : JSON.stringify(event.message?.content);
+    const content = event.message?.content;
 
+    // Handle string content
+    if (typeof content === 'string') {
+      return (
+        <div className="flex justify-end my-2">
+          <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
+            <div className="text-sm">
+              <MarkdownRenderer content={content} />
+            </div>
+            <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // Handle array content (text + images)
+    if (Array.isArray(content)) {
+      const textBlocks = content.filter((block: any) => block.type === 'text');
+      const imageBlocks = content.filter((block: any) => block.type === 'image');
+      const textContent = textBlocks.map((block: any) => block.text || '').join('\n').trim();
+
+      return (
+        <div className="flex justify-end my-2">
+          <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
+            {textContent && (
+              <div className="text-sm">
+                <MarkdownRenderer content={textContent} />
+              </div>
+            )}
+            {imageBlocks.length > 0 && (
+              <div className={`flex flex-wrap gap-2 ${textContent ? 'mt-2' : ''}`}>
+                {imageBlocks.map((block: any, i: number) => {
+                  const source = block.source;
+                  if (source?.type === 'base64' && source?.data && source?.media_type) {
+                    return (
+                      <img
+                        key={i}
+                        src={`data:${source.media_type};base64,${source.data}`}
+                        alt="User uploaded image"
+                        className="max-w-full max-h-64 rounded-lg object-contain"
+                      />
+                    );
+                  }
+                  if (source?.type === 'url' && source?.url) {
+                    return (
+                      <img
+                        key={i}
+                        src={source.url}
+                        alt="User uploaded image"
+                        className="max-w-full max-h-64 rounded-lg object-contain"
+                      />
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            )}
+            <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // Fallback for unknown content types
     return (
       <div className="flex justify-end my-2">
         <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
           <div className="text-sm">
-            <MarkdownRenderer content={userContent || ''} />
+            <MarkdownRenderer content={JSON.stringify(content)} />
           </div>
           <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
         </div>
