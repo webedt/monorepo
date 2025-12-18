@@ -195,9 +195,21 @@ export const useAuthStore = create<AuthState>((set) => ({
   setLoading: (isLoading) => set({ isLoading }),
 }));
 
-interface RepoConnectionState {
+// ============================================================================
+// REPOSITORY CONNECTION STATE
+// ============================================================================
+// This store manages the currently selected repository and branch, persisting
+// to localStorage so it survives page refreshes and navigation.
+// ============================================================================
+
+const REPO_CONNECTION_STORAGE_KEY = 'repoConnectionState';
+
+interface RepoConnectionData {
   selectedRepo: string;
   baseBranch: string;
+}
+
+interface RepoConnectionState extends RepoConnectionData {
   isLocked: boolean;
   setSelectedRepo: (repo: string) => void;
   setBaseBranch: (branch: string) => void;
@@ -205,15 +217,62 @@ interface RepoConnectionState {
   clearRepoConnection: () => void;
 }
 
-export const useRepoStore = create<RepoConnectionState>((set) => ({
-  selectedRepo: '',
-  baseBranch: '',
-  isLocked: false,
-  setSelectedRepo: (repo) => set({ selectedRepo: repo }),
-  setBaseBranch: (branch) => set({ baseBranch: branch }),
-  setIsLocked: (locked) => set({ isLocked: locked }),
-  clearRepoConnection: () => set({ selectedRepo: '', baseBranch: '', isLocked: false }),
-}));
+// Load initial state from localStorage
+function loadRepoConnection(): RepoConnectionData {
+  const defaults: RepoConnectionData = {
+    selectedRepo: '',
+    baseBranch: '',
+  };
+
+  try {
+    const stored = localStorage.getItem(REPO_CONNECTION_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return { ...defaults, ...parsed };
+    }
+  } catch (e) {
+    console.warn('[RepoConnection] Failed to load from localStorage:', e);
+  }
+  return defaults;
+}
+
+// Save state to localStorage
+function saveRepoConnection(data: RepoConnectionData) {
+  try {
+    localStorage.setItem(REPO_CONNECTION_STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn('[RepoConnection] Failed to save to localStorage:', e);
+  }
+}
+
+export const useRepoStore = create<RepoConnectionState>((set, get) => {
+  const initialData = loadRepoConnection();
+
+  return {
+    ...initialData,
+    isLocked: false, // Never persist locked state - it's session-specific
+
+    setSelectedRepo: (repo: string) => {
+      set({ selectedRepo: repo });
+      saveRepoConnection({ selectedRepo: repo, baseBranch: get().baseBranch });
+    },
+
+    setBaseBranch: (branch: string) => {
+      set({ baseBranch: branch });
+      saveRepoConnection({ selectedRepo: get().selectedRepo, baseBranch: branch });
+    },
+
+    setIsLocked: (locked: boolean) => {
+      set({ isLocked: locked });
+      // Don't persist locked state - it's transient/session-specific
+    },
+
+    clearRepoConnection: () => {
+      set({ selectedRepo: '', baseBranch: '', isLocked: false });
+      saveRepoConnection({ selectedRepo: '', baseBranch: '' });
+    },
+  };
+});
 
 // ============================================================================
 // SESSION LAST VISITED PAGE TRACKING
