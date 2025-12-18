@@ -91,50 +91,163 @@ export interface GitOutcomeInfo {
 }
 
 /**
+ * Assistant message content block
+ */
+export interface AssistantContentBlock {
+  type: 'text' | 'thinking' | 'tool_use';
+  text?: string;
+  thinking?: string;
+  signature?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+/**
+ * Extended message type for user/assistant events
+ */
+export interface SessionMessage {
+  role: 'user' | 'assistant';
+  content: string | ContentBlock[] | AssistantContentBlock[];
+  // Assistant message fields
+  id?: string;
+  type?: 'message';
+  model?: string;
+  usage?: SessionUsage;
+  stop_reason?: string | null;
+  stop_sequence?: string | null;
+  context_management?: Record<string, unknown> | null;
+}
+
+/**
+ * Usage information from assistant/result events
+ */
+export interface SessionUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  service_tier?: string;
+  cache_creation?: {
+    ephemeral_1h_input_tokens?: number;
+    ephemeral_5m_input_tokens?: number;
+  };
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  server_tool_use?: {
+    web_fetch_requests?: number;
+    web_search_requests?: number;
+  };
+}
+
+/**
+ * Model-specific usage tracking
+ */
+export interface ModelUsage {
+  costUSD?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  contextWindow?: number;
+  webSearchRequests?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}
+
+/**
+ * Control response from session control commands
+ */
+export interface ControlResponse {
+  subtype: 'success' | 'error';
+  request_id: string;
+  error?: string;
+  response?: Record<string, unknown>;
+  pending_permission_requests?: unknown[];
+}
+
+/**
+ * Environment manager log data
+ */
+export interface EnvManagerLogData {
+  type?: string;
+  category?: string;
+  content?: string;  // Main message content
+  message?: string;  // Alternative message field
+  level?: 'debug' | 'info' | 'warn' | 'error';
+  extra?: Record<string, unknown>;
+  timestamp?: string;  // Inner timestamp from env manager
+}
+
+/**
  * Event from the session events API
+ * This interface represents all possible event types from Claude Remote sessions
  */
 export interface SessionEvent {
   uuid: string;
   type: SessionEventType;
   session_id?: string;
-  parent_tool_use_id?: string;
+  parent_tool_use_id?: string | null;
   timestamp?: string;
 
-  // User message event
-  message?: {
-    role: 'user' | 'assistant';
-    content: string | ContentBlock[];
-  };
+  // === User/Assistant message events ===
+  message?: SessionMessage;
+  isReplay?: boolean;
 
-  // Result event (completion)
+  // === Result event (completion) ===
   result?: string;
   total_cost_usd?: number;
   duration_ms?: number;
+  duration_api_ms?: number;
   num_turns?: number;
+  is_error?: boolean;
+  subtype?: 'success' | 'error' | 'init';
+  usage?: SessionUsage;
+  modelUsage?: Record<string, ModelUsage>;
+  permission_denials?: unknown[];
 
-  // Tool use event
+  // === Tool use event ===
   tool_use?: {
     name: string;
     input: Record<string, unknown>;
   };
 
-  // Tool result event
+  // === Tool result event ===
   tool_use_result?: {
     tool_use_id: string;
     stdout?: string;
     stderr?: string;
     is_error?: boolean;
+    file?: {
+      content?: string;
+      numLines?: number;
+    };
+    filePath?: string;
+    oldString?: string;
+    newString?: string;
+    structuredPatch?: unknown[];
   };
 
-  // Environment manager log
-  data?: {
-    type?: string;
-    category?: string;
-    content?: string;  // Actual message content from env_manager_log
-    message?: string;  // Alternative message field
-    level?: string;
-    extra?: Record<string, unknown>;
-  };
+  // === Tool progress event ===
+  tool_name?: string;
+  tool_use_id?: string;
+  elapsed_time_seconds?: number;
+
+  // === Environment manager log ===
+  data?: EnvManagerLogData;
+
+  // === Control response ===
+  response?: ControlResponse;
+
+  // === System event ===
+  cwd?: string;
+  model?: string;
+  tools?: string[];
+  agents?: string[];
+  skills?: string[];
+  plugins?: unknown[];
+  mcp_servers?: Array<{ name: string }>;
+  apiKeySource?: string;
+  output_style?: string;
+  permissionMode?: string;
+  slash_commands?: string[];
+  claude_code_version?: string;
 }
 
 /**
@@ -146,7 +259,9 @@ export type SessionEventType =
   | 'result'
   | 'tool_use'
   | 'tool_result'
+  | 'tool_progress'
   | 'env_manager_log'
+  | 'control_response'
   | 'system'
   | 'error';
 
