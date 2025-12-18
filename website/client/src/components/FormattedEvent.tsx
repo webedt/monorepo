@@ -1,5 +1,40 @@
+import { useState } from 'react';
 import { ExpandableJson, ExpandableThinking } from './ExpandableContent';
 import { MarkdownRenderer } from './MarkdownRenderer';
+
+// Image preview modal component
+function ImagePreviewModal({
+  src,
+  alt,
+  onClose
+}: {
+  src: string;
+  alt: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      onClick={onClose}
+    >
+      <div className="relative max-w-[90vw] max-h-[90vh]">
+        <button
+          onClick={onClose}
+          className="absolute -top-10 right-0 text-white/80 hover:text-white text-2xl font-bold"
+          aria-label="Close preview"
+        >
+          ✕
+        </button>
+        <img
+          src={src}
+          alt={alt}
+          className="max-w-full max-h-[90vh] object-contain rounded-lg"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+    </div>
+  );
+}
 
 // Content block types for structured multimodal content
 interface TextBlock {
@@ -255,6 +290,7 @@ function getStatusSummary(eventType: string, event: any): string {
 
 // Format a raw event for display
 export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: RawEvent; filters?: Record<string, boolean>; toolResultMap?: Map<string, any> }) {
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const eventType = event.type;
   const emoji = getEventEmoji(eventType);
   const time = event.timestamp.toLocaleTimeString();
@@ -273,44 +309,56 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
       const textContent = textBlocks.map(block => block.text || '').join('\n').trim();
 
       return (
-        <div className="flex justify-end my-2">
-          <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
-            {textContent && (
-              <div className="text-sm">
-                <MarkdownRenderer content={textContent} />
-              </div>
-            )}
-            {imageBlocks.length > 0 && (
-              <div className={`flex flex-wrap gap-2 ${textContent ? 'mt-2' : ''}`}>
-                {imageBlocks.map((block, i) => {
-                  const source = block.source;
-                  if (source?.type === 'base64' && source?.data && source?.media_type) {
-                    return (
-                      <img
-                        key={i}
-                        src={`data:${source.media_type};base64,${source.data}`}
-                        alt="User uploaded image"
-                        className="max-w-full max-h-64 rounded-lg object-contain"
-                      />
-                    );
-                  }
-                  if (source?.type === 'url' && source?.url) {
-                    return (
-                      <img
-                        key={i}
-                        src={source.url}
-                        alt="User uploaded image"
-                        className="max-w-full max-h-64 rounded-lg object-contain"
-                      />
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-            )}
-            <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+        <>
+          {previewImage && (
+            <ImagePreviewModal
+              src={previewImage.src}
+              alt={previewImage.alt}
+              onClose={() => setPreviewImage(null)}
+            />
+          )}
+          <div className="flex justify-end my-2">
+            <div className="max-w-[80%] bg-base-300 rounded-2xl rounded-br-sm px-4 py-2">
+              {textContent && (
+                <div className="text-sm">
+                  <MarkdownRenderer content={textContent} />
+                </div>
+              )}
+              {imageBlocks.length > 0 && (
+                <div className={`flex flex-wrap gap-2 ${textContent ? 'mt-2' : ''}`}>
+                  {imageBlocks.map((block, i) => {
+                    const source = block.source;
+                    if (source?.type === 'base64' && source?.data && source?.media_type) {
+                      const imgSrc = `data:${source.media_type};base64,${source.data}`;
+                      return (
+                        <img
+                          key={i}
+                          src={imgSrc}
+                          alt="User uploaded image"
+                          className="max-w-full max-h-64 rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => setPreviewImage({ src: imgSrc, alt: 'User uploaded image' })}
+                        />
+                      );
+                    }
+                    if (source?.type === 'url' && source?.url) {
+                      return (
+                        <img
+                          key={i}
+                          src={source.url}
+                          alt="User uploaded image"
+                          className="max-w-full max-h-64 rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => setPreviewImage({ src: source.url!, alt: 'User uploaded image' })}
+                        />
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
+              )}
+              <div className="text-xs opacity-40 mt-1 text-right">{time}</div>
+            </div>
           </div>
-        </div>
+        </>
       );
     }
 
