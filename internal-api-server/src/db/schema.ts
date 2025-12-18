@@ -111,8 +111,7 @@ export const events = pgTable('events', {
   chatSessionId: text('chat_session_id')
     .notNull()
     .references(() => chatSessions.id, { onDelete: 'cascade' }),
-  eventType: text('event_type').notNull(), // SSE event name: 'commit_progress', 'github_pull_progress', 'assistant_message', etc.
-  eventData: json('event_data').notNull(), // Raw JSON data from SSE event
+  eventData: json('event_data').notNull(), // Raw JSON event (includes type field within the JSON)
   timestamp: timestamp('timestamp').defaultNow().notNull(),
 });
 

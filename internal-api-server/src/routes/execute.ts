@@ -410,7 +410,6 @@ const executeHandler = async (req: Request, res: Response) => {
         try {
           await db.insert(events).values({
             chatSessionId: chatSession.id,
-            eventType: event.type,
             eventData: event
           });
         } catch (err) {
@@ -888,7 +887,6 @@ const executeHandler = async (req: Request, res: Response) => {
                   try {
                     await db.insert(events).values({
                       chatSessionId: chatSession.id,
-                      eventType: eventData.type,
                       eventData: eventData
                     });
                     logger.debug('Event stored to database', {
