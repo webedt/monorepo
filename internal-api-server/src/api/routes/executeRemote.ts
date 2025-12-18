@@ -16,6 +16,7 @@ import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl } from '@webed
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
+import { cleanupRedundantSessions } from '../../logic/sessions/claudeSessionSync.js';
 import {
   getExecutionProvider,
   type ExecutionEvent,
@@ -424,6 +425,23 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             chatSessionId,
             remoteSessionId: (event as any).remoteSessionId,
           });
+
+          // Clean up any redundant pending sessions created around the same time
+          // This handles cases where user submitted a request but it failed early,
+          // leaving orphaned pending sessions
+          const cleanedUp = await cleanupRedundantSessions(
+            user.id,
+            chatSessionId,
+            chatSession?.createdAt || new Date(),
+            repositoryOwner,
+            repositoryName
+          );
+          if (cleanedUp > 0) {
+            logger.info(`Cleaned up ${cleanedUp} redundant session(s) after linking`, {
+              component: 'ExecuteRemoteRoute',
+              chatSessionId,
+            });
+          }
         } catch (err) {
           logger.error('Failed to save remote session ID', err, {
             component: 'ExecuteRemoteRoute',
