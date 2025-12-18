@@ -53,43 +53,6 @@ body {
   font-size: 2rem;
 }
 
-/* Biotin theme - inspired by purple shampoo bottle with gold accents */
-[data-theme='biotin'] {
-  --p: 38 75% 55%; /* Primary: warm gold buttons */
-  --pf: 38 75% 45%; /* Primary focus: darker gold */
-  --pc: 270 60% 20%; /* Primary content: dark purple text on gold */
-  --s: 270 55% 40%; /* Secondary: medium purple */
-  --sf: 270 55% 32%; /* Secondary focus: darker purple */
-  --sc: 38 80% 85%; /* Secondary content: gold text */
-  --a: 35 85% 58%; /* Accent: orange-gold */
-  --af: 35 85% 48%; /* Accent focus */
-  --ac: 270 60% 18%; /* Accent content: dark purple text */
-  --n: 270 50% 30%; /* Neutral: purple */
-  --nf: 270 50% 25%; /* Neutral focus */
-  --nc: 38 70% 75%; /* Neutral content: gold text */
-  --b1: 270 55% 22%; /* Base background: rich purple */
-  --b2: 270 50% 28%; /* Base 200: lighter purple */
-  --b3: 270 45% 35%; /* Base 300: even lighter purple */
-  --bc: 38 80% 65%; /* Base content: gold text */
-  --in: 195 80% 55%; /* Info: cyan */
-  --inc: 195 100% 10%; /* Info content */
-  --su: 140 60% 50%; /* Success: green */
-  --suc: 140 100% 10%; /* Success content */
-  --wa: 38 90% 55%; /* Warning: gold (matching theme) */
-  --wac: 38 100% 10%; /* Warning content */
-  --er: 0 70% 55%; /* Error: red */
-  --erc: 0 100% 95%; /* Error content */
-  --rounded-box: 1rem;
-  --rounded-btn: 0.5rem;
-  --rounded-badge: 1.9rem;
-  --animation-btn: 0.25s;
-  --animation-input: 0.2s;
-  --btn-focus-scale: 0.95;
-  --border-btn: 1px;
-  --tab-border: 1px;
-  --tab-radius: 0.5rem;
-}
-
 /* Customize bumblebee theme to be more yellow and black */
 [data-theme='bumblebee'] {
   --p: 45 100% 50%; /* Primary: bright yellow */
