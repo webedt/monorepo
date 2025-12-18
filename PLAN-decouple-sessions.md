@@ -126,6 +126,112 @@ CREATE TABLE live_chat_messages (
 CREATE INDEX idx_live_chat_branch ON live_chat_messages(owner, repo, branch);
 ```
 
+### New Table: `workspace_presence` (Ephemeral State)
+
+```sql
+-- One row per user per branch (UPSERT pattern)
+CREATE TABLE workspace_presence (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  branch TEXT NOT NULL,
+
+  -- Current state (constantly updated via UPSERT)
+  page TEXT,                    -- 'code', 'images', 'sounds', 'scenes', 'chat'
+  cursor_x INT,
+  cursor_y INT,
+  selection JSONB,              -- Current selection (file path, text range, etc.)
+  heartbeat_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  PRIMARY KEY (user_id, owner, repo, branch)
+);
+
+-- Index for "who's online on this branch?"
+CREATE INDEX idx_presence_branch
+  ON workspace_presence (owner, repo, branch, heartbeat_at DESC);
+```
+
+### New Table: `workspace_events` (Persistent Log)
+
+```sql
+-- Append-only log of all actions (file edits, uploads, etc.)
+CREATE TABLE workspace_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  branch TEXT NOT NULL,
+
+  event_type TEXT NOT NULL,     -- 'file_edit', 'file_create', 'file_delete',
+                                -- 'image_upload', 'sound_upload', 'scene_update', etc.
+  page TEXT,                    -- 'code', 'images', 'sounds', 'scenes', 'chat'
+  path TEXT,                    -- File/resource path affected
+  payload JSONB,                -- Event-specific data
+
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Index for streaming events on a branch
+CREATE INDEX idx_events_branch
+  ON workspace_events (owner, repo, branch, created_at DESC);
+```
+
+### PostgreSQL LISTEN/NOTIFY Triggers
+
+```sql
+-- Notify on presence changes
+CREATE OR REPLACE FUNCTION notify_presence_change()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM pg_notify(
+    'workspace_presence',
+    json_build_object(
+      'user_id', NEW.user_id,
+      'owner', NEW.owner,
+      'repo', NEW.repo,
+      'branch', NEW.branch,
+      'page', NEW.page,
+      'cursor_x', NEW.cursor_x,
+      'cursor_y', NEW.cursor_y,
+      'selection', NEW.selection
+    )::text
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER presence_notify
+  AFTER INSERT OR UPDATE ON workspace_presence
+  FOR EACH ROW EXECUTE FUNCTION notify_presence_change();
+
+-- Notify on new events
+CREATE OR REPLACE FUNCTION notify_workspace_event()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM pg_notify(
+    'workspace_events',
+    json_build_object(
+      'id', NEW.id,
+      'user_id', NEW.user_id,
+      'owner', NEW.owner,
+      'repo', NEW.repo,
+      'branch', NEW.branch,
+      'event_type', NEW.event_type,
+      'page', NEW.page,
+      'path', NEW.path,
+      'payload', NEW.payload
+    )::text
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER event_notify
+  AFTER INSERT ON workspace_events
+  FOR EACH ROW EXECUTE FUNCTION notify_workspace_event();
+```
+
 ---
 
 ## Implementation Phases
@@ -168,13 +274,26 @@ CREATE INDEX idx_live_chat_branch ON live_chat_messages(owner, repo, branch);
 3. Implement local LLM execution (same streaming as remote agents)
 4. Connect Live Chat to branch workspace
 
-### Phase 6: Database Migration (High Risk)
+### Phase 6: Collaborative Layer (High Complexity)
+1. Create `workspace_presence` table (ephemeral, UPSERT)
+2. Create `workspace_events` table (persistent, INSERT)
+3. Set up PostgreSQL LISTEN/NOTIFY triggers
+4. Create API endpoints:
+   - `PUT /api/workspace/presence` - Update presence (throttled by client)
+   - `GET /api/workspace/presence` - Get active users on branch
+   - `POST /api/workspace/events` - Log an event
+   - `GET /api/workspace/events/stream` - SSE stream for branch
+5. Add polling fallback (every 5-10s) for sync correction
+6. Implement offline detection (heartbeat > 30s = offline)
+7. Add presence indicators to UI (show other users' cursors, selections)
+
+### Phase 7: Database Migration (High Risk)
 1. Rename `chat_sessions` table to `agents`
 2. Update all references in code
 3. Update API endpoints
 4. Test thoroughly before deploying
 
-### Phase 7: Cleanup
+### Phase 8: Cleanup
 1. Remove old session-based code paths
 2. Remove temporary redirects
 3. Update documentation
