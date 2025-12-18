@@ -316,9 +316,10 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       // Notify subscribers about new session
       sessionListBroadcaster.notifySessionCreated(user.id, chatSession);
     } else {
-      // Update existing session
+      // Update existing session status only - don't overwrite the session title (userRequest)
+      // The title should remain as the initial generated title until user renames it
       await db.update(chatSessions)
-        .set({ status: 'running', userRequest: serializedRequest })
+        .set({ status: 'running' })
         .where(eq(chatSessions.id, chatSessionId));
 
       // Notify subscribers about status change
