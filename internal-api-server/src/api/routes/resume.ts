@@ -84,6 +84,31 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
       'X-Accel-Buffering': 'no'
     });
 
+    // Send submission preview event immediately so user sees their request was received
+    // userRequest contains the session title (updated when session_name event is received)
+    const sessionName = session.userRequest || session.sessionPath || session.id;
+    const repoInfo = session.repositoryOwner && session.repositoryName
+      ? `${session.repositoryOwner}/${session.repositoryName}`
+      : null;
+    const previewText = repoInfo
+      ? `Resuming session: ${sessionName} (${repoInfo})`
+      : `Resuming session: ${sessionName}`;
+
+    res.write(`data: ${JSON.stringify({
+      type: 'submission_preview',
+      message: previewText,
+      source: 'internal-api-server:/resume',
+      timestamp: new Date().toISOString(),
+      data: {
+        sessionId: session.id,
+        sessionName,
+        repositoryOwner: session.repositoryOwner,
+        repositoryName: session.repositoryName,
+        branch: session.branch,
+        status: session.status
+      }
+    })}\n\n`);
+
     // Handle 'running' sessions
     if (session.status === 'running') {
       // Check if AI Worker is still active using both in-memory map and DB activity
