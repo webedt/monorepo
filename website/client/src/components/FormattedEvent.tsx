@@ -298,6 +298,15 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
         {toolBlocks.length > 0 && (
           <div className="ml-4 mt-1 space-y-1">
             {toolBlocks.map((block: any, i: number) => {
+              // Special formatting for Read tool
+              if (block.name === 'Read') {
+                return (
+                  <div key={`tool-${i}`} className="text-xs opacity-70 py-1 px-2 bg-base-200 rounded border-l-2 border-blue-400">
+                    <span className="font-medium">📖 Read:</span>{' '}
+                    <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
+                  </div>
+                );
+              }
               // Special formatting for Bash tool
               if (block.name === 'Bash') {
                 const description = block.input?.description || 'Running command';

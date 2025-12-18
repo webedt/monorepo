@@ -11,7 +11,10 @@
       "Bash(git push:*)",
       "Bash(npx tsc)",
       "Bash(npm test:*)",
-      "Bash(gh pr create:*)"
+      "Bash(gh pr create:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []
