@@ -576,6 +576,25 @@ export const adminApi = {
     }),
 
   getStats: () => fetchApi('/api/admin/stats'),
+
+  // Logs management
+  getLogs: (params?: { level?: string; component?: string; sessionId?: string; since?: string; limit?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.level) queryParams.append('level', params.level);
+    if (params?.component) queryParams.append('component', params.component);
+    if (params?.sessionId) queryParams.append('sessionId', params.sessionId);
+    if (params?.since) queryParams.append('since', params.since);
+    if (params?.limit) queryParams.append('limit', String(params.limit));
+    const queryString = queryParams.toString();
+    return fetchApi(`/api/logs${queryString ? `?${queryString}` : ''}`);
+  },
+
+  clearLogs: () =>
+    fetchApi('/api/logs', {
+      method: 'DELETE',
+    }),
+
+  getLogsStatus: () => fetchApi('/api/logs/status'),
 };
 
 // Storage API (connects to internal-api-server storage routes)

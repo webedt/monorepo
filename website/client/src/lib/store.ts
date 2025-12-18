@@ -195,21 +195,76 @@ export const useAuthStore = create<AuthState>((set) => ({
   setLoading: (isLoading) => set({ isLoading }),
 }));
 
-interface RepoConnectionState {
+// ============================================================================
+// REPOSITORY CONNECTION STATE
+// ============================================================================
+// This store manages the currently selected repository and branch, persisting
+// to localStorage so it survives page refreshes and navigation.
+// ============================================================================
+
+const REPO_CONNECTION_STORAGE_KEY = 'repoConnectionState';
+
+interface RepoConnectionData {
   selectedRepo: string;
+}
+
+interface RepoConnectionState extends RepoConnectionData {
   isLocked: boolean;
   setSelectedRepo: (repo: string) => void;
   setIsLocked: (locked: boolean) => void;
   clearRepoConnection: () => void;
 }
 
-export const useRepoStore = create<RepoConnectionState>((set) => ({
-  selectedRepo: '',
-  isLocked: false,
-  setSelectedRepo: (repo) => set({ selectedRepo: repo }),
-  setIsLocked: (locked) => set({ isLocked: locked }),
-  clearRepoConnection: () => set({ selectedRepo: '', isLocked: false }),
-}));
+// Load initial state from localStorage
+function loadRepoConnection(): RepoConnectionData {
+  const defaults: RepoConnectionData = {
+    selectedRepo: '',
+  };
+
+  try {
+    const stored = localStorage.getItem(REPO_CONNECTION_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return { ...defaults, ...parsed };
+    }
+  } catch (e) {
+    console.warn('[RepoConnection] Failed to load from localStorage:', e);
+  }
+  return defaults;
+}
+
+// Save state to localStorage
+function saveRepoConnection(data: RepoConnectionData) {
+  try {
+    localStorage.setItem(REPO_CONNECTION_STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn('[RepoConnection] Failed to save to localStorage:', e);
+  }
+}
+
+export const useRepoStore = create<RepoConnectionState>((set) => {
+  const initialData = loadRepoConnection();
+
+  return {
+    ...initialData,
+    isLocked: false, // Never persist locked state - it's session-specific
+
+    setSelectedRepo: (repo: string) => {
+      set({ selectedRepo: repo });
+      saveRepoConnection({ selectedRepo: repo });
+    },
+
+    setIsLocked: (locked: boolean) => {
+      set({ isLocked: locked });
+      // Don't persist locked state - it's transient/session-specific
+    },
+
+    clearRepoConnection: () => {
+      set({ selectedRepo: '', isLocked: false });
+      saveRepoConnection({ selectedRepo: '' });
+    },
+  };
+});
 
 // ============================================================================
 // SESSION LAST VISITED PAGE TRACKING

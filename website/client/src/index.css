@@ -21,6 +21,26 @@ body {
   min-height: 100vh;
 }
 
+/* Disable horizontal scrolling on mobile devices */
+@media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
+  /* Allow horizontal scroll for images that need it (zoomed or oversized) */
+  .image-scrollable {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Ensure content doesn't cause horizontal overflow */
+  #root {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+}
+
 /* Apply pixel font for retro theme */
 [data-theme='retro'] {
   font-family: 'VT323', monospace;
@@ -53,35 +73,84 @@ body {
   font-size: 2rem;
 }
 
-/* Customize bumblebee theme to be more yellow and black */
+/* Customize bumblebee theme to be more yellow and black (daisyUI 5.x format) */
 [data-theme='bumblebee'] {
-  --p: 45 100% 50%; /* Primary: bright yellow */
-  --s: 0 0% 0%; /* Secondary: black */
-  --a: 45 100% 60%; /* Accent: lighter yellow */
-  --n: 0 0% 15%; /* Neutral: dark gray */
-  --b1: 45 100% 85%; /* Base background: light yellow */
-  --b2: 45 100% 75%; /* Base 200: medium yellow */
-  --b3: 45 100% 65%; /* Base 300: darker yellow */
-  --bc: 0 0% 10%; /* Base content: almost black text */
-  --pc: 0 0% 10%; /* Primary content: black text on yellow */
-  --sc: 45 100% 90%; /* Secondary content: light yellow text on black */
-  --ac: 0 0% 10%; /* Accent content: black text */
-  --nc: 45 100% 90%; /* Neutral content: light yellow text */
-  --in: 195 100% 50%; /* Info */
-  --su: 140 60% 50%; /* Success */
-  --wa: 40 100% 50%; /* Warning */
-  --er: 0 70% 50%; /* Error */
+  color-scheme: light;
+  --color-base-100: oklch(95% .14 95);
+  --color-base-200: oklch(88% .15 95);
+  --color-base-300: oklch(78% .14 95);
+  --color-base-content: oklch(15% 0 0);
+  --color-primary: oklch(85% .2 92);
+  --color-primary-content: oklch(15% 0 0);
+  --color-secondary: oklch(0% 0 0);
+  --color-secondary-content: oklch(95% .12 95);
+  --color-accent: oklch(90% .18 92);
+  --color-accent-content: oklch(15% 0 0);
+  --color-neutral: oklch(25% .01 90);
+  --color-neutral-content: oklch(92% .08 95);
+  --color-info: oklch(74% .16 232);
+  --color-info-content: oklch(29% .07 243);
+  --color-success: oklch(76% .18 163);
+  --color-success-content: oklch(37% .08 169);
+  --color-warning: oklch(82% .19 84);
+  --color-warning-content: oklch(41% .11 46);
+  --color-error: oklch(71% .19 22);
+  --color-error-content: oklch(39% .14 26);
+  --radius-selector: 1rem;
+  --radius-field: .5rem;
+  --radius-box: 1rem;
+  --size-selector: .25rem;
+  --size-field: .25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* Biotin theme - purple bottle with gold text (daisyUI 5.x format) */
+[data-theme='biotin'] {
+  color-scheme: dark;
+  --color-base-100: oklch(18% .09 285);
+  --color-base-200: oklch(24% .08 285);
+  --color-base-300: oklch(32% .07 285);
+  --color-base-content: oklch(78% .12 75);
+  --color-primary: oklch(75% .15 75);
+  --color-primary-content: oklch(20% .05 285);
+  --color-secondary: oklch(45% .12 285);
+  --color-secondary-content: oklch(85% .08 75);
+  --color-accent: oklch(78% .14 65);
+  --color-accent-content: oklch(20% .05 285);
+  --color-neutral: oklch(28% .08 285);
+  --color-neutral-content: oklch(80% .10 75);
+  --color-info: oklch(74% .16 232);
+  --color-info-content: oklch(29% .07 243);
+  --color-success: oklch(76% .18 163);
+  --color-success-content: oklch(37% .08 169);
+  --color-warning: oklch(78% .15 75);
+  --color-warning-content: oklch(25% .06 75);
+  --color-error: oklch(71% .19 22);
+  --color-error-content: oklch(27% .10 12);
+  --radius-selector: 1rem;
+  --radius-field: .5rem;
+  --radius-box: 1rem;
+  --size-selector: .25rem;
+  --size-field: .25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
 }
 
 /* Markdown content styling */
 .markdown-content {
   word-wrap: break-word;
   overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 .markdown-content pre {
   white-space: pre-wrap;
   word-break: break-word;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .markdown-content code {
@@ -93,4 +162,27 @@ body {
   display: block;
   padding: 0;
   background: transparent;
+}
+
+/* Mobile-specific markdown handling */
+@media (max-width: 768px) {
+  .markdown-content {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .markdown-content pre {
+    max-width: calc(100vw - 2rem);
+  }
+
+  .markdown-content img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Allow horizontal scrolling specifically for large images in a wrapper */
+  .markdown-content .image-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }

@@ -408,7 +408,7 @@ export default function Layout() {
                       ⚙️ Settings
                     </Link>
 
-                    {/* Admin link - only show if user is admin */}
+                    {/* Admin links - only show if user is admin */}
                     {user?.isAdmin && (
                       <>
                         <div className="border-t border-base-300 my-2"></div>
@@ -418,6 +418,13 @@ export default function Layout() {
                           className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors font-medium"
                         >
                           👑 User Administration
+                        </Link>
+                        <Link
+                          to="/admin/logs"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors font-medium"
+                        >
+                          📋 Server Logs
                         </Link>
                       </>
                     )}

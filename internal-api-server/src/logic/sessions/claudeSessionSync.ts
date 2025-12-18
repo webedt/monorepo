@@ -6,7 +6,7 @@
  */
 
 import { db, chatSessions, events, users } from '../db/index.js';
-import { eq, and, or, isNotNull, isNull, gte } from 'drizzle-orm';
+import { eq, and, or, isNotNull, isNull, gte, ne, lte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { ClaudeRemoteClient, generateSessionPath, logger, normalizeRepoUrl } from '@webedt/shared';
 import { ensureValidToken } from '../auth/claudeAuth.js';
@@ -52,6 +52,105 @@ function mapStatus(anthropicStatus: string): string {
     'archived': 'completed'
   };
   return statusMap[anthropicStatus] || 'pending';
+}
+
+/**
+ * Clean up redundant pending sessions
+ *
+ * When a session gets linked to a remoteSessionId, check if there are other
+ * sessions from the same user created around the same time that:
+ * - Have status 'pending' or 'running'
+ * - Have no remoteSessionId (not yet linked)
+ * - Were created within 10 minutes of the linked session
+ * - Either have no repository info OR same repository
+ *
+ * These are likely orphaned/duplicate sessions that should be cleaned up.
+ */
+async function cleanupRedundantSessions(
+  userId: string,
+  linkedSessionId: string,
+  linkedCreatedAt: Date,
+  repositoryOwner?: string | null,
+  repositoryName?: string | null
+): Promise<number> {
+  const tenMinutesBefore = new Date(linkedCreatedAt.getTime() - 10 * 60 * 1000);
+  const tenMinutesAfter = new Date(linkedCreatedAt.getTime() + 10 * 60 * 1000);
+
+  try {
+    // Find potential redundant sessions
+    const redundantSessions = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.userId, userId),
+          ne(chatSessions.id, linkedSessionId), // Exclude the session we just linked
+          isNull(chatSessions.remoteSessionId), // Only sessions without remoteSessionId
+          isNull(chatSessions.deletedAt), // Not already deleted
+          or(
+            eq(chatSessions.status, 'pending'),
+            eq(chatSessions.status, 'running')
+          ),
+          gte(chatSessions.createdAt, tenMinutesBefore),
+          lte(chatSessions.createdAt, tenMinutesAfter)
+        )
+      );
+
+    // Filter to sessions that are truly redundant:
+    // - Sessions with no repository info (orphaned sessions)
+    // - Sessions with the same repository (potential duplicates)
+    const sessionsToCleanup = redundantSessions.filter(session => {
+      // No repository info = likely orphaned
+      if (!session.repositoryOwner || !session.repositoryName) {
+        return true;
+      }
+      // Same repository = potential duplicate
+      if (repositoryOwner && repositoryName &&
+          session.repositoryOwner === repositoryOwner &&
+          session.repositoryName === repositoryName) {
+        return true;
+      }
+      return false;
+    });
+
+    if (sessionsToCleanup.length === 0) {
+      return 0;
+    }
+
+    // Soft-delete redundant sessions
+    const sessionIds = sessionsToCleanup.map(s => s.id);
+    const now = new Date();
+
+    for (const session of sessionsToCleanup) {
+      await db
+        .update(chatSessions)
+        .set({
+          deletedAt: now,
+          status: 'error' // Mark as error to indicate it was cleaned up
+        })
+        .where(eq(chatSessions.id, session.id));
+
+      // Notify subscribers about deletion
+      sessionListBroadcaster.notifySessionDeleted(userId, session.id);
+
+      logger.info(`[SessionSync] Cleaned up redundant session`, {
+        component: 'SessionSync',
+        redundantSessionId: session.id,
+        linkedSessionId,
+        hadRepository: !!(session.repositoryOwner && session.repositoryName),
+        status: session.status
+      });
+    }
+
+    return sessionsToCleanup.length;
+  } catch (error) {
+    logger.error(`[SessionSync] Failed to cleanup redundant sessions`, error as Error, {
+      component: 'SessionSync',
+      linkedSessionId,
+      userId
+    });
+    return 0;
+  }
 }
 
 /**
@@ -406,6 +505,21 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
             status
           });
 
+          // Clean up any redundant pending sessions created around the same time
+          const cleanedUp = await cleanupRedundantSessions(
+            userId,
+            matchingExistingSession.id,
+            matchingExistingSession.createdAt,
+            repositoryOwner,
+            repositoryName
+          );
+          if (cleanedUp > 0) {
+            logger.info(`[SessionSync] Cleaned up ${cleanedUp} redundant session(s) after linking`, {
+              component: 'SessionSync',
+              linkedSessionId: matchingExistingSession.id
+            });
+          }
+
           continue; // Skip creating a new session
         }
 
@@ -473,6 +587,21 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           eventsCount: sessionEvents.length,
           status
         });
+
+        // Clean up any redundant pending sessions created around the same time
+        const cleanedUp = await cleanupRedundantSessions(
+          userId,
+          sessionId,
+          new Date(remoteSession.created_at),
+          repositoryOwner,
+          repositoryName
+        );
+        if (cleanedUp > 0) {
+          logger.info(`[SessionSync] Cleaned up ${cleanedUp} redundant session(s) after import`, {
+            component: 'SessionSync',
+            importedSessionId: sessionId
+          });
+        }
 
       } catch (error) {
         result.errors++;
@@ -616,3 +745,6 @@ export function getSyncStats(): SyncStats {
 export async function triggerSync(): Promise<void> {
   await runSync();
 }
+
+// Export cleanup function for use in execute routes
+export { cleanupRedundantSessions };

@@ -37,6 +37,7 @@ interface SessionLayoutProps {
   titleActions?: React.ReactNode; // Edit and Delete buttons for title line
   prActions?: React.ReactNode; // PR buttons for branch line
   session?: any; // Session data passed from parent to avoid stale data
+  isMaximized?: boolean; // When true, hide header and sidebar for full reading mode
   children: React.ReactNode;
 }
 
@@ -50,6 +51,7 @@ export default function SessionLayout({
   titleActions,
   prActions,
   session: sessionProp,
+  isMaximized = false,
   children,
 }: SessionLayoutProps) {
   const { user, isAuthenticated, clearUser } = useAuthStore();
@@ -106,6 +108,28 @@ export default function SessionLayout({
   const repositories = repositoriesProp ?? reposData?.data ?? [];
   const isLoadingRepos = isLoadingReposProp ?? isLoadingReposQuery;
   const isLocked = isLockedProp ?? (repoStore.isLocked || (!!sessionId && !!sessionData?.data));
+
+  // Get repository display name with fallbacks:
+  // 1. Look up from repositories list by cloneUrl
+  // 2. Use session's repositoryName if available
+  // 3. Extract from URL if possible (e.g., "https://github.com/owner/repo.git" -> "owner/repo")
+  // 4. Fall back to "unknown"
+  const repositoryDisplayName = (() => {
+    // Try lookup first
+    const foundRepo = repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo);
+    if (foundRepo?.fullName) return foundRepo.fullName;
+
+    // Use session's stored repositoryName
+    if (sessionData?.data?.repositoryName) return sessionData.data.repositoryName;
+
+    // Try to extract from URL as last resort
+    if (selectedRepo) {
+      const match = selectedRepo.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/);
+      if (match) return match[1];
+    }
+
+    return 'unknown';
+  })();
 
   const handleLogout = async () => {
     try {
@@ -263,6 +287,17 @@ export default function SessionLayout({
       },
     ] : [])
   ];
+
+  // When maximized, render only the children with minimal wrapper
+  if (isMaximized) {
+    return (
+      <div className="h-screen bg-base-200 flex flex-col">
+        <main className="flex-1 flex flex-col min-h-0 min-w-0">
+          {children}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-base-200 flex flex-col">
@@ -758,7 +793,7 @@ export default function SessionLayout({
                 >
                   <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></div>
                   <span className={`text-base-content/70 ${branchExpanded ? '' : 'truncate'}`}>
-                    {repositories.find((repo: GitHubRepository) => repo.cloneUrl === selectedRepo)?.fullName || 'unknown'}/{baseBranch}
+                    {repositoryDisplayName}/{baseBranch}
                     {branch && (
                       <> → <span className="font-medium">{branchExpanded || branch.length <= 20 ? branch : branch.substring(0, 20) + '…'}</span></>
                     )}

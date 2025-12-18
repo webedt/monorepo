@@ -9,6 +9,7 @@ import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
 import SessionLayout from '@/components/SessionLayout';
+import MobileToolbar from '@/components/MobileToolbar';
 import { FormattedEventList, type RawEvent } from '@/components/FormattedEvent';
 import type { Message, GitHubRepository, ChatSession, ChatVerbosityLevel } from '@/shared';
 
@@ -264,12 +265,28 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     };
   });
   // Show/hide timestamps in chat - persisted to localStorage
+  // On mobile, default to false (hidden) for cleaner view
   const [showTimestamps, setShowTimestamps] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('chatShowTimestamps');
-      return saved === null ? true : saved === 'true'; // Default to true (show timestamps)
+      if (saved !== null) {
+        return saved === 'true';
+      }
+      // No saved preference - default based on screen size
+      // Use window.innerWidth since hook isn't available in initializer
+      const isMobileWidth = typeof window !== 'undefined' && window.innerWidth < 768;
+      return !isMobileWidth; // Default to false on mobile, true on desktop
     } catch {
       return true;
+    }
+  });
+  // Maximized view toggle - persisted to localStorage
+  // When maximized, hides header, sidebar, input area for full reading mode
+  const [isChatMaximized, setIsChatMaximized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('chatMaximized') === 'true';
+    } catch {
+      return false;
     }
   });
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
@@ -322,6 +339,15 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     }
   }, [showTimestamps]);
 
+  // Persist isChatMaximized to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatMaximized', isChatMaximized ? 'true' : 'false');
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [isChatMaximized]);
+
   // Sync local state with global store
   useEffect(() => {
     repoStore.setSelectedRepo(selectedRepo);
@@ -361,8 +387,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         workerStore.startExecution(effectiveSessionId);
       }
     } else if (!isExecuting) {
-      // If we stopped executing, clear global store (only if it matches our session)
-      if (effectiveSessionId && workerStore.executingSessionId === effectiveSessionId) {
+      // If we stopped executing, ALWAYS clear global store
+      // We don't check if sessionId matches because:
+      // 1. The sessionId might have changed during completion (e.g., from 'new' to actual ID)
+      // 2. We want to prevent stuck states from race conditions
+      // 3. Only one session can be executing at a time anyway
+      if (workerStore.executingSessionId) {
         workerStore.stopExecution();
       }
     }
@@ -1424,10 +1454,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       // Re-enable state changes for proper completion detection
+      // Note: We only set local state here. The sync effect at line ~368 will
+      // handle clearing the global workerStore. This prevents a race condition
+      // where stopExecution() clears the store, then the sync effect (seeing
+      // isExecuting still true from the previous render) calls startExecution() again.
       setIsExecuting(false);
       setStreamUrl(null);
       setIsReconnecting(false);
-      workerStore.stopExecution();
       // Capture session ID from completion event
       if (data?.websiteSessionId) {
         console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
@@ -1467,9 +1500,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     },
     onError: (error) => {
       console.log('[Chat] onError called. Error:', error.message);
+      // Note: We only set local state here. The sync effect handles clearing workerStore.
       setIsExecuting(false);
       setStreamUrl(null);
-      workerStore.stopExecution();
     },
     autoReconnect: false, // Disable auto-reconnect to prevent infinite loops
   });
@@ -1640,12 +1673,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Cancel the ongoing stream
       disconnectStream();
 
+      // Note: We only set local state here. The sync effect handles clearing workerStore.
       setIsExecuting(false);
       setStreamUrl(null);
-
-      // Clear global worker state on interrupt
-      workerStore.stopExecution();
-      console.log('[Chat] Job interrupted, worker store cleared');
+      console.log('[Chat] Job interrupted, sync effect will clear worker store');
 
       // Add system message about interruption
       messageIdCounter.current += 1;
@@ -1877,8 +1908,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   // The actual content to render
   const content = (
       <div className="flex flex-col flex-1 overflow-hidden">
-      {/* Alerts/Warnings Area - only show for existing sessions with messages */}
-      {messages.length > 0 && (
+      {/* Alerts/Warnings Area - only show for existing sessions with messages, hidden when maximized */}
+      {!isChatMaximized && messages.length > 0 && (
         <div className="bg-base-100 border-b border-base-300 p-4 flex-shrink-0">
           <div className="max-w-7xl mx-auto space-y-2">
             {/* Title editing mode */}
@@ -2033,8 +2064,27 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       ) : (
         /* Messages area with bottom input panel */
         <>
-          {/* Toolbar: Filter dropdown and Raw JSON toggle */}
-          <div className="flex justify-end items-center gap-2 px-4 py-2 border-b border-base-300 bg-base-200/50">
+          {/* Toolbars - hidden when maximized */}
+          {!isChatMaximized && (
+            <>
+              {/* Mobile Toolbar - only visible on mobile */}
+              <MobileToolbar
+                eventFilters={eventFilters}
+                onEventFiltersChange={setEventFilters}
+                showTimestamps={showTimestamps}
+                onShowTimestampsChange={setShowTimestamps}
+                showRawJson={showRawJson}
+                onShowRawJsonChange={setShowRawJson}
+                prLoading={prLoading}
+                prSuccess={prSuccess}
+                prError={prError}
+                autoPrProgress={autoPrProgress}
+                onPrSuccessDismiss={() => setPrSuccess(null)}
+                onPrErrorDismiss={() => setPrError(null)}
+              />
+
+              {/* Desktop Toolbar: Filter dropdown and Raw JSON toggle - hidden on mobile */}
+              <div className="hidden md:flex justify-end items-center gap-2 px-4 py-2 border-b border-base-300 bg-base-200/50">
             {/* Event filter dropdown - only show in formatted view */}
             {!showRawJson && (
               <div className="dropdown dropdown-end">
@@ -2128,7 +2178,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               </svg>
               Raw JSON
             </button>
-          </div>
+              </div>
+            </>
+          )}
 
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
             {showRawJson ? (
@@ -2277,34 +2329,36 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
             )}
           </div>
 
-          {/* Input panel at bottom when messages exist */}
-          <div className="bg-base-100 border-t border-base-300 p-6 flex-shrink-0">
-            {session?.deletedAt ? (
-              <div className="text-center text-base-content/50 py-2">
-                <span className="text-sm">This session is in the trash. Restore it to continue chatting.</span>
-              </div>
-            ) : (
-              <ChatInput
-                key="bottom-input"
-                ref={chatInputRef}
-                input={input}
-                setInput={setInput}
-                images={images}
-                setImages={setImages}
-                onSubmit={handleSubmit}
-                isExecuting={isExecuting}
-                selectedRepo={selectedRepo}
-                setSelectedRepo={setSelectedRepo}
-                repositories={repositories}
-                isLoadingRepos={isLoadingRepos}
-                isLocked={isLocked}
-                user={user}
-                centered={false}
-                hideRepoSelection={true}
-                onInterrupt={handleInterrupt}
-              />
-            )}
-          </div>
+          {/* Input panel at bottom when messages exist - hidden when maximized */}
+          {!isChatMaximized && (
+            <div className="bg-base-100 border-t border-base-300 p-6 flex-shrink-0">
+              {session?.deletedAt ? (
+                <div className="text-center text-base-content/50 py-2">
+                  <span className="text-sm">This session is in the trash. Restore it to continue chatting.</span>
+                </div>
+              ) : (
+                <ChatInput
+                  key="bottom-input"
+                  ref={chatInputRef}
+                  input={input}
+                  setInput={setInput}
+                  images={images}
+                  setImages={setImages}
+                  onSubmit={handleSubmit}
+                  isExecuting={isExecuting}
+                  selectedRepo={selectedRepo}
+                  setSelectedRepo={setSelectedRepo}
+                  repositories={repositories}
+                  isLoadingRepos={isLoadingRepos}
+                  isLocked={isLocked}
+                  user={user}
+                  centered={false}
+                  hideRepoSelection={true}
+                  onInterrupt={handleInterrupt}
+                />
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -2316,6 +2370,54 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
           fileName={viewingImage.fileName}
           onClose={() => setViewingImage(null)}
         />
+      )}
+
+      {/* Floating maximize/restore button - only show when there are messages */}
+      {messages.length > 0 && (
+        <button
+          onClick={() => setIsChatMaximized(!isChatMaximized)}
+          className={`fixed z-50 btn btn-circle shadow-lg hover:scale-110 transition-all ${
+            isChatMaximized
+              ? 'bottom-4 right-4 btn-primary'
+              : 'bottom-4 right-4 btn-ghost bg-base-100 border border-base-300'
+          }`}
+          title={isChatMaximized ? 'Exit full screen (restore chat input)' : 'Full screen (hide chat input)'}
+          aria-label={isChatMaximized ? 'Restore chat view' : 'Maximize chat view'}
+        >
+          {isChatMaximized ? (
+            /* Restore/minimize icon */
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"
+              />
+            </svg>
+          ) : (
+            /* Maximize/expand icon */
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+              />
+            </svg>
+          )}
+        </button>
       )}
       </div>
   );
@@ -2337,6 +2439,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       titleActions={titleActions}
       prActions={prActions}
       session={session}
+      isMaximized={isChatMaximized}
     >
       {content}
     </SessionLayout>
