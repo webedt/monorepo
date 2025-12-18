@@ -93,6 +93,28 @@ function extractPrompt(userRequest: string | UserRequestContent[]): string {
     .join('\n');
 }
 
+/**
+ * Extract image attachments from userRequest for storage
+ */
+function extractImageAttachments(userRequest: string | UserRequestContent[]): Array<{
+  id: string;
+  data: string;
+  mediaType: string;
+  fileName: string;
+}> {
+  if (typeof userRequest === 'string') {
+    return [];
+  }
+
+  const imageBlocks = userRequest.filter(b => b.type === 'image');
+  return imageBlocks.map((block, index) => ({
+    id: `img-${Date.now()}-${index}`,
+    data: block.source?.data || '',
+    mediaType: block.source?.media_type || 'image/png',
+    fileName: `image-${index + 1}.png`
+  }));
+}
+
 // ============================================================================
 // Execute Remote Handler
 // ============================================================================
@@ -290,11 +312,13 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSessionId, status: 'running' });
     }
 
-    // Store user message
+    // Store user message with extracted images
+    const imageAttachments = extractImageAttachments(userRequest);
     await db.insert(messages).values({
       chatSessionId,
       type: 'user',
       content: serializedRequest,
+      images: imageAttachments.length > 0 ? imageAttachments : null,
     });
 
     // Set up SSE response
