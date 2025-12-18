@@ -18,6 +18,7 @@ import QuickChatSetup from '@/pages/QuickChatSetup';
 import QuickSessionSetup from '@/pages/QuickSessionSetup';
 import Settings from '@/pages/Settings';
 import UserAdministration from '@/pages/UserAdministration';
+import AdminLogs from '@/pages/AdminLogs';
 import Code from '@/pages/Code';
 import Images from '@/pages/Images';
 import Sound from '@/pages/Sound';
@@ -239,6 +240,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <UserAdministration />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/logs"
+              element={
+                <ProtectedRoute>
+                  <AdminLogs />
                 </ProtectedRoute>
               }
             />
