@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ThemeSelector from './ThemeSelector';
 import MobileMenu from './MobileMenu';
-import SessionsSidebar from './AgentsSidebar';
+import AgentsSidebar from './AgentsSidebar';
 import { VERSION, VERSION_TIMESTAMP, VERSION_SHA, GITHUB_REPO_URL } from '@/version';
 import type { GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
@@ -230,8 +230,8 @@ export default function SessionLayout({
   // Navigation items for mobile menu
   const navItems = [
     {
-      to: '/sessions',
-      label: 'Sessions',
+      to: '/agents',
+      label: 'Agents',
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 13h8v8H3v-8zm0-10h8v8H3V3zm10 0h8v8h-8V3zm0 10h8v8h-8v-8z"/></svg>
     },
     {
@@ -432,13 +432,13 @@ export default function SessionLayout({
               {/* Navigation Items - Desktop Only */}
               <div className="hidden md:flex items-center gap-1">
                 <Link
-                  to="/sessions"
+                  to="/agents"
                   className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors text-base-content/70 hover:bg-base-200"
                 >
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M3 13h8v8H3v-8zm0-10h8v8H3V3zm10 0h8v8h-8V3zm0 10h8v8h-8v-8z"/>
                   </svg>
-                  Sessions
+                  Agents
                 </Link>
 
                 {location.pathname.includes('/chat') || (sessionId && location.pathname === `/session/${sessionId}`) ? (
@@ -685,13 +685,13 @@ export default function SessionLayout({
                       📚 Library
                     </Link>
 
-                    {/* My Sessions link */}
+                    {/* My Agents link */}
                     <Link
-                      to="/sessions"
+                      to="/agents"
                       onClick={() => setUserMenuOpen(false)}
                       className="block px-4 py-2 text-sm text-base-content hover:bg-base-200 transition-colors"
                     >
-                      📂 My Sessions
+                      🤖 My Agents
                     </Link>
 
                     {/* Settings link */}
@@ -843,9 +843,9 @@ export default function SessionLayout({
 
       {/* Main Content - with sidebar */}
       <div className="flex-1 flex min-h-0">
-        {/* Sessions Sidebar - Desktop only */}
+        {/* Agents Sidebar - Desktop only */}
         <div className="hidden md:flex">
-          <SessionsSidebar />
+          <AgentsSidebar />
         </div>
         {/* Main content area */}
         <main className="flex-1 flex flex-col min-h-0 min-w-0">
