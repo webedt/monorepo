@@ -393,8 +393,12 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         workerStore.startExecution(effectiveSessionId);
       }
     } else if (!isExecuting) {
-      // If we stopped executing, clear global store (only if it matches our session)
-      if (effectiveSessionId && workerStore.executingSessionId === effectiveSessionId) {
+      // If we stopped executing, ALWAYS clear global store
+      // We don't check if sessionId matches because:
+      // 1. The sessionId might have changed during completion (e.g., from 'new' to actual ID)
+      // 2. We want to prevent stuck states from race conditions
+      // 3. Only one session can be executing at a time anyway
+      if (workerStore.executingSessionId) {
         workerStore.stopExecution();
       }
     }
@@ -1463,10 +1467,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       }
 
       // Re-enable state changes for proper completion detection
+      // Note: We only set local state here. The sync effect at line ~368 will
+      // handle clearing the global workerStore. This prevents a race condition
+      // where stopExecution() clears the store, then the sync effect (seeing
+      // isExecuting still true from the previous render) calls startExecution() again.
       setIsExecuting(false);
       setStreamUrl(null);
       setIsReconnecting(false);
-      workerStore.stopExecution();
       // Capture session ID from completion event
       if (data?.websiteSessionId) {
         console.log('[Chat] Execution completed, setting currentSessionId:', data.websiteSessionId);
@@ -1506,9 +1513,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     },
     onError: (error) => {
       console.log('[Chat] onError called. Error:', error.message);
+      // Note: We only set local state here. The sync effect handles clearing workerStore.
       setIsExecuting(false);
       setStreamUrl(null);
-      workerStore.stopExecution();
     },
     autoReconnect: false, // Disable auto-reconnect to prevent infinite loops
   });
@@ -1681,12 +1688,10 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Cancel the ongoing stream
       disconnectStream();
 
+      // Note: We only set local state here. The sync effect handles clearing workerStore.
       setIsExecuting(false);
       setStreamUrl(null);
-
-      // Clear global worker state on interrupt
-      workerStore.stopExecution();
-      console.log('[Chat] Job interrupted, worker store cleared');
+      console.log('[Chat] Job interrupted, sync effect will clear worker store');
 
       // Add system message about interruption
       messageIdCounter.current += 1;
