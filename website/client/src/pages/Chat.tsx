@@ -9,6 +9,7 @@ import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
 import SessionLayout from '@/components/SessionLayout';
+import MobileToolbar from '@/components/MobileToolbar';
 import { FormattedEventList, type RawEvent } from '@/components/FormattedEvent';
 import type { Message, GitHubRepository, ChatSession, ChatVerbosityLevel } from '@/shared';
 
@@ -266,10 +267,17 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     };
   });
   // Show/hide timestamps in chat - persisted to localStorage
+  // On mobile, default to false (hidden) for cleaner view
   const [showTimestamps, setShowTimestamps] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('chatShowTimestamps');
-      return saved === null ? true : saved === 'true'; // Default to true (show timestamps)
+      if (saved !== null) {
+        return saved === 'true';
+      }
+      // No saved preference - default based on screen size
+      // Use window.innerWidth since hook isn't available in initializer
+      const isMobileWidth = typeof window !== 'undefined' && window.innerWidth < 768;
+      return !isMobileWidth; // Default to false on mobile, true on desktop
     } catch {
       return true;
     }
@@ -2050,8 +2058,24 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       ) : (
         /* Messages area with bottom input panel */
         <>
-          {/* Toolbar: Filter dropdown and Raw JSON toggle */}
-          <div className="flex justify-end items-center gap-2 px-4 py-2 border-b border-base-300 bg-base-200/50">
+          {/* Mobile Toolbar - only visible on mobile */}
+          <MobileToolbar
+            eventFilters={eventFilters}
+            onEventFiltersChange={setEventFilters}
+            showTimestamps={showTimestamps}
+            onShowTimestampsChange={setShowTimestamps}
+            showRawJson={showRawJson}
+            onShowRawJsonChange={setShowRawJson}
+            prLoading={prLoading}
+            prSuccess={prSuccess}
+            prError={prError}
+            autoPrProgress={autoPrProgress}
+            onPrSuccessDismiss={() => setPrSuccess(null)}
+            onPrErrorDismiss={() => setPrError(null)}
+          />
+
+          {/* Desktop Toolbar: Filter dropdown and Raw JSON toggle - hidden on mobile */}
+          <div className="hidden md:flex justify-end items-center gap-2 px-4 py-2 border-b border-base-300 bg-base-200/50">
             {/* Event filter dropdown - only show in formatted view */}
             {!showRawJson && (
               <div className="dropdown dropdown-end">
