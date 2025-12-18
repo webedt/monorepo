@@ -140,6 +140,46 @@ export const liveChatMessages = pgTable('live_chat_messages', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// Workspace presence - ephemeral state for collaborative editing
+// One row per user per branch (UPSERT pattern)
+export const workspacePresence = pgTable('workspace_presence', {
+  id: text('id').primaryKey(), // Composite: {userId}_{owner}_{repo}_{branch}
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  owner: text('owner').notNull(), // GitHub repo owner
+  repo: text('repo').notNull(), // GitHub repo name
+  branch: text('branch').notNull(), // Branch name
+  page: text('page'), // 'code', 'images', 'sounds', 'scenes', 'chat'
+  cursorX: integer('cursor_x'),
+  cursorY: integer('cursor_y'),
+  selection: json('selection').$type<{
+    filePath?: string;
+    startLine?: number;
+    endLine?: number;
+    startCol?: number;
+    endCol?: number;
+  }>(), // Current selection
+  heartbeatAt: timestamp('heartbeat_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Workspace events - append-only log of all actions
+export const workspaceEvents = pgTable('workspace_events', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  owner: text('owner').notNull(),
+  repo: text('repo').notNull(),
+  branch: text('branch').notNull(),
+  eventType: text('event_type').notNull(), // 'file_edit', 'file_create', 'file_delete', etc.
+  page: text('page'), // 'code', 'images', 'sounds', 'scenes', 'chat'
+  path: text('path'), // File/resource path affected
+  payload: json('payload').$type<Record<string, unknown>>(), // Event-specific data
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -152,3 +192,7 @@ export type Event = typeof events.$inferSelect;
 export type NewEvent = typeof events.$inferInsert;
 export type LiveChatMessage = typeof liveChatMessages.$inferSelect;
 export type NewLiveChatMessage = typeof liveChatMessages.$inferInsert;
+export type WorkspacePresence = typeof workspacePresence.$inferSelect;
+export type NewWorkspacePresence = typeof workspacePresence.$inferInsert;
+export type WorkspaceEvent = typeof workspaceEvents.$inferSelect;
+export type NewWorkspaceEvent = typeof workspaceEvents.$inferInsert;

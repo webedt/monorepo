@@ -906,6 +906,68 @@ export const liveChatApi = {
   },
 };
 
+// Workspace API (collaboration - presence and events)
+export const workspaceApi = {
+  // Update presence on a branch
+  updatePresence: (data: {
+    owner: string;
+    repo: string;
+    branch: string;
+    page?: string;
+    cursorX?: number;
+    cursorY?: number;
+    selection?: {
+      filePath?: string;
+      startLine?: number;
+      endLine?: number;
+      startCol?: number;
+      endCol?: number;
+    };
+  }) =>
+    fetchApi('/api/workspace/presence', {
+      method: 'PUT',
+      body: data,
+    }),
+
+  // Get active users on a branch
+  getPresence: (owner: string, repo: string, branch: string) =>
+    fetchApi(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`),
+
+  // Remove presence (leaving workspace)
+  leaveWorkspace: (owner: string, repo: string, branch: string) =>
+    fetchApi(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`, {
+      method: 'DELETE',
+    }),
+
+  // Log a workspace event
+  logEvent: (data: {
+    owner: string;
+    repo: string;
+    branch: string;
+    eventType: string;
+    page?: string;
+    path?: string;
+    payload?: Record<string, unknown>;
+  }) =>
+    fetchApi('/api/workspace/events', {
+      method: 'POST',
+      body: data,
+    }),
+
+  // Get recent events for a branch
+  getEvents: (owner: string, repo: string, branch: string, options?: { limit?: number; since?: string }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.since) params.append('since', options.since);
+    const queryString = params.toString();
+    return fetchApi(`/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Get event stream URL (SSE)
+  getEventStreamUrl: (owner: string, repo: string, branch: string) =>
+    `${getApiBaseUrl()}/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}/stream`,
+};
+
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;

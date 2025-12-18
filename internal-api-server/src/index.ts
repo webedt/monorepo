@@ -41,6 +41,7 @@ import imageGenRoutes from './api/routes/imageGen.js';
 import internalSessionsRoutes from './api/routes/internalSessions.js';
 import logsRoutes from './api/routes/logs.js';
 import liveChatRoutes from './api/routes/liveChat.js';
+import workspaceRoutes from './api/routes/workspace.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './logic/db/index.js';
@@ -308,6 +309,7 @@ app.use('/api/image-gen', imageGenRoutes);
 app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Sessions management
 app.use('/api', logsRoutes);  // Debug logs endpoint
 app.use('/api/live-chat', liveChatRoutes);  // Live Chat for branch-based workspace
+app.use('/api/workspace', workspaceRoutes);  // Workspace presence and events
 
 // Note: Static file serving removed - handled by website-server facade
 
