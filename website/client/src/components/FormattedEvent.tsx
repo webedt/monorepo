@@ -408,6 +408,8 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const toolResult = toolResultMap?.get(block.id);
                 const fileContent = toolResult?.tool_use_result?.file?.content || null;
                 const numLines = toolResult?.tool_use_result?.file?.numLines || null;
+                const durationMs = toolResult?.tool_use_result?.durationMs;
+                const isWaiting = !toolResult;
 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
@@ -417,12 +419,20 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                       <span>📖 Read:</span>
                       <span className="font-mono text-blue-400">{block.input?.file_path || 'unknown'}</span>
                       {numLines && <span className="opacity-50">({numLines} lines)</span>}
+                      {durationMs !== undefined && <span className="opacity-40">({durationMs}ms)</span>}
                     </summary>
-                    {fileContent && (
-                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
-                        {fileContent}
-                      </pre>
-                    )}
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>Reading file...</span>
+                        </div>
+                      ) : fileContent ? (
+                        <pre className="whitespace-pre-wrap">{fileContent}</pre>
+                      ) : (
+                        <div className="opacity-50">File is empty or could not be read</div>
+                      )}
+                    </div>
                   </details>
                 );
               }
@@ -434,20 +444,48 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const resultContent = toolResult?.tool_use_result?.stdout || toolResult?.content || '';
                 const hasError = toolResult?.is_error || toolResult?.tool_use_result?.stderr;
                 const stderrContent = toolResult?.tool_use_result?.stderr || '';
+                const exitCode = toolResult?.tool_use_result?.exitCode;
+                const durationMs = toolResult?.tool_use_result?.durationMs;
+                const isWaiting = !toolResult;
+
+                // Truncate command for display if too long
+                const displayCommand = command.length > 80 ? command.substring(0, 80) + '...' : command;
 
                 return (
-                  <details key={`tool-${i}`} className="text-xs opacity-60 hover:opacity-100">
-                    <summary className="cursor-pointer font-mono flex items-center gap-2">
-                      <span className="opacity-50">{time}</span>
-                      <span>🔨</span> Bash: <span className="text-base-content/80">{command}</span>{' '}
-                      <span className="text-base-content/50">// {description}</span>
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>💻 Bash:</span>
+                      <span className="font-mono text-green-400">{displayCommand}</span>
+                      {exitCode !== undefined && exitCode !== 0 && <span className="text-error">(exit {exitCode})</span>}
+                      {durationMs !== undefined && <span className="opacity-40">({durationMs}ms)</span>}
                     </summary>
-                    {toolResult && (
-                      <pre className={`mt-1 ml-4 p-2 rounded overflow-auto max-h-48 text-xs whitespace-pre-wrap ${hasError ? 'bg-error/10 text-error' : 'bg-base-300 text-base-content/70'}`}>
-                        {stderrContent && <span className="text-error">{stderrContent}</span>}
-                        {resultContent}
-                      </pre>
-                    )}
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>{description}...</span>
+                        </div>
+                      ) : (
+                        <>
+                          {command.length > 80 && (
+                            <div className="mb-2 pb-2 border-b border-base-content/10">
+                              <div className="opacity-50 mb-1">Full command:</div>
+                              <pre className="whitespace-pre-wrap font-mono text-green-400/80">{command}</pre>
+                            </div>
+                          )}
+                          {stderrContent && (
+                            <pre className="whitespace-pre-wrap text-error mb-2">{stderrContent}</pre>
+                          )}
+                          {resultContent ? (
+                            <pre className={`whitespace-pre-wrap ${hasError ? 'text-error' : ''}`}>{resultContent}</pre>
+                          ) : !stderrContent && (
+                            <div className="opacity-50">(no output)</div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </details>
                 );
               }
@@ -458,6 +496,8 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const oldString = block.input?.old_string || toolResult?.tool_use_result?.oldString || '';
                 const newString = block.input?.new_string || toolResult?.tool_use_result?.newString || '';
                 const structuredPatch = toolResult?.tool_use_result?.structuredPatch;
+                const durationMs = toolResult?.tool_use_result?.durationMs;
+                const isWaiting = !toolResult;
 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
@@ -466,9 +506,15 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                       <span className="text-base-content/50">▶</span>
                       <span>📝 Edit:</span>
                       <span className="font-mono text-yellow-400">{filePath}</span>
+                      {durationMs !== undefined && <span className="opacity-40">({durationMs}ms)</span>}
                     </summary>
                     <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
-                      {structuredPatch && structuredPatch.length > 0 ? (
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>Editing file...</span>
+                        </div>
+                      ) : structuredPatch && structuredPatch.length > 0 ? (
                         <pre className="whitespace-pre-wrap">
                           {structuredPatch.map((hunk: any, hunkIdx: number) => (
                             <span key={hunkIdx}>
@@ -487,7 +533,7 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                             </span>
                           ))}
                         </pre>
-                      ) : (
+                      ) : oldString || newString ? (
                         <div className="space-y-1">
                           <div className="text-red-400 bg-red-400/10 p-1 rounded">
                             <span className="opacity-50">- </span>{oldString}
@@ -496,6 +542,8 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                             <span className="opacity-50">+ </span>{newString}
                           </div>
                         </div>
+                      ) : (
+                        <div className="opacity-50">Edit completed</div>
                       )}
                     </div>
                   </details>
@@ -507,6 +555,8 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                 const fileContent = block.input?.content || toolResult?.tool_use_result?.content || null;
                 const filePath = block.input?.file_path || toolResult?.tool_use_result?.filePath || 'unknown';
                 const lineCount = fileContent ? fileContent.split('\n').length : null;
+                const durationMs = toolResult?.tool_use_result?.durationMs;
+                const isWaiting = !toolResult;
 
                 return (
                   <details key={`tool-${i}`} className="text-xs text-base-content/60">
@@ -516,24 +566,252 @@ export function FormattedEvent({ event, filters = {}, toolResultMap }: { event: 
                       <span>✏️ Write:</span>
                       <span className="font-mono text-green-400">{filePath}</span>
                       {lineCount && <span className="opacity-50">({lineCount} lines)</span>}
+                      {durationMs !== undefined && <span className="opacity-40">({durationMs}ms)</span>}
                     </summary>
-                    {fileContent && (
-                      <pre className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs whitespace-pre-wrap">
-                        {fileContent}
-                      </pre>
-                    )}
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>Writing file...</span>
+                        </div>
+                      ) : fileContent ? (
+                        <pre className="whitespace-pre-wrap">{fileContent}</pre>
+                      ) : (
+                        <div className="opacity-50">File written successfully</div>
+                      )}
+                    </div>
+                  </details>
+                );
+              }
+              // Special formatting for Grep tool
+              if (block.name === 'Grep') {
+                const toolResult = toolResultMap?.get(block.id);
+                const pattern = block.input?.pattern || '';
+                const path = block.input?.path || 'cwd';
+                const fileType = block.input?.type;
+                const glob = block.input?.glob;
+                const outputMode = block.input?.output_mode || 'files_with_matches';
+                const numFiles = toolResult?.tool_use_result?.numFiles;
+                const filenames = toolResult?.tool_use_result?.filenames || [];
+                const resultContent = toolResult?.content;
+                const durationMs = toolResult?.tool_use_result?.durationMs;
+                const isWaiting = !toolResult;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>🔍 Grep:</span>
+                      <span className="font-mono text-purple-400">{pattern}</span>
+                      {fileType && <span className="opacity-50">in *.{fileType}</span>}
+                      {glob && <span className="opacity-50">({glob})</span>}
+                      {numFiles !== undefined && <span className="opacity-50">({numFiles} files)</span>}
+                      {durationMs !== undefined && <span className="opacity-40">({durationMs}ms)</span>}
+                    </summary>
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>Searching...</span>
+                        </div>
+                      ) : outputMode === 'content' && resultContent ? (
+                        <pre className="whitespace-pre-wrap">{typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent, null, 2)}</pre>
+                      ) : filenames.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {filenames.slice(0, 50).map((file: string, idx: number) => (
+                            <div key={idx} className="font-mono text-blue-400/80">{file}</div>
+                          ))}
+                          {filenames.length > 50 && <div className="opacity-50">...and {filenames.length - 50} more files</div>}
+                        </div>
+                      ) : (
+                        <div className="opacity-50">No matches found</div>
+                      )}
+                    </div>
+                  </details>
+                );
+              }
+              // Special formatting for Glob tool
+              if (block.name === 'Glob') {
+                const toolResult = toolResultMap?.get(block.id);
+                const pattern = block.input?.pattern || '';
+                const path = block.input?.path;
+                const numFiles = toolResult?.tool_use_result?.numFiles;
+                const filenames = toolResult?.tool_use_result?.filenames || [];
+                const durationMs = toolResult?.tool_use_result?.durationMs;
+                const isWaiting = !toolResult;
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>📂 Glob:</span>
+                      <span className="font-mono text-cyan-400">{pattern}</span>
+                      {path && <span className="opacity-50">in {path}</span>}
+                      {numFiles !== undefined && <span className="opacity-50">({numFiles} files)</span>}
+                      {durationMs !== undefined && <span className="opacity-40">({durationMs}ms)</span>}
+                    </summary>
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>Searching files...</span>
+                        </div>
+                      ) : filenames.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {filenames.slice(0, 50).map((file: string, idx: number) => (
+                            <div key={idx} className="font-mono text-blue-400/80">{file}</div>
+                          ))}
+                          {filenames.length > 50 && <div className="opacity-50">...and {filenames.length - 50} more files</div>}
+                        </div>
+                      ) : (
+                        <div className="opacity-50">No files matched</div>
+                      )}
+                    </div>
+                  </details>
+                );
+              }
+              // Special formatting for TodoWrite tool
+              if (block.name === 'TodoWrite') {
+                const toolResult = toolResultMap?.get(block.id);
+                const inputTodos = block.input?.todos || [];
+                const newTodos = toolResult?.tool_use_result?.newTodos || inputTodos;
+                const isWaiting = !toolResult;
+
+                const statusEmoji: Record<string, string> = {
+                  pending: '⬜',
+                  in_progress: '🔄',
+                  completed: '✅'
+                };
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>📋 TodoWrite:</span>
+                      <span className="opacity-50">({newTodos.length} items)</span>
+                    </summary>
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>Updating todos...</span>
+                        </div>
+                      ) : newTodos.length > 0 ? (
+                        <div className="space-y-1">
+                          {newTodos.map((todo: { content: string; status: string; activeForm?: string }, idx: number) => (
+                            <div key={idx} className="flex items-start gap-2">
+                              <span>{statusEmoji[todo.status] || '⬜'}</span>
+                              <span className={todo.status === 'completed' ? 'line-through opacity-50' : todo.status === 'in_progress' ? 'text-primary' : ''}>
+                                {todo.content}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="opacity-50">No todos</div>
+                      )}
+                    </div>
+                  </details>
+                );
+              }
+              // Special formatting for Task tool
+              if (block.name === 'Task') {
+                const toolResult = toolResultMap?.get(block.id);
+                const description = block.input?.description || 'Task';
+                const subagentType = block.input?.subagent_type || 'general';
+                const prompt = block.input?.prompt || '';
+                const status = toolResult?.tool_use_result?.status;
+                const agentId = toolResult?.tool_use_result?.agentId;
+                const totalDurationMs = toolResult?.tool_use_result?.totalDurationMs;
+                const totalToolUseCount = toolResult?.tool_use_result?.totalToolUseCount;
+                const totalTokens = toolResult?.tool_use_result?.totalTokens;
+                const content = toolResult?.tool_use_result?.content;
+                const isWaiting = !toolResult;
+
+                const subagentEmoji: Record<string, string> = {
+                  'Explore': '🔭',
+                  'Plan': '📐',
+                  'general-purpose': '🤖',
+                  'claude-code-guide': '📚'
+                };
+
+                return (
+                  <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                    <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                      <span className="font-mono opacity-50">{time}</span>
+                      <span className="text-base-content/50">▶</span>
+                      <span>{subagentEmoji[subagentType] || '🤖'} Task:</span>
+                      <span className="text-orange-400">{description}</span>
+                      <span className="opacity-50">({subagentType})</span>
+                      {status && <span className={status === 'completed' ? 'text-success' : 'text-warning'}>[{status}]</span>}
+                      {totalDurationMs !== undefined && <span className="opacity-40">({(totalDurationMs / 1000).toFixed(1)}s)</span>}
+                    </summary>
+                    <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-96 text-xs">
+                      {isWaiting ? (
+                        <div className="flex items-center gap-2 text-base-content/50">
+                          <span className="loading loading-spinner loading-xs"></span>
+                          <span>Agent working...</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {agentId && <div className="opacity-50">Agent: {agentId}</div>}
+                          {totalToolUseCount !== undefined && totalTokens !== undefined && (
+                            <div className="opacity-50">{totalToolUseCount} tool calls • {totalTokens.toLocaleString()} tokens</div>
+                          )}
+                          {prompt && (
+                            <details className="mt-1">
+                              <summary className="cursor-pointer opacity-50 hover:opacity-100">View prompt</summary>
+                              <pre className="mt-1 p-2 bg-base-200 rounded whitespace-pre-wrap">{prompt}</pre>
+                            </details>
+                          )}
+                          {content && Array.isArray(content) && content.length > 0 && (
+                            <div className="mt-2 border-t border-base-content/10 pt-2">
+                              <div className="opacity-50 mb-1">Result:</div>
+                              {content.map((item: { type: string; text?: string }, idx: number) => (
+                                item.type === 'text' && item.text ? (
+                                  <pre key={idx} className="whitespace-pre-wrap">{item.text}</pre>
+                                ) : null
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </details>
                 );
               }
               // Default formatting for other tools
+              const toolResult = toolResultMap?.get(block.id);
+              const isWaiting = !toolResult;
               return (
-                <details key={`tool-${i}`} className="text-xs opacity-60">
-                  <summary className="cursor-pointer hover:opacity-100">
-                    🔨 {block.name}
+                <details key={`tool-${i}`} className="text-xs text-base-content/60">
+                  <summary className="py-1 cursor-pointer hover:text-base-content/80 list-none flex items-center gap-2">
+                    <span className="font-mono opacity-50">{time}</span>
+                    <span className="text-base-content/50">▶</span>
+                    <span>🔨 {block.name}</span>
                   </summary>
-                  <pre className="mt-1 p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
-                    {JSON.stringify(block.input, null, 2)}
-                  </pre>
+                  <div className="ml-[88px] p-2 bg-base-300 rounded overflow-auto max-h-48 text-xs">
+                    {isWaiting ? (
+                      <div className="flex items-center gap-2 text-base-content/50">
+                        <span className="loading loading-spinner loading-xs"></span>
+                        <span>Running...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="opacity-50 mb-1">Input:</div>
+                        <pre className="whitespace-pre-wrap">{JSON.stringify(block.input, null, 2)}</pre>
+                        {toolResult && (
+                          <>
+                            <div className="opacity-50 mt-2 mb-1 border-t border-base-content/10 pt-2">Result:</div>
+                            <pre className="whitespace-pre-wrap">{typeof toolResult.content === 'string' ? toolResult.content : JSON.stringify(toolResult.content, null, 2)}</pre>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </details>
               );
             })}
