@@ -229,6 +229,37 @@ export default function Sessions() {
     },
   });
 
+  // Sync sessions from Anthropic API and sync events for all non-trashed sessions
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      // Step 1: Sync sessions from Anthropic
+      const syncResult = await sessionsApi.sync({ activeOnly: true });
+
+      // Step 2: Get all non-trashed sessions and sync their events
+      const activeSessions = allSessions.filter((s) => !s.deletedAt);
+
+      if (activeSessions.length > 0) {
+        console.log(`[Sync] Syncing events for ${activeSessions.length} session(s)`);
+        // Sync events in parallel
+        const eventSyncPromises = activeSessions.map((session) =>
+          sessionsApi.syncEvents(session.id).catch((err) => {
+            console.warn(`[Sync] Failed to sync events for session ${session.id}:`, err);
+            return null; // Don't fail the whole sync if one session fails
+          })
+        );
+        await Promise.all(eventSyncPromises);
+      }
+
+      return syncResult;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      const result = data?.data;
+      if (result?.imported > 0) {
+        console.log(`[Sync] Imported ${result.imported} session(s) from Anthropic`);
+      }
+    },
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -511,25 +542,53 @@ export default function Sessions() {
                     Select all ({sessions.length})
                   </span>
                 </label>
-                <button
-                  onClick={() => navigate('/trash')}
-                  className="btn btn-ghost btn-sm"
-                  title="View deleted sessions"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => syncMutation.mutate()}
+                    className="btn btn-ghost btn-sm"
+                    title="Sync sessions from Anthropic"
+                    disabled={syncMutation.isPending}
                   >
-                    <path
-                      fillRule="evenodd"
-                      d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Trash
-                </button>
+                    {syncMutation.isPending ? (
+                      <span className="loading loading-spinner loading-xs"></span>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                    )}
+                    Sync
+                  </button>
+                  <button
+                    onClick={() => navigate('/trash')}
+                    className="btn btn-ghost btn-sm"
+                    title="View deleted sessions"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    Trash
+                  </button>
+                </div>
               </div>
             </div>
 

@@ -8,37 +8,10 @@ import { useBrowserNotification, playNotificationSound, getNotificationPrefs } f
 import { useAuthStore, useRepoStore, useWorkerStore } from '@/lib/store';
 import ChatInput, { type ChatInputRef, type ImageAttachment } from '@/components/ChatInput';
 import { ImageViewer } from '@/components/ImageViewer';
-import { ChatMessage } from '@/components/ChatMessage';
 import SessionLayout from '@/components/SessionLayout';
+import { FormattedEventList, type RawEvent } from '@/components/FormattedEvent';
 import type { Message, GitHubRepository, ChatSession, ChatVerbosityLevel } from '@/shared';
 
-// Helper to render text with clickable links
-function LinkifyText({ text, className }: { text: string; className?: string }) {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const parts = text.split(urlRegex);
-
-  return (
-    <span className={className}>
-      {parts.map((part, i) => {
-        if (part.match(urlRegex)) {
-          return (
-            <a
-              key={i}
-              href={part}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-info underline hover:text-info-content"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {part}
-            </a>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </span>
-  );
-}
 
 // Database event type
 interface DbEvent {
@@ -48,6 +21,7 @@ interface DbEvent {
   eventData: any;
   timestamp: Date;
 }
+
 
 // Draft message type
 interface DraftMessage {
@@ -104,13 +78,45 @@ function convertEventToMessage(event: DbEvent, sessionId: string, _verbosityLeve
     return null;
   }
 
-  // Skip control events that don't need to be displayed
+  // Skip control events that don't need to be displayed in formatted view
   if (eventType === 'connected' || eventType === 'completed' || eventType === 'heartbeat') {
     return null;
   }
 
-  // Display all events as raw JSON - simple and flat
-  const content = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+  // Skip events that are handled by FormattedEvent in the raw view
+  // These don't need to clutter the formatted chat view
+  if (eventType === 'env_manager_log' || eventType === 'system' || eventType === 'title_generation') {
+    return null;
+  }
+
+  // Format content based on event type for cleaner display
+  let content: string;
+  switch (eventType) {
+    case 'message':
+      content = data.message || JSON.stringify(data);
+      break;
+    case 'session_name':
+      content = `Session: ${data.sessionName}`;
+      break;
+    case 'session_created':
+      content = data.remoteWebUrl ? `Session created: ${data.remoteWebUrl}` : 'Session created';
+      break;
+    case 'user':
+      // Skip user events - they're handled as user messages
+      return null;
+    case 'assistant':
+      // Skip assistant events - they're handled as assistant messages
+      return null;
+    case 'result':
+      content = data.result || 'Task completed';
+      break;
+    case 'error':
+      content = `Error: ${data.message || data.error || JSON.stringify(data)}`;
+      break;
+    default:
+      // For unknown types, show a brief summary
+      content = `[${eventType}] ${typeof data === 'string' ? data : ''}`;
+  }
 
   return {
     id: event.id,
@@ -210,7 +216,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const wasStreamingRef = useRef(false); // Track if we were streaming, to preserve scroll when stream ends
   const shouldAutoScrollDuringStreamRef = useRef(true); // Track if we should auto-scroll during active streaming
   const pendingUserMessagesRef = useRef<Message[]>([]); // Track user messages added locally but not yet in DB
-  const [lastRequest, setLastRequest] = useState<{
+  const [_lastRequest, setLastRequest] = useState<{
     input: string;
     selectedRepo: string;
     baseBranch: string;
@@ -222,6 +228,43 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   } | null>(null);
   const [prLoading, setPrLoading] = useState<'create' | 'auto' | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
+  // Raw JSON view toggle - persisted to localStorage
+  const [showRawJson, setShowRawJson] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('chatShowRawJson') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  // Store raw events for the raw JSON view (separate from formatted messages)
+  const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
+
+  // Event type filter - which event types to show in formatted view
+  const [eventFilters, setEventFilters] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('chatEventFilters');
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    // Default: show all
+    return {
+      user: true,
+      assistant: true,
+      result: true,
+      thinking: true,
+      message: true,
+      system: true,
+      connected: true,
+      env_manager_log: true,
+      tool_use: true,
+      tool_result: true,
+      tool_progress: true,
+      completed: true,
+      error: true,
+      title_generation: true,
+      session_name: true,
+      session_created: true,
+    };
+  });
   const [prSuccess, setPrSuccess] = useState<string | null>(null);
   const [autoPrProgress, setAutoPrProgress] = useState<string | null>(null);
   const [copyChatSuccess, setCopyChatSuccess] = useState(false);
@@ -244,6 +287,24 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
   // Browser notification and sound for session completion
   const { showSessionCompletedNotification } = useBrowserNotification();
+
+  // Persist showRawJson to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatShowRawJson', showRawJson ? 'true' : 'false');
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [showRawJson]);
+
+  // Persist eventFilters to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatEventFilters', JSON.stringify(eventFilters));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [eventFilters]);
 
   // Sync local state with global store
   useEffect(() => {
@@ -754,6 +815,16 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     // Convert raw events to displayable messages
     const dbEvents: DbEvent[] = eventsData?.data?.events || [];
 
+    // Populate rawEvents from database events for the raw JSON view
+    // This ensures raw events are available when returning to a session
+    if (dbEvents.length > 0) {
+      setRawEvents(dbEvents.map(event => ({
+        eventType: event.eventType,
+        data: event.eventData,
+        timestamp: new Date(event.timestamp)
+      })));
+    }
+
     // Debug logging - use primitive values for production visibility
     console.log(`[Chat] Merging messages: sessionId=${sessionId}, rawMessagesCount=${messagesData?.data?.messages?.length || 0}, filteredDbMessagesCount=${dbMessages.length}, rawEventsCount=${dbEvents.length}`);
 
@@ -1022,6 +1093,7 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
+      setRawEvents([]); // Clear raw events for new session
       setInput('');
       setImages([]);
       setSelectedRepo('');
@@ -1289,10 +1361,13 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         }
       }
 
-      // DEBUG: Log raw JSON for all events
-      console.log('[SSE RAW EVENT]', eventType, JSON.stringify(data, null, 2));
+      // Store raw event for the raw JSON view
+      setRawEvents((prev) => [
+        ...prev,
+        { eventType, data, timestamp: new Date() },
+      ]);
 
-      // DEBUG: Always show raw JSON as a message for debugging
+      // Also add as a formatted message for the normal view
       const rawJsonContent = `**[${eventType}]**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
       messageIdCounter.current += 1;
       setMessages((prev) => [
@@ -1306,7 +1381,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
         },
       ]);
       workerStore.recordHeartbeat();
-      // DEBUG MODE: Skip all other processing - just show raw JSON
     },
     onConnected: () => {
       setIsExecuting(true);
@@ -1541,71 +1615,6 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     if (sessionId && sessionId !== 'new') {
       clearDraft(sessionId);
     }
-  };
-
-  const handleRetry = () => {
-    if (!lastRequest || isExecuting) return;
-
-    // When user retries, they're at the bottom of the chat - enable auto-scroll
-    shouldAutoScrollDuringStreamRef.current = true;
-
-    // Add user message for retry
-    messageIdCounter.current += 1;
-    const userMessage: Message = {
-      id: Date.now() + messageIdCounter.current,
-      chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
-      type: 'user',
-      content: lastRequest.input,
-      timestamp: new Date(),
-    };
-
-    // Track this as a pending message so it won't be lost when the merge effect runs
-    pendingUserMessagesRef.current = [...pendingUserMessagesRef.current, userMessage];
-
-    setMessages((prev) => [...prev, userMessage]);
-
-    // Build request body with saved request data
-    const requestParams: any = {
-      userRequest: lastRequest.input,
-    };
-
-    // Add user's preferred provider
-    const provider = user?.preferredProvider || 'claude';
-    if (provider) {
-      requestParams.provider = provider;
-    }
-
-    if (currentSessionId) {
-      requestParams.websiteSessionId = currentSessionId;
-      console.log('[Chat] Retrying with existing session:', currentSessionId);
-    }
-
-    // Only send repository parameters for new sessions (not resuming)
-    if (!currentSessionId) {
-      if (lastRequest.selectedRepo) {
-        requestParams.repositoryUrl = lastRequest.selectedRepo;
-      }
-
-      if (lastRequest.baseBranch) {
-        requestParams.baseBranch = lastRequest.baseBranch;
-      }
-
-      // Auto-commit is now always enabled
-      requestParams.autoCommit = true;
-    } else {
-      // When resuming, repository is already in the session workspace
-      console.log('[Chat] Retrying resumed session - repository already in workspace');
-    }
-
-    // Always use POST
-    setStreamMethod('POST');
-    setStreamBody(requestParams);
-
-    // Use execute-remote endpoint for claude-remote provider
-    const executeUrl = provider === 'claude-remote'
-      ? `${getApiBaseUrl()}/api/execute-remote`
-      : `${getApiBaseUrl()}/api/execute`;
-    setStreamUrl(executeUrl);
   };
 
   // Handle interrupting current job
@@ -2014,29 +2023,116 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       ) : (
         /* Messages area with bottom input panel */
         <>
+          {/* Toolbar: Filter dropdown and Raw JSON toggle */}
+          <div className="flex justify-end items-center gap-2 px-4 py-2 border-b border-base-300 bg-base-200/50">
+            {/* Event filter dropdown - only show in formatted view */}
+            {!showRawJson && (
+              <div className="dropdown dropdown-end">
+                <label tabIndex={0} className="btn btn-xs btn-ghost gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  Filter
+                </label>
+                <ul tabIndex={0} className="dropdown-content z-[100] p-2 shadow-lg bg-base-200 rounded-box w-44">
+                  {/* All / None inline buttons */}
+                  <li className="flex gap-1 mb-1 pb-1 border-b border-base-300">
+                    <button
+                      className="btn btn-xs btn-ghost flex-1"
+                      onClick={() => setEventFilters(prev => {
+                        const newFilters = { ...prev };
+                        Object.keys(newFilters).forEach(k => newFilters[k] = true);
+                        return newFilters;
+                      })}
+                    >
+                      All
+                    </button>
+                    <span className="text-base-content/30 self-center">/</span>
+                    <button
+                      className="btn btn-xs btn-ghost flex-1"
+                      onClick={() => setEventFilters(prev => {
+                        const newFilters = { ...prev };
+                        Object.keys(newFilters).forEach(k => newFilters[k] = false);
+                        // Always keep core message types visible
+                        newFilters.user = true;
+                        newFilters.assistant = true;
+                        newFilters.result = true;
+                        newFilters.error = true;
+                        return newFilters;
+                      })}
+                    >
+                      None
+                    </button>
+                  </li>
+                  {/* Event type checkboxes - exclude always-visible types */}
+                  {[
+                    { key: 'thinking', emoji: '🧠', label: 'Thinking' },
+                    { key: 'message', emoji: '💬', label: 'Status' },
+                    { key: 'system', emoji: '⚙️', label: 'System' },
+                    { key: 'connected', emoji: '🔌', label: 'Connection' },
+                    { key: 'env_manager_log', emoji: '🔧', label: 'Env Logs' },
+                    { key: 'tool_use', emoji: '🔨', label: 'Tools' },
+                    { key: 'completed', emoji: '🏁', label: 'Completed' },
+                    { key: 'title_generation', emoji: '✨', label: 'Title' },
+                    { key: 'session_name', emoji: '📝', label: 'Session' },
+                  ].map(({ key, emoji, label }) => (
+                    <li key={key}>
+                      <label className="flex items-center gap-2 cursor-pointer px-1 py-0.5">
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-xs"
+                          checked={eventFilters[key] ?? true}
+                          onChange={(e) => setEventFilters(prev => ({ ...prev, [key]: e.target.checked }))}
+                        />
+                        <span>{emoji}</span>
+                        <span className="text-xs">{label}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* Raw JSON toggle */}
+            <button
+              onClick={() => setShowRawJson(!showRawJson)}
+              className={`btn btn-xs ${showRawJson ? 'btn-primary' : 'btn-ghost'}`}
+              title={showRawJson ? 'Switch to formatted view' : 'Switch to raw JSON view'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+              Raw JSON
+            </button>
+          </div>
+
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 relative">
-            <div className="max-w-4xl mx-auto space-y-4">
-              {messages
-                .filter((message) => shouldShowMessage(message, user?.chatVerbosityLevel || 'verbose'))
-                .map((message) => (
-                message.type === 'system' ? (
-                  // Compact inline status update - no panel, faint text, inline timestamp
-                  <div key={message.id} className="text-xs text-base-content/40 py-0.5">
-                    <span className="opacity-60">{new Date(message.timestamp).toLocaleTimeString()}</span>
-                    <span className="mx-2">•</span>
-                    <LinkifyText text={message.content} className="opacity-80" />
+            {showRawJson ? (
+              /* Raw JSON stream view - clean JSON objects only */
+              <div className="max-w-4xl mx-auto font-mono text-xs">
+                {rawEvents.length === 0 ? (
+                  <div className="text-center text-base-content/50 py-8 font-sans">
+                    No events yet.
                   </div>
                 ) : (
-                  <ChatMessage
-                    key={message.id}
-                    message={{ ...message, images: message.images ?? undefined }}
-                    userName={user?.displayName || user?.email}
-                    onImageClick={setViewingImage}
-                    onRetry={handleRetry}
-                    showRetry={message.type === 'error' && !!lastRequest && !isExecuting}
-                  />
-                )
-              ))}
+                  <div className="space-y-2">
+                    {rawEvents.map((event, index) => (
+                      <pre key={index} className="bg-base-300 p-3 rounded-lg overflow-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify({ eventType: event.eventType, data: event.data }, null, 2)}
+                      </pre>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Normal formatted view - uses FormattedEvent for rawEvents */
+              <div className="max-w-4xl mx-auto space-y-1">
+                {rawEvents.length === 0 ? (
+                  <div className="text-center text-base-content/50 py-8">
+                    No events yet.
+                  </div>
+                ) : (
+                  <FormattedEventList events={rawEvents} filters={eventFilters} />
+                )}
 
               {isExecuting && (
                 <div className="flex justify-start">
@@ -2103,7 +2199,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
               )}
 
               <div ref={messagesEndRef} />
-            </div>
+              </div>
+            )}
 
             {/* Floating scroll buttons */}
             {showScrollToTop && (

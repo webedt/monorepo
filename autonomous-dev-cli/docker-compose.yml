@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   autonomous-dev-cli:
-    image: ghcr.io/webedt/monorepo/autonomous-dev-cli:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: ["node", "dist/index.js", "start", "--verbose"]
     environment:
       NODE_ENV: production

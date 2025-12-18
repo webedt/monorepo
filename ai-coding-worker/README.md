@@ -81,7 +81,6 @@ ai-coding-worker/
 ├── Dockerfile
 ├── docker-compose.yml               # Local testing
 ├── swarm.yml                        # Production deployment (MinIO included)
-├── deploy-swarm.sh                  # Deployment script
 ├── API.md                           # API documentation
 ├── CREDENTIALS.md                   # How to get OAuth credentials
 └── package.json
@@ -138,13 +137,10 @@ docker-compose up
 
 ### Deploy
 
-```bash
-chmod +x deploy-swarm.sh
-./deploy-swarm.sh
-```
+Deployment is handled through Dokploy which builds images directly on the server.
 
 This will:
-1. Build the Docker image
+1. Build the Docker image on the server
 2. Deploy MinIO for session storage
 3. Deploy worker replicas (default: 5)
 4. Set up overlay network for service communication
@@ -176,28 +172,10 @@ docker service scale unified-worker-stack_unified-worker=20
 
 ### Redeploy (Update Code)
 
-When you update the code and need to redeploy:
+When you update the code and need to redeploy, trigger a new deployment through Dokploy. It will:
 
-```bash
-# 1. Build TypeScript
-npm run build
-
-# 2. Build and push Docker image
-docker build -t ghcr.io/webedt/monorepo/ai-coding-worker:latest .
-docker push ghcr.io/webedt/monorepo/ai-coding-worker:latest
-
-# 3. Update the service (rolling update)
-docker service update --image ghcr.io/webedt/monorepo/ai-coding-worker:latest webedt-app-ai-coding-workers-gy4wew_ai-coding-worker
-```
-
-Or use the automated script:
-
-```bash
-# For local registry (adjust registry URL as needed)
-./redeploy.sh
-```
-
-The service will perform a rolling update (2 workers at a time by default) with zero downtime.
+1. Build the Docker image on the server
+2. Perform a rolling update with zero downtime
 
 ### Stop
 

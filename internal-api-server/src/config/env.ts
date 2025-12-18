@@ -6,7 +6,8 @@
 import * as os from 'os';
 
 // Server configuration
-export const PORT = parseInt(process.env.PORT || '3000', 10);
+// API_PORT takes precedence over PORT for clarity in monorepo setup
+export const PORT = parseInt(process.env.API_PORT || process.env.PORT || '3001', 10);
 export const NODE_ENV = process.env.NODE_ENV || 'development';
 export const CONTAINER_ID = os.hostname();
 
@@ -82,6 +83,13 @@ export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL || 'claude-
 export const CLAUDE_ORG_UUID = process.env.CLAUDE_ORG_UUID || '';  // For title generation endpoint
 export const CLAUDE_COOKIES = process.env.CLAUDE_COOKIES || '';  // Browser cookies for fast title generation
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // OpenRouter API key for title generation
+
+// Background sync configuration
+// Automatically syncs Claude Remote sessions from Anthropic API
+export const CLAUDE_SYNC_ENABLED = process.env.CLAUDE_SYNC_ENABLED !== 'false';  // Enabled by default
+export const CLAUDE_SYNC_INTERVAL_MS = parseInt(process.env.CLAUDE_SYNC_INTERVAL_MS || '300000', 10);  // 5 minutes
+export const CLAUDE_SYNC_INITIAL_DELAY_MS = parseInt(process.env.CLAUDE_SYNC_INITIAL_DELAY_MS || '5000', 10);  // 5 seconds after startup
+export const CLAUDE_SYNC_LIMIT = parseInt(process.env.CLAUDE_SYNC_LIMIT || '50', 10);  // Max sessions to fetch per sync
 
 /**
  * Validate required environment variables
