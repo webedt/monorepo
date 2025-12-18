@@ -24,6 +24,7 @@ import { GitHubOperations, parseRepoUrl } from '../services/github/operations.js
 import { logger, generateSessionPath, getEventEmoji } from '@webedt/shared';
 import { WORKSPACE_DIR } from '../config/env.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
+import { sessionListBroadcaster } from '../lib/sessionListBroadcaster.js';
 import { workerCoordinator, WorkerAssignment, AcquireWorkerOptions } from '../services/workerCoordinator/workerCoordinator.js';
 
 // Define types locally (were previously in @webedt/shared)
@@ -265,6 +266,9 @@ const executeHandler = async (req: Request, res: Response) => {
         component: 'ExecuteRoute',
         sessionId: chatSession.id
       });
+
+      // Notify subscribers of new session
+      sessionListBroadcaster.notifySessionCreated(user.id, chatSession);
     }
 
     // Store user message
@@ -455,6 +459,9 @@ const executeHandler = async (req: Request, res: Response) => {
       .update(chatSessions)
       .set({ status: 'running' })
       .where(eq(chatSessions.id, chatSession.id));
+
+    // Notify subscribers of status change to running
+    sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSession.id, status: 'running' });
 
     // Setup heartbeat interval (keeps connection alive and signals activity)
     const heartbeatInterval = setInterval(() => {
@@ -1196,6 +1203,9 @@ const executeHandler = async (req: Request, res: Response) => {
         .set({ status: 'completed', completedAt: new Date(), workerLastActivity: null })
         .where(eq(chatSessions.id, chatSession.id));
 
+      // Notify subscribers of status change to completed
+      sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSession.id, status: 'completed' });
+
       await sendEvent({
         type: 'completed',
         sessionId: chatSession.id,
@@ -1259,6 +1269,9 @@ const executeHandler = async (req: Request, res: Response) => {
         .set({ status: 'error', completedAt: new Date(), workerLastActivity: null })
         .where(eq(chatSessions.id, chatSession.id));
 
+      // Notify subscribers of status change to error
+      sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSession.id, status: 'error' });
+
       await sendEvent({
         type: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -1297,6 +1310,11 @@ const executeHandler = async (req: Request, res: Response) => {
           .update(chatSessions)
           .set({ status: 'error', completedAt: new Date() })
           .where(eq(chatSessions.id, chatSession.id));
+
+        // Notify subscribers of status change to error
+        if (user?.id) {
+          sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSession.id, status: 'error' });
+        }
       } catch (dbError) {
         console.error('[ExecuteRoute] Failed to update session status:', dbError);
       }

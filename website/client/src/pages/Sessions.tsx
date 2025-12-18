@@ -6,6 +6,7 @@ import { useAuthStore, useSessionLastPageStore, useRecentReposStore, type Sessio
 import ChatInput, { type ImageAttachment } from '@/components/ChatInput';
 import type { ChatSession, GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
+import { useSessionListUpdates } from '@/hooks/useSessionListUpdates';
 
 // Helper to get the session URL with last visited page
 function getSessionUrl(sessionId: string, getLastPage: (id: string) => string): string {
@@ -66,13 +67,10 @@ export default function Sessions() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['sessions'],
     queryFn: sessionsApi.list,
-    refetchInterval: (query) => {
-      // Poll every 3 seconds if there are any running sessions
-      const sessions = query.state.data?.data?.sessions || [];
-      const hasRunning = sessions.some((s: ChatSession) => s.status === 'running');
-      return hasRunning ? 3000 : false;
-    },
   });
+
+  // Subscribe to real-time session updates via SSE (replaces polling)
+  useSessionListUpdates();
 
   const allSessions: ChatSession[] = data?.data?.sessions || [];
 

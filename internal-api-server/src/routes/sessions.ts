@@ -15,6 +15,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient } from '@webedt/shared';
 import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../lib/sessionEventBroadcaster.js';
+import { sessionListBroadcaster } from '../lib/sessionListBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
 import { GitHubOperations } from '../services/github/operations.js';
 import { storageService } from '../services/storage/storageService.js';
@@ -152,6 +153,98 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     logger.error('Get sessions error', error as Error, { component: 'Sessions' });
     res.status(500).json({ success: false, error: 'Failed to fetch sessions' });
   }
+});
+
+/**
+ * SSE endpoint for real-time session list updates
+ *
+ * Clients subscribe to this endpoint to receive updates when:
+ * - A new session is created
+ * - A session status changes (running -> completed, etc.)
+ * - A session is updated (title change, etc.)
+ * - A session is deleted
+ *
+ * This eliminates the need for polling the sessions list.
+ */
+router.get('/updates', requireAuth, async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const userId = authReq.user!.id;
+  const subscriberId = uuidv4();
+
+  logger.info(`Client subscribing to session list updates`, {
+    component: 'Sessions',
+    userId,
+    subscriberId
+  });
+
+  // Set up SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  // Send initial connected event
+  res.write(`event: connected\n`);
+  res.write(`data: ${JSON.stringify({
+    subscriberId,
+    userId,
+    timestamp: new Date().toISOString()
+  })}\n\n`);
+
+  // Subscribe to session list updates for this user
+  const unsubscribe = sessionListBroadcaster.subscribe(userId, subscriberId, (event) => {
+    try {
+      // Check if response is still writable
+      if (res.writableEnded) {
+        unsubscribe();
+        return;
+      }
+
+      // Write the event in SSE format
+      res.write(`event: ${event.type}\n`);
+      res.write(`data: ${JSON.stringify({
+        type: event.type,
+        session: event.session,
+        timestamp: event.timestamp.toISOString()
+      })}\n\n`);
+    } catch (err) {
+      logger.error(`Error writing to session list stream for subscriber ${subscriberId}`, err as Error, {
+        component: 'Sessions'
+      });
+      unsubscribe();
+    }
+  });
+
+  // Send heartbeat every 30 seconds to keep connection alive
+  const heartbeatInterval = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(heartbeatInterval);
+      return;
+    }
+    res.write(`:heartbeat\n\n`);
+  }, 30000);
+
+  // Handle client disconnect
+  req.on('close', () => {
+    logger.info(`Client disconnected from session list updates`, {
+      component: 'Sessions',
+      userId,
+      subscriberId
+    });
+    clearInterval(heartbeatInterval);
+    unsubscribe();
+  });
+
+  // Handle errors
+  req.on('error', (err) => {
+    logger.error(`Session list stream error for subscriber ${subscriberId}`, err, {
+      component: 'Sessions'
+    });
+    clearInterval(heartbeatInterval);
+    unsubscribe();
+  });
 });
 
 // Get all deleted chat sessions for user (with pagination)
@@ -1094,6 +1187,9 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       .set({ deletedAt: new Date() })
       .where(eq(chatSessions.id, sessionId));
 
+    // Notify subscribers of session deletion
+    sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, sessionId);
+
     res.json({
       success: true,
       data: {
@@ -1216,6 +1312,9 @@ router.post('/:id/worker-status', async (req: Request, res: Response) => {
         completedAt: completedAt ? new Date(completedAt) : new Date()
       })
       .where(eq(chatSessions.id, sessionId));
+
+    // Notify subscribers of status change (use session's userId)
+    sessionListBroadcaster.notifyStatusChanged(session.userId, { id: sessionId, status });
 
     logger.info(`Worker callback updated session ${sessionId} status to '${status}'`, { component: 'Sessions' });
 
