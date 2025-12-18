@@ -9,7 +9,7 @@ export default {
   },
   plugins: [require('daisyui')],
   daisyui: {
-    themes: true, // All themes are loaded via direct CSS import in index.css
+    themes: true, // All themes loaded via CSS import; biotin defined in index.css
     darkTheme: "dark",
     base: true,
     styled: true,
