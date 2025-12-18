@@ -39,6 +39,7 @@ interface SessionLayoutProps {
   titleActions?: React.ReactNode; // Edit and Delete buttons for title line
   prActions?: React.ReactNode; // PR buttons for branch line
   session?: any; // Session data passed from parent to avoid stale data
+  isMaximized?: boolean; // When true, hide header and sidebar for full reading mode
   children: React.ReactNode;
 }
 
@@ -54,6 +55,7 @@ export default function SessionLayout({
   titleActions,
   prActions,
   session: sessionProp,
+  isMaximized = false,
   children,
 }: SessionLayoutProps) {
   const { user, isAuthenticated, clearUser } = useAuthStore();
@@ -267,6 +269,17 @@ export default function SessionLayout({
       },
     ] : [])
   ];
+
+  // When maximized, render only the children with minimal wrapper
+  if (isMaximized) {
+    return (
+      <div className="h-screen bg-base-200 flex flex-col">
+        <main className="flex-1 flex flex-col min-h-0 min-w-0">
+          {children}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-base-200 flex flex-col">
