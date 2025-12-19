@@ -236,6 +236,7 @@ function addAppStyles(): void {
 
     .app-main {
       flex: 1;
+      min-height: 0; /* Allow flex item to shrink below content */
       background: var(--color-bg-secondary);
     }
 
