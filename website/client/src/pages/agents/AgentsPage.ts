@@ -22,6 +22,12 @@ export class AgentsPage extends Page<PageOptions> {
   private emptyIcon: Icon | null = null;
   private isLoading = true;
 
+  // Prefetched GitHub data
+  private prefetchedRepos: Repository[] | null = null;
+  private prefetchedBranches: Map<string, Branch[]> = new Map();
+  private isPrefetchingRepos = false;
+  private reposPrefetchPromise: Promise<void> | null = null;
+
   protected render(): string {
     return `
       <div class="agents-page">
@@ -89,6 +95,62 @@ export class AgentsPage extends Page<PageOptions> {
 
     // Load sessions
     this.loadSessions();
+
+    // Prefetch GitHub repos in the background
+    this.prefetchGitHubData();
+  }
+
+  /**
+   * Prefetch GitHub repos and branches in the background
+   * so they're ready when the user clicks "New Session"
+   */
+  private prefetchGitHubData(): void {
+    if (this.isPrefetchingRepos || this.prefetchedRepos !== null) return;
+
+    this.isPrefetchingRepos = true;
+    this.reposPrefetchPromise = (async () => {
+      try {
+        const response = await githubApi.getRepos();
+        this.prefetchedRepos = response.repos || [];
+
+        // Also prefetch branches for the last used repo
+        const lastUsedRepo = localStorage.getItem('webedt_last_repo');
+        if (lastUsedRepo && this.prefetchedRepos.length > 0) {
+          const [owner, name] = lastUsedRepo.split('/');
+          const repo = this.prefetchedRepos.find(r => r.owner.login === owner && r.name === name);
+          if (repo) {
+            await this.prefetchBranches(owner, name);
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to prefetch GitHub repos:', error);
+        this.prefetchedRepos = [];
+      } finally {
+        this.isPrefetchingRepos = false;
+      }
+    })();
+  }
+
+  /**
+   * Prefetch branches for a specific repo
+   */
+  private async prefetchBranches(owner: string, name: string): Promise<Branch[]> {
+    const key = `${owner}/${name}`;
+
+    // Return cached branches if available
+    if (this.prefetchedBranches.has(key)) {
+      return this.prefetchedBranches.get(key)!;
+    }
+
+    try {
+      const response = await githubApi.getBranches(owner, name);
+      const branches = response.branches || [];
+      this.prefetchedBranches.set(key, branches);
+      return branches;
+    } catch (error) {
+      console.warn(`Failed to prefetch branches for ${key}:`, error);
+      return [];
+    }
   }
 
   private async loadSessions(): Promise<void> {
@@ -242,17 +304,41 @@ export class AgentsPage extends Page<PageOptions> {
       },
     });
 
-    // State for the form
-    let repos: Repository[] = [];
+    // Get last used repository from localStorage
+    const lastUsedRepo = localStorage.getItem('webedt_last_repo');
+
+    // Use prefetched data if available
+    const hasPrefetchedRepos = this.prefetchedRepos !== null;
+    const prefetchedBranchesForLastRepo = lastUsedRepo
+      ? this.prefetchedBranches.get(lastUsedRepo)
+      : undefined;
+
+    // State for the form - initialize with prefetched data
+    let repos: Repository[] = this.prefetchedRepos || [];
     let branches: Branch[] = [];
     let selectedRepo: Repository | null = null;
     let selectedBranch: string = '';
     let initialRequest: string = '';
-    let isLoadingRepos = true;
+    let isLoadingRepos = !hasPrefetchedRepos && this.isPrefetchingRepos;
     let isLoadingBranches = false;
 
-    // Get last used repository from localStorage
-    const lastUsedRepo = localStorage.getItem('webedt_last_repo');
+    // If we have prefetched repos and a last used repo, auto-select it
+    if (hasPrefetchedRepos && lastUsedRepo && repos.length > 0) {
+      const [owner, name] = lastUsedRepo.split('/');
+      const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
+      if (lastRepo) {
+        selectedRepo = lastRepo;
+        // Use prefetched branches if available
+        if (prefetchedBranchesForLastRepo) {
+          branches = prefetchedBranchesForLastRepo;
+          // Auto-select main or master
+          const defaultBranch = branches.find(b => b.name === 'main' || b.name === 'master');
+          if (defaultBranch) {
+            selectedBranch = defaultBranch.name;
+          }
+        }
+      }
+    }
 
     // Build the form HTML
     const updateBody = () => {
@@ -355,12 +441,60 @@ export class AgentsPage extends Page<PageOptions> {
 
     // Load repositories
     const loadRepos = async () => {
+      // If we already have prefetched repos, use them
+      if (this.prefetchedRepos !== null) {
+        repos = this.prefetchedRepos;
+        isLoadingRepos = false;
+
+        // Auto-select last used repository if available
+        if (lastUsedRepo && repos.length > 0) {
+          const [owner, name] = lastUsedRepo.split('/');
+          const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
+          if (lastRepo) {
+            selectedRepo = lastRepo;
+            updateBody();
+            await loadBranches();
+            return;
+          }
+        }
+        updateBody();
+        return;
+      }
+
+      // If prefetch is in progress, wait for it
+      if (this.reposPrefetchPromise) {
+        isLoadingRepos = true;
+        updateBody();
+
+        await this.reposPrefetchPromise;
+
+        // Use the prefetched results
+        repos = this.prefetchedRepos || [];
+        isLoadingRepos = false;
+
+        // Auto-select last used repository if available
+        if (lastUsedRepo && repos.length > 0) {
+          const [owner, name] = lastUsedRepo.split('/');
+          const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
+          if (lastRepo) {
+            selectedRepo = lastRepo;
+            updateBody();
+            await loadBranches();
+            return;
+          }
+        }
+        updateBody();
+        return;
+      }
+
+      // Otherwise, fetch repos now
       isLoadingRepos = true;
       updateBody();
 
       try {
         const response = await githubApi.getRepos();
         repos = response.repos || [];
+        this.prefetchedRepos = repos; // Cache for future use
 
         // Auto-select last used repository if available
         if (lastUsedRepo && repos.length > 0) {
@@ -387,12 +521,29 @@ export class AgentsPage extends Page<PageOptions> {
     const loadBranches = async () => {
       if (!selectedRepo) return;
 
+      const repoKey = `${selectedRepo.owner.login}/${selectedRepo.name}`;
+
+      // Check if we have cached branches
+      const cachedBranches = this.prefetchedBranches.get(repoKey);
+      if (cachedBranches) {
+        branches = cachedBranches;
+        // Auto-select main or master if available
+        const defaultBranch = branches.find(b => b.name === 'main' || b.name === 'master');
+        if (defaultBranch) {
+          selectedBranch = defaultBranch.name;
+        }
+        updateBody();
+        return;
+      }
+
       isLoadingBranches = true;
       updateBody();
 
       try {
         const response = await githubApi.getBranches(selectedRepo.owner.login, selectedRepo.name);
         branches = response.branches || [];
+        // Cache for future use
+        this.prefetchedBranches.set(repoKey, branches);
         // Auto-select main or master if available
         const defaultBranch = branches.find(b => b.name === 'main' || b.name === 'master');
         if (defaultBranch) {
