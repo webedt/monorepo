@@ -6,6 +6,7 @@ import { Page, type PageOptions } from '../base/Page';
 import { Card, Button, Input, toast } from '../../components';
 import { authStore } from '../../stores/authStore';
 import { githubApi, userApi } from '../../lib/api';
+import type { ClaudeAuth } from '../../types';
 import './settings.css';
 
 export class SettingsPage extends Page<PageOptions> {
@@ -14,6 +15,7 @@ export class SettingsPage extends Page<PageOptions> {
   protected requiresAuth = true;
 
   private displayNameInput: Input | null = null;
+  private claudeAuthInput: Input | null = null;
   private cards: Card[] = [];
   private buttons: Button[] = [];
 
@@ -109,6 +111,7 @@ export class SettingsPage extends Page<PageOptions> {
 
     const user = authStore.getUser();
     const isGitHubConnected = !!user?.githubId;
+    const isClaudeConnected = !!user?.claudeAuth;
 
     const content = document.createElement('div');
     content.className = 'connections-content';
@@ -122,6 +125,22 @@ export class SettingsPage extends Page<PageOptions> {
         </div>
         <div class="connection-action github-action"></div>
       </div>
+      <div class="connection-item">
+        <div class="connection-info">
+          <span class="connection-name">Claude</span>
+          <span class="connection-status ${isClaudeConnected ? 'connected' : 'disconnected'}">
+            ${isClaudeConnected ? 'Connected' : 'Not connected'}
+          </span>
+        </div>
+        <div class="connection-action claude-action"></div>
+      </div>
+      ${!isClaudeConnected ? `
+      <div class="claude-auth-form">
+        <p class="connection-help">Paste your Claude auth JSON to connect:</p>
+        <div class="claude-auth-input"></div>
+        <div class="claude-auth-submit"></div>
+      </div>
+      ` : ''}
     `;
 
     // Create GitHub connect/disconnect button
@@ -133,6 +152,39 @@ export class SettingsPage extends Page<PageOptions> {
       });
       btn.mount(githubAction);
       this.buttons.push(btn);
+    }
+
+    // Create Claude connect/disconnect button
+    const claudeAction = content.querySelector('.claude-action') as HTMLElement;
+    if (claudeAction) {
+      const btn = new Button(isClaudeConnected ? 'Disconnect' : 'Add Auth', {
+        variant: isClaudeConnected ? 'secondary' : 'primary',
+        onClick: () => this.handleClaudeAction(isClaudeConnected),
+      });
+      btn.mount(claudeAction);
+      this.buttons.push(btn);
+    }
+
+    // Create Claude auth input and submit button if not connected
+    if (!isClaudeConnected) {
+      const claudeAuthInputContainer = content.querySelector('.claude-auth-input') as HTMLElement;
+      if (claudeAuthInputContainer) {
+        this.claudeAuthInput = new Input({
+          type: 'text',
+          placeholder: '{"claudeAiOauth":{"accessToken":"...","refreshToken":"..."}}',
+        });
+        this.claudeAuthInput.mount(claudeAuthInputContainer);
+      }
+
+      const claudeAuthSubmit = content.querySelector('.claude-auth-submit') as HTMLElement;
+      if (claudeAuthSubmit) {
+        const submitBtn = new Button('Save Claude Auth', {
+          variant: 'primary',
+          onClick: () => this.handleClaudeAuthSubmit(),
+        });
+        submitBtn.mount(claudeAuthSubmit);
+        this.buttons.push(submitBtn);
+      }
     }
 
     const card = new Card();
@@ -203,6 +255,44 @@ export class SettingsPage extends Page<PageOptions> {
     }
   }
 
+  private async handleClaudeAction(isConnected: boolean): Promise<void> {
+    if (isConnected) {
+      try {
+        await userApi.removeClaudeAuth();
+        authStore.updateUser({ claudeAuth: undefined });
+        toast.success('Claude disconnected');
+        this.update({});
+      } catch (error) {
+        toast.error('Failed to disconnect Claude');
+      }
+    }
+    // If not connected, the form is already shown
+  }
+
+  private async handleClaudeAuthSubmit(): Promise<void> {
+    const authJson = this.claudeAuthInput?.getValue() || '';
+    if (!authJson.trim()) {
+      toast.error('Please paste your Claude auth JSON');
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(authJson);
+      await userApi.updateClaudeAuth(parsed);
+
+      // Update local user state
+      authStore.updateUser({ claudeAuth: parsed as ClaudeAuth });
+      toast.success('Claude authentication saved');
+      this.update({});
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        toast.error('Invalid JSON format');
+      } else {
+        toast.error('Failed to save Claude authentication');
+      }
+    }
+  }
+
   private async handleLogout(): Promise<void> {
     try {
       await authStore.logout();
@@ -214,6 +304,7 @@ export class SettingsPage extends Page<PageOptions> {
 
   protected onUnmount(): void {
     this.displayNameInput?.unmount();
+    this.claudeAuthInput?.unmount();
     for (const card of this.cards) {
       card.unmount();
     }

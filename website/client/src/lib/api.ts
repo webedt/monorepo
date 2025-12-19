@@ -363,18 +363,20 @@ export const userApi = {
 // ============================================================================
 export const sessionsApi = {
   list: () =>
-    fetchApi<{ sessions: Session[] }>('/api/sessions'),
+    fetchApi<ApiResponse<{ sessions: Session[] }>>('/api/sessions')
+      .then(r => r.data!),
 
   listDeleted: (params?: { limit?: number; offset?: number }) => {
     const queryParams = new URLSearchParams();
     if (params?.limit) queryParams.append('limit', String(params.limit));
     if (params?.offset) queryParams.append('offset', String(params.offset));
     const queryString = queryParams.toString();
-    return fetchApi<{ sessions: Session[] }>(`/api/sessions/deleted${queryString ? `?${queryString}` : ''}`);
+    return fetchApi<ApiResponse<{ sessions: Session[] }>>(`/api/sessions/deleted${queryString ? `?${queryString}` : ''}`)
+      .then(r => r.data!);
   },
 
   get: (id: string) =>
-    fetchApi<{ session: Session }>(`/api/sessions/${id}`),
+    fetchApi<{ success: boolean; session: Session }>(`/api/sessions/${id}`),
 
   getMessages: (id: string) =>
     fetchApi(`/api/sessions/${id}/messages`),
@@ -661,6 +663,31 @@ export function createExecuteRemoteEventSource(data: {
   }
   const fullUrl = `${getApiBaseUrl()}/api/execute-remote?${params}`;
   console.log('[API] Creating Claude Remote EventSource:', fullUrl);
+  return new EventSource(fullUrl, { withCredentials: true });
+}
+
+/**
+ * Create an EventSource for executing a pending session
+ * This starts the AI agent on the session
+ */
+export function createSessionExecuteEventSource(session: {
+  id: string;
+  userRequest?: string | null;
+  repositoryOwner?: string | null;
+  repositoryName?: string | null;
+}): EventSource {
+  const params = new URLSearchParams();
+  params.append('websiteSessionId', session.id);
+  if (session.userRequest) {
+    params.append('userRequest', session.userRequest);
+  }
+  if (session.repositoryOwner && session.repositoryName) {
+    params.append('github', JSON.stringify({
+      repoUrl: `https://github.com/${session.repositoryOwner}/${session.repositoryName}`,
+    }));
+  }
+  const fullUrl = `${getApiBaseUrl()}/api/execute-remote?${params}`;
+  console.log('[API] Creating Session Execute EventSource:', fullUrl);
   return new EventSource(fullUrl, { withCredentials: true });
 }
 

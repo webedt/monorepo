@@ -5,7 +5,7 @@
 
 import { Page, type PageOptions } from '../base/Page';
 import { Spinner, toast } from '../../components';
-import { sessionsApi } from '../../lib/api';
+import { sessionsApi, createSessionExecuteEventSource } from '../../lib/api';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
 import type { Session } from '../../types';
@@ -157,8 +157,12 @@ export class ChatPage extends Page<ChatPageOptions> {
       // Load events/messages
       await this.loadMessages();
 
-      // Connect to live stream if session is active
-      if (this.session?.status === 'running') {
+      // Handle based on session status
+      if (this.session?.status === 'pending') {
+        // Start execution for pending sessions
+        this.startExecution();
+      } else if (this.session?.status === 'running') {
+        // Connect to live stream if session is already running
         this.connectToStream();
       }
     } catch (error) {
@@ -169,6 +173,69 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.isLoading = false;
       this.updateLoadingState();
     }
+  }
+
+  /**
+   * Start execution for a pending session
+   */
+  private startExecution(): void {
+    if (!this.session) return;
+
+    console.log('[ChatPage] Starting execution for session:', this.session.id);
+
+    // Add system message
+    this.addMessage({
+      id: `system-${Date.now()}`,
+      type: 'system',
+      content: '🚀 Starting AI agent...',
+      timestamp: new Date(),
+    });
+
+    // Update status
+    this.updateSessionStatus('running');
+    workerStore.startExecution(this.session.id);
+
+    // Create EventSource for execution
+    const es = createSessionExecuteEventSource(this.session);
+
+    es.onopen = () => {
+      console.log('[ChatPage] Execution stream connected');
+    };
+
+    // Only use named event listeners - don't use onmessage to avoid duplicates
+    // The server sends events with specific types that we listen for
+    const eventTypes = ['connected', 'message', 'session_name', 'assistant_message',
+                        'tool_use', 'tool_result', 'completed', 'error', 'session-created',
+                        'input_preview', 'submission_preview'];
+    for (const eventType of eventTypes) {
+      es.addEventListener(eventType, (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleStreamEvent({ ...data, type: eventType });
+        } catch (error) {
+          console.error(`Failed to parse ${eventType} event:`, error);
+        }
+      });
+    }
+
+    es.onerror = (error) => {
+      console.error('[ChatPage] Execution stream error:', error);
+
+      // Only show error if not completed
+      if (this.session?.status !== 'completed') {
+        this.addMessage({
+          id: `error-${Date.now()}`,
+          type: 'error',
+          content: 'Connection lost. Please refresh to reconnect.',
+          timestamp: new Date(),
+        });
+      }
+
+      es.close();
+      workerStore.stopExecution();
+    };
+
+    this.eventSource = { close: () => es.close() };
   }
 
   private updateHeader(): void {
@@ -321,39 +388,131 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Update heartbeat
     workerStore.heartbeat();
 
+    console.log('[ChatPage] Stream event:', eventType, event);
+
     switch (eventType) {
+      case 'connected':
+      case 'session-created':
+        // Connection/session established
+        console.log('[ChatPage] Connected/Session created:', event);
+        break;
+
+      case 'message':
+        // Progress messages from the worker
+        const msgContent = this.extractStringContent(event);
+        if (msgContent) {
+          const emoji = event.emoji || '';
+          this.addMessage({
+            id: `system-${Date.now()}-${Math.random()}`,
+            type: 'system',
+            content: `${emoji} ${msgContent}`.trim(),
+            timestamp: new Date(),
+          });
+        }
+        break;
+
+      case 'input_preview':
+      case 'submission_preview':
+        // User input confirmation
+        const inputContent = this.extractStringContent(event);
+        if (inputContent) {
+          this.addMessage({
+            id: `user-${Date.now()}`,
+            type: 'user',
+            content: inputContent,
+            timestamp: new Date(),
+          });
+        }
+        break;
+
       case 'assistant':
       case 'assistant_message':
+        const assistantContent = this.extractAssistantContent(event);
+        if (assistantContent) {
+          this.addMessage({
+            id: `assistant-${Date.now()}-${Math.random()}`,
+            type: 'assistant',
+            content: assistantContent,
+            timestamp: new Date(),
+            model: event.model,
+          });
+        }
+        break;
+
+      case 'tool_use':
+        // Show tool being used
+        const toolName = event.name || event.tool || 'unknown tool';
         this.addMessage({
-          id: `assistant-${Date.now()}`,
-          type: 'assistant',
-          content: this.extractAssistantContent(event),
+          id: `system-${Date.now()}-${Math.random()}`,
+          type: 'system',
+          content: `🔧 Using tool: ${toolName}`,
           timestamp: new Date(),
-          model: event.model,
         });
+        break;
+
+      case 'tool_result':
+        // Tool completed (optional: could show result)
         break;
 
       case 'error':
+        const errorContent = this.extractStringContent(event) || 'An error occurred';
         this.addMessage({
           id: `error-${Date.now()}`,
           type: 'error',
-          content: event.message || event.error || 'An error occurred',
+          content: errorContent,
           timestamp: new Date(),
         });
+        workerStore.stopExecution();
+        this.updateSessionStatus('failed');
         break;
 
       case 'completed':
+        this.addMessage({
+          id: `system-${Date.now()}`,
+          type: 'system',
+          content: '✅ Task completed',
+          timestamp: new Date(),
+        });
         workerStore.stopExecution();
         this.updateSessionStatus('completed');
+        // Close the event source
+        if (this.eventSource) {
+          this.eventSource.close();
+          this.eventSource = null;
+        }
         break;
 
       case 'session_name':
-        if (event.sessionName && this.session) {
-          this.session.userRequest = event.sessionName;
+        if ((event.sessionName || event.name) && this.session) {
+          this.session.userRequest = event.sessionName || event.name;
           this.updateHeader();
         }
         break;
     }
+  }
+
+  /**
+   * Extract a string content from an event, handling various formats
+   */
+  private extractStringContent(event: any): string {
+    // Try various common field names
+    if (typeof event.content === 'string') return event.content;
+    if (typeof event.message === 'string') return event.message;
+    if (typeof event.text === 'string') return event.text;
+
+    // Handle content arrays (like Claude API format)
+    if (Array.isArray(event.content)) {
+      return event.content
+        .map((block: any) => {
+          if (typeof block === 'string') return block;
+          if (block.type === 'text' && typeof block.text === 'string') return block.text;
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    return '';
   }
 
   private updateSessionStatus(status: string): void {
