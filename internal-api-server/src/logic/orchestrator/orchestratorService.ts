@@ -42,6 +42,7 @@ import {
   waitForAllSessions,
   SessionResult,
 } from './sessionExecutor.js';
+import { logger } from '@webedt/shared';
 
 export interface StartOrchestratorRequest {
   repositoryOwner: string;
@@ -98,7 +99,7 @@ export async function createJob(
 
   const [job] = await db.insert(orchestratorJobs).values(newJob).returning();
 
-  console.log(`[OrchestratorService] Created job ${jobId} for ${config.repositoryOwner}/${config.repositoryName}`);
+  logger.info(`Created job`, { component: 'OrchestratorService', jobId, repo: `${config.repositoryOwner}/${config.repositoryName}` });
 
   return job;
 }
@@ -143,12 +144,12 @@ export async function startJob(jobId: string, _apiKey?: string): Promise<void> {
   orchestratorBroadcaster.startJob(jobId);
   orchestratorBroadcaster.broadcastJobStarted(jobId);
 
-  console.log(`[OrchestratorService] Started job ${jobId}`);
+  logger.info(`Started job`, { component: 'OrchestratorService', jobId });
 
   // Clean up when done
   promise
     .catch(err => {
-      console.error(`[OrchestratorService] Job ${jobId} error:`, err);
+      logger.error(`Job error`, err as Error, { component: 'OrchestratorService', jobId });
     })
     .finally(() => {
       activeJobRunners.delete(jobId);
@@ -176,7 +177,7 @@ export async function pauseJob(jobId: string): Promise<void> {
     orchestratorBroadcaster.broadcastJobPaused(jobId, job.currentCycle);
   }
 
-  console.log(`[OrchestratorService] Paused job ${jobId}`);
+  logger.info(`Paused job`, { component: 'OrchestratorService', jobId });
 }
 
 /**
@@ -195,7 +196,7 @@ export async function resumeJob(jobId: string, apiKey?: string): Promise<void> {
   await startJob(jobId, apiKey);
   orchestratorBroadcaster.broadcastJobResumed(jobId, job.currentCycle);
 
-  console.log(`[OrchestratorService] Resumed job ${jobId}`);
+  logger.info(`Resumed job`, { component: 'OrchestratorService', jobId });
 }
 
 /**
@@ -216,7 +217,7 @@ export async function cancelJob(jobId: string): Promise<void> {
 
   orchestratorBroadcaster.endJob(jobId, 'cancelled');
 
-  console.log(`[OrchestratorService] Cancelled job ${jobId}`);
+  logger.info(`Cancelled job`, { component: 'OrchestratorService', jobId });
 }
 
 /**
@@ -318,7 +319,7 @@ async function runOrchestrationLoop(
 
     // SETUP PHASE (only on first run, cycle 0)
     if (job.currentCycle === 0) {
-      console.log(`[OrchestratorService] Running setup for job ${jobId}`);
+      logger.info(`Running setup phase`, { component: 'OrchestratorService', jobId });
       await runSetupPhase(job);
 
       if (isCancelled()) return;
@@ -344,7 +345,7 @@ async function runOrchestrationLoop(
       }
 
       const cycleNumber = job.currentCycle;
-      console.log(`[OrchestratorService] Starting cycle ${cycleNumber} for job ${jobId}`);
+      logger.info(`Starting cycle`, { component: 'OrchestratorService', jobId, cycleNumber });
 
       // Run one complete cycle
       const shouldContinue = await runCycle(job, cycleNumber, isCancelled);
@@ -355,7 +356,7 @@ async function runOrchestrationLoop(
       }
 
       if (isCancelled()) {
-        console.log(`[OrchestratorService] Job ${jobId} cancelled during cycle ${cycleNumber}`);
+        logger.info(`Job cancelled during cycle`, { component: 'OrchestratorService', jobId, cycleNumber });
         return;
       }
 
@@ -369,7 +370,7 @@ async function runOrchestrationLoop(
       await sleep(5000);
     }
   } catch (error) {
-    console.error(`[OrchestratorService] Job ${jobId} failed:`, error);
+    logger.error(`Job failed`, error as Error, { component: 'OrchestratorService', jobId });
 
     await db
       .update(orchestratorJobs)
@@ -424,7 +425,7 @@ async function runSetupPhase(job: OrchestratorJob): Promise<void> {
   // Archive the setup session
   await archiveSession(job.userId, result.sessionId);
 
-  console.log(`[OrchestratorService] Setup complete for job ${job.id}`);
+  logger.info(`Setup complete`, { component: 'OrchestratorService', jobId: job.id });
 }
 
 /**
@@ -510,7 +511,7 @@ async function runDiscoveryPhase(
   const title = generateSessionTitle('discovery', params);
   const prompt = getDiscoveryPrompt(params);
 
-  console.log(`[OrchestratorService] Running discovery for cycle ${cycleNumber}`);
+  logger.info(`Running discovery`, { component: 'OrchestratorService', cycleNumber });
 
   const result = await createAndExecuteSession({
     userId: job.userId,
@@ -526,7 +527,7 @@ async function runDiscoveryPhase(
   await archiveSession(job.userId, result.sessionId);
 
   if (result.status === 'error') {
-    console.error(`[OrchestratorService] Discovery failed:`, result.error);
+    logger.error(`Discovery failed`, new Error(result.error || 'Unknown'), { component: 'OrchestratorService' });
     return { success: false, taskDescriptions: [] };
   }
 
@@ -583,7 +584,7 @@ async function runExecutionPhase(
 ): Promise<void> {
   orchestratorBroadcaster.broadcastCyclePhase(job.id, cycleNumber, 'execution');
 
-  console.log(`[OrchestratorService] Executing ${taskDescriptions.length} tasks in parallel`);
+  logger.info(`Executing tasks in parallel`, { component: 'OrchestratorService', taskCount: taskDescriptions.length });
 
   // Get task records
   const tasks = await db
@@ -712,7 +713,7 @@ async function runConvergencePhase(
 ): Promise<void> {
   orchestratorBroadcaster.broadcastCyclePhase(job.id, cycleNumber, 'convergence');
 
-  console.log(`[OrchestratorService] Convergence for cycle ${cycleNumber}`);
+  logger.info(`Convergence phase`, { component: 'OrchestratorService', cycleNumber });
 
   // Get task results
   const tasks = await db.select().from(orchestratorTasks).where(eq(orchestratorTasks.cycleId, cycleId));
@@ -725,7 +726,7 @@ async function runConvergencePhase(
     .set({ tasksCompleted: completed, tasksFailed: failed })
     .where(eq(orchestratorCycles.id, cycleId));
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: ${completed} completed, ${failed} failed`);
+  logger.info(`Cycle results`, { component: 'OrchestratorService', cycleNumber, completed, failed });
 }
 
 /**
@@ -750,7 +751,7 @@ async function runUpdatePhase(
   const title = generateSessionTitle('update', params);
   const prompt = getUpdatePrompt(params);
 
-  console.log(`[OrchestratorService] Running update for cycle ${cycleNumber}`);
+  logger.info(`Running update phase`, { component: 'OrchestratorService', cycleNumber });
 
   const result = await createAndExecuteSession({
     userId: job.userId,
@@ -783,7 +784,7 @@ async function runUpdatePhase(
     summary,
   });
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber} update complete`);
+  logger.info(`Update phase complete`, { component: 'OrchestratorService', cycleNumber });
 }
 
 /**
@@ -807,7 +808,7 @@ async function completeJob(jobId: string, reason: string): Promise<void> {
 
   orchestratorBroadcaster.endJob(jobId, reason);
 
-  console.log(`[OrchestratorService] Job ${jobId} completed: ${reason}`);
+  logger.info(`Job completed`, { component: 'OrchestratorService', jobId, reason });
 }
 
 /**
