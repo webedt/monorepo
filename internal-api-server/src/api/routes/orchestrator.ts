@@ -133,7 +133,7 @@ router.get('/', requireAuth, async (req: Request, res: Response): Promise<void> 
 
     res.json({ success: true, data: jobs });
   } catch (error) {
-    console.error('[Orchestrator API] Error listing jobs:', error);
+    logger.error('Error listing jobs', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -168,7 +168,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<voi
 
     res.json({ success: true, data: job });
   } catch (error) {
-    console.error('[Orchestrator API] Error getting job:', error);
+    logger.error('Error getting job', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -215,11 +215,29 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response): Prom
 
     // Subscribe to job events
     const unsubscribe = orchestratorBroadcaster.subscribe(jobId, subscriberId, (event: OrchestratorEvent) => {
-      res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      try {
+        // Check if response is still writable
+        if (res.writableEnded) {
+          unsubscribe();
+          return;
+        }
+        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      } catch (err) {
+        logger.error(`Error writing to orchestrator stream for job ${jobId}`, err as Error, {
+          component: 'OrchestratorAPI',
+          jobId,
+          subscriberId,
+        });
+        unsubscribe();
+      }
     });
 
     // Heartbeat
     const heartbeat = setInterval(() => {
+      if (res.writableEnded) {
+        clearInterval(heartbeat);
+        return;
+      }
       res.write(': heartbeat\n\n');
     }, 30000);
 
@@ -227,23 +245,44 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response): Prom
     req.on('close', () => {
       clearInterval(heartbeat);
       unsubscribe();
-      console.log(`[Orchestrator API] Client disconnected from job ${jobId}`);
+      logger.info(`Client disconnected from orchestrator job stream`, {
+        component: 'OrchestratorAPI',
+        jobId,
+        subscriberId,
+      });
+    });
+
+    // Handle request errors
+    req.on('error', (err) => {
+      logger.error(`Orchestrator stream error for job ${jobId}`, err, {
+        component: 'OrchestratorAPI',
+        jobId,
+        subscriberId,
+      });
+      clearInterval(heartbeat);
+      unsubscribe();
     });
 
     // If job is already completed, send completion event
     if (job.status === 'completed' || job.status === 'cancelled' || job.status === 'error') {
-      res.write(
-        `event: job_ended\ndata: ${JSON.stringify({
-          type: 'job_ended',
-          jobId,
-          data: { status: job.status },
-          timestamp: new Date(),
-        })}\n\n`
-      );
+      if (!res.writableEnded) {
+        res.write(
+          `event: job_ended\ndata: ${JSON.stringify({
+            type: 'job_ended',
+            jobId,
+            data: { status: job.status },
+            timestamp: new Date(),
+          })}\n\n`
+        );
+      }
     }
   } catch (error) {
-    console.error('[Orchestrator API] Error streaming job:', error);
-    res.status(500).json({ success: false, error: (error as Error).message });
+    logger.error('Error setting up orchestrator stream', error as Error, {
+      component: 'OrchestratorAPI',
+    });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
   }
 });
 
@@ -290,7 +329,7 @@ router.post('/:id/start', requireAuth, async (req: Request, res: Response): Prom
 
     res.json({ success: true, message: 'Job started' });
   } catch (error) {
-    console.error('[Orchestrator API] Error starting job:', error);
+    logger.error('Error starting job', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -326,7 +365,7 @@ router.post('/:id/pause', requireAuth, async (req: Request, res: Response): Prom
 
     res.json({ success: true, message: 'Job paused' });
   } catch (error) {
-    console.error('[Orchestrator API] Error pausing job:', error);
+    logger.error('Error pausing job', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -374,7 +413,7 @@ router.post('/:id/resume', requireAuth, async (req: Request, res: Response): Pro
 
     res.json({ success: true, message: 'Job resumed' });
   } catch (error) {
-    console.error('[Orchestrator API] Error resuming job:', error);
+    logger.error('Error resuming job', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -410,7 +449,7 @@ router.post('/:id/cancel', requireAuth, async (req: Request, res: Response): Pro
 
     res.json({ success: true, message: 'Job cancelled' });
   } catch (error) {
-    console.error('[Orchestrator API] Error cancelling job:', error);
+    logger.error('Error cancelling job', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -444,7 +483,7 @@ router.get('/:id/cycles', requireAuth, async (req: Request, res: Response): Prom
 
     res.json({ success: true, data: job.cycles });
   } catch (error) {
-    console.error('[Orchestrator API] Error listing cycles:', error);
+    logger.error('Error listing cycles', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -486,7 +525,7 @@ router.get('/:id/cycles/:num', requireAuth, async (req: Request, res: Response):
 
     res.json({ success: true, data: cycle });
   } catch (error) {
-    console.error('[Orchestrator API] Error getting cycle:', error);
+    logger.error('Error getting cycle', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -528,7 +567,7 @@ router.put('/:id/request', requireAuth, async (req: Request, res: Response): Pro
 
     res.json({ success: true, message: 'Request document updated' });
   } catch (error) {
-    console.error('[Orchestrator API] Error updating request document:', error);
+    logger.error('Error updating request document', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
@@ -570,7 +609,7 @@ router.put('/:id/tasklist', requireAuth, async (req: Request, res: Response): Pr
 
     res.json({ success: true, message: 'Task list updated' });
   } catch (error) {
-    console.error('[Orchestrator API] Error updating task list:', error);
+    logger.error('Error updating task list', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
