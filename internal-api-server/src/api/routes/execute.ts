@@ -278,6 +278,7 @@ const executeHandler = async (req: Request, res: Response) => {
 
           // Reuse the existing session
           chatSession = existing;
+          chatSession._reused = true; // Mark as reused for session-created event
 
           // Update status to running if it was pending
           if (existing.status === 'pending') {
@@ -287,19 +288,8 @@ const executeHandler = async (req: Request, res: Response) => {
               .where(eq(chatSessions.id, existing.id));
           }
 
-          // Send session-created event with existing session ID
-          res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'
-          });
-
-          res.write(`event: session-created\n`);
-          res.write(`data: ${JSON.stringify({ websiteSessionId: existing.id, reused: true })}\n\n`);
-
-          // Continue with execution using existing session
-          // Skip to store user message section
+          // Note: Don't send headers or session-created event here -
+          // the main flow below will handle it with the reused flag
         }
       }
 
@@ -444,10 +434,16 @@ const executeHandler = async (req: Request, res: Response) => {
       res.write(`data: ${JSON.stringify(inputPreviewEvent)}\n\n`);
     }
 
-    // Send session-created event for new sessions
+    // Send session-created event for new sessions (or reused sessions)
     if (!websiteSessionId) {
+      const sessionCreatedData: { websiteSessionId: string; reused?: boolean } = {
+        websiteSessionId: chatSession.id
+      };
+      if (chatSession._reused) {
+        sessionCreatedData.reused = true;
+      }
       res.write(`event: session-created\n`);
-      res.write(`data: ${JSON.stringify({ websiteSessionId: chatSession.id })}\n\n`);
+      res.write(`data: ${JSON.stringify(sessionCreatedData)}\n\n`);
     }
 
     // Track client connection
