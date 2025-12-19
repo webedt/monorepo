@@ -10,3 +10,4 @@ export { AgentsPage } from './agents/AgentsPage';
 export { SettingsPage } from './settings/SettingsPage';
 export { ChatPage } from './chat/ChatPage';
 export { CodePage } from './code/CodePage';
+export { TrashPage } from './trash/TrashPage';

@@ -16,6 +16,7 @@ import {
   SettingsPage,
   ChatPage,
   CodePage,
+  TrashPage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -354,6 +355,15 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Agent Sessions | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/trash',
+        component: () => {
+          mountPage(TrashPage);
+          return document.createElement('div');
+        },
+        title: 'Trash | WebEDT',
         guard: () => authStore.isAuthenticated(),
       },
       {
