@@ -75,11 +75,16 @@ router.get('/oauth', requireAuth, (req: Request, res: Response) => {
 
   const referer = req.get('referer') || req.get('origin');
   let returnOrigin = getRequestOrigin(req);
+  let returnPath = '/settings'; // Default to settings page
 
   if (referer) {
     try {
       const refererUrl = new URL(referer);
       returnOrigin = refererUrl.origin;
+      // Extract the hash path (e.g., #/settings -> /settings)
+      if (refererUrl.hash) {
+        returnPath = refererUrl.hash.slice(1); // Remove the # prefix
+      }
     } catch {
       // Fall back to request origin
     }
@@ -90,6 +95,7 @@ router.get('/oauth', requireAuth, (req: Request, res: Response) => {
     userId: authReq.user!.id,
     timestamp: Date.now(),
     returnOrigin,
+    returnPath,
   })).toString('base64');
 
   // Build redirect URI dynamically based on returnOrigin
@@ -120,6 +126,7 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
       userId: string;
       timestamp: number;
       returnOrigin?: string;
+      returnPath?: string;
     };
     try {
       stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
@@ -154,7 +161,8 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
     };
 
     if (tokenData.error) {
-      res.redirect(getFrontendUrl(`/settings?error=${tokenData.error}`, stateData.returnOrigin));
+      const errorReturnPath = stateData.returnPath || '/settings';
+      res.redirect(getFrontendUrl(`${errorReturnPath}?error=${tokenData.error}`, stateData.returnOrigin));
       return;
     }
 
@@ -185,7 +193,8 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
       })
       .where(eq(users.id, stateData.userId));
 
-    res.redirect(getFrontendUrl('/settings?success=github_connected', stateData.returnOrigin));
+    const returnPath = stateData.returnPath || '/settings';
+    res.redirect(getFrontendUrl(`${returnPath}?success=github_connected`, stateData.returnOrigin));
   } catch (error) {
     logger.error('GitHub OAuth error', error as Error, { component: 'GitHub' });
     res.redirect(getFrontendUrl('/settings?error=oauth_failed'));
