@@ -5,24 +5,18 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import * as os from 'os';
-import * as path from 'path';
 import { db, chatSessions, messages, users, events } from '../../logic/db/index.js';
 import type { ChatSession } from '../../logic/db/schema.js';
 import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient, normalizeRepoName, normalizeRepoUrl } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient } from '@webedt/shared';
 import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
-import { GitHubOperations } from '../../logic/github/operations.js';
-import { storageService } from '../../logic/storage/storageService.js';
 import { ensureValidToken, type ClaudeAuth } from '../../logic/auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
-
-const STORAGE_WORKER_URL = process.env.STORAGE_WORKER_URL || 'http://storage-worker:3000';
 
 // Helper function to delete a GitHub branch
 async function deleteGitHubBranch(
@@ -49,35 +43,6 @@ async function deleteGitHubBranch(
     }
     logger.error(`Failed to delete GitHub branch ${owner}/${repo}/${branch}`, error as Error, { component: 'Sessions' });
     return { success: false, message: 'Failed to delete branch' };
-  }
-}
-
-// Helper function to delete session from storage worker
-async function deleteFromStorageWorker(sessionPath: string): Promise<{ success: boolean; message: string }> {
-  try {
-    const response = await fetch(`${STORAGE_WORKER_URL}/api/storage-worker/sessions/${sessionPath}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      // 404 means session doesn't exist in storage (never uploaded or already deleted)
-      if (response.status === 404) {
-        logger.info(`Storage session ${sessionPath} not found (already deleted)`, { component: 'Sessions' });
-        return { success: true, message: 'Session not found in storage' };
-      }
-      const error = await response.text();
-      logger.error(`Failed to delete storage session ${sessionPath}: ${error}`, undefined, { component: 'Sessions' });
-      return { success: false, message: 'Failed to delete from storage' };
-    }
-
-    logger.info(`Deleted storage session ${sessionPath}`, { component: 'Sessions' });
-    return { success: true, message: 'Storage session deleted' };
-  } catch (error) {
-    logger.error(`Error deleting storage session ${sessionPath}`, error as Error, { component: 'Sessions' });
-    return { success: false, message: 'Error deleting from storage' };
   }
 }
 
@@ -297,134 +262,6 @@ router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Get deleted sessions error', error as Error, { component: 'Sessions' });
     res.status(500).json({ success: false, error: 'Failed to fetch deleted sessions' });
-  }
-});
-
-// Create a code-only session (no AI execution, just for tracking file operations)
-// This endpoint clones the repository and uploads files to storage
-router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const { title, repositoryUrl, repositoryOwner, repositoryName, baseBranch } = req.body;
-
-    if (!repositoryOwner || !repositoryName) {
-      res.status(400).json({
-        success: false,
-        error: 'Missing required fields: repositoryOwner, repositoryName'
-      });
-      return;
-    }
-
-    // Require GitHub access token for cloning
-    if (!authReq.user?.githubAccessToken) {
-      res.status(400).json({
-        success: false,
-        error: 'GitHub access token required. Please connect your GitHub account.'
-      });
-      return;
-    }
-
-    // Normalize repository name and URL to prevent duplicates (remove .git suffix)
-    const normalizedRepoName = normalizeRepoName(repositoryName);
-    const normalizedRepoUrl = repositoryUrl
-      ? normalizeRepoUrl(repositoryUrl)
-      : `https://github.com/${repositoryOwner}/${normalizedRepoName}`;
-
-    // Generate UUID for the session
-    const sessionId = crypto.randomUUID();
-    const repoUrl = normalizedRepoUrl;
-    const effectiveBaseBranch = baseBranch || 'main';
-
-    logger.info(`Creating code session ${sessionId} for ${repositoryOwner}/${normalizedRepoName}`, {
-      component: 'Sessions',
-      sessionId,
-      repoUrl: normalizedRepoUrl,
-      baseBranch: effectiveBaseBranch
-    });
-
-    // Initialize storage service
-    await storageService.initialize();
-
-    // Create GitHubOperations instance
-    const githubOperations = new GitHubOperations(storageService);
-
-    // Define workspace root (temporary directory for cloning)
-    const workspaceRoot = path.join(os.tmpdir(), 'code-sessions');
-
-    // Call initSession to clone the repo and upload to storage
-    // This generates a branch name and session title
-    const initResult = await githubOperations.initSession(
-      {
-        sessionId,
-        repoUrl,
-        branch: effectiveBaseBranch,
-        userRequest: title || 'Code editing session',
-        githubAccessToken: authReq.user.githubAccessToken,
-        workspaceRoot,
-        // No coding assistant for code-only sessions
-        codingAssistantProvider: undefined,
-        codingAssistantAuthentication: undefined
-      },
-      (event) => {
-        logger.info(`Init session progress: ${event.message}`, {
-          component: 'Sessions',
-          sessionId,
-          stage: event.stage
-        });
-      }
-    );
-
-    // Generate session path using the branch name from initResult (using normalized repo name)
-    const sessionPath = generateSessionPath(repositoryOwner, normalizedRepoName, initResult.branchName);
-
-    // Create the session with 'completed' status - code sessions don't have active AI processing
-    const [chatSession] = await db
-      .insert(chatSessions)
-      .values({
-        id: sessionId,
-        userId: authReq.user!.id,
-        userRequest: initResult.sessionTitle || title || 'Code editing session',
-        status: 'completed',
-        repositoryUrl: normalizedRepoUrl,
-        repositoryOwner,
-        repositoryName: normalizedRepoName,
-        baseBranch: effectiveBaseBranch,
-        branch: initResult.branchName,
-        sessionPath,
-        autoCommit: false,
-        locked: true,
-      })
-      .returning();
-
-    // Create an initial user message
-    await db
-      .insert(messages)
-      .values({
-        chatSessionId: sessionId,
-        type: 'user',
-        content: `Started code editing session on repository ${repositoryOwner}/${normalizedRepoName}`,
-      });
-
-    logger.info(`Created code session ${sessionId} with branch ${initResult.branchName}`, {
-      component: 'Sessions',
-      sessionId,
-      sessionPath,
-      branchName: initResult.branchName,
-      sessionTitle: initResult.sessionTitle
-    });
-
-    res.json({
-      success: true,
-      data: {
-        sessionId: chatSession.id,
-        sessionPath: chatSession.sessionPath,
-        branchName: initResult.branchName,
-        sessionTitle: initResult.sessionTitle
-      },
-    });
-  } catch (error) {
-    logger.error('Create code session error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to create code session' });
   }
 });
 
@@ -917,11 +754,9 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
 
     const cleanupResults: {
       branches: { sessionId: string; success: boolean; message: string }[];
-      storage: { sessionPath: string; success: boolean; message: string }[];
       remoteSessions: { remoteSessionId: string; success: boolean; message: string }[];
     } = {
       branches: [],
-      storage: [],
       remoteSessions: []
     };
 
@@ -940,15 +775,6 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
         });
       cleanupResults.branches = await Promise.all(branchDeletions);
     }
-
-    // Delete from storage worker for all sessions that have sessionPath
-    const storageDeletions = sessions
-      .filter((s: ChatSession) => s.sessionPath)
-      .map(async (session: ChatSession) => {
-        const result = await deleteFromStorageWorker(session.sessionPath!);
-        return { sessionPath: session.sessionPath!, ...result };
-      });
-    cleanupResults.storage = await Promise.all(storageDeletions);
 
     // Archive Claude Remote sessions
     if (authReq.user?.claudeAuth) {
@@ -1133,7 +959,6 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 
     const cleanupResults: {
       branch?: { success: boolean; message: string };
-      storage?: { success: boolean; message: string };
       remoteSession?: { success: boolean; message: string };
     } = {};
 
@@ -1172,11 +997,6 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
         hasRepoName: !!session.repositoryName,
         hasGithubToken: !!authReq.user?.githubAccessToken,
       });
-    }
-
-    // Delete from storage worker if sessionPath exists
-    if (session.sessionPath) {
-      cleanupResults.storage = await deleteFromStorageWorker(session.sessionPath);
     }
 
     // Archive Claude Remote session if it exists

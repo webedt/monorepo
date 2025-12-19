@@ -10,7 +10,6 @@ import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './githubClient.js';
 import { GitHelper } from './gitHelper.js';
 import { AIWorkerClient } from '../aiWorker/aiWorkerClient.js';
-import { StorageService } from '../storage/storageService.js';
 import { logger, generateSessionPath } from '@webedt/shared';
 
 // ============================================================================
@@ -171,11 +170,9 @@ export function parseRepoUrl(repoUrl: string): { owner: string; repo: string } {
 
 export class GitHubOperations {
   private githubClient: GitHubClient;
-  private storageService: StorageService;
 
-  constructor(storageService: StorageService) {
+  constructor() {
     this.githubClient = new GitHubClient();
-    this.storageService = storageService;
   }
 
   /**
@@ -196,33 +193,14 @@ export class GitHubOperations {
     try {
       progress({ type: 'progress', stage: 'preparing', message: 'Preparing session initialization...', endpoint });
 
-      // Check for existing session in storage
-      progress({ type: 'progress', stage: 'checking_session', message: 'Checking for existing session...', endpoint });
-
       // Clean up any existing local directory
       if (fs.existsSync(sessionRoot)) {
         fs.rmSync(sessionRoot, { recursive: true, force: true });
       }
 
-      // Try to download existing session
-      let sessionExisted = false;
-      try {
-        const sessionData = await this.storageService.downloadSessionToBuffer(sessionId);
-        if (sessionData) {
-          // Extract session to local directory
-          fs.mkdirSync(sessionRoot, { recursive: true });
-          await this.storageService.extractSessionToPath(sessionData, sessionRoot);
-          sessionExisted = true;
-          progress({ type: 'progress', stage: 'session_found', message: 'Existing session found', endpoint });
-        }
-      } catch {
-        // Session doesn't exist, create new
-      }
-
-      if (!sessionExisted) {
-        fs.mkdirSync(workspaceDir, { recursive: true });
-        progress({ type: 'progress', stage: 'new_session', message: 'Creating new session', endpoint });
-      }
+      // Create fresh session directory
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      progress({ type: 'progress', stage: 'new_session', message: 'Creating new session', endpoint });
 
       // Check if repo already exists in session
       let metadata = this.getMetadata(sessionRoot);
@@ -363,11 +341,6 @@ export class GitHubOperations {
         endpoint
       });
 
-      // Upload to storage
-      progress({ type: 'progress', stage: 'uploading', message: 'Uploading session to storage...', endpoint });
-
-      await this.storageService.uploadSessionFromPath(sessionId, sessionRoot);
-
       logger.info('Init session completed', {
         component: 'GitHubOperations',
         sessionId,
@@ -380,7 +353,7 @@ export class GitHubOperations {
       return {
         clonedPath,
         branch: baseBranch,
-        wasCloned: !sessionExisted,
+        wasCloned: true,
         branchName,
         sessionTitle: title,
         sessionPath,

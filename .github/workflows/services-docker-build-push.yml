@@ -321,12 +321,6 @@ jobs:
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          MINIO_ENDPOINT: ${{ vars.MINIO_ENDPOINT || 'webedt-app-minio-0fslch-minio-1' }}
-          MINIO_PORT: ${{ vars.MINIO_PORT || '9000' }}
-          MINIO_USE_SSL: ${{ vars.MINIO_USE_SSL || 'false' }}
-          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
-          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
-          MINIO_BUCKET: ${{ vars.MINIO_BUCKET || 'sessions' }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://webedt.etdofresh.com' }}
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
@@ -377,12 +371,6 @@ jobs:
           WORKER_BASE_PORT=5001
           WORKSPACE_DIR=/workspace
           DATABASE_URL=${DATABASE_URL}
-          MINIO_ENDPOINT=${MINIO_ENDPOINT}
-          MINIO_PORT=${MINIO_PORT}
-          MINIO_USE_SSL=${MINIO_USE_SSL}
-          MINIO_ROOT_USER=${MINIO_ROOT_USER}
-          MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-          MINIO_BUCKET=${MINIO_BUCKET}
           SESSION_SECRET=${SESSION_SECRET}
           ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
           GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}

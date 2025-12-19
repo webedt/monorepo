@@ -3,7 +3,6 @@ import 'dotenv/config';
 import { Command } from 'commander';
 import { sessionCommand } from './commands/session.js';
 import { githubCommand } from './commands/github.js';
-import { storageCommand } from './commands/storage.js';
 import { adminCommand } from './commands/admin.js';
 
 const program = new Command();
@@ -16,7 +15,6 @@ program
 // Add commands
 program.addCommand(sessionCommand);
 program.addCommand(githubCommand);
-program.addCommand(storageCommand);
 program.addCommand(adminCommand);
 
 program.parse();

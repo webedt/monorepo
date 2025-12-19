@@ -600,258 +600,58 @@ export const adminApi = {
   getLogsStatus: () => fetchApi('/api/logs/status'),
 };
 
-// Storage API (connects to internal-api-server storage routes)
+// Storage API - REMOVED (sessions are now ephemeral)
+// These functions are stubbed out to prevent breaking changes in pages that use them.
+// File operations should use GitHub API directly for persistence.
 export const storageApi = {
   listSessions: async () => {
-    const response = await fetchApi('/api/storage/sessions');
-    // Map sessionPath to sessionId for compatibility with frontend
-    if (response.sessions) {
-      response.sessions = response.sessions.map((session: any) => ({
-        sessionId: session.sessionPath, // Use sessionPath as the ID
-        createdAt: session.createdAt,
-        lastModified: session.lastModified,
-        size: session.size,
-      }));
-    }
-    return response;
+    console.warn('[Storage] Storage has been removed. Sessions are now ephemeral.');
+    return { sessions: [] };
   },
 
   getSession: async (sessionId: string) => {
-    const response = await fetchApi(`/api/storage/sessions/${sessionId}`);
-    // Map sessionPath to sessionId for compatibility
-    return {
-      sessionId: response.sessionPath || sessionId,
-      createdAt: response.createdAt,
-      lastModified: response.lastModified,
-      size: response.size,
-    };
+    console.warn('[Storage] Storage has been removed. Sessions are now ephemeral.');
+    return { sessionId, createdAt: null, lastModified: null, size: 0 };
   },
 
-  sessionExists: async (sessionId: string): Promise<boolean> => {
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionId}`, {
-        method: 'HEAD',
-        credentials: 'include',
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+  sessionExists: async (_sessionId: string): Promise<boolean> => {
+    console.warn('[Storage] Storage has been removed. Sessions are now ephemeral.');
+    return false;
   },
 
-  // List all files in a session
-  listFiles: async (sessionPath: string): Promise<{ path: string; size: number; type: 'file' | 'directory' }[]> => {
-    const response = await fetchApi(`/api/storage/sessions/${sessionPath}/files`);
-    return response.files || [];
+  listFiles: async (_sessionPath: string): Promise<{ path: string; size: number; type: 'file' | 'directory' }[]> => {
+    console.warn('[Storage] Storage has been removed. Use GitHub API for file operations.');
+    return [];
   },
 
-  // Get a file's raw URL (for images, etc.)
-  getFileUrl: (sessionPath: string, filePath: string): string => {
-    return `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
+  getFileUrl: (_sessionPath: string, _filePath: string): string => {
+    console.warn('[Storage] Storage has been removed. Use GitHub API for file operations.');
+    return '';
   },
 
-  // Get file content as blob
-  getFileBlob: async (sessionPath: string, filePath: string): Promise<Blob | null> => {
-    const url = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
-    try {
-      const response = await fetch(url, {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        // Log detailed error info
-        const errorText = await response.text().catch(() => '');
-        console.log(`[Storage] getFileBlob error:`, {
-          status: response.status,
-          url,
-          sessionPath,
-          filePath,
-          errorDetails: errorText.substring(0, 1000),
-        });
-        return null;
-      }
-      return await response.blob();
-    } catch (error) {
-      console.error(`[Storage] getFileBlob exception:`, error);
-      return null;
-    }
+  getFileBlob: async (_sessionPath: string, _filePath: string): Promise<Blob | null> => {
+    console.warn('[Storage] Storage has been removed. Use GitHub API for file operations.');
+    return null;
   },
 
-  // Get file content as text
-  getFileText: async (sessionPath: string, filePath: string): Promise<string | null> => {
-    const url = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
-
-    console.log(`[Storage] getFileText request:`, {
-      sessionPath,
-      filePath,
-      url,
-      apiBaseUrl: getApiBaseUrl(),
-    });
-
-    try {
-      const response = await fetch(url, {
-        credentials: 'include',
-      });
-
-      console.log(`[Storage] getFileText response:`, {
-        status: response.status,
-        ok: response.ok,
-        url,
-      });
-
-      if (!response.ok) {
-        // Try to get error details
-        const errorText = await response.text().catch(() => '');
-        console.log(`[Storage] getFileText error details:`, {
-          status: response.status,
-          errorText: errorText.substring(0, 500),
-        });
-        return null;
-      }
-      return await response.text();
-    } catch (error) {
-      console.error(`[Storage] getFileText exception:`, error);
-      return null;
-    }
+  getFileText: async (_sessionPath: string, _filePath: string): Promise<string | null> => {
+    console.warn('[Storage] Storage has been removed. Use GitHub API for file operations.');
+    return null;
   },
 
-  // Write/update a file in a session
-  writeFile: async (sessionPath: string, filePath: string, content: string | Blob): Promise<boolean> => {
-    const body = typeof content === 'string' ? content : content;
-    const contentType = typeof content === 'string' ? 'text/plain; charset=utf-8' : content.type;
-    const contentSize = typeof content === 'string' ? content.length : content.size;
-    const url = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`;
-
-    console.log(`[Storage] Writing file:`, {
-      sessionPath,
-      filePath,
-      contentType,
-      contentSize,
-      url,
-      apiBaseUrl: getApiBaseUrl(),
-    });
-
-    try {
-      const response = await fetch(url, {
-        method: 'PUT',
-        credentials: 'include',
-        headers: {
-          'Content-Type': contentType,
-        },
-        body,
-      });
-
-      if (response.ok) {
-        const data = await response.json().catch(() => ({}));
-        console.log(`[Storage] Successfully wrote file:`, {
-          filePath,
-          status: response.status,
-          response: data,
-        });
-        return true;
-      } else {
-        // Try to get error details from response
-        let errorBody: string | object = '';
-        try {
-          errorBody = await response.json();
-        } catch {
-          try {
-            errorBody = await response.text();
-          } catch {
-            errorBody = '(could not read response body)';
-          }
-        }
-
-        console.error(`[Storage] Failed to write file:`, {
-          filePath,
-          sessionPath,
-          url,
-          status: response.status,
-          statusText: response.statusText,
-          errorBody,
-          headers: Object.fromEntries(response.headers.entries()),
-        });
-
-        // If 404, run diagnostics to understand why
-        if (response.status === 404) {
-          console.log(`[Storage] Running diagnostics for 404 error...`);
-
-          // Check if session exists
-          try {
-            const sessionCheckUrl = `${getApiBaseUrl()}/api/storage/sessions/${sessionPath}`;
-            const sessionCheck = await fetch(sessionCheckUrl, {
-              method: 'HEAD',
-              credentials: 'include',
-            });
-            console.log(`[Storage] Session exists check:`, {
-              url: sessionCheckUrl,
-              exists: sessionCheck.ok,
-              status: sessionCheck.status,
-            });
-          } catch (e) {
-            console.log(`[Storage] Session exists check failed:`, e);
-          }
-
-          // Check if we can list sessions at all (to verify API is reachable)
-          try {
-            const listUrl = `${getApiBaseUrl()}/api/storage/sessions`;
-            const listCheck = await fetch(listUrl, {
-              method: 'GET',
-              credentials: 'include',
-            });
-            const listData = await listCheck.json().catch(() => null);
-            console.log(`[Storage] List sessions check:`, {
-              url: listUrl,
-              ok: listCheck.ok,
-              status: listCheck.status,
-              sessionCount: listData?.count ?? 'unknown',
-            });
-          } catch (e) {
-            console.log(`[Storage] List sessions check failed:`, e);
-          }
-        }
-
-        return false;
-      }
-    } catch (error) {
-      console.error(`[Storage] Network error writing file:`, {
-        filePath,
-        sessionPath,
-        url,
-        error: error instanceof Error ? error.message : error,
-        errorType: error instanceof Error ? error.name : typeof error,
-      });
-      return false;
-    }
+  writeFile: async (_sessionPath: string, _filePath: string, _content: string | Blob): Promise<boolean> => {
+    console.warn('[Storage] Storage has been removed. Use GitHub API for file operations.');
+    return false;
   },
 
-  // Delete a file from a session
-  deleteFile: async (sessionPath: string, filePath: string): Promise<boolean> => {
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+  deleteFile: async (_sessionPath: string, _filePath: string): Promise<boolean> => {
+    console.warn('[Storage] Storage has been removed. Use GitHub API for file operations.');
+    return false;
   },
 
-  // Delete a folder (and all its contents) from a session
-  deleteFolder: async (sessionPath: string, folderPath: string): Promise<{ success: boolean; filesDeleted?: number }> => {
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/folders/${folderPath}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (response.ok) {
-        const data = await response.json();
-        return { success: true, filesDeleted: data.filesDeleted };
-      }
-      return { success: false };
-    } catch {
-      return { success: false };
-    }
+  deleteFolder: async (_sessionPath: string, _folderPath: string): Promise<{ success: boolean; filesDeleted?: number }> => {
+    console.warn('[Storage] Storage has been removed. Use GitHub API for file operations.');
+    return { success: false };
   },
 };
 

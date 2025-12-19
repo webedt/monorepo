@@ -23,17 +23,9 @@ const DEFAULT_ORIGINS = NODE_ENV === 'production'
   : ['http://localhost:5173', 'http://localhost:3000'];
 export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || DEFAULT_ORIGINS;
 
-// Session storage paths
+// Session storage paths (ephemeral - no persistent storage)
 export const TMP_DIR = process.env.TMP_DIR || '/tmp';
 export const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '/workspace';
-
-// MinIO configuration
-export const MINIO_ENDPOINT = process.env.MINIO_ENDPOINT || 'localhost';
-export const MINIO_PORT = parseInt(process.env.MINIO_PORT || '9000', 10);
-export const MINIO_USE_SSL = process.env.MINIO_USE_SSL === 'true';
-export const MINIO_ROOT_USER = process.env.MINIO_ROOT_USER || '';
-export const MINIO_ROOT_PASSWORD = process.env.MINIO_ROOT_PASSWORD || '';
-export const MINIO_BUCKET = process.env.MINIO_BUCKET || 'sessions';
 
 // AI Worker configuration
 export const AI_WORKER_TIMEOUT_MS = parseInt(process.env.AI_WORKER_TIMEOUT_MS || '600000', 10); // 10 minutes
@@ -99,8 +91,6 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   const warnings: string[] = [];
 
   if (NODE_ENV === 'production') {
-    if (!MINIO_ROOT_USER) errors.push('MINIO_ROOT_USER is required in production');
-    if (!MINIO_ROOT_PASSWORD) errors.push('MINIO_ROOT_PASSWORD is required in production');
     if (SESSION_SECRET === 'development-secret-change-in-production') {
       errors.push('SESSION_SECRET must be changed in production');
     }
@@ -131,9 +121,6 @@ export function logEnvConfig(): void {
   console.log(`  CONTAINER_ID=${CONTAINER_ID}`);
   console.log(`  TMP_DIR=${TMP_DIR}`);
   console.log(`  WORKSPACE_DIR=${WORKSPACE_DIR}`);
-  console.log(`  MINIO_ENDPOINT=${MINIO_ENDPOINT}`);
-  console.log(`  MINIO_PORT=${MINIO_PORT}`);
-  console.log(`  MINIO_BUCKET=${MINIO_BUCKET}`);
   console.log(`  AI_WORKER_PORT=${AI_WORKER_PORT}`);
   console.log(`  USE_WORKER_COORDINATOR=${USE_WORKER_COORDINATOR}`);
   console.log(`  WORKER_POOL_MODE=${WORKER_POOL_MODE}`);
@@ -141,8 +128,6 @@ export function logEnvConfig(): void {
   console.log(`  DOCKER_SOCKET_PATH=${DOCKER_SOCKET_PATH}`);
   console.log(`  WORKER_BASE_PORT=${WORKER_BASE_PORT}`);
   console.log(`  WORKER_POOL_SIZE=${WORKER_POOL_SIZE}`);
-  console.log(`  MINIO_ROOT_USER=${redact(MINIO_ROOT_USER)}`);
-  console.log(`  MINIO_ROOT_PASSWORD=${redact(MINIO_ROOT_PASSWORD)}`);
   console.log(`  SESSION_SECRET=${redact(SESSION_SECRET)}`);
   console.log(`  USE_NEW_ARCHITECTURE=${USE_NEW_ARCHITECTURE}`);
   console.log(`  CLAUDE_ENVIRONMENT_ID=${CLAUDE_ENVIRONMENT_ID || 'not set'}`);

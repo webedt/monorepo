@@ -9,7 +9,6 @@ import { logger, getEventEmoji } from '@webedt/shared';
 import { CredentialManager } from './utils/credentialManager';
 import { SecureCredentialManager } from './utils/secureCredentialManager';
 import { enrichEventWithRelativePaths } from './utils/filePathHelper';
-import { StorageClient } from './storage/storageClient';
 
 // Local workspace root for downloaded sessions
 const WORKSPACE_ROOT = process.env.WORKSPACE_DIR || '/workspace';
@@ -17,17 +16,15 @@ const WORKSPACE_ROOT = process.env.WORKSPACE_DIR || '/workspace';
 /**
  * Orchestrator for executing coding assistant requests
  *
- * This worker handles LLM execution with session sync:
- * - Downloads session from storage (via internal-api-server)
- * - Runs the LLM provider in the extracted workspace
- * - Uploads session back to storage after completion
+ * This worker handles LLM execution:
+ * - Receives workspace path from internal-api-server
+ * - Runs the LLM provider in the workspace
  * - Streams events back to caller
+ * - Sessions are ephemeral (no storage persistence)
  */
 export class Orchestrator {
-  private storageClient: StorageClient;
-
   constructor() {
-    this.storageClient = new StorageClient();
+    // No storage client needed - sessions are ephemeral
   }
 
   /**
@@ -44,12 +41,11 @@ export class Orchestrator {
    * Execute an LLM request
    *
    * Flow:
-   * 1. Download session from storage (using websiteSessionId)
-   * 2. Extract to local workspace
-   * 3. Write credentials for the provider
-   * 4. Run the LLM provider
-   * 5. Upload session back to storage
-   * 6. Stream events back to caller
+   * 1. Validate request and prepare workspace
+   * 2. Write credentials for the provider
+   * 3. Run the LLM provider
+   * 4. Stream events back to caller
+   * (Sessions are ephemeral - no storage persistence)
    */
   async execute(request: ExecuteRequest, req: Request, res: Response, abortSignal?: AbortSignal): Promise<void> {
     const startTime = Date.now();
@@ -142,11 +138,11 @@ export class Orchestrator {
       // Step 1: Validate request
       this.validateRequest(request);
 
-      // Step 2: Download session from storage
+      // Step 2: Prepare workspace
       sendEvent({
         type: 'message',
-        stage: 'downloading',
-        message: 'Downloading session from storage...',
+        stage: 'preparing',
+        message: 'Preparing workspace...',
         timestamp: new Date().toISOString()
       });
 
@@ -159,37 +155,13 @@ export class Orchestrator {
       fs.mkdirSync(sessionRoot, { recursive: true, mode: 0o700 });
       fs.chmodSync(sessionRoot, 0o700);
 
-      // Download and extract session with progress callbacks
-      const sessionDownloaded = await this.storageClient.downloadSession(
+      logger.info('Workspace prepared (ephemeral session)', {
+        component: 'Orchestrator',
         websiteSessionId,
-        sessionRoot,
-        (stage, message, data) => {
-          // Send progress events to client for visibility into download/extract process
-          sendEvent({
-            type: 'message',
-            stage: `download_${stage}`,
-            message,
-            data,
-            timestamp: new Date().toISOString()
-          });
-        }
-      );
+        sessionRoot
+      });
 
-      if (sessionDownloaded) {
-        logger.info('Session downloaded from storage', {
-          component: 'Orchestrator',
-          websiteSessionId,
-          sessionRoot
-        });
-      } else {
-        logger.info('No existing session in storage, created empty workspace', {
-          component: 'Orchestrator',
-          websiteSessionId,
-          sessionRoot
-        });
-      }
-
-      // Ensure the workspace path exists after download
+      // Ensure the workspace path exists
       if (!fs.existsSync(localWorkspacePath)) {
         // Create workspace directory if it doesn't exist
         fs.mkdirSync(localWorkspacePath, { recursive: true });
@@ -459,35 +431,10 @@ export class Orchestrator {
         }
       }
 
-      sendEvent({
-        type: 'message',
-        stage: 'uploading',
-        message: 'Uploading session to storage...',
-        timestamp: new Date().toISOString()
-      });
+      // Note: Sessions are ephemeral - no storage upload needed
+      // Changes are committed directly to GitHub by internal-api-server
 
-      await this.storageClient.uploadSession(
-        websiteSessionId,
-        sessionRoot,
-        (stage, message, data) => {
-          // Send progress events to client for visibility into upload process
-          sendEvent({
-            type: 'message',
-            stage: `upload_${stage}`,
-            message,
-            data,
-            timestamp: new Date().toISOString()
-          });
-        }
-      );
-
-      logger.info('Session uploaded to storage', {
-        component: 'Orchestrator',
-        websiteSessionId,
-        sessionRoot
-      });
-
-      // Step 8: Send completion event
+      // Send completion event
       const duration = Date.now() - startTime;
       sendEvent({
         type: 'completed',
@@ -535,22 +482,7 @@ export class Orchestrator {
         provider: request.codingAssistantProvider
       });
 
-      // Try to upload session even on error (to preserve any partial work)
-      try {
-        if (fs.existsSync(sessionRoot)) {
-          await this.storageClient.uploadSession(websiteSessionId, sessionRoot);
-          logger.info('Session uploaded after error', {
-            component: 'Orchestrator',
-            websiteSessionId
-          });
-        }
-      } catch (uploadError) {
-        logger.error('Failed to upload session after error', uploadError, {
-          component: 'Orchestrator',
-          websiteSessionId
-        });
-      }
-
+      // Sessions are ephemeral - no storage upload needed on error
       // Cleanup local session directory and credentials
       try {
         if (fs.existsSync(sessionRoot)) {

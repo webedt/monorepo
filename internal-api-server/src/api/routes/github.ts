@@ -11,7 +11,6 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger, ClaudeRemoteClient } from '@webedt/shared';
 import { GitHubOperations } from '../../logic/github/operations.js';
-import { StorageService } from '../../logic/storage/storageService.js';
 import { AIWorkerClient } from '../../logic/aiWorker/aiWorkerClient.js';
 import { ensureValidToken, type ClaudeAuth } from '../../logic/auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
@@ -19,8 +18,7 @@ import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/e
 const router = Router();
 
 // Initialize services for Auto PR
-const storageService = new StorageService();
-const githubOperations = new GitHubOperations(storageService);
+const githubOperations = new GitHubOperations();
 
 // Helper function to get the frontend URL for redirects
 function getFrontendUrl(path: string, storedOrigin?: string): string {

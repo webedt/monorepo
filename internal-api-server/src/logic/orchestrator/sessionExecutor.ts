@@ -13,7 +13,6 @@ import { db } from '../db/index.js';
 import { chatSessions, users, ChatSession } from '../db/schema.js';
 import { ensureValidToken, ClaudeAuth } from '../auth/claudeAuth.js';
 import { workerCoordinator, WorkerAssignment } from '../execution/workerCoordinator.js';
-import { StorageService } from '../storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../github/operations.js';
 import { WORKSPACE_DIR } from '../config/env.js';
 import { generateSessionPath, logger } from '@webedt/shared';
@@ -38,8 +37,7 @@ export interface SessionResult {
 }
 
 // Initialize services
-const storageService = new StorageService();
-const githubOperations = new GitHubOperations(storageService);
+const githubOperations = new GitHubOperations();
 
 /**
  * Get ClaudeAuth for a user and refresh if needed
@@ -165,15 +163,8 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
     workspacePath = initResult.localPath;
     logger.info(`Workspace initialized`, { component: 'SessionExecutor', workspacePath });
 
-    // Upload session to storage before calling worker (non-fatal if storage is unavailable)
-    if (fs.existsSync(sessionRoot)) {
-      try {
-        await storageService.uploadSessionFromPath(sessionId, sessionRoot);
-        logger.info(`Session uploaded to storage`, { component: 'SessionExecutor', sessionId });
-      } catch (storageError) {
-        logger.warn(`Failed to upload session to storage (continuing without)`, { component: 'SessionExecutor', sessionId, error: (storageError as Error).message });
-      }
-    }
+    // Note: Sessions are ephemeral - no storage upload needed
+    // The AI worker operates on local workspace and changes are committed directly to GitHub
 
     // Acquire worker
     logger.info(`Acquiring worker...`, { component: 'SessionExecutor' });

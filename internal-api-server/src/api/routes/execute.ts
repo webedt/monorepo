@@ -19,7 +19,6 @@ import { ensureValidToken, ClaudeAuth } from '../../logic/auth/claudeAuth.js';
 import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../../logic/auth/codexAuth.js';
 import { ensureValidGeminiToken, isValidGeminiAuth } from '../../logic/auth/geminiAuth.js';
 import type { GeminiAuth } from '../../logic/auth/lucia.js';
-import { StorageService } from '../../logic/storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../../logic/github/operations.js';
 import { logger, generateSessionPath, getEventEmoji, normalizeRepoUrl } from '@webedt/shared';
 import { WORKSPACE_DIR } from '../../logic/config/env.js';
@@ -34,8 +33,7 @@ export type ProviderAuth = ClaudeAuth | CodexAuth | { apiKey: string };
 const router = Router();
 
 // Initialize services
-const storageService = new StorageService();
-const githubOperations = new GitHubOperations(storageService);
+const githubOperations = new GitHubOperations();
 
 // Track active sessions for abort routing
 export const activeWorkerSessions = new Map<string, { workerUrl: string; containerId: string }>();
@@ -576,23 +574,8 @@ const executeHandler = async (req: Request, res: Response) => {
         fs.rmSync(sessionRoot, { recursive: true, force: true });
       }
 
-      let sessionExisted = false;
-      try {
-        const sessionData = await storageService.downloadSessionToBuffer(chatSession.id);
-        if (sessionData) {
-          fs.mkdirSync(sessionRoot, { recursive: true });
-          await storageService.extractSessionToPath(sessionData, sessionRoot);
-          sessionExisted = true;
-          await sendEvent({
-            type: 'message',
-            stage: 'session_found',
-            message: 'Existing session found in storage',
-            endpoint: '/execute'
-          });
-        }
-      } catch {
-        // Session doesn't exist
-      }
+      // Create fresh session directory (ephemeral - no storage)
+      fs.mkdirSync(sessionRoot, { recursive: true });
 
       // ========================================================================
       // PHASE 2: GitHub Setup (if needed)
@@ -711,48 +694,14 @@ const executeHandler = async (req: Request, res: Response) => {
 
           // Note: branch_created and session_name events are already sent by initSession()
           // via the progress callback - no need to send them again here
-
-        } else if (sessionExisted) {
-          // Use existing workspace from downloaded session
-          const metadataPath = path.join(sessionRoot, '.session-metadata.json');
-          if (fs.existsSync(metadataPath)) {
-            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-            if (metadata.github?.clonedPath) {
-              workspacePath = path.join(sessionRoot, 'workspace', metadata.github.clonedPath);
-            }
-          }
         }
+        // Note: Sessions are now ephemeral - no persistent storage fallback needed
       }
 
       // Default workspace path if not set
       if (!workspacePath) {
         workspacePath = path.join(sessionRoot, 'workspace');
         fs.mkdirSync(workspacePath, { recursive: true });
-      }
-
-      // Ensure session is uploaded to storage before calling AI worker
-      // This is important because the AI worker downloads the session separately
-      // and needs to have the latest files (especially for resumed sessions)
-      if (fs.existsSync(sessionRoot)) {
-        const workspaceContent = fs.existsSync(workspacePath) ? fs.readdirSync(workspacePath) : [];
-        if (workspaceContent.length > 0) {
-          await sendEvent({
-            type: 'message',
-            stage: 'syncing_session',
-            message: 'Syncing session to storage...',
-            endpoint: '/execute'
-          });
-
-          await storageService.uploadSessionFromPath(chatSession.id, sessionRoot);
-
-          logger.info('Session synced to storage before AI worker', {
-            component: 'ExecuteRoute',
-            sessionId: chatSession.id,
-            sessionRoot,
-            workspacePath,
-            fileCount: workspaceContent.length
-          });
-        }
       }
 
       // ========================================================================
@@ -1028,118 +977,8 @@ const executeHandler = async (req: Request, res: Response) => {
         sessionRoot
       });
 
-      // Re-download session from storage to get AI worker's changes
-      // The AI worker uploads its modified workspace back to storage, so we need
-      // to download it to get the latest files before doing commit checks
-      //
-      // We extract the FULL session INCLUDING .git from the tarball.
-      // The AI worker backs up .git before AI execution and restores it before uploading,
-      // so the tarball always has the correct git state needed for committing/pushing.
-      await sendEvent({
-        type: 'message',
-        stage: 'downloading_session',
-        message: 'Downloading updated session from storage...',
-        endpoint: '/execute'
-      });
-
-      try {
-        // Download updated session data
-        const updatedSessionData = await storageService.downloadSessionToBuffer(chatSession.id);
-        if (updatedSessionData) {
-          // Extract the full session INCLUDING .git from the tarball
-          // The AI worker backs up .git before execution and restores it before uploading,
-          // so the tarball always has the correct git state for committing/pushing
-          if (!fs.existsSync(sessionRoot)) {
-            fs.mkdirSync(sessionRoot, { recursive: true });
-          }
-
-          logger.info('Extracting full session from tarball (including .git)', {
-            component: 'ExecuteRoute',
-            sessionId: chatSession.id,
-            sessionRoot
-          });
-
-          await storageService.extractSessionToPath(updatedSessionData, sessionRoot);
-
-          logger.info('Session extracted', {
-            component: 'ExecuteRoute',
-            sessionId: chatSession.id
-          });
-
-          // Re-read metadata to get the correct workspace path after re-extraction
-          const metadataPath = path.join(sessionRoot, '.session-metadata.json');
-          if (fs.existsSync(metadataPath)) {
-            try {
-              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-              if (metadata.github?.clonedPath) {
-                workspacePath = path.join(sessionRoot, 'workspace', metadata.github.clonedPath);
-              } else {
-                workspacePath = path.join(sessionRoot, 'workspace');
-              }
-            } catch {
-              workspacePath = path.join(sessionRoot, 'workspace');
-            }
-          } else {
-            workspacePath = path.join(sessionRoot, 'workspace');
-          }
-
-          logger.info('Re-downloaded session with AI worker changes (git state preserved)', {
-            component: 'ExecuteRoute',
-            sessionId: chatSession.id,
-            sessionRoot,
-            workspacePath,
-            workspaceExists: fs.existsSync(workspacePath)
-          });
-
-          // Log git status for debugging
-          if (fs.existsSync(workspacePath)) {
-            const gitDir = path.join(workspacePath, '.git');
-            const files = fs.readdirSync(workspacePath);
-            logger.info('Workspace state after re-download', {
-              component: 'ExecuteRoute',
-              sessionId: chatSession.id,
-              workspacePath,
-              hasGitDir: fs.existsSync(gitDir),
-              fileCount: files.length,
-              files: files.slice(0, 20) // First 20 files
-            });
-
-            // Run git status to see changes
-            if (fs.existsSync(gitDir)) {
-              try {
-                const { execSync } = await import('child_process');
-                const gitStatus = execSync('git status --porcelain', { cwd: workspacePath, encoding: 'utf-8' });
-                const gitDiff = execSync('git diff --stat', { cwd: workspacePath, encoding: 'utf-8' });
-                const gitLog = execSync('git log --oneline -3', { cwd: workspacePath, encoding: 'utf-8' });
-                logger.info('Git state after re-download', {
-                  component: 'ExecuteRoute',
-                  sessionId: chatSession.id,
-                  gitStatusOutput: gitStatus || '(clean)',
-                  gitDiffStat: gitDiff || '(no diff)',
-                  recentCommits: gitLog
-                });
-              } catch (gitErr) {
-                logger.warn('Failed to get git status after re-download', {
-                  component: 'ExecuteRoute',
-                  sessionId: chatSession.id,
-                  error: gitErr instanceof Error ? gitErr.message : String(gitErr)
-                });
-              }
-            }
-          }
-        } else {
-          logger.warn('No session data found in storage after AI worker execution', {
-            component: 'ExecuteRoute',
-            sessionId: chatSession.id
-          });
-        }
-      } catch (downloadError) {
-        logger.error('Failed to re-download session from storage', downloadError, {
-          component: 'ExecuteRoute',
-          sessionId: chatSession.id
-        });
-        // Continue with existing local files as fallback
-      }
+      // Note: Sessions are now ephemeral - no storage download/upload needed
+      // The AI worker operates on ephemeral workspace and changes are committed directly to GitHub
 
       // Auto-commit if GitHub session
       logger.info('Checking auto-commit conditions', {
@@ -1226,46 +1065,8 @@ const executeHandler = async (req: Request, res: Response) => {
         }
       }
 
-      // Upload session to storage with file count
-      const countFilesRecursive = (dirPath: string): number => {
-        if (!fs.existsSync(dirPath)) return 0;
-        let count = 0;
-        const items = fs.readdirSync(dirPath);
-        for (const item of items) {
-          const itemPath = path.join(dirPath, item);
-          const stat = fs.statSync(itemPath);
-          if (stat.isDirectory()) {
-            count += countFilesRecursive(itemPath);
-          } else {
-            count++;
-          }
-        }
-        return count;
-      };
-
-      const uploadFileCount = fs.existsSync(sessionRoot) ? countFilesRecursive(sessionRoot) : 0;
-
-      await sendEvent({
-        type: 'message',
-        stage: 'uploading',
-        message: `Saving session to storage (${uploadFileCount} files)...`,
-        data: { totalFileCount: uploadFileCount },
-        endpoint: '/execute'
-      });
-
-      await storageService.uploadSessionFromPath(chatSession.id, sessionRoot);
-
-      await sendEvent({
-        type: 'message',
-        stage: 'uploaded',
-        message: `Session saved to storage (${uploadFileCount} files)`,
-        data: { totalFileCount: uploadFileCount },
-        source: 'storage-worker',
-        endpoint: '/execute'
-      });
-
       // ========================================================================
-      // PHASE 5: Completion
+      // PHASE 5: Completion (Sessions are ephemeral - no storage upload needed)
       // ========================================================================
 
       // Clear heartbeat interval
@@ -1324,16 +1125,7 @@ const executeHandler = async (req: Request, res: Response) => {
         sessionId: chatSession.id
       });
 
-      // Try to upload session state even on error
-      try {
-        if (sessionRoot && fs.existsSync(sessionRoot)) {
-          await storageService.uploadSessionFromPath(chatSession.id, sessionRoot);
-        }
-      } catch {
-        // Non-critical
-      }
-
-      // Cleanup
+      // Cleanup (sessions are ephemeral - no storage upload needed)
       try {
         if (sessionRoot && fs.existsSync(sessionRoot)) {
           fs.rmSync(sessionRoot, { recursive: true, force: true });
