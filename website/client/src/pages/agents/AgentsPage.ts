@@ -251,6 +251,9 @@ export class AgentsPage extends Page<PageOptions> {
     let isLoadingRepos = true;
     let isLoadingBranches = false;
 
+    // Get last used repository from localStorage
+    const lastUsedRepo = localStorage.getItem('webedt_last_repo');
+
     // Build the form HTML
     const updateBody = () => {
       const body = modal.getBody();
@@ -358,6 +361,19 @@ export class AgentsPage extends Page<PageOptions> {
       try {
         const response = await githubApi.getRepos();
         repos = response.repos || [];
+
+        // Auto-select last used repository if available
+        if (lastUsedRepo && repos.length > 0) {
+          const [owner, name] = lastUsedRepo.split('/');
+          const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
+          if (lastRepo) {
+            selectedRepo = lastRepo;
+            isLoadingRepos = false;
+            updateBody();
+            await loadBranches();
+            return;
+          }
+        }
       } catch (error) {
         console.error('Failed to load repos:', error);
         repos = [];
@@ -409,6 +425,9 @@ export class AgentsPage extends Page<PageOptions> {
           branch: `claude/session-${Date.now()}`,
           title: initialRequest || undefined,
         });
+
+        // Save the selected repository to localStorage for next time
+        localStorage.setItem('webedt_last_repo', `${selectedRepo.owner.login}/${selectedRepo.name}`);
 
         modal.close();
         modal.unmount();

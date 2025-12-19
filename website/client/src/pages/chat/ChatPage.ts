@@ -19,6 +19,59 @@ interface ChatMessage {
   model?: string;
 }
 
+interface RawEvent {
+  id: string;
+  type: string;
+  timestamp: Date;
+  data: any;
+}
+
+// Event type emoji mapping
+const EVENT_EMOJIS: Record<string, string> = {
+  connected: '🔌',
+  message: '💬',
+  title_generation: '✨',
+  session_created: '🎉',
+  'session-created': '🎉',
+  session_name: '📝',
+  env_manager_log: '🔧',
+  system: '⚙️',
+  user: '👤',
+  input_preview: '👤',
+  submission_preview: '📤',
+  assistant: '🤖',
+  assistant_message: '🤖',
+  tool_use: '🔨',
+  tool_result: '📤',
+  tool_progress: '⏳',
+  result: '✅',
+  completed: '🏁',
+  error: '❌',
+  heartbeat: '💓',
+};
+
+// Default event filters
+const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
+  user: true,
+  input_preview: true,
+  submission_preview: true,
+  assistant: true,
+  assistant_message: true,
+  tool_use: true,
+  tool_result: false,
+  message: true,
+  system: true,
+  error: true,
+  connected: false,
+  completed: true,
+  session_name: false,
+  'session-created': false,
+  session_created: false,
+  title_generation: false,
+  env_manager_log: false,
+  heartbeat: false,
+};
+
 interface ChatPageOptions extends PageOptions {
   params?: {
     sessionId?: string;
@@ -32,12 +85,18 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private session: Session | null = null;
   private messages: ChatMessage[] = [];
+  private rawEvents: RawEvent[] = [];
   private inputValue = '';
   private isLoading = true;
   private isSending = false;
   private eventSource: { close: () => void } | null = null;
   private messagesContainer: HTMLElement | null = null;
   private inputElement: HTMLTextAreaElement | null = null;
+
+  // View settings (persisted to localStorage)
+  private showRawJson = false;
+  private showTimestamps = false;
+  private eventFilters: Record<string, boolean> = { ...DEFAULT_EVENT_FILTERS };
 
   protected render(): string {
     return `
@@ -60,11 +119,38 @@ export class ChatPage extends Page<ChatPageOptions> {
           </div>
         </header>
 
+        <div class="chat-toolbar">
+          <div class="toolbar-left">
+            <div class="view-toggle">
+              <button class="toggle-btn" data-view="formatted" title="Formatted View">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                Chat
+              </button>
+              <button class="toggle-btn" data-view="raw" title="Raw JSON View">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                Raw
+              </button>
+            </div>
+          </div>
+          <div class="toolbar-right">
+            <button class="toolbar-btn" data-action="toggle-timestamps" title="Toggle Timestamps">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            </button>
+            <div class="filter-dropdown">
+              <button class="toolbar-btn" data-action="toggle-filters" title="Filter Events">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+              </button>
+              <div class="filter-menu" style="display: none;"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="chat-messages" id="chat-messages">
           <div class="chat-loading">
             <div class="spinner-container"></div>
           </div>
           <div class="messages-list" style="display: none;"></div>
+          <div class="events-list" style="display: none;"></div>
           <div class="chat-empty" style="display: none;">
             <h3>No messages yet</h3>
             <p>Send a message to start the conversation</p>
@@ -90,6 +176,9 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   protected onMount(): void {
     super.onMount();
+
+    // Load settings from localStorage
+    this.loadSettings();
 
     // Setup back button
     const backBtn = this.$('[data-action="back"]') as HTMLButtonElement;
@@ -124,6 +213,9 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Get messages container
     this.messagesContainer = this.$('.messages-list') as HTMLElement;
 
+    // Setup toolbar buttons
+    this.setupToolbar();
+
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
     if (spinnerContainer) {
@@ -133,6 +225,196 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     // Load session data
     this.loadSession();
+  }
+
+  private loadSettings(): void {
+    try {
+      // Load view mode
+      const savedRawJson = localStorage.getItem('chat_showRawJson');
+      if (savedRawJson !== null) {
+        this.showRawJson = savedRawJson === 'true';
+      }
+
+      // Load timestamps setting
+      const savedTimestamps = localStorage.getItem('chat_showTimestamps');
+      if (savedTimestamps !== null) {
+        this.showTimestamps = savedTimestamps === 'true';
+      }
+
+      // Load event filters
+      const savedFilters = localStorage.getItem('chat_eventFilters');
+      if (savedFilters) {
+        const parsed = JSON.parse(savedFilters);
+        this.eventFilters = { ...DEFAULT_EVENT_FILTERS, ...parsed };
+      }
+    } catch (error) {
+      console.warn('Failed to load chat settings:', error);
+    }
+  }
+
+  private saveSettings(): void {
+    try {
+      localStorage.setItem('chat_showRawJson', String(this.showRawJson));
+      localStorage.setItem('chat_showTimestamps', String(this.showTimestamps));
+      localStorage.setItem('chat_eventFilters', JSON.stringify(this.eventFilters));
+    } catch (error) {
+      console.warn('Failed to save chat settings:', error);
+    }
+  }
+
+  private setupToolbar(): void {
+    // View toggle buttons
+    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
+    const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
+
+    formattedBtn?.addEventListener('click', () => {
+      this.showRawJson = false;
+      this.saveSettings();
+      this.updateToolbarState();
+      this.renderContent();
+    });
+
+    rawBtn?.addEventListener('click', () => {
+      this.showRawJson = true;
+      this.saveSettings();
+      this.updateToolbarState();
+      this.renderContent();
+    });
+
+    // Timestamps toggle
+    const timestampsBtn = this.$('[data-action="toggle-timestamps"]') as HTMLButtonElement;
+    timestampsBtn?.addEventListener('click', () => {
+      this.showTimestamps = !this.showTimestamps;
+      this.saveSettings();
+      this.updateToolbarState();
+      this.renderContent();
+    });
+
+    // Filters dropdown
+    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    const filterMenu = this.$('.filter-menu') as HTMLElement;
+
+    filtersBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isVisible = filterMenu.style.display !== 'none';
+      filterMenu.style.display = isVisible ? 'none' : 'block';
+      if (!isVisible) {
+        this.renderFilterMenu();
+      }
+    });
+
+    // Close filter menu when clicking outside
+    document.addEventListener('click', () => {
+      if (filterMenu) {
+        filterMenu.style.display = 'none';
+      }
+    });
+
+    // Initial toolbar state
+    this.updateToolbarState();
+  }
+
+  private updateToolbarState(): void {
+    // Update view toggle
+    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
+    const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
+
+    formattedBtn?.classList.toggle('active', !this.showRawJson);
+    rawBtn?.classList.toggle('active', this.showRawJson);
+
+    // Update timestamps button
+    const timestampsBtn = this.$('[data-action="toggle-timestamps"]') as HTMLButtonElement;
+    timestampsBtn?.classList.toggle('active', this.showTimestamps);
+
+    // Update filters button to show if any filters are active
+    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    const hasActiveFilters = Object.values(this.eventFilters).some(v => !v);
+    filtersBtn?.classList.toggle('has-filters', hasActiveFilters);
+  }
+
+  private renderFilterMenu(): void {
+    const filterMenu = this.$('.filter-menu') as HTMLElement;
+    if (!filterMenu) return;
+
+    // Get unique event types from raw events
+    const eventTypes = new Set<string>();
+    for (const event of this.rawEvents) {
+      eventTypes.add(event.type);
+    }
+
+    // Also add common types that might appear
+    const commonTypes = ['user', 'assistant', 'assistant_message', 'tool_use', 'tool_result', 'message', 'error', 'completed'];
+    for (const type of commonTypes) {
+      eventTypes.add(type);
+    }
+
+    // Sort types alphabetically
+    const sortedTypes = Array.from(eventTypes).sort();
+
+    filterMenu.innerHTML = `
+      <div class="filter-menu-header">
+        <span>Filter Events</span>
+        <button class="filter-select-all" data-action="select-all">All</button>
+        <button class="filter-select-none" data-action="select-none">None</button>
+      </div>
+      <div class="filter-menu-items">
+        ${sortedTypes.map(type => {
+          const emoji = EVENT_EMOJIS[type] || '📦';
+          const checked = this.eventFilters[type] !== false;
+          return `
+            <label class="filter-item">
+              <input type="checkbox" data-filter="${type}" ${checked ? 'checked' : ''}>
+              <span class="filter-emoji">${emoji}</span>
+              <span class="filter-label">${type}</span>
+            </label>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    // Add event listeners
+    filterMenu.querySelectorAll('input[data-filter]').forEach(checkbox => {
+      checkbox.addEventListener('change', (e) => {
+        const target = e.target as HTMLInputElement;
+        const filterType = target.dataset.filter!;
+        this.eventFilters[filterType] = target.checked;
+        this.saveSettings();
+        this.updateToolbarState();
+        this.renderContent();
+      });
+    });
+
+    // Select all/none
+    filterMenu.querySelector('[data-action="select-all"]')?.addEventListener('click', () => {
+      for (const type of sortedTypes) {
+        this.eventFilters[type] = true;
+      }
+      this.saveSettings();
+      this.renderFilterMenu();
+      this.updateToolbarState();
+      this.renderContent();
+    });
+
+    filterMenu.querySelector('[data-action="select-none"]')?.addEventListener('click', () => {
+      for (const type of sortedTypes) {
+        this.eventFilters[type] = false;
+      }
+      this.saveSettings();
+      this.renderFilterMenu();
+      this.updateToolbarState();
+      this.renderContent();
+    });
+
+    // Prevent clicks inside menu from closing it
+    filterMenu.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  private renderContent(): void {
+    if (this.showRawJson) {
+      this.renderRawEvents();
+    } else {
+      this.renderMessages();
+    }
   }
 
   private async loadSession(): Promise<void> {
@@ -266,18 +548,34 @@ export class ChatPage extends Page<ChatPageOptions> {
     if (!this.session) return;
 
     try {
-      const response = await sessionsApi.getEvents(this.session.id) as { events?: any[] };
-      const events = response.events || [];
+      const response = await sessionsApi.getEvents(this.session.id) as { success?: boolean; data?: { events?: any[] }; events?: any[] };
+      // Handle both wrapped { data: { events } } and direct { events } formats
+      const events = response.data?.events || response.events || [];
 
-      // Convert events to messages
+      // Store raw events for raw view
+      this.rawEvents = events.map((event: any) => this.convertToRawEvent(event));
+
+      // Convert events to messages for formatted view
       this.messages = events
         .map((event: any) => this.convertEventToMessage(event))
         .filter((msg: ChatMessage | null): msg is ChatMessage => msg !== null);
 
-      this.renderMessages();
+      this.renderContent();
     } catch (error) {
       console.error('Failed to load messages:', error);
     }
+  }
+
+  private convertToRawEvent(event: any): RawEvent {
+    const data = event.eventData || event;
+    const eventType = data?.type || 'unknown';
+
+    return {
+      id: event.id || `event-${Date.now()}-${Math.random()}`,
+      type: eventType,
+      timestamp: new Date(event.timestamp || Date.now()),
+      data: data,
+    };
   }
 
   private convertEventToMessage(event: any): ChatMessage | null {
@@ -286,8 +584,9 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     if (!data) return null;
 
-    // Skip control events
-    if (['connected', 'completed', 'heartbeat', 'env_manager_log', 'system'].includes(eventType)) {
+    // Skip control/internal events
+    if (['connected', 'completed', 'heartbeat', 'env_manager_log', 'system',
+         'title_generation', 'session_created', 'session_name', 'session-created'].includes(eventType)) {
       return null;
     }
 
@@ -298,6 +597,18 @@ export class ChatPage extends Page<ChatPageOptions> {
           id: event.id || `user-${Date.now()}`,
           type: 'user',
           content: data.content || data.message || '',
+          timestamp: new Date(event.timestamp || Date.now()),
+        };
+
+      case 'input_preview':
+      case 'submission_preview':
+        // User input confirmation
+        const inputContent = data.message || data.data?.preview || '';
+        if (!inputContent) return null;
+        return {
+          id: event.id || `user-${Date.now()}`,
+          type: 'user',
+          content: inputContent,
           timestamp: new Date(event.timestamp || Date.now()),
         };
 
@@ -324,6 +635,15 @@ export class ChatPage extends Page<ChatPageOptions> {
           id: event.id || `system-${Date.now()}`,
           type: 'system',
           content: data.message || '',
+          timestamp: new Date(event.timestamp || Date.now()),
+        };
+
+      case 'tool_use':
+        const toolName = data.name || data.tool || 'unknown tool';
+        return {
+          id: event.id || `system-${Date.now()}`,
+          type: 'system',
+          content: `🔧 Using tool: ${toolName}`,
           timestamp: new Date(event.timestamp || Date.now()),
         };
 
@@ -389,6 +709,14 @@ export class ChatPage extends Page<ChatPageOptions> {
     workerStore.heartbeat();
 
     console.log('[ChatPage] Stream event:', eventType, event);
+
+    // Always add to raw events
+    this.addRawEvent({
+      id: `event-${Date.now()}-${Math.random()}`,
+      type: eventType,
+      timestamp: new Date(),
+      data: event,
+    });
 
     switch (eventType) {
       case 'connected':
@@ -524,8 +852,18 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private addMessage(message: ChatMessage): void {
     this.messages.push(message);
-    this.renderMessages();
+    if (!this.showRawJson) {
+      this.renderMessages();
+    }
     this.scrollToBottom();
+  }
+
+  private addRawEvent(event: RawEvent): void {
+    this.rawEvents.push(event);
+    if (this.showRawJson) {
+      this.renderRawEvents();
+      this.scrollToBottom();
+    }
   }
 
   private renderMessages(): void {
@@ -533,6 +871,10 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     const empty = this.$('.chat-empty') as HTMLElement;
     const list = this.$('.messages-list') as HTMLElement;
+    const eventsList = this.$('.events-list') as HTMLElement;
+
+    // Hide events list in formatted mode
+    eventsList?.style.setProperty('display', 'none');
 
     if (this.messages.length === 0) {
       empty?.style.setProperty('display', 'flex');
@@ -545,6 +887,56 @@ export class ChatPage extends Page<ChatPageOptions> {
         .map((msg) => this.renderMessage(msg))
         .join('');
     }
+  }
+
+  private renderRawEvents(): void {
+    const empty = this.$('.chat-empty') as HTMLElement;
+    const messagesList = this.$('.messages-list') as HTMLElement;
+    const eventsList = this.$('.events-list') as HTMLElement;
+
+    // Hide messages list in raw mode
+    messagesList?.style.setProperty('display', 'none');
+
+    // Filter events based on event filters
+    const filteredEvents = this.rawEvents.filter(event => {
+      return this.eventFilters[event.type] !== false;
+    });
+
+    if (filteredEvents.length === 0) {
+      empty?.style.setProperty('display', 'flex');
+      eventsList?.style.setProperty('display', 'none');
+    } else {
+      empty?.style.setProperty('display', 'none');
+      eventsList?.style.setProperty('display', 'flex');
+
+      if (eventsList) {
+        eventsList.innerHTML = filteredEvents
+          .map((event) => this.renderRawEvent(event))
+          .join('');
+      }
+    }
+  }
+
+  private renderRawEvent(event: RawEvent): string {
+    const emoji = EVENT_EMOJIS[event.type] || '📦';
+    const timestamp = this.showTimestamps
+      ? `<span class="event-timestamp">${event.timestamp.toLocaleTimeString()}</span>`
+      : '';
+
+    // Pretty print JSON
+    const jsonContent = JSON.stringify(event.data, null, 2);
+    const escapedJson = this.escapeHtml(jsonContent);
+
+    return `
+      <div class="raw-event event-type-${event.type}">
+        <div class="event-header">
+          <span class="event-emoji">${emoji}</span>
+          <span class="event-type">${event.type}</span>
+          ${timestamp}
+        </div>
+        <pre class="event-json"><code>${escapedJson}</code></pre>
+      </div>
+    `;
   }
 
   private renderMessage(message: ChatMessage): string {
@@ -562,13 +954,18 @@ export class ChatPage extends Page<ChatPageOptions> {
     const escapedContent = this.escapeHtml(message.content);
     const formattedContent = this.formatMarkdown(escapedContent);
 
+    // Show timestamp only when enabled
+    const timeHtml = this.showTimestamps
+      ? `<span class="message-time">${time}</span>`
+      : '';
+
     return `
       <div class="chat-message ${typeClass}">
         <div class="message-bubble">
           <div class="message-content">${formattedContent}</div>
           <div class="message-meta">
             <span class="message-sender">${senderName}</span>
-            <span class="message-time">${time}</span>
+            ${timeHtml}
           </div>
         </div>
       </div>
