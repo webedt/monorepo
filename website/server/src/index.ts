@@ -53,7 +53,6 @@ const ALLOWED_API_ROUTES = [
   '/api/user',           // User settings
   '/api/sessions',       // Session management (public endpoints)
   '/api/github',         // GitHub OAuth & repos
-  '/api/execute',        // AI execution (local worker)
   '/api/execute-remote', // AI execution (Claude Remote Sessions API)
   '/api/resume',         // Session replay
   '/api/transcribe',     // Audio transcription
@@ -80,7 +79,6 @@ const SSE_ENDPOINTS = [
   '/api/sessions/updates',               // Session list updates stream
   '/api/sessions/*/events/stream',       // Session event stream
   '/api/sessions/*/stream',              // Legacy session stream endpoint
-  '/api/execute',                        // Execution stream (can be SSE)
   '/api/execute-remote',                 // Remote execution stream
   '/api/live-chat/*/events',             // Live chat event stream
   '/api/workspace/*/events',             // Workspace event stream

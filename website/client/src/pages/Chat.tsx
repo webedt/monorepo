@@ -1247,11 +1247,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       setStreamMethod('POST');
       setStreamBody(params);
 
-      // Use execute-remote endpoint for claude-remote provider
-      const executeUrl = provider === 'claude-remote'
-        ? `${getApiBaseUrl()}/api/execute-remote`
-        : `${getApiBaseUrl()}/api/execute`;
-      console.log('[Chat] Setting streamUrl to:', executeUrl, 'provider:', provider);
+      // Always use execute-remote endpoint (local workers removed)
+      const executeUrl = `${getApiBaseUrl()}/api/execute-remote`;
+      console.log('[Chat] Setting streamUrl to:', executeUrl);
       setStreamUrl(executeUrl);
 
       setIsExecuting(true);
@@ -1675,10 +1673,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
     setStreamMethod('POST');
     setStreamBody(requestParams);
 
-    // Use execute-remote endpoint for claude-remote provider
-    const executeUrl = provider === 'claude-remote'
-      ? `${getApiBaseUrl()}/api/execute-remote`
-      : `${getApiBaseUrl()}/api/execute`;
+    // Always use execute-remote endpoint (local workers removed)
+    const executeUrl = `${getApiBaseUrl()}/api/execute-remote`;
     setStreamUrl(executeUrl);
 
     setInput('');

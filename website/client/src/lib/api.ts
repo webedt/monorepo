@@ -771,54 +771,8 @@ export const workspaceApi = {
     `${getApiBaseUrl()}/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}/stream`,
 };
 
-// Execute API (SSE)
-export function createExecuteEventSource(data: {
-  userRequest: string;
-  provider?: 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote';
-  github?: {
-    repoUrl: string;
-  };
-  autoCommit?: boolean;
-  websiteSessionId?: string;
-}) {
-  // If provider is claude-remote, use the execute-remote endpoint
-  if (data.provider === 'claude-remote') {
-    return createExecuteRemoteEventSource(data);
-  }
-
-  const params = new URLSearchParams();
-
-  // Add non-github params directly
-  if (data.userRequest !== undefined) {
-    params.append('userRequest', String(data.userRequest));
-  }
-  if (data.provider !== undefined) {
-    params.append('provider', data.provider);
-  }
-  if (data.autoCommit !== undefined) {
-    params.append('autoCommit', String(data.autoCommit));
-  }
-  if (data.websiteSessionId !== undefined) {
-    params.append('websiteSessionId', String(data.websiteSessionId));
-  }
-
-  // Add github params as nested object by stringifying
-  if (data.github) {
-    params.append('github', JSON.stringify(data.github));
-  }
-
-  const fullUrl = `${getApiBaseUrl()}/api/execute?${params}`;
-  console.log('[API] Creating EventSource with URL:', fullUrl);
-  console.log('[API] API_BASE_URL:', getApiBaseUrl());
-  console.log('[API] Selected provider:', data.provider || 'default');
-
-  return new EventSource(fullUrl, {
-    withCredentials: true,
-  });
-}
-
 // Execute Remote API (Claude Remote Sessions - SSE)
-// Uses Anthropic's Remote Sessions API instead of local ai-coding-worker
+// Uses Anthropic's Remote Sessions API for AI execution
 export function createExecuteRemoteEventSource(data: {
   userRequest: string;
   provider?: string;

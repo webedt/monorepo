@@ -9,7 +9,6 @@ import * as path from 'path';
 import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './githubClient.js';
 import { GitHelper } from './gitHelper.js';
-import { AIWorkerClient } from '../aiWorker/aiWorkerClient.js';
 import { logger, generateSessionPath } from '@webedt/shared';
 
 // ============================================================================
@@ -241,54 +240,14 @@ export class GitHubOperations {
 
       progress({ type: 'progress', stage: 'generating_name', message: 'Generating session title and branch name...', endpoint });
 
-      let title: string;
-      let descriptivePart: string;
+      // Use fallback naming (AI worker removed)
+      const title = 'New Session';
+      const descriptivePart = 'auto-request';
 
-      // Only use LLM if credentials are provided
-      if (options.codingAssistantProvider && options.codingAssistantAuthentication) {
-        try {
-          const aiWorkerClient = new AIWorkerClient();
-          // Serialize authentication if it's an object
-          const authString = typeof options.codingAssistantAuthentication === 'object'
-            ? JSON.stringify(options.codingAssistantAuthentication)
-            : options.codingAssistantAuthentication;
-          const result = await aiWorkerClient.generateSessionTitleAndBranch(
-            userRequest,
-            baseBranch,
-            options.codingAssistantProvider,
-            authString
-          );
-          title = result.title;
-          descriptivePart = result.branchName;
-
-          logger.info('Generated session title and branch name via AI worker', {
-            component: 'GitHubOperations',
-            sessionId,
-            title,
-            descriptivePart
-          });
-        } catch (llmError) {
-          logger.warn('AI worker naming failed, using fallback', {
-            component: 'GitHubOperations',
-            sessionId,
-            error: llmError instanceof Error ? llmError.message : String(llmError)
-          });
-
-          title = 'New Session';
-          descriptivePart = 'auto-request';
-
-          progress({ type: 'progress', stage: 'fallback', message: 'Using fallback naming (LLM unavailable)', endpoint });
-        }
-      } else {
-        // No credentials provided, use fallback
-        logger.info('No coding assistant credentials, using fallback naming', {
-          component: 'GitHubOperations',
-          sessionId
-        });
-
-        title = 'New Session';
-        descriptivePart = 'auto-request';
-      }
+      logger.info('Using fallback naming', {
+        component: 'GitHubOperations',
+        sessionId
+      });
 
       // Construct full branch name: webedt/{descriptive}-{sessionIdSuffix}
       const sessionIdSuffix = sessionId.slice(-8);
@@ -620,102 +579,16 @@ export class GitHubOperations {
         endpoint
       });
 
-      // Generate commit message using AI worker
+      // Generate commit message (AI worker removed - using simple fallback)
       await progress({ type: 'progress', stage: 'generating_message', message: 'Generating commit message...', endpoint });
 
-      let commitMessage: string = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
+      const commitMessage: string = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
 
-      // Only use AI worker if credentials are provided
-      if (options.codingAssistantProvider && options.codingAssistantAuthentication) {
-        const aiWorkerClient = new AIWorkerClient();
-        // Serialize authentication if it's an object
-        const authString = typeof options.codingAssistantAuthentication === 'object'
-          ? JSON.stringify(options.codingAssistantAuthentication)
-          : options.codingAssistantAuthentication;
-
-        // Retry logic with delays to allow Docker Swarm to route to different workers
-        // Initial delay of 500ms before first attempt to let previous worker become free
-        // Then 5s, 10s, 15s between retries for Docker Swarm worker availability
-        const retryDelays = [5000, 10000, 15000];
-        const maxAttempts = retryDelays.length + 1;
-        let lastError: Error | null = null;
-        let success = false;
-
-        // Small initial delay to help Docker Swarm route to an available worker
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          try {
-            // Create a new client instance for each attempt to avoid connection reuse
-            // which might route to the same (busy) worker
-            const freshClient = new AIWorkerClient();
-            commitMessage = await freshClient.generateCommitMessage(
-              gitStatus,
-              gitDiff,
-              options.codingAssistantProvider,
-              authString
-            );
-
-            if (userId) {
-              commitMessage = `${commitMessage}\n\nCommitted by: ${userId}`;
-            }
-
-            logger.info('Generated commit message via AI worker', {
-              component: 'GitHubOperations',
-              sessionId,
-              commitMessage,
-              attempt: attempt + 1
-            });
-
-            success = true;
-            break;
-          } catch (llmError) {
-            lastError = llmError instanceof Error ? llmError : new Error(String(llmError));
-
-            if (attempt < retryDelays.length) {
-              const delay = retryDelays[attempt];
-              logger.warn('AI worker commit message generation failed, retrying...', {
-                component: 'GitHubOperations',
-                sessionId,
-                attempt: attempt + 1,
-                nextRetryMs: delay,
-                error: lastError.message
-              });
-
-              await progress({
-                type: 'progress',
-                stage: 'generating_message_retry',
-                message: `Retrying commit message generation (attempt ${attempt + 2}/${maxAttempts})...`,
-                endpoint
-              });
-
-              // Wait before retrying - gives Docker Swarm time to route to different worker
-              await new Promise(resolve => setTimeout(resolve, delay));
-            }
-          }
-        }
-
-        if (!success) {
-          logger.warn('AI worker commit message generation failed after all retries, using fallback', {
-            component: 'GitHubOperations',
-            sessionId,
-            totalAttempts: retryDelays.length + 1,
-            error: lastError?.message
-          });
-
-          commitMessage = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
-
-          await progress({ type: 'progress', stage: 'fallback', message: 'Using fallback commit message (AI worker unavailable)', endpoint });
-        }
-      } else {
-        // No credentials provided, use fallback
-        logger.info('No coding assistant credentials, using fallback commit message', {
-          component: 'GitHubOperations',
-          sessionId
-        });
-
-        commitMessage = userId ? `Update files\n\nCommitted by: ${userId}` : 'Update files';
-      }
+      logger.info('Using fallback commit message', {
+        component: 'GitHubOperations',
+        sessionId,
+        commitMessage
+      });
 
       // Commit changes
       await progress({ type: 'progress', stage: 'committing', message: 'Committing changes...', data: { commitMessage }, endpoint });

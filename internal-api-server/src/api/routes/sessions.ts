@@ -11,7 +11,6 @@ import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient } from '@webedt/shared';
-import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -668,36 +667,8 @@ router.post('/:id/abort', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Try to signal the AI worker to abort
-    let workerAborted = false;
-    const workerInfo = activeWorkerSessions.get(sessionId);
-
-    if (workerInfo) {
-      logger.info(`Found active worker for session ${sessionId}: ${workerInfo.containerId}`, { component: 'Sessions' });
-
-      try {
-        const abortResponse = await fetch(`${workerInfo.workerUrl}/abort`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId }),
-        });
-
-        if (abortResponse.ok) {
-          const abortResult = await abortResponse.json();
-          logger.info(`Worker abort response: ${JSON.stringify(abortResult)}`, { component: 'Sessions' });
-          workerAborted = true;
-        } else {
-          logger.warn(`Worker abort failed with status: ${abortResponse.status}`, { component: 'Sessions' });
-        }
-      } catch (workerError) {
-        logger.error('Failed to signal worker abort', workerError as Error, { component: 'Sessions' });
-      }
-
-      // Clean up the session mapping
-      activeWorkerSessions.delete(sessionId);
-    } else {
-      logger.info(`No active worker found for session ${sessionId} - may have already completed`, { component: 'Sessions' });
-    }
+    // Note: Local AI worker has been removed - sessions are now handled by Claude Remote
+    logger.info(`Session ${sessionId} abort requested`, { component: 'Sessions' });
 
     // Update session status to interrupted
     await db
@@ -705,14 +676,13 @@ router.post('/:id/abort', requireAuth, async (req: Request, res: Response) => {
       .set({ status: 'error', completedAt: new Date() })
       .where(eq(chatSessions.id, sessionId));
 
-    logger.info(`Session ${sessionId} aborted by user (worker signaled: ${workerAborted})`, { component: 'Sessions' });
+    logger.info(`Session ${sessionId} aborted by user`, { component: 'Sessions' });
 
     res.json({
       success: true,
       data: {
-        message: workerAborted ? 'Session aborted and worker signaled' : 'Session aborted (worker may have already completed)',
-        sessionId: sessionId,
-        workerAborted
+        message: 'Session aborted',
+        sessionId: sessionId
       }
     });
   } catch (error) {

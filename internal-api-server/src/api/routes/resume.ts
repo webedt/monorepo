@@ -15,7 +15,6 @@ import { db, chatSessions, events } from '../../logic/db/index.js';
 import { eq, and, or, asc } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
-import { activeWorkerSessions } from './execute.js';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -111,17 +110,14 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
 
     // Handle 'running' sessions
     if (session.status === 'running') {
-      // Check if AI Worker is still active using both in-memory map and DB activity
-      const activeWorker = activeWorkerSessions.get(session.id);
-
-      // Also check DB-backed activity timestamp (survives server restarts)
+      // Check if session is still active using DB activity timestamp
       const workerLastActivity = session.workerLastActivity;
       const activityThresholdMs = 2 * 60 * 1000; // 2 minutes
       const isRecentlyActive = workerLastActivity &&
         (Date.now() - new Date(workerLastActivity).getTime() < activityThresholdMs);
 
-      if (activeWorker || isRecentlyActive) {
-        // Worker is still active - send reconnect info
+      if (isRecentlyActive) {
+        // Session is still active - send reconnect info
         res.write(`data: ${JSON.stringify({
           type: 'reconnected',
           sessionId: session.id,
@@ -133,7 +129,6 @@ router.get('/resume/:sessionId', requireAuth, async (req: Request, res: Response
         logger.info('Reconnected to active session', {
           component: 'ResumeRoute',
           sessionId: session.id,
-          activeWorkerInMemory: !!activeWorker,
           workerLastActivity: workerLastActivity
         });
       } else {
