@@ -86,6 +86,8 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   }, [inactivityTimeout]);
 
   const connect = useCallback(() => {
+    console.log('[SSE] connect() called with url:', url, 'method:', methodRef.current, 'isConnecting:', isConnectingRef.current);
+
     // Cancel any pending cleanup (handles React Strict Mode remount)
     if (cleanupTimeoutRef.current) {
       clearTimeout(cleanupTimeoutRef.current);
@@ -108,7 +110,10 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
     }
 
     // Prevent duplicate connections (only check isConnectingRef now since we cleared the others)
-    if (!url || isConnectingRef.current) return;
+    if (!url || isConnectingRef.current) {
+      console.log('[SSE] Skipping connection: url=', url, 'isConnecting=', isConnectingRef.current);
+      return;
+    }
 
     try {
       isConnectingRef.current = true;
@@ -518,6 +523,7 @@ export function useEventSource(url: string | null, options: UseEventSourceOption
   }, []);
 
   useEffect(() => {
+    console.log('[SSE] URL effect running, url:', url);
     if (url) {
       connect();
     }
