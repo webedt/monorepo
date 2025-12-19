@@ -147,39 +147,87 @@ export default function Orchestrator() {
   });
 
   // SSE event streaming for active job
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const maxReconnectAttempts = 5;
+
   useEffect(() => {
     if (!activeJobId) return;
 
-    const eventSource = orchestratorApi.createEventSource(activeJobId);
-    eventSourceRef.current = eventSource;
+    let isCleanedUp = false;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    eventSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data) as OrchestratorEvent;
-        setEvents(prev => [...prev, event]);
-      } catch {
-        console.error('[Orchestrator] Failed to parse event:', e.data);
-      }
+    const connectToEventSource = () => {
+      if (isCleanedUp) return;
+
+      const eventSource = orchestratorApi.createEventSource(activeJobId);
+      eventSourceRef.current = eventSource;
+
+      eventSource.onopen = () => {
+        console.log('[Orchestrator] EventSource connected');
+        setStreamError(null);
+        reconnectAttemptRef.current = 0;
+      };
+
+      eventSource.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data) as OrchestratorEvent;
+          setEvents(prev => [...prev, event]);
+        } catch {
+          console.error('[Orchestrator] Failed to parse event:', e.data);
+        }
+      };
+
+      eventSource.addEventListener('connected', () => {
+        console.log('[Orchestrator] Stream connected to job');
+        setStreamError(null);
+      });
+
+      eventSource.addEventListener('job_completed', () => {
+        queryClient.invalidateQueries({ queryKey: ['orchestrator-jobs'] });
+      });
+
+      eventSource.addEventListener('job_ended', () => {
+        eventSource.close();
+        setActiveJobId(null);
+        setStreamError(null);
+        queryClient.invalidateQueries({ queryKey: ['orchestrator-jobs'] });
+      });
+
+      eventSource.onerror = (e) => {
+        console.error('[Orchestrator] EventSource error:', e);
+        eventSource.close();
+        eventSourceRef.current = null;
+
+        if (isCleanedUp) return;
+
+        // Attempt reconnection with exponential backoff
+        if (reconnectAttemptRef.current < maxReconnectAttempts) {
+          reconnectAttemptRef.current++;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current - 1), 30000);
+          setStreamError(`Connection lost. Reconnecting in ${Math.round(delay / 1000)}s... (attempt ${reconnectAttemptRef.current}/${maxReconnectAttempts})`);
+          console.log(`[Orchestrator] Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current})`);
+
+          reconnectTimeout = setTimeout(connectToEventSource, delay);
+        } else {
+          setStreamError('Connection lost. Maximum reconnection attempts reached. Click "Watch" to try again.');
+          setActiveJobId(null);
+          queryClient.invalidateQueries({ queryKey: ['orchestrator-jobs'] });
+        }
+      };
     };
 
-    eventSource.addEventListener('job_completed', () => {
-      queryClient.invalidateQueries({ queryKey: ['orchestrator-jobs'] });
-    });
-
-    eventSource.addEventListener('job_ended', () => {
-      eventSource.close();
-      setActiveJobId(null);
-      queryClient.invalidateQueries({ queryKey: ['orchestrator-jobs'] });
-    });
-
-    eventSource.onerror = () => {
-      console.error('[Orchestrator] EventSource error');
-      eventSource.close();
-    };
+    connectToEventSource();
 
     return () => {
-      eventSource.close();
-      eventSourceRef.current = null;
+      isCleanedUp = true;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
     };
   }, [activeJobId, queryClient]);
 
@@ -542,32 +590,55 @@ export default function Orchestrator() {
       </div>
 
       {/* Active Job Events */}
-      {activeJobId && events.length > 0 && (
+      {activeJobId && (
         <div className="card bg-base-100 shadow-xl mb-8">
           <div className="card-body">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="card-title">Live Events</h2>
+              <h2 className="card-title">
+                Live Events
+                {!streamError && (
+                  <span className="loading loading-spinner loading-xs ml-2"></span>
+                )}
+              </h2>
               <button
                 onClick={() => {
                   eventSourceRef.current?.close();
                   setActiveJobId(null);
                   setEvents([]);
+                  setStreamError(null);
                 }}
                 className="btn btn-ghost btn-sm"
               >
                 Close
               </button>
             </div>
-            <div className="bg-base-200 rounded-lg p-4 max-h-64 overflow-y-auto font-mono text-sm">
-              {events.map((event, i) => (
-                <div key={i} className="mb-1">
-                  <span className="text-primary">[{event.type}]</span>{' '}
-                  <span className="text-base-content/70">
-                    {JSON.stringify(event.data || {})}
-                  </span>
-                </div>
-              ))}
-            </div>
+
+            {/* Stream error alert */}
+            {streamError && (
+              <div className="alert alert-warning mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>{streamError}</span>
+              </div>
+            )}
+
+            {events.length > 0 ? (
+              <div className="bg-base-200 rounded-lg p-4 max-h-64 overflow-y-auto font-mono text-sm">
+                {events.map((event, i) => (
+                  <div key={i} className="mb-1">
+                    <span className="text-primary">[{event.type}]</span>{' '}
+                    <span className="text-base-content/70">
+                      {JSON.stringify(event.data || {})}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-4 text-base-content/50">
+                Waiting for events...
+              </div>
+            )}
           </div>
         </div>
       )}
