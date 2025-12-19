@@ -237,6 +237,8 @@ const sseProxyOptions: Options = {
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
+      // Set Accept header to signal SSE expectation
+      proxyReq.setHeader('Accept', 'text/event-stream');
       // Log SSE connection
       console.log(`[SSE Proxy] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${proxyReq.path}`);
     },
@@ -245,10 +247,15 @@ const sseProxyOptions: Options = {
       // These help ensure the connection stays open and unbuffered
       if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
         console.log(`[SSE Proxy] Streaming response for ${req.url}`);
-        // Disable any nginx buffering that might interfere
-        res.setHeader('X-Accel-Buffering', 'no');
+        // Disable buffering for various reverse proxies
+        res.setHeader('X-Accel-Buffering', 'no');           // nginx
+        res.setHeader('X-Content-Type-Options', 'nosniff'); // Prevent content type sniffing
         // Ensure cache is disabled
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        // Set Connection: keep-alive to maintain long-lived connection
+        res.setHeader('Connection', 'keep-alive');
       }
 
       // Apply cookie path rewriting from base options

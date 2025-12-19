@@ -232,14 +232,15 @@ router.get('/:id/stream', requireAuth, async (req: Request, res: Response): Prom
       }
     });
 
-    // Heartbeat
+    // Heartbeat - use 15 second interval to prevent proxy timeouts
+    // Many reverse proxies (Traefik, nginx) have default timeouts around 30-60 seconds
     const heartbeat = setInterval(() => {
       if (res.writableEnded) {
         clearInterval(heartbeat);
         return;
       }
       res.write(': heartbeat\n\n');
-    }, 30000);
+    }, 15000);
 
     // Cleanup on disconnect
     req.on('close', () => {
