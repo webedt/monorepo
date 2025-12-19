@@ -10,8 +10,6 @@ import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { eq, sql } from 'drizzle-orm';
 import { lucia } from '../../logic/auth/lucia.js';
 import bcrypt from 'bcrypt';
-import { workerCoordinator } from '../../logic/execution/workerCoordinator.js';
-import { USE_WORKER_COORDINATOR, WORKER_SWARM_SERVICE_NAME } from '../../logic/config/env.js';
 
 const router = Router();
 
@@ -245,25 +243,6 @@ router.get('/stats', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error fetching stats:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch statistics' });
-  }
-});
-
-// GET /api/admin/workers - Get worker coordinator status
-router.get('/workers', requireAdmin, async (req, res) => {
-  try {
-    const coordinatorStatus = workerCoordinator.getStatus();
-
-    res.json({
-      success: true,
-      data: {
-        coordinatorEnabled: USE_WORKER_COORDINATOR,
-        serviceName: WORKER_SWARM_SERVICE_NAME,
-        ...coordinatorStatus
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching worker status:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch worker status' });
   }
 });
 

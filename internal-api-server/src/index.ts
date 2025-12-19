@@ -26,23 +26,19 @@ import { logger } from '@webedt/shared';
 import './logic/db/index.js';
 
 // Import routes
-import executeRoutes from './api/routes/execute.js';
 import executeRemoteRoutes from './api/routes/executeRemote.js';
 import resumeRoutes from './api/routes/resume.js';
 import authRoutes from './api/routes/auth.js';
 import userRoutes from './api/routes/user.js';
 import sessionsRoutes from './api/routes/sessions.js';
 import githubRoutes from './api/routes/github.js';
-import storageRoutes from './api/routes/storage.js';
 import adminRoutes from './api/routes/admin.js';
 import transcribeRoutes from './api/routes/transcribe.js';
-import completionsRoutes from './api/routes/completions.js';
 import imageGenRoutes from './api/routes/imageGen.js';
 import internalSessionsRoutes from './api/routes/internalSessions.js';
 import logsRoutes from './api/routes/logs.js';
 import liveChatRoutes from './api/routes/liveChat.js';
 import workspaceRoutes from './api/routes/workspace.js';
-import orchestratorRoutes from './api/routes/orchestrator.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './logic/db/index.js';
@@ -295,23 +291,19 @@ app.get('/metrics', (req, res) => {
 });
 
 // Add routes
-app.use('/api', executeRoutes);
 app.use('/api/execute-remote', executeRemoteRoutes);  // Claude Remote Sessions endpoint
 app.use('/api', resumeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/github', githubRoutes);
-app.use('/api/storage', storageRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', transcribeRoutes);
-app.use('/api/completions', completionsRoutes);
 app.use('/api/image-gen', imageGenRoutes);
 app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Sessions management
 app.use('/api', logsRoutes);  // Debug logs endpoint
 app.use('/api/live-chat', liveChatRoutes);  // Live Chat for branch-based workspace
 app.use('/api/workspace', workspaceRoutes);  // Workspace presence and events
-app.use('/api/orchestrator', orchestratorRoutes);  // Long-running multi-cycle orchestration
 
 // Note: Static file serving removed - handled by website-server facade
 
@@ -378,7 +370,6 @@ app.listen(PORT, () => {
   console.log('  GET  /api/github/oauth                 - Start GitHub OAuth');
   console.log('  GET  /api/github/repos                 - List repos');
   console.log('');
-  console.log('  GET  /api/storage/sessions/...         - Storage operations');
   console.log('');
   console.log('  GET  /api/admin/users                  - List all users (admin)');
   console.log('  GET  /api/admin/users/:id              - Get user by ID (admin)');
@@ -390,7 +381,6 @@ app.listen(PORT, () => {
   console.log('');
   console.log('  POST /api/transcribe                   - Transcribe audio (Whisper)');
   console.log('');
-  console.log('  POST /api/completions                  - Code completions (autocomplete)');
   console.log('  POST /api/user/openrouter-api-key      - Set OpenRouter API key');
   console.log('  POST /api/user/autocomplete-settings   - Update autocomplete settings');
   console.log('');

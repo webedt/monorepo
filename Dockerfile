@@ -3,8 +3,7 @@
 # =============================================================================
 # Builds all services into one image:
 # - Website (React client + Express server)
-# - Internal API Server
-# - AI Coding Workers
+# - Internal API Server (with Claude Remote Sessions)
 # =============================================================================
 
 # Build arguments for version tracking
@@ -90,25 +89,7 @@ COPY internal-api-server/src ./src
 RUN npm run build
 
 # =============================================================================
-# Stage 5: Build ai-coding-worker
-# =============================================================================
-FROM node:20-slim AS worker-build
-
-WORKDIR /app
-
-# Copy shared package first
-COPY --from=shared-build /app/shared ./shared
-
-# Build ai-coding-worker
-WORKDIR /app/ai-coding-worker
-COPY ai-coding-worker/package*.json ./
-RUN npm install
-COPY ai-coding-worker/tsconfig.json ./
-COPY ai-coding-worker/src ./src
-RUN npm run build
-
-# =============================================================================
-# Stage 6: Production image
+# Stage 5: Production image
 # =============================================================================
 FROM node:20-slim AS production
 
@@ -163,11 +144,6 @@ COPY --from=api-build /app/internal-api-server/dist ./internal-api-server/dist
 COPY --from=api-build /app/internal-api-server/node_modules ./internal-api-server/node_modules
 COPY --from=api-build /app/internal-api-server/package.json ./internal-api-server/
 
-# Copy ai-coding-worker
-COPY --from=worker-build /app/ai-coding-worker/dist ./ai-coding-worker/dist
-COPY --from=worker-build /app/ai-coding-worker/node_modules ./ai-coding-worker/node_modules
-COPY --from=worker-build /app/ai-coding-worker/package.json ./ai-coding-worker/
-
 # Copy orchestrator script
 COPY scripts/start.js ./scripts/start.js
 
@@ -179,8 +155,6 @@ RUN git config --global user.email "worker@webedt.local" && \
 ENV NODE_ENV=production
 ENV WEBSITE_PORT=3000
 ENV API_PORT=3001
-ENV WORKER_PORT=5001
-ENV WORKER_POOL_SIZE=2
 ENV WORKSPACE_DIR=/workspace
 ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
 ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP

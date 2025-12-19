@@ -23,44 +23,9 @@ const DEFAULT_ORIGINS = NODE_ENV === 'production'
   : ['http://localhost:5173', 'http://localhost:3000'];
 export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || DEFAULT_ORIGINS;
 
-// Session storage paths
+// Session storage paths (ephemeral - no persistent storage)
 export const TMP_DIR = process.env.TMP_DIR || '/tmp';
 export const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '/workspace';
-
-// MinIO configuration
-export const MINIO_ENDPOINT = process.env.MINIO_ENDPOINT || 'localhost';
-export const MINIO_PORT = parseInt(process.env.MINIO_PORT || '9000', 10);
-export const MINIO_USE_SSL = process.env.MINIO_USE_SSL === 'true';
-export const MINIO_ROOT_USER = process.env.MINIO_ROOT_USER || '';
-export const MINIO_ROOT_PASSWORD = process.env.MINIO_ROOT_PASSWORD || '';
-export const MINIO_BUCKET = process.env.MINIO_BUCKET || 'sessions';
-
-// AI Worker configuration
-export const AI_WORKER_TIMEOUT_MS = parseInt(process.env.AI_WORKER_TIMEOUT_MS || '600000', 10); // 10 minutes
-export const AI_WORKER_PORT = parseInt(process.env.AI_WORKER_PORT || '5000', 10);
-
-// Worker Coordinator configuration (replaces DNSRR with direct routing)
-export const USE_WORKER_COORDINATOR = process.env.USE_WORKER_COORDINATOR !== 'false';
-export const DOCKER_SOCKET_PATH = process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock';
-export const WORKER_SWARM_SERVICE_NAME = process.env.WORKER_SWARM_SERVICE_NAME || 'webedt-app-ai-coding-workers-gy4wew_ai-coding-worker';
-export const WORKER_COORDINATOR_REFRESH_INTERVAL_MS = parseInt(
-  process.env.WORKER_COORDINATOR_REFRESH_INTERVAL_MS || '5000', 10
-); // How often to refresh worker list (5 seconds)
-export const WORKER_STALE_BUSY_TIMEOUT_MS = parseInt(
-  process.env.WORKER_STALE_BUSY_TIMEOUT_MS || '600000', 10
-); // When to consider a busy worker stale (10 minutes)
-export const WORKER_NO_CAPACITY_RETRY_MS = parseInt(
-  process.env.WORKER_NO_CAPACITY_RETRY_MS || '1000', 10
-); // Wait between retries when no capacity (1 second)
-export const WORKER_NO_CAPACITY_MAX_RETRIES = parseInt(
-  process.env.WORKER_NO_CAPACITY_MAX_RETRIES || '10', 10
-); // Max retries when no workers available
-
-// Local worker pool configuration (for single-image deployment)
-// When WORKER_POOL_MODE='local', use local workers instead of Docker Swarm
-export const WORKER_POOL_MODE = process.env.WORKER_POOL_MODE || 'swarm'; // 'swarm' | 'local'
-export const WORKER_BASE_PORT = parseInt(process.env.WORKER_BASE_PORT || '5001', 10);
-export const WORKER_POOL_SIZE = parseInt(process.env.WORKER_POOL_SIZE || '2', 10);
 
 // Orphan session cleanup configuration
 export const ORPHAN_SESSION_TIMEOUT_MINUTES = parseInt(process.env.ORPHAN_SESSION_TIMEOUT_MINUTES || '30', 10);
@@ -99,8 +64,6 @@ export function validateEnv(): { valid: boolean; errors: string[]; warnings: str
   const warnings: string[] = [];
 
   if (NODE_ENV === 'production') {
-    if (!MINIO_ROOT_USER) errors.push('MINIO_ROOT_USER is required in production');
-    if (!MINIO_ROOT_PASSWORD) errors.push('MINIO_ROOT_PASSWORD is required in production');
     if (SESSION_SECRET === 'development-secret-change-in-production') {
       errors.push('SESSION_SECRET must be changed in production');
     }
@@ -131,18 +94,6 @@ export function logEnvConfig(): void {
   console.log(`  CONTAINER_ID=${CONTAINER_ID}`);
   console.log(`  TMP_DIR=${TMP_DIR}`);
   console.log(`  WORKSPACE_DIR=${WORKSPACE_DIR}`);
-  console.log(`  MINIO_ENDPOINT=${MINIO_ENDPOINT}`);
-  console.log(`  MINIO_PORT=${MINIO_PORT}`);
-  console.log(`  MINIO_BUCKET=${MINIO_BUCKET}`);
-  console.log(`  AI_WORKER_PORT=${AI_WORKER_PORT}`);
-  console.log(`  USE_WORKER_COORDINATOR=${USE_WORKER_COORDINATOR}`);
-  console.log(`  WORKER_POOL_MODE=${WORKER_POOL_MODE}`);
-  console.log(`  WORKER_SWARM_SERVICE_NAME=${WORKER_SWARM_SERVICE_NAME}`);
-  console.log(`  DOCKER_SOCKET_PATH=${DOCKER_SOCKET_PATH}`);
-  console.log(`  WORKER_BASE_PORT=${WORKER_BASE_PORT}`);
-  console.log(`  WORKER_POOL_SIZE=${WORKER_POOL_SIZE}`);
-  console.log(`  MINIO_ROOT_USER=${redact(MINIO_ROOT_USER)}`);
-  console.log(`  MINIO_ROOT_PASSWORD=${redact(MINIO_ROOT_PASSWORD)}`);
   console.log(`  SESSION_SECRET=${redact(SESSION_SECRET)}`);
   console.log(`  USE_NEW_ARCHITECTURE=${USE_NEW_ARCHITECTURE}`);
   console.log(`  CLAUDE_ENVIRONMENT_ID=${CLAUDE_ENVIRONMENT_ID || 'not set'}`);

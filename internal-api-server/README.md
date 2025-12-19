@@ -1,39 +1,32 @@
 # Internal API Server
 
-Internal API server for WebEDT - a single persistent service that handles API endpoints, database operations, storage management, and GitHub integration. This server is only accessible internally via the dokploy-network.
+Internal API server for WebEDT - a single persistent service that handles API endpoints, database operations, and GitHub integration. This server is only accessible internally via the dokploy-network.
 
 ## Architecture
 
-This server consolidates functionality that was previously split across multiple workers:
-
-| Consolidated From | Functionality |
-|-------------------|---------------|
-| Website Server | API routes, authentication, sessions |
-| Storage Worker | MinIO session management, file operations |
-| GitHub Worker | Clone, branch, commit, push operations |
-
-The Internal API Server orchestrates AI Coding Workers, which remain as separate ephemeral containers that only handle LLM execution.
+This server uses Claude Remote Sessions for AI execution - all LLM processing is handled by Anthropic's API, making the architecture fully ephemeral.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         Internal API Server                              │
 │                                                                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
-│  │ API Routes  │  │  Database   │  │   Storage   │  │   GitHub    │   │
-│  │ /execute    │  │ PostgreSQL  │  │   MinIO     │  │ Clone/Push  │   │
-│  │ /resume     │  │ Drizzle ORM │  │   Tarball   │  │ Branch/PR   │   │
-│  │ /sessions   │  │             │  │             │  │             │   │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                     │
+│  │ API Routes  │  │  Database   │  │   GitHub    │                     │
+│  │ /execute-   │  │ PostgreSQL  │  │ Clone/Push  │                     │
+│  │  remote     │  │ Drizzle ORM │  │ Branch/PR   │                     │
+│  │ /resume     │  │             │  │             │                     │
+│  │ /sessions   │  │             │  │             │                     │
+│  └─────────────┘  └─────────────┘  └─────────────┘                     │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
-                          Spawn/Orchestrate
+                          Anthropic API (Claude Remote)
                                     │
                                     ▼
                     ┌───────────────────────────┐
-                    │   AI Coding Worker        │
-                    │   (Ephemeral Container)   │
-                    │   - Claude Agent SDK      │
-                    │   - LLM Execution Only    │
+                    │   Claude Remote Sessions  │
+                    │   (Anthropic hosted)      │
+                    │   - No local workers      │
+                    │   - Fully ephemeral       │
                     └───────────────────────────┘
 ```
 
@@ -43,42 +36,36 @@ The Internal API Server orchestrates AI Coding Workers, which remain as separate
 internal-api-server/
 ├── src/
 │   ├── index.ts                 # Express app entrypoint
-│   ├── auth.ts                  # Lucia authentication setup
-│   ├── config/
-│   │   └── env.ts               # Environment configuration
-│   ├── db/
-│   │   ├── index.ts             # Drizzle database setup
-│   │   └── schema.ts            # PostgreSQL schema
-│   ├── routes/
-│   │   ├── execute.ts           # POST /api/execute (SSE)
-│   │   ├── resume.ts            # GET /api/resume/:sessionId (SSE)
-│   │   ├── auth.ts              # Authentication endpoints
-│   │   ├── user.ts              # User settings endpoints
-│   │   ├── sessions.ts          # Session CRUD endpoints
-│   │   ├── github.ts            # GitHub OAuth/repos endpoints
-│   │   └── storage.ts           # Storage operations
-│   ├── services/
-│   │   ├── storage/
-│   │   │   ├── storageService.ts  # MinIO operations
-│   │   │   └── minioClient.ts     # MinIO client setup
-│   │   └── github/
-│   │       ├── gitHelper.ts       # Git operations (simple-git)
-│   │       ├── githubClient.ts    # GitHub clone/pull
-│   │       └── operations.ts      # Init session, commit, push
-│   ├── middleware/
-│   │   └── auth.ts              # Authentication middleware
-│   ├── lib/
-│   │   ├── claudeAuth.ts        # Claude OAuth token management
-│   │   ├── codexAuth.ts         # Codex/OpenAI auth helpers
-│   │   └── sessionEventBroadcaster.ts
-│   ├── services/
-│   │   ├── aiWorker/
-│   │   │   └── aiWorkerClient.ts  # Client for AI worker /query endpoint
-│   └── utils/
-│       ├── logger.ts            # Logging utility
-│       ├── emojiMapper.ts       # SSE event emoji assignment
-│       ├── sessionPathHelper.ts # Session path utilities
-│       └── previewUrlHelper.ts  # Preview URL generation
+│   ├── api/
+│   │   ├── routes/
+│   │   │   ├── executeRemote.ts # Claude Remote execution
+│   │   │   ├── resume.ts        # Session replay (SSE)
+│   │   │   ├── auth.ts          # Authentication endpoints
+│   │   │   ├── user.ts          # User settings endpoints
+│   │   │   ├── sessions.ts      # Session CRUD endpoints
+│   │   │   ├── github.ts        # GitHub OAuth/repos endpoints
+│   │   │   └── admin.ts         # Admin endpoints
+│   │   └── middleware/
+│   │       └── auth.ts          # Authentication middleware
+│   ├── logic/
+│   │   ├── auth/
+│   │   │   ├── lucia.ts         # Lucia authentication
+│   │   │   └── claudeAuth.ts    # Claude OAuth helpers
+│   │   ├── config/
+│   │   │   └── env.ts           # Environment configuration
+│   │   ├── db/
+│   │   │   ├── index.ts         # Drizzle database setup
+│   │   │   └── schema.ts        # PostgreSQL schema
+│   │   ├── github/
+│   │   │   ├── gitHelper.ts     # Git operations (simple-git)
+│   │   │   ├── githubClient.ts  # GitHub clone/pull
+│   │   │   └── operations.ts    # Init session, commit, push
+│   │   ├── sessions/
+│   │   │   ├── claudeSessionSync.ts      # Background sync
+│   │   │   └── sessionEventBroadcaster.ts # SSE events
+│   │   └── utils/
+│   │       ├── logger.ts        # Logging utility
+│   │       └── sessionPathHelper.ts # Session path utilities
 ├── package.json
 ├── tsconfig.json
 └── Dockerfile
@@ -94,24 +81,22 @@ GET /health
 
 Returns server status, container ID, and build info.
 
-### Execute (Main Entry Point)
+### Execute Remote (Claude Remote Sessions)
 
 ```
-POST /api/execute
+POST /api/execute-remote
 Content-Type: application/json
 
 {
   "userRequest": "Add dark mode toggle",
-  "websiteSessionId": "optional-existing-session-id",
   "github": {
     "repoUrl": "https://github.com/owner/repo",
     "branch": "main"
-  },
-  "autoCommit": true
+  }
 }
 ```
 
-Returns SSE stream with progress events.
+Returns SSE stream with progress events from Claude Remote.
 
 ### Resume Session
 
@@ -152,15 +137,6 @@ GET /api/github/oauth       - Start GitHub OAuth flow
 GET /api/github/repos       - List user's repositories
 ```
 
-### Storage
-
-```
-GET    /api/storage/sessions/:path/files     - List files
-GET    /api/storage/sessions/:path/files/*   - Read file
-PUT    /api/storage/sessions/:path/files/*   - Write file
-DELETE /api/storage/sessions/:path/files/*   - Delete file
-```
-
 ## Environment Variables
 
 ### Required
@@ -173,28 +149,18 @@ DELETE /api/storage/sessions/:path/files/*   - Delete file
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `3000` | Server port |
+| `PORT` | `3001` | Server port |
 | `NODE_ENV` | `development` | Environment (development/production) |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | CORS allowed origins (comma-separated) |
 | `SESSION_SECRET` | - | Session encryption secret |
 
-### MinIO Configuration
+### Claude Remote Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MINIO_ENDPOINT` | `localhost` | MinIO server hostname |
-| `MINIO_PORT` | `9000` | MinIO server port |
-| `MINIO_USE_SSL` | `false` | Use SSL for MinIO |
-| `MINIO_ROOT_USER` | - | MinIO access key |
-| `MINIO_ROOT_PASSWORD` | - | MinIO secret key |
-| `MINIO_BUCKET` | `sessions` | Bucket name for sessions |
-
-### AI Worker Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AI_WORKER_URL` | `http://localhost:5001` | AI Coding Worker URL |
-| `AI_WORKER_TIMEOUT_MS` | `600000` | Worker timeout (10 min) |
+| `CLAUDE_ENVIRONMENT_ID` | - | Claude Environment ID for remote sessions |
+| `CLAUDE_API_BASE_URL` | `https://api.anthropic.com` | Anthropic API base URL |
+| `CLAUDE_DEFAULT_MODEL` | `claude-opus-4-5-20251101` | Default Claude model |
 
 ### GitHub Configuration
 
@@ -216,7 +182,6 @@ DELETE /api/storage/sessions/:path/files/*   - Delete file
 
 - Node.js 20+
 - PostgreSQL database
-- MinIO server (for session storage)
 
 ### Setup
 
@@ -226,9 +191,7 @@ npm install
 
 # Set environment variables
 export DATABASE_URL=postgresql://user:pass@localhost:5432/webedt
-export MINIO_ENDPOINT=localhost
-export MINIO_ROOT_USER=minioadmin
-export MINIO_ROOT_PASSWORD=minioadmin
+export CLAUDE_ENVIRONMENT_ID=your-environment-id
 
 # Run in development mode
 npm run dev
@@ -246,16 +209,15 @@ npm start
 
 ### Docker Compose
 
-Uses external PostgreSQL and MinIO services on the dokploy-network:
+Uses external PostgreSQL services on the dokploy-network:
 
 ```bash
 # Create .env file with required variables
 cat > .env << EOF
 DATABASE_URL=postgresql://user:pass@host:5432/db
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=minioadmin
 SESSION_SECRET=your-secret-key
 ALLOWED_ORIGINS=https://your-domain.com
+CLAUDE_ENVIRONMENT_ID=your-environment-id
 EOF
 
 # Start internal-api-server
@@ -272,9 +234,9 @@ docker compose logs -f internal-api-server
 docker build -t internal-api-server .
 
 # Run container
-docker run -p 3000:3000 \
+docker run -p 3001:3001 \
   -e DATABASE_URL=postgresql://... \
-  -e MINIO_ENDPOINT=minio \
+  -e CLAUDE_ENVIRONMENT_ID=... \
   internal-api-server
 ```
 
@@ -290,13 +252,6 @@ docker stack deploy -c swarm.yml internal-api-server
 docker service ls
 docker service logs internal-api-server_internal-api-server -f
 ```
-
-The `swarm.yml` expects these environment variables to be set:
-- `DATABASE_URL` - PostgreSQL connection string
-- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` - MinIO credentials
-- `SESSION_SECRET` - Session encryption key
-- `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` - GitHub OAuth
-- `ALLOWED_ORIGINS` - CORS allowed origins
 
 ## Database
 
@@ -321,6 +276,6 @@ npm run db:studio     # Open Drizzle Studio
 
 ## Notes
 
-- SQLite support was removed to simplify builds. See `src/db/SQLITE_REMOVED.md` for reintroduction instructions.
-- The server requires `DATABASE_URL` to be set - there is no fallback database.
-- This server is not publicly accessible - public API access goes through the website facade.
+- This server uses Claude Remote Sessions - no local AI workers are required
+- The server requires `DATABASE_URL` to be set - there is no fallback database
+- This server is not publicly accessible - public API access goes through the website facade

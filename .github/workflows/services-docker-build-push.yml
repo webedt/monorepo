@@ -96,10 +96,42 @@ jobs:
         run: |
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
+          # Helper function for curl with retry and timeout
+          # Usage: curl_with_retry [curl args...]
+          curl_with_retry() {
+            local max_retries=4
+            local retry=0
+            local wait_time=2
+            local result
+            local http_code
+
+            while [ $retry -lt $max_retries ]; do
+              # Run curl with timeouts (30s connect, 60s total)
+              result=$(curl --connect-timeout 30 --max-time 60 "$@" 2>&1)
+              local exit_code=$?
+
+              if [ $exit_code -eq 0 ]; then
+                echo "$result"
+                return 0
+              fi
+
+              retry=$((retry + 1))
+              if [ $retry -lt $max_retries ]; then
+                echo "⚠️  Curl failed (exit code: $exit_code), retrying in ${wait_time}s... (attempt $retry/$max_retries)" >&2
+                sleep $wait_time
+                wait_time=$((wait_time * 2))
+              fi
+            done
+
+            echo "❌ Curl failed after $max_retries attempts" >&2
+            echo "$result"
+            return 1
+          }
+
           echo "🔍 Checking if application '${APP_NAME}' exists..."
 
           # Get all projects to find if our application exists
-          PROJECTS=$(curl -s -X 'GET' \
+          PROJECTS=$(curl_with_retry -s -X 'GET' \
             "${DOKPLOY_URL}/api/project.all" \
             -H 'accept: application/json' \
             -H "x-api-key: ${DOKPLOY_API_KEY}")
@@ -120,7 +152,7 @@ jobs:
           else
             echo "📦 Application not found. Creating new application..."
 
-            CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+            CREATE_RESPONSE=$(curl_with_retry -s -w "\n%{http_code}" -X 'POST' \
               "${DOKPLOY_URL}/api/trpc/application.create" \
               -H 'accept: application/json' \
               -H 'Content-Type: application/json' \
@@ -153,7 +185,7 @@ jobs:
           REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
           REPO_NAME="${GITHUB_REPOSITORY##*/}"
 
-          curl -s -X 'POST' \
+          curl_with_retry -s -X 'POST' \
             "${DOKPLOY_URL}/api/trpc/application.saveGithubProvider" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \
@@ -174,7 +206,7 @@ jobs:
           echo "✅ GitHub provider configured (buildPath: root)"
 
           # Update deployment settings
-          curl -s -X 'POST' \
+          curl_with_retry -s -X 'POST' \
             "${DOKPLOY_URL}/api/trpc/application.update" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \
@@ -200,7 +232,7 @@ jobs:
 
           # Fetch domains using the dedicated domain.byApplicationId endpoint
           echo "🔍 Fetching domains for application ${APP_ID}..."
-          DOMAINS_RESPONSE=$(curl -s -X 'GET' \
+          DOMAINS_RESPONSE=$(curl_with_retry -s -X 'GET' \
             "${DOKPLOY_URL}/api/domain.byApplicationId?applicationId=${APP_ID}" \
             -H 'accept: application/json' \
             -H "x-api-key: ${DOKPLOY_API_KEY}")
@@ -236,7 +268,7 @@ jobs:
                 echo "ℹ️  Domain for host ${DOMAIN} already exists (ID: ${HOST_MATCH}), skipping creation"
               else
                 echo "🌐 Creating domain: https://${DOMAIN}${PATH_PREFIX}"
-                curl -s -X 'POST' \
+                curl_with_retry -s -X 'POST' \
                   "${DOKPLOY_URL}/api/trpc/domain.create" \
                   -H 'accept: application/json' \
                   -H 'Content-Type: application/json' \
@@ -257,7 +289,7 @@ jobs:
               fi
             else
               echo "🌐 Creating domain: https://${DOMAIN}${PATH_PREFIX}"
-              curl -s -X 'POST' \
+              curl_with_retry -s -X 'POST' \
                 "${DOKPLOY_URL}/api/trpc/domain.create" \
                 -H 'accept: application/json' \
                 -H 'Content-Type: application/json' \
@@ -289,12 +321,6 @@ jobs:
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           APPLICATION_ID: ${{ steps.dokploy_app.outputs.application_id }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          MINIO_ENDPOINT: ${{ vars.MINIO_ENDPOINT || 'webedt-app-minio-0fslch-minio-1' }}
-          MINIO_PORT: ${{ vars.MINIO_PORT || '9000' }}
-          MINIO_USE_SSL: ${{ vars.MINIO_USE_SSL || 'false' }}
-          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
-          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
-          MINIO_BUCKET: ${{ vars.MINIO_BUCKET || 'sessions' }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || 'https://webedt.etdofresh.com' }}
           GITHUB_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
@@ -304,6 +330,35 @@ jobs:
           CLAUDE_ENVIRONMENT_ID: ${{ secrets.CLAUDE_ENVIRONMENT_ID }}
         run: |
           DOKPLOY_URL="${DOKPLOY_URL%/}"
+
+          # Helper function for curl with retry and timeout
+          curl_with_retry() {
+            local max_retries=4
+            local retry=0
+            local wait_time=2
+            local result
+
+            while [ $retry -lt $max_retries ]; do
+              result=$(curl --connect-timeout 30 --max-time 60 "$@" 2>&1)
+              local exit_code=$?
+
+              if [ $exit_code -eq 0 ]; then
+                echo "$result"
+                return 0
+              fi
+
+              retry=$((retry + 1))
+              if [ $retry -lt $max_retries ]; then
+                echo "⚠️  Curl failed (exit code: $exit_code), retrying in ${wait_time}s... (attempt $retry/$max_retries)" >&2
+                sleep $wait_time
+                wait_time=$((wait_time * 2))
+              fi
+            done
+
+            echo "❌ Curl failed after $max_retries attempts" >&2
+            echo "$result"
+            return 1
+          }
 
           echo "🔧 Configuring environment variables..."
 
@@ -316,12 +371,6 @@ jobs:
           WORKER_BASE_PORT=5001
           WORKSPACE_DIR=/workspace
           DATABASE_URL=${DATABASE_URL}
-          MINIO_ENDPOINT=${MINIO_ENDPOINT}
-          MINIO_PORT=${MINIO_PORT}
-          MINIO_USE_SSL=${MINIO_USE_SSL}
-          MINIO_ROOT_USER=${MINIO_ROOT_USER}
-          MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-          MINIO_BUCKET=${MINIO_BUCKET}
           SESSION_SECRET=${SESSION_SECRET}
           ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
           GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
@@ -335,7 +384,7 @@ jobs:
           ENV_VARS_CLEANED=$(echo "$ENV_VARS" | sed 's/^[[:space:]]*//')
           ENV_VARS_ESCAPED=$(echo "$ENV_VARS_CLEANED" | jq -Rs .)
 
-          curl -s -X 'POST' \
+          curl_with_retry -s -X 'POST' \
             "${DOKPLOY_URL}/api/trpc/application.update" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \
@@ -358,10 +407,39 @@ jobs:
         run: |
           DOKPLOY_URL="${DOKPLOY_URL%/}"
 
+          # Helper function for curl with retry and timeout
+          curl_with_retry() {
+            local max_retries=4
+            local retry=0
+            local wait_time=2
+            local result
+
+            while [ $retry -lt $max_retries ]; do
+              result=$(curl --connect-timeout 30 --max-time 60 "$@" 2>&1)
+              local exit_code=$?
+
+              if [ $exit_code -eq 0 ]; then
+                echo "$result"
+                return 0
+              fi
+
+              retry=$((retry + 1))
+              if [ $retry -lt $max_retries ]; then
+                echo "⚠️  Curl failed (exit code: $exit_code), retrying in ${wait_time}s... (attempt $retry/$max_retries)" >&2
+                sleep $wait_time
+                wait_time=$((wait_time * 2))
+              fi
+            done
+
+            echo "❌ Curl failed after $max_retries attempts" >&2
+            echo "$result"
+            return 1
+          }
+
           echo "🚀 Deploying ${APP_NAME}..."
           echo "   Dokploy will build the Docker image from root Dockerfile"
 
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X 'POST' \
+          RESPONSE=$(curl_with_retry -s -w "\n%{http_code}" -X 'POST' \
             "${DOKPLOY_URL}/api/trpc/application.deploy" \
             -H 'accept: application/json' \
             -H 'Content-Type: application/json' \

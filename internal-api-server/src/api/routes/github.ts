@@ -11,16 +11,13 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger, ClaudeRemoteClient } from '@webedt/shared';
 import { GitHubOperations } from '../../logic/github/operations.js';
-import { StorageService } from '../../logic/storage/storageService.js';
-import { AIWorkerClient } from '../../logic/aiWorker/aiWorkerClient.js';
 import { ensureValidToken, type ClaudeAuth } from '../../logic/auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
 
 const router = Router();
 
 // Initialize services for Auto PR
-const storageService = new StorageService();
-const githubOperations = new GitHubOperations(storageService);
+const githubOperations = new GitHubOperations();
 
 // Helper function to get the frontend URL for redirects
 function getFrontendUrl(path: string, storedOrigin?: string): string {
@@ -1589,52 +1586,7 @@ router.post('/repos/:owner/:repo/commit', requireAuth, async (req: Request, res:
       ];
       const deletedPaths = deletions || [];
 
-      // Try to generate a commit message using AI
-      try {
-        // Get user's preferred provider and auth from database
-        const userRecord = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, authReq.user!.id))
-          .limit(1);
-
-        const user = userRecord[0];
-        const provider = user?.preferredProvider;
-        let authentication: string | null = null;
-
-        if (provider === 'claude' && user?.claudeAuth) {
-          authentication = typeof user.claudeAuth === 'string' ? user.claudeAuth : JSON.stringify(user.claudeAuth);
-        } else if (provider === 'codex' && user?.codexAuth) {
-          authentication = typeof user.codexAuth === 'string' ? user.codexAuth : JSON.stringify(user.codexAuth);
-        } else if (provider === 'gemini' && user?.geminiAuth) {
-          authentication = typeof user.geminiAuth === 'string' ? user.geminiAuth : JSON.stringify(user.geminiAuth);
-        }
-
-        if (provider && authentication) {
-          const aiWorkerClient = new AIWorkerClient();
-
-          if (hasImages && !hasFiles && !hasDeletions) {
-            // Image-only commit
-            const imageChanges = images.map((img: { path: string; content: string; beforeContent?: string }) => ({
-              path: img.path,
-              beforeBase64: img.beforeContent,
-              afterBase64: img.content
-            }));
-            commitMessage = await aiWorkerClient.generateImageCommitMessage(imageChanges, provider, authentication);
-          } else {
-            // Code files, deletions, or mixed - include deletion info in the message generation
-            const pathsWithDeletions = [...allPaths, ...deletedPaths.map((p: string) => `[deleted] ${p}`)];
-            commitMessage = await aiWorkerClient.generateCommitMessageFromChanges(pathsWithDeletions, provider, authentication);
-          }
-        }
-      } catch (aiError) {
-        logger.warn('Failed to generate AI commit message, using fallback', {
-          component: 'GitHub',
-          error: aiError instanceof Error ? aiError.message : String(aiError)
-        });
-      }
-
-      // Fallback message
+      // Generate commit message (AI worker removed - using simple fallback)
       if (!commitMessage) {
         const updatedCount = (files?.length || 0) + (images?.length || 0);
         const deletedCount = deletions?.length || 0;
