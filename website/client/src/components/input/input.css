@@ -1,0 +1,139 @@
+/*
+ * Input Component Styles
+ */
+
+.input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.input-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.input-label--required::after {
+  content: ' *';
+  color: var(--color-error-500);
+}
+
+.input {
+  display: block;
+  width: 100%;
+  height: var(--input-height-base);
+  padding: 0 var(--spacing-3);
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.input:hover:not(:disabled):not(:focus) {
+  border-color: var(--color-neutral-300);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--color-bg-secondary);
+}
+
+/* Sizes */
+.input--sm {
+  height: var(--input-height-sm);
+  padding: 0 var(--spacing-2);
+  font-size: var(--font-size-xs);
+}
+
+.input--lg {
+  height: var(--input-height-lg);
+  padding: 0 var(--spacing-4);
+  font-size: var(--font-size-base);
+}
+
+/* States */
+.input--error {
+  border-color: var(--color-error-500);
+}
+
+.input--error:focus {
+  border-color: var(--color-error-500);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.input--success {
+  border-color: var(--color-success-500);
+}
+
+.input--success:focus {
+  border-color: var(--color-success-500);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+/* Helper text */
+.input-helper {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.input-error {
+  font-size: var(--font-size-xs);
+  color: var(--color-error-600);
+}
+
+/* Textarea variant */
+textarea.input {
+  height: auto;
+  min-height: 6rem;
+  padding: var(--spacing-3);
+  line-height: var(--line-height-normal);
+  resize: vertical;
+}
+
+/* With icon */
+.input-container {
+  position: relative;
+}
+
+.input-container .input {
+  padding-left: 2.5rem;
+}
+
+.input-container .input--has-right-icon {
+  padding-right: 2.5rem;
+  padding-left: var(--spacing-3);
+}
+
+.input-icon {
+  position: absolute;
+  top: 50%;
+  left: var(--spacing-3);
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+}
+
+.input-icon--right {
+  left: auto;
+  right: var(--spacing-3);
+}
+
+/* Search input */
+.input--search {
+  padding-left: 2.5rem;
+}

@@ -1,0 +1,97 @@
+/*
+ * Icon Component Styles
+ */
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Sizes */
+.icon--xs {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.icon--sm {
+  width: 1rem;
+  height: 1rem;
+}
+
+.icon--md {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.icon--lg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.icon--xl {
+  width: 2rem;
+  height: 2rem;
+}
+
+/* Colors */
+.icon--primary {
+  color: var(--color-primary-500);
+}
+
+.icon--secondary {
+  color: var(--color-text-secondary);
+}
+
+.icon--success {
+  color: var(--color-success-500);
+}
+
+.icon--warning {
+  color: var(--color-warning-500);
+}
+
+.icon--error {
+  color: var(--color-error-500);
+}
+
+.icon--info {
+  color: var(--color-info-500);
+}
+
+/* Button inside icon for clickable icons */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.icon-button:hover {
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.icon-button:active {
+  background-color: var(--color-bg-tertiary);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.icon-button .icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
