@@ -249,7 +249,7 @@ class Router {
 
     // Render component
     try {
-      const component = await match.route.component();
+      const component = await match.route.component(match.params);
       this.outlet.appendChild(component);
 
       // Update title

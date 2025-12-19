@@ -486,6 +486,13 @@ Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue | ForEach-Obj
 
 Then restart with `npm run dev`.
 
+### Test Credentials
+
+For local development testing, use these credentials:
+
+- **Email:** `testuser@example.com`
+- **Password:** `password123`
+
 ### Browser Testing with Chrome DevTools MCP
 
 When testing in the browser, use the Chrome DevTools MCP tools for automation:

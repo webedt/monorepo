@@ -90,6 +90,71 @@ router.use((req: Request, res: Response, next) => {
   next();
 });
 
+// Create a new code session
+router.post('/create-code-session', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const {
+      title,
+      repositoryOwner,
+      repositoryName,
+      baseBranch,
+      branch,
+    } = req.body;
+
+    // Validate required fields
+    if (!repositoryOwner || !repositoryName || !baseBranch || !branch) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required fields: repositoryOwner, repositoryName, baseBranch, branch',
+      });
+      return;
+    }
+
+    // Generate session ID
+    const sessionId = uuidv4();
+
+    // Generate session path (format: owner__repo__branch)
+    const sessionPath = generateSessionPath(repositoryOwner, repositoryName, branch);
+
+    // Build repository URL
+    const repositoryUrl = `https://github.com/${repositoryOwner}/${repositoryName}`;
+
+    // Create session in database
+    const [session] = await db.insert(chatSessions).values({
+      id: sessionId,
+      userId: authReq.user!.id,
+      sessionPath,
+      repositoryOwner,
+      repositoryName,
+      repositoryUrl,
+      baseBranch,
+      branch,
+      userRequest: title || 'New coding session',
+      status: 'pending',
+      provider: 'claude',
+      autoCommit: false,
+      locked: false,
+    }).returning();
+
+    logger.info(`Created code session ${sessionId}`, {
+      component: 'Sessions',
+      sessionId,
+      repositoryOwner,
+      repositoryName,
+      branch,
+    });
+
+    // Broadcast session list update
+    sessionListBroadcaster.notifySessionUpdated(authReq.user!.id, session);
+
+    res.json({ success: true, session });
+  } catch (error) {
+    logger.error('Create code session error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to create session' });
+  }
+});
+
 // Get all chat sessions for user (excluding deleted ones)
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -305,7 +370,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: {
+      session: {
         ...session,
         previewUrl
       }
