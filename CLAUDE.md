@@ -440,13 +440,102 @@ await storageWorkerApi.writeFile(sessionPath, `workspace/${filePath}`, content);
 
 ---
 
+## Local Development
+
+### Starting the Development Server
+
+From the monorepo root directory, run:
+
+```bash
+npm run dev
+```
+
+This starts all services concurrently:
+- **Vite dev server** (React client): `http://localhost:5173` or `http://localhost:5174` (hot reload)
+- **Website server** (Express facade): `http://localhost:3000` (serves built client + proxies API)
+- **Internal API server**: `http://localhost:3001`
+
+**Recommended for development:** Use the Vite dev server port (5173/5174) for hot reload support.
+
+### Restarting the Development Server
+
+**IMPORTANT:** Do NOT kill all node processes. Only kill the specific processes on the dev ports.
+
+To find and kill specific processes on Windows:
+
+```powershell
+# Find processes on specific ports
+netstat -ano | findstr :3000
+netstat -ano | findstr :3001
+netstat -ano | findstr :5173
+netstat -ano | findstr :5174
+
+# Kill specific PID (replace <PID> with the actual process ID)
+taskkill /PID <PID> /F
+```
+
+Or use PowerShell to kill by port:
+
+```powershell
+# Kill process on port 3000
+Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+
+# Kill process on port 5173
+Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+Then restart with `npm run dev`.
+
+### Browser Testing with Chrome DevTools MCP
+
+When testing in the browser, use the Chrome DevTools MCP tools for automation:
+
+1. **Navigate to pages:**
+   ```
+   mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page with url: "http://localhost:5174"
+   ```
+
+2. **Take snapshots to see page state:**
+   ```
+   mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot
+   ```
+
+3. **Click elements by uid (from snapshot):**
+   ```
+   mcp__plugin_chrome-devtools-mcp_chrome-devtools__click with uid: "<element-uid>"
+   ```
+
+4. **Fill form inputs:**
+   ```
+   mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill with uid: "<input-uid>", value: "text"
+   ```
+
+5. **Check console for errors:**
+   ```
+   mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_console_messages
+   ```
+
+6. **Check network requests:**
+   ```
+   mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests
+   ```
+
+**Workflow for testing:**
+1. Start dev server with `npm run dev`
+2. Navigate to the app URL
+3. Take a snapshot to see the page structure
+4. Interact with elements using their uids from the snapshot
+5. Check console/network for errors after actions
+
+---
+
 ## Development Commands
 
 ### Node.js
 
 ```bash
 npm install        # Install dependencies
-npm run dev        # Development mode
+npm run dev        # Development mode (all services)
 npm run build      # Build TypeScript
 npm start          # Production
 ```

@@ -96,10 +96,25 @@ class Router {
   }
 
   /**
-   * Get current path (without hash)
+   * Get current path (without hash and query string)
    */
   getCurrentPath(): string {
-    return window.location.hash.slice(1) || '/';
+    const hash = window.location.hash.slice(1) || '/';
+    // Remove query string from path for matching
+    const queryIndex = hash.indexOf('?');
+    return queryIndex >= 0 ? hash.slice(0, queryIndex) : hash;
+  }
+
+  /**
+   * Get current query string parameters from hash
+   */
+  getQueryParams(): URLSearchParams {
+    const hash = window.location.hash.slice(1) || '/';
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex >= 0) {
+      return new URLSearchParams(hash.slice(queryIndex + 1));
+    }
+    return new URLSearchParams();
   }
 
   /**

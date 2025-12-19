@@ -117,7 +117,7 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
     const { code, state } = req.query;
 
     if (!code || !state) {
-      res.redirect(getFrontendUrl('/login?error=missing_params'));
+      res.redirect(getFrontendUrl('/#/login?error=missing_params'));
       return;
     }
 
@@ -131,13 +131,13 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
     try {
       stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
     } catch {
-      res.redirect(getFrontendUrl('/login?error=invalid_state'));
+      res.redirect(getFrontendUrl('/#/login?error=invalid_state'));
       return;
     }
 
     // Check if state is not too old (10 minute timeout)
     if (Date.now() - stateData.timestamp > 10 * 60 * 1000) {
-      res.redirect(getFrontendUrl('/login?error=state_expired', stateData.returnOrigin));
+      res.redirect(getFrontendUrl('/#/login?error=state_expired', stateData.returnOrigin));
       return;
     }
 
@@ -162,7 +162,8 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
 
     if (tokenData.error) {
       const errorReturnPath = stateData.returnPath || '/settings';
-      res.redirect(getFrontendUrl(`${errorReturnPath}?error=${tokenData.error}`, stateData.returnOrigin));
+      // Use hash-based routing: /#/path?query
+      res.redirect(getFrontendUrl(`/#${errorReturnPath}?error=${tokenData.error}`, stateData.returnOrigin));
       return;
     }
 
@@ -194,10 +195,12 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
       .where(eq(users.id, stateData.userId));
 
     const returnPath = stateData.returnPath || '/settings';
-    res.redirect(getFrontendUrl(`${returnPath}?success=github_connected`, stateData.returnOrigin));
+    // Use hash-based routing: /#/path?query
+    res.redirect(getFrontendUrl(`/#${returnPath}?success=github_connected`, stateData.returnOrigin));
   } catch (error) {
     logger.error('GitHub OAuth error', error as Error, { component: 'GitHub' });
-    res.redirect(getFrontendUrl('/settings?error=oauth_failed'));
+    // Use hash-based routing for error redirect
+    res.redirect(getFrontendUrl('/#/settings?error=oauth_failed'));
   }
 });
 
