@@ -196,3 +196,113 @@ export type WorkspacePresence = typeof workspacePresence.$inferSelect;
 export type NewWorkspacePresence = typeof workspacePresence.$inferInsert;
 export type WorkspaceEvent = typeof workspaceEvents.$inferSelect;
 export type NewWorkspaceEvent = typeof workspaceEvents.$inferInsert;
+
+// Orchestrator Jobs - Long-running multi-cycle agent orchestration
+export const orchestratorJobs = pgTable('orchestrator_jobs', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  // Repository context
+  repositoryOwner: text('repository_owner').notNull(),
+  repositoryName: text('repository_name').notNull(),
+  baseBranch: text('base_branch').notNull(),
+  workingBranch: text('working_branch').notNull(),
+  sessionPath: text('session_path').notNull(), // Format: {owner}__{repo}__{branch}
+
+  // Goal/Request document
+  requestDocument: text('request_document').notNull(), // Markdown content defining the goal
+  taskList: text('task_list'), // Current TASKLIST.md content
+
+  // Status
+  status: text('status').notNull().default('pending'), // 'pending' | 'running' | 'paused' | 'completed' | 'cancelled' | 'error'
+  currentCycle: integer('current_cycle').notNull().default(0),
+
+  // Limits
+  maxCycles: integer('max_cycles'), // Optional cycle limit
+  timeLimitMinutes: integer('time_limit_minutes'), // Optional time limit
+  maxParallelTasks: integer('max_parallel_tasks').default(3).notNull(),
+
+  // Provider configuration
+  provider: text('provider').default('claude').notNull(), // 'claude' | 'claude-remote'
+
+  // Timestamps
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+
+  // Error tracking
+  lastError: text('last_error'),
+  errorCount: integer('error_count').default(0).notNull(),
+});
+
+// Orchestrator Cycles - Individual cycles within a job
+export const orchestratorCycles = pgTable('orchestrator_cycles', {
+  id: text('id').primaryKey(), // UUID
+  jobId: text('job_id')
+    .notNull()
+    .references(() => orchestratorJobs.id, { onDelete: 'cascade' }),
+
+  cycleNumber: integer('cycle_number').notNull(),
+  phase: text('phase').notNull().default('discovery'), // 'discovery' | 'execution' | 'convergence' | 'update'
+
+  // Task tracking
+  tasksDiscovered: integer('tasks_discovered').default(0).notNull(),
+  tasksLaunched: integer('tasks_launched').default(0).notNull(),
+  tasksCompleted: integer('tasks_completed').default(0).notNull(),
+  tasksFailed: integer('tasks_failed').default(0).notNull(),
+
+  // Results
+  summary: text('summary'), // LLM-generated cycle summary
+  learnings: text('learnings'), // New information discovered
+
+  // Timestamps
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// Orchestrator Tasks - Individual tasks within a cycle
+export const orchestratorTasks = pgTable('orchestrator_tasks', {
+  id: text('id').primaryKey(), // UUID
+  cycleId: text('cycle_id')
+    .notNull()
+    .references(() => orchestratorCycles.id, { onDelete: 'cascade' }),
+  jobId: text('job_id')
+    .notNull()
+    .references(() => orchestratorJobs.id, { onDelete: 'cascade' }),
+
+  // Task definition
+  taskNumber: integer('task_number').notNull(),
+  description: text('description').notNull(), // What the agent should do
+  context: text('context'), // Additional context for the agent
+  priority: text('priority').default('P1'), // 'P0' | 'P1' | 'P2'
+  canRunParallel: boolean('can_run_parallel').default(true).notNull(),
+
+  // Execution
+  agentSessionId: text('agent_session_id')
+    .references(() => chatSessions.id, { onDelete: 'set null' }), // The spawned agent session
+  taskBranch: text('task_branch'), // Branch created for this task
+  status: text('status').notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+
+  // Results
+  resultSummary: text('result_summary'), // What the agent accomplished
+  filesModified: json('files_modified').$type<string[]>(), // List of files changed
+  commitsMade: json('commits_made').$type<string[]>(), // Commit hashes
+
+  // Timestamps
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+
+  // Error tracking
+  errorMessage: text('error_message'),
+  retryCount: integer('retry_count').default(0).notNull(),
+});
+
+export type OrchestratorJob = typeof orchestratorJobs.$inferSelect;
+export type NewOrchestratorJob = typeof orchestratorJobs.$inferInsert;
+export type OrchestratorCycle = typeof orchestratorCycles.$inferSelect;
+export type NewOrchestratorCycle = typeof orchestratorCycles.$inferInsert;
+export type OrchestratorTask = typeof orchestratorTasks.$inferSelect;
+export type NewOrchestratorTask = typeof orchestratorTasks.$inferInsert;
