@@ -4,9 +4,9 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Input, Icon, Spinner, toast } from '../../components';
-import { sessionsApi } from '../../lib/api';
-import type { Session } from '../../types';
+import { Button, Input, Icon, Spinner, Modal, toast } from '../../components';
+import { sessionsApi, githubApi } from '../../lib/api';
+import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
 
 export class AgentsPage extends Page<PageOptions> {
@@ -199,8 +199,220 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private handleNewSession(): void {
-    // For now, navigate to a quick setup or show a modal
-    toast.info('New session feature coming soon!');
+    this.showNewSessionModal();
+  }
+
+  private showNewSessionModal(): void {
+    const modal = new Modal({
+      title: 'New Agent Session',
+      size: 'md',
+      onClose: () => {
+        modal.unmount();
+      },
+    });
+
+    // State for the form
+    let repos: Repository[] = [];
+    let branches: Branch[] = [];
+    let selectedRepo: Repository | null = null;
+    let selectedBranch: string = '';
+    let initialRequest: string = '';
+    let isLoadingRepos = true;
+    let isLoadingBranches = false;
+
+    // Build the form HTML
+    const updateBody = () => {
+      const body = modal.getBody();
+      body.innerHTML = `
+        <div class="new-session-form">
+          <div class="form-group">
+            <label class="form-label">Repository</label>
+            ${isLoadingRepos ? `
+              <div class="form-loading">Loading repositories...</div>
+            ` : repos.length === 0 ? `
+              <div class="form-empty">
+                <p>No repositories found. <a href="#" id="connect-github">Connect GitHub</a> to get started.</p>
+              </div>
+            ` : `
+              <select class="form-select" id="repo-select">
+                <option value="">Select a repository...</option>
+                ${repos.map(repo => `
+                  <option value="${repo.owner.login}/${repo.name}" ${selectedRepo?.owner.login === repo.owner.login && selectedRepo?.name === repo.name ? 'selected' : ''}>
+                    ${repo.owner.login}/${repo.name}
+                  </option>
+                `).join('')}
+              </select>
+            `}
+          </div>
+
+          ${selectedRepo ? `
+            <div class="form-group">
+              <label class="form-label">Branch</label>
+              ${isLoadingBranches ? `
+                <div class="form-loading">Loading branches...</div>
+              ` : `
+                <select class="form-select" id="branch-select">
+                  <option value="">Select a branch...</option>
+                  ${branches.map(branch => `
+                    <option value="${branch.name}" ${selectedBranch === branch.name ? 'selected' : ''}>
+                      ${branch.name}${branch.name === 'main' || branch.name === 'master' ? ' (default)' : ''}
+                    </option>
+                  `).join('')}
+                </select>
+              `}
+            </div>
+          ` : ''}
+
+          ${selectedRepo && selectedBranch ? `
+            <div class="form-group">
+              <label class="form-label">Initial Task (optional)</label>
+              <textarea class="form-textarea" id="request-input" placeholder="Describe what you want the AI to help with...">${initialRequest}</textarea>
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      // Add event listeners
+      const repoSelect = body.querySelector('#repo-select') as HTMLSelectElement;
+      if (repoSelect) {
+        repoSelect.addEventListener('change', async () => {
+          const value = repoSelect.value;
+          if (value) {
+            const [owner, name] = value.split('/');
+            selectedRepo = repos.find(r => r.owner.login === owner && r.name === name) || null;
+            selectedBranch = '';
+            branches = [];
+            updateBody();
+            await loadBranches();
+          } else {
+            selectedRepo = null;
+            selectedBranch = '';
+            branches = [];
+            updateBody();
+          }
+        });
+      }
+
+      const branchSelect = body.querySelector('#branch-select') as HTMLSelectElement;
+      if (branchSelect) {
+        branchSelect.addEventListener('change', () => {
+          selectedBranch = branchSelect.value;
+          updateBody();
+        });
+      }
+
+      const requestInput = body.querySelector('#request-input') as HTMLTextAreaElement;
+      if (requestInput) {
+        requestInput.addEventListener('input', () => {
+          initialRequest = requestInput.value;
+        });
+      }
+
+      const connectGithubLink = body.querySelector('#connect-github');
+      if (connectGithubLink) {
+        connectGithubLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          modal.close();
+          modal.unmount();
+          githubApi.connect();
+        });
+      }
+    };
+
+    // Load repositories
+    const loadRepos = async () => {
+      isLoadingRepos = true;
+      updateBody();
+
+      try {
+        const response = await githubApi.getRepos();
+        repos = response.repos || [];
+      } catch (error) {
+        console.error('Failed to load repos:', error);
+        repos = [];
+      } finally {
+        isLoadingRepos = false;
+        updateBody();
+      }
+    };
+
+    // Load branches for selected repo
+    const loadBranches = async () => {
+      if (!selectedRepo) return;
+
+      isLoadingBranches = true;
+      updateBody();
+
+      try {
+        const response = await githubApi.getBranches(selectedRepo.owner.login, selectedRepo.name);
+        branches = response.branches || [];
+        // Auto-select main or master if available
+        const defaultBranch = branches.find(b => b.name === 'main' || b.name === 'master');
+        if (defaultBranch) {
+          selectedBranch = defaultBranch.name;
+        }
+      } catch (error) {
+        console.error('Failed to load branches:', error);
+        branches = [];
+      } finally {
+        isLoadingBranches = false;
+        updateBody();
+      }
+    };
+
+    // Create session
+    const createSession = async () => {
+      if (!selectedRepo || !selectedBranch) {
+        toast.error('Please select a repository and branch');
+        return;
+      }
+
+      createBtn.setDisabled(true);
+      createBtn.setLoading(true);
+
+      try {
+        const response = await sessionsApi.createCodeSession({
+          repositoryOwner: selectedRepo.owner.login,
+          repositoryName: selectedRepo.name,
+          baseBranch: selectedBranch,
+          branch: `claude/session-${Date.now()}`,
+          title: initialRequest || undefined,
+        });
+
+        modal.close();
+        modal.unmount();
+
+        toast.success('Session created!');
+        this.navigate(`/session/${response.session.id}/chat`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to create session';
+        toast.error(message);
+        createBtn.setDisabled(false);
+        createBtn.setLoading(false);
+      }
+    };
+
+    // Footer buttons
+    const cancelBtn = new Button('Cancel', {
+      variant: 'secondary',
+      onClick: () => {
+        modal.close();
+        modal.unmount();
+      },
+    });
+
+    const createBtn = new Button('Create Session', {
+      variant: 'primary',
+      onClick: createSession,
+    });
+
+    modal.addFooterAction(cancelBtn);
+    modal.addFooterAction(createBtn);
+
+    // Initialize
+    updateBody();
+    modal.open();
+    loadRepos();
   }
 
   protected onUnmount(): void {
