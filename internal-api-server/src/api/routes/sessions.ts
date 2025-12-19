@@ -217,14 +217,15 @@ router.get('/updates', requireAuth, async (req: Request, res: Response) => {
     }
   });
 
-  // Send heartbeat every 30 seconds to keep connection alive
+  // Send heartbeat every 15 seconds to keep connection alive
+  // Reduced from 30s to prevent proxy timeouts (Traefik default is ~30-60s)
   const heartbeatInterval = setInterval(() => {
     if (res.writableEnded) {
       clearInterval(heartbeatInterval);
       return;
     }
     res.write(`:heartbeat\n\n`);
-  }, 30000);
+  }, 15000);
 
   // Handle client disconnect
   req.on('close', () => {

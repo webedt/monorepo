@@ -457,7 +457,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       sessionEventBroadcaster.broadcast(chatSessionId, event.type, event);
     };
 
-    // Set up heartbeat
+    // Set up heartbeat - use 15 second interval to prevent proxy timeouts
+    // Traefik and other proxies often have 30-60 second idle timeouts
     const heartbeatInterval = setInterval(() => {
       if (!clientDisconnected) {
         try {
@@ -468,7 +469,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       } else {
         clearInterval(heartbeatInterval);
       }
-    }, 30000);
+    }, 15000);
 
     // Send input preview event immediately so user sees their request was received
     if (userRequest) {

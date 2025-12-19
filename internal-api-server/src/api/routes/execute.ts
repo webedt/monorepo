@@ -546,11 +546,12 @@ const executeHandler = async (req: Request, res: Response) => {
     sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSession.id, status: 'running' });
 
     // Setup heartbeat interval (keeps connection alive and signals activity)
+    // Using 15 second interval to prevent proxy timeouts (Traefik default is ~30-60s)
     const heartbeatInterval = setInterval(() => {
       if (!clientDisconnected && !res.writableEnded) {
         res.write(`event: heartbeat\ndata: {}\n\n`);
       }
-    }, 30000); // Send heartbeat every 30 seconds
+    }, 15000);
 
     try {
       // ========================================================================
