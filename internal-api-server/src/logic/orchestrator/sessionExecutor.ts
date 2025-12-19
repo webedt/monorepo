@@ -1,22 +1,22 @@
 /**
  * Session Executor
  *
- * Handles creating and managing claude-remote sessions for the orchestrator.
- * Provides methods to create sessions, wait for completion, and clean up.
+ * Handles creating and managing sessions for the orchestrator using local workers.
+ * Uses the same worker infrastructure as the agents page.
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { eq, and } from 'drizzle-orm';
+import * as fs from 'fs';
+import * as path from 'path';
 import { db } from '../db/index.js';
 import { chatSessions, users, ChatSession } from '../db/schema.js';
 import { ensureValidToken, ClaudeAuth } from '../auth/claudeAuth.js';
-import { ClaudeRemoteClient } from '@webedt/shared';
-import {
-  CLAUDE_ENVIRONMENT_ID,
-  CLAUDE_API_BASE_URL,
-  CLAUDE_DEFAULT_MODEL,
-  CLAUDE_ORG_UUID,
-} from '../config/env.js';
+import { workerCoordinator, WorkerAssignment } from '../execution/workerCoordinator.js';
+import { StorageService } from '../storage/storageService.js';
+import { GitHubOperations, parseRepoUrl } from '../github/operations.js';
+import { WORKSPACE_DIR } from '../config/env.js';
+import { generateSessionPath } from '@webedt/shared';
 
 export interface CreateSessionParams {
   userId: string;
@@ -32,11 +32,14 @@ export interface CreateSessionParams {
 
 export interface SessionResult {
   sessionId: string;
-  remoteSessionId?: string;
   status: 'completed' | 'error';
   branch?: string;
   error?: string;
 }
+
+// Initialize services
+const storageService = new StorageService();
+const githubOperations = new GitHubOperations(storageService);
 
 /**
  * Get ClaudeAuth for a user and refresh if needed
@@ -71,31 +74,25 @@ async function getClaudeAuth(userId: string): Promise<ClaudeAuth | null> {
 }
 
 /**
- * Create a ClaudeRemoteClient
+ * Get user's GitHub access token
  */
-function createClient(claudeAuth: ClaudeAuth, environmentId?: string): ClaudeRemoteClient {
-  return new ClaudeRemoteClient({
-    accessToken: claudeAuth.accessToken,
-    environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || '',
-    baseUrl: CLAUDE_API_BASE_URL,
-    model: CLAUDE_DEFAULT_MODEL,
-    orgUuid: CLAUDE_ORG_UUID,
-  });
+async function getGitHubToken(userId: string): Promise<string | null> {
+  const [userData] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  return userData?.githubAccessToken || null;
 }
 
 /**
- * Create a claude-remote session and wait for it to complete
+ * Create a session and execute it using the local worker (same as agents page)
  */
 export async function createAndExecuteSession(params: CreateSessionParams): Promise<SessionResult> {
   const { userId, title, prompt, repoOwner, repoName } = params;
 
   console.log(`[SessionExecutor] Creating session: ${title}`);
-
-  // Validate environment configuration
-  if (!CLAUDE_ENVIRONMENT_ID) {
-    console.error('[SessionExecutor] CLAUDE_ENVIRONMENT_ID is not configured');
-    throw new Error('Claude Remote Sessions not configured: CLAUDE_ENVIRONMENT_ID is missing. Set this in the server environment.');
-  }
 
   // Get Claude auth
   const claudeAuth = await getClaudeAuth(userId);
@@ -104,51 +101,181 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
     throw new Error('Claude authentication not configured for this user. Please connect your Claude account in Settings.');
   }
 
-  console.log(`[SessionExecutor] Using environment: ${CLAUDE_ENVIRONMENT_ID.substring(0, 20)}... for user ${userId.substring(0, 8)}...`);
+  // Get GitHub token
+  const githubToken = await getGitHubToken(userId);
+  if (!githubToken) {
+    console.error(`[SessionExecutor] User ${userId} does not have GitHub connected`);
+    throw new Error('GitHub not connected for this user. Please connect your GitHub account in Settings.');
+  }
 
   // Create local chat session record
   const sessionId = uuidv4();
   const gitUrl = `https://github.com/${repoOwner}/${repoName}`;
+  const baseBranch = params.baseBranch || 'main';
 
-  const [newSession] = await db.insert(chatSessions).values({
+  await db.insert(chatSessions).values({
     id: sessionId,
     userId,
     userRequest: title,
     status: 'running',
-    provider: 'claude-remote',
+    provider: 'claude',
     repositoryUrl: gitUrl,
     repositoryOwner: repoOwner,
     repositoryName: repoName,
-    baseBranch: params.baseBranch || 'main',
-  }).returning();
+    baseBranch,
+  });
 
   console.log(`[SessionExecutor] Created local session: ${sessionId}`);
 
+  // Setup workspace
+  const sessionRoot = path.join(WORKSPACE_DIR, `session-${sessionId}`);
+  let workspacePath: string | undefined;
+
   try {
-    // Create Claude remote session
-    const client = createClient(claudeAuth);
+    // Initialize GitHub session (clone repo, create branch)
+    console.log(`[SessionExecutor] Initializing GitHub session for ${gitUrl}`);
 
-    const { sessionId: remoteSessionId, webUrl } = await client.createSession({
-      prompt,
-      gitUrl,
-      model: CLAUDE_DEFAULT_MODEL,
-      title,
-    });
+    const initResult = await githubOperations.initSession(
+      {
+        sessionId,
+        repoUrl: gitUrl,
+        branch: baseBranch,
+        userRequest: title,
+        githubAccessToken: githubToken,
+        workspaceRoot: WORKSPACE_DIR,
+        codingAssistantProvider: 'ClaudeAgentSDK',
+        codingAssistantAuthentication: claudeAuth,
+      },
+      async (event) => {
+        console.log(`[SessionExecutor] Init event: ${event.type} - ${event.message}`);
+      }
+    );
 
-    console.log(`[SessionExecutor] Created remote session: ${remoteSessionId}`);
+    // Update database with branch info
+    const sessionPath = generateSessionPath(repoOwner, repoName, initResult.branchName);
 
-    // Update local session with remote ID
     await db.update(chatSessions)
       .set({
-        remoteSessionId,
-        remoteWebUrl: webUrl,
+        branch: initResult.branchName,
+        sessionPath: sessionPath,
+        userRequest: initResult.sessionTitle || title,
       })
       .where(eq(chatSessions.id, sessionId));
 
-    // Wait for session to complete
-    const result = await waitForSessionCompletion(client, remoteSessionId, sessionId);
+    workspacePath = initResult.localPath;
+    console.log(`[SessionExecutor] Workspace initialized at: ${workspacePath}`);
 
-    return result;
+    // Upload session to storage before calling worker
+    if (fs.existsSync(sessionRoot)) {
+      await storageService.uploadSessionFromPath(sessionId, sessionRoot);
+      console.log(`[SessionExecutor] Session uploaded to storage`);
+    }
+
+    // Acquire worker
+    console.log(`[SessionExecutor] Acquiring worker...`);
+    const workerAssignment = await workerCoordinator.acquireWorker(sessionId);
+
+    if (!workerAssignment) {
+      throw new Error('No AI workers available. Please check that the ai-coding-worker service is running.');
+    }
+
+    console.log(`[SessionExecutor] Worker acquired: ${workerAssignment.worker.id}`);
+
+    // Prepare payload for AI worker
+    const aiWorkerPayload = {
+      userRequest: prompt,
+      codingAssistantProvider: 'ClaudeAgentSDK',
+      codingAssistantAuthentication: claudeAuth,
+      workspacePath: workspacePath,
+      websiteSessionId: sessionId,
+      providerOptions: {},
+    };
+
+    // Call AI worker
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 600000); // 10 minutes
+
+    console.log(`[SessionExecutor] Calling worker at ${workerAssignment.url}/execute`);
+
+    const aiResponse = await fetch(`${workerAssignment.url}/execute`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify(aiWorkerPayload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
+      throw new Error(`AI worker error: ${aiResponse.status} - ${errorText}`);
+    }
+
+    if (!aiResponse.body) {
+      throw new Error('No response body from AI worker');
+    }
+
+    // Stream the response and wait for completion
+    const reader = aiResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let sessionCompleted = false;
+    let sessionError: string | undefined;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim() || !line.startsWith('data:')) continue;
+
+        try {
+          const data = line.substring(5).trim();
+          const event = JSON.parse(data);
+
+          console.log(`[SessionExecutor] Event: ${event.type}`);
+
+          if (event.type === 'completed') {
+            sessionCompleted = true;
+          } else if (event.type === 'error') {
+            sessionError = event.error || event.message || 'Unknown error';
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    // Release worker
+    workerCoordinator.releaseWorker(workerAssignment.worker.id, sessionId);
+
+    // Update session status
+    const finalStatus = sessionError ? 'error' : 'completed';
+    await db.update(chatSessions)
+      .set({
+        status: finalStatus,
+        completedAt: new Date(),
+      })
+      .where(eq(chatSessions.id, sessionId));
+
+    // Get final branch name
+    const [finalSession] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+
+    console.log(`[SessionExecutor] Session ${sessionId} ${finalStatus}`);
+
+    return {
+      sessionId,
+      status: sessionError ? 'error' : 'completed',
+      branch: finalSession?.branch || undefined,
+      error: sessionError,
+    };
   } catch (error) {
     console.error(`[SessionExecutor] Session failed:`, error);
 
@@ -156,6 +283,15 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
     await db.update(chatSessions)
       .set({ status: 'error', completedAt: new Date() })
       .where(eq(chatSessions.id, sessionId));
+
+    // Clean up workspace
+    if (fs.existsSync(sessionRoot)) {
+      try {
+        fs.rmSync(sessionRoot, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
 
     return {
       sessionId,
@@ -166,91 +302,12 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
 }
 
 /**
- * Wait for a remote session to complete by polling
- */
-async function waitForSessionCompletion(
-  client: ClaudeRemoteClient,
-  remoteSessionId: string,
-  localSessionId: string,
-  maxWaitMs: number = 30 * 60 * 1000, // 30 minutes default
-  pollIntervalMs: number = 10000 // 10 seconds
-): Promise<SessionResult> {
-  const startTime = Date.now();
-
-  console.log(`[SessionExecutor] Waiting for session ${remoteSessionId} to complete...`);
-
-  while (Date.now() - startTime < maxWaitMs) {
-    try {
-      // Get session from Anthropic
-      const session = await client.getSession(remoteSessionId);
-
-      console.log(`[SessionExecutor] Session ${remoteSessionId} status: ${session.session_status}`);
-
-      // Extract branch from session context if available
-      const workingBranch = session.session_context?.outcomes?.[0]?.git_info?.branches?.[0];
-
-      if (session.session_status === 'completed' || session.session_status === 'idle') {
-        // Session is done
-        await db.update(chatSessions)
-          .set({
-            status: 'completed',
-            branch: workingBranch,
-            completedAt: new Date(),
-          })
-          .where(eq(chatSessions.id, localSessionId));
-
-        return {
-          sessionId: localSessionId,
-          remoteSessionId,
-          status: 'completed',
-          branch: workingBranch,
-        };
-      }
-
-      if (session.session_status === 'failed') {
-        await db.update(chatSessions)
-          .set({ status: 'error', completedAt: new Date() })
-          .where(eq(chatSessions.id, localSessionId));
-
-        return {
-          sessionId: localSessionId,
-          remoteSessionId,
-          status: 'error',
-          error: 'Session ended with error',
-        };
-      }
-
-      // Still running, wait and poll again
-      await sleep(pollIntervalMs);
-    } catch (error) {
-      console.error(`[SessionExecutor] Error polling session status:`, error);
-      // Continue polling on transient errors
-      await sleep(pollIntervalMs);
-    }
-  }
-
-  // Timeout
-  console.error(`[SessionExecutor] Session ${remoteSessionId} timed out after ${maxWaitMs}ms`);
-
-  await db.update(chatSessions)
-    .set({ status: 'error', completedAt: new Date() })
-    .where(eq(chatSessions.id, localSessionId));
-
-  return {
-    sessionId: localSessionId,
-    remoteSessionId,
-    status: 'error',
-    error: 'Session timed out',
-  };
-}
-
-/**
- * Archive a session and delete its branch
+ * Archive a session (mark as completed)
  */
 export async function archiveSession(
   userId: string,
   sessionId: string,
-  deleteBranch: boolean = true
+  _deleteBranch: boolean = true
 ): Promise<void> {
   console.log(`[SessionExecutor] Archiving session: ${sessionId}`);
 
@@ -264,30 +321,12 @@ export async function archiveSession(
     throw new Error('Session not found');
   }
 
-  // Archive on Anthropic if we have a remote session
-  if (session.remoteSessionId) {
-    const claudeAuth = await getClaudeAuth(userId);
-    if (claudeAuth) {
-      const client = createClient(claudeAuth);
-      try {
-        await client.archiveSession(session.remoteSessionId);
-        console.log(`[SessionExecutor] Archived remote session: ${session.remoteSessionId}`);
-      } catch (error) {
-        console.error(`[SessionExecutor] Failed to archive remote session:`, error);
-      }
-    }
-  }
-
   // Update local session status
   await db.update(chatSessions)
     .set({ status: 'completed', completedAt: new Date() })
     .where(eq(chatSessions.id, sessionId));
 
-  // Delete branch if requested
-  // Note: This would require git operations - for now we rely on task sessions to clean up their own branches
-  if (deleteBranch && session.branch) {
-    console.log(`[SessionExecutor] Branch ${session.branch} should be deleted by task session`);
-  }
+  console.log(`[SessionExecutor] Archived session: ${sessionId}`);
 }
 
 /**
@@ -308,12 +347,6 @@ export async function getSessionStatus(sessionId: string): Promise<ChatSession |
 export async function areAllSessionsComplete(sessionIds: string[]): Promise<boolean> {
   if (sessionIds.length === 0) return true;
 
-  const sessions = await db
-    .select()
-    .from(chatSessions)
-    .where(eq(chatSessions.id, sessionIds[0]));
-
-  // This is a simplified check - in production you'd want to check all at once
   for (const id of sessionIds) {
     const [session] = await db
       .select()
@@ -365,7 +398,6 @@ export async function waitForAllSessions(
         pending.delete(id);
         results.set(id, {
           sessionId: id,
-          remoteSessionId: session.remoteSessionId || undefined,
           status: 'completed',
           branch: session.branch || undefined,
         });
@@ -374,7 +406,6 @@ export async function waitForAllSessions(
         pending.delete(id);
         results.set(id, {
           sessionId: id,
-          remoteSessionId: session.remoteSessionId || undefined,
           status: 'error',
           error: 'Session ended with error',
         });

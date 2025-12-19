@@ -21,7 +21,6 @@ import {
   StartOrchestratorRequest,
 } from '../../logic/orchestrator/index.js';
 import { orchestratorBroadcaster, OrchestratorEvent } from '../../logic/orchestrator/orchestratorBroadcaster.js';
-import { CLAUDE_ENVIRONMENT_ID } from '../../logic/config/env.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -63,21 +62,21 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Pre-flight validation for Claude Remote Sessions
-    if (!CLAUDE_ENVIRONMENT_ID) {
-      res.status(503).json({
-        success: false,
-        error: 'Orchestrator requires Claude Remote Sessions, but CLAUDE_ENVIRONMENT_ID is not configured on this server.',
-      });
-      return;
-    }
-
     // Check if user has Claude auth configured
     const claudeAuth = authReq.user?.claudeAuth as { accessToken?: string } | null;
     if (!claudeAuth?.accessToken) {
       res.status(400).json({
         success: false,
         error: 'Claude authentication not configured. Please connect your Claude account in Settings before using the orchestrator.',
+      });
+      return;
+    }
+
+    // Check if user has GitHub connected
+    if (!authReq.user?.githubAccessToken) {
+      res.status(400).json({
+        success: false,
+        error: 'GitHub not connected. Please connect your GitHub account in Settings before using the orchestrator.',
       });
       return;
     }
