@@ -213,23 +213,39 @@
   border-bottom-left-radius: var(--radius-sm);
 }
 
-/* System messages as status lines (no bubble) */
+/* System messages as compact status lines (no bubble) */
 .chat-message.message-system {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .message-system .message-bubble {
   background: transparent;
   color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: var(--font-size-xs);
+  padding: var(--spacing-xs) 0;
   max-width: 100%;
   border: none;
-  text-align: center;
+  text-align: left;
 }
 
 .message-system .message-content {
-  display: inline;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.message-system .status-emoji {
+  flex-shrink: 0;
+}
+
+.message-system .status-text {
+  opacity: 0.7;
+}
+
+.message-system .status-timestamp {
+  font-family: var(--font-mono);
+  opacity: 0.5;
+  font-size: var(--font-size-xs);
 }
 
 .message-system .message-meta {

@@ -13,7 +13,7 @@ import './chat.css';
 
 interface ChatMessage {
   id: string;
-  type: 'user' | 'assistant' | 'system' | 'error';
+  type: string; // Event type from raw JSON (e.g., 'user', 'assistant', 'message', 'tool_use', 'error')
   content: string;
   timestamp: Date;
   model?: string;
@@ -641,12 +641,11 @@ export class ChatPage extends Page<ChatPageOptions> {
       case 'input_preview':
       case 'submission_preview':
         // This is a confirmation message like "Request received: ..."
-        // Treat as system message, not user message
         const inputContent = data.message || data.data?.preview || '';
         if (!inputContent) return null;
         return {
-          id: event.id || `system-${Date.now()}`,
-          type: 'system',
+          id: event.id || `${eventType}-${Date.now()}`,
+          type: eventType, // Keep original type for emoji lookup
           content: inputContent,
           timestamp: new Date(event.timestamp || Date.now()),
         };
@@ -674,8 +673,8 @@ export class ChatPage extends Page<ChatPageOptions> {
 
       case 'message':
         return {
-          id: event.id || `system-${Date.now()}`,
-          type: 'system',
+          id: event.id || `message-${Date.now()}`,
+          type: 'message', // Keep original type
           content: data.message || '',
           timestamp: new Date(event.timestamp || Date.now()),
         };
@@ -683,9 +682,9 @@ export class ChatPage extends Page<ChatPageOptions> {
       case 'tool_use':
         const toolName = data.name || data.tool || 'unknown tool';
         return {
-          id: event.id || `system-${Date.now()}`,
-          type: 'system',
-          content: `🔧 Using tool: ${toolName}`,
+          id: event.id || `tool_use-${Date.now()}`,
+          type: 'tool_use', // Keep original type
+          content: `Using tool: ${toolName}`,
           timestamp: new Date(event.timestamp || Date.now()),
         };
 
@@ -1013,18 +1012,38 @@ export class ChatPage extends Page<ChatPageOptions> {
   }
 
   private renderMessage(message: ChatMessage): string {
-    const typeClass = `message-${message.type}`;
     const user = authStore.getUser();
+    const time = message.timestamp.toLocaleTimeString();
+    const escapedContent = this.escapeHtml(message.content);
+
+    // Status message types get compact single-line rendering with emoji
+    const statusTypes = ['message', 'input_preview', 'submission_preview', 'tool_use', 'system'];
+    if (statusTypes.includes(message.type)) {
+      const emoji = EVENT_EMOJIS[message.type] || '📦';
+      const timestampHtml = this.showTimestamps
+        ? `<span class="status-timestamp">${time}</span>`
+        : '';
+      return `
+        <div class="chat-message message-system">
+          <div class="message-bubble">
+            <div class="message-content">
+              ${timestampHtml}
+              <span class="status-emoji">${emoji}</span>
+              <span class="status-text">${escapedContent}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // User, assistant, error get bubble treatment
+    const typeClass = `message-${message.type}`;
     const senderName = message.type === 'user'
       ? (user?.displayName || user?.email || 'You')
       : message.type === 'assistant'
         ? (message.model ? `Claude (${message.model})` : 'Claude')
-        : message.type === 'error'
-          ? 'Error'
-          : 'System';
+        : 'Error';
 
-    const time = message.timestamp.toLocaleTimeString();
-    const escapedContent = this.escapeHtml(message.content);
     const formattedContent = this.formatMarkdown(escapedContent);
 
     // Show timestamp only when enabled
