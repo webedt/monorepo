@@ -417,18 +417,46 @@ export class ChatPage extends Page<ChatPageOptions> {
   }
 
   private formatMarkdown(text: string): string {
-    // Basic markdown formatting
-    let formatted = text
-      // Code blocks
-      .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+    // Process code blocks first (store and replace with placeholders)
+    const codeBlocks: string[] = [];
+    let formatted = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      const idx = codeBlocks.length;
+      const languageLabel = lang ? `<span class="code-lang">${lang}</span>` : '';
+      codeBlocks.push(`<div class="code-block">${languageLabel}<pre><code>${code.trim()}</code></pre></div>`);
+      return `__CODE_BLOCK_${idx}__`;
+    });
+
+    // Process other markdown
+    formatted = formatted
       // Inline code
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+      // Headers (must be at start of line)
+      .replace(/^### (.+)$/gm, '<h4 class="md-heading">$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3 class="md-heading">$1</h3>')
+      .replace(/^# (.+)$/gm, '<h2 class="md-heading">$1</h2>')
       // Bold
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       // Italic
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      // Line breaks
-      .replace(/\n/g, '<br>');
+      // Strikethrough
+      .replace(/~~(.+?)~~/g, '<del>$1</del>')
+      // Links
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      // Horizontal rules
+      .replace(/^---$/gm, '<hr class="md-hr">')
+      // Unordered lists
+      .replace(/^[\*\-] (.+)$/gm, '<li class="md-li">$1</li>')
+      // Numbered lists
+      .replace(/^\d+\. (.+)$/gm, '<li class="md-li-num">$1</li>')
+      // Wrap consecutive li items
+      .replace(/(<li class="md-li">[\s\S]*?<\/li>)(\s*<li class="md-li">)/g, '$1$2')
+      // Line breaks (but not after block elements)
+      .replace(/\n(?!<)/g, '<br>');
+
+    // Restore code blocks
+    codeBlocks.forEach((block, idx) => {
+      formatted = formatted.replace(`__CODE_BLOCK_${idx}__`, block);
+    });
 
     return formatted;
   }
