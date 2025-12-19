@@ -62,6 +62,7 @@ const ALLOWED_API_ROUTES = [
   '/api/logs',           // Debug logs (for debugging, may disable in production)
   '/api/live-chat',      // Live Chat for branch-based workspace
   '/api/workspace',      // Workspace presence and events for collaboration
+  '/api/orchestrator',   // Long-running multi-cycle orchestration jobs
 ];
 
 // Block internal-only routes explicitly

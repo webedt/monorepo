@@ -42,6 +42,7 @@ import internalSessionsRoutes from './api/routes/internalSessions.js';
 import logsRoutes from './api/routes/logs.js';
 import liveChatRoutes from './api/routes/liveChat.js';
 import workspaceRoutes from './api/routes/workspace.js';
+import orchestratorRoutes from './api/routes/orchestrator.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './logic/db/index.js';
@@ -310,6 +311,7 @@ app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Ses
 app.use('/api', logsRoutes);  // Debug logs endpoint
 app.use('/api/live-chat', liveChatRoutes);  // Live Chat for branch-based workspace
 app.use('/api/workspace', workspaceRoutes);  // Workspace presence and events
+app.use('/api/orchestrator', orchestratorRoutes);  // Long-running multi-cycle orchestration
 
 // Note: Static file serving removed - handled by website-server facade
 
@@ -406,6 +408,17 @@ app.listen(PORT, () => {
   console.log('  GET  /api/logs                         - Get captured logs');
   console.log('  DELETE /api/logs                       - Clear captured logs');
   console.log('  GET  /api/logs/status                  - Get log capture status');
+  console.log('');
+  console.log('  POST /api/orchestrator                 - Create orchestrator job');
+  console.log('  GET  /api/orchestrator                 - List orchestrator jobs');
+  console.log('  GET  /api/orchestrator/:id             - Get job details');
+  console.log('  GET  /api/orchestrator/:id/stream      - Stream job events (SSE)');
+  console.log('  POST /api/orchestrator/:id/start       - Start job');
+  console.log('  POST /api/orchestrator/:id/pause       - Pause job');
+  console.log('  POST /api/orchestrator/:id/resume      - Resume job');
+  console.log('  POST /api/orchestrator/:id/cancel      - Cancel job');
+  console.log('  GET  /api/orchestrator/:id/cycles      - List cycles');
+  console.log('  GET  /api/orchestrator/:id/cycles/:num - Get cycle with tasks');
   console.log('='.repeat(60));
 
   // Schedule periodic orphan cleanup
