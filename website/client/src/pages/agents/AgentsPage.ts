@@ -167,7 +167,14 @@ export class AgentsPage extends Page<PageOptions> {
     cardEl.innerHTML = `
       <div class="session-card-header">
         <span class="session-status ${statusClass}">${status}</span>
-        <span class="session-date">${date}</span>
+        <div class="session-card-actions">
+          <span class="session-date">${date}</span>
+          <button class="session-delete-btn" title="Delete session">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <h3 class="session-title">${this.escapeHtml(title)}</h3>
       <div class="session-meta">
@@ -176,11 +183,30 @@ export class AgentsPage extends Page<PageOptions> {
       </div>
     `;
 
+    // Delete button handler
+    const deleteBtn = cardEl.querySelector('.session-delete-btn');
+    deleteBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.handleDeleteSession(session.id);
+    });
+
     cardEl.addEventListener('click', () => {
       this.navigate(`/session/${session.id}/chat`);
     });
 
     container.appendChild(cardEl);
+  }
+
+  private async handleDeleteSession(sessionId: string): Promise<void> {
+    try {
+      await sessionsApi.delete(sessionId);
+      toast.success('Session moved to trash');
+      this.sessions = this.sessions.filter(s => s.id !== sessionId);
+      this.filteredSessions = this.filteredSessions.filter(s => s.id !== sessionId);
+      this.renderSessions();
+    } catch (error) {
+      toast.error('Failed to delete session');
+    }
   }
 
   private handleSearch(query: string): void {
