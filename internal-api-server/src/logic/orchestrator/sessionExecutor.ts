@@ -91,11 +91,20 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
 
   console.log(`[SessionExecutor] Creating session: ${title}`);
 
+  // Validate environment configuration
+  if (!CLAUDE_ENVIRONMENT_ID) {
+    console.error('[SessionExecutor] CLAUDE_ENVIRONMENT_ID is not configured');
+    throw new Error('Claude Remote Sessions not configured: CLAUDE_ENVIRONMENT_ID is missing. Set this in the server environment.');
+  }
+
   // Get Claude auth
   const claudeAuth = await getClaudeAuth(userId);
   if (!claudeAuth) {
-    throw new Error('Claude authentication not configured');
+    console.error(`[SessionExecutor] User ${userId} does not have Claude authentication configured`);
+    throw new Error('Claude authentication not configured for this user. Please connect your Claude account in Settings.');
   }
+
+  console.log(`[SessionExecutor] Using environment: ${CLAUDE_ENVIRONMENT_ID.substring(0, 20)}... for user ${userId.substring(0, 8)}...`);
 
   // Create local chat session record
   const sessionId = uuidv4();
