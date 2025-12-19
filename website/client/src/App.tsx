@@ -12,6 +12,7 @@ import Store from '@/pages/Store';
 import Library from '@/pages/Library';
 import Community from '@/pages/Community';
 import Agents from '@/pages/Agents';
+import Orchestrator from '@/pages/Orchestrator';
 import Trash from '@/pages/Trash';
 import Chat from '@/pages/Chat';
 import QuickChatSetup from '@/pages/QuickChatSetup';
@@ -203,6 +204,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Agents />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orchestrator"
+              element={
+                <ProtectedRoute>
+                  <Orchestrator />
                 </ProtectedRoute>
               }
             />

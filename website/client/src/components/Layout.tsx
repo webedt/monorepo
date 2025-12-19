@@ -93,10 +93,11 @@ export default function Layout() {
     ? user.email.substring(0, 2).toUpperCase()
     : '??';
 
-  // Detect if we're in editor mode (on /agents, /session/*, /workspace, or /github/*)
+  // Detect if we're in editor mode (on /agents, /orchestrator, /session/*, /workspace, or /github/*)
   // Settings page respects the 'from' URL parameter to show the correct navbar
   const settingsOrigin = searchParams.get('from');
   const isEditorMode = location.pathname === '/agents' ||
+                       location.pathname === '/orchestrator' ||
                        location.pathname === '/sessions' || // Backwards compat redirect
                        location.pathname === '/trash' ||
                        location.pathname === '/workspace' ||
@@ -148,6 +149,12 @@ export default function Layout() {
       label: 'Agents',
       icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 13h8v8H3v-8zm0-10h8v8H3V3zm10 0h8v8h-8V3zm0 10h8v8h-8v-8z"/></svg>,
       isActive: location.pathname === '/agents' || location.pathname === '/sessions'
+    },
+    {
+      to: '/orchestrator',
+      label: 'Orchestrator',
+      icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>,
+      isActive: location.pathname === '/orchestrator'
     },
     {
       to: '/workspace',

@@ -1048,3 +1048,159 @@ export function createExecuteRemoteEventSource(data: {
     withCredentials: true,
   });
 }
+
+// Orchestrator API - Long-running multi-cycle agent orchestration
+export interface OrchestratorJob {
+  id: string;
+  userId: string;
+  repositoryOwner: string;
+  repositoryName: string;
+  baseBranch: string;
+  workingBranch: string;
+  sessionPath: string;
+  requestDocument: string;
+  taskList: string | null;
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'cancelled' | 'error';
+  currentCycle: number;
+  maxCycles: number | null;
+  timeLimitMinutes: number | null;
+  maxParallelTasks: number;
+  provider: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  errorCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrchestratorCycle {
+  id: string;
+  jobId: string;
+  cycleNumber: number;
+  phase: string;
+  tasksDiscovered: number;
+  tasksLaunched: number;
+  tasksCompleted: number;
+  tasksFailed: number;
+  summary: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface OrchestratorTask {
+  id: string;
+  cycleId: string;
+  jobId: string;
+  taskNumber: number;
+  description: string;
+  context: string | null;
+  priority: string;
+  canRunParallel: boolean;
+  status: string;
+  agentSessionId: string | null;
+  retryCount: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  resultSummary: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface CreateOrchestratorJobRequest {
+  repositoryOwner: string;
+  repositoryName: string;
+  baseBranch: string;
+  workingBranch?: string;
+  requestDocument: string;
+  initialTaskList?: string;
+  maxCycles?: number;
+  timeLimitMinutes?: number;
+  maxParallelTasks?: number;
+  provider?: 'claude' | 'claude-remote';
+  autoStart?: boolean;
+}
+
+export const orchestratorApi = {
+  // Create a new orchestrator job
+  create: (data: CreateOrchestratorJobRequest) =>
+    fetchApi<{ success: boolean; data: OrchestratorJob }>('/api/orchestrator', {
+      method: 'POST',
+      body: data,
+    }),
+
+  // List all jobs for current user
+  list: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ success: boolean; data: OrchestratorJob[] }>(
+      `/api/orchestrator${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  // Get a specific job with its cycles
+  get: (id: string) =>
+    fetchApi<{ success: boolean; data: OrchestratorJob & { cycles: OrchestratorCycle[] } }>(
+      `/api/orchestrator/${id}`
+    ),
+
+  // Start a pending or paused job
+  start: (id: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/orchestrator/${id}/start`, {
+      method: 'POST',
+    }),
+
+  // Pause a running job
+  pause: (id: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/orchestrator/${id}/pause`, {
+      method: 'POST',
+    }),
+
+  // Resume a paused job
+  resume: (id: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/orchestrator/${id}/resume`, {
+      method: 'POST',
+    }),
+
+  // Cancel a job
+  cancel: (id: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/orchestrator/${id}/cancel`, {
+      method: 'POST',
+    }),
+
+  // Get cycles for a job
+  getCycles: (id: string) =>
+    fetchApi<{ success: boolean; data: OrchestratorCycle[] }>(`/api/orchestrator/${id}/cycles`),
+
+  // Get a specific cycle with its tasks
+  getCycle: (jobId: string, cycleNumber: number) =>
+    fetchApi<{ success: boolean; data: OrchestratorCycle & { tasks: OrchestratorTask[] } }>(
+      `/api/orchestrator/${jobId}/cycles/${cycleNumber}`
+    ),
+
+  // Update request document
+  updateRequestDocument: (id: string, requestDocument: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/orchestrator/${id}/request`, {
+      method: 'PUT',
+      body: { requestDocument },
+    }),
+
+  // Update task list
+  updateTaskList: (id: string, taskList: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/orchestrator/${id}/tasklist`, {
+      method: 'PUT',
+      body: { taskList },
+    }),
+
+  // Get SSE stream URL for job events
+  getStreamUrl: (id: string) => `${getApiBaseUrl()}/api/orchestrator/${id}/stream`,
+
+  // Create EventSource for job events
+  createEventSource: (id: string) => {
+    const url = `${getApiBaseUrl()}/api/orchestrator/${id}/stream`;
+    console.log('[Orchestrator] Creating EventSource:', url);
+    return new EventSource(url, { withCredentials: true });
+  },
+};
