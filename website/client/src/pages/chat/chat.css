@@ -134,6 +134,7 @@
 /* Messages Area */
 .chat-messages {
   flex: 1;
+  min-height: 0; /* Critical: allows flex item to shrink below content size */
   overflow-y: auto;
   padding: var(--spacing-lg);
   display: flex;
