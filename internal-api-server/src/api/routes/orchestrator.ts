@@ -21,6 +21,7 @@ import {
   StartOrchestratorRequest,
 } from '../../logic/orchestrator/index.js';
 import { orchestratorBroadcaster, OrchestratorEvent } from '../../logic/orchestrator/orchestratorBroadcaster.js';
+import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -81,6 +82,8 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    logger.info('Creating orchestrator job', { component: 'OrchestratorAPI', userId, repo: `${repositoryOwner}/${repositoryName}` });
+
     // Create the job
     const job = await createJob(userId, {
       repositoryOwner,
@@ -95,14 +98,18 @@ router.post('/', requireAuth, async (req: Request, res: Response): Promise<void>
       provider,
     });
 
+    logger.info('Job created', { component: 'OrchestratorAPI', jobId: job.id, autoStart });
+
     // Auto-start if requested (claudeAuth already validated above)
     if (autoStart) {
+      logger.info('Auto-starting job', { component: 'OrchestratorAPI', jobId: job.id });
       await startJob(job.id, claudeAuth.accessToken);
+      logger.info('Job started', { component: 'OrchestratorAPI', jobId: job.id });
     }
 
     res.status(201).json({ success: true, data: job });
   } catch (error) {
-    console.error('[Orchestrator API] Error creating job:', error);
+    logger.error('Error creating job', error as Error, { component: 'OrchestratorAPI' });
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
