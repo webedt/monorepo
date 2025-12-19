@@ -343,10 +343,12 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
     // Helper to send SSE events
     // Pass events through directly without modification - frontend handles all formatting
+    // Use named SSE events so frontend can listen with addEventListener(eventType)
     const sendEvent = async (event: ExecutionEvent) => {
       if (clientDisconnected) return;
 
-      const eventData = `data: ${JSON.stringify(event)}\n\n`;
+      // Send as named SSE event: "event: <type>\ndata: <json>\n\n"
+      const eventData = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 
       // Log SSE event for debugging
       logger.info('SSE event', {

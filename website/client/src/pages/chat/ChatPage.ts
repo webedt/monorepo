@@ -512,8 +512,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Only use named event listeners - don't use onmessage to avoid duplicates
     // The server sends events with specific types that we listen for
     const eventTypes = ['connected', 'message', 'session_name', 'assistant_message',
-                        'tool_use', 'tool_result', 'completed', 'error', 'session-created',
-                        'input_preview', 'submission_preview'];
+                        'assistant', 'user', 'tool_use', 'tool_result', 'completed',
+                        'error', 'session-created', 'input_preview', 'submission_preview'];
     for (const eventType of eventTypes) {
       es.addEventListener(eventType, (event: MessageEvent) => {
         try {
@@ -797,15 +797,36 @@ export class ChatPage extends Page<ChatPageOptions> {
         console.log('[ChatPage] Connected/Session created:', event);
         break;
 
+      case 'user':
+        // User message - extract content from nested message object
+        let userContent = '';
+        if (typeof event.message === 'object' && event.message?.content) {
+          userContent = typeof event.message.content === 'string'
+            ? event.message.content
+            : '';
+        } else if (typeof event.content === 'string') {
+          userContent = event.content;
+        } else if (typeof event.message === 'string') {
+          userContent = event.message;
+        }
+        if (userContent) {
+          this.addMessage({
+            id: `user-${Date.now()}-${Math.random()}`,
+            type: 'user',
+            content: userContent,
+            timestamp: new Date(),
+          });
+        }
+        break;
+
       case 'message':
-        // Progress messages from the worker
+        // Progress messages from the worker - use 'message' type for consistent rendering
         const msgContent = this.extractStringContent(event);
         if (msgContent) {
-          const emoji = event.emoji || '';
           this.addMessage({
-            id: `system-${Date.now()}-${Math.random()}`,
-            type: 'system',
-            content: `${emoji} ${msgContent}`.trim(),
+            id: `message-${Date.now()}-${Math.random()}`,
+            type: 'message',
+            content: msgContent,
             timestamp: new Date(),
           });
         }
@@ -817,8 +838,8 @@ export class ChatPage extends Page<ChatPageOptions> {
         const inputContent = this.extractStringContent(event);
         if (inputContent) {
           this.addMessage({
-            id: `system-${Date.now()}`,
-            type: 'system',
+            id: `${eventType}-${Date.now()}`,
+            type: eventType, // Use actual event type for emoji lookup
             content: inputContent,
             timestamp: new Date(),
           });
@@ -834,18 +855,18 @@ export class ChatPage extends Page<ChatPageOptions> {
             type: 'assistant',
             content: assistantContent,
             timestamp: new Date(),
-            model: event.model,
+            model: event.model || event.message?.model,
           });
         }
         break;
 
       case 'tool_use':
-        // Show tool being used
+        // Show tool being used - use 'tool_use' type for consistent rendering
         const toolName = event.name || event.tool || 'unknown tool';
         this.addMessage({
-          id: `system-${Date.now()}-${Math.random()}`,
-          type: 'system',
-          content: `🔧 Using tool: ${toolName}`,
+          id: `tool_use-${Date.now()}-${Math.random()}`,
+          type: 'tool_use',
+          content: `Using tool: ${toolName}`,
           timestamp: new Date(),
         });
         break;
@@ -867,12 +888,8 @@ export class ChatPage extends Page<ChatPageOptions> {
         break;
 
       case 'completed':
-        this.addMessage({
-          id: `system-${Date.now()}`,
-          type: 'system',
-          content: '✅ Task completed',
-          timestamp: new Date(),
-        });
+        // Don't add a message for completed - it's a control event
+        // The result event already shows the completion
         workerStore.stopExecution();
         this.updateSessionStatus('completed');
         // Close the event source
