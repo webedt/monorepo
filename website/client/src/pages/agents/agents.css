@@ -288,6 +288,25 @@
   border-color: var(--color-primary);
 }
 
+.form-select option {
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  padding: var(--spacing-sm);
+}
+
+/* Force dark mode options to use dark colors */
+[data-theme="dark"] .form-select option {
+  color: #f9fafb;
+  background: #1f2937;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .form-select option {
+    color: #f9fafb;
+    background: #1f2937;
+  }
+}
+
 .form-textarea {
   width: 100%;
   min-height: 100px;
