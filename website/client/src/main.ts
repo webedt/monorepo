@@ -237,7 +237,24 @@ function addAppStyles(): void {
     .app-main {
       flex: 1;
       min-height: 0; /* Allow flex item to shrink below content */
+      display: flex;
+      flex-direction: column;
       background: var(--color-bg-secondary);
+    }
+
+    .app-main > * {
+      flex: 1;
+      min-height: 0;
+    }
+
+    .app-main .page {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Hide empty divs created by router */
+    .app-main > div:empty {
+      display: none;
     }
 
     .not-found-page {
