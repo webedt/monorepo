@@ -51,9 +51,24 @@ async function archiveClaudeRemoteSession(
   claudeAuth: ClaudeAuth,
   environmentId?: string
 ): Promise<{ success: boolean; message: string }> {
+  logger.info('archiveClaudeRemoteSession called', {
+    component: 'Sessions',
+    remoteSessionId,
+    hasAccessToken: !!claudeAuth.accessToken,
+    hasRefreshToken: !!claudeAuth.refreshToken,
+    environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
+    baseUrl: CLAUDE_API_BASE_URL,
+  });
+
   try {
     // Refresh token if needed
+    logger.info('Refreshing Claude auth token if needed', { component: 'Sessions', remoteSessionId });
     const refreshedAuth = await ensureValidToken(claudeAuth);
+    logger.info('Token refresh complete', {
+      component: 'Sessions',
+      remoteSessionId,
+      tokenRefreshed: refreshedAuth !== claudeAuth,
+    });
 
     const client = new ClaudeRemoteClient({
       accessToken: refreshedAuth.accessToken,
@@ -61,18 +76,24 @@ async function archiveClaudeRemoteSession(
       baseUrl: CLAUDE_API_BASE_URL,
     });
 
+    logger.info('Calling ClaudeRemoteClient.archiveSession', { component: 'Sessions', remoteSessionId });
     await client.archiveSession(remoteSessionId);
-    logger.info(`Archived Claude Remote session ${remoteSessionId}`, { component: 'Sessions' });
+    logger.info(`Successfully archived Claude Remote session ${remoteSessionId}`, { component: 'Sessions' });
     return { success: true, message: 'Remote session archived' };
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string };
+    logger.error('archiveClaudeRemoteSession error', error as Error, {
+      component: 'Sessions',
+      remoteSessionId,
+      errorStatus: err.status,
+      errorMessage: err.message,
+    });
     // 404 means session doesn't exist (already archived or never existed)
     if (err.status === 404) {
       logger.info(`Claude Remote session ${remoteSessionId} not found (already archived)`, { component: 'Sessions' });
       return { success: true, message: 'Remote session already archived or does not exist' };
     }
-    logger.error(`Failed to archive Claude Remote session ${remoteSessionId}`, error as Error, { component: 'Sessions' });
-    return { success: false, message: 'Failed to archive remote session' };
+    return { success: false, message: `Failed to archive remote session: ${err.message || 'Unknown error'}` };
   }
 }
 
@@ -1035,11 +1056,40 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Archive Claude Remote session if it exists
+    logger.info('Session deletion - checking Claude Remote archive conditions', {
+      component: 'Sessions',
+      sessionId,
+      provider: session.provider ?? undefined,
+      remoteSessionId: session.remoteSessionId ?? undefined,
+      hasClaudeAuth: !!authReq.user?.claudeAuth,
+      claudeAuthKeys: authReq.user?.claudeAuth ? Object.keys(authReq.user.claudeAuth as object) : [],
+      willArchive: session.provider === 'claude-remote' && !!session.remoteSessionId && !!authReq.user?.claudeAuth,
+    });
+
     if (session.provider === 'claude-remote' && session.remoteSessionId && authReq.user?.claudeAuth) {
+      logger.info('Attempting to archive Claude Remote session', {
+        component: 'Sessions',
+        sessionId,
+        remoteSessionId: session.remoteSessionId,
+      });
       cleanupResults.remoteSession = await archiveClaudeRemoteSession(
         session.remoteSessionId,
         authReq.user.claudeAuth as ClaudeAuth
       );
+      logger.info('Claude Remote archive result', {
+        component: 'Sessions',
+        sessionId,
+        remoteSessionId: session.remoteSessionId,
+        result: cleanupResults.remoteSession,
+      });
+    } else {
+      logger.info('Skipping Claude Remote archive - conditions not met', {
+        component: 'Sessions',
+        sessionId,
+        isClaudeRemote: session.provider === 'claude-remote',
+        hasRemoteSessionId: !!session.remoteSessionId,
+        hasClaudeAuth: !!authReq.user?.claudeAuth,
+      });
     }
 
     // Soft delete session from database
