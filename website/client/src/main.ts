@@ -6,7 +6,23 @@
 import './styles/index.css';
 import { router } from './lib/router';
 import { theme } from './lib/theme';
-import { Button, Card, Icon, IconButton, toast, type IconName } from './components';
+import { IconButton, Button } from './components';
+import { authStore } from './stores/authStore';
+import {
+  LoginPage,
+  RegisterPage,
+  DashboardPage,
+  AgentsPage,
+  SettingsPage,
+} from './pages';
+
+import { Page, type PageOptions } from './pages/base/Page';
+
+// Type for Page constructor
+type PageConstructor = new (options?: PageOptions) => Page;
+
+// Current page instance
+let currentPage: Page | null = null;
 
 /**
  * Create the app layout
@@ -20,24 +36,13 @@ function createLayout(): HTMLElement {
   header.className = 'app-header';
   header.innerHTML = `
     <div class="app-header-content">
-      <a href="#/" class="app-logo">
+      <a href="#/agents" class="app-logo">
         <span class="app-logo-text">WebEDT</span>
       </a>
       <nav class="app-nav" id="app-nav"></nav>
       <div class="app-header-actions" id="header-actions"></div>
     </div>
   `;
-
-  // Add theme toggle to header actions
-  const headerActions = header.querySelector('#header-actions')!;
-  const themeToggle = new IconButton(theme.getResolvedTheme() === 'dark' ? 'sun' : 'moon', {
-    label: 'Toggle theme',
-    onClick: () => {
-      theme.toggle();
-      themeToggle.setIcon(theme.getResolvedTheme() === 'dark' ? 'sun' : 'moon');
-    },
-  });
-  headerActions.appendChild(themeToggle.getElement());
 
   // Main content area
   const main = document.createElement('main');
@@ -51,71 +56,68 @@ function createLayout(): HTMLElement {
 }
 
 /**
- * Home page component
+ * Update the header based on auth state
  */
-function HomePage(): HTMLElement {
-  const container = document.createElement('div');
-  container.className = 'home-page';
+function updateHeader(): void {
+  const nav = document.getElementById('app-nav');
+  const actions = document.getElementById('header-actions');
 
-  // Hero section
-  const hero = document.createElement('section');
-  hero.className = 'hero';
-  hero.innerHTML = `
-    <h1 class="hero-title">WebEDT</h1>
-    <p class="hero-subtitle">AI-Powered Code Editor</p>
-  `;
+  if (!nav || !actions) return;
 
-  // Demo card
-  const card = new Card({ elevated: true });
-  card.header({ title: 'Component Demo' });
-  const body = card.body();
+  // Clear existing content
+  nav.innerHTML = '';
+  actions.innerHTML = '';
 
-  // Button examples
-  const buttonRow = document.createElement('div');
-  buttonRow.className = 'flex gap-2 flex-wrap mb-4';
+  const isAuthenticated = authStore.isAuthenticated();
 
-  const primaryBtn = new Button('Primary', {
-    variant: 'primary',
-    onClick: () => toast.success('Primary button clicked!'),
-  });
+  if (isAuthenticated) {
+    // Nav links for authenticated users
+    const navLinks = [
+      { path: '/agents', text: 'Sessions' },
+      { path: '/dashboard', text: 'Dashboard' },
+    ];
 
-  const secondaryBtn = new Button('Secondary', {
-    variant: 'secondary',
-    onClick: () => toast.info('Secondary button clicked!'),
-  });
+    for (const link of navLinks) {
+      const a = document.createElement('a');
+      a.href = `#${link.path}`;
+      a.className = 'nav-link';
+      a.textContent = link.text;
 
-  const dangerBtn = new Button('Danger', {
-    variant: 'danger',
-    onClick: () => toast.error('Danger button clicked!'),
-  });
+      // Mark active link
+      if (window.location.hash === `#${link.path}`) {
+        a.classList.add('active');
+      }
 
-  const ghostBtn = new Button('Ghost', {
-    variant: 'ghost',
-    onClick: () => toast.warning('Ghost button clicked!'),
-  });
+      nav.appendChild(a);
+    }
 
-  buttonRow.appendChild(primaryBtn.getElement());
-  buttonRow.appendChild(secondaryBtn.getElement());
-  buttonRow.appendChild(dangerBtn.getElement());
-  buttonRow.appendChild(ghostBtn.getElement());
-  body.getElement().appendChild(buttonRow);
-
-  // Icon examples
-  const iconRow = document.createElement('div');
-  iconRow.className = 'flex gap-3 items-center';
-
-  const icons: IconName[] = ['code', 'terminal', 'github', 'settings', 'user'];
-  for (const name of icons) {
-    const icon = new Icon(name, { size: 'lg' });
-    iconRow.appendChild(icon.getElement());
+    // Settings icon
+    const settingsBtn = new IconButton('settings', {
+      label: 'Settings',
+      onClick: () => router.navigate('/settings'),
+    });
+    actions.appendChild(settingsBtn.getElement());
   }
 
-  body.getElement().appendChild(iconRow);
+  // Theme toggle
+  const themeToggle = new IconButton(theme.getResolvedTheme() === 'dark' ? 'sun' : 'moon', {
+    label: 'Toggle theme',
+    onClick: () => {
+      theme.toggle();
+      updateHeader();
+    },
+  });
+  actions.appendChild(themeToggle.getElement());
 
-  container.appendChild(hero);
-  container.appendChild(card.getElement());
-
-  return container;
+  // Auth button
+  if (!isAuthenticated) {
+    const loginBtn = new Button('Sign In', {
+      variant: 'primary',
+      size: 'sm',
+      onClick: () => router.navigate('/login'),
+    });
+    actions.appendChild(loginBtn.getElement());
+  }
 }
 
 /**
@@ -127,7 +129,7 @@ function NotFoundPage(): HTMLElement {
   container.innerHTML = `
     <h1>404</h1>
     <p>Page not found</p>
-    <a href="#/" class="btn btn--primary">Go Home</a>
+    <a href="#/agents" class="btn btn--primary">Go to Sessions</a>
   `;
   return container;
 }
@@ -148,73 +150,68 @@ function addAppStyles(): void {
       position: sticky;
       top: 0;
       z-index: var(--z-sticky);
-      background-color: var(--color-bg);
+      background-color: var(--color-bg-primary);
       border-bottom: 1px solid var(--color-border);
     }
 
     .app-header-content {
       display: flex;
       align-items: center;
-      gap: var(--spacing-4);
-      max-width: 80rem;
+      gap: var(--spacing-lg);
+      max-width: 1400px;
       margin: 0 auto;
-      padding: var(--spacing-3) var(--spacing-4);
+      padding: var(--spacing-md) var(--spacing-lg);
     }
 
     .app-logo {
       display: flex;
       align-items: center;
-      gap: var(--spacing-2);
+      gap: var(--spacing-sm);
       text-decoration: none;
     }
 
     .app-logo-text {
       font-size: var(--font-size-xl);
       font-weight: var(--font-weight-bold);
-      color: var(--color-text);
+      color: var(--color-text-primary);
     }
 
     .app-nav {
       display: flex;
       align-items: center;
-      gap: var(--spacing-1);
+      gap: var(--spacing-xs);
       flex: 1;
+    }
+
+    .nav-link {
+      padding: var(--spacing-sm) var(--spacing-md);
+      color: var(--color-text-secondary);
+      text-decoration: none;
+      border-radius: var(--radius-md);
+      font-size: var(--font-size-sm);
+      font-weight: var(--font-weight-medium);
+      transition: color var(--transition-fast), background var(--transition-fast);
+    }
+
+    .nav-link:hover {
+      color: var(--color-text-primary);
+      background: var(--color-bg-hover);
+    }
+
+    .nav-link.active {
+      color: var(--color-primary);
+      background: var(--color-primary-bg);
     }
 
     .app-header-actions {
       display: flex;
       align-items: center;
-      gap: var(--spacing-2);
+      gap: var(--spacing-sm);
     }
 
     .app-main {
       flex: 1;
-      max-width: 80rem;
-      width: 100%;
-      margin: 0 auto;
-      padding: var(--spacing-6) var(--spacing-4);
-    }
-
-    .home-page {
-      display: flex;
-      flex-direction: column;
-      gap: var(--spacing-8);
-    }
-
-    .hero {
-      text-align: center;
-      padding: var(--spacing-12) 0;
-    }
-
-    .hero-title {
-      font-size: var(--font-size-4xl);
-      font-weight: var(--font-weight-bold);
-      margin-bottom: var(--spacing-2);
-    }
-
-    .hero-subtitle {
-      font-size: var(--font-size-xl);
-      color: var(--color-text-secondary);
+      background: var(--color-bg-secondary);
     }
 
     .not-found-page {
@@ -222,29 +219,71 @@ function addAppStyles(): void {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: var(--spacing-4);
-      padding: var(--spacing-16) 0;
+      gap: var(--spacing-md);
+      padding: var(--spacing-2xl) 0;
       text-align: center;
+      min-height: 60vh;
     }
 
     .not-found-page h1 {
       font-size: 6rem;
       font-weight: var(--font-weight-bold);
-      color: var(--color-text-tertiary);
+      color: var(--color-text-muted);
+      margin: 0;
     }
 
     .not-found-page p {
       font-size: var(--font-size-xl);
       color: var(--color-text-secondary);
+      margin: 0;
     }
   `;
   document.head.appendChild(style);
 }
 
 /**
+ * Mount a page to the outlet
+ */
+function mountPage(PageClass: PageConstructor, params: Record<string, string> = {}): void {
+  const outlet = document.getElementById('app-outlet');
+  if (!outlet) return;
+
+  // Unmount current page
+  if (currentPage) {
+    currentPage.unmount();
+    currentPage = null;
+  }
+
+  // Create query params
+  const hash = window.location.hash.slice(1);
+  const queryIndex = hash.indexOf('?');
+  const query = queryIndex >= 0 ? new URLSearchParams(hash.slice(queryIndex + 1)) : new URLSearchParams();
+
+  // Create and mount new page
+  const page = new PageClass({ params, query });
+
+  // Check access
+  if (!page.canAccess()) {
+    // Redirect to login
+    router.navigate('/login');
+    return;
+  }
+
+  outlet.innerHTML = '';
+  page.mount(outlet);
+  currentPage = page;
+
+  // Load page data
+  page.load();
+
+  // Update header
+  updateHeader();
+}
+
+/**
  * Initialize the application
  */
-function init(): void {
+async function init(): Promise<void> {
   const appElement = document.getElementById('app');
   if (!appElement) {
     console.error('App element not found');
@@ -258,6 +297,12 @@ function init(): void {
   const layout = createLayout();
   appElement.appendChild(layout);
 
+  // Initialize auth
+  await authStore.initialize();
+
+  // Subscribe to auth changes
+  authStore.subscribe(() => updateHeader());
+
   // Setup router
   router
     .setOutlet('#app-outlet')
@@ -265,11 +310,64 @@ function init(): void {
     .register([
       {
         path: '/',
-        component: HomePage,
-        title: 'WebEDT - Home',
+        component: () => {
+          // Redirect to agents or login
+          if (authStore.isAuthenticated()) {
+            router.navigate('/agents');
+          } else {
+            router.navigate('/login');
+          }
+          return document.createElement('div');
+        },
+      },
+      {
+        path: '/login',
+        component: () => {
+          mountPage(LoginPage);
+          return document.createElement('div');
+        },
+        title: 'Login | WebEDT',
+      },
+      {
+        path: '/register',
+        component: () => {
+          mountPage(RegisterPage);
+          return document.createElement('div');
+        },
+        title: 'Register | WebEDT',
+      },
+      {
+        path: '/dashboard',
+        component: () => {
+          mountPage(DashboardPage);
+          return document.createElement('div');
+        },
+        title: 'Dashboard | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/agents',
+        component: () => {
+          mountPage(AgentsPage);
+          return document.createElement('div');
+        },
+        title: 'Sessions | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/settings',
+        component: () => {
+          mountPage(SettingsPage);
+          return document.createElement('div');
+        },
+        title: 'Settings | WebEDT',
+        guard: () => authStore.isAuthenticated(),
       },
     ])
     .start();
+
+  // Update header
+  updateHeader();
 
   console.log('WebEDT initialized');
 }
