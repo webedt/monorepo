@@ -42,8 +42,9 @@ RUN npm install
 
 COPY website/client/ .
 
-# Generate version.ts
-RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
+# Generate version.ts (create src dir if it doesn't exist)
+RUN mkdir -p src && \
+    TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
     SHA_VALUE="${BUILD_COMMIT_SHA:-}" && \
     if [ -n "$TIMESTAMP_VALUE" ]; then TIMESTAMP_EXPORT="'$TIMESTAMP_VALUE'"; else TIMESTAMP_EXPORT="null"; fi && \
     if [ -n "$SHA_VALUE" ]; then SHA_EXPORT="'$SHA_VALUE'"; else SHA_EXPORT="null"; fi && \
