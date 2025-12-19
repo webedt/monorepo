@@ -165,10 +165,14 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
     workspacePath = initResult.localPath;
     logger.info(`Workspace initialized`, { component: 'SessionExecutor', workspacePath });
 
-    // Upload session to storage before calling worker
+    // Upload session to storage before calling worker (non-fatal if storage is unavailable)
     if (fs.existsSync(sessionRoot)) {
-      await storageService.uploadSessionFromPath(sessionId, sessionRoot);
-      logger.info(`Session uploaded to storage`, { component: 'SessionExecutor', sessionId });
+      try {
+        await storageService.uploadSessionFromPath(sessionId, sessionRoot);
+        logger.info(`Session uploaded to storage`, { component: 'SessionExecutor', sessionId });
+      } catch (storageError) {
+        logger.warn(`Failed to upload session to storage (continuing without)`, { component: 'SessionExecutor', sessionId, error: (storageError as Error).message });
+      }
     }
 
     // Acquire worker
