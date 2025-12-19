@@ -11,7 +11,7 @@ import './agents.css';
 
 export class AgentsPage extends Page<PageOptions> {
   readonly route = '/agents';
-  readonly title = 'Sessions';
+  readonly title = 'Agent Sessions';
   protected requiresAuth = true;
 
   private sessions: Session[] = [];
@@ -27,7 +27,7 @@ export class AgentsPage extends Page<PageOptions> {
       <div class="agents-page">
         <header class="agents-header">
           <div class="agents-header-left">
-            <h1 class="agents-title">Sessions</h1>
+            <h1 class="agents-title">Agent Sessions</h1>
             <p class="agents-subtitle">Manage your AI coding sessions</p>
           </div>
           <div class="agents-header-right">
@@ -42,7 +42,7 @@ export class AgentsPage extends Page<PageOptions> {
           </div>
           <div class="sessions-empty" style="display: none;">
             <div class="empty-icon"></div>
-            <h3 class="empty-title">No sessions yet</h3>
+            <h3 class="empty-title">No agent sessions yet</h3>
             <p class="empty-description">Start a new session to begin coding with AI</p>
           </div>
           <div class="sessions-list" style="display: none;"></div>
@@ -59,7 +59,7 @@ export class AgentsPage extends Page<PageOptions> {
     if (searchContainer) {
       this.searchInput = new Input({
         type: 'search',
-        placeholder: 'Search sessions...',
+        placeholder: 'Search agent sessions...',
         onChange: (value) => this.handleSearch(value),
       });
       this.searchInput.mount(searchContainer);
@@ -96,8 +96,8 @@ export class AgentsPage extends Page<PageOptions> {
       this.filteredSessions = [...this.sessions];
       this.renderSessions();
     } catch (error) {
-      toast.error('Failed to load sessions');
-      console.error('Failed to load sessions:', error);
+      toast.error('Failed to load agent sessions');
+      console.error('Failed to load agent sessions:', error);
     } finally {
       this.isLoading = false;
       this.updateLoadingState();

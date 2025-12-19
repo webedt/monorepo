@@ -455,6 +455,12 @@ export const sessionsApi = {
   abort: (id: string) =>
     fetchApi(`/api/sessions/${id}/abort`, { method: 'POST' }),
 
+  sendMessage: (id: string, content: string, images?: Array<{ data: string; mediaType: string }>) =>
+    fetchApi<{ success: boolean; error?: string }>(`/api/sessions/${id}/send`, {
+      method: 'POST',
+      body: { content, images },
+    }),
+
   initializeRepository: (id: string) =>
     fetchApi(`/api/sessions/${id}/init-repository`, { method: 'POST' }),
 

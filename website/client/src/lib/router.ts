@@ -5,7 +5,7 @@
 
 export interface Route {
   path: string;
-  component: () => HTMLElement | Promise<HTMLElement>;
+  component: (params?: Record<string, string>) => HTMLElement | Promise<HTMLElement>;
   title?: string;
   guard?: () => boolean | Promise<boolean>;
 }

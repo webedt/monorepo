@@ -14,6 +14,7 @@ import {
   DashboardPage,
   AgentsPage,
   SettingsPage,
+  ChatPage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -73,7 +74,7 @@ function updateHeader(): void {
   if (isAuthenticated) {
     // Nav links for authenticated users
     const navLinks = [
-      { path: '/agents', text: 'Sessions' },
+      { path: '/agents', text: 'Agent Sessions' },
       { path: '/dashboard', text: 'Dashboard' },
     ];
 
@@ -129,7 +130,7 @@ function NotFoundPage(): HTMLElement {
   container.innerHTML = `
     <h1>404</h1>
     <p>Page not found</p>
-    <a href="#/agents" class="btn btn--primary">Go to Sessions</a>
+    <a href="#/agents" class="btn btn--primary">Go to Agent Sessions</a>
   `;
   return container;
 }
@@ -351,7 +352,7 @@ async function init(): Promise<void> {
           mountPage(AgentsPage);
           return document.createElement('div');
         },
-        title: 'Sessions | WebEDT',
+        title: 'Agent Sessions | WebEDT',
         guard: () => authStore.isAuthenticated(),
       },
       {
@@ -361,6 +362,15 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Settings | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/session/:sessionId/chat',
+        component: (params) => {
+          mountPage(ChatPage, params);
+          return document.createElement('div');
+        },
+        title: 'Chat | WebEDT',
         guard: () => authStore.isAuthenticated(),
       },
     ])

@@ -46,7 +46,7 @@ export class DashboardPage extends Page<PageOptions> {
     this.createActionCard(
       '[data-action="new-session"]',
       'code',
-      'New Session',
+      'New Agent Session',
       'Start a new AI coding session with your repository',
       () => this.navigate('/agents')
     );
@@ -54,8 +54,8 @@ export class DashboardPage extends Page<PageOptions> {
     this.createActionCard(
       '[data-action="view-sessions"]',
       'folder',
-      'My Sessions',
-      'View and manage your existing sessions',
+      'Agent Sessions',
+      'View and manage your AI coding sessions',
       () => this.navigate('/agents')
     );
 
