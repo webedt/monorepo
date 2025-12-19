@@ -196,6 +196,9 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [streamMethod, setStreamMethod] = useState<'GET' | 'POST'>('GET');
   const [streamBody, setStreamBody] = useState<any>(null);
+
+  // Debug: Log render with current state
+  console.log('[Chat] Render - streamUrl:', streamUrl, 'streamMethod:', streamMethod, 'sessionId:', sessionId);
   const [isReconnecting, setIsReconnecting] = useState(false); // Track reconnection attempts
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -1217,7 +1220,8 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
 
     // Check if we came from Dashboard with stream params (old behavior for backward compatibility)
     if (state?.startStream && state?.streamParams && !streamUrl) {
-      console.log('[Chat] Auto-starting stream from navigation state:', state.streamParams);
+      console.log('[Chat] Auto-starting stream from navigation state:', JSON.stringify(state.streamParams));
+      console.log('[Chat] Current state before update - streamUrl:', streamUrl, 'isExecuting:', isExecuting, 'currentSessionId:', currentSessionId);
 
       // Filter out github/repository parameters if we're resuming an existing session
       let params = { ...state.streamParams };
