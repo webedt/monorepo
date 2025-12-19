@@ -2,7 +2,15 @@
  * OrchestratorService
  *
  * Main service class for managing long-running multi-cycle orchestration jobs.
- * Handles the complete lifecycle: creation, cycle execution, pause/resume, and completion.
+ * Uses claude-remote sessions for execution.
+ *
+ * Flow:
+ * 1. SETUP: Create dev branch, store spec, initialize task list
+ * 2. DISCOVERY: Analyze codebase, discover 4 parallelizable tasks
+ * 3. EXECUTION: Launch 4 parallel task sessions, each merges to dev branch
+ * 4. CONVERGENCE: Wait for all tasks, archive sessions
+ * 5. UPDATE: Update task list with results
+ * 6. REPEAT until done or cancelled
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -21,11 +29,19 @@ import {
 } from '../db/schema.js';
 import { orchestratorBroadcaster } from './orchestratorBroadcaster.js';
 import {
-  discoverTasks,
-  generateCycleSummary,
-  updateTaskList,
-  DiscoveredTask,
-} from './taskDiscovery.js';
+  generateSessionTitle,
+  getSetupPrompt,
+  getDiscoveryPrompt,
+  getTaskPrompt,
+  getUpdatePrompt,
+  SessionTemplateParams,
+} from './sessionTemplates.js';
+import {
+  createAndExecuteSession,
+  archiveSession,
+  waitForAllSessions,
+  SessionResult,
+} from './sessionExecutor.js';
 
 export interface StartOrchestratorRequest {
   repositoryOwner: string;
@@ -76,8 +92,8 @@ export async function createJob(
     currentCycle: 0,
     maxCycles: config.maxCycles || null,
     timeLimitMinutes: config.timeLimitMinutes || null,
-    maxParallelTasks: config.maxParallelTasks || 3,
-    provider: config.provider || 'claude',
+    maxParallelTasks: config.maxParallelTasks || 4, // Default to 4 for parallel discovery
+    provider: config.provider || 'claude-remote',
   };
 
   const [job] = await db.insert(orchestratorJobs).values(newJob).returning();
@@ -90,7 +106,7 @@ export async function createJob(
 /**
  * Start running an orchestrator job
  */
-export async function startJob(jobId: string, apiKey: string): Promise<void> {
+export async function startJob(jobId: string, _apiKey?: string): Promise<void> {
   // Check if already running
   if (activeJobRunners.has(jobId)) {
     throw new Error('Job is already running');
@@ -118,8 +134,8 @@ export async function startJob(jobId: string, apiKey: string): Promise<void> {
     cancelled = true;
   };
 
-  // Start the cycle loop
-  const promise = runCycleLoop(jobId, apiKey, () => cancelled);
+  // Start the main orchestration loop
+  const promise = runOrchestrationLoop(job, () => cancelled);
 
   activeJobRunners.set(jobId, { cancel, promise });
 
@@ -140,7 +156,7 @@ export async function startJob(jobId: string, apiKey: string): Promise<void> {
 }
 
 /**
- * Pause a running job (will finish current cycle first)
+ * Pause a running job (will finish current phase first)
  */
 export async function pauseJob(jobId: string): Promise<void> {
   const runner = activeJobRunners.get(jobId);
@@ -148,10 +164,8 @@ export async function pauseJob(jobId: string): Promise<void> {
     throw new Error('Job is not running');
   }
 
-  // Signal cancellation
   runner.cancel();
 
-  // Update status
   const [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId));
   if (job) {
     await db
@@ -168,7 +182,7 @@ export async function pauseJob(jobId: string): Promise<void> {
 /**
  * Resume a paused job
  */
-export async function resumeJob(jobId: string, apiKey: string): Promise<void> {
+export async function resumeJob(jobId: string, apiKey?: string): Promise<void> {
   const [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId));
   if (!job) {
     throw new Error('Job not found');
@@ -284,17 +298,43 @@ export async function updateJobTaskList(jobId: string, taskList: string): Promis
     .where(eq(orchestratorJobs.id, jobId));
 }
 
+// =============================================================================
+// Main Orchestration Loop
+// =============================================================================
+
 /**
- * Main cycle loop - runs until completion, pause, or cancellation
+ * Main orchestration loop - runs setup then cycles until completion
  */
-async function runCycleLoop(jobId: string, apiKey: string, isCancelled: () => boolean): Promise<void> {
+async function runOrchestrationLoop(
+  initialJob: OrchestratorJob,
+  isCancelled: () => boolean
+): Promise<void> {
+  const jobId = initialJob.id;
+
   try {
+    // Get fresh job state
+    let [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId));
+    if (!job) throw new Error('Job not found');
+
+    // SETUP PHASE (only on first run, cycle 0)
+    if (job.currentCycle === 0) {
+      console.log(`[OrchestratorService] Running setup for job ${jobId}`);
+      await runSetupPhase(job);
+
+      if (isCancelled()) return;
+
+      // Increment to cycle 1
+      await db
+        .update(orchestratorJobs)
+        .set({ currentCycle: 1, updatedAt: new Date() })
+        .where(eq(orchestratorJobs.id, jobId));
+    }
+
+    // CYCLE LOOP
     while (!isCancelled()) {
-      // Get current job state
-      const [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId));
-      if (!job) {
-        throw new Error('Job not found');
-      }
+      // Refresh job state
+      [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId));
+      if (!job) throw new Error('Job not found');
 
       // Check termination conditions
       const termination = checkTerminationConditions(job);
@@ -303,29 +343,30 @@ async function runCycleLoop(jobId: string, apiKey: string, isCancelled: () => bo
         return;
       }
 
-      // Run one cycle
-      const cycleNumber = job.currentCycle + 1;
-      const shouldContinue = await runCycle(job, cycleNumber, apiKey, isCancelled);
+      const cycleNumber = job.currentCycle;
+      console.log(`[OrchestratorService] Starting cycle ${cycleNumber} for job ${jobId}`);
 
-      // Update current cycle counter
-      await db
-        .update(orchestratorJobs)
-        .set({ currentCycle: cycleNumber, updatedAt: new Date() })
-        .where(eq(orchestratorJobs.id, jobId));
+      // Run one complete cycle
+      const shouldContinue = await runCycle(job, cycleNumber, isCancelled);
 
       if (!shouldContinue) {
         await completeJob(jobId, 'all_tasks_complete');
         return;
       }
 
-      // Check if cancelled during cycle
       if (isCancelled()) {
         console.log(`[OrchestratorService] Job ${jobId} cancelled during cycle ${cycleNumber}`);
         return;
       }
 
+      // Increment cycle counter
+      await db
+        .update(orchestratorJobs)
+        .set({ currentCycle: cycleNumber + 1, updatedAt: new Date() })
+        .where(eq(orchestratorJobs.id, jobId));
+
       // Brief pause between cycles
-      await sleep(2000);
+      await sleep(5000);
     }
   } catch (error) {
     console.error(`[OrchestratorService] Job ${jobId} failed:`, error);
@@ -335,7 +376,7 @@ async function runCycleLoop(jobId: string, apiKey: string, isCancelled: () => bo
       .set({
         status: 'error',
         lastError: (error as Error).message,
-        errorCount: (await getJob(jobId))?.errorCount ?? 0 + 1,
+        errorCount: initialJob.errorCount + 1,
         updatedAt: new Date(),
       })
       .where(eq(orchestratorJobs.id, jobId));
@@ -346,12 +387,52 @@ async function runCycleLoop(jobId: string, apiKey: string, isCancelled: () => bo
 }
 
 /**
- * Run a single cycle
+ * SETUP Phase - Create dev branch, store spec, initialize task list
+ */
+async function runSetupPhase(job: OrchestratorJob): Promise<void> {
+  const params: SessionTemplateParams = {
+    jobTitle: job.requestDocument.slice(0, 100), // Use first 100 chars as title
+    devBranch: job.workingBranch,
+    repoOwner: job.repositoryOwner,
+    repoName: job.repositoryName,
+    specification: job.requestDocument,
+  };
+
+  const title = generateSessionTitle('setup', params);
+  const prompt = getSetupPrompt(params);
+
+  orchestratorBroadcaster.broadcast({
+    type: 'phase_started',
+    jobId: job.id,
+    data: { phase: 'setup' },
+  });
+
+  const result = await createAndExecuteSession({
+    userId: job.userId,
+    title,
+    prompt,
+    repoOwner: job.repositoryOwner,
+    repoName: job.repositoryName,
+    baseBranch: job.baseBranch,
+    orchestratorJobId: job.id,
+  });
+
+  if (result.status === 'error') {
+    throw new Error(`Setup failed: ${result.error}`);
+  }
+
+  // Archive the setup session
+  await archiveSession(job.userId, result.sessionId);
+
+  console.log(`[OrchestratorService] Setup complete for job ${job.id}`);
+}
+
+/**
+ * Run a single cycle (Discovery → Execution → Convergence → Update)
  */
 async function runCycle(
   job: OrchestratorJob,
   cycleNumber: number,
-  apiKey: string,
   isCancelled: () => boolean
 ): Promise<boolean> {
   const cycleId = uuidv4();
@@ -369,38 +450,34 @@ async function runCycle(
   };
 
   await db.insert(orchestratorCycles).values(newCycle);
-
   orchestratorBroadcaster.broadcastCycleStarted(job.id, cycleNumber);
 
-  console.log(`[OrchestratorService] Starting cycle ${cycleNumber} for job ${job.id}`);
+  // DISCOVERY PHASE
+  const discoveryResult = await runDiscoveryPhase(job, cycleId, cycleNumber);
 
-  // Phase 1: Discovery
-  const discoveredTasks = await discoveryPhase(job, cycleId, cycleNumber, apiKey);
-
-  if (discoveredTasks.length === 0) {
-    // No more tasks to do
+  if (!discoveryResult.success) {
+    // No more tasks to discover - we're done
     await db
       .update(orchestratorCycles)
       .set({ phase: 'completed', completedAt: new Date() })
       .where(eq(orchestratorCycles.id, cycleId));
-
-    return false; // Signal completion
+    return false;
   }
 
   if (isCancelled()) return true;
 
-  // Phase 2: Execution
-  await executionPhase(job, cycleId, cycleNumber, discoveredTasks, apiKey, isCancelled);
+  // EXECUTION PHASE
+  await runExecutionPhase(job, cycleId, cycleNumber, discoveryResult.taskDescriptions);
 
   if (isCancelled()) return true;
 
-  // Phase 3: Convergence
-  await convergencePhase(job, cycleId, cycleNumber);
+  // CONVERGENCE PHASE
+  await runConvergencePhase(job, cycleId, cycleNumber);
 
   if (isCancelled()) return true;
 
-  // Phase 4: Update
-  await updatePhase(job, cycleId, cycleNumber, apiKey);
+  // UPDATE PHASE
+  await runUpdatePhase(job, cycleId, cycleNumber);
 
   // Mark cycle complete
   await db
@@ -412,95 +489,101 @@ async function runCycle(
 }
 
 /**
- * Phase 1: Discovery - Use LLM to find tasks
+ * DISCOVERY Phase - Run discovery session to find tasks
  */
-async function discoveryPhase(
+async function runDiscoveryPhase(
   job: OrchestratorJob,
   cycleId: string,
-  cycleNumber: number,
-  apiKey: string
-): Promise<DiscoveredTask[]> {
+  cycleNumber: number
+): Promise<{ success: boolean; taskDescriptions: string[] }> {
   orchestratorBroadcaster.broadcastCyclePhase(job.id, cycleNumber, 'discovery');
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: Discovery phase`);
-
-  // Get previous cycle summary if exists
-  let previousCycleSummary: string | undefined;
-  if (cycleNumber > 1) {
-    const [prevCycle] = await db
-      .select()
-      .from(orchestratorCycles)
-      .where(and(eq(orchestratorCycles.jobId, job.id), eq(orchestratorCycles.cycleNumber, cycleNumber - 1)));
-
-    previousCycleSummary = prevCycle?.summary || undefined;
-  }
-
-  // TODO: Get actual file tree and git status from the repository
-  // For now, use placeholders
-  const context = {
-    requestDocument: job.requestDocument,
-    taskList: job.taskList,
+  const params: SessionTemplateParams = {
+    jobTitle: job.requestDocument.slice(0, 100),
+    devBranch: job.workingBranch,
     repoOwner: job.repositoryOwner,
     repoName: job.repositoryName,
-    branch: job.workingBranch,
-    recentCommits: [], // TODO: Get from git
-    fileTree: 'File tree not yet implemented', // TODO: Get from storage
-    gitStatus: 'Git status not yet implemented', // TODO: Get from git
-    previousCycleSummary,
+    specification: job.requestDocument,
+    cycleNumber,
   };
 
-  const result = await discoverTasks(context, apiKey);
+  const title = generateSessionTitle('discovery', params);
+  const prompt = getDiscoveryPrompt(params);
 
-  // Create task records
-  const taskRecords: NewOrchestratorTask[] = result.tasks.map((task: DiscoveredTask, index: number) => ({
-    id: uuidv4(),
-    cycleId,
-    jobId: job.id,
-    taskNumber: index + 1,
-    description: task.description,
-    context: task.context,
-    priority: task.priority,
-    canRunParallel: task.parallel,
-    status: 'pending' as const,
-    retryCount: 0,
-  }));
+  console.log(`[OrchestratorService] Running discovery for cycle ${cycleNumber}`);
 
-  if (taskRecords.length > 0) {
-    await db.insert(orchestratorTasks).values(taskRecords);
+  const result = await createAndExecuteSession({
+    userId: job.userId,
+    title,
+    prompt,
+    repoOwner: job.repositoryOwner,
+    repoName: job.repositoryName,
+    orchestratorJobId: job.id,
+    orchestratorCycleId: cycleId,
+  });
+
+  // Archive the discovery session
+  await archiveSession(job.userId, result.sessionId);
+
+  if (result.status === 'error') {
+    console.error(`[OrchestratorService] Discovery failed:`, result.error);
+    return { success: false, taskDescriptions: [] };
   }
 
-  // Update cycle with task count
+  // For now, we'll create 4 placeholder tasks
+  // In a real implementation, we'd parse the TASKLIST.md from the repo
+  // to get the actual discovered tasks
+  const taskDescriptions = [
+    `Cycle ${cycleNumber} - Task 1: Implementation task`,
+    `Cycle ${cycleNumber} - Task 2: Implementation task`,
+    `Cycle ${cycleNumber} - Task 3: Implementation task`,
+    `Cycle ${cycleNumber} - Task 4: Implementation task`,
+  ];
+
+  // Create task records
+  for (let i = 0; i < taskDescriptions.length; i++) {
+    const task: NewOrchestratorTask = {
+      id: uuidv4(),
+      cycleId,
+      jobId: job.id,
+      taskNumber: i + 1,
+      description: taskDescriptions[i],
+      context: null,
+      priority: 'P1',
+      canRunParallel: true,
+      status: 'pending',
+      retryCount: 0,
+    };
+    await db.insert(orchestratorTasks).values(task);
+  }
+
+  // Update cycle
   await db
     .update(orchestratorCycles)
-    .set({ tasksDiscovered: result.tasks.length })
+    .set({ tasksDiscovered: taskDescriptions.length })
     .where(eq(orchestratorCycles.id, cycleId));
 
-  // Broadcast discovered tasks
   orchestratorBroadcaster.broadcastTasksDiscovered(
     job.id,
     cycleNumber,
-    taskRecords.map(t => ({ id: t.id, description: t.description }))
+    taskDescriptions.map((desc, i) => ({ id: `task-${i + 1}`, description: desc }))
   );
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: Discovered ${result.tasks.length} tasks`);
-
-  return result.tasks;
+  return { success: true, taskDescriptions };
 }
 
 /**
- * Phase 2: Execution - Run tasks in parallel
+ * EXECUTION Phase - Launch parallel task sessions
  */
-async function executionPhase(
+async function runExecutionPhase(
   job: OrchestratorJob,
   cycleId: string,
   cycleNumber: number,
-  discoveredTasks: DiscoveredTask[],
-  apiKey: string,
-  isCancelled: () => boolean
+  taskDescriptions: string[]
 ): Promise<void> {
   orchestratorBroadcaster.broadcastCyclePhase(job.id, cycleNumber, 'execution');
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: Execution phase`);
+  console.log(`[OrchestratorService] Executing ${taskDescriptions.length} tasks in parallel`);
 
   // Get task records
   const tasks = await db
@@ -509,129 +592,127 @@ async function executionPhase(
     .where(eq(orchestratorTasks.cycleId, cycleId))
     .orderBy(orchestratorTasks.taskNumber);
 
-  // Determine which tasks can run in parallel
-  const parallelTasks = tasks.filter((t: OrchestratorTask) => t.canRunParallel);
-  const sequentialTasks = tasks.filter((t: OrchestratorTask) => !t.canRunParallel);
+  // Launch all task sessions in parallel
+  const sessionPromises: Promise<SessionResult>[] = [];
 
-  // Run parallel tasks first (up to maxParallelTasks)
-  const maxParallel = job.maxParallelTasks;
-  const taskBatches: OrchestratorTask[][] = [];
+  for (const task of tasks) {
+    const params: SessionTemplateParams = {
+      jobTitle: job.requestDocument.slice(0, 100),
+      devBranch: job.workingBranch,
+      repoOwner: job.repositoryOwner,
+      repoName: job.repositoryName,
+      specification: job.requestDocument,
+      cycleNumber,
+      taskNumber: task.taskNumber,
+      taskDescription: task.description,
+      taskContext: task.context || undefined,
+    };
 
-  for (let i = 0; i < parallelTasks.length; i += maxParallel) {
-    taskBatches.push(parallelTasks.slice(i, i + maxParallel));
-  }
+    const title = generateSessionTitle('task', params);
+    const prompt = getTaskPrompt(params);
 
-  // Add sequential tasks as individual batches
-  sequentialTasks.forEach((t: OrchestratorTask) => taskBatches.push([t]));
-
-  let launched = 0;
-
-  for (const batch of taskBatches) {
-    if (isCancelled()) break;
-
-    // Launch all tasks in the batch
-    const taskPromises = batch.map(task => executeTask(job, task, cycleNumber, apiKey));
-
-    launched += batch.length;
-    await db
-      .update(orchestratorCycles)
-      .set({ tasksLaunched: launched })
-      .where(eq(orchestratorCycles.id, cycleId));
-
-    // Wait for batch to complete
-    await Promise.allSettled(taskPromises);
-  }
-
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: Executed ${launched} tasks`);
-}
-
-/**
- * Execute a single task
- */
-async function executeTask(
-  job: OrchestratorJob,
-  task: OrchestratorTask,
-  cycleNumber: number,
-  _apiKey: string
-): Promise<void> {
-  console.log(`[OrchestratorService] Starting task ${task.taskNumber}: ${task.description}`);
-
-  // Mark task as running
-  await db
-    .update(orchestratorTasks)
-    .set({ status: 'running', startedAt: new Date() })
-    .where(eq(orchestratorTasks.id, task.id));
-
-  orchestratorBroadcaster.broadcastTaskStarted(job.id, cycleNumber, task.id, task.description);
-
-  try {
-    // TODO: Actually spawn an agent session here
-    // For now, simulate task execution
-    await simulateTaskExecution(job, task, cycleNumber);
-
-    // Mark task as completed
+    // Update task status
     await db
       .update(orchestratorTasks)
-      .set({
-        status: 'completed',
-        completedAt: new Date(),
-        resultSummary: `Completed: ${task.description}`,
-      })
+      .set({ status: 'running', startedAt: new Date() })
       .where(eq(orchestratorTasks.id, task.id));
 
-    orchestratorBroadcaster.broadcastTaskCompleted(job.id, cycleNumber, task.id, {
-      resultSummary: `Completed: ${task.description}`,
+    orchestratorBroadcaster.broadcastTaskStarted(job.id, cycleNumber, task.id, task.description);
+
+    // Launch session (don't await yet)
+    const sessionPromise = createAndExecuteSession({
+      userId: job.userId,
+      title,
+      prompt,
+      repoOwner: job.repositoryOwner,
+      repoName: job.repositoryName,
+      orchestratorJobId: job.id,
+      orchestratorCycleId: cycleId,
+      orchestratorTaskId: task.id,
+    }).then(async (result) => {
+      // Update task with session ID
+      await db
+        .update(orchestratorTasks)
+        .set({ agentSessionId: result.sessionId })
+        .where(eq(orchestratorTasks.id, task.id));
+      return result;
     });
 
-    console.log(`[OrchestratorService] Task ${task.taskNumber} completed`);
-  } catch (error) {
-    // Mark task as failed
-    await db
-      .update(orchestratorTasks)
-      .set({
-        status: 'failed',
-        completedAt: new Date(),
-        errorMessage: (error as Error).message,
-      })
-      .where(eq(orchestratorTasks.id, task.id));
+    sessionPromises.push(sessionPromise);
+  }
 
-    orchestratorBroadcaster.broadcastTaskFailed(job.id, cycleNumber, task.id, (error as Error).message);
+  // Update launched count
+  await db
+    .update(orchestratorCycles)
+    .set({ tasksLaunched: tasks.length })
+    .where(eq(orchestratorCycles.id, cycleId));
 
-    console.error(`[OrchestratorService] Task ${task.taskNumber} failed:`, error);
+  // Wait for all sessions to complete
+  const results = await Promise.allSettled(sessionPromises);
+
+  // Update task statuses based on results
+  for (let i = 0; i < results.length; i++) {
+    const task = tasks[i];
+    const result = results[i];
+
+    if (result.status === 'fulfilled') {
+      const sessionResult = result.value;
+
+      if (sessionResult.status === 'completed') {
+        await db
+          .update(orchestratorTasks)
+          .set({
+            status: 'completed',
+            completedAt: new Date(),
+            resultSummary: 'Task completed successfully',
+          })
+          .where(eq(orchestratorTasks.id, task.id));
+
+        orchestratorBroadcaster.broadcastTaskCompleted(job.id, cycleNumber, task.id, {
+          resultSummary: 'Task completed successfully',
+        });
+      } else {
+        await db
+          .update(orchestratorTasks)
+          .set({
+            status: 'failed',
+            completedAt: new Date(),
+            errorMessage: sessionResult.error || 'Unknown error',
+          })
+          .where(eq(orchestratorTasks.id, task.id));
+
+        orchestratorBroadcaster.broadcastTaskFailed(job.id, cycleNumber, task.id, sessionResult.error || 'Unknown error');
+      }
+
+      // Archive the task session
+      await archiveSession(job.userId, sessionResult.sessionId);
+    } else {
+      // Promise rejected
+      await db
+        .update(orchestratorTasks)
+        .set({
+          status: 'failed',
+          completedAt: new Date(),
+          errorMessage: result.reason?.message || 'Session failed to start',
+        })
+        .where(eq(orchestratorTasks.id, task.id));
+
+      orchestratorBroadcaster.broadcastTaskFailed(job.id, cycleNumber, task.id, result.reason?.message || 'Session failed');
+    }
   }
 }
 
 /**
- * Simulate task execution (placeholder for actual agent spawning)
+ * CONVERGENCE Phase - Collect results and update counts
  */
-async function simulateTaskExecution(
-  _job: OrchestratorJob,
-  task: OrchestratorTask,
-  cycleNumber: number
-): Promise<void> {
-  // Simulate work with progress updates
-  for (let i = 1; i <= 3; i++) {
-    await sleep(1000);
-    orchestratorBroadcaster.broadcastTaskProgress(
-      _job.id,
-      cycleNumber,
-      task.id,
-      `Step ${i}/3: Processing...`
-    );
-  }
-}
-
-/**
- * Phase 3: Convergence - Wait for all tasks and collect results
- */
-async function convergencePhase(
+async function runConvergencePhase(
   job: OrchestratorJob,
   cycleId: string,
   cycleNumber: number
 ): Promise<void> {
   orchestratorBroadcaster.broadcastCyclePhase(job.id, cycleNumber, 'convergence');
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: Convergence phase`);
+  console.log(`[OrchestratorService] Convergence for cycle ${cycleNumber}`);
 
   // Get task results
   const tasks = await db.select().from(orchestratorTasks).where(eq(orchestratorTasks.cycleId, cycleId));
@@ -648,60 +729,61 @@ async function convergencePhase(
 }
 
 /**
- * Phase 4: Update - Update task list and generate summary
+ * UPDATE Phase - Run update session to update task list
  */
-async function updatePhase(
+async function runUpdatePhase(
   job: OrchestratorJob,
   cycleId: string,
-  cycleNumber: number,
-  apiKey: string
+  cycleNumber: number
 ): Promise<void> {
   orchestratorBroadcaster.broadcastCyclePhase(job.id, cycleNumber, 'update');
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: Update phase`);
+  const params: SessionTemplateParams = {
+    jobTitle: job.requestDocument.slice(0, 100),
+    devBranch: job.workingBranch,
+    repoOwner: job.repositoryOwner,
+    repoName: job.repositoryName,
+    specification: job.requestDocument,
+    cycleNumber,
+  };
 
-  // Get tasks
+  const title = generateSessionTitle('update', params);
+  const prompt = getUpdatePrompt(params);
+
+  console.log(`[OrchestratorService] Running update for cycle ${cycleNumber}`);
+
+  const result = await createAndExecuteSession({
+    userId: job.userId,
+    title,
+    prompt,
+    repoOwner: job.repositoryOwner,
+    repoName: job.repositoryName,
+    orchestratorJobId: job.id,
+    orchestratorCycleId: cycleId,
+  });
+
+  // Archive the update session
+  await archiveSession(job.userId, result.sessionId);
+
+  // Get summary
   const tasks = await db.select().from(orchestratorTasks).where(eq(orchestratorTasks.cycleId, cycleId));
+  const completedCount = tasks.filter((t: OrchestratorTask) => t.status === 'completed').length;
+  const failedCount = tasks.filter((t: OrchestratorTask) => t.status === 'failed').length;
 
-  const completedTasks = tasks
-    .filter((t: OrchestratorTask) => t.status === 'completed')
-    .map((t: OrchestratorTask) => ({
-      description: t.description,
-      resultSummary: t.resultSummary || undefined,
-      filesModified: t.filesModified || undefined,
-    }));
+  const summary = `Cycle ${cycleNumber}: ${completedCount} tasks completed, ${failedCount} failed`;
 
-  const failedTasks = tasks
-    .filter((t: OrchestratorTask) => t.status === 'failed')
-    .map((t: OrchestratorTask) => ({
-      description: t.description,
-      errorMessage: t.errorMessage || undefined,
-    }));
-
-  // Generate cycle summary
-  const summary = await generateCycleSummary(completedTasks, failedTasks, apiKey);
-
-  // Update task list
-  const updatedTaskList = await updateTaskList(job.taskList, completedTasks, failedTasks, [], apiKey);
-
-  // Update cycle and job
   await db
     .update(orchestratorCycles)
     .set({ summary })
     .where(eq(orchestratorCycles.id, cycleId));
 
-  await db
-    .update(orchestratorJobs)
-    .set({ taskList: updatedTaskList, updatedAt: new Date() })
-    .where(eq(orchestratorJobs.id, job.id));
-
   orchestratorBroadcaster.broadcastCycleCompleted(job.id, cycleNumber, {
-    tasksCompleted: completedTasks.length,
-    tasksFailed: failedTasks.length,
+    tasksCompleted: completedCount,
+    tasksFailed: failedCount,
     summary,
   });
 
-  console.log(`[OrchestratorService] Cycle ${cycleNumber}: Updated task list and summary`);
+  console.log(`[OrchestratorService] Cycle ${cycleNumber} update complete`);
 }
 
 /**
@@ -715,7 +797,6 @@ async function completeJob(jobId: string, reason: string): Promise<void> {
     .set({ status: 'completed', completedAt: new Date(), updatedAt: new Date() })
     .where(eq(orchestratorJobs.id, jobId));
 
-  // Get total task count
   const tasks = await db.select().from(orchestratorTasks).where(eq(orchestratorTasks.jobId, jobId));
 
   orchestratorBroadcaster.broadcastJobCompleted(jobId, {
@@ -749,9 +830,6 @@ function checkTerminationConditions(job: OrchestratorJob): { terminate: boolean;
   return { terminate: false };
 }
 
-/**
- * Sleep helper
- */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
