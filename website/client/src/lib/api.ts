@@ -24,30 +24,32 @@ function getApiBaseUrl(): string {
   const pathname = window.location.pathname;
   const pathSegments = pathname.split('/').filter(Boolean);
 
-  // Check if we're in a path-based deployment and first segment is not a route name
-  const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'orchestrator', 'trash', 'settings', 'admin',
-                     'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
-                     'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace', 'github'];
+  // SPECIAL CASE: Check for /github/owner/repo/branch/ pattern FIRST
+  // This is path-based routing even though 'github' looks like an app route
+  if (pathSegments[0] === 'github' && pathSegments.length >= 4) {
+    cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
+  } else {
+    // Check if we're in a path-based deployment and first segment is not a route name
+    const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'orchestrator', 'trash', 'settings', 'admin',
+                       'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
+                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace'];
 
-  if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
-    // Check for /github/ prefix pattern: /github/owner/repo/branch/
-    if (pathSegments[0] === 'github' && pathSegments.length >= 4) {
-      cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
-    }
-    // Check for monorepo pattern: /owner/repo/website/branch/
-    else if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
-      cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
-    }
-    // Standard format: /owner/repo/branch/...
-    else if (pathSegments.length >= 3) {
-      cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+    if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
+      // Check for monorepo pattern: /owner/repo/website/branch/
+      if (pathSegments.length >= 4 && pathSegments[2] === 'website') {
+        cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}/${pathSegments[3]}`;
+      }
+      // Standard format: /owner/repo/branch/...
+      else if (pathSegments.length >= 3) {
+        cachedApiBaseUrl = `/${pathSegments[0]}/${pathSegments[1]}/${pathSegments[2]}`;
+      } else {
+        // Not enough segments for path-based routing
+        cachedApiBaseUrl = '';
+      }
     } else {
-      // Not enough segments for path-based routing
+      // Default to empty string for root-based deployments
       cachedApiBaseUrl = '';
     }
-  } else {
-    // Default to empty string for root-based deployments
-    cachedApiBaseUrl = '';
   }
 
   console.log('[API] Detected API_BASE_URL:', cachedApiBaseUrl);
