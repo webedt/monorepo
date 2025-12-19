@@ -1527,6 +1527,30 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       // Note: We only set local state here. The sync effect handles clearing workerStore.
       setIsExecuting(false);
       setStreamUrl(null);
+      setIsReconnecting(false);
+
+      // Add error message to rawEvents so user can see what went wrong
+      setRawEvents((prev) => [
+        ...prev,
+        {
+          type: 'error',
+          message: error.message || 'Connection failed',
+          timestamp: new Date(),
+        },
+      ]);
+
+      // Also add as a formatted message
+      messageIdCounter.current += 1;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + messageIdCounter.current,
+          chatSessionId: sessionId && sessionId !== 'new' ? sessionId : '',
+          type: 'system',
+          content: `Error: ${error.message || 'Connection failed'}`,
+          timestamp: new Date(),
+        },
+      ]);
     },
     autoReconnect: false, // Disable auto-reconnect to prevent infinite loops
   });
