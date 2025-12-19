@@ -51,7 +51,7 @@ class AuthStore extends Store<AuthState> {
     try {
       const response = await authApi.getSession();
       this.setState({
-        user: response.user,
+        user: response?.user ?? null,
         isLoading: false,
         isInitialized: true,
       });
@@ -77,10 +77,10 @@ class AuthStore extends Store<AuthState> {
       // Verify session was established by checking it
       // This ensures the cookie was properly set before proceeding
       const sessionCheck = await authApi.getSession();
-      console.log('[AuthStore] Session verified after login:', sessionCheck.user?.email);
+      console.log('[AuthStore] Session verified after login:', sessionCheck?.user?.email);
 
       this.setState({
-        user: sessionCheck.user || response.user,
+        user: sessionCheck?.user ?? response?.user ?? null,
         isLoading: false,
       });
     } catch (error) {
@@ -104,10 +104,10 @@ class AuthStore extends Store<AuthState> {
       // Verify session was established by checking it
       // This ensures the cookie was properly set before proceeding
       const sessionCheck = await authApi.getSession();
-      console.log('[AuthStore] Session verified after register:', sessionCheck.user?.email);
+      console.log('[AuthStore] Session verified after register:', sessionCheck?.user?.email);
 
       this.setState({
-        user: sessionCheck.user || response.user,
+        user: sessionCheck?.user ?? response?.user ?? null,
         isLoading: false,
       });
     } catch (error) {

@@ -92,9 +92,12 @@ router.get('/oauth', requireAuth, (req: Request, res: Response) => {
     returnOrigin,
   })).toString('base64');
 
+  // Build redirect URI dynamically based on returnOrigin
+  const redirectUri = `${returnOrigin}/api/github/oauth/callback`;
+
   const params = new URLSearchParams({
-    client_id: process.env.GITHUB_OAUTH_CLIENT_ID!,
-    redirect_uri: process.env.GITHUB_OAUTH_REDIRECT_URL!,
+    client_id: process.env.GITHUB_CLIENT_ID!,
+    redirect_uri: redirectUri,
     scope: 'repo workflow user:email',
     state,
   });
@@ -139,8 +142,8 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        client_id: process.env.GITHUB_OAUTH_CLIENT_ID,
-        client_secret: process.env.GITHUB_OAUTH_CLIENT_SECRET,
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
         code,
       }),
     });
@@ -161,11 +164,23 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
     const octokit = new Octokit({ auth: accessToken });
     const { data: githubUser } = await octokit.users.getAuthenticated();
 
-    // Update user with GitHub info
+    const githubIdStr = String(githubUser.id);
+
+    // First, remove GitHub connection from any existing user with this GitHub ID
+    // This allows transferring GitHub connection between accounts
     await db
       .update(users)
       .set({
-        githubId: String(githubUser.id),
+        githubId: null,
+        githubAccessToken: null,
+      })
+      .where(eq(users.githubId, githubIdStr));
+
+    // Update current user with GitHub info
+    await db
+      .update(users)
+      .set({
+        githubId: githubIdStr,
         githubAccessToken: accessToken,
       })
       .where(eq(users.id, stateData.userId));

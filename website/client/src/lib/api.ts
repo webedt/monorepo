@@ -141,22 +141,22 @@ async function fetchApi<T = unknown>(endpoint: string, options: FetchApiOptions 
 // ============================================================================
 export const authApi = {
   register: (email: string, password: string) =>
-    fetchApi<{ user: User }>('/api/auth/register', {
+    fetchApi<ApiResponse<{ user: User }>>('/api/auth/register', {
       method: 'POST',
       body: { email: email.toLowerCase().trim(), password },
-    }),
+    }).then(r => r.data),
 
   login: (email: string, password: string, rememberMe = false) =>
-    fetchApi<{ user: User }>('/api/auth/login', {
+    fetchApi<ApiResponse<{ user: User }>>('/api/auth/login', {
       method: 'POST',
       body: { email: email.toLowerCase().trim(), password, rememberMe },
-    }),
+    }).then(r => r.data),
 
   logout: () =>
     fetchApi('/api/auth/logout', { method: 'POST' }),
 
   getSession: () =>
-    fetchApi<{ user: User | null }>('/api/auth/session'),
+    fetchApi<ApiResponse<{ user: User | null }>>('/api/auth/session').then(r => r.data),
 };
 
 // ============================================================================
