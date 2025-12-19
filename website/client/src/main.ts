@@ -160,7 +160,9 @@ function addAppStyles(): void {
     .app-layout {
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
+      height: 100vh;
+      max-height: 100vh;
+      overflow: hidden;
     }
 
     .app-header {
@@ -239,6 +241,7 @@ function addAppStyles(): void {
       min-height: 0; /* Allow flex item to shrink below content */
       display: flex;
       flex-direction: column;
+      overflow: hidden; /* Prevent content from expanding beyond viewport */
       background: var(--color-bg-secondary);
     }
 
@@ -250,6 +253,7 @@ function addAppStyles(): void {
     .app-main .page {
       display: flex;
       flex-direction: column;
+      overflow: hidden; /* Contain children within page bounds */
     }
 
     /* Hide empty divs created by router */
