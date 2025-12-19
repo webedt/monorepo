@@ -73,10 +73,31 @@ const BLOCKED_ROUTES = [
   '/api/sessions/*/worker-status',       // Only ai-worker reports status
 ];
 
+// SSE (Server-Sent Events) endpoints that require special proxy handling
+// These are long-lived connections that shouldn't timeout
+const SSE_ENDPOINTS = [
+  '/api/orchestrator/*/stream',          // Orchestrator job event stream
+  '/api/sessions/updates',               // Session list updates stream
+  '/api/sessions/*/events/stream',       // Session event stream
+  '/api/sessions/*/stream',              // Legacy session stream endpoint
+  '/api/execute',                        // Execution stream (can be SSE)
+  '/api/execute-remote',                 // Remote execution stream
+  '/api/live-chat/*/events',             // Live chat event stream
+  '/api/workspace/*/events',             // Workspace event stream
+];
+
 // Check if a path matches a blocked route pattern
 function isBlockedRoute(path: string): boolean {
   return BLOCKED_ROUTES.some(pattern => {
     const regex = new RegExp('^' + pattern.replace(/\*/g, '[^/]+') + '$');
+    return regex.test(path);
+  });
+}
+
+// Check if a path is an SSE endpoint that needs special handling
+function isSSEEndpoint(path: string): boolean {
+  return SSE_ENDPOINTS.some(pattern => {
+    const regex = new RegExp('^' + pattern.replace(/\*/g, '[^/]+') + '(\\?.*)?$');
     return regex.test(path);
   });
 }
@@ -109,8 +130,8 @@ function getOwnerRepoBranchPath(urlPath: string): string {
   return '/';
 }
 
-// Proxy middleware for /api routes
-const apiProxyOptions: Options = {
+// Base proxy options shared between regular API and SSE endpoints
+const baseProxyOptions: Options = {
   target: INTERNAL_API_URL,
   changeOrigin: true,
   // Cookie handling for session persistence
@@ -200,41 +221,121 @@ const apiProxyOptions: Options = {
   },
 };
 
-// Helper function to handle API proxy requests with route filtering
-function handleApiProxy(req: express.Request, res: express.Response, next: express.NextFunction) {
+// SSE-specific proxy options with extended timeouts and no buffering
+// These settings are critical for long-lived Server-Sent Events connections
+const sseProxyOptions: Options = {
+  ...baseProxyOptions,
+  // Disable proxy timeout entirely for SSE connections (0 = no timeout)
+  // This prevents 502 errors when the connection is idle waiting for events
+  proxyTimeout: 0,
+  timeout: 0,
+  // Handle SSE-specific proxy events
+  on: {
+    ...baseProxyOptions.on,
+    proxyReq: (proxyReq, req) => {
+      // Forward cookies from the original request
+      if (req.headers.cookie) {
+        proxyReq.setHeader('Cookie', req.headers.cookie);
+      }
+      // Log SSE connection
+      console.log(`[SSE Proxy] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${proxyReq.path}`);
+    },
+    proxyRes: (proxyRes, req, res) => {
+      // Ensure SSE-specific headers are set for the proxy response
+      // These help ensure the connection stays open and unbuffered
+      if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+        console.log(`[SSE Proxy] Streaming response for ${req.url}`);
+        // Disable any nginx buffering that might interfere
+        res.setHeader('X-Accel-Buffering', 'no');
+        // Ensure cache is disabled
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+
+      // Apply cookie path rewriting from base options
+      const setCookie = proxyRes.headers['set-cookie'];
+      if (setCookie) {
+        const referer = req.headers.referer || req.headers.origin || '';
+        let cookiePath = '/';
+        try {
+          if (referer) {
+            const refererUrl = new URL(referer);
+            cookiePath = getOwnerRepoBranchPath(refererUrl.pathname);
+          }
+        } catch (e) {
+          console.log('[SSE Proxy] Failed to parse referer for cookie path:', referer);
+        }
+        const rewrittenCookies = setCookie.map(cookie =>
+          cookie.replace(/Path=\/[^;]*/gi, `Path=${cookiePath}`)
+        );
+        proxyRes.headers['set-cookie'] = rewrittenCookies;
+      }
+    },
+  },
+};
+
+// Create proxy middleware instances
+const apiProxy = createProxyMiddleware(baseProxyOptions);
+const sseProxy = createProxyMiddleware(sseProxyOptions);
+
+// Helper function to validate API routes (returns null if allowed, or error response to send)
+function validateApiRoute(fullPath: string, method: string): { status: number; body: object } | null {
+  // Block internal-only routes
+  if (isBlockedRoute(fullPath)) {
+    console.log(`[Blocked] ${method} ${fullPath}`);
+    return {
+      status: 403,
+      body: {
+        error: 'Forbidden',
+        message: 'This endpoint is not accessible from the public API'
+      }
+    };
+  }
+
+  // Check if route is in whitelist
+  if (!isAllowedRoute(fullPath)) {
+    console.log(`[Not Allowed] ${method} ${fullPath}`);
+    return {
+      status: 404,
+      body: {
+        error: 'Not Found',
+        message: 'Endpoint not found'
+      }
+    };
+  }
+
+  return null; // Allowed
+}
+
+// Combined handler that validates and proxies API requests, using SSE proxy for streaming endpoints
+function handleApiRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
   // Extract just the /api/... part from the path (handles both direct and prefixed paths)
   const originalUrl = req.originalUrl;
   const apiMatch = originalUrl.match(/\/api(\/[^?]*)?/);
   const fullPath = apiMatch ? apiMatch[0] : '/api' + req.path;
 
-  // Log ALL API requests for debugging (temporarily enabled in production)
-  console.log(`[API Request] ${req.method} ${fullPath} (originalUrl: ${originalUrl})`);
+  // Log ALL API requests for debugging
+  const isSSE = isSSEEndpoint(fullPath);
+  console.log(`[API Request] ${req.method} ${fullPath} (originalUrl: ${originalUrl}, isSSE: ${isSSE})`);
 
-  // Block internal-only routes
-  if (isBlockedRoute(fullPath)) {
-    console.log(`[Blocked] ${req.method} ${fullPath}`);
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'This endpoint is not accessible from the public API'
-    });
+  // Validate the route
+  const validationError = validateApiRoute(fullPath, req.method);
+  if (validationError) {
+    return res.status(validationError.status).json(validationError.body);
   }
 
-  // Check if route is in whitelist
-  if (!isAllowedRoute(fullPath)) {
-    console.log(`[Not Allowed] ${req.method} ${fullPath}`);
-    return res.status(404).json({
-      error: 'Not Found',
-      message: 'Endpoint not found'
-    });
+  // Use SSE proxy for streaming endpoints, regular proxy for everything else
+  if (isSSE) {
+    console.log(`[SSE] Routing ${fullPath} to SSE proxy`);
+    return sseProxy(req, res, next);
   }
 
-  // Proxy the request
-  next();
+  // Regular API proxy
+  return apiProxy(req, res, next);
 }
 
 // Path-prefixed API routes: /github/:owner/:repo/:branch/api/*
 // This handles preview deployments where the app is served at a path prefix
-app.use('/github/:owner/:repo/:branch/api', handleApiProxy, createProxyMiddleware(apiProxyOptions));
+app.use('/github/:owner/:repo/:branch/api', handleApiRequest);
 
 // Standard owner/repo/branch pattern: /:owner/:repo/:branch/api/*
 // Note: This is a catch-all for 3-segment prefixes, placed after /github to avoid conflicts
@@ -244,11 +345,11 @@ app.use('/:segment1/:segment2/:segment3/api', (req, res, next) => {
   if (segment1 === 'github' || segment1 === 'api') {
     return next('route');
   }
-  handleApiProxy(req, res, next);
-}, createProxyMiddleware(apiProxyOptions));
+  handleApiRequest(req, res, next);
+});
 
 // Direct API routes: /api/*
-app.use('/api', handleApiProxy, createProxyMiddleware(apiProxyOptions));
+app.use('/api', handleApiRequest);
 
 // Serve static files from the client build
 const clientDistPath = path.join(__dirname, '../../client/dist');
@@ -271,6 +372,9 @@ app.listen(PORT, () => {
   console.log('');
   console.log('Allowed API routes:');
   ALLOWED_API_ROUTES.forEach(route => console.log(`  ${route}/*`));
+  console.log('');
+  console.log('SSE endpoints (no timeout):');
+  SSE_ENDPOINTS.forEach(route => console.log(`  ${route}`));
   console.log('');
   console.log('Blocked routes (internal only):');
   BLOCKED_ROUTES.forEach(route => console.log(`  ${route}`));
