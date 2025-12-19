@@ -586,40 +586,57 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     // Skip control/internal events
     if (['connected', 'completed', 'heartbeat', 'env_manager_log', 'system',
-         'title_generation', 'session_created', 'session_name', 'session-created'].includes(eventType)) {
+         'title_generation', 'session_created', 'session_name', 'session-created',
+         'result'].includes(eventType)) {
       return null;
     }
 
     // Handle different event types
     switch (eventType) {
       case 'user':
+        // Handle nested message object from Claude remote
+        let userContent = '';
+        if (typeof data.message === 'object' && data.message?.content) {
+          userContent = typeof data.message.content === 'string'
+            ? data.message.content
+            : '';
+        } else if (typeof data.content === 'string') {
+          userContent = data.content;
+        } else if (typeof data.message === 'string') {
+          userContent = data.message;
+        }
+        if (!userContent) return null;
         return {
           id: event.id || `user-${Date.now()}`,
           type: 'user',
-          content: data.content || data.message || '',
+          content: userContent,
           timestamp: new Date(event.timestamp || Date.now()),
         };
 
       case 'input_preview':
       case 'submission_preview':
-        // User input confirmation
+        // This is a confirmation message like "Request received: ..."
+        // Treat as system message, not user message
         const inputContent = data.message || data.data?.preview || '';
         if (!inputContent) return null;
         return {
-          id: event.id || `user-${Date.now()}`,
-          type: 'user',
+          id: event.id || `system-${Date.now()}`,
+          type: 'system',
           content: inputContent,
           timestamp: new Date(event.timestamp || Date.now()),
         };
 
       case 'assistant':
       case 'assistant_message':
+        const assistantContent = this.extractAssistantContent(data);
+        // Skip assistant messages with no actual text content (e.g., only thinking blocks)
+        if (!assistantContent) return null;
         return {
           id: event.id || `assistant-${Date.now()}`,
           type: 'assistant',
-          content: this.extractAssistantContent(data),
+          content: assistantContent,
           timestamp: new Date(event.timestamp || Date.now()),
-          model: data.model,
+          model: data.model || data.message?.model,
         };
 
       case 'error':
@@ -653,23 +670,54 @@ export class ChatPage extends Page<ChatPageOptions> {
   }
 
   private extractAssistantContent(data: any): string {
-    // Handle content blocks array
-    if (Array.isArray(data.content)) {
-      return data.content
+    // Helper to extract text from content blocks array
+    const extractFromContentArray = (contentArray: any[]): string => {
+      return contentArray
         .map((block: any) => {
-          if (block.type === 'text') return block.text;
+          if (typeof block === 'string') return block;
+          if (block.type === 'text' && block.text) return block.text;
           if (block.type === 'tool_use') return `[Using tool: ${block.name}]`;
+          // Skip thinking blocks - they're internal
+          if (block.type === 'thinking') return '';
           return '';
         })
         .filter(Boolean)
         .join('\n');
+    };
+
+    // Handle content blocks array directly on data
+    if (Array.isArray(data.content)) {
+      const result = extractFromContentArray(data.content);
+      if (result) return result;
     }
 
-    // Handle message field (from SSE)
-    if (data.message) return data.message;
+    // Handle nested message object (from Claude remote events)
+    if (data.message && typeof data.message === 'object') {
+      // message.content can be an array of blocks
+      if (Array.isArray(data.message.content)) {
+        const result = extractFromContentArray(data.message.content);
+        if (result) return result;
+      }
+      // Or message.content could be a string
+      if (typeof data.message.content === 'string') {
+        return data.message.content;
+      }
+    }
+
+    // Handle message field as string (from SSE)
+    if (typeof data.message === 'string') return data.message;
 
     // Handle direct content string
     if (typeof data.content === 'string') return data.content;
+
+    // Handle nested data.data structure
+    if (data.data) {
+      if (typeof data.data.message === 'string') return data.data.message;
+      if (typeof data.data.content === 'string') return data.data.content;
+      if (Array.isArray(data.data.content)) {
+        return extractFromContentArray(data.data.content);
+      }
+    }
 
     return '';
   }
@@ -741,12 +789,12 @@ export class ChatPage extends Page<ChatPageOptions> {
 
       case 'input_preview':
       case 'submission_preview':
-        // User input confirmation
+        // This is a confirmation message like "Request received: ..."
         const inputContent = this.extractStringContent(event);
         if (inputContent) {
           this.addMessage({
-            id: `user-${Date.now()}`,
-            type: 'user',
+            id: `system-${Date.now()}`,
+            type: 'system',
             content: inputContent,
             timestamp: new Date(),
           });

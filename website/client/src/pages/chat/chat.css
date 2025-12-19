@@ -212,11 +212,27 @@
   border-bottom-left-radius: var(--radius-sm);
 }
 
+/* System messages as status lines (no bubble) */
+.chat-message.message-system {
+  justify-content: center;
+}
+
 .message-system .message-bubble {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
+  background: transparent;
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: var(--spacing-xs) var(--spacing-md);
+  max-width: 100%;
+  border: none;
+  text-align: center;
+}
+
+.message-system .message-content {
+  display: inline;
+}
+
+.message-system .message-meta {
+  display: none;
 }
 
 .message-error .message-bubble {
@@ -489,14 +505,15 @@
   display: flex;
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-md);
-  padding: 2px;
+  padding: 3px;
+  gap: 2px;
 }
 
 .toggle-btn {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
-  padding: var(--spacing-xs) var(--spacing-sm);
+  gap: 6px;
+  padding: 6px 12px;
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
@@ -505,6 +522,7 @@
   border-radius: calc(var(--radius-md) - 2px);
   cursor: pointer;
   transition: all var(--transition-fast);
+  white-space: nowrap;
 }
 
 .toggle-btn:hover {
