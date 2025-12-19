@@ -1247,12 +1247,18 @@ export default function Chat({ sessionId: sessionIdProp, isEmbedded = false }: C
       const executeUrl = provider === 'claude-remote'
         ? `${getApiBaseUrl()}/api/execute-remote`
         : `${getApiBaseUrl()}/api/execute`;
+      console.log('[Chat] Setting streamUrl to:', executeUrl, 'provider:', provider);
       setStreamUrl(executeUrl);
 
       setIsExecuting(true);
 
       // Clear the navigation state to prevent re-triggering
-      navigate(location.pathname, { replace: true, state: {} });
+      // Use queueMicrotask to ensure state updates are committed before navigation
+      console.log('[Chat] Queueing navigate to clear state');
+      queueMicrotask(() => {
+        console.log('[Chat] Executing navigate to clear state');
+        navigate(location.pathname, { replace: true, state: {} });
+      });
     }
   }, [location.state, streamUrl, navigate, location.pathname, currentSessionId]);
 
