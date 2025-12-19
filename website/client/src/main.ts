@@ -21,6 +21,17 @@ import {
 
 import { Page, type PageOptions } from './pages/base/Page';
 
+/**
+ * Get SVG icon for navigation
+ */
+function getNavIcon(name: string): string {
+  const icons: Record<string, string> = {
+    'cpu': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg>`,
+    'layout-dashboard': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>`,
+  };
+  return icons[name] || '';
+}
+
 // Type for Page constructor
 type PageConstructor = new (options?: PageOptions) => Page;
 
@@ -74,17 +85,20 @@ function updateHeader(): void {
   const isAuthenticated = authStore.isAuthenticated();
 
   if (isAuthenticated) {
-    // Nav links for authenticated users
+    // Nav links for authenticated users with icons
     const navLinks = [
-      { path: '/agents', text: 'Agent Sessions' },
-      { path: '/dashboard', text: 'Dashboard' },
+      { path: '/agents', text: 'Agents', icon: 'cpu' },
+      { path: '/dashboard', text: 'Dashboard', icon: 'layout-dashboard' },
     ];
 
     for (const link of navLinks) {
       const a = document.createElement('a');
       a.href = `#${link.path}`;
       a.className = 'nav-link';
-      a.textContent = link.text;
+
+      // Add icon
+      const iconSvg = getNavIcon(link.icon);
+      a.innerHTML = `${iconSvg}<span>${link.text}</span>`;
 
       // Mark active link
       if (window.location.hash === `#${link.path}`) {
@@ -182,18 +196,26 @@ function addAppStyles(): void {
     .app-nav {
       display: flex;
       align-items: center;
-      gap: var(--spacing-xs);
+      justify-content: center;
+      gap: 1.5rem;
       flex: 1;
     }
 
     .nav-link {
-      padding: var(--spacing-sm) var(--spacing-md);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
       color: var(--color-text-secondary);
       text-decoration: none;
       border-radius: var(--radius-md);
       font-size: var(--font-size-sm);
       font-weight: var(--font-weight-medium);
       transition: color var(--transition-fast), background var(--transition-fast);
+    }
+
+    .nav-link svg {
+      flex-shrink: 0;
     }
 
     .nav-link:hover {

@@ -168,10 +168,10 @@ export const githubApi = {
   },
 
   getRepos: () =>
-    fetchApi<{ repos: Repository[] }>('/api/github/repos'),
+    fetchApi<ApiResponse<Repository[]>>('/api/github/repos').then(r => ({ repos: r.data || [] })),
 
   getBranches: (owner: string, repo: string) =>
-    fetchApi<{ branches: Branch[] }>(`/api/github/repos/${owner}/${repo}/branches`),
+    fetchApi<ApiResponse<Branch[]>>(`/api/github/repos/${owner}/${repo}/branches`).then(r => ({ branches: r.data || [] })),
 
   createBranch: (owner: string, repo: string, data: { branchName: string; baseBranch: string }) =>
     fetchApi(`/api/github/repos/${owner}/${repo}/branches`, {

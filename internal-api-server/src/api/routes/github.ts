@@ -223,12 +223,13 @@ router.get('/repos', requireAuth, async (req: Request, res: Response) => {
     const formattedRepos = repos.map((repo) => ({
       id: repo.id,
       name: repo.name,
-      fullName: repo.full_name,
+      full_name: repo.full_name,
+      owner: { login: repo.owner.login },
       private: repo.private,
       description: repo.description,
-      htmlUrl: repo.html_url,
-      cloneUrl: repo.clone_url,
-      defaultBranch: repo.default_branch,
+      html_url: repo.html_url,
+      clone_url: repo.clone_url,
+      default_branch: repo.default_branch,
     }));
 
     res.json({ success: true, data: formattedRepos });
