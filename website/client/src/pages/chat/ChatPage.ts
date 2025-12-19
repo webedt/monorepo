@@ -96,6 +96,7 @@ export class ChatPage extends Page<ChatPageOptions> {
   // View settings (persisted to localStorage)
   private showRawJson = false;
   private showTimestamps = false;
+  private widescreen = false;
   private eventFilters: Record<string, boolean> = { ...DEFAULT_EVENT_FILTERS };
 
   protected render(): string {
@@ -135,6 +136,9 @@ export class ChatPage extends Page<ChatPageOptions> {
           <div class="toolbar-right">
             <button class="toolbar-btn" data-action="toggle-timestamps" title="Toggle Timestamps">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            </button>
+            <button class="toolbar-btn" data-action="toggle-widescreen" title="Toggle Widescreen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
             </button>
             <div class="filter-dropdown">
               <button class="toolbar-btn" data-action="toggle-filters" title="Filter Events">
@@ -241,6 +245,12 @@ export class ChatPage extends Page<ChatPageOptions> {
         this.showTimestamps = savedTimestamps === 'true';
       }
 
+      // Load widescreen setting
+      const savedWidescreen = localStorage.getItem('chat_widescreen');
+      if (savedWidescreen !== null) {
+        this.widescreen = savedWidescreen === 'true';
+      }
+
       // Load event filters
       const savedFilters = localStorage.getItem('chat_eventFilters');
       if (savedFilters) {
@@ -256,6 +266,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     try {
       localStorage.setItem('chat_showRawJson', String(this.showRawJson));
       localStorage.setItem('chat_showTimestamps', String(this.showTimestamps));
+      localStorage.setItem('chat_widescreen', String(this.widescreen));
       localStorage.setItem('chat_eventFilters', JSON.stringify(this.eventFilters));
     } catch (error) {
       console.warn('Failed to save chat settings:', error);
@@ -288,6 +299,14 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.saveSettings();
       this.updateToolbarState();
       this.renderContent();
+    });
+
+    // Widescreen toggle
+    const widescreenBtn = this.$('[data-action="toggle-widescreen"]') as HTMLButtonElement;
+    widescreenBtn?.addEventListener('click', () => {
+      this.widescreen = !this.widescreen;
+      this.saveSettings();
+      this.updateToolbarState();
     });
 
     // Filters dropdown
@@ -325,6 +344,12 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Update timestamps button
     const timestampsBtn = this.$('[data-action="toggle-timestamps"]') as HTMLButtonElement;
     timestampsBtn?.classList.toggle('active', this.showTimestamps);
+
+    // Update widescreen button and class
+    const widescreenBtn = this.$('[data-action="toggle-widescreen"]') as HTMLButtonElement;
+    widescreenBtn?.classList.toggle('active', this.widescreen);
+    const chatPage = this.$('.chat-page') as HTMLElement;
+    chatPage?.classList.toggle('widescreen', this.widescreen);
 
     // Update filters button to show if any filters are active
     const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
