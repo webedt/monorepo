@@ -111,7 +111,7 @@ function App() {
 
     // App routes that should not be treated as path-based deployment prefixes
     // Note: 'github' is included because /github/:owner/:repo/:branch/* are workspace routes
-    const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'trash', 'settings', 'admin',
+    const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'orchestrator', 'trash', 'settings', 'admin',
                        'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
                        'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace', 'github'];
 

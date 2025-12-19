@@ -25,8 +25,9 @@ function getApiBaseUrl(): string {
   const pathSegments = pathname.split('/').filter(Boolean);
 
   // Check if we're in a path-based deployment and first segment is not a route name
-  const appRoutes = ['login', 'register', 'session', 'sessions', 'settings', 'new-session',
-                     'code', 'images', 'sound', 'scene-editor', 'preview', 'quick-setup', 'item'];
+  const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'orchestrator', 'trash', 'settings', 'admin',
+                     'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
+                     'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace', 'github'];
 
   if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
     // Check for /github/ prefix pattern: /github/owner/repo/branch/
