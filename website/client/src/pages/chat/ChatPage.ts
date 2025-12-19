@@ -53,6 +53,9 @@ export class ChatPage extends Page<ChatPageOptions> {
             </div>
           </div>
           <div class="chat-header-right">
+            <button class="header-btn" data-action="view-code" title="View Files">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            </button>
             <div class="chat-status"></div>
           </div>
         </header>
@@ -92,6 +95,17 @@ export class ChatPage extends Page<ChatPageOptions> {
     const backBtn = this.$('[data-action="back"]') as HTMLButtonElement;
     if (backBtn) {
       backBtn.addEventListener('click', () => this.navigate('/agents'));
+    }
+
+    // Setup view code button
+    const viewCodeBtn = this.$('[data-action="view-code"]') as HTMLButtonElement;
+    if (viewCodeBtn) {
+      viewCodeBtn.addEventListener('click', () => {
+        const sessionId = this.options.params?.sessionId;
+        if (sessionId) {
+          this.navigate(`/session/${sessionId}/code`);
+        }
+      });
     }
 
     // Setup send button

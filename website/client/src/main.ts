@@ -15,6 +15,7 @@ import {
   AgentsPage,
   SettingsPage,
   ChatPage,
+  CodePage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -371,6 +372,15 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Chat | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/session/:sessionId/code',
+        component: (params) => {
+          mountPage(CodePage, params);
+          return document.createElement('div');
+        },
+        title: 'Code | WebEDT',
         guard: () => authStore.isAuthenticated(),
       },
     ])

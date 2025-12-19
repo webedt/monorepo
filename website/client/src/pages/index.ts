@@ -9,3 +9,4 @@ export { DashboardPage } from './dashboard/DashboardPage';
 export { AgentsPage } from './agents/AgentsPage';
 export { SettingsPage } from './settings/SettingsPage';
 export { ChatPage } from './chat/ChatPage';
+export { CodePage } from './code/CodePage';

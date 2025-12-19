@@ -84,6 +84,25 @@
   gap: var(--spacing-sm);
 }
 
+.header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.header-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
 .chat-status {
   padding: var(--spacing-xs) var(--spacing-sm);
   font-size: var(--font-size-xs);

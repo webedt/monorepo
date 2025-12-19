@@ -663,3 +663,63 @@ export function createExecuteRemoteEventSource(data: {
   console.log('[API] Creating Claude Remote EventSource:', fullUrl);
   return new EventSource(fullUrl, { withCredentials: true });
 }
+
+// ============================================================================
+// Storage Worker API (File operations)
+// ============================================================================
+export const storageWorkerApi = {
+  listFiles: (sessionPath: string) =>
+    fetchApi<{ files: string[] }>(`/api/storage/sessions/${sessionPath}/files`),
+
+  getFileText: async (sessionPath: string, filePath: string): Promise<string> => {
+    const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.status}`);
+    }
+    return response.text();
+  },
+
+  getFileBlob: async (sessionPath: string, filePath: string): Promise<Blob> => {
+    const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.status}`);
+    }
+    return response.blob();
+  },
+
+  writeFile: async (sessionPath: string, filePath: string, content: string): Promise<void> => {
+    const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+      body: content,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to write file: ${response.status}`);
+    }
+  },
+
+  deleteFile: async (sessionPath: string, filePath: string): Promise<void> => {
+    const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to delete file: ${response.status}`);
+    }
+  },
+
+  checkFileExists: async (sessionPath: string, filePath: string): Promise<boolean> => {
+    const response = await fetch(`${getApiBaseUrl()}/api/storage/sessions/${sessionPath}/files/${filePath}`, {
+      method: 'HEAD',
+      credentials: 'include',
+    });
+    return response.ok;
+  },
+};
