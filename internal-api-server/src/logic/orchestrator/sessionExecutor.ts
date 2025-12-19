@@ -16,7 +16,7 @@ import { workerCoordinator, WorkerAssignment } from '../execution/workerCoordina
 import { StorageService } from '../storage/storageService.js';
 import { GitHubOperations, parseRepoUrl } from '../github/operations.js';
 import { WORKSPACE_DIR } from '../config/env.js';
-import { generateSessionPath } from '@webedt/shared';
+import { generateSessionPath, logger } from '@webedt/shared';
 
 export interface CreateSessionParams {
   userId: string;
@@ -92,19 +92,19 @@ async function getGitHubToken(userId: string): Promise<string | null> {
 export async function createAndExecuteSession(params: CreateSessionParams): Promise<SessionResult> {
   const { userId, title, prompt, repoOwner, repoName } = params;
 
-  console.log(`[SessionExecutor] Creating session: ${title}`);
+  logger.info(`Creating orchestrator session: ${title}`, { component: 'SessionExecutor', userId, repoOwner, repoName });
 
   // Get Claude auth
   const claudeAuth = await getClaudeAuth(userId);
   if (!claudeAuth) {
-    console.error(`[SessionExecutor] User ${userId} does not have Claude authentication configured`);
+    logger.error('User does not have Claude authentication configured', { component: 'SessionExecutor', userId });
     throw new Error('Claude authentication not configured for this user. Please connect your Claude account in Settings.');
   }
 
   // Get GitHub token
   const githubToken = await getGitHubToken(userId);
   if (!githubToken) {
-    console.error(`[SessionExecutor] User ${userId} does not have GitHub connected`);
+    logger.error('User does not have GitHub connected', { component: 'SessionExecutor', userId });
     throw new Error('GitHub not connected for this user. Please connect your GitHub account in Settings.');
   }
 
@@ -125,7 +125,7 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
     baseBranch,
   });
 
-  console.log(`[SessionExecutor] Created local session: ${sessionId}`);
+  logger.info(`Created local session`, { component: 'SessionExecutor', sessionId });
 
   // Setup workspace
   const sessionRoot = path.join(WORKSPACE_DIR, `session-${sessionId}`);
@@ -133,7 +133,7 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
 
   try {
     // Initialize GitHub session (clone repo, create branch)
-    console.log(`[SessionExecutor] Initializing GitHub session for ${gitUrl}`);
+    logger.info(`Initializing GitHub session`, { component: 'SessionExecutor', gitUrl, baseBranch });
 
     const initResult = await githubOperations.initSession(
       {
@@ -147,7 +147,7 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
         codingAssistantAuthentication: claudeAuth,
       },
       async (event) => {
-        console.log(`[SessionExecutor] Init event: ${event.type} - ${event.message}`);
+        logger.info(`Init event: ${event.type}`, { component: 'SessionExecutor', message: event.message });
       }
     );
 
@@ -163,23 +163,23 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
       .where(eq(chatSessions.id, sessionId));
 
     workspacePath = initResult.localPath;
-    console.log(`[SessionExecutor] Workspace initialized at: ${workspacePath}`);
+    logger.info(`Workspace initialized`, { component: 'SessionExecutor', workspacePath });
 
     // Upload session to storage before calling worker
     if (fs.existsSync(sessionRoot)) {
       await storageService.uploadSessionFromPath(sessionId, sessionRoot);
-      console.log(`[SessionExecutor] Session uploaded to storage`);
+      logger.info(`Session uploaded to storage`, { component: 'SessionExecutor', sessionId });
     }
 
     // Acquire worker
-    console.log(`[SessionExecutor] Acquiring worker...`);
+    logger.info(`Acquiring worker...`, { component: 'SessionExecutor' });
     const workerAssignment = await workerCoordinator.acquireWorker(sessionId);
 
     if (!workerAssignment) {
       throw new Error('No AI workers available. Please check that the ai-coding-worker service is running.');
     }
 
-    console.log(`[SessionExecutor] Worker acquired: ${workerAssignment.worker.id}`);
+    logger.info(`Worker acquired`, { component: 'SessionExecutor', workerId: workerAssignment.worker.id });
 
     // Prepare payload for AI worker
     const aiWorkerPayload = {
@@ -195,7 +195,7 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 600000); // 10 minutes
 
-    console.log(`[SessionExecutor] Calling worker at ${workerAssignment.url}/execute`);
+    logger.info(`Calling worker`, { component: 'SessionExecutor', workerUrl: `${workerAssignment.url}/execute` });
 
     const aiResponse = await fetch(`${workerAssignment.url}/execute`, {
       method: 'POST',
@@ -240,7 +240,7 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
           const data = line.substring(5).trim();
           const event = JSON.parse(data);
 
-          console.log(`[SessionExecutor] Event: ${event.type}`);
+          logger.info(`Worker event: ${event.type}`, { component: 'SessionExecutor' });
 
           if (event.type === 'completed') {
             sessionCompleted = true;
@@ -268,7 +268,7 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
     // Get final branch name
     const [finalSession] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
 
-    console.log(`[SessionExecutor] Session ${sessionId} ${finalStatus}`);
+    logger.info(`Session ${finalStatus}`, { component: 'SessionExecutor', sessionId, status: finalStatus });
 
     return {
       sessionId,
@@ -277,7 +277,7 @@ export async function createAndExecuteSession(params: CreateSessionParams): Prom
       error: sessionError,
     };
   } catch (error) {
-    console.error(`[SessionExecutor] Session failed:`, error);
+    logger.error(`Session failed`, error as Error, { component: 'SessionExecutor', sessionId });
 
     // Update session status to error
     await db.update(chatSessions)
@@ -309,7 +309,7 @@ export async function archiveSession(
   sessionId: string,
   _deleteBranch: boolean = true
 ): Promise<void> {
-  console.log(`[SessionExecutor] Archiving session: ${sessionId}`);
+  logger.info(`Archiving session`, { component: 'SessionExecutor', sessionId });
 
   // Get session
   const [session] = await db
@@ -326,7 +326,7 @@ export async function archiveSession(
     .set({ status: 'completed', completedAt: new Date() })
     .where(eq(chatSessions.id, sessionId));
 
-  console.log(`[SessionExecutor] Archived session: ${sessionId}`);
+  logger.info(`Session archived`, { component: 'SessionExecutor', sessionId });
 }
 
 /**
@@ -375,7 +375,7 @@ export async function waitForAllSessions(
   const startTime = Date.now();
   const pending = new Set(sessionIds);
 
-  console.log(`[SessionExecutor] Waiting for ${sessionIds.length} sessions to complete...`);
+  logger.info(`Waiting for sessions to complete`, { component: 'SessionExecutor', count: sessionIds.length });
 
   while (pending.size > 0 && Date.now() - startTime < maxWaitMs) {
     for (const id of [...pending]) {
@@ -401,7 +401,7 @@ export async function waitForAllSessions(
           status: 'completed',
           branch: session.branch || undefined,
         });
-        console.log(`[SessionExecutor] Session ${id} completed`);
+        logger.info(`Session completed`, { component: 'SessionExecutor', sessionId: id });
       } else if (session.status === 'error') {
         pending.delete(id);
         results.set(id, {
@@ -409,12 +409,12 @@ export async function waitForAllSessions(
           status: 'error',
           error: 'Session ended with error',
         });
-        console.log(`[SessionExecutor] Session ${id} failed`);
+        logger.info(`Session failed`, { component: 'SessionExecutor', sessionId: id });
       }
     }
 
     if (pending.size > 0) {
-      console.log(`[SessionExecutor] Still waiting for ${pending.size} sessions...`);
+      logger.info(`Still waiting for sessions`, { component: 'SessionExecutor', pending: pending.size });
       await sleep(pollIntervalMs);
     }
   }
