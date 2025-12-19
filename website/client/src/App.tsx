@@ -489,6 +489,14 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/github/:owner/:repo/:branch/orchestrator"
+            element={
+              <ProtectedRoute>
+                <Orchestrator />
+              </ProtectedRoute>
+            }
+          />
           {/* Default workspace route redirects to code */}
           <Route
             path="/github/:owner/:repo/:branch"
