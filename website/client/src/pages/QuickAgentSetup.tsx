@@ -67,7 +67,7 @@ const activityInfo: Record<ActivityType, ActivityInfo> = {
   },
 };
 
-export default function QuickSessionSetup() {
+export default function QuickAgentSetup() {
   const navigate = useNavigate();
   const { activity } = useParams<{ activity: ActivityType }>();
   const user = useAuthStore((state) => state.user);
@@ -255,8 +255,8 @@ export default function QuickSessionSetup() {
         <div className="text-center">
           <h1 className="text-3xl font-bold text-base-content mb-4">Invalid Activity</h1>
           <p className="text-base-content/70 mb-6">The activity you requested does not exist.</p>
-          <button onClick={() => navigate('/sessions')} className="btn btn-primary">
-            Go to Sessions
+          <button onClick={() => navigate('/agents')} className="btn btn-primary">
+            Go to Agents
           </button>
         </div>
       </div>
@@ -336,11 +336,11 @@ export default function QuickSessionSetup() {
                           setRepoHighlightedIndex(-1);
                         }}
                         className={`w-full text-left px-4 py-2 text-sm hover:bg-primary focus:bg-primary hover:text-primary-content focus:text-primary-content focus:outline-none ${!selectedRepo ? 'bg-primary/20 font-semibold' : ''} ${repoHighlightedIndex === 0 ? 'bg-primary text-primary-content' : ''}`}
-                        title="Session won't be saved to a repository"
+                        title="Agent won't be saved to a repository"
                       >
                         <div>
                           <div>No repository</div>
-                          <div className="text-xs text-base-content/50">Session only (not saved)</div>
+                          <div className="text-xs text-base-content/50">Agent only (not saved)</div>
                         </div>
                       </button>
 
@@ -446,7 +446,7 @@ export default function QuickSessionSetup() {
                   Loading...
                 </>
               ) : (
-                'Start Session'
+                'Start Agent'
               )}
             </button>
           </div>

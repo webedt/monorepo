@@ -3,12 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { getApiBaseUrl } from '@/lib/api';
 
 /**
- * Session list update event types from the server
+ * Agent list update event types from the server
  */
-export type SessionUpdateType = 'created' | 'updated' | 'deleted' | 'status_changed';
+export type AgentUpdateType = 'created' | 'updated' | 'deleted' | 'status_changed';
 
-export interface SessionListEvent {
-  type: SessionUpdateType;
+export interface AgentListEvent {
+  type: AgentUpdateType;
   session: {
     id: string;
     status?: string;
@@ -18,18 +18,18 @@ export interface SessionListEvent {
   timestamp: string;
 }
 
-interface UseSessionListUpdatesOptions {
+interface UseAgentListUpdatesOptions {
   /** Whether to enable the SSE connection (default: true) */
   enabled?: boolean;
-  /** Callback when a session update is received */
-  onUpdate?: (event: SessionListEvent) => void;
+  /** Callback when an agent update is received */
+  onUpdate?: (event: AgentListEvent) => void;
 }
 
 /**
- * Hook to subscribe to real-time session list updates via SSE.
+ * Hook to subscribe to real-time agent list updates via SSE.
  *
- * This eliminates the need for polling the sessions list by receiving
- * push notifications when sessions are created, updated, or change status.
+ * This eliminates the need for polling the agents list by receiving
+ * push notifications when agents are created, updated, or change status.
  *
  * The hook automatically invalidates the React Query cache for the 'sessions'
  * query key when updates are received, triggering a refetch.
@@ -37,17 +37,17 @@ interface UseSessionListUpdatesOptions {
  * @example
  * ```tsx
  * // Basic usage - just invalidates the sessions query
- * useSessionListUpdates();
+ * useAgentListUpdates();
  *
  * // With custom callback
- * useSessionListUpdates({
+ * useAgentListUpdates({
  *   onUpdate: (event) => {
- *     console.log('Session updated:', event);
+ *     console.log('Agent updated:', event);
  *   }
  * });
  * ```
  */
-export function useSessionListUpdates(options: UseSessionListUpdatesOptions = {}) {
+export function useAgentListUpdates(options: UseAgentListUpdatesOptions = {}) {
   const { enabled = true, onUpdate } = options;
   const queryClient = useQueryClient();
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -67,13 +67,13 @@ export function useSessionListUpdates(options: UseSessionListUpdatesOptions = {}
     }
 
     const url = `${getApiBaseUrl()}/api/sessions/updates`;
-    console.log('[SessionListUpdates] Connecting to:', url);
+    console.log('[AgentListUpdates] Connecting to:', url);
 
     const eventSource = new EventSource(url, { withCredentials: true });
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
-      console.log('[SessionListUpdates] Connected');
+      console.log('[AgentListUpdates] Connected');
       reconnectAttemptRef.current = 0;
     };
 
@@ -81,17 +81,17 @@ export function useSessionListUpdates(options: UseSessionListUpdatesOptions = {}
     eventSource.addEventListener('connected', (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('[SessionListUpdates] Connection confirmed:', data);
+        console.log('[AgentListUpdates] Connection confirmed:', data);
       } catch {
         // Ignore parse errors
       }
     });
 
-    // Handle session events
-    const handleSessionEvent = (eventType: SessionUpdateType) => (event: MessageEvent) => {
+    // Handle agent events
+    const handleAgentEvent = (eventType: AgentUpdateType) => (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data) as SessionListEvent;
-        console.log(`[SessionListUpdates] Received ${eventType} event:`, data);
+        const data = JSON.parse(event.data) as AgentListEvent;
+        console.log(`[AgentListUpdates] Received ${eventType} event:`, data);
 
         // Call the user callback if provided
         onUpdateRef.current?.(data);
@@ -99,17 +99,17 @@ export function useSessionListUpdates(options: UseSessionListUpdatesOptions = {}
         // Invalidate the sessions query to trigger a refetch
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
       } catch (err) {
-        console.error('[SessionListUpdates] Error parsing event:', err);
+        console.error('[AgentListUpdates] Error parsing event:', err);
       }
     };
 
-    eventSource.addEventListener('created', handleSessionEvent('created'));
-    eventSource.addEventListener('updated', handleSessionEvent('updated'));
-    eventSource.addEventListener('deleted', handleSessionEvent('deleted'));
-    eventSource.addEventListener('status_changed', handleSessionEvent('status_changed'));
+    eventSource.addEventListener('created', handleAgentEvent('created'));
+    eventSource.addEventListener('updated', handleAgentEvent('updated'));
+    eventSource.addEventListener('deleted', handleAgentEvent('deleted'));
+    eventSource.addEventListener('status_changed', handleAgentEvent('status_changed'));
 
     eventSource.onerror = (error) => {
-      console.error('[SessionListUpdates] Error:', error);
+      console.error('[AgentListUpdates] Error:', error);
 
       // Close the current connection
       eventSource.close();
@@ -119,13 +119,13 @@ export function useSessionListUpdates(options: UseSessionListUpdatesOptions = {}
       if (reconnectAttemptRef.current < maxReconnectAttempts) {
         reconnectAttemptRef.current++;
         const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000);
-        console.log(`[SessionListUpdates] Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current})`);
+        console.log(`[AgentListUpdates] Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current})`);
 
         reconnectTimeoutRef.current = setTimeout(() => {
           connect();
         }, delay);
       } else {
-        console.warn('[SessionListUpdates] Max reconnect attempts reached, stopping');
+        console.warn('[AgentListUpdates] Max reconnect attempts reached, stopping');
       }
     };
   }, [queryClient]);
@@ -137,7 +137,7 @@ export function useSessionListUpdates(options: UseSessionListUpdatesOptions = {}
     }
 
     if (eventSourceRef.current) {
-      console.log('[SessionListUpdates] Disconnecting');
+      console.log('[AgentListUpdates] Disconnecting');
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }

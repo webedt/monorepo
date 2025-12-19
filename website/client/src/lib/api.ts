@@ -855,6 +855,119 @@ export const storageApi = {
 // Backwards compatibility alias
 export const storageWorkerApi = storageApi;
 
+// Live Chat API (branch-based workspace chat)
+export const liveChatApi = {
+  // Get messages for a branch-based live chat
+  getMessages: (owner: string, repo: string, branch: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi(`/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/messages${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Add a message to a branch-based live chat
+  addMessage: (owner: string, repo: string, branch: string, data: {
+    role: 'user' | 'assistant';
+    content: string;
+    images?: Array<{ id: string; data: string; mediaType: string; fileName?: string }>;
+  }) =>
+    fetchApi(`/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/messages`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  // Clear all messages for a branch-based live chat
+  clearMessages: (owner: string, repo: string, branch: string) =>
+    fetchApi(`/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/messages`, {
+      method: 'DELETE',
+    }),
+
+  // Get execute URL for SSE streaming
+  getExecuteUrl: (owner: string, repo: string, branch: string) =>
+    `${getApiBaseUrl()}/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/execute`,
+
+  // Create an EventSource for live chat execution
+  createExecuteEventSource: (owner: string, repo: string, branch: string, data: {
+    message: string;
+    images?: Array<{ id: string; data: string; mediaType: string; fileName?: string }>;
+  }) => {
+    const params = new URLSearchParams();
+    params.append('message', data.message);
+    if (data.images) {
+      params.append('images', JSON.stringify(data.images));
+    }
+
+    const fullUrl = `${getApiBaseUrl()}/api/live-chat/${owner}/${repo}/${encodeURIComponent(branch)}/execute?${params}`;
+    console.log('[LiveChat] Creating EventSource with URL:', fullUrl);
+
+    return new EventSource(fullUrl, {
+      withCredentials: true,
+    });
+  },
+};
+
+// Workspace API (collaboration - presence and events)
+export const workspaceApi = {
+  // Update presence on a branch
+  updatePresence: (data: {
+    owner: string;
+    repo: string;
+    branch: string;
+    page?: string;
+    cursorX?: number;
+    cursorY?: number;
+    selection?: {
+      filePath?: string;
+      startLine?: number;
+      endLine?: number;
+      startCol?: number;
+      endCol?: number;
+    };
+  }) =>
+    fetchApi('/api/workspace/presence', {
+      method: 'PUT',
+      body: data,
+    }),
+
+  // Get active users on a branch
+  getPresence: (owner: string, repo: string, branch: string) =>
+    fetchApi(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`),
+
+  // Remove presence (leaving workspace)
+  leaveWorkspace: (owner: string, repo: string, branch: string) =>
+    fetchApi(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`, {
+      method: 'DELETE',
+    }),
+
+  // Log a workspace event
+  logEvent: (data: {
+    owner: string;
+    repo: string;
+    branch: string;
+    eventType: string;
+    page?: string;
+    path?: string;
+    payload?: Record<string, unknown>;
+  }) =>
+    fetchApi('/api/workspace/events', {
+      method: 'POST',
+      body: data,
+    }),
+
+  // Get recent events for a branch
+  getEvents: (owner: string, repo: string, branch: string, options?: { limit?: number; since?: string }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.since) params.append('since', options.since);
+    const queryString = params.toString();
+    return fetchApi(`/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Get event stream URL (SSE)
+  getEventStreamUrl: (owner: string, repo: string, branch: string) =>
+    `${getApiBaseUrl()}/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}/stream`,
+};
+
 // Execute API (SSE)
 export function createExecuteEventSource(data: {
   userRequest: string;

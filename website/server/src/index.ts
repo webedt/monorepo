@@ -60,6 +60,8 @@ const ALLOWED_API_ROUTES = [
   '/api/admin',          // Admin (requires admin auth anyway)
   '/api/storage',        // Storage operations (file listing, read, write, delete)
   '/api/logs',           // Debug logs (for debugging, may disable in production)
+  '/api/live-chat',      // Live Chat for branch-based workspace
+  '/api/workspace',      // Workspace presence and events for collaboration
 ];
 
 // Block internal-only routes explicitly

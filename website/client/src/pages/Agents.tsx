@@ -6,7 +6,7 @@ import { useAuthStore, useSessionLastPageStore, useRecentReposStore, type Sessio
 import ChatInput, { type ImageAttachment } from '@/components/ChatInput';
 import type { ChatSession, GitHubRepository } from '@/shared';
 import { truncateSessionName } from '@/lib/utils';
-import { useSessionListUpdates } from '@/hooks/useSessionListUpdates';
+import { useAgentListUpdates } from '@/hooks/useAgentListUpdates';
 
 // Helper to get the session URL with last visited page
 function getSessionUrl(sessionId: string, getLastPage: (id: string) => string): string {
@@ -40,7 +40,7 @@ function getPageIcon(page: SessionPageName): React.ReactNode {
   }
 }
 
-export default function Sessions() {
+export default function Agents() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -68,8 +68,8 @@ export default function Sessions() {
     queryFn: sessionsApi.list,
   });
 
-  // Subscribe to real-time session updates via SSE (replaces polling)
-  useSessionListUpdates();
+  // Subscribe to real-time agent updates via SSE (replaces polling)
+  useAgentListUpdates();
 
   const allSessions: ChatSession[] = data?.data?.sessions || [];
 
@@ -356,9 +356,9 @@ export default function Sessions() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
         <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold text-base-content mb-2">My Sessions</h1>
+          <h1 className="text-3xl font-bold text-base-content mb-2">My Agents</h1>
           <p className="text-sm text-base-content/70">
-            Quick start below, or view and manage all my sessions
+            Quick start below, or view and manage all my agents
           </p>
         </div>
 
@@ -381,7 +381,7 @@ export default function Sessions() {
             </div>
             <input
               type="text"
-              placeholder="Search sessions by title, repository, branch, or status..."
+              placeholder="Search agents by title, repository, branch, or status..."
               className="input input-bordered w-full pl-10"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -409,7 +409,7 @@ export default function Sessions() {
           </div>
           {searchQuery && (
             <p className="text-sm text-base-content/70 mt-2 text-center">
-              Found {sessions.length} session{sessions.length !== 1 ? 's' : ''} matching "{searchQuery}"
+              Found {sessions.length} agent{sessions.length !== 1 ? 's' : ''} matching "{searchQuery}"
             </p>
           )}
         </div>
@@ -436,14 +436,14 @@ export default function Sessions() {
       {isLoading && (
         <div className="text-center py-12">
           <span className="loading loading-spinner loading-lg text-primary"></span>
-          <p className="mt-2 text-base-content/70">Loading sessions...</p>
+          <p className="mt-2 text-base-content/70">Loading agents...</p>
         </div>
       )}
 
       {error && (
         <div className="alert alert-error">
           <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          <span>{error instanceof Error ? error.message : 'Failed to load sessions'}</span>
+          <span>{error instanceof Error ? error.message : 'Failed to load agents'}</span>
         </div>
       )}
 
@@ -462,14 +462,14 @@ export default function Sessions() {
               d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
             />
           </svg>
-          <h3 className="mt-2 text-sm font-medium text-base-content">No sessions</h3>
+          <h3 className="mt-2 text-sm font-medium text-base-content">No agents</h3>
           <p className="mt-1 text-sm text-base-content/70">
             Get started by using the quick start chat above.
           </p>
           <button
             onClick={() => navigate('/trash')}
             className="btn btn-ghost btn-sm mt-4"
-            title="View deleted sessions"
+            title="View deleted agents"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -495,7 +495,7 @@ export default function Sessions() {
             <div className="bg-primary/10 border border-primary rounded-md px-4 py-3 mb-4 flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <span className="text-sm font-medium">
-                  {selectedIds.length} session{selectedIds.length !== 1 ? 's' : ''} selected
+                  {selectedIds.length} agent{selectedIds.length !== 1 ? 's' : ''} selected
                 </span>
                 <button
                   onClick={() => setSelectedIds([])}
@@ -540,7 +540,7 @@ export default function Sessions() {
                   <button
                     onClick={() => syncMutation.mutate()}
                     className="btn btn-ghost btn-sm"
-                    title="Sync sessions from Anthropic"
+                    title="Sync agents from Anthropic"
                     disabled={syncMutation.isPending}
                   >
                     {syncMutation.isPending ? (
@@ -566,7 +566,7 @@ export default function Sessions() {
                   <button
                     onClick={() => navigate('/trash')}
                     className="btn btn-ghost btn-sm"
-                    title="View deleted sessions"
+                    title="View deleted agents"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -682,7 +682,7 @@ export default function Sessions() {
                               handleEdit(session);
                             }}
                             className="btn btn-ghost btn-xs btn-circle"
-                            title="Edit session title"
+                            title="Edit agent title"
                           >
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
@@ -699,7 +699,7 @@ export default function Sessions() {
                               handleDelete(session.id);
                             }}
                             className="btn btn-ghost btn-xs btn-circle text-error"
-                            title="Delete session"
+                            title="Delete agent"
                           >
                             <svg
                               xmlns="http://www.w3.org/2000/svg"

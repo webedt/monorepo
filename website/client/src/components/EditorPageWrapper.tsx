@@ -1,4 +1,4 @@
-import SessionLayout from './SessionLayout';
+import SessionLayout from './AgentLayout';
 import type { GitHubRepository } from '@/shared';
 
 interface EditorPageWrapperProps {

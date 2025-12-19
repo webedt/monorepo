@@ -11,11 +11,11 @@ import Dashboard from '@/pages/Dashboard';
 import Store from '@/pages/Store';
 import Library from '@/pages/Library';
 import Community from '@/pages/Community';
-import Sessions from '@/pages/Sessions';
+import Agents from '@/pages/Agents';
 import Trash from '@/pages/Trash';
 import Chat from '@/pages/Chat';
 import QuickChatSetup from '@/pages/QuickChatSetup';
-import QuickSessionSetup from '@/pages/QuickSessionSetup';
+import QuickAgentSetup from '@/pages/QuickAgentSetup';
 import Settings from '@/pages/Settings';
 import UserAdministration from '@/pages/UserAdministration';
 import AdminLogs from '@/pages/AdminLogs';
@@ -29,6 +29,15 @@ import LibraryItemPage from '@/pages/LibraryItemPage';
 import StoreItemDetail from '@/pages/StoreItemDetail';
 import SplitViewRouter from '@/components/SplitViewRouter';
 import ImageEditor from '@/pages/editor/ImageEditor';
+import Workspace from '@/pages/Workspace';
+import {
+  WorkspaceCode,
+  WorkspaceImages,
+  WorkspaceSounds,
+  WorkspaceScenes,
+  WorkspaceChat,
+  WorkspacePreview,
+} from '@/pages/workspace';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,7 +58,8 @@ function DefaultRoute() {
     store: '/store',
     library: '/library',
     community: '/community',
-    sessions: '/sessions',
+    sessions: '/agents', // Keep 'sessions' key for backwards compat, redirect to /agents
+    agents: '/agents',
   };
 
   // If user has a default landing page set, redirect to it
@@ -99,9 +109,10 @@ function App() {
     const pathSegments = pathname.split('/').filter(Boolean);
 
     // App routes that should not be treated as path-based deployment prefixes
-    const appRoutes = ['login', 'register', 'session', 'sessions', 'trash', 'settings', 'admin',
+    // Note: 'github' is included because /github/:owner/:repo/:branch/* are workspace routes
+    const appRoutes = ['login', 'register', 'session', 'sessions', 'agents', 'trash', 'settings', 'admin',
                        'code', 'images', 'sound', 'scene-editor', 'preview', 'library', 'community',
-                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor'];
+                       'item', 'store', 'quick-setup', 'dashboard', 'landing', 'editor', 'image-editor', 'workspace', 'github'];
 
     if (pathSegments.length >= 1 && !appRoutes.includes(pathSegments[0])) {
       // Check for /github/ prefix pattern: /github/owner/repo/branch/
@@ -188,18 +199,27 @@ function App() {
               }
             />
             <Route
-              path="/sessions"
+              path="/agents"
               element={
                 <ProtectedRoute>
-                  <Sessions />
+                  <Agents />
                 </ProtectedRoute>
               }
             />
+            {/* Redirect /sessions to /agents for backwards compatibility */}
+            <Route
+              path="/sessions"
+              element={<Navigate to="/agents" replace />}
+            />
             <Route
               path="/editor/sessions"
+              element={<Navigate to="/agents" replace />}
+            />
+            <Route
+              path="/editor/agents"
               element={
                 <ProtectedRoute>
-                  <Sessions />
+                  <Agents />
                 </ProtectedRoute>
               }
             />
@@ -208,6 +228,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Trash />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/workspace"
+              element={
+                <ProtectedRoute>
+                  <Workspace />
                 </ProtectedRoute>
               }
             />
@@ -223,7 +251,7 @@ function App() {
               path="/quick-setup/:activity"
               element={
                 <ProtectedRoute>
-                  <QuickSessionSetup />
+                  <QuickAgentSetup />
                 </ProtectedRoute>
               }
             />
@@ -401,6 +429,61 @@ function App() {
                 <SplitViewRouter />
               </ProtectedRoute>
             }
+          />
+
+          {/* Live Workspace routes - /github/:owner/:repo/:branch/:page */}
+          <Route
+            path="/github/:owner/:repo/:branch/code"
+            element={
+              <ProtectedRoute>
+                <WorkspaceCode />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/images"
+            element={
+              <ProtectedRoute>
+                <WorkspaceImages />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/sounds"
+            element={
+              <ProtectedRoute>
+                <WorkspaceSounds />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/scenes"
+            element={
+              <ProtectedRoute>
+                <WorkspaceScenes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/chat"
+            element={
+              <ProtectedRoute>
+                <WorkspaceChat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/github/:owner/:repo/:branch/preview"
+            element={
+              <ProtectedRoute>
+                <WorkspacePreview />
+              </ProtectedRoute>
+            }
+          />
+          {/* Default workspace route redirects to code */}
+          <Route
+            path="/github/:owner/:repo/:branch"
+            element={<Navigate to="code" replace />}
           />
 
           <Route path="*" element={<Navigate to="/" replace />} />

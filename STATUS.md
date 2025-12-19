@@ -2,7 +2,7 @@
 
 > **Purpose:** This file tracks implementation progress for the autonomous development CLI. Read this file to understand what's been built, what's prioritized, and where to find key files.
 
-**Last Updated:** 2025-12-14
+**Last Updated:** 2025-12-18
 
 ---
 
@@ -114,16 +114,29 @@ Long-term vision features.
 | Moderation tools | ❌ Not Started | - | |
 | Notifications | ❌ Not Started | - | Browser notifications exist for sessions only |
 
-### Editor - Session Management
+### Editor - Remote Task Agents
 | Feature | Status | Key Files | Notes |
 |---------|--------|-----------|-------|
-| Session CRUD | ✅ Complete | `internal-api-server/src/routes/sessions.ts`, `website/client/src/pages/Sessions.tsx` | |
-| Git branch-based sessions | ✅ Complete | `internal-api-server/src/services/github/` | Auto-generated branch names |
-| Session persistence | ✅ Complete | `internal-api-server/src/db/schema.ts` | PostgreSQL + MinIO |
-| Session replay | ✅ Complete | `internal-api-server/src/routes/resume.ts` | SSE event replay |
+| Agent CRUD | ✅ Complete | `internal-api-server/src/api/routes/sessions.ts`, `website/client/src/pages/Agents.tsx` | Renamed from Sessions |
+| Git branch-based agents | ✅ Complete | `internal-api-server/src/logic/github/` | Auto-generated branch names |
+| Agent persistence | ✅ Complete | `internal-api-server/src/logic/db/schema.ts` | PostgreSQL |
+| Agent replay | ✅ Complete | `internal-api-server/src/api/routes/resume.ts` | SSE event replay |
 | Trash/restore | ✅ Complete | `website/client/src/pages/Trash.tsx` | Soft delete with restore |
-| Session sidebar | ✅ Complete | `website/client/src/components/SessionsSidebar.tsx` | |
-| Real-time collaboration (CRDT) | ❌ Not Started | - | Has session locking only |
+| Agent sidebar | ✅ Complete | `website/client/src/components/AgentsSidebar.tsx` | |
+| Claude Remote Sessions | ✅ Complete | `internal-api-server/src/api/routes/internalSessions.ts` | Anthropic Remote Sessions API |
+
+### Live Workspace
+| Feature | Status | Key Files | Notes |
+|---------|--------|-----------|-------|
+| Branch Selection UI | ✅ Complete | `website/client/src/pages/Workspace.tsx` | Owner/repo/branch picker |
+| Workspace Layout | ✅ Complete | `website/client/src/components/workspace/WorkspaceLayout.tsx` | Navigation and presence |
+| Code Editor (GitHub API) | ✅ Complete | `website/client/src/pages/workspace/WorkspaceCode.tsx` | GitHub API file ops |
+| Image Gallery | ✅ Complete | `website/client/src/pages/workspace/WorkspaceImages.tsx` | Base64 image preview |
+| Sound Player | ✅ Complete | `website/client/src/pages/workspace/WorkspaceSounds.tsx` | Audio playback |
+| Scene Editor | ✅ Complete | `website/client/src/pages/workspace/WorkspaceScenes.tsx` | Scene file editing |
+| Live Chat | ✅ Complete | `website/client/src/pages/workspace/WorkspaceChat.tsx`, `internal-api-server/src/api/routes/liveChat.ts` | Branch-based AI chat |
+| Preview | ✅ Complete | `website/client/src/pages/workspace/WorkspacePreview.tsx` | Live deployment preview |
+| Real-time collaboration | 🟡 Partial | `internal-api-server/src/api/routes/workspace.ts` | Presence tracking, needs CRDT |
 
 ### Editor - Chat (AI Assistant)
 | Feature | Status | Key Files | Notes |
@@ -219,6 +232,21 @@ Long-term vision features.
 ---
 
 ## Changelog
+
+### 2025-12-18
+- Major refactoring: Decoupled Sessions from Branches
+  - Renamed "Sessions" to "Agents" (Remote Task Agents)
+  - Added new "Live Workspace" feature for branch-based editing
+  - Implemented GitHub API integration for workspace pages (Code, Images, Sounds, Scenes)
+  - Added Live Chat with branch-based message storage
+  - Implemented collaborative layer with presence tracking and event logging
+  - Added database migration for workspace tables (live_chat_messages, workspace_presence, workspace_events)
+  - Key files:
+    - `website/client/src/pages/Workspace.tsx` - Branch selection UI
+    - `website/client/src/pages/workspace/*.tsx` - Workspace page components
+    - `internal-api-server/src/api/routes/liveChat.ts` - Live chat API
+    - `internal-api-server/src/api/routes/workspace.ts` - Workspace presence/events API
+    - `internal-api-server/drizzle/0003_add_workspace_tables.sql` - Migration
 
 ### 2025-12-14
 - Documentation verification completed (Issue #713)

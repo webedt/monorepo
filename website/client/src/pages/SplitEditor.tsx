@@ -1,6 +1,6 @@
 import { useParams, Navigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import SessionLayout from '@/components/SessionLayout';
+import SessionLayout from '@/components/AgentLayout';
 import SplitEditorLayout, { parseSplitRoute } from '@/components/SplitEditorLayout';
 import { sessionsApi, githubApi } from '@/lib/api';
 import { useAuthStore, useSplitViewStore } from '@/lib/store';
