@@ -1698,6 +1698,8 @@ const streamEventsHandler = async (req: Request, res: Response) => {
 
             let eventCount = 0;
             let foundNewUserMessage = false;
+            // Track stored event UUIDs to prevent duplicates
+            const storedEventUuids = new Set<string>();
             const result = await client.resume(
               session.remoteSessionId,
               prompt,
@@ -1769,11 +1771,30 @@ const streamEventsHandler = async (req: Request, res: Response) => {
                 });
                 // Use sseWrite with flush to ensure data gets through proxy chain
                 sseWrite(res, sseData);
-                // Store event in database
+
+                // Store event in database - deduplicate by UUID
+                const eventUuid = (event as { uuid?: string }).uuid;
+                if (eventUuid && storedEventUuids.has(eventUuid)) {
+                  // Skip duplicate event storage
+                  logger.debug(`Resume event #${eventCount} - SKIPPED (duplicate)`, {
+                    component: 'Sessions',
+                    eventType,
+                    sessionId,
+                    eventUuid,
+                  });
+                  return;
+                }
+
                 await db.insert(events).values({
                   chatSessionId: sessionId,
                   eventData: eventWithTimestamp,
                 });
+
+                // Mark as stored to prevent future duplicates
+                if (eventUuid) {
+                  storedEventUuids.add(eventUuid);
+                }
+
                 logger.info(`Resume event #${eventCount} - STORED IN DB`, {
                   component: 'Sessions',
                   eventType,

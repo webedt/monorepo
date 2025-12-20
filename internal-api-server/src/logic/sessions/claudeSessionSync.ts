@@ -442,6 +442,37 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           }
         }
 
+        // Third fallback: Match by time window alone for running sessions
+        // This catches cases where remote session doesn't have repo info yet
+        if (!matchingExistingSession) {
+          const timeOnlyMatches = await db
+            .select()
+            .from(chatSessions)
+            .where(
+              and(
+                eq(chatSessions.userId, userId),
+                isNull(chatSessions.remoteSessionId), // Only match sessions without remoteSessionId
+                isNull(chatSessions.deletedAt),
+                eq(chatSessions.status, 'running'), // Must be running (actively being created)
+                gte(chatSessions.createdAt, fiveMinutesBefore),
+                lte(chatSessions.createdAt, fiveMinutesAfter)
+              )
+            )
+            .orderBy(chatSessions.createdAt)
+            .limit(1);
+
+          if (timeOnlyMatches.length > 0) {
+            matchingExistingSession = timeOnlyMatches[0];
+            logger.info(`[SessionSync] Found matching session by time window only (running session)`, {
+              component: 'SessionSync',
+              existingSessionId: matchingExistingSession.id,
+              existingCreatedAt: matchingExistingSession.createdAt,
+              remoteSessionId: remoteSession.id,
+              remoteCreatedAt: remoteSession.created_at
+            });
+          }
+        }
+
         // If we found a matching session, link it to the remote session instead of creating duplicate
         if (matchingExistingSession) {
           // Extract total cost from result event

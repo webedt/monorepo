@@ -1001,33 +1001,17 @@ export class ChatPage extends Page<ChatPageOptions> {
       console.log('[ChatPage] EventSource connection opened');
     };
 
-    // Handler for processing event data
-    const handleEventData = (event: MessageEvent) => {
-      try {
-        console.log('[ChatPage] Raw SSE message received:', event.data.substring(0, 200));
-        const data = JSON.parse(event.data);
-        this.handleStreamEvent(data);
-      } catch (error) {
-        console.error('Failed to parse stream event:', error);
-      }
-    };
-
-    // Listen for default (unnamed) message events
-    es.onmessage = handleEventData;
-
-    // Listen for named events that the server might send
-    // The server uses named events like "event: completed\n" for some event types
-    const namedEventTypes = ['connected', 'completed', 'error'];
-    for (const eventType of namedEventTypes) {
-      es.addEventListener(eventType, (event: Event) => {
-        const messageEvent = event as MessageEvent;
+    // Only use named event listeners - don't use onmessage to avoid duplicates
+    // The server sends events with specific types that we listen for
+    const eventTypes = ['connected', 'message', 'session_name', 'assistant_message',
+                        'assistant', 'user', 'tool_use', 'tool_result', 'completed',
+                        'error', 'session-created', 'input_preview', 'submission_preview',
+                        'title_generation', 'result'];
+    for (const eventType of eventTypes) {
+      es.addEventListener(eventType, (event: MessageEvent) => {
         try {
-          const data = JSON.parse(messageEvent.data);
-          // Add the event type to the data if not already present
-          if (!data.type) {
-            data.type = eventType;
-          }
-          this.handleStreamEvent(data);
+          const data = JSON.parse(event.data);
+          this.handleStreamEvent({ ...data, type: eventType });
         } catch (error) {
           console.error(`Failed to parse ${eventType} event:`, error);
         }
@@ -1108,6 +1092,18 @@ export class ChatPage extends Page<ChatPageOptions> {
           this.updateHeader();
         }
         return; // Don't create a message for session_name
+
+      case 'title_generation':
+        // Update the session title when title is successfully generated
+        if (event.status === 'success' && event.title && this.session) {
+          this.session.userRequest = event.title;
+          // Also update branch if provided
+          if (event.branch_name) {
+            this.session.branch = event.branch_name;
+          }
+          this.updateHeader();
+        }
+        break; // Still create a message to show title generation status
     }
 
     // Use the same conversion logic as loadMessages for consistency

@@ -341,6 +341,11 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
+    // Track event UUIDs to prevent duplicate storage
+    // This is critical because the Claude API may send the same event multiple times
+    // (e.g., during polling or reconnection), and we need to ensure each event is stored only once
+    const storedEventUuids = new Set<string>();
+
     // Helper to send SSE events
     // Pass events through directly without modification - frontend handles all formatting
     // Use named SSE events so frontend can listen with addEventListener(eventType)
@@ -364,12 +369,28 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         logger.warn('Failed to write SSE event', { component: 'ExecuteRemoteRoute', error });
       }
 
-      // Store event in database
+      // Store event in database - deduplicate by UUID
+      const eventUuid = (event as any).uuid;
+      if (eventUuid && storedEventUuids.has(eventUuid)) {
+        // Skip duplicate event
+        logger.debug('Skipping duplicate event', {
+          component: 'ExecuteRemoteRoute',
+          chatSessionId,
+          eventUuid,
+          eventType: event.type,
+        });
+        return;
+      }
+
       try {
         await db.insert(events).values({
           chatSessionId,
           eventData: event,
         });
+        // Mark as stored to prevent future duplicates
+        if (eventUuid) {
+          storedEventUuids.add(eventUuid);
+        }
       } catch (error) {
         logger.warn('Failed to store event', { component: 'ExecuteRemoteRoute', error });
       }
@@ -396,8 +417,8 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       }
 
       // Also capture title from title_generation events (success status)
-      // Only save title for NEW sessions (not on resume/subsequent messages)
-      if (!websiteSessionId && event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
+      // Update title for any session that receives a title_generation event
+      if (event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
         const newTitle = (event as any).title;
         const newBranch = (event as any).branch_name;
         try {
