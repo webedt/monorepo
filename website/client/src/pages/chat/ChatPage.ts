@@ -51,6 +51,7 @@ const EVENT_EMOJIS: Record<string, string> = {
   completed: '🏁',
   error: '❌',
   heartbeat: '💓',
+  thinking: '🧠',
 };
 
 // Default event filters
@@ -73,6 +74,7 @@ const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   title_generation: false,
   env_manager_log: false,
   heartbeat: false,
+  thinking: true,
 };
 
 interface ChatPageOptions extends PageOptions {
@@ -760,6 +762,30 @@ export class ChatPage extends Page<ChatPageOptions> {
     for (const block of contentArray) {
       if (block.type === 'text' && block.text) {
         textParts.push(block.text);
+      } else if (block.type === 'thinking' && block.thinking) {
+        // If we have accumulated text, create a text message first
+        if (textParts.length > 0) {
+          messages.push({
+            id: `assistant-text-${Date.now()}-${Math.random()}`,
+            type: 'assistant',
+            content: textParts.join('\n'),
+            timestamp,
+            model,
+          });
+          textParts = [];
+        }
+
+        // Create thinking message as a status line
+        // Truncate thinking content for display (show first line or first 100 chars)
+        const thinkingText = block.thinking;
+        const firstLine = thinkingText.split('\n')[0];
+        const displayText = firstLine.length > 100 ? firstLine.substring(0, 100) + '...' : firstLine;
+        messages.push({
+          id: `thinking-${Date.now()}-${Math.random()}`,
+          type: 'thinking',
+          content: displayText || 'Thinking...',
+          timestamp,
+        });
       } else if (block.type === 'tool_use') {
         // If we have accumulated text, create a text message first
         if (textParts.length > 0) {
@@ -789,7 +815,6 @@ export class ChatPage extends Page<ChatPageOptions> {
           toolResult: toolResult,
         });
       }
-      // Skip thinking blocks - they're internal
     }
 
     // Add any remaining text
@@ -828,8 +853,7 @@ export class ChatPage extends Page<ChatPageOptions> {
           if (typeof block === 'string') return block;
           if (block.type === 'text' && block.text) return block.text;
           if (block.type === 'tool_use') return `[Using tool: ${block.name}]`;
-          // Skip thinking blocks - they're internal
-          if (block.type === 'thinking') return '';
+          if (block.type === 'thinking') return ''; // Thinking is handled separately as status message
           return '';
         })
         .filter(Boolean)
@@ -1109,7 +1133,7 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     // Status message types get compact single-line rendering with emoji
     // Note: tool_use is handled separately in renderMessages() with ToolDetails component
-    const statusTypes = ['message', 'input_preview', 'submission_preview', 'system'];
+    const statusTypes = ['message', 'input_preview', 'submission_preview', 'system', 'thinking'];
     if (statusTypes.includes(message.type)) {
       const emoji = EVENT_EMOJIS[message.type] || '📦';
       const timestampHtml = this.showTimestamps
