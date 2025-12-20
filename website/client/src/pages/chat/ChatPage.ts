@@ -20,6 +20,8 @@ interface ChatMessage {
   // For tool_use messages
   toolUse?: ToolUseBlock;
   toolResult?: ToolResult;
+  // For thinking messages - stores full content when truncated
+  fullContent?: string;
 }
 
 interface RawEvent {
@@ -779,12 +781,15 @@ export class ChatPage extends Page<ChatPageOptions> {
         // Truncate thinking content for display (show first line or first 100 chars)
         const thinkingText = block.thinking;
         const firstLine = thinkingText.split('\n')[0];
+        const isTruncated = firstLine.length > 100 || thinkingText.includes('\n');
         const displayText = firstLine.length > 100 ? firstLine.substring(0, 100) + '...' : firstLine;
         messages.push({
           id: `thinking-${Date.now()}-${Math.random()}`,
           type: 'thinking',
           content: displayText || 'Thinking...',
           timestamp,
+          // Store full content only if truncated
+          fullContent: isTruncated ? thinkingText : undefined,
         });
       } else if (block.type === 'tool_use') {
         // If we have accumulated text, create a text message first
@@ -1073,7 +1078,41 @@ export class ChatPage extends Page<ChatPageOptions> {
           this.messagesContainer.insertAdjacentHTML('beforeend', html);
         }
       }
+
+      // Add click handlers for expandable thinking messages
+      this.setupThinkingClickHandlers();
     }
+  }
+
+  /**
+   * Set up click handlers for expandable thinking messages
+   */
+  private setupThinkingClickHandlers(): void {
+    if (!this.messagesContainer) return;
+
+    const expandableThinkings = this.messagesContainer.querySelectorAll('.message-thinking-expandable');
+    expandableThinkings.forEach((el) => {
+      el.addEventListener('click', (e) => {
+        // Don't toggle if clicking on a link or other interactive element
+        if ((e.target as HTMLElement).tagName === 'A') return;
+
+        const collapsed = el.querySelector('.thinking-collapsed') as HTMLElement;
+        const expanded = el.querySelector('.thinking-expanded') as HTMLElement;
+
+        if (collapsed && expanded) {
+          const isExpanded = collapsed.style.display === 'none';
+          if (isExpanded) {
+            // Collapse
+            collapsed.style.display = '';
+            expanded.style.display = 'none';
+          } else {
+            // Expand
+            collapsed.style.display = 'none';
+            expanded.style.display = '';
+          }
+        }
+      });
+    });
   }
 
   private renderRawEvents(): void {
@@ -1139,6 +1178,24 @@ export class ChatPage extends Page<ChatPageOptions> {
       const timestampHtml = this.showTimestamps
         ? `<span class="status-timestamp">${time}</span>`
         : '';
+
+      // Thinking messages with fullContent are expandable
+      if (message.type === 'thinking' && message.fullContent) {
+        const escapedFullContent = this.escapeHtml(message.fullContent);
+        return `
+          <div class="chat-message message-system message-thinking-expandable" data-message-id="${message.id}">
+            <div class="message-bubble">
+              <div class="message-content">
+                ${timestampHtml}
+                <span class="status-emoji">${emoji}</span>
+                <span class="status-text thinking-collapsed">${escapedContent}</span>
+                <span class="status-text thinking-expanded" style="display: none;">${escapedFullContent}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
       return `
         <div class="chat-message message-system">
           <div class="message-bubble">

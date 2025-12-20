@@ -253,6 +253,20 @@
   display: none;
 }
 
+/* Expandable thinking messages */
+.message-thinking-expandable {
+  cursor: pointer;
+}
+
+.message-thinking-expandable:hover .status-text {
+  color: var(--color-text-primary);
+}
+
+.message-thinking-expandable .thinking-expanded {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .message-error .message-bubble {
   background: var(--color-error-bg);
   color: var(--color-error);
