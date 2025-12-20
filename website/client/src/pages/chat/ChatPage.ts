@@ -1247,6 +1247,39 @@ export class ChatPage extends Page<ChatPageOptions> {
       return `__CODE_BLOCK_${idx}__`;
     });
 
+    // Process tables (before other markdown to avoid conflicts)
+    const tables: string[] = [];
+    formatted = formatted.replace(/^(\|.+\|)\n(\|[-:| ]+\|)\n((?:\|.+\|\n?)+)/gm, (match) => {
+      const idx = tables.length;
+      const lines = match.trim().split('\n');
+      if (lines.length < 2) return match;
+
+      // Parse header row
+      const headerCells = lines[0].split('|').filter(cell => cell.trim());
+      // Skip separator row (lines[1])
+      // Parse data rows
+      const dataRows = lines.slice(2).map(line =>
+        line.split('|').filter(cell => cell.trim())
+      );
+
+      let tableHtml = '<table class="md-table"><thead><tr>';
+      headerCells.forEach(cell => {
+        tableHtml += `<th>${cell.trim()}</th>`;
+      });
+      tableHtml += '</tr></thead><tbody>';
+      dataRows.forEach(row => {
+        tableHtml += '<tr>';
+        row.forEach(cell => {
+          tableHtml += `<td>${cell.trim()}</td>`;
+        });
+        tableHtml += '</tr>';
+      });
+      tableHtml += '</tbody></table>';
+
+      tables.push(tableHtml);
+      return `__TABLE_${idx}__`;
+    });
+
     // Process other markdown
     formatted = formatted
       // Inline code
@@ -1273,6 +1306,11 @@ export class ChatPage extends Page<ChatPageOptions> {
       .replace(/(<li class="md-li">[\s\S]*?<\/li>)(\s*<li class="md-li">)/g, '$1$2')
       // Line breaks (but not after block elements)
       .replace(/\n(?!<)/g, '<br>');
+
+    // Restore tables
+    tables.forEach((table, idx) => {
+      formatted = formatted.replace(`__TABLE_${idx}__`, table);
+    });
 
     // Restore code blocks
     codeBlocks.forEach((block, idx) => {
