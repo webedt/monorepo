@@ -777,6 +777,110 @@ router.post('/:id/abort', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// Send a follow-up message to an existing session (triggers resume via internal sessions)
+router.post('/:id/send', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+    const { content } = req.body;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    if (!content || typeof content !== 'string') {
+      res.status(400).json({ success: false, error: 'Message content is required' });
+      return;
+    }
+
+    // Verify session exists and belongs to user
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          eq(chatSessions.userId, authReq.user!.id),
+          isNull(chatSessions.deletedAt)
+        )
+      )
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (!session.remoteSessionId) {
+      res.status(400).json({ success: false, error: 'Session has no remote session ID - cannot send follow-up message' });
+      return;
+    }
+
+    // Get Claude auth for the user
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, authReq.user!.id))
+      .limit(1);
+
+    if (!user?.claude_auth) {
+      res.status(401).json({ success: false, error: 'Claude authentication not configured' });
+      return;
+    }
+
+    // Parse Claude auth
+    let claudeAuth: ClaudeAuth;
+    try {
+      claudeAuth = typeof user.claude_auth === 'string'
+        ? JSON.parse(user.claude_auth)
+        : user.claude_auth as ClaudeAuth;
+    } catch {
+      res.status(401).json({ success: false, error: 'Invalid Claude authentication data' });
+      return;
+    }
+
+    // Ensure we have a valid token
+    const validAuth = await ensureValidToken(claudeAuth);
+    if (!validAuth) {
+      res.status(401).json({ success: false, error: 'Claude token expired and could not be refreshed' });
+      return;
+    }
+
+    // Update session status to running
+    await db.update(chatSessions)
+      .set({ status: 'running' })
+      .where(eq(chatSessions.id, sessionId));
+
+    // Store the user message in the database for the stream to pick up
+    // The actual resume will happen when the client connects to the SSE stream
+    // Store a pending message event that the stream handler will use
+    const userMessageEvent = {
+      type: 'pending_user_message',
+      content: content,
+      timestamp: new Date().toISOString(),
+      source: 'user',
+    };
+
+    await db.insert(events).values({
+      chatSessionId: sessionId,
+      eventData: userMessageEvent,
+    });
+
+    logger.info(`Queued follow-up message for session ${sessionId}`, {
+      component: 'Sessions',
+      sessionId,
+      contentLength: content.length,
+    });
+
+    // Return success - the client will connect to the SSE stream which handles the actual resume
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Send message error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to send message' });
+  }
+});
+
 // Bulk delete chat sessions (soft delete with branch cleanup)
 router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => {
   try {
