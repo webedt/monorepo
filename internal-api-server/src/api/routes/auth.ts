@@ -6,13 +6,13 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import { generateIdFromEntropySize } from 'lucia';
-import { db, users } from '../../logic/db/index.js';
-import { lucia } from '../../logic/auth/lucia.js';
+import { db, users } from '@webedt/shared';
+import { lucia } from '@webedt/shared';
 import { eq } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
-import { ensureValidToken, ClaudeAuth } from '../../logic/auth/claudeAuth.js';
-import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '../../logic/auth/codexAuth.js';
-import { logger } from '../../logic/utils/logger.js';
+import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
+import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '@webedt/shared';
+import { logger } from '@webedt/shared';
 
 const router = Router();
 

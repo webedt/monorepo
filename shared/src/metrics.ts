@@ -5,7 +5,7 @@
  * API call success rates, task completion times, and error rates.
  */
 
-import { logger } from '@webedt/shared';
+import { logger } from './logger.js';
 import { circuitBreakerRegistry } from './circuitBreaker.js';
 
 export interface MetricLabels {

@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { db, chatSessions, events, messages } from '../../logic/db/index.js';
+import { db, chatSessions, events, messages } from '@webedt/shared';
 import { eq, desc, and, lt, sql, count } from 'drizzle-orm';
 
 export const sessionCommand = new Command('session')

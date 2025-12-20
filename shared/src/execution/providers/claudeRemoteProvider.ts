@@ -11,8 +11,8 @@ import {
   type CreateSessionParams,
   type TitleGenerationEvent,
   generateTitle,
-} from '@webedt/shared';
-import { logger } from '@webedt/shared';
+} from '../../claudeRemote/index.js';
+import { logger } from '../../logger.js';
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL, CLAUDE_ORG_UUID, CLAUDE_COOKIES, OPENROUTER_API_KEY } from '../../config/env.js';
 import type {

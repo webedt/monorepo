@@ -4,11 +4,11 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users } from '../../logic/db/index.js';
+import { db, users } from '@webedt/shared';
 import { eq } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { shouldRefreshToken, refreshClaudeToken, type ClaudeAuth } from '../../logic/auth/claudeAuth.js';
+import { shouldRefreshClaudeToken, refreshClaudeToken, type ClaudeAuth } from '@webedt/shared';
 import { logger } from '@webedt/shared';
 
 const router = Router();
@@ -92,7 +92,7 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
     const claudeAuth = user.claudeAuth as ClaudeAuth;
 
     // Check if refresh is needed
-    if (!shouldRefreshToken(claudeAuth)) {
+    if (!shouldRefreshClaudeToken(claudeAuth)) {
       logger.info('Token still valid, no refresh needed', { component: 'UserRoutes' });
       res.json({
         success: true,
@@ -163,7 +163,7 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
     let wasRefreshed = false;
 
     // Auto-refresh if needed
-    if (shouldRefreshToken(claudeAuth)) {
+    if (shouldRefreshClaudeToken(claudeAuth)) {
       logger.info('Token expiring soon, auto-refreshing', { component: 'UserRoutes', userId: authReq.user!.id });
       try {
         claudeAuth = await refreshClaudeToken(claudeAuth);

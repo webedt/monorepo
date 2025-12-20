@@ -9,7 +9,8 @@ import * as path from 'path';
 import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './githubClient.js';
 import { GitHelper } from './gitHelper.js';
-import { logger, generateSessionPath } from '@webedt/shared';
+import { logger } from '../logger.js';
+import { generateSessionPath } from '../sessionPathHelper.js';
 
 // ============================================================================
 // Types

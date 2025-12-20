@@ -8,19 +8,19 @@
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, chatSessions, messages, users, events } from '../../logic/db/index.js';
+import { db, chatSessions, messages, users, events } from '@webedt/shared';
 import { eq } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { ensureValidToken, ClaudeAuth } from '../../logic/auth/claudeAuth.js';
+import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl } from '@webedt/shared';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
-import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
-import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
-import { cleanupRedundantSessions } from '../../logic/sessions/claudeSessionSync.js';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+import { sessionEventBroadcaster } from '@webedt/shared';
+import { sessionListBroadcaster } from '@webedt/shared';
+import { cleanupRedundantSessions } from '@webedt/shared';
 import {
   getExecutionProvider,
   type ExecutionEvent,
-} from '../../logic/execution/providers/index.js';
+} from '@webedt/shared';
 
 const router = Router();
 

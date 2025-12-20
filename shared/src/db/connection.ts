@@ -35,7 +35,7 @@ export interface ConnectionStats {
   uptime: number;
 }
 
-export interface HealthCheckResult {
+export interface DatabaseHealthCheckResult {
   healthy: boolean;
   latencyMs: number;
   error?: string;
@@ -266,7 +266,7 @@ export class DatabaseConnection {
   /**
    * Perform a health check
    */
-  async healthCheck(): Promise<HealthCheckResult> {
+  async healthCheck(): Promise<DatabaseHealthCheckResult> {
     const start = Date.now();
 
     try {

@@ -3,7 +3,7 @@
  * Consolidated from website/apps/server/src/lib/codexAuth.ts
  */
 
-import { logger } from '@webedt/shared';
+import { logger } from '../logger.js';
 
 // Define CodexAuth type locally (was previously in @webedt/shared)
 export interface CodexAuth {
@@ -25,7 +25,7 @@ const TOKEN_BUFFER_TIME = 10 * 60 * 1000;
  *
  * Note: API key authentication doesn't expire, only OAuth tokens do
  */
-export function shouldRefreshToken(codexAuth: CodexAuth): boolean {
+export function shouldRefreshCodexToken(codexAuth: CodexAuth): boolean {
   // API key authentication never expires
   if (codexAuth.apiKey) {
     return false;
@@ -133,7 +133,7 @@ export async function ensureValidCodexToken(codexAuth: CodexAuth): Promise<Codex
   }
 
   // Check if OAuth token needs refresh
-  if (shouldRefreshToken(codexAuth)) {
+  if (shouldRefreshCodexToken(codexAuth)) {
     logger.info('Token expires soon, refreshing', { component: 'CodexAuth' });
     return await refreshCodexToken(codexAuth);
   }

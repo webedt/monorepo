@@ -8,7 +8,7 @@
 export { ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from './claudeRemoteClient.js';
 export { generateTitle, generateTitleSync } from './titleGenerator.js';
 export type {
-  ClaudeAuth,
+  ClaudeRemoteAuth,
   ClaudeRemoteClientConfig,
   CreateSessionParams,
   CreateSessionResult,

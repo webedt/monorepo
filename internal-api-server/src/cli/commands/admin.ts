@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { db, users } from '../../logic/db/index.js';
+import { db, users } from '@webedt/shared';
 import { eq, desc } from 'drizzle-orm';
-import { lucia } from '../../logic/auth/lucia.js';
+import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 

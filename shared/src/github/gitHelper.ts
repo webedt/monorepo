@@ -3,7 +3,7 @@
  */
 
 import { simpleGit, SimpleGit } from 'simple-git';
-import { logger } from '@webedt/shared';
+import { logger } from '../logger.js';
 
 export class GitHelper {
   private git: SimpleGit;

@@ -10,7 +10,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { logger } from '@webedt/shared';
+import { logger } from '../logger.js';
 import type { ChatSession } from '../db/schema.js';
 
 export type SessionUpdateType = 'created' | 'updated' | 'deleted' | 'status_changed';

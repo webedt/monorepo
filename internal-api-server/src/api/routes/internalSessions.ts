@@ -21,10 +21,10 @@
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, chatSessions, events, users } from '../../logic/db/index.js';
+import { db, chatSessions, events, users } from '@webedt/shared';
 import { eq, desc, asc, and, isNull } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { ensureValidToken, ClaudeAuth } from '../../logic/auth/claudeAuth.js';
+import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {
   logger,
   ClaudeRemoteClient,
@@ -39,7 +39,7 @@ import {
   CLAUDE_ORG_UUID,
   CLAUDE_COOKIES,
   OPENROUTER_API_KEY,
-} from '../../logic/config/env.js';
+} from '@webedt/shared';
 
 const router = Router();
 

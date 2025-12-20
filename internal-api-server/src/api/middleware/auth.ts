@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { lucia } from '../../logic/auth/lucia.js';
+import { lucia } from '@webedt/shared';
 import type { User, Session } from 'lucia';
 
 // Extend Express Request type to include auth properties

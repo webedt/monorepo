@@ -3,7 +3,7 @@
  * Consolidated from website/apps/server/src/lib/claudeAuth.ts
  */
 
-import { logger } from '@webedt/shared';
+import { logger } from '../logger.js';
 
 // Define ClaudeAuth type locally (was previously in @webedt/shared)
 // Must match the schema in db/schema.ts
@@ -34,7 +34,7 @@ interface RefreshTokenResponse {
  * Check if a Claude access token needs to be refreshed
  * Returns true if token expires within the buffer time or is already expired
  */
-export function shouldRefreshToken(claudeAuth: ClaudeAuth): boolean {
+export function shouldRefreshClaudeToken(claudeAuth: ClaudeAuth): boolean {
   const now = Date.now();
   const expiresAt = claudeAuth.expiresAt;
   const timeUntilExpiry = expiresAt - now;
@@ -111,7 +111,7 @@ export async function refreshClaudeToken(claudeAuth: ClaudeAuth): Promise<Claude
  * Returns the original auth object if still valid, or refreshed auth if it was expiring
  */
 export async function ensureValidToken(claudeAuth: ClaudeAuth): Promise<ClaudeAuth> {
-  if (shouldRefreshToken(claudeAuth)) {
+  if (shouldRefreshClaudeToken(claudeAuth)) {
     logger.info('Token expires soon, refreshing', { component: 'ClaudeAuth' });
     return await refreshClaudeToken(claudeAuth);
   }

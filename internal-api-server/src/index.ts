@@ -18,7 +18,7 @@ import {
   CLAUDE_SYNC_INTERVAL_MS,
   validateEnv,
   logEnvConfig
-} from './logic/config/env.js';
+} from '@webedt/shared';
 
 import { logger } from '@webedt/shared';
 
@@ -41,7 +41,7 @@ import liveChatRoutes from './api/routes/liveChat.js';
 import workspaceRoutes from './api/routes/workspace.js';
 
 // Import database for orphan cleanup
-import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from './logic/db/index.js';
+import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from '@webedt/shared';
 import { eq, and, lt, sql, count } from 'drizzle-orm';
 
 // Import middleware
@@ -53,10 +53,10 @@ import {
   createDatabaseHealthCheck,
   metrics,
   circuitBreakerRegistry,
-} from './logic/utils/index.js';
+} from '@webedt/shared';
 
 // Import background sync service
-import { startBackgroundSync, stopBackgroundSync } from './logic/sessions/claudeSessionSync.js';
+import { startBackgroundSync, stopBackgroundSync } from '@webedt/shared';
 
 /**
  * Clean up orphaned sessions that are stuck in 'running' status

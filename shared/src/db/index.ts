@@ -18,7 +18,7 @@ import {
   DatabaseConnection,
   createConnection,
   type ConnectionStats,
-  type HealthCheckResult,
+  type DatabaseHealthCheckResult,
 } from './connection.js';
 import {
   runMigrations,
@@ -297,7 +297,7 @@ export function getConnectionStats(): ConnectionStats | null {
 /**
  * Perform a manual health check
  */
-export async function checkHealth(): Promise<HealthCheckResult> {
+export async function checkHealth(): Promise<DatabaseHealthCheckResult> {
   const start = Date.now();
 
   try {
@@ -348,6 +348,28 @@ export type {
   NewMessage,
   Event,
   NewEvent,
+  LiveChatMessage,
+  NewLiveChatMessage,
+  WorkspacePresence,
+  NewWorkspacePresence,
+  WorkspaceEvent,
+  NewWorkspaceEvent,
+  OrchestratorJob,
+  NewOrchestratorJob,
+  OrchestratorCycle,
+  NewOrchestratorCycle,
+  OrchestratorTask,
+  NewOrchestratorTask,
+} from './schema.js';
+
+// Re-export table definitions from schema
+export {
+  liveChatMessages,
+  workspacePresence,
+  workspaceEvents,
+  orchestratorJobs,
+  orchestratorCycles,
+  orchestratorTasks,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
@@ -356,16 +378,20 @@ export {
   validateSchema,
   formatSchemaErrors,
   getCurrentMigrationVersion,
+  getAppliedMigrations,
+  createBackup,
   ensureSchemaUpToDate,
+  getDatabaseDiagnostics,
   type MigrationResult,
   type SchemaValidationResult,
+  type BackupResult,
 } from './migrations.js';
 
 // Re-export connection utilities
 export {
   DatabaseConnection,
   createConnection,
-  withRetry,
+  withRetry as withDatabaseRetry,
   type ConnectionStats,
-  type HealthCheckResult,
+  type DatabaseHealthCheckResult,
 } from './connection.js';

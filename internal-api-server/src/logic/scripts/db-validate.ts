@@ -13,7 +13,7 @@ import {
   formatSchemaErrors,
   getCurrentMigrationVersion,
   getDatabaseDiagnostics,
-} from '../db/migrations.js';
+} from '@webedt/shared';
 
 const { Pool } = pg;
 

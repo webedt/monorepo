@@ -9,7 +9,7 @@
 import 'dotenv/config';
 import pg from 'pg';
 import * as path from 'path';
-import { createBackup, getDatabaseDiagnostics } from '../db/migrations.js';
+import { createBackup, getDatabaseDiagnostics } from '@webedt/shared';
 
 const { Pool } = pg;
 

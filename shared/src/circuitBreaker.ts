@@ -8,7 +8,7 @@
  * - HALF_OPEN: Testing if service has recovered
  */
 
-import { logger } from '@webedt/shared';
+import { logger } from './logger.js';
 
 export type CircuitState = 'closed' | 'open' | 'half_open';
 

@@ -9,7 +9,7 @@
  * - Automatic recovery mechanisms
  */
 
-import { logger } from '@webedt/shared';
+import { logger } from './logger.js';
 import { metrics } from './metrics.js';
 import { circuitBreakerRegistry, type CircuitBreakerStats } from './circuitBreaker.js';
 

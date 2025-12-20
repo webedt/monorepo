@@ -5,7 +5,7 @@
  * with configurable backoff strategies, jitter, and recovery options.
  */
 
-import { logger } from '@webedt/shared';
+import { logger } from './logger.js';
 
 export interface RetryConfig {
   /** Maximum number of retry attempts (default: 3) */

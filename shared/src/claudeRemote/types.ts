@@ -4,9 +4,10 @@
  */
 
 /**
- * Authentication credentials for Claude API
+ * Authentication credentials for Claude Remote Sessions API
+ * For user-persisted auth credentials with required refreshToken, use ClaudeAuth from auth/claudeAuth.ts
  */
-export interface ClaudeAuth {
+export interface ClaudeRemoteAuth {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number;

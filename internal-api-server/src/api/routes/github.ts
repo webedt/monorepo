@@ -5,14 +5,14 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { db, users, chatSessions, events } from '../../logic/db/index.js';
+import { db, users, chatSessions, events } from '@webedt/shared';
 import { eq, and, isNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger, ClaudeRemoteClient } from '@webedt/shared';
-import { GitHubOperations } from '../../logic/github/operations.js';
-import { ensureValidToken, type ClaudeAuth } from '../../logic/auth/claudeAuth.js';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
+import { GitHubOperations } from '@webedt/shared';
+import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
 const router = Router();
 

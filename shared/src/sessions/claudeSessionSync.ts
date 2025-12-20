@@ -8,7 +8,9 @@
 import { db, chatSessions, events, users } from '../db/index.js';
 import { eq, and, or, isNotNull, isNull, gte, ne, lte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { ClaudeRemoteClient, generateSessionPath, logger, normalizeRepoUrl } from '@webedt/shared';
+import { ClaudeRemoteClient } from '../claudeRemote/index.js';
+import { generateSessionPath, normalizeRepoUrl } from '../sessionPathHelper.js';
+import { logger } from '../logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
 import { sessionListBroadcaster } from './sessionListBroadcaster.js';
 import {

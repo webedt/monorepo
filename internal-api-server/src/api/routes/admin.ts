@@ -4,11 +4,11 @@
  */
 
 import { Router } from 'express';
-import { db } from '../../logic/db/index.js';
-import { users, sessions } from '../../logic/db/schema.js';
+import { db } from '@webedt/shared';
+import { users, sessions } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { eq, sql } from 'drizzle-orm';
-import { lucia } from '../../logic/auth/lucia.js';
+import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
 
 const router = Router();

@@ -9,7 +9,7 @@
  * - Service unavailability
  */
 
-import { logger } from '@webedt/shared';
+import { logger } from './logger.js';
 import { retryWithBackoff, RETRY_CONFIGS, type RetryConfig } from './retry.js';
 import { circuitBreakerRegistry, type CircuitBreaker } from './circuitBreaker.js';
 import { metrics } from './metrics.js';

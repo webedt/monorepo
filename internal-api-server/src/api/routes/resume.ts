@@ -11,11 +11,11 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events } from '../../logic/db/index.js';
+import { db, chatSessions, events } from '@webedt/shared';
 import { eq, and, or, asc } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
-import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
+import { sessionEventBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();

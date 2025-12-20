@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users } from '../../logic/db/index.js';
+import { db, users } from '@webedt/shared';
 import { eq } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';

@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { eq, and, gt, desc } from 'drizzle-orm';
-import { db } from '../../logic/db/index.js';
-import { workspacePresence, workspaceEvents, users } from '../../logic/db/schema.js';
+import { db } from '@webedt/shared';
+import { workspacePresence, workspaceEvents, users } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '../../logic/utils/logger.js';
+import { logger } from '@webedt/shared';
 
 const router = Router();
 

@@ -5,17 +5,17 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { db, chatSessions, messages, users, events } from '../../logic/db/index.js';
-import type { ChatSession } from '../../logic/db/schema.js';
+import { db, chatSessions, messages, users, events } from '@webedt/shared';
+import type { ChatSession } from '@webedt/shared';
 import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from '@webedt/shared';
-import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
-import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
+import { sessionEventBroadcaster } from '@webedt/shared';
+import { sessionListBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { ensureValidToken, type ClaudeAuth } from '../../logic/auth/claudeAuth.js';
-import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
+import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
 /**
  * Helper to write SSE data safely.
