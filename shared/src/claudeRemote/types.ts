@@ -172,6 +172,8 @@ export type EventCallback = (event: SessionEvent) => void | Promise<void>;
 export interface PollOptions {
   /** Skip events that already exist (for resume) */
   skipExistingEvents?: boolean;
+  /** Pre-captured existing event IDs to skip (used by resume to avoid race condition) */
+  existingEventIds?: Set<string>;
   /** Polling interval in milliseconds (default: 2000) */
   pollIntervalMs?: number;
   /** Maximum number of polls before timeout (default: 300 = 10 min) */

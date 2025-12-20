@@ -425,18 +425,20 @@ export class ClaudeRemoteClient {
   ): Promise<SessionResult> {
     const {
       skipExistingEvents = false,
+      existingEventIds,
       pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
       maxPolls = DEFAULT_MAX_POLLS,
       abortSignal,
     } = options;
 
-    const seenEventIds = new Set<string>();
+    // Use pre-captured event IDs if provided (from resume()), otherwise create new set
+    const seenEventIds = existingEventIds ? new Set(existingEventIds) : new Set<string>();
     let pollCount = 0;
     let title: string | undefined;
     let branch: string | undefined;
 
-    // For resume: mark existing events as seen
-    if (skipExistingEvents) {
+    // For resume: mark existing events as seen (only if not already provided)
+    if (skipExistingEvents && !existingEventIds) {
       try {
         const existingEvents = await this.getEvents(sessionId);
         for (const event of existingEvents.data || []) {
@@ -582,13 +584,26 @@ export class ClaudeRemoteClient {
     onEvent: EventCallback,
     options: PollOptions = {}
   ): Promise<SessionResult> {
+    // IMPORTANT: Capture existing event IDs BEFORE sending the message
+    // This ensures we can properly filter out old events during polling
+    const existingEventIds = new Set<string>();
+    try {
+      const existingEvents = await this.getEvents(sessionId);
+      for (const event of existingEvents.data || []) {
+        existingEventIds.add(event.uuid);
+      }
+    } catch {
+      // Ignore errors fetching existing events
+    }
+
     // Send the message
     await this.sendMessage(sessionId, message);
 
-    // Poll for new events only
+    // Poll for new events only, passing the pre-captured event IDs
     return this.pollSession(sessionId, onEvent, {
       ...options,
       skipExistingEvents: true,
+      existingEventIds, // Pass pre-captured IDs
     });
   }
 }

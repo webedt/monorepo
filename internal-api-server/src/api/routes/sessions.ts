@@ -10,7 +10,7 @@ import type { ChatSession } from '../../logic/db/schema.js';
 import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from '@webedt/shared';
 import { sessionEventBroadcaster } from '../../logic/sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../../logic/sessions/sessionListBroadcaster.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -824,7 +824,7 @@ router.post('/:id/send', requireAuth, async (req: Request, res: Response) => {
       .where(eq(users.id, authReq.user!.id))
       .limit(1);
 
-    if (!user?.claude_auth) {
+    if (!user?.claudeAuth) {
       res.status(401).json({ success: false, error: 'Claude authentication not configured' });
       return;
     }
@@ -832,9 +832,9 @@ router.post('/:id/send', requireAuth, async (req: Request, res: Response) => {
     // Parse Claude auth
     let claudeAuth: ClaudeAuth;
     try {
-      claudeAuth = typeof user.claude_auth === 'string'
-        ? JSON.parse(user.claude_auth)
-        : user.claude_auth as ClaudeAuth;
+      claudeAuth = typeof user.claudeAuth === 'string'
+        ? JSON.parse(user.claudeAuth)
+        : user.claudeAuth as ClaudeAuth;
     } catch {
       res.status(401).json({ success: false, error: 'Invalid Claude authentication data' });
       return;
@@ -1553,8 +1553,270 @@ const streamEventsHandler = async (req: Request, res: Response) => {
         unsubscribe();
       });
     } else {
-      // Session is not actively streaming (completed, error, or orphaned)
-      // Send completion event and close connection
+      // Session is not actively streaming - check for pending user messages to resume
+      const pendingMessages = storedEvents.filter(e => {
+        const data = e.eventData as { type?: string };
+        return data?.type === 'pending_user_message';
+      });
+
+      if (pendingMessages.length > 0 && session.remoteSessionId && session.status === 'running') {
+        // Found pending message(s) - resume the Claude session
+        const pendingMessage = pendingMessages[pendingMessages.length - 1]; // Use the latest
+        const messageData = pendingMessage.eventData as { content?: string };
+        const prompt = messageData?.content;
+
+        if (prompt) {
+          logger.info(`Found pending message for session ${sessionId}, initiating resume`, {
+            component: 'Sessions',
+            promptLength: prompt.length,
+          });
+
+          // Delete the pending message event (it will be replaced by actual events)
+          await db.delete(events).where(eq(events.id, pendingMessage.id));
+
+          // Get Claude auth
+          const [user] = await db
+            .select()
+            .from(users)
+            .where(eq(users.id, session.userId))
+            .limit(1);
+
+          if (!user?.claudeAuth) {
+            res.write(`data: ${JSON.stringify({
+              type: 'error',
+              error: 'Claude authentication not configured',
+              timestamp: new Date().toISOString()
+            })}\n\n`);
+            res.end();
+            return;
+          }
+
+          let claudeAuth: ClaudeAuth;
+          try {
+            claudeAuth = typeof user.claudeAuth === 'string'
+              ? JSON.parse(user.claudeAuth)
+              : user.claudeAuth as ClaudeAuth;
+          } catch {
+            res.write(`data: ${JSON.stringify({
+              type: 'error',
+              error: 'Invalid Claude authentication data',
+              timestamp: new Date().toISOString()
+            })}\n\n`);
+            res.end();
+            return;
+          }
+
+          const validAuth = await ensureValidToken(claudeAuth);
+          if (!validAuth) {
+            res.write(`data: ${JSON.stringify({
+              type: 'error',
+              error: 'Claude token expired',
+              timestamp: new Date().toISOString()
+            })}\n\n`);
+            res.end();
+            return;
+          }
+
+          // Get environment ID - from config or auto-detect from user's recent sessions
+          let environmentId = CLAUDE_ENVIRONMENT_ID;
+          if (!environmentId) {
+            logger.info('CLAUDE_ENVIRONMENT_ID not configured, attempting auto-detection for resume', {
+              component: 'Sessions',
+              sessionId,
+            });
+
+            const detectedEnvId = await fetchEnvironmentIdFromSessions(
+              validAuth.accessToken,
+              CLAUDE_API_BASE_URL
+            );
+
+            if (detectedEnvId) {
+              environmentId = detectedEnvId;
+              logger.info('Auto-detected environment ID from user sessions', {
+                component: 'Sessions',
+                environmentId: environmentId.slice(0, 10) + '...',
+              });
+            } else {
+              logger.error('Could not detect environment ID for resume', {
+                component: 'Sessions',
+                sessionId,
+              });
+              res.write(`data: ${JSON.stringify({
+                type: 'error',
+                error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first.',
+                timestamp: new Date().toISOString()
+              })}\n\n`);
+
+              // Reset session status since we couldn't resume
+              await db.update(chatSessions)
+                .set({ status: 'completed' })
+                .where(eq(chatSessions.id, sessionId));
+
+              res.end();
+              return;
+            }
+          }
+
+          // Send resuming event
+          res.write(`data: ${JSON.stringify({
+            type: 'resuming',
+            sessionId,
+            prompt,
+            timestamp: new Date().toISOString()
+          })}\n\n`);
+
+          // Store user message event
+          const userMsgEvent = {
+            type: 'user_message',
+            content: prompt,
+            timestamp: new Date().toISOString(),
+          };
+          await db.insert(events).values({
+            chatSessionId: sessionId,
+            eventData: userMsgEvent,
+          });
+          res.write(`data: ${JSON.stringify(userMsgEvent)}\n\n`);
+
+          // Create Claude client and resume session
+          logger.info('Creating ClaudeRemoteClient for resume', {
+            component: 'Sessions',
+            sessionId,
+            remoteSessionId: session.remoteSessionId,
+            environmentId: environmentId.slice(0, 10) + '...',
+          });
+
+          const client = new ClaudeRemoteClient({
+            accessToken: validAuth.accessToken,
+            environmentId,
+            baseUrl: CLAUDE_API_BASE_URL,
+          });
+
+          try {
+            logger.info('Calling client.resume()', {
+              component: 'Sessions',
+              sessionId,
+              remoteSessionId: session.remoteSessionId,
+              promptLength: prompt.length,
+            });
+
+            let eventCount = 0;
+            let foundNewUserMessage = false;
+            const result = await client.resume(
+              session.remoteSessionId,
+              prompt,
+              async (event) => {
+                eventCount++;
+                const eventType = (event as { type?: string }).type;
+
+                // Filter out context events that contain old conversation data
+                // The Claude API returns system/user events for context, but we only want
+                // new events that are part of this turn's response
+                if (eventType === 'system') {
+                  // Skip system events during resume - they contain the original system prompt
+                  logger.info(`Resume: Skipping system event (context)`, {
+                    component: 'Sessions',
+                    sessionId,
+                  });
+                  return;
+                }
+
+                if (eventType === 'user') {
+                  // Check if this user event contains the NEW message we just sent
+                  const eventData = event as { message?: { content?: string } };
+                  const messageContent = eventData.message?.content;
+                  if (messageContent === prompt) {
+                    foundNewUserMessage = true;
+                    // This is the new user message - we already added it to the stream earlier
+                    logger.info(`Resume: Skipping user event (already sent)`, {
+                      component: 'Sessions',
+                      sessionId,
+                    });
+                    return;
+                  } else {
+                    // This is an old user message from the original conversation - skip it
+                    logger.info(`Resume: Skipping old user event (context)`, {
+                      component: 'Sessions',
+                      sessionId,
+                    });
+                    return;
+                  }
+                }
+
+                // Skip env_manager_log events - they're internal
+                if (eventType === 'env_manager_log') {
+                  return;
+                }
+
+                logger.info(`Resume event #${eventCount}`, {
+                  component: 'Sessions',
+                  eventType,
+                  sessionId,
+                });
+
+                if (res.writableEnded) return;
+                const eventWithTimestamp = { ...event, timestamp: new Date().toISOString() };
+                res.write(`data: ${JSON.stringify(eventWithTimestamp)}\n\n`);
+                // Store event in database
+                await db.insert(events).values({
+                  chatSessionId: sessionId,
+                  eventData: eventWithTimestamp,
+                });
+              }
+            );
+
+            logger.info('Resume completed', {
+              component: 'Sessions',
+              sessionId,
+              status: result.status,
+              eventCount,
+              branch: result.branch,
+              totalCost: result.totalCost,
+            });
+
+            // Update session status
+            await db.update(chatSessions)
+              .set({
+                status: result.status === 'completed' || result.status === 'idle' ? 'completed' : 'error',
+                branch: result.branch || session.branch,
+                totalCost: result.totalCost?.toString() || session.totalCost,
+                completedAt: new Date(),
+              })
+              .where(eq(chatSessions.id, sessionId));
+
+            // Send completion event
+            res.write(`event: completed\n`);
+            res.write(`data: ${JSON.stringify({
+              websiteSessionId: sessionId,
+              completed: true,
+              status: result.status === 'completed' || result.status === 'idle' ? 'completed' : 'error',
+            })}\n\n`);
+          } catch (resumeError) {
+            const errorMessage = resumeError instanceof Error ? resumeError.message : String(resumeError);
+            const errorStack = resumeError instanceof Error ? resumeError.stack : undefined;
+            logger.error('Resume error', resumeError as Error, {
+              component: 'Sessions',
+              sessionId,
+              errorMessage,
+              errorStack,
+            });
+            res.write(`data: ${JSON.stringify({
+              type: 'error',
+              error: resumeError instanceof Error ? resumeError.message : 'Resume failed',
+              timestamp: new Date().toISOString()
+            })}\n\n`);
+
+            // Update session status to error
+            await db.update(chatSessions)
+              .set({ status: 'error', completedAt: new Date() })
+              .where(eq(chatSessions.id, sessionId));
+          }
+
+          res.end();
+          return;
+        }
+      }
+
+      // No pending messages - session is completed/error, send completion event and close
       res.write(`event: completed\n`);
       res.write(`data: ${JSON.stringify({
         websiteSessionId: sessionId,
