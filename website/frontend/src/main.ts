@@ -8,6 +8,8 @@ import { router } from './lib/router';
 import { theme } from './lib/theme';
 import { IconButton, Button } from './components';
 import { authStore } from './stores/authStore';
+import { TAGLINES } from './constants/taglines';
+import { getVersion, getVersionSHA, getVersionTimestamp, GITHUB_REPO_URL } from './version';
 import {
   LoginPage,
   RegisterPage,
@@ -38,6 +40,88 @@ type PageConstructor = new (options?: PageOptions) => Page;
 // Current page instance
 let currentPage: Page | null = null;
 
+// Tagline state
+let taglineIndex = Math.floor(Math.random() * TAGLINES.length);
+let showVersionDetails = false;
+
+/**
+ * Get a random tagline
+ */
+function getTagline(): string {
+  return TAGLINES[taglineIndex];
+}
+
+/**
+ * Pick a new random tagline
+ */
+function nextTagline(): void {
+  taglineIndex = Math.floor(Math.random() * TAGLINES.length);
+  updateLogoTagline();
+}
+
+/**
+ * Toggle version details display
+ */
+function toggleVersionDetails(): void {
+  showVersionDetails = !showVersionDetails;
+  updateLogoTagline();
+}
+
+/**
+ * Get short SHA for display
+ */
+function getShortSha(): string {
+  const sha = getVersionSHA();
+  return sha?.substring(0, 7) ?? 'unknown';
+}
+
+/**
+ * Format timestamp for display
+ */
+function getFormattedTimestamp(): string {
+  const timestamp = getVersionTimestamp();
+  if (!timestamp) return '';
+
+  const date = new Date(timestamp);
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short'
+  });
+}
+
+/**
+ * Update the logo tagline and version display
+ */
+function updateLogoTagline(): void {
+  const taglineEl = document.getElementById('app-tagline');
+  const versionEl = document.getElementById('app-version');
+  const githubLink = document.getElementById('app-github-link');
+
+  if (taglineEl) {
+    taglineEl.textContent = getTagline();
+  }
+
+  if (versionEl) {
+    if (showVersionDetails) {
+      const formattedTime = getFormattedTimestamp();
+      versionEl.textContent = formattedTime
+        ? `${getShortSha()} [${formattedTime}]`
+        : getShortSha();
+    } else {
+      versionEl.textContent = `v${getVersion()}`;
+    }
+  }
+
+  if (githubLink) {
+    githubLink.style.display = showVersionDetails ? 'inline-flex' : 'none';
+  }
+}
+
 /**
  * Create the app layout
  */
@@ -50,13 +134,36 @@ function createLayout(): HTMLElement {
   header.className = 'app-header';
   header.innerHTML = `
     <div class="app-header-content">
-      <a href="#/agents" class="app-logo">
-        <span class="app-logo-text">WebEDT</span>
-      </a>
+      <div class="app-logo-container">
+        <a href="#/agents" class="app-logo">
+          <span class="app-logo-text">WebEDT</span>
+        </a>
+        <div class="app-tagline" id="app-tagline">${getTagline()}</div>
+        <div class="app-version-row">
+          <span class="app-version" id="app-version">v${getVersion()}</span>
+          <a href="${GITHUB_REPO_URL}" target="_blank" rel="noopener noreferrer" class="app-github-link" id="app-github-link" style="display: none;">
+            <svg width="10" height="10" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
       <nav class="app-nav" id="app-nav"></nav>
       <div class="app-header-actions" id="header-actions"></div>
     </div>
   `;
+
+  // Add click handlers for tagline and version
+  const taglineEl = header.querySelector('#app-tagline');
+  const versionEl = header.querySelector('#app-version');
+
+  if (taglineEl) {
+    taglineEl.addEventListener('click', nextTagline);
+  }
+
+  if (versionEl) {
+    versionEl.addEventListener('click', toggleVersionDetails);
+  }
 
   // Main content area
   const main = document.createElement('main');
@@ -182,16 +289,66 @@ function addAppStyles(): void {
       padding: var(--spacing-md) var(--spacing-lg);
     }
 
+    .app-logo-container {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0;
+    }
+
     .app-logo {
       display: flex;
       align-items: center;
       gap: var(--spacing-sm);
       text-decoration: none;
+      line-height: 1.2;
     }
 
     .app-logo-text {
       font-size: var(--font-size-xl);
       font-weight: var(--font-weight-bold);
+      color: var(--color-text-primary);
+    }
+
+    .app-tagline {
+      font-size: 10px;
+      color: var(--color-text-secondary);
+      font-style: italic;
+      cursor: pointer;
+      transition: color var(--transition-fast);
+      line-height: 1.2;
+    }
+
+    .app-tagline:hover {
+      color: var(--color-text-primary);
+    }
+
+    .app-version-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .app-version {
+      font-size: 9px;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      transition: color var(--transition-fast);
+      line-height: 1.2;
+    }
+
+    .app-version:hover {
+      color: var(--color-text-primary);
+    }
+
+    .app-github-link {
+      display: inline-flex;
+      align-items: center;
+      color: var(--color-text-secondary);
+      transition: color var(--transition-fast);
+    }
+
+    .app-github-link:hover {
       color: var(--color-text-primary);
     }
 

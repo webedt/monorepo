@@ -8,8 +8,8 @@ import { adminCommand } from './commands/admin.js';
 const program = new Command();
 
 program
-  .name('internal-server')
-  .description('CLI for internal-api-server operations')
+  .name('webedt')
+  .description('CLI for WebEDT administration')
   .version('1.0.0');
 
 // Add commands

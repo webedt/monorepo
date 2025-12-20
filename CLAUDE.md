@@ -1,0 +1,253 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+WebEDT is an AI-powered code editing platform. This monorepo contains a vanilla TypeScript frontend, Express backend, and shared utilities.
+
+## Monorepo Structure
+
+| Package | Path | Description |
+|---------|------|-------------|
+| **Shared** | `/shared` | Core business logic, auth, database, GitHub operations |
+| **CLI** | `/cli` | Administration CLI (session, admin, github commands) |
+| **Frontend** | `/website/frontend` | Vanilla TypeScript SPA (Vite) |
+| **Backend** | `/website/backend` | Express API server |
+| **Tools** | `/tools/*` | CLI utilities (autonomous-dev-cli, claude-web-cli) |
+
+## Development Commands
+
+```bash
+# Start all services (shared watch + frontend dev + backend dev)
+npm run dev
+
+# Build everything
+npm run build
+
+# Clean all build artifacts
+npm run clean
+```
+
+### Per-Package Commands
+
+**Frontend** (`website/frontend`):
+```bash
+npm run dev      # Vite dev server with hot reload
+npm run build    # Production build
+npm run preview  # Preview production build
+```
+
+**Backend** (`website/backend`):
+```bash
+npm run dev      # tsx watch with auto-reload
+npm run build    # TypeScript compilation
+npm run db:push  # Push schema to database
+npm run db:studio # Open Drizzle Studio
+```
+
+**CLI** (`cli`):
+```bash
+npm run cli              # From monorepo root
+npm run dev -- session list    # List sessions
+npm run dev -- admin users     # List users
+npm run dev -- github repos    # List repos
+```
+
+**Shared** (`shared`):
+```bash
+npm run dev   # tsc --watch
+npm run build # TypeScript compilation
+npm run test  # Run tests
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              FRONTEND                                        │
+│  website/frontend (Vite + Vanilla TypeScript)                               │
+│  - SPA with CSS theming                                                     │
+│  - SSE streaming for real-time updates                                      │
+│  - Component-based UI (vanilla TS, no framework)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                              HTTP/SSE API
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              BACKEND                                         │
+│  website/backend (Express API Server)                                        │
+│  - REST API routes (auth, sessions, github, admin)                          │
+│  - SSE streaming endpoints                                                  │
+│  - Static file serving                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                              Imports from
+                                    │
+┌───────────────────────────────────┴───────────────────────────────────────┐
+│                                                                            │
+▼                                                                            ▼
+┌─────────────────────────────────┐    ┌─────────────────────────────────────┐
+│              CLI                 │    │              SHARED                  │
+│  cli (Administration Commands)   │    │  shared (Core Business Logic)        │
+│  - session list/get/delete      │───▶│  - Authentication (Lucia, OAuth)    │
+│  - admin users/create-user      │    │  - Database (Drizzle + PostgreSQL)  │
+│  - github branches/repos/pr     │    │  - GitHub/Git operations            │
+└─────────────────────────────────┘    │  - Session management               │
+                                       │  - Utilities (retry, circuit breaker)│
+                                       └─────────────────────────────────────┘
+                                                         │
+                                                         ▼
+                                                PostgreSQL Database
+```
+
+---
+
+### Frontend (`website/frontend/src/`)
+
+- **`components/`** - Vanilla TypeScript UI components (Button, Card, Input, Modal, etc.)
+- **`pages/`** - Page components (Login, Register, Dashboard, Agents, Chat, Code, Settings, Trash)
+- **`stores/`** - Simple state management (authStore, repoStore, workerStore)
+- **`lib/`** - Utilities (api.ts, router.ts, events.ts for SSE, theme.ts)
+- **`styles/`** - CSS with custom properties for theming
+
+---
+
+### Backend (`website/backend/src/`)
+
+The backend is a thin API layer that imports core logic from the shared package.
+
+- **`api/routes/`** - Express route handlers
+  - `auth.ts` - Authentication (register, login, logout)
+  - `sessions.ts` - Session CRUD operations
+  - `executeRemote.ts` - Claude Remote execution (SSE)
+  - `resume.ts` - Event replay streaming
+  - `github.ts` - GitHub OAuth and repo operations
+  - `workspace.ts` - Workspace file operations
+  - `admin.ts` - Admin user management
+  - `liveChat.ts` - Live chat endpoints
+  - `transcribe.ts` - Audio transcription (OpenAI Whisper)
+  - `imageGen.ts` - Image generation
+  - `logs.ts` - Server log viewing
+- **`api/middleware/`** - Auth middleware
+- **`scripts/`** - Database utilities (db-check, db-backup, db-validate)
+
+---
+
+### CLI (`cli/src/`)
+
+Standalone administration CLI for managing the platform without the web server.
+
+- **`commands/`** - CLI command modules
+  - `session.ts` - Session management (list, get, delete, cleanup)
+  - `admin.ts` - User administration (users, create-user, set-admin, delete-user)
+  - `github.ts` - GitHub operations (branches, repos, create-branch, create-pr)
+
+---
+
+### Shared (`shared/src/`)
+
+The shared package contains all core business logic, reusable across backend and CLI.
+
+- **`auth/`** - Authentication providers
+  - `lucia.ts` - Lucia auth setup
+  - `claudeAuth.ts` - Claude OAuth helpers
+  - `codexAuth.ts` - Codex auth helpers
+  - `geminiAuth.ts` - Gemini auth helpers
+- **`db/`** - Database layer
+  - `schema.ts` - Drizzle ORM schema (users, sessions, messages, events)
+  - `connection.ts` - PostgreSQL connection management
+  - `migrations.ts` - Database migrations
+- **`github/`** - Git/GitHub operations
+  - `gitHelper.ts` - Low-level git operations (simple-git)
+  - `githubClient.ts` - Octokit wrapper
+  - `operations.ts` - High-level operations (clone, branch, push, PR)
+- **`execution/providers/`** - Execution orchestration
+  - `claudeRemoteProvider.ts` - Claude Remote Sessions provider
+  - `types.ts` - Provider interfaces
+- **`sessions/`** - Session management
+  - `claudeSessionSync.ts` - Background sync service
+  - `sessionEventBroadcaster.ts` - SSE event broadcasting
+  - `sessionListBroadcaster.ts` - Session list updates
+- **`claudeRemote/`** - Claude Remote Sessions API client
+  - `claudeRemoteClient.ts` - API client
+  - `titleGenerator.ts` - Session title generation
+  - `types.ts` - Type definitions
+- **Utilities**:
+  - `circuitBreaker.ts` - Circuit breaker pattern
+  - `healthMonitor.ts` - Health check system
+  - `metrics.ts` - Performance metrics
+  - `recovery.ts` - Session recovery
+  - `retry.ts` - Retry logic with backoff
+  - `logger.ts` / `logCapture.ts` - Structured logging
+  - `emojiMapper.ts` - SSE emoji decoration
+  - `previewUrlHelper.ts` - Preview URL generation
+  - `sessionPathHelper.ts` - Session path utilities
+
+## Database
+
+- **PostgreSQL** with **Drizzle ORM**
+- Tables: `users`, `sessions`, `chatSessions`, `messages`, `events`
+
+## Key API Routes
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/execute-remote` | POST | Execute AI request (SSE) |
+| `/api/resume/:sessionId` | GET | Replay stored events (SSE) |
+| `/api/auth/*` | - | Authentication (register, login, logout, session) |
+| `/api/sessions/*` | - | Session CRUD |
+| `/api/github/*` | - | GitHub OAuth and repo operations |
+| `/health`, `/ready`, `/live` | GET | Health/Kubernetes probes |
+
+## Environment Variables
+
+Required in `.env` (copy from `.env.example`):
+
+```bash
+DATABASE_URL=postgresql://user:password@localhost:5432/webedt
+SESSION_SECRET=your-secret-key
+FRONTEND_PORT=3000
+BACKEND_PORT=3001
+```
+
+Optional:
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` - GitHub OAuth
+- `CLAUDE_ENVIRONMENT_ID` - Claude Remote Sessions
+- `OPENAI_API_KEY` - Audio transcription
+- `OPENROUTER_API_KEY` - Title generation
+
+## Docker Build
+
+Single multi-stage image containing frontend and backend:
+
+```bash
+docker build \
+  --build-arg BUILD_COMMIT_SHA=$(git rev-parse HEAD) \
+  --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  --build-arg BUILD_VERSION=0.0.$(git rev-list --count HEAD) \
+  -t webedt .
+```
+
+Exposes ports 3000 (frontend) and 3001 (backend API).
+
+## Version Display
+
+The frontend displays version as `v0.0.{commit_count}` with toggleable details showing `{sha} [{timestamp}]`. Version info is injected at build time via `vite-plugin-version-mark`.
+
+## Git Commit Messages
+
+- Use imperative mood, present tense
+- Start with capital letter and verb
+- No prefixes (`feat:`, `fix:`, etc.) or emojis
+- Good verbs: Add, Update, Remove, Fix, Refactor, Enhance, Rename
+
+## Pre-Commit Checklist
+
+Before committing, run in modified package folders:
+
+```bash
+npm install
+npm run build
+```

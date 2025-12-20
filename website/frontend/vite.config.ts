@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { vitePluginVersionMark } from 'vite-plugin-version-mark';
 
 const FRONTEND_PORT = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 const BACKEND_PORT = parseInt(process.env.BACKEND_PORT || '3001', 10);
@@ -7,6 +8,25 @@ const BACKEND_PORT = parseInt(process.env.BACKEND_PORT || '3001', 10);
 export default defineConfig({
   // Use relative paths so the app works at any path prefix
   base: './',
+  plugins: [
+    vitePluginVersionMark({
+      name: 'webedt',
+      // Use custom command to get version as "0.0.{commit_count} [{sha}] [{timestamp}]"
+      // git rev-list --count HEAD gives total commit count
+      // git log -1 --format=%cI gives ISO timestamp
+      command: {
+        commands: [
+          'git rev-list --count HEAD',
+          'git rev-parse --short HEAD',
+          'git log -1 --format=%cI',
+        ],
+        format: '0.0.{0} [{1}] [{2}]',
+      },
+      ifMeta: false, // Don't add meta tag
+      ifLog: false, // Don't log to console automatically
+      ifGlobal: true, // Expose as global variable
+    }),
+  ],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
