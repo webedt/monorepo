@@ -615,17 +615,10 @@ export class ChatPage extends Page<ChatPageOptions> {
       // Build tool result map from events (tool_result events reference tool_use by id)
       this.buildToolResultMap(events);
 
-      // Check if there are any user_message events (from resume)
-      // If so, we'll skip replay user events to avoid duplicates
-      const hasUserMessageEvents = events.some((event: any) => {
-        const data = event.eventData || event;
-        return data?.type === 'user_message';
-      });
-
       // Convert events to messages for formatted view
       // Use flatMap since convertEventToMessages returns an array (to handle extracting tool_use from assistant)
       this.messages = events
-        .flatMap((event: any) => this.convertEventToMessages(event, hasUserMessageEvents))
+        .flatMap((event: any) => this.convertEventToMessages(event))
         .filter((msg: ChatMessage | null): msg is ChatMessage => msg !== null);
 
       this.renderContent();
@@ -689,9 +682,8 @@ export class ChatPage extends Page<ChatPageOptions> {
    * Convert an event to one or more ChatMessages.
    * Returns an array because assistant events may contain both text and tool_use blocks.
    * @param event The event to convert
-   * @param hasUserMessageEvents If true, skip replay user events (to avoid duplicates with user_message)
    */
-  private convertEventToMessages(event: any, hasUserMessageEvents: boolean = false): (ChatMessage | null)[] {
+  private convertEventToMessages(event: any): (ChatMessage | null)[] {
     const data = event.eventData || event;
     const eventType = data?.type;
 
@@ -704,65 +696,26 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
 
     // Skip control/internal events (these are too low-level or redundant)
-    if (['connected', 'heartbeat', 'env_manager_log', 'system',
-         'tool_result'].includes(eventType)) {
+    // Pass through only key events: input_preview, title_generation, result, assistant, thinking, tool_use, error, user
+    if (['connected', 'heartbeat', 'env_manager_log', 'system', 'tool_result',
+         'session_created', 'session_name', 'completed', 'message', 'submission_preview',
+         'replay_start', 'replay_end', 'live_stream_start', 'resuming'].includes(eventType)) {
       return [null];
     }
 
     // Handle different event types
     switch (eventType) {
-      case 'user':
-      case 'user_message': {
-        // Only skip replay user events if there are user_message events in the session
-        // This prevents skipping the original user message in new sessions
-        // but still skips replay context events during resume (when user_message events exist)
-        if (eventType === 'user' && data.isReplay && hasUserMessageEvents) {
-          return [null];
-        }
-        // Handle nested message object from Claude remote (user events)
-        // and simple content from resume (user_message events)
-        let userContent = '';
-        if (typeof data.message === 'object' && data.message?.content) {
-          userContent = typeof data.message.content === 'string'
-            ? data.message.content
-            : '';
-        } else if (typeof data.content === 'string') {
-          userContent = data.content;
-        } else if (typeof data.message === 'string') {
-          userContent = data.message;
-        }
-        if (!userContent) return [null];
-
-        // Skip if this matches our optimistic user message (avoid duplicates)
-        if (this.shownOptimisticUserMessage && userContent.trim() === this.shownOptimisticUserMessage.trim()) {
-          console.log('[ChatPage] Skipping duplicate user message (already shown optimistically)');
-          return [null];
-        }
-
-        return [{
-          id: event.id || `user-${Date.now()}`,
-          type: 'user', // Normalize to 'user' for rendering
-          content: userContent,
-          timestamp: new Date(event.timestamp || Date.now()),
-        }];
-      }
-
       case 'input_preview': {
         // input_preview is server confirmation of user's request
         const previewContent = data.data?.preview || data.message || '';
         if (!previewContent) return [null];
 
-        // Check if this is from a follow-up message (source: 'user') vs initial request (source: 'claude-remote')
-        const isFollowUpMessage = data.source === 'user';
+        // During page load/replay: show as user message bubble (no optimistic message was shown)
+        // During live execution: show as "Request confirmed" (optimistic message was already shown)
+        // This applies to both initial requests AND follow-up messages
 
-        // For initial requests (source: 'claude-remote'):
-        // - During replay or page load: show as user message (no optimistic message was shown)
-        // - During live execution: show as "Request confirmed" (optimistic message was already shown)
-        // For follow-up messages (source: 'user'):
-        // - Always show as "Request confirmed" (user_message event shows the user bubble)
-
-        if (!isFollowUpMessage && !this.shownOptimisticUserMessage) {
-          // Initial request during page load/replay - show as user message
+        if (!this.shownOptimisticUserMessage) {
+          // Page load/replay - show as user message
           return [{
             id: event.id || `user-replay-${Date.now()}`,
             type: 'user',
@@ -771,9 +724,7 @@ export class ChatPage extends Page<ChatPageOptions> {
           }];
         }
 
-        // Show as confirmation status message for:
-        // - Follow-up messages (source: 'user') - user_message handles the bubble
-        // - Initial requests when optimistic message was shown
+        // Live execution - show as confirmation status message
         return [{
           id: event.id || `${eventType}-${Date.now()}`,
           type: 'message', // Show as system message
@@ -782,19 +733,17 @@ export class ChatPage extends Page<ChatPageOptions> {
         }];
       }
 
-      case 'submission_preview': {
-        // submission_preview is for resume operations - just shows "Resuming session: ..."
-        // The user's message comes via input_preview event
-        const statusMessage = data.message || '';
-        if (!statusMessage) return [null];
-
+      case 'user_message':
+        // Legacy event type for follow-up messages (backwards compatibility)
+        // New sessions use input_preview with source: 'user' instead
+        const userContent = data.content || '';
+        if (!userContent) return [null];
         return [{
-          id: event.id || `${eventType}-${Date.now()}`,
-          type: eventType, // Keep original type for emoji lookup
-          content: statusMessage,
+          id: event.id || `user-${Date.now()}`,
+          type: 'user',
+          content: userContent,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
-      }
 
       case 'assistant':
       case 'assistant_message':
@@ -806,14 +755,6 @@ export class ChatPage extends Page<ChatPageOptions> {
           id: event.id || `error-${Date.now()}`,
           type: 'error',
           content: data.message || data.error || 'An error occurred',
-          timestamp: new Date(event.timestamp || Date.now()),
-        }];
-
-      case 'message':
-        return [{
-          id: event.id || `message-${Date.now()}`,
-          type: 'message', // Keep original type
-          content: data.message || '',
           timestamp: new Date(event.timestamp || Date.now()),
         }];
 
@@ -859,25 +800,8 @@ export class ChatPage extends Page<ChatPageOptions> {
         }];
       }
 
-      case 'session_created':
-      case 'session-created':
-        return [{
-          id: event.id || `session_created-${Date.now()}`,
-          type: 'session_created',
-          content: 'Session created',
-          timestamp: new Date(event.timestamp || Date.now()),
-        }];
-
-      case 'session_name':
-        return [{
-          id: event.id || `session_name-${Date.now()}`,
-          type: 'session_name',
-          content: `Session: "${data.sessionName || data.name || 'Untitled'}"`,
-          timestamp: new Date(event.timestamp || Date.now()),
-        }];
-
       case 'result': {
-        // Final result with cost/duration info
+        // Final result from Anthropic with cost/duration info - this is the completion indicator
         const cost = data.total_cost_usd ? `$${data.total_cost_usd.toFixed(4)}` : '';
         const duration = data.duration_ms ? `${(data.duration_ms / 1000).toFixed(1)}s` : '';
         const stats = [cost, duration].filter(Boolean).join(' • ');
@@ -888,18 +812,6 @@ export class ChatPage extends Page<ChatPageOptions> {
           timestamp: new Date(event.timestamp || Date.now()),
         }];
       }
-
-      case 'completed':
-        // Completion event with optional stats
-        const completedCost = data.totalCost ? `$${data.totalCost.toFixed(4)}` : '';
-        const completedDuration = data.duration_ms ? `${(data.duration_ms / 1000).toFixed(1)}s` : '';
-        const completedStats = [completedCost, completedDuration].filter(Boolean).join(' • ');
-        return [{
-          id: event.id || `completed-${Date.now()}`,
-          type: 'completed',
-          content: completedStats ? `Session completed (${completedStats})` : 'Session completed',
-          timestamp: new Date(event.timestamp || Date.now()),
-        }];
 
       default:
         return [null];

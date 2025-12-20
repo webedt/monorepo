@@ -1469,46 +1469,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
     // Flush headers immediately to establish SSE connection through proxies
     res.flushHeaders();
 
-    // Send submission preview event immediately so user sees their request was received
-    // userRequest contains the session title (updated when session_name event is received)
-    const sessionName = session.userRequest || session.sessionPath || sessionId;
-    const repoInfo = session.repositoryOwner && session.repositoryName
-      ? `${session.repositoryOwner}/${session.repositoryName}`
-      : null;
-    const previewText = repoInfo
-      ? `Resuming session: ${sessionName} (${repoInfo})`
-      : `Resuming session: ${sessionName}`;
-
-    res.write(`data: ${JSON.stringify({
-      type: 'submission_preview',
-      message: previewText,
-      source: 'internal-api-server:/sessions/events/stream',
-      timestamp: new Date().toISOString(),
-      data: {
-        sessionId,
-        sessionName,
-        repositoryOwner: session.repositoryOwner,
-        repositoryName: session.repositoryName,
-        branch: session.branch,
-        status: session.status
-      }
-    })}\n\n`);
-
-    // Send a connected event with session info
-    res.write(`event: connected\n`);
-    res.write(`data: ${JSON.stringify({
-      sessionId,
-      status: session.status,
-      isLive: isActive || isRecentlyActive,
-      sessionPath: session.sessionPath,
-      branch: session.branch,
-      baseBranch: session.baseBranch,
-      repositoryOwner: session.repositoryOwner,
-      repositoryName: session.repositoryName,
-      userRequest: session.userRequest,
-      createdAt: session.createdAt,
-      completedAt: session.completedAt
-    })}\n\n`);
+    // No custom wrapper events - just replay stored events directly
 
     // PHASE 1: Replay stored events from database
     const storedEvents = await db
@@ -1522,14 +1483,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
       sessionId
     });
 
-    // Send replay start marker
-    res.write(`data: ${JSON.stringify({
-      type: 'replay_start',
-      totalEvents: storedEvents.length,
-      timestamp: new Date().toISOString()
-    })}\n\n`);
-
-    // Replay each stored event
+    // Replay each stored event (no wrapper markers)
     for (const event of storedEvents) {
       if (res.writableEnded) break;
       const eventData = {
@@ -1540,13 +1494,6 @@ const streamEventsHandler = async (req: Request, res: Response) => {
       res.write(`data: ${JSON.stringify(eventData)}\n\n`);
     }
 
-    // Send replay end marker
-    res.write(`data: ${JSON.stringify({
-      type: 'replay_end',
-      totalEvents: storedEvents.length,
-      timestamp: new Date().toISOString()
-    })}\n\n`);
-
     // PHASE 2: Handle based on session status
     // Subscribe to live events if session is active in broadcaster OR has recent DB activity
     // This handles the case where the broadcaster might not have the session (e.g., server restart)
@@ -1554,12 +1501,6 @@ const streamEventsHandler = async (req: Request, res: Response) => {
     if (isActive || isRecentlyActive) {
       // Session is actively streaming - subscribe to live events
       const subscriberId = uuidv4();
-
-      res.write(`data: ${JSON.stringify({
-        type: 'live_stream_start',
-        message: 'Now receiving live events',
-        timestamp: new Date().toISOString()
-      })}\n\n`);
 
       // Subscribe to session events
       const unsubscribe = sessionEventBroadcaster.subscribe(sessionId, subscriberId, (event) => {
@@ -1718,34 +1659,27 @@ const streamEventsHandler = async (req: Request, res: Response) => {
             }
           }
 
-          // Send resuming event with flush
-          logger.info('RESUME: Sending resuming event', {
-            component: 'Sessions',
-            sessionId,
-            writableEnded: res.writableEnded,
-          });
-          sseWriteSync(res, `data: ${JSON.stringify({
-            type: 'resuming',
-            sessionId,
-            prompt,
-            timestamp: new Date().toISOString()
-          })}\n\n`);
-
-          // Store user message event
-          const userMsgEvent = {
-            type: 'user_message',
-            content: prompt,
+          // Send input_preview for the follow-up message (same format as initial execution)
+          const inputPreviewEvent = {
+            type: 'input_preview',
+            message: `Request received: ${prompt.length > 200 ? prompt.substring(0, 200) + '...' : prompt}`,
+            source: 'user',
             timestamp: new Date().toISOString(),
+            data: {
+              preview: prompt,
+              truncated: prompt.length > 200,
+              originalLength: prompt.length,
+            },
           };
           await db.insert(events).values({
             chatSessionId: sessionId,
-            eventData: userMsgEvent,
+            eventData: inputPreviewEvent,
           });
-          logger.info('RESUME: Sending user_message event', {
+          logger.info('RESUME: Sending input_preview event', {
             component: 'Sessions',
             sessionId,
           });
-          sseWriteSync(res, `data: ${JSON.stringify(userMsgEvent)}\n\n`);
+          sseWriteSync(res, `data: ${JSON.stringify(inputPreviewEvent)}\n\n`);
 
           // Create Claude client and resume session
           logger.info('Creating ClaudeRemoteClient for resume', {

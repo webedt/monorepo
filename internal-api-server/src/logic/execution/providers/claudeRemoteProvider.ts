@@ -89,23 +89,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       model: model || CLAUDE_DEFAULT_MODEL,
     });
 
-    // Emit connected event
-    await onEvent({
-      type: 'connected',
-      timestamp: new Date().toISOString(),
-      source,
-      provider: this.name,
-    });
-
-    // Emit creating session event
-    await onEvent({
-      type: 'message',
-      timestamp: new Date().toISOString(),
-      source,
-      stage: 'creating_session',
-      message: 'Creating Claude remote session...',
-    });
-
+    // No custom events - just create the client and let Anthropic events flow through
     const client = this.createClient(claudeAuth, environmentId);
 
     // Extract text from prompt for title generation (images can't be used for title)
@@ -166,24 +150,6 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         webUrl,
       });
 
-      // Emit session created event
-      await onEvent({
-        type: 'session_created',
-        timestamp: new Date().toISOString(),
-        source,
-        remoteSessionId: sessionId,
-        remoteWebUrl: webUrl,
-        sessionId: chatSessionId,
-      });
-
-      // Emit session name
-      await onEvent({
-        type: 'session_name',
-        timestamp: new Date().toISOString(),
-        source,
-        sessionName: title,
-      });
-
       // Poll for events - pass raw events directly
       const result = await client.pollSession(
         sessionId,
@@ -204,17 +170,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         durationMs: result.durationMs,
       });
 
-      // Emit final completed event with all details
-      await onEvent({
-        type: 'completed',
-        timestamp: new Date().toISOString(),
-        source,
-        sessionId: chatSessionId,
-        branch: result.branch,
-        totalCost: result.totalCost,
-        duration_ms: result.durationMs,
-      });
-
+      // No custom completed event - the Anthropic result event serves as completion indicator
       return {
         remoteSessionId: sessionId,
         remoteWebUrl: webUrl,
@@ -258,23 +214,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       remoteSessionId,
     });
 
-    // Emit connected event
-    await onEvent({
-      type: 'connected',
-      timestamp: new Date().toISOString(),
-      source,
-      provider: this.name,
-      sessionId: chatSessionId,
-    });
-
-    // Emit resuming event
-    await onEvent({
-      type: 'message',
-      timestamp: new Date().toISOString(),
-      source,
-      stage: 'resuming',
-      message: 'Resuming session...',
-    });
+    // No custom events for resume - let Anthropic events flow through
 
     const client = this.createClient(claudeAuth, environmentId);
 
@@ -301,17 +241,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         status: result.status,
       });
 
-      // Emit final completed event
-      await onEvent({
-        type: 'completed',
-        timestamp: new Date().toISOString(),
-        source,
-        sessionId: chatSessionId,
-        branch: result.branch,
-        totalCost: result.totalCost,
-        duration_ms: result.durationMs,
-      });
-
+      // No custom completed event - the Anthropic result event serves as completion indicator
       return {
         remoteSessionId,
         remoteWebUrl: webUrl,
