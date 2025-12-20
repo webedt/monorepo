@@ -494,14 +494,6 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     console.log('[ChatPage] Starting execution for session:', this.session.id);
 
-    // Add system message
-    this.addMessage({
-      id: `system-${Date.now()}`,
-      type: 'system',
-      content: '🚀 Starting AI agent...',
-      timestamp: new Date(),
-    });
-
     // Update status
     this.updateSessionStatus('running');
     workerStore.startExecution(this.session.id);
@@ -917,100 +909,16 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     console.log('[ChatPage] Stream event:', eventType, event);
 
-    // Always add to raw events
-    this.addRawEvent({
-      id: `event-${Date.now()}-${Math.random()}`,
-      type: eventType,
-      timestamp: new Date(),
-      data: event,
-    });
+    // Always add to raw events (same format as loadMessages)
+    const rawEvent = this.convertToRawEvent({ eventData: event, timestamp: new Date().toISOString() });
+    this.addRawEvent(rawEvent);
 
+    // Handle control events that don't create messages
     switch (eventType) {
       case 'connected':
       case 'session-created':
-        // Connection/session established
         console.log('[ChatPage] Connected/Session created:', event);
-        break;
-
-      case 'user':
-        // User message - extract content from nested message object
-        let userContent = '';
-        if (typeof event.message === 'object' && event.message?.content) {
-          userContent = typeof event.message.content === 'string'
-            ? event.message.content
-            : '';
-        } else if (typeof event.content === 'string') {
-          userContent = event.content;
-        } else if (typeof event.message === 'string') {
-          userContent = event.message;
-        }
-        if (userContent) {
-          this.addMessage({
-            id: `user-${Date.now()}-${Math.random()}`,
-            type: 'user',
-            content: userContent,
-            timestamp: new Date(),
-          });
-        }
-        break;
-
-      case 'message':
-        // Progress messages from the worker - use 'message' type for consistent rendering
-        const msgContent = this.extractStringContent(event);
-        if (msgContent) {
-          this.addMessage({
-            id: `message-${Date.now()}-${Math.random()}`,
-            type: 'message',
-            content: msgContent,
-            timestamp: new Date(),
-          });
-        }
-        break;
-
-      case 'input_preview':
-      case 'submission_preview':
-        // This is a confirmation message like "Request received: ..."
-        const inputContent = this.extractStringContent(event);
-        if (inputContent) {
-          this.addMessage({
-            id: `${eventType}-${Date.now()}`,
-            type: eventType, // Use actual event type for emoji lookup
-            content: inputContent,
-            timestamp: new Date(),
-          });
-        }
-        break;
-
-      case 'assistant':
-      case 'assistant_message':
-        const assistantContent = this.extractAssistantContent(event);
-        if (assistantContent) {
-          this.addMessage({
-            id: `assistant-${Date.now()}-${Math.random()}`,
-            type: 'assistant',
-            content: assistantContent,
-            timestamp: new Date(),
-            model: event.model || event.message?.model,
-          });
-        }
-        break;
-
-      case 'tool_use':
-        // Show tool being used with expandable details
-        const streamToolName = event.name || event.tool || 'unknown tool';
-        const streamToolId = event.id || event.tool_use_id || `tool-${Date.now()}`;
-        this.addMessage({
-          id: streamToolId,
-          type: 'tool_use',
-          content: `Using tool: ${streamToolName}`,
-          timestamp: new Date(),
-          toolUse: {
-            id: streamToolId,
-            name: event.name || event.tool || 'unknown',
-            input: event.input || {},
-          },
-        });
-        break;
+        return;
 
       case 'tool_result':
         // Tool completed - update the corresponding tool_use message with result
@@ -1021,68 +929,44 @@ export class ChatPage extends Page<ChatPageOptions> {
             content: event.content,
             is_error: event.is_error,
           };
-          // Store in map
           this.toolResultMap.set(resultToolId, result);
-          // Update the message
           this.updateToolResult(resultToolId, result);
         }
-        break;
+        return;
 
       case 'error':
-        const errorContent = this.extractStringContent(event) || 'An error occurred';
-        this.addMessage({
-          id: `error-${Date.now()}`,
-          type: 'error',
-          content: errorContent,
-          timestamp: new Date(),
-        });
         workerStore.stopExecution();
         this.updateSessionStatus('failed');
-        break;
+        break; // Still create a message for errors
 
       case 'completed':
-        // Don't add a message for completed - it's a control event
-        // The result event already shows the completion
         workerStore.stopExecution();
         this.updateSessionStatus('completed');
-        // Close the event source
         if (this.eventSource) {
           this.eventSource.close();
           this.eventSource = null;
         }
-        break;
+        return;
 
       case 'session_name':
         if ((event.sessionName || event.name) && this.session) {
           this.session.userRequest = event.sessionName || event.name;
           this.updateHeader();
         }
-        break;
-    }
-  }
-
-  /**
-   * Extract a string content from an event, handling various formats
-   */
-  private extractStringContent(event: any): string {
-    // Try various common field names
-    if (typeof event.content === 'string') return event.content;
-    if (typeof event.message === 'string') return event.message;
-    if (typeof event.text === 'string') return event.text;
-
-    // Handle content arrays (like Claude API format)
-    if (Array.isArray(event.content)) {
-      return event.content
-        .map((block: any) => {
-          if (typeof block === 'string') return block;
-          if (block.type === 'text' && typeof block.text === 'string') return block.text;
-          return '';
-        })
-        .filter(Boolean)
-        .join('\n');
+        return; // Don't create a message for session_name
     }
 
-    return '';
+    // Use the same conversion logic as loadMessages for consistency
+    // Wrap event to match the format from database events
+    const wrappedEvent = { eventData: event, timestamp: new Date().toISOString() };
+    const messages = this.convertEventToMessages(wrappedEvent);
+
+    // Add each message (convertEventToMessages returns an array)
+    for (const msg of messages) {
+      if (msg) {
+        this.addMessage(msg);
+      }
+    }
   }
 
   private updateSessionStatus(status: string): void {
