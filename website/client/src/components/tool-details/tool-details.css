@@ -5,6 +5,11 @@
 .tool-details {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.tool-details:last-child {
+  margin-bottom: 0;
 }
 
 .tool-details[open] .tool-arrow {

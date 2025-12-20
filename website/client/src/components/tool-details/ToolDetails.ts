@@ -315,16 +315,19 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
   }
 
   private renderReadDetails(result: any): string {
-    const fileContent = result?.file?.content || null;
+    // Content can be in result.file.content (structured) or directly in this.result.content (raw string from Claude)
+    const fileContent = result?.file?.content || this.result?.content || null;
     if (fileContent) {
-      return `<pre class="tool-output">${this.escapeHtml(fileContent)}</pre>`;
+      const content = typeof fileContent === 'string' ? fileContent : JSON.stringify(fileContent, null, 2);
+      return `<pre class="tool-output">${this.escapeHtml(content)}</pre>`;
     }
     return `<div class="tool-empty">File is empty or could not be read</div>`;
   }
 
   private renderBashDetails(result: any): string {
     const command = this.tool.input?.command || '';
-    const stdout = result?.stdout || '';
+    // Output can be in result.stdout (structured) or directly in this.result.content (raw string from Claude)
+    const stdout = result?.stdout || this.result?.content || '';
     const stderr = result?.stderr || '';
     const hasFullCommand = command.length > 80;
 
@@ -344,7 +347,8 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
     }
 
     if (stdout) {
-      html += `<pre class="tool-output ${result?.is_error || stderr ? 'tool-error-output' : ''}">${this.escapeHtml(stdout)}</pre>`;
+      const output = typeof stdout === 'string' ? stdout : JSON.stringify(stdout, null, 2);
+      html += `<pre class="tool-output ${this.result?.is_error || stderr ? 'tool-error-output' : ''}">${this.escapeHtml(output)}</pre>`;
     } else if (!stderr) {
       html += `<div class="tool-empty">(no output)</div>`;
     }
@@ -394,12 +398,26 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
   }
 
   private renderGrepDetails(result: any): string {
-    const outputMode = this.tool.input?.output_mode || 'files_with_matches';
     const filenames = result?.filenames || [];
     const resultContent = this.result?.content;
 
-    if (outputMode === 'content' && resultContent) {
+    // If we have content directly (raw string from Claude), show it
+    if (resultContent) {
       const content = typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent, null, 2);
+      // If it looks like a file list (newline separated paths), render as file list
+      if (typeof resultContent === 'string' && resultContent.includes('\n') && !resultContent.includes(' ')) {
+        const files = resultContent.split('\n').filter((f: string) => f.trim());
+        if (files.length > 0) {
+          const displayFiles = files.slice(0, 50);
+          const remaining = files.length - 50;
+          return `
+            <div class="tool-file-list">
+              ${displayFiles.map((file: string) => `<div class="tool-file-item">${this.escapeHtml(file)}</div>`).join('')}
+              ${remaining > 0 ? `<div class="tool-meta">...and ${remaining} more files</div>` : ''}
+            </div>
+          `;
+        }
+      }
       return `<pre class="tool-output">${this.escapeHtml(content)}</pre>`;
     }
 
@@ -419,6 +437,22 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
 
   private renderGlobDetails(result: any): string {
     const filenames = result?.filenames || [];
+    const resultContent = this.result?.content;
+
+    // If we have content directly (raw string from Claude), parse as file list
+    if (resultContent && typeof resultContent === 'string') {
+      const files = resultContent.split('\n').filter((f: string) => f.trim());
+      if (files.length > 0) {
+        const displayFiles = files.slice(0, 50);
+        const remaining = files.length - 50;
+        return `
+          <div class="tool-file-list">
+            ${displayFiles.map((file: string) => `<div class="tool-file-item">${this.escapeHtml(file)}</div>`).join('')}
+            ${remaining > 0 ? `<div class="tool-meta">...and ${remaining} more files</div>` : ''}
+          </div>
+        `;
+      }
+    }
 
     if (filenames.length > 0) {
       const displayFiles = filenames.slice(0, 50);
