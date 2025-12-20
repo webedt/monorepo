@@ -364,7 +364,7 @@ jobs:
 
           ENV_VARS=$(cat <<ENVEOF
           NODE_ENV=production
-          PORT=3000
+          PORT=3001
           WORKSPACE_DIR=/workspace
           DATABASE_URL=${DATABASE_URL}
           SESSION_SECRET=${SESSION_SECRET}

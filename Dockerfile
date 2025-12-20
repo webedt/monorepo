@@ -3,8 +3,8 @@
 # =============================================================================
 # Builds all services into one image:
 # - Shared library (@webedt/shared)
-# - Website Frontend (React client)
-# - Website Backend (Express server serving API + static files)
+# - Website Frontend (Vite preview server on port 3000)
+# - Website Backend (Express API on port 3001)
 # =============================================================================
 
 # Build arguments for version tracking
@@ -121,13 +121,16 @@ WORKDIR /app
 # Copy shared package
 COPY --from=shared-build /app/shared ./shared
 
-# Copy website frontend build (static files)
-COPY --from=frontend-build /app/frontend/dist ./website/frontend/dist
+# Copy website frontend (full package for vite preview)
+COPY --from=frontend-build /app/frontend ./website/frontend
 
 # Copy website backend
 COPY --from=backend-build /app/backend/dist ./website/backend/dist
 COPY --from=backend-build /app/backend/node_modules ./website/backend/node_modules
 COPY --from=backend-build /app/backend/package.json ./website/backend/
+
+# Copy start script
+COPY scripts/start.js ./scripts/start.js
 
 # Configure git for worker processes
 RUN git config --global user.email "worker@webedt.local" && \
@@ -135,19 +138,18 @@ RUN git config --global user.email "worker@webedt.local" && \
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=3001
 ENV WORKSPACE_DIR=/workspace
 ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
 ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
 ENV BUILD_IMAGE_TAG=$BUILD_IMAGE_TAG
 
-# Expose main port
-EXPOSE 3000
+# Expose ports (frontend on 3000, backend API on 3001)
+EXPOSE 3000 3001
 
-# Health check
+# Health check on frontend
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:3000/ || exit 1
 
-# Start the backend server (serves both API and static frontend)
-WORKDIR /app/website/backend
-CMD ["node", "dist/index.js"]
+# Start both services
+CMD ["node", "scripts/start.js"]
