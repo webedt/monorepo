@@ -19,6 +19,37 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        // Disable timeout for SSE connections
+        timeout: 0,
+        proxyTimeout: 0,
+        // SSE-specific configuration to prevent buffering and timeouts
+        configure: (proxy) => {
+          // Disable socket timeout for long-running SSE connections
+          proxy.on('proxyReq', (proxyReq, req) => {
+            // Set headers for SSE endpoints to prevent buffering
+            if (req.url?.includes('/stream') || req.headers.accept?.includes('text/event-stream')) {
+              proxyReq.setHeader('Accept', 'text/event-stream');
+              proxyReq.setHeader('Cache-Control', 'no-cache');
+              proxyReq.setHeader('Connection', 'keep-alive');
+              // Disable socket timeout
+              if (proxyReq.socket) {
+                proxyReq.socket.setTimeout(0);
+              }
+            }
+          });
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            // Disable buffering for SSE responses
+            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+              res.setHeader('Connection', 'keep-alive');
+              // Disable socket timeout on response
+              if (res.socket) {
+                res.socket.setTimeout(0);
+              }
+            }
+          });
+        },
       },
     },
   },

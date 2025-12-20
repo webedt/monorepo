@@ -105,6 +105,7 @@ export class ChatPage extends Page<ChatPageOptions> {
   private eventSource: { close: () => void } | null = null;
   private messagesContainer: HTMLElement | null = null;
   private inputElement: HTMLTextAreaElement | null = null;
+  private shownOptimisticUserMessage: string | null = null; // Track optimistic user message to avoid duplicates
 
   // View settings (persisted to localStorage)
   private showRawJson = false;
@@ -517,6 +518,18 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     console.log('[ChatPage] Starting execution for session:', this.session.id);
 
+    // Show the user's request immediately (optimistic UI)
+    // This gives instant feedback before the server responds
+    if (this.session.userRequest) {
+      this.shownOptimisticUserMessage = this.session.userRequest;
+      this.addMessage({
+        id: `user-${Date.now()}`,
+        type: 'user',
+        content: this.session.userRequest,
+        timestamp: new Date(),
+      });
+    }
+
     // Update status
     this.updateSessionStatus('running');
     workerStore.startExecution(this.session.id);
@@ -719,6 +732,13 @@ export class ChatPage extends Page<ChatPageOptions> {
           userContent = data.message;
         }
         if (!userContent) return [null];
+
+        // Skip if this matches our optimistic user message (avoid duplicates)
+        if (this.shownOptimisticUserMessage && userContent.trim() === this.shownOptimisticUserMessage.trim()) {
+          console.log('[ChatPage] Skipping duplicate user message (already shown optimistically)');
+          return [null];
+        }
+
         return [{
           id: event.id || `user-${Date.now()}`,
           type: 'user', // Normalize to 'user' for rendering
@@ -727,17 +747,54 @@ export class ChatPage extends Page<ChatPageOptions> {
         }];
       }
 
-      case 'input_preview':
-      case 'submission_preview':
-        // This is a confirmation message like "Request received: ..."
-        const inputContent = data.message || data.data?.preview || '';
-        if (!inputContent) return [null];
+      case 'input_preview': {
+        // input_preview is server confirmation of user's request
+        const previewContent = data.data?.preview || data.message || '';
+        if (!previewContent) return [null];
+
+        // Check if this is from a follow-up message (source: 'user') vs initial request (source: 'claude-remote')
+        const isFollowUpMessage = data.source === 'user';
+
+        // For initial requests (source: 'claude-remote'):
+        // - During replay or page load: show as user message (no optimistic message was shown)
+        // - During live execution: show as "Request confirmed" (optimistic message was already shown)
+        // For follow-up messages (source: 'user'):
+        // - Always show as "Request confirmed" (user_message event shows the user bubble)
+
+        if (!isFollowUpMessage && !this.shownOptimisticUserMessage) {
+          // Initial request during page load/replay - show as user message
+          return [{
+            id: event.id || `user-replay-${Date.now()}`,
+            type: 'user',
+            content: previewContent,
+            timestamp: new Date(event.timestamp || Date.now()),
+          }];
+        }
+
+        // Show as confirmation status message for:
+        // - Follow-up messages (source: 'user') - user_message handles the bubble
+        // - Initial requests when optimistic message was shown
+        return [{
+          id: event.id || `${eventType}-${Date.now()}`,
+          type: 'message', // Show as system message
+          content: `Request confirmed: ${previewContent}`,
+          timestamp: new Date(event.timestamp || Date.now()),
+        }];
+      }
+
+      case 'submission_preview': {
+        // submission_preview is for resume operations - just shows "Resuming session: ..."
+        // The user's message comes via input_preview event
+        const statusMessage = data.message || '';
+        if (!statusMessage) return [null];
+
         return [{
           id: event.id || `${eventType}-${Date.now()}`,
           type: eventType, // Keep original type for emoji lookup
-          content: inputContent,
+          content: statusMessage,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
+      }
 
       case 'assistant':
       case 'assistant_message':
@@ -1013,14 +1070,28 @@ export class ChatPage extends Page<ChatPageOptions> {
   private connectToStream(): void {
     if (!this.session) return;
 
+    // Close any existing connection first
+    if (this.eventSource) {
+      console.log('[ChatPage] Closing existing EventSource connection');
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+
     const streamUrl = sessionsApi.getStreamUrl(this.session.id);
+    console.log('[ChatPage] Connecting to stream:', streamUrl);
 
     // Use EventSource for SSE
     const es = new EventSource(streamUrl, { withCredentials: true });
 
+    // Log when connection opens
+    es.onopen = () => {
+      console.log('[ChatPage] EventSource connection opened');
+    };
+
     // Handler for processing event data
     const handleEventData = (event: MessageEvent) => {
       try {
+        console.log('[ChatPage] Raw SSE message received:', event.data.substring(0, 200));
         const data = JSON.parse(event.data);
         this.handleStreamEvent(data);
       } catch (error) {
@@ -1095,16 +1166,26 @@ export class ChatPage extends Page<ChatPageOptions> {
         return;
 
       case 'error':
-        workerStore.stopExecution();
-        this.updateSessionStatus('failed');
+        // Only handle error if this is NOT a replayed event
+        if (!event._replayed) {
+          workerStore.stopExecution();
+          this.updateSessionStatus('failed');
+        }
         break; // Still create a message for errors
 
       case 'completed':
-        workerStore.stopExecution();
-        this.updateSessionStatus('completed');
-        if (this.eventSource) {
-          this.eventSource.close();
-          this.eventSource = null;
+        // Only close the connection if this is NOT a replayed event
+        // During resume, we replay past events including the old 'completed' event
+        // but we need to keep the connection open for new events from the resume
+        if (!event._replayed) {
+          workerStore.stopExecution();
+          this.updateSessionStatus('completed');
+          if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+          }
+        } else {
+          console.log('[ChatPage] Ignoring replayed completed event, keeping connection open for resume');
         }
         return;
 
@@ -1510,7 +1591,8 @@ export class ChatPage extends Page<ChatPageOptions> {
       this.inputElement.style.height = 'auto';
     }
 
-    // Add user message
+    // Add user message optimistically and track it to avoid duplicates
+    this.shownOptimisticUserMessage = content;
     this.addMessage({
       id: `user-${Date.now()}`,
       type: 'user',

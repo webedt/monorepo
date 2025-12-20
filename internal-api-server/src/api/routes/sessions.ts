@@ -17,6 +17,48 @@ import { v4 as uuidv4 } from 'uuid';
 import { ensureValidToken, type ClaudeAuth } from '../../logic/auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '../../logic/config/env.js';
 
+/**
+ * Helper to write SSE data safely.
+ * Checks if the stream is still writable before writing.
+ * Returns true if write succeeded, false if stream was closed.
+ */
+function sseWrite(res: Response, data: string): boolean {
+  // Check all conditions that would prevent writing
+  if (res.writableEnded || res.writableFinished) {
+    return false;
+  }
+  if (res.socket && res.socket.destroyed) {
+    return false;
+  }
+  try {
+    // Write the data - res.write returns false if internal buffer is full
+    const writeResult = res.write(data);
+
+    // Try compression middleware flush if available (e.g., from compression middleware)
+    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+      (res as unknown as { flush: () => void }).flush();
+    }
+
+    // If write returned false, the internal buffer is full
+    // This shouldn't happen often with SSE but log it for debugging
+    if (!writeResult) {
+      console.log('[sseWrite] Internal buffer full, data queued');
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[sseWrite] Error writing:', err);
+    return false;
+  }
+}
+
+/**
+ * Synchronous SSE write helper - same as sseWrite but named for clarity.
+ */
+function sseWriteSync(res: Response, data: string): boolean {
+  return sseWrite(res, data);
+}
+
 // Helper function to delete a GitHub branch
 async function deleteGitHubBranch(
   githubAccessToken: string,
@@ -854,12 +896,17 @@ router.post('/:id/send', requireAuth, async (req: Request, res: Response) => {
 
     // Store the user message in the database for the stream to pick up
     // The actual resume will happen when the client connects to the SSE stream
-    // Store a pending message event that the stream handler will use
+    // Use input_preview for consistency with initial execution flow
     const userMessageEvent = {
-      type: 'pending_user_message',
-      content: content,
-      timestamp: new Date().toISOString(),
+      type: 'input_preview',
+      message: `Request received: ${content.length > 200 ? content.substring(0, 200) + '...' : content}`,
       source: 'user',
+      timestamp: new Date().toISOString(),
+      data: {
+        preview: content,
+        truncated: content.length > 200,
+        originalLength: content.length,
+      },
     };
 
     await db.insert(events).values({
@@ -1419,6 +1466,8 @@ const streamEventsHandler = async (req: Request, res: Response) => {
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no'
     });
+    // Flush headers immediately to establish SSE connection through proxies
+    res.flushHeaders();
 
     // Send submission preview event immediately so user sees their request was received
     // userRequest contains the session title (updated when session_name event is received)
@@ -1554,13 +1603,14 @@ const streamEventsHandler = async (req: Request, res: Response) => {
       });
     } else {
       // Session is not actively streaming - check for pending user messages to resume
+      // Look for input_preview events from 'user' source (follow-up messages)
       const pendingMessages = storedEvents.filter(e => {
-        const data = e.eventData as { type?: string };
-        return data?.type === 'pending_user_message';
+        const data = e.eventData as { type?: string; source?: string };
+        return data?.type === 'input_preview' && data?.source === 'user';
       });
 
       // Re-fetch session status to avoid race condition with /send endpoint
-      // The /send endpoint updates status to 'running' and inserts pending_user_message,
+      // The /send endpoint updates status to 'running' and inserts input_preview,
       // but the session object was fetched at the start of this handler
       const [freshSession] = await db
         .select()
@@ -1573,8 +1623,8 @@ const streamEventsHandler = async (req: Request, res: Response) => {
       if (pendingMessages.length > 0 && session.remoteSessionId && currentStatus === 'running') {
         // Found pending message(s) - resume the Claude session
         const pendingMessage = pendingMessages[pendingMessages.length - 1]; // Use the latest
-        const messageData = pendingMessage.eventData as { content?: string };
-        const prompt = messageData?.content;
+        const messageData = pendingMessage.eventData as { data?: { preview?: string } };
+        const prompt = messageData?.data?.preview;
 
         if (prompt) {
           logger.info(`Found pending message for session ${sessionId}, initiating resume`, {
@@ -1668,8 +1718,13 @@ const streamEventsHandler = async (req: Request, res: Response) => {
             }
           }
 
-          // Send resuming event
-          res.write(`data: ${JSON.stringify({
+          // Send resuming event with flush
+          logger.info('RESUME: Sending resuming event', {
+            component: 'Sessions',
+            sessionId,
+            writableEnded: res.writableEnded,
+          });
+          sseWriteSync(res, `data: ${JSON.stringify({
             type: 'resuming',
             sessionId,
             prompt,
@@ -1686,7 +1741,11 @@ const streamEventsHandler = async (req: Request, res: Response) => {
             chatSessionId: sessionId,
             eventData: userMsgEvent,
           });
-          res.write(`data: ${JSON.stringify(userMsgEvent)}\n\n`);
+          logger.info('RESUME: Sending user_message event', {
+            component: 'Sessions',
+            sessionId,
+          });
+          sseWriteSync(res, `data: ${JSON.stringify(userMsgEvent)}\n\n`);
 
           // Create Claude client and resume session
           logger.info('Creating ClaudeRemoteClient for resume', {
@@ -1758,19 +1817,40 @@ const streamEventsHandler = async (req: Request, res: Response) => {
                   return;
                 }
 
-                logger.info(`Resume event #${eventCount}`, {
+                logger.info(`Resume event #${eventCount} - WRITING TO SSE STREAM`, {
+                  component: 'Sessions',
+                  eventType,
+                  sessionId,
+                  writableEnded: res.writableEnded,
+                  finished: res.finished,
+                });
+
+                if (res.writableEnded) {
+                  logger.warn(`Resume event #${eventCount} - SKIPPED (response ended)`, {
+                    component: 'Sessions',
+                    eventType,
+                    sessionId,
+                  });
+                  return;
+                }
+                const eventWithTimestamp = { ...event, timestamp: new Date().toISOString() };
+                const sseData = `data: ${JSON.stringify(eventWithTimestamp)}\n\n`;
+                logger.info(`Resume event #${eventCount} - SSE DATA LENGTH: ${sseData.length}`, {
                   component: 'Sessions',
                   eventType,
                   sessionId,
                 });
-
-                if (res.writableEnded) return;
-                const eventWithTimestamp = { ...event, timestamp: new Date().toISOString() };
-                res.write(`data: ${JSON.stringify(eventWithTimestamp)}\n\n`);
+                // Use sseWrite with flush to ensure data gets through proxy chain
+                sseWrite(res, sseData);
                 // Store event in database
                 await db.insert(events).values({
                   chatSessionId: sessionId,
                   eventData: eventWithTimestamp,
+                });
+                logger.info(`Resume event #${eventCount} - STORED IN DB`, {
+                  component: 'Sessions',
+                  eventType,
+                  sessionId,
                 });
               }
             );
@@ -1794,9 +1874,8 @@ const streamEventsHandler = async (req: Request, res: Response) => {
               })
               .where(eq(chatSessions.id, sessionId));
 
-            // Send completion event
-            res.write(`event: completed\n`);
-            res.write(`data: ${JSON.stringify({
+            // Send completion event with flush
+            sseWrite(res, `event: completed\ndata: ${JSON.stringify({
               websiteSessionId: sessionId,
               completed: true,
               status: result.status === 'completed' || result.status === 'idle' ? 'completed' : 'error',
@@ -1810,7 +1889,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
               errorMessage,
               errorStack,
             });
-            res.write(`data: ${JSON.stringify({
+            sseWrite(res, `data: ${JSON.stringify({
               type: 'error',
               error: resumeError instanceof Error ? resumeError.message : 'Resume failed',
               timestamp: new Date().toISOString()
