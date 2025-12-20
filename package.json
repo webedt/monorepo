@@ -3,43 +3,21 @@
   "version": "1.0.0",
   "private": true,
   "description": "WebEDT - AI-powered code editing platform",
+  "workspaces": [
+    "shared",
+    "website/frontend",
+    "website/backend",
+    "internal-api-server",
+    "tools/*"
+  ],
   "scripts": {
-    "install:all": "npm run install:shared && npm run install:client && npm run install:server && npm run install:api",
-    "install:shared": "cd shared && npm install",
-    "install:client": "cd website/client && npm install",
-    "install:server": "cd website/server && npm install",
-    "install:api": "cd internal-api-server && npm install",
-    "build": "npm run build:shared && npm run build:client && npm run build:server && npm run build:api",
-    "build:shared": "cd shared && npm run build",
-    "build:client": "cd website/client && npm run build",
-    "build:server": "cd website/server && npm run build",
-    "build:api": "cd internal-api-server && npm run build",
-    "predev": "node scripts/predev.js",
-    "dev": "dotenv -- concurrently -n shared,client,server,api -c magenta,blue,green,yellow \"npm run dev:shared\" \"npm run dev:client\" \"npm run dev:server\" \"npm run dev:api\"",
-    "dev:shared": "cd shared && npm run dev",
-    "dev:client": "cd website/client && npm run dev",
-    "dev:server": "cd website/server && npm run dev",
-    "dev:api": "cd internal-api-server && npm run dev",
-    "dev:client-only": "cd website/client && npm run dev",
-    "docker:db": "docker start webedt-postgres 2>/dev/null || docker run -d --name webedt-postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=webedt postgres:15",
-    "docker:db:stop": "docker stop webedt-postgres || true",
-    "docker:db:rm": "docker stop webedt-postgres 2>/dev/null; docker rm webedt-postgres 2>/dev/null || true",
-    "start": "node scripts/start.js",
-    "start:server": "cd website/server && npm start",
-    "start:api": "cd internal-api-server && npm start",
-    "clean": "npm run clean:shared && npm run clean:client && npm run clean:server && npm run clean:api",
-    "clean:shared": "cd shared && npm run clean || true",
-    "clean:client": "cd website/client && npm run clean || true",
-    "clean:server": "cd website/server && rm -rf dist || true",
-    "clean:api": "cd internal-api-server && npm run clean || true",
-    "db:generate": "cd internal-api-server && npm run db:generate",
-    "db:migrate": "cd internal-api-server && npm run db:migrate",
-    "db:push": "cd internal-api-server && npm run db:push",
-    "db:studio": "cd internal-api-server && npm run db:studio"
+    "build": "npm run build --workspaces --if-present",
+    "dev": "concurrently -n shared,frontend,backend,api -c magenta,blue,green,yellow \"npm run dev -w shared\" \"npm run dev -w website/frontend\" \"npm run dev -w website/backend\" \"npm run dev -w internal-api-server\"",
+    "start": "npm run start -w website/backend",
+    "clean": "npm run clean --workspaces --if-present"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "dotenv-cli": "^11.0.0"
+    "concurrently": "^8.2.2"
   },
   "engines": {
     "node": ">=20.0.0"
