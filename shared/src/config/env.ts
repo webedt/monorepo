@@ -1,5 +1,5 @@
 /**
- * Environment configuration for internal-api-server
+ * Environment configuration for website backend
  * Centralizes all environment variable access with type safety and defaults
  */
 
