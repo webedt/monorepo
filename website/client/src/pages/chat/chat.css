@@ -204,6 +204,7 @@
   background: var(--color-primary);
   color: white;
   border-bottom-right-radius: var(--radius-sm);
+  padding: var(--spacing-xl);
 }
 
 .message-assistant .message-bubble {
@@ -211,6 +212,7 @@
   color: var(--color-text-primary);
   border: 1px solid var(--color-border);
   border-bottom-left-radius: var(--radius-sm);
+  padding: var(--spacing-xl);
 }
 
 /* System messages as compact status lines (no bubble) */
@@ -470,17 +472,33 @@
 
 .message-content .md-li,
 .message-content .md-li-num {
+  display: block;
   margin-left: var(--spacing-lg);
   margin-bottom: var(--spacing-xs);
-  list-style-position: inside;
+  padding-left: 1.5em;
+  position: relative;
 }
 
-.message-content .md-li {
-  list-style-type: disc;
+.message-content .md-li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--color-text-muted);
+}
+
+.message-content .md-li-num:first-of-type {
+  counter-reset: list-counter;
 }
 
 .message-content .md-li-num {
-  list-style-type: decimal;
+  counter-increment: list-counter;
+}
+
+.message-content .md-li-num::before {
+  content: counter(list-counter) '.';
+  position: absolute;
+  left: 0;
+  color: var(--color-text-muted);
 }
 
 .message-content .md-hr {
