@@ -4,7 +4,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Spinner, toast } from '../../components';
+import { Spinner, toast, ToolDetails, type ToolResult, type ToolUseBlock } from '../../components';
 import { sessionsApi, createSessionExecuteEventSource } from '../../lib/api';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
@@ -17,6 +17,9 @@ interface ChatMessage {
   content: string;
   timestamp: Date;
   model?: string;
+  // For tool_use messages
+  toolUse?: ToolUseBlock;
+  toolResult?: ToolResult;
 }
 
 interface RawEvent {
@@ -86,6 +89,7 @@ export class ChatPage extends Page<ChatPageOptions> {
   private session: Session | null = null;
   private messages: ChatMessage[] = [];
   private rawEvents: RawEvent[] = [];
+  private toolResultMap: Map<string, ToolResult> = new Map(); // Maps tool_use_id to tool_result
   private inputValue = '';
   private isLoading = true;
   private isSending = false;
@@ -580,14 +584,57 @@ export class ChatPage extends Page<ChatPageOptions> {
       // Store raw events for raw view
       this.rawEvents = events.map((event: any) => this.convertToRawEvent(event));
 
+      // Build tool result map from events (tool_result events reference tool_use by id)
+      this.buildToolResultMap(events);
+
       // Convert events to messages for formatted view
+      // Use flatMap since convertEventToMessages returns an array (to handle extracting tool_use from assistant)
       this.messages = events
-        .map((event: any) => this.convertEventToMessage(event))
+        .flatMap((event: any) => this.convertEventToMessages(event))
         .filter((msg: ChatMessage | null): msg is ChatMessage => msg !== null);
 
       this.renderContent();
     } catch (error) {
       console.error('Failed to load messages:', error);
+    }
+  }
+
+  /**
+   * Build a map of tool_use_id -> tool_result from events.
+   * Tool results can come as:
+   * 1. Direct tool_result events
+   * 2. Inside user events with content array containing tool_result blocks
+   */
+  private buildToolResultMap(events: any[]): void {
+    this.toolResultMap.clear();
+
+    for (const event of events) {
+      const data = event.eventData || event;
+
+      // Direct tool_result event
+      if (data?.type === 'tool_result' && data?.tool_use_id) {
+        this.toolResultMap.set(data.tool_use_id, {
+          tool_use_result: data.tool_use_result || {},
+          content: data.content,
+          is_error: data.is_error,
+        });
+      }
+
+      // User event with tool_result in content array
+      if (data?.type === 'user' && data?.message?.content) {
+        const content = data.message.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'tool_result' && block.tool_use_id) {
+              this.toolResultMap.set(block.tool_use_id, {
+                tool_use_result: {},
+                content: block.content,
+                is_error: block.is_error,
+              });
+            }
+          }
+        }
+      }
     }
   }
 
@@ -603,17 +650,21 @@ export class ChatPage extends Page<ChatPageOptions> {
     };
   }
 
-  private convertEventToMessage(event: any): ChatMessage | null {
+  /**
+   * Convert an event to one or more ChatMessages.
+   * Returns an array because assistant events may contain both text and tool_use blocks.
+   */
+  private convertEventToMessages(event: any): (ChatMessage | null)[] {
     const data = event.eventData || event;
     const eventType = data?.type;
 
-    if (!data) return null;
+    if (!data) return [null];
 
     // Skip control/internal events
     if (['connected', 'completed', 'heartbeat', 'env_manager_log', 'system',
          'title_generation', 'session_created', 'session_name', 'session-created',
-         'result'].includes(eventType)) {
-      return null;
+         'result', 'tool_result'].includes(eventType)) {
+      return [null];
     }
 
     // Handle different event types
@@ -630,67 +681,151 @@ export class ChatPage extends Page<ChatPageOptions> {
         } else if (typeof data.message === 'string') {
           userContent = data.message;
         }
-        if (!userContent) return null;
-        return {
+        if (!userContent) return [null];
+        return [{
           id: event.id || `user-${Date.now()}`,
           type: 'user',
           content: userContent,
           timestamp: new Date(event.timestamp || Date.now()),
-        };
+        }];
 
       case 'input_preview':
       case 'submission_preview':
         // This is a confirmation message like "Request received: ..."
         const inputContent = data.message || data.data?.preview || '';
-        if (!inputContent) return null;
-        return {
+        if (!inputContent) return [null];
+        return [{
           id: event.id || `${eventType}-${Date.now()}`,
           type: eventType, // Keep original type for emoji lookup
           content: inputContent,
           timestamp: new Date(event.timestamp || Date.now()),
-        };
+        }];
 
       case 'assistant':
       case 'assistant_message':
-        const assistantContent = this.extractAssistantContent(data);
-        // Skip assistant messages with no actual text content (e.g., only thinking blocks)
-        if (!assistantContent) return null;
-        return {
-          id: event.id || `assistant-${Date.now()}`,
-          type: 'assistant',
-          content: assistantContent,
-          timestamp: new Date(event.timestamp || Date.now()),
-          model: data.model || data.message?.model,
-        };
+        // Extract messages from assistant event - can include text AND tool_use blocks
+        return this.extractMessagesFromAssistant(event, data);
 
       case 'error':
-        return {
+        return [{
           id: event.id || `error-${Date.now()}`,
           type: 'error',
           content: data.message || data.error || 'An error occurred',
           timestamp: new Date(event.timestamp || Date.now()),
-        };
+        }];
 
       case 'message':
-        return {
+        return [{
           id: event.id || `message-${Date.now()}`,
           type: 'message', // Keep original type
           content: data.message || '',
           timestamp: new Date(event.timestamp || Date.now()),
-        };
+        }];
 
       case 'tool_use':
+        // Direct tool_use event (from streaming)
         const toolName = data.name || data.tool || 'unknown tool';
-        return {
+        const toolUseId = data.id || data.tool_use_id || '';
+        const toolResult = this.toolResultMap.get(toolUseId);
+        return [{
           id: event.id || `tool_use-${Date.now()}`,
-          type: 'tool_use', // Keep original type
+          type: 'tool_use',
           content: `Using tool: ${toolName}`,
           timestamp: new Date(event.timestamp || Date.now()),
-        };
+          toolUse: {
+            id: toolUseId,
+            name: data.name || data.tool || 'unknown',
+            input: data.input || {},
+          },
+          toolResult: toolResult,
+        }];
 
       default:
-        return null;
+        return [null];
     }
+  }
+
+  /**
+   * Extract messages from an assistant event.
+   * Assistant events can contain text blocks AND tool_use blocks.
+   */
+  private extractMessagesFromAssistant(event: any, data: any): (ChatMessage | null)[] {
+    const messages: (ChatMessage | null)[] = [];
+    const timestamp = new Date(event.timestamp || Date.now());
+    const model = data.model || data.message?.model;
+
+    // Get content array - could be in data.content or data.message.content
+    let contentArray: any[] = [];
+    if (Array.isArray(data.content)) {
+      contentArray = data.content;
+    } else if (data.message && Array.isArray(data.message.content)) {
+      contentArray = data.message.content;
+    }
+
+    // Process each content block
+    let textParts: string[] = [];
+
+    for (const block of contentArray) {
+      if (block.type === 'text' && block.text) {
+        textParts.push(block.text);
+      } else if (block.type === 'tool_use') {
+        // If we have accumulated text, create a text message first
+        if (textParts.length > 0) {
+          messages.push({
+            id: `assistant-text-${Date.now()}-${Math.random()}`,
+            type: 'assistant',
+            content: textParts.join('\n'),
+            timestamp,
+            model,
+          });
+          textParts = [];
+        }
+
+        // Create tool_use message
+        const toolUseId = block.id || '';
+        const toolResult = this.toolResultMap.get(toolUseId);
+        messages.push({
+          id: block.id || `tool_use-${Date.now()}-${Math.random()}`,
+          type: 'tool_use',
+          content: `Using tool: ${block.name}`,
+          timestamp,
+          toolUse: {
+            id: toolUseId,
+            name: block.name || 'unknown',
+            input: block.input || {},
+          },
+          toolResult: toolResult,
+        });
+      }
+      // Skip thinking blocks - they're internal
+    }
+
+    // Add any remaining text
+    if (textParts.length > 0) {
+      messages.push({
+        id: `assistant-text-${Date.now()}-${Math.random()}`,
+        type: 'assistant',
+        content: textParts.join('\n'),
+        timestamp,
+        model,
+      });
+    }
+
+    // If no messages were extracted, try the old approach (string content)
+    if (messages.length === 0) {
+      const assistantContent = this.extractAssistantContent(data);
+      if (assistantContent) {
+        messages.push({
+          id: event.id || `assistant-${Date.now()}`,
+          type: 'assistant',
+          content: assistantContent,
+          timestamp,
+          model,
+        });
+      }
+    }
+
+    return messages.length > 0 ? messages : [null];
   }
 
   private extractAssistantContent(data: any): string {
@@ -861,18 +996,36 @@ export class ChatPage extends Page<ChatPageOptions> {
         break;
 
       case 'tool_use':
-        // Show tool being used - use 'tool_use' type for consistent rendering
-        const toolName = event.name || event.tool || 'unknown tool';
+        // Show tool being used with expandable details
+        const streamToolName = event.name || event.tool || 'unknown tool';
+        const streamToolId = event.id || event.tool_use_id || `tool-${Date.now()}`;
         this.addMessage({
-          id: `tool_use-${Date.now()}-${Math.random()}`,
+          id: streamToolId,
           type: 'tool_use',
-          content: `Using tool: ${toolName}`,
+          content: `Using tool: ${streamToolName}`,
           timestamp: new Date(),
+          toolUse: {
+            id: streamToolId,
+            name: event.name || event.tool || 'unknown',
+            input: event.input || {},
+          },
         });
         break;
 
       case 'tool_result':
-        // Tool completed (optional: could show result)
+        // Tool completed - update the corresponding tool_use message with result
+        const resultToolId = event.tool_use_id;
+        if (resultToolId) {
+          const result: ToolResult = {
+            tool_use_result: event.tool_use_result || {},
+            content: event.content,
+            is_error: event.is_error,
+          };
+          // Store in map
+          this.toolResultMap.set(resultToolId, result);
+          // Update the message
+          this.updateToolResult(resultToolId, result);
+        }
         break;
 
       case 'error':
@@ -947,6 +1100,20 @@ export class ChatPage extends Page<ChatPageOptions> {
     this.scrollToBottom();
   }
 
+  /**
+   * Update a tool_use message with its result (for streaming)
+   */
+  private updateToolResult(toolId: string, result: ToolResult): void {
+    const message = this.messages.find(m => m.toolUse?.id === toolId);
+    if (message) {
+      message.toolResult = result;
+      // Re-render to update the tool details
+      if (!this.showRawJson) {
+        this.renderMessages();
+      }
+    }
+  }
+
   private addRawEvent(event: RawEvent): void {
     this.rawEvents.push(event);
     if (this.showRawJson) {
@@ -972,9 +1139,32 @@ export class ChatPage extends Page<ChatPageOptions> {
       empty?.style.setProperty('display', 'none');
       list?.style.setProperty('display', 'flex');
 
-      this.messagesContainer.innerHTML = this.messages
-        .map((msg) => this.renderMessage(msg))
-        .join('');
+      // Clear and re-render all messages
+      this.messagesContainer.innerHTML = '';
+
+      for (const msg of this.messages) {
+        // Handle tool_use messages with ToolDetails component
+        if (msg.type === 'tool_use' && msg.toolUse) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'chat-message message-system';
+          wrapper.innerHTML = '<div class="message-bubble"><div class="message-content"></div></div>';
+          const contentEl = wrapper.querySelector('.message-content') as HTMLElement;
+
+          const toolDetails = new ToolDetails({
+            tool: msg.toolUse,
+            result: msg.toolResult,
+            showTimestamp: this.showTimestamps,
+            timestamp: msg.timestamp,
+          });
+          contentEl.appendChild(toolDetails.getElement());
+
+          this.messagesContainer.appendChild(wrapper);
+        } else {
+          // Regular message rendering
+          const html = this.renderMessage(msg);
+          this.messagesContainer.insertAdjacentHTML('beforeend', html);
+        }
+      }
     }
   }
 
@@ -1034,7 +1224,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     const escapedContent = this.escapeHtml(message.content);
 
     // Status message types get compact single-line rendering with emoji
-    const statusTypes = ['message', 'input_preview', 'submission_preview', 'tool_use', 'system'];
+    // Note: tool_use is handled separately in renderMessages() with ToolDetails component
+    const statusTypes = ['message', 'input_preview', 'submission_preview', 'system'];
     if (statusTypes.includes(message.type)) {
       const emoji = EVENT_EMOJIS[message.type] || '📦';
       const timestampHtml = this.showTimestamps

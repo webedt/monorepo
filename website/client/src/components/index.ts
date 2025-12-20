@@ -40,3 +40,7 @@ export type {
 // Icon
 export { Icon, IconButton, ICONS } from './icon';
 export type { IconOptions, IconSize, IconColor, IconName, IconButtonOptions } from './icon';
+
+// ToolDetails
+export { ToolDetails } from './tool-details';
+export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-details';
