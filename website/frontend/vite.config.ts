@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
+const FRONTEND_PORT = parseInt(process.env.FRONTEND_PORT || '3000', 10);
+const BACKEND_PORT = parseInt(process.env.BACKEND_PORT || '3001', 10);
+
 export default defineConfig({
   // Use relative paths so the app works at any path prefix
   base: './',
@@ -14,11 +17,11 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
-    port: 3000,
+    port: FRONTEND_PORT,
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: `http://localhost:${BACKEND_PORT}`,
         changeOrigin: true,
         // Disable timeout for SSE connections
         timeout: 0,
@@ -55,11 +58,11 @@ export default defineConfig({
     },
   },
   preview: {
-    port: 3000,
+    port: FRONTEND_PORT,
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: `http://localhost:${BACKEND_PORT}`,
         changeOrigin: true,
         timeout: 0,
         // SSE-specific configuration

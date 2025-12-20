@@ -6,8 +6,10 @@
 import * as os from 'os';
 
 // Server configuration
-// API_PORT takes precedence over PORT for clarity in monorepo setup
-export const PORT = parseInt(process.env.API_PORT || process.env.PORT || '3001', 10);
+export const FRONTEND_PORT = parseInt(process.env.FRONTEND_PORT || '3000', 10);
+export const BACKEND_PORT = parseInt(process.env.BACKEND_PORT || '3001', 10);
+// Legacy: PORT maps to BACKEND_PORT for backward compatibility
+export const PORT = BACKEND_PORT;
 export const NODE_ENV = process.env.NODE_ENV || 'development';
 export const CONTAINER_ID = os.hostname();
 
@@ -89,7 +91,8 @@ export function logEnvConfig(): void {
     value ? `${value.substring(0, 4)}...${value.substring(value.length - 4)}` : 'not set';
 
   console.log('Environment Configuration:');
-  console.log(`  PORT=${PORT}`);
+  console.log(`  FRONTEND_PORT=${FRONTEND_PORT}`);
+  console.log(`  BACKEND_PORT=${BACKEND_PORT}`);
   console.log(`  NODE_ENV=${NODE_ENV}`);
   console.log(`  CONTAINER_ID=${CONTAINER_ID}`);
   console.log(`  TMP_DIR=${TMP_DIR}`);

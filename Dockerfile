@@ -141,7 +141,8 @@ RUN git config --global user.email "worker@webedt.local" && \
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV PORT=3001
+ENV FRONTEND_PORT=3000
+ENV BACKEND_PORT=3001
 ENV WORKSPACE_DIR=/workspace
 ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
 ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
