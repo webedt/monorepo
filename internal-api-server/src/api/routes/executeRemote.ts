@@ -305,7 +305,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
         userId: user.id,
         userRequest: serializedRequest,
         status: 'running',
-        provider: 'claude-remote',
+        provider: 'claude',
         repositoryUrl: repoUrl,
         repositoryOwner: repositoryOwner,
         repositoryName: repositoryName,
@@ -480,7 +480,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       await sendEvent({
         type: 'input_preview',
         message: `Request received: ${previewText}`,
-        source: 'claude-remote',
+        source: 'claude',
         timestamp: new Date().toISOString(),
         data: {
           preview: previewText,

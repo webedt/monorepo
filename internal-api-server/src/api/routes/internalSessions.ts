@@ -251,7 +251,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       userId: user.id,
       userRequest: prompt,
       status: 'running',
-      provider: 'claude-remote',
+      provider: 'claude',
       repositoryUrl: gitUrl,
     }).returning();
 

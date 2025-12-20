@@ -545,7 +545,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     // The server sends events with specific types that we listen for
     const eventTypes = ['connected', 'message', 'session_name', 'assistant_message',
                         'assistant', 'user', 'tool_use', 'tool_result', 'completed',
-                        'error', 'session-created', 'input_preview', 'submission_preview'];
+                        'error', 'session-created', 'input_preview', 'submission_preview',
+                        'title_generation', 'result'];
     for (const eventType of eventTypes) {
       es.addEventListener(eventType, (event: MessageEvent) => {
         try {

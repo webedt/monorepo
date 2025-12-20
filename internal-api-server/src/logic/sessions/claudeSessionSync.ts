@@ -552,7 +552,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           userId,
           userRequest,
           status,
-          provider: 'claude-remote',
+          provider: 'claude',
           remoteSessionId: remoteSession.id,
           remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
           totalCost,

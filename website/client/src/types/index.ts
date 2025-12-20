@@ -52,7 +52,7 @@ export interface ImageAiKeys {
   google?: string;
 }
 
-export type Provider = 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote';
+export type Provider = 'claude' | 'codex' | 'copilot' | 'gemini';
 export type LandingPage = 'dashboard' | 'store' | 'library' | 'community' | 'sessions';
 export type VerbosityLevel = 'minimal' | 'normal' | 'verbose';
 export type ImageAiProvider = 'openrouter' | 'cometapi' | 'google';

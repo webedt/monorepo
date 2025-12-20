@@ -74,7 +74,7 @@ export const chatSessions = pgTable('chat_sessions', {
   repositoryUrl: text('repository_url'),
   baseBranch: text('base_branch'),
   branch: text('branch'), // Working branch name - populated when branch is created
-  provider: text('provider').default('claude'), // 'claude' | 'codex' | 'copilot' | 'gemini' | 'claude-remote'
+  provider: text('provider').default('claude'), // 'claude' | 'codex' | 'copilot' | 'gemini'
   providerSessionId: text('provider_session_id'), // Claude SDK session ID for conversation resume
   // Claude Remote Sessions fields
   remoteSessionId: text('remote_session_id'), // Anthropic session ID (e.g., session_01S7DYYtwgMZ3gbAmjMmMpnA)
@@ -225,7 +225,7 @@ export const orchestratorJobs = pgTable('orchestrator_jobs', {
   maxParallelTasks: integer('max_parallel_tasks').default(3).notNull(),
 
   // Provider configuration
-  provider: text('provider').default('claude').notNull(), // 'claude' | 'claude-remote'
+  provider: text('provider').default('claude').notNull(), // 'claude'
 
   // Timestamps
   startedAt: timestamp('started_at'),

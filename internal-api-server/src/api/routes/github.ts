@@ -894,7 +894,7 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
           hasClaudeAuth: !!authReq.user?.claudeAuth
         });
 
-        // Fetch session details to check if it's a claude-remote session
+        // Fetch session details to check if it has a remote session to archive
         const [session] = await db
           .select()
           .from(chatSessions)
@@ -916,7 +916,7 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
           });
 
           // Archive Claude Remote session if applicable
-          if (session.provider === 'claude-remote' && session.remoteSessionId && authReq.user?.claudeAuth) {
+          if (session.remoteSessionId && authReq.user?.claudeAuth) {
             const archiveResult = await archiveClaudeRemoteSession(
               session.remoteSessionId,
               authReq.user.claudeAuth as ClaudeAuth
@@ -933,7 +933,6 @@ router.post('/repos/:owner/:repo/branches/*/auto-pr', requireAuth, async (req: R
               component: 'GitHub',
               sessionId,
               provider: session.provider ?? undefined,
-              isClaudeRemote: session.provider === 'claude-remote',
               hasRemoteSessionId: !!session.remoteSessionId,
               hasClaudeAuth: !!authReq.user?.claudeAuth
             });

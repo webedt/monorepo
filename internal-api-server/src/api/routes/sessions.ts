@@ -983,12 +983,10 @@ router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => 
       cleanupResults.branches = await Promise.all(branchDeletions);
     }
 
-    // Archive Claude Remote sessions
-    // Check for both 'claude-remote' and 'claude' providers since sessions may have
-    // remoteSessionId even with 'claude' provider (from sync or direct creation)
+    // Archive Claude Remote sessions if they have a remoteSessionId
     if (authReq.user?.claudeAuth) {
       const remoteSessionArchives = sessions
-        .filter((s: ChatSession) => (s.provider === 'claude-remote' || s.provider === 'claude') && s.remoteSessionId)
+        .filter((s: ChatSession) => s.remoteSessionId)
         .map(async (session: ChatSession) => {
           const result = await archiveClaudeRemoteSession(
             session.remoteSessionId!,
@@ -1209,10 +1207,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Archive Claude Remote session if it exists
-    // Check for both 'claude-remote' and 'claude' providers since sessions may have
-    // remoteSessionId even with 'claude' provider (from sync or direct creation)
-    const isClaudeProvider = session.provider === 'claude-remote' || session.provider === 'claude';
-    const shouldArchive = isClaudeProvider && !!session.remoteSessionId && !!authReq.user?.claudeAuth;
+    const shouldArchive = !!session.remoteSessionId && !!authReq.user?.claudeAuth;
 
     logger.info('Session deletion - checking Claude Remote archive conditions', {
       component: 'Sessions',
@@ -1221,7 +1216,6 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       remoteSessionId: session.remoteSessionId ?? undefined,
       hasClaudeAuth: !!authReq.user?.claudeAuth,
       claudeAuthKeys: authReq.user?.claudeAuth ? Object.keys(authReq.user.claudeAuth as object) : [],
-      isClaudeProvider,
       willArchive: shouldArchive,
     });
 
@@ -1245,7 +1239,6 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       logger.info('Skipping Claude Remote archive - conditions not met', {
         component: 'Sessions',
         sessionId,
-        isClaudeProvider,
         hasRemoteSessionId: !!session.remoteSessionId,
         hasClaudeAuth: !!authReq.user?.claudeAuth,
       });
@@ -2057,7 +2050,7 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
           userId,
           userRequest,
           status,
-          provider: 'claude-remote',
+          provider: 'claude',
           remoteSessionId: remoteSession.id,
           remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
           totalCost,

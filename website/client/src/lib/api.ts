@@ -581,7 +581,7 @@ export interface CreateOrchestratorJobRequest {
   maxCycles?: number;
   timeLimitMinutes?: number;
   maxParallelTasks?: number;
-  provider?: 'claude' | 'claude-remote';
+  provider?: 'claude';
   autoStart?: boolean;
 }
 

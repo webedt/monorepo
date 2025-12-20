@@ -58,7 +58,7 @@ function passRawEvent(event: SessionEvent, source: string): ExecutionEvent {
  * Claude Remote Provider
  */
 export class ClaudeRemoteProvider implements ExecutionProvider {
-  readonly name = 'claude-remote';
+  readonly name = 'claude';
 
   /**
    * Create a ClaudeRemoteClient with the given auth
