@@ -42,8 +42,10 @@ const EVENT_EMOJIS: Record<string, string> = {
   env_manager_log: '🔧',
   system: '⚙️',
   user: '👤',
+  user_message: '👤',
   input_preview: '👤',
   submission_preview: '📤',
+  resuming: '🔄',
   assistant: '🤖',
   assistant_message: '🤖',
   tool_use: '🔨',
@@ -59,21 +61,24 @@ const EVENT_EMOJIS: Record<string, string> = {
 // Default event filters
 const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   user: true,
+  user_message: true,
   input_preview: true,
   submission_preview: true,
+  resuming: false,
   assistant: true,
   assistant_message: true,
   tool_use: true,
   tool_result: false,
   message: true,
-  system: true,
+  system: false, // Internal system init messages
   error: true,
   connected: false,
   completed: true,
-  session_name: false,
-  'session-created': false,
-  session_created: false,
-  title_generation: false,
+  session_name: true, // Show session name
+  'session-created': true,
+  session_created: true,
+  title_generation: true, // Show title generation status
+  result: true, // Show completion stats
   env_manager_log: false,
   heartbeat: false,
   thinking: true,
@@ -656,17 +661,23 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     if (!data) return [null];
 
-    // Skip control/internal events
-    if (['connected', 'completed', 'heartbeat', 'env_manager_log', 'system',
-         'title_generation', 'session_created', 'session_name', 'session-created',
-         'result', 'tool_result'].includes(eventType)) {
+    // Skip control/internal events (these are too low-level or redundant)
+    if (['connected', 'heartbeat', 'env_manager_log', 'system',
+         'tool_result'].includes(eventType)) {
       return [null];
     }
 
     // Handle different event types
     switch (eventType) {
       case 'user':
-        // Handle nested message object from Claude remote
+      case 'user_message': {
+        // Skip replay user events - they duplicate user_message events
+        // Replay events come from Claude API context during resume
+        if (eventType === 'user' && data.isReplay) {
+          return [null];
+        }
+        // Handle nested message object from Claude remote (user events)
+        // and simple content from resume (user_message events)
         let userContent = '';
         if (typeof data.message === 'object' && data.message?.content) {
           userContent = typeof data.message.content === 'string'
@@ -680,10 +691,11 @@ export class ChatPage extends Page<ChatPageOptions> {
         if (!userContent) return [null];
         return [{
           id: event.id || `user-${Date.now()}`,
-          type: 'user',
+          type: 'user', // Normalize to 'user' for rendering
           content: userContent,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
+      }
 
       case 'input_preview':
       case 'submission_preview':
@@ -734,6 +746,72 @@ export class ChatPage extends Page<ChatPageOptions> {
             input: data.input || {},
           },
           toolResult: toolResult,
+        }];
+
+      case 'title_generation': {
+        // Title generation progress/result
+        const status = data.status || 'unknown';
+        const method = data.method || '';
+        let content = '';
+        if (status === 'trying') {
+          content = `Generating title via ${method}...`;
+        } else if (status === 'success') {
+          content = `Title: "${data.title || 'Untitled'}"`;
+        } else if (status === 'failed') {
+          content = `Title generation failed (${method})`;
+        } else if (status === 'skipped') {
+          content = `Title generation skipped (${method})`;
+        } else {
+          content = `Title generation: ${status}`;
+        }
+        return [{
+          id: event.id || `title_generation-${Date.now()}`,
+          type: 'title_generation',
+          content,
+          timestamp: new Date(event.timestamp || Date.now()),
+        }];
+      }
+
+      case 'session_created':
+      case 'session-created':
+        return [{
+          id: event.id || `session_created-${Date.now()}`,
+          type: 'session_created',
+          content: 'Session created',
+          timestamp: new Date(event.timestamp || Date.now()),
+        }];
+
+      case 'session_name':
+        return [{
+          id: event.id || `session_name-${Date.now()}`,
+          type: 'session_name',
+          content: `Session: "${data.sessionName || data.name || 'Untitled'}"`,
+          timestamp: new Date(event.timestamp || Date.now()),
+        }];
+
+      case 'result': {
+        // Final result with cost/duration info
+        const cost = data.total_cost_usd ? `$${data.total_cost_usd.toFixed(4)}` : '';
+        const duration = data.duration_ms ? `${(data.duration_ms / 1000).toFixed(1)}s` : '';
+        const stats = [cost, duration].filter(Boolean).join(' • ');
+        return [{
+          id: event.id || `result-${Date.now()}`,
+          type: 'result',
+          content: stats ? `Completed (${stats})` : 'Completed',
+          timestamp: new Date(event.timestamp || Date.now()),
+        }];
+      }
+
+      case 'completed':
+        // Completion event with optional stats
+        const completedCost = data.totalCost ? `$${data.totalCost.toFixed(4)}` : '';
+        const completedDuration = data.duration_ms ? `${(data.duration_ms / 1000).toFixed(1)}s` : '';
+        const completedStats = [completedCost, completedDuration].filter(Boolean).join(' • ');
+        return [{
+          id: event.id || `completed-${Date.now()}`,
+          type: 'completed',
+          content: completedStats ? `Session completed (${completedStats})` : 'Session completed',
+          timestamp: new Date(event.timestamp || Date.now()),
         }];
 
       default:
@@ -1172,7 +1250,10 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     // Status message types get compact single-line rendering with emoji
     // Note: tool_use is handled separately in renderMessages() with ToolDetails component
-    const statusTypes = ['message', 'input_preview', 'submission_preview', 'system', 'thinking'];
+    const statusTypes = [
+      'message', 'input_preview', 'submission_preview', 'system', 'thinking',
+      'title_generation', 'session_created', 'session_name', 'result', 'completed'
+    ];
     if (statusTypes.includes(message.type)) {
       const emoji = EVENT_EMOJIS[message.type] || '📦';
       const timestampHtml = this.showTimestamps
