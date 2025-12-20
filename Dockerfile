@@ -129,8 +129,11 @@ COPY --from=backend-build /app/backend/dist ./website/backend/dist
 COPY --from=backend-build /app/backend/node_modules ./website/backend/node_modules
 COPY --from=backend-build /app/backend/package.json ./website/backend/
 
-# Copy start script
-COPY scripts/start.js ./scripts/start.js
+# Copy root package.json for npm start
+COPY package.json ./
+
+# Install concurrently for production start script
+RUN npm install concurrently
 
 # Configure git for worker processes
 RUN git config --global user.email "worker@webedt.local" && \
@@ -151,5 +154,5 @@ EXPOSE 3000 3001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3000/ || exit 1
 
-# Start both services
-CMD ["node", "scripts/start.js"]
+# Start both services via npm start
+CMD ["npm", "start"]

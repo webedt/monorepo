@@ -15,6 +15,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
@@ -44,6 +45,40 @@ export default defineConfig({
               res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
               res.setHeader('Connection', 'keep-alive');
               // Disable socket timeout on response
+              if (res.socket) {
+                res.socket.setTimeout(0);
+              }
+            }
+          });
+        },
+      },
+    },
+  },
+  preview: {
+    port: 3000,
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        timeout: 0,
+        // SSE-specific configuration
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (req.url?.includes('/stream') || req.headers.accept?.includes('text/event-stream')) {
+              proxyReq.setHeader('Accept', 'text/event-stream');
+              proxyReq.setHeader('Cache-Control', 'no-cache');
+              proxyReq.setHeader('Connection', 'keep-alive');
+              if (proxyReq.socket) {
+                proxyReq.socket.setTimeout(0);
+              }
+            }
+          });
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+              res.setHeader('Connection', 'keep-alive');
               if (res.socket) {
                 res.socket.setTimeout(0);
               }
