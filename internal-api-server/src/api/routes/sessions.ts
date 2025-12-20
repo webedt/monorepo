@@ -1559,7 +1559,18 @@ const streamEventsHandler = async (req: Request, res: Response) => {
         return data?.type === 'pending_user_message';
       });
 
-      if (pendingMessages.length > 0 && session.remoteSessionId && session.status === 'running') {
+      // Re-fetch session status to avoid race condition with /send endpoint
+      // The /send endpoint updates status to 'running' and inserts pending_user_message,
+      // but the session object was fetched at the start of this handler
+      const [freshSession] = await db
+        .select()
+        .from(chatSessions)
+        .where(eq(chatSessions.id, sessionId))
+        .limit(1);
+
+      const currentStatus = freshSession?.status || session.status;
+
+      if (pendingMessages.length > 0 && session.remoteSessionId && currentStatus === 'running') {
         // Found pending message(s) - resume the Claude session
         const pendingMessage = pendingMessages[pendingMessages.length - 1]; // Use the latest
         const messageData = pendingMessage.eventData as { content?: string };

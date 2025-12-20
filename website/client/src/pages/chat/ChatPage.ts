@@ -380,10 +380,24 @@ export class ChatPage extends Page<ChatPageOptions> {
       eventTypes.add(event.type);
     }
 
-    // Also add common types that might appear
-    const commonTypes = ['user', 'assistant', 'assistant_message', 'tool_use', 'tool_result', 'message', 'error', 'completed'];
+    // Also add common types that might appear (includes all known event types)
+    // Note: 'user' and 'assistant' are excluded since they're always shown
+    const commonTypes = [
+      'user_message', 'input_preview', 'submission_preview',
+      'assistant_message', 'thinking',
+      'tool_use', 'tool_result',
+      'message', 'error', 'completed', 'result',
+      'title_generation', 'session_created', 'session_name',
+      'connected', 'system', 'env_manager_log', 'heartbeat', 'resuming'
+    ];
     for (const type of commonTypes) {
       eventTypes.add(type);
+    }
+
+    // Remove types that are always shown (not filterable)
+    const alwaysShowTypes = ['user', 'assistant'];
+    for (const type of alwaysShowTypes) {
+      eventTypes.delete(type);
     }
 
     // Sort types alphabetically
@@ -588,10 +602,17 @@ export class ChatPage extends Page<ChatPageOptions> {
       // Build tool result map from events (tool_result events reference tool_use by id)
       this.buildToolResultMap(events);
 
+      // Check if there are any user_message events (from resume)
+      // If so, we'll skip replay user events to avoid duplicates
+      const hasUserMessageEvents = events.some((event: any) => {
+        const data = event.eventData || event;
+        return data?.type === 'user_message';
+      });
+
       // Convert events to messages for formatted view
       // Use flatMap since convertEventToMessages returns an array (to handle extracting tool_use from assistant)
       this.messages = events
-        .flatMap((event: any) => this.convertEventToMessages(event))
+        .flatMap((event: any) => this.convertEventToMessages(event, hasUserMessageEvents))
         .filter((msg: ChatMessage | null): msg is ChatMessage => msg !== null);
 
       this.renderContent();
@@ -654,12 +675,20 @@ export class ChatPage extends Page<ChatPageOptions> {
   /**
    * Convert an event to one or more ChatMessages.
    * Returns an array because assistant events may contain both text and tool_use blocks.
+   * @param event The event to convert
+   * @param hasUserMessageEvents If true, skip replay user events (to avoid duplicates with user_message)
    */
-  private convertEventToMessages(event: any): (ChatMessage | null)[] {
+  private convertEventToMessages(event: any, hasUserMessageEvents: boolean = false): (ChatMessage | null)[] {
     const data = event.eventData || event;
     const eventType = data?.type;
 
     if (!data) return [null];
+
+    // Skip replayed events (marked with _replayed: true during resume)
+    // These are duplicates of already-stored events
+    if (data._replayed === true) {
+      return [null];
+    }
 
     // Skip control/internal events (these are too low-level or redundant)
     if (['connected', 'heartbeat', 'env_manager_log', 'system',
@@ -671,9 +700,10 @@ export class ChatPage extends Page<ChatPageOptions> {
     switch (eventType) {
       case 'user':
       case 'user_message': {
-        // Skip replay user events - they duplicate user_message events
-        // Replay events come from Claude API context during resume
-        if (eventType === 'user' && data.isReplay) {
+        // Only skip replay user events if there are user_message events in the session
+        // This prevents skipping the original user message in new sessions
+        // but still skips replay context events during resume (when user_message events exist)
+        if (eventType === 'user' && data.isReplay && hasUserMessageEvents) {
           return [null];
         }
         // Handle nested message object from Claude remote (user events)
@@ -988,7 +1018,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Use EventSource for SSE
     const es = new EventSource(streamUrl, { withCredentials: true });
 
-    es.onmessage = (event) => {
+    // Handler for processing event data
+    const handleEventData = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         this.handleStreamEvent(data);
@@ -996,6 +1027,28 @@ export class ChatPage extends Page<ChatPageOptions> {
         console.error('Failed to parse stream event:', error);
       }
     };
+
+    // Listen for default (unnamed) message events
+    es.onmessage = handleEventData;
+
+    // Listen for named events that the server might send
+    // The server uses named events like "event: completed\n" for some event types
+    const namedEventTypes = ['connected', 'completed', 'error'];
+    for (const eventType of namedEventTypes) {
+      es.addEventListener(eventType, (event: Event) => {
+        const messageEvent = event as MessageEvent;
+        try {
+          const data = JSON.parse(messageEvent.data);
+          // Add the event type to the data if not already present
+          if (!data.type) {
+            data.type = eventType;
+          }
+          this.handleStreamEvent(data);
+        } catch (error) {
+          console.error(`Failed to parse ${eventType} event:`, error);
+        }
+      });
+    }
 
     es.onerror = () => {
       console.error('Stream connection error');
@@ -1123,7 +1176,15 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Hide events list in formatted mode
     eventsList?.style.setProperty('display', 'none');
 
-    if (this.messages.length === 0) {
+    // Filter messages based on event filters
+    // Always show user and assistant messages regardless of filter settings
+    const alwaysShowTypes = ['user', 'assistant'];
+    const filteredMessages = this.messages.filter(msg => {
+      if (alwaysShowTypes.includes(msg.type)) return true;
+      return this.eventFilters[msg.type] !== false;
+    });
+
+    if (filteredMessages.length === 0) {
       empty?.style.setProperty('display', 'flex');
       list?.style.setProperty('display', 'none');
     } else {
@@ -1133,7 +1194,7 @@ export class ChatPage extends Page<ChatPageOptions> {
       // Clear and re-render all messages
       this.messagesContainer.innerHTML = '';
 
-      for (const msg of this.messages) {
+      for (const msg of filteredMessages) {
         // Handle tool_use messages with ToolDetails component
         if (msg.type === 'tool_use' && msg.toolUse) {
           const wrapper = document.createElement('div');
