@@ -1,387 +1,412 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createProxyMiddleware, Options } from 'http-proxy-middleware';
 
+import {
+  PORT,
+  NODE_ENV,
+  CONTAINER_ID,
+  ALLOWED_ORIGINS,
+  BUILD_COMMIT_SHA,
+  BUILD_TIMESTAMP,
+  BUILD_IMAGE_TAG,
+  ORPHAN_SESSION_TIMEOUT_MINUTES,
+  ORPHAN_CLEANUP_INTERVAL_MINUTES,
+  CLAUDE_SYNC_ENABLED,
+  CLAUDE_SYNC_INTERVAL_MS,
+  validateEnv,
+  logEnvConfig
+} from '@webedt/shared';
+
+import { logger } from '@webedt/shared';
+
+// Import database (initializes on import)
+import { waitForDatabase } from '@webedt/shared';
+
+// Import routes
+import executeRemoteRoutes from './api/routes/executeRemote.js';
+import resumeRoutes from './api/routes/resume.js';
+import authRoutes from './api/routes/auth.js';
+import userRoutes from './api/routes/user.js';
+import sessionsRoutes from './api/routes/sessions.js';
+import githubRoutes from './api/routes/github.js';
+import adminRoutes from './api/routes/admin.js';
+import transcribeRoutes from './api/routes/transcribe.js';
+import imageGenRoutes from './api/routes/imageGen.js';
+import internalSessionsRoutes from './api/routes/internalSessions.js';
+import logsRoutes from './api/routes/logs.js';
+import liveChatRoutes from './api/routes/liveChat.js';
+import workspaceRoutes from './api/routes/workspace.js';
+
+// Import database for orphan cleanup
+import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from '@webedt/shared';
+import { eq, and, lt, sql } from 'drizzle-orm';
+
+// Import middleware
+import { authMiddleware } from './api/middleware/auth.js';
+
+// Import health monitoring and metrics utilities
+import {
+  healthMonitor,
+  createDatabaseHealthCheck,
+  metrics,
+} from '@webedt/shared';
+
+// Import background sync service
+import { startBackgroundSync, stopBackgroundSync } from '@webedt/shared';
+
+/**
+ * Clean up orphaned sessions that are stuck in 'running' status
+ * This handles cases where:
+ * 1. The server restarted while a job was running and the worker callback failed
+ * 2. The worker crashed without sending a completion callback
+ * 3. Network issues prevented the callback from reaching the server
+ */
+async function cleanupOrphanedSessions(): Promise<{ success: boolean; cleaned: number }> {
+  const startTime = Date.now();
+  let cleaned = 0;
+
+  try {
+    const timeoutThreshold = new Date(Date.now() - ORPHAN_SESSION_TIMEOUT_MINUTES * 60 * 1000);
+
+    // Find sessions stuck in 'running' or 'pending' for too long
+    const stuckSessions = await db
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          sql`${chatSessions.status} IN ('running', 'pending')`,
+          lt(chatSessions.createdAt, timeoutThreshold)
+        )
+      );
+
+    if (stuckSessions.length === 0) {
+      // Record successful cycle even with no sessions cleaned
+      const durationMs = Date.now() - startTime;
+      metrics.recordCleanupCycle(true, 0, durationMs);
+      healthMonitor.updateCleanupStatus(true, 0);
+      return { success: true, cleaned: 0 };
+    }
+
+    logger.info(`[OrphanCleanup] Found ${stuckSessions.length} potentially orphaned session(s)`);
+
+    for (const session of stuckSessions) {
+      try {
+        // Check if session has a 'completed' event stored (worker finished but callback failed)
+        // eventData is a JSON column containing the raw event with a 'type' field
+        const allEvents = await db
+          .select()
+          .from(events)
+          .where(eq(events.chatSessionId, session.id));
+
+        const completedEvents = allEvents.filter(e => (e.eventData as any)?.type === 'completed');
+
+        // Check if session has any events at all (worker started processing)
+        const totalEvents = allEvents.length;
+
+        // Determine the appropriate status:
+        // - If there's a 'completed' event, mark as completed
+        // - If there are events but no completion, mark as error (worker likely crashed mid-execution)
+        // - If there are no events, mark as error (worker never started or crashed immediately)
+        let newStatus: 'completed' | 'error';
+        let reason: string;
+
+        if (completedEvents.length > 0) {
+          newStatus = 'completed';
+          reason = 'Found completed event in database';
+        } else if (totalEvents > 0) {
+          newStatus = 'error';
+          reason = `Worker processed ${totalEvents} events but never sent completion`;
+        } else {
+          newStatus = 'error';
+          reason = 'No events found - worker may have never started';
+        }
+
+        await db
+          .update(chatSessions)
+          .set({
+            status: newStatus,
+            completedAt: new Date()
+          })
+          .where(eq(chatSessions.id, session.id));
+
+        cleaned++;
+        logger.info(`[OrphanCleanup] Updated session ${session.id} from '${session.status}' to '${newStatus}' (${reason})`);
+      } catch (sessionError) {
+        logger.error(`[OrphanCleanup] Error processing session ${session.id}:`, sessionError);
+        metrics.recordError('cleanup_session_error', 'OrphanCleanup');
+      }
+    }
+
+    const durationMs = Date.now() - startTime;
+    metrics.recordCleanupCycle(true, cleaned, durationMs);
+    healthMonitor.updateCleanupStatus(true, cleaned);
+
+    logger.info(`[OrphanCleanup] Cleanup completed for ${stuckSessions.length} session(s), cleaned: ${cleaned}`);
+    return { success: true, cleaned };
+  } catch (error) {
+    const durationMs = Date.now() - startTime;
+    metrics.recordCleanupCycle(false, cleaned, durationMs);
+    healthMonitor.updateCleanupStatus(false, cleaned);
+    metrics.recordError('cleanup_cycle_error', 'OrphanCleanup');
+
+    logger.error('[OrphanCleanup] Error during orphan session cleanup:', error);
+    return { success: false, cleaned };
+  }
+}
+
+// Get __dirname equivalent for ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Configuration
-const PORT = parseInt(process.env.PORT || '3000', 10);
-const NODE_ENV = process.env.NODE_ENV || 'development';
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL || 'http://localhost:3001';
-
-if (!INTERNAL_API_URL) {
-  console.error('ERROR: INTERNAL_API_URL environment variable is required');
-  process.exit(1);
+// Validate environment
+const envValidation = validateEnv();
+if (!envValidation.valid) {
+  logger.warn('Environment validation warnings:', { errors: envValidation.errors.join(', ') });
 }
 
-// CORS configuration
-const ALLOWED_ORIGINS = NODE_ENV === 'production'
-  ? ['https://webedt.etdofresh.com']
-  : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:3001'];
+// Middleware
+app.use(
+  cors({
+    origin: ALLOWED_ORIGINS,
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-app.use(cors({
-  origin: ALLOWED_ORIGINS,
-  credentials: true,
+// Add auth middleware
+app.use(authMiddleware);
+
+// Initialize health monitoring with database health check
+healthMonitor.registerCheck('database', createDatabaseHealthCheck(async () => {
+  const startTime = Date.now();
+  try {
+    const result = await checkDbHealth();
+    return {
+      healthy: result.healthy,
+      latencyMs: Date.now() - startTime,
+      error: result.healthy ? undefined : 'Database health check failed',
+    };
+  } catch (error) {
+    return {
+      healthy: false,
+      latencyMs: Date.now() - startTime,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }));
 
-// Health check endpoint (not proxied)
+// Set cleanup interval for status display
+healthMonitor.setCleanupInterval(ORPHAN_CLEANUP_INTERVAL_MINUTES);
+
+// Start periodic health checks (every 30 seconds)
+healthMonitor.startPeriodicChecks(30000);
+
+// Basic health check endpoint (fast, for load balancers)
 app.get('/health', (req, res) => {
+  res.setHeader('X-Container-ID', CONTAINER_ID);
   res.json({
-    status: 'healthy',
-    service: 'website-server',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// JSON body parser for API routes
-// This is needed so we can re-stream the body to the proxy
-// Without this, http-proxy-middleware doesn't forward POST bodies correctly
-// for path-prefixed routes like /github/owner/repo/branch/api/*
-app.use('/github/:owner/:repo/:branch/api', express.json({ limit: '10mb' }));
-app.use('/:segment1/:segment2/:segment3/api', express.json({ limit: '10mb' }));
-app.use('/api', express.json({ limit: '10mb' }));
-
-// Define which API routes are allowed to be proxied (whitelist)
-// This controls what the public can access - internal-only routes are blocked
-const ALLOWED_API_ROUTES = [
-  '/api/auth',           // Authentication
-  '/api/user',           // User settings
-  '/api/sessions',       // Session management (public endpoints)
-  '/api/github',         // GitHub OAuth & repos
-  '/api/execute-remote', // AI execution (Claude Remote Sessions API)
-  '/api/resume',         // Session replay
-  '/api/transcribe',     // Audio transcription
-  '/api/admin',          // Admin (requires admin auth anyway)
-  '/api/storage',        // Storage operations (file listing, read, write, delete)
-  '/api/logs',           // Debug logs (for debugging, may disable in production)
-  '/api/live-chat',      // Live Chat for branch-based workspace
-  '/api/workspace',      // Workspace presence and events for collaboration
-  '/api/orchestrator',   // Long-running multi-cycle orchestration jobs
-];
-
-// Block internal-only routes explicitly
-const BLOCKED_ROUTES = [
-  '/api/storage/sessions/*/upload',      // Only ai-worker should upload
-  '/api/storage/sessions/*/download',    // Only ai-worker should download tarballs
-  '/api/storage/sessions/bulk-delete',   // Internal batch operations
-  '/api/sessions/*/worker-status',       // Only ai-worker reports status
-];
-
-// SSE (Server-Sent Events) endpoints that require special proxy handling
-// These are long-lived connections that shouldn't timeout
-const SSE_ENDPOINTS = [
-  '/api/orchestrator/*/stream',          // Orchestrator job event stream
-  '/api/sessions/updates',               // Session list updates stream
-  '/api/sessions/*/events/stream',       // Session event stream
-  '/api/sessions/*/stream',              // Legacy session stream endpoint
-  '/api/execute-remote',                 // Remote execution stream
-  '/api/live-chat/*/events',             // Live chat event stream
-  '/api/workspace/*/events',             // Workspace event stream
-];
-
-// Check if a path matches a blocked route pattern
-function isBlockedRoute(path: string): boolean {
-  return BLOCKED_ROUTES.some(pattern => {
-    const regex = new RegExp('^' + pattern.replace(/\*/g, '[^/]+') + '$');
-    return regex.test(path);
-  });
-}
-
-// Check if a path is an SSE endpoint that needs special handling
-function isSSEEndpoint(path: string): boolean {
-  return SSE_ENDPOINTS.some(pattern => {
-    const regex = new RegExp('^' + pattern.replace(/\*/g, '[^/]+') + '(\\?.*)?$');
-    return regex.test(path);
-  });
-}
-
-// Check if a path matches an allowed route
-function isAllowedRoute(path: string): boolean {
-  return ALLOWED_API_ROUTES.some(route => path.startsWith(route));
-}
-
-// Extract owner/repo/branch prefix from a URL path for cookie scoping
-// Patterns:
-//   /github/owner/repo/branch/...  (preview via /github prefix) -> /github/owner/repo/branch
-//   /owner/repo/branch/...         (standard path-based) -> /owner/repo/branch
-// This ensures cookies are scoped to the specific preview branch
-function getOwnerRepoBranchPath(urlPath: string): string {
-  const segments = urlPath.split('/').filter(Boolean);
-
-  // Check for /github/ prefix pattern: /github/owner/repo/branch/
-  if (segments[0] === 'github' && segments.length >= 4) {
-    return `/${segments[0]}/${segments[1]}/${segments[2]}/${segments[3]}`;
-  }
-  // Standard path-based deployment: /owner/repo/branch/
-  if (segments.length >= 3) {
-    return `/${segments[0]}/${segments[1]}/${segments[2]}`;
-  }
-  // Fallback for root deployment (2 segments): /owner/repo
-  if (segments.length >= 2) {
-    return `/${segments[0]}/${segments[1]}`;
-  }
-  return '/';
-}
-
-// Base proxy options shared between regular API and SSE endpoints
-const baseProxyOptions: Options = {
-  target: INTERNAL_API_URL,
-  changeOrigin: true,
-  // Cookie handling for session persistence
-  cookieDomainRewrite: '',  // Remove domain restriction so cookies work across proxy
-  // Preserve the full path including /api prefix
-  // Handle both direct /api/... paths and path-prefixed /github/owner/repo/branch/api/... paths
-  pathRewrite: (path, req) => {
-    // Log the incoming path for debugging
-    console.log(`[Proxy pathRewrite] Received path: ${path}, req.url: ${req.url}`);
-
-    // Extract the /api/... portion from the path, stripping any prefix
-    // This handles:
-    //   /api/auth/session -> /api/auth/session
-    //   /github/owner/repo/branch/api/auth/session -> /api/auth/session
-    //   /owner/repo/branch/api/auth/session -> /api/auth/session
-    const apiMatch = path.match(/\/api(\/.*)?$/);
-    if (apiMatch) {
-      const rewrittenPath = apiMatch[0];
-      console.log(`[Proxy pathRewrite] Rewritten to: ${rewrittenPath}`);
-      return rewrittenPath;
+    success: true,
+    data: {
+      status: 'ok',
+      service: 'website-backend',
+      containerId: CONTAINER_ID,
+      build: {
+        commitSha: BUILD_COMMIT_SHA,
+        timestamp: BUILD_TIMESTAMP,
+        imageTag: BUILD_IMAGE_TAG,
+      },
+      timestamp: new Date().toISOString(),
     }
-
-    // Fallback: if path starts with /api, return as-is; otherwise prepend /api
-    const rewrittenPath = path.startsWith('/api') ? path : '/api' + path;
-    console.log(`[Proxy pathRewrite] Rewritten to: ${rewrittenPath}`);
-    return rewrittenPath;
-  },
-  // Handle proxy errors
-  on: {
-    error: (err, req, res) => {
-      console.error('[Proxy Error]', err.message);
-      if (res && 'writeHead' in res) {
-        (res as any).writeHead(502, { 'Content-Type': 'application/json' });
-        (res as any).end(JSON.stringify({ error: 'Proxy error', message: err.message }));
-      }
-    },
-    proxyReq: (proxyReq, req) => {
-      // Forward cookies from the original request
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
-
-      // Re-stream the body if it was parsed by express.json()
-      // This is necessary because express.json() consumes the body stream
-      // and http-proxy-middleware needs the body to be written to proxyReq
-      const body = (req as express.Request).body;
-      if (body && Object.keys(body).length > 0) {
-        const bodyData = JSON.stringify(body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
-
-      // Log proxied requests (always, for debugging)
-      console.log(`[Proxy proxyReq] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${proxyReq.path}`);
-    },
-    proxyRes: (proxyRes, req, res) => {
-      // Rewrite cookie path based on the Referer to scope cookies to owner/repo/branch
-      // This ensures auth cookies work correctly in preview deployments
-      const setCookie = proxyRes.headers['set-cookie'];
-      if (setCookie) {
-        const referer = req.headers.referer || req.headers.origin || '';
-        let cookiePath = '/';
-
-        try {
-          if (referer) {
-            const refererUrl = new URL(referer);
-            cookiePath = getOwnerRepoBranchPath(refererUrl.pathname);
-          }
-        } catch (e) {
-          // If referer parsing fails, fall back to root
-          console.log('[Proxy] Failed to parse referer for cookie path:', referer);
-        }
-
-        // Rewrite the Path in each Set-Cookie header
-        const rewrittenCookies = setCookie.map(cookie => {
-          // Replace Path=/... with our computed path
-          // Regex matches Path= followed by / and any non-semicolon chars (or end of string)
-          // Using a single regex to avoid double-replacement issues
-          return cookie.replace(/Path=\/[^;]*/gi, `Path=${cookiePath}`);
-        });
-
-        proxyRes.headers['set-cookie'] = rewrittenCookies;
-        console.log(`[Proxy] Set-Cookie rewritten for ${req.url} with path=${cookiePath}:`, rewrittenCookies);
-      }
-    },
-  },
-};
-
-// SSE-specific proxy options with extended timeouts and no buffering
-// These settings are critical for long-lived Server-Sent Events connections
-const sseProxyOptions: Options = {
-  ...baseProxyOptions,
-  // Disable proxy timeout entirely for SSE connections (0 = no timeout)
-  // This prevents 502 errors when the connection is idle waiting for events
-  proxyTimeout: 0,
-  timeout: 0,
-  // Handle SSE-specific proxy events
-  on: {
-    ...baseProxyOptions.on,
-    proxyReq: (proxyReq, req) => {
-      // Forward cookies from the original request
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
-      // Set Accept header to signal SSE expectation
-      proxyReq.setHeader('Accept', 'text/event-stream');
-      // Log SSE connection
-      console.log(`[SSE Proxy] ${req.method} ${req.url} -> ${INTERNAL_API_URL}${proxyReq.path}`);
-    },
-    proxyRes: (proxyRes, req, res) => {
-      // Ensure SSE-specific headers are set for the proxy response
-      // These help ensure the connection stays open and unbuffered
-      if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
-        console.log(`[SSE Proxy] Streaming response for ${req.url}`);
-        // Disable buffering for various reverse proxies
-        res.setHeader('X-Accel-Buffering', 'no');           // nginx
-        res.setHeader('X-Content-Type-Options', 'nosniff'); // Prevent content type sniffing
-        // Ensure cache is disabled
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-        // Set Connection: keep-alive to maintain long-lived connection
-        res.setHeader('Connection', 'keep-alive');
-      }
-
-      // Apply cookie path rewriting from base options
-      const setCookie = proxyRes.headers['set-cookie'];
-      if (setCookie) {
-        const referer = req.headers.referer || req.headers.origin || '';
-        let cookiePath = '/';
-        try {
-          if (referer) {
-            const refererUrl = new URL(referer);
-            cookiePath = getOwnerRepoBranchPath(refererUrl.pathname);
-          }
-        } catch (e) {
-          console.log('[SSE Proxy] Failed to parse referer for cookie path:', referer);
-        }
-        const rewrittenCookies = setCookie.map(cookie =>
-          cookie.replace(/Path=\/[^;]*/gi, `Path=${cookiePath}`)
-        );
-        proxyRes.headers['set-cookie'] = rewrittenCookies;
-      }
-    },
-  },
-};
-
-// Create proxy middleware instances
-const apiProxy = createProxyMiddleware(baseProxyOptions);
-const sseProxy = createProxyMiddleware(sseProxyOptions);
-
-// Helper function to validate API routes (returns null if allowed, or error response to send)
-function validateApiRoute(fullPath: string, method: string): { status: number; body: object } | null {
-  // Block internal-only routes
-  if (isBlockedRoute(fullPath)) {
-    console.log(`[Blocked] ${method} ${fullPath}`);
-    return {
-      status: 403,
-      body: {
-        error: 'Forbidden',
-        message: 'This endpoint is not accessible from the public API'
-      }
-    };
-  }
-
-  // Check if route is in whitelist
-  if (!isAllowedRoute(fullPath)) {
-    console.log(`[Not Allowed] ${method} ${fullPath}`);
-    return {
-      status: 404,
-      body: {
-        error: 'Not Found',
-        message: 'Endpoint not found'
-      }
-    };
-  }
-
-  return null; // Allowed
-}
-
-// Combined handler that validates and proxies API requests, using SSE proxy for streaming endpoints
-function handleApiRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
-  // Extract just the /api/... part from the path (handles both direct and prefixed paths)
-  const originalUrl = req.originalUrl;
-  const apiMatch = originalUrl.match(/\/api(\/[^?]*)?/);
-  const fullPath = apiMatch ? apiMatch[0] : '/api' + req.path;
-
-  // Log ALL API requests for debugging
-  const isSSE = isSSEEndpoint(fullPath);
-  console.log(`[API Request] ${req.method} ${fullPath} (originalUrl: ${originalUrl}, isSSE: ${isSSE})`);
-
-  // Validate the route
-  const validationError = validateApiRoute(fullPath, req.method);
-  if (validationError) {
-    return res.status(validationError.status).json(validationError.body);
-  }
-
-  // Use SSE proxy for streaming endpoints, regular proxy for everything else
-  if (isSSE) {
-    console.log(`[SSE] Routing ${fullPath} to SSE proxy`);
-    return sseProxy(req, res, next);
-  }
-
-  // Regular API proxy
-  return apiProxy(req, res, next);
-}
-
-// Path-prefixed API routes: /github/:owner/:repo/:branch/api/*
-// This handles preview deployments where the app is served at a path prefix
-app.use('/github/:owner/:repo/:branch/api', handleApiRequest);
-
-// Standard owner/repo/branch pattern: /:owner/:repo/:branch/api/*
-// Note: This is a catch-all for 3-segment prefixes, placed after /github to avoid conflicts
-app.use('/:segment1/:segment2/:segment3/api', (req, res, next) => {
-  // Skip if segment1 is 'github' (handled above) or if it looks like an app route
-  const segment1 = req.params.segment1;
-  if (segment1 === 'github' || segment1 === 'api') {
-    return next('route');
-  }
-  handleApiRequest(req, res, next);
+  });
 });
 
-// Direct API routes: /api/*
-app.use('/api', handleApiRequest);
+// Detailed health status endpoint (comprehensive health information)
+app.get('/health/status', async (req, res) => {
+  try {
+    const status = await healthMonitor.getDetailedHealthStatus({
+      version: '1.0.0',
+      service: 'website-backend',
+      containerId: CONTAINER_ID,
+      build: {
+        commitSha: BUILD_COMMIT_SHA,
+        timestamp: BUILD_TIMESTAMP,
+        imageTag: BUILD_IMAGE_TAG,
+      },
+    });
 
-// Serve static files from the client build
-const clientDistPath = path.join(__dirname, '../../client/dist');
-app.use(express.static(clientDistPath));
+    const statusCode = status.status === 'healthy' ? 200 : status.status === 'degraded' ? 200 : 503;
+
+    res.setHeader('X-Container-ID', CONTAINER_ID);
+    res.status(statusCode).json({
+      success: status.status !== 'unhealthy',
+      data: status,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+// Kubernetes readiness probe
+app.get('/ready', async (req, res) => {
+  try {
+    const ready = await healthMonitor.isReady();
+    if (ready) {
+      res.status(200).json({ status: 'ready' });
+    } else {
+      res.status(503).json({ status: 'not_ready' });
+    }
+  } catch (error) {
+    res.status(503).json({ status: 'not_ready', error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+// Kubernetes liveness probe
+app.get('/live', (req, res) => {
+  res.status(200).json({ status: 'alive' });
+});
+
+// Metrics endpoint (JSON format)
+app.get('/metrics', (req, res) => {
+  // Update database connection stats
+  const dbStats = getConnectionStats();
+  if (dbStats) {
+    metrics.updateDbConnections(dbStats.totalCount, dbStats.idleCount, dbStats.waitingCount);
+  }
+
+  res.setHeader('Content-Type', 'application/json');
+  res.json({
+    success: true,
+    data: metrics.getMetricsJson(),
+  });
+});
+
+// Add API routes
+app.use('/api/execute-remote', executeRemoteRoutes);  // Claude Remote Sessions endpoint
+app.use('/api', resumeRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/user', userRoutes);
+app.use('/api/sessions', sessionsRoutes);
+app.use('/api/github', githubRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api', transcribeRoutes);
+app.use('/api/image-gen', imageGenRoutes);
+app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Sessions management
+app.use('/api', logsRoutes);  // Debug logs endpoint
+app.use('/api/live-chat', liveChatRoutes);  // Live Chat for branch-based workspace
+app.use('/api/workspace', workspaceRoutes);  // Workspace presence and events
+
+// Serve static files from the frontend build
+const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+app.use(express.static(frontendDistPath));
 
 // SPA fallback - serve index.html for all non-API routes
 app.get('*', (req, res) => {
-  res.sendFile(path.join(clientDistPath, 'index.html'));
+  res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
+
+// Error handler
+app.use(
+  (
+    err: Error,
+    req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : undefined;
+
+    logger.error('Unhandled error:', err);
+    console.error('[GlobalErrorHandler] Error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      path: req.path,
+      method: req.method
+    });
+
+    // Return more descriptive error message for debugging
+    res.status(500).json({ success: false, error: errorMessage || 'Internal server error' });
+  }
+);
 
 // Start server
 app.listen(PORT, () => {
   console.log('='.repeat(60));
-  console.log('Website Server (API Facade)');
+  console.log('WebEDT Backend Server');
   console.log('='.repeat(60));
-  console.log(`Port: ${PORT}`);
+  console.log(`Container ID: ${CONTAINER_ID}`);
+  console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);
-  console.log(`Internal API: ${INTERNAL_API_URL}`);
-  console.log(`Client dist: ${clientDistPath}`);
+  console.log(`Frontend dist: ${frontendDistPath}`);
   console.log('');
-  console.log('Allowed API routes:');
-  ALLOWED_API_ROUTES.forEach(route => console.log(`  ${route}/*`));
+
+  // Log environment configuration
+  logEnvConfig();
+
   console.log('');
-  console.log('SSE endpoints (no timeout):');
-  SSE_ENDPOINTS.forEach(route => console.log(`  ${route}`));
+  console.log('Available endpoints:');
+  console.log('  GET  /health                           - Basic health check');
+  console.log('  GET  /health/status                    - Detailed health status');
+  console.log('  GET  /ready                            - Kubernetes readiness probe');
+  console.log('  GET  /live                             - Kubernetes liveness probe');
+  console.log('  GET  /metrics                          - Performance metrics (JSON)');
   console.log('');
-  console.log('Blocked routes (internal only):');
-  BLOCKED_ROUTES.forEach(route => console.log(`  ${route}`));
+  console.log('  POST /api/execute-remote               - Execute AI request (SSE)');
+  console.log('  GET  /api/resume/:sessionId            - Resume session (SSE)');
+  console.log('');
+  console.log('  POST /api/auth/register                - Register new user');
+  console.log('  POST /api/auth/login                   - Login');
+  console.log('  POST /api/auth/logout                  - Logout');
+  console.log('  GET  /api/auth/session                 - Get current session');
+  console.log('');
+  console.log('  GET  /api/sessions                     - List sessions');
+  console.log('  GET  /api/sessions/:id                 - Get session');
+  console.log('  DELETE /api/sessions/:id               - Delete session');
+  console.log('');
+  console.log('  GET  /api/github/oauth                 - Start GitHub OAuth');
+  console.log('  GET  /api/github/repos                 - List repos');
   console.log('='.repeat(60));
+
+  // Schedule periodic orphan cleanup
+  logger.info(`Scheduling orphan cleanup: timeout=${ORPHAN_SESSION_TIMEOUT_MINUTES}min, interval=${ORPHAN_CLEANUP_INTERVAL_MINUTES}min`);
+  logger.info('Health monitoring enabled with periodic checks every 30 seconds');
+
+  // Run initial cleanup on startup
+  cleanupOrphanedSessions();
+
+  // Schedule periodic cleanup
+  setInterval(() => {
+    cleanupOrphanedSessions();
+  }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+
+  // Start Claude session background sync
+  if (CLAUDE_SYNC_ENABLED) {
+    logger.info(`Starting Claude session sync: interval=${Math.round(CLAUDE_SYNC_INTERVAL_MS / 1000 / 60)}min`);
+    startBackgroundSync();
+  } else {
+    logger.info('Claude session sync is disabled');
+  }
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully...');
+  healthMonitor.stopPeriodicChecks();
+  stopBackgroundSync();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  logger.info('SIGINT received, shutting down gracefully...');
+  healthMonitor.stopPeriodicChecks();
+  stopBackgroundSync();
+  process.exit(0);
 });

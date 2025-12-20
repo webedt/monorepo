@@ -7,12 +7,11 @@
     "shared",
     "website/frontend",
     "website/backend",
-    "internal-api-server",
     "tools/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "dev": "concurrently -n shared,frontend,backend,api -c magenta,blue,green,yellow \"npm run dev -w shared\" \"npm run dev -w website/frontend\" \"npm run dev -w website/backend\" \"npm run dev -w internal-api-server\"",
+    "dev": "concurrently -n shared,frontend,backend -c magenta,blue,green \"npm run dev -w shared\" \"npm run dev -w website/frontend\" \"npm run dev -w website/backend\"",
     "start": "npm run start -w website/backend",
     "clean": "npm run clean --workspaces --if-present"
   },
