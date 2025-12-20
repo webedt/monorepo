@@ -28,6 +28,9 @@ export class AgentsPage extends Page<PageOptions> {
   private isPrefetchingRepos = false;
   private reposPrefetchPromise: Promise<void> | null = null;
 
+  // Session list updates subscription
+  private sessionUpdatesEventSource: EventSource | null = null;
+
   protected render(): string {
     return `
       <div class="agents-page">
@@ -96,8 +99,89 @@ export class AgentsPage extends Page<PageOptions> {
     // Load sessions
     this.loadSessions();
 
+    // Subscribe to real-time session list updates
+    this.subscribeToSessionUpdates();
+
     // Prefetch GitHub repos in the background
     this.prefetchGitHubData();
+  }
+
+  /**
+   * Subscribe to real-time session list updates via SSE
+   */
+  private subscribeToSessionUpdates(): void {
+    // Close any existing connection
+    if (this.sessionUpdatesEventSource) {
+      this.sessionUpdatesEventSource.close();
+    }
+
+    this.sessionUpdatesEventSource = new EventSource('/api/sessions/updates', { withCredentials: true });
+
+    this.sessionUpdatesEventSource.addEventListener('created', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const session = data.session as Session;
+        // Add new session to the beginning of the list
+        this.sessions.unshift(session);
+        this.filteredSessions = [...this.sessions];
+        this.renderSessions();
+        console.log('[AgentsPage] Session created:', session.id);
+      } catch (error) {
+        console.error('[AgentsPage] Failed to parse created event:', error);
+      }
+    });
+
+    this.sessionUpdatesEventSource.addEventListener('updated', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const updatedSession = data.session as Partial<Session> & { id: string };
+        // Update the session in our list
+        const index = this.sessions.findIndex(s => s.id === updatedSession.id);
+        if (index !== -1) {
+          this.sessions[index] = { ...this.sessions[index], ...updatedSession };
+          this.filteredSessions = [...this.sessions];
+          this.renderSessions();
+          console.log('[AgentsPage] Session updated:', updatedSession.id, updatedSession);
+        }
+      } catch (error) {
+        console.error('[AgentsPage] Failed to parse updated event:', error);
+      }
+    });
+
+    this.sessionUpdatesEventSource.addEventListener('status_changed', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const updatedSession = data.session as Partial<Session> & { id: string };
+        // Update the session status in our list
+        const index = this.sessions.findIndex(s => s.id === updatedSession.id);
+        if (index !== -1) {
+          this.sessions[index] = { ...this.sessions[index], ...updatedSession };
+          this.filteredSessions = [...this.sessions];
+          this.renderSessions();
+          console.log('[AgentsPage] Session status changed:', updatedSession.id, updatedSession.status);
+        }
+      } catch (error) {
+        console.error('[AgentsPage] Failed to parse status_changed event:', error);
+      }
+    });
+
+    this.sessionUpdatesEventSource.addEventListener('deleted', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const sessionId = data.session.id;
+        // Remove the session from our list
+        this.sessions = this.sessions.filter(s => s.id !== sessionId);
+        this.filteredSessions = this.filteredSessions.filter(s => s.id !== sessionId);
+        this.renderSessions();
+        console.log('[AgentsPage] Session deleted:', sessionId);
+      } catch (error) {
+        console.error('[AgentsPage] Failed to parse deleted event:', error);
+      }
+    });
+
+    this.sessionUpdatesEventSource.onerror = (error) => {
+      console.error('[AgentsPage] Session updates SSE error:', error);
+    };
   }
 
   /**
@@ -621,5 +705,11 @@ export class AgentsPage extends Page<PageOptions> {
     this.newSessionBtn?.unmount();
     this.spinner?.unmount();
     this.emptyIcon?.unmount();
+
+    // Close session updates subscription
+    if (this.sessionUpdatesEventSource) {
+      this.sessionUpdatesEventSource.close();
+      this.sessionUpdatesEventSource = null;
+    }
   }
 }

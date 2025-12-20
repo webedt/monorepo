@@ -398,14 +398,27 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       // Also capture title from title_generation events (success status)
       // Only save title for NEW sessions (not on resume/subsequent messages)
       if (!websiteSessionId && event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
+        const newTitle = (event as any).title;
+        const newBranch = (event as any).branch_name;
         try {
           await db.update(chatSessions)
-            .set({ userRequest: (event as any).title })
+            .set({
+              userRequest: newTitle,
+              ...(newBranch ? { branch: newBranch } : {})
+            })
             .where(eq(chatSessions.id, chatSessionId));
           logger.info('Session title saved to database from title_generation', {
             component: 'ExecuteRemoteRoute',
             chatSessionId,
-            title: (event as any).title,
+            title: newTitle,
+            branch: newBranch,
+          });
+
+          // Notify session list subscribers about the title update
+          sessionListBroadcaster.notifySessionUpdated(user.id, {
+            id: chatSessionId,
+            userRequest: newTitle,
+            ...(newBranch ? { branch: newBranch } : {})
           });
         } catch (err) {
           logger.error('Failed to save session title from title_generation', err, {

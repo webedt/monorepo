@@ -523,6 +523,29 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           continue; // Skip creating a new session
         }
 
+        // Double-check that no session with this remoteSessionId was created during our processing
+        // This handles race conditions where executeRemote sets remoteSessionId after our initial check
+        const [existingWithRemoteId] = await db
+          .select({ id: chatSessions.id })
+          .from(chatSessions)
+          .where(
+            and(
+              eq(chatSessions.userId, userId),
+              eq(chatSessions.remoteSessionId, remoteSession.id)
+            )
+          )
+          .limit(1);
+
+        if (existingWithRemoteId) {
+          result.skipped++;
+          logger.info(`[SessionSync] Session with remoteSessionId already exists (race condition avoided)`, {
+            component: 'SessionSync',
+            existingSessionId: existingWithRemoteId.id,
+            remoteSessionId: remoteSession.id
+          });
+          continue;
+        }
+
         // No matching session found, create a new one
         const sessionId = uuidv4();
         const sessionPath = repositoryOwner && repositoryName && branch
