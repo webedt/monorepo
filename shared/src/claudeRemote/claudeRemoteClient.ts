@@ -26,6 +26,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import type { IClaudeRemoteClient } from '../interfaces/IClaudeRemoteClient.js';
 import {
   ClaudeRemoteClientConfig,
   CreateSessionParams,
@@ -141,7 +142,7 @@ export async function fetchEnvironmentIdFromSessions(
  * @see {@link CreateSessionParams} for session creation options
  * @see {@link SessionResult} for execution results
  */
-export class ClaudeRemoteClient {
+export class ClaudeRemoteClient implements IClaudeRemoteClient {
   private accessToken: string;
   private environmentId: string;
   private orgUuid?: string;

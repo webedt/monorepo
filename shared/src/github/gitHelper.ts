@@ -38,6 +38,7 @@
  */
 
 import { simpleGit, SimpleGit } from 'simple-git';
+import type { IGitHelper } from '../interfaces/IGitHelper.js';
 import { logger } from '../logger.js';
 
 /**
@@ -60,7 +61,7 @@ import { logger } from '../logger.js';
  * await git.push('origin', 'claude/fix-bug-123');
  * ```
  */
-export class GitHelper {
+export class GitHelper implements IGitHelper {
   private git: SimpleGit;
   private workspacePath: string;
   private safeDirectoryAdded: boolean = false;

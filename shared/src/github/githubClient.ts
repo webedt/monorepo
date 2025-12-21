@@ -35,35 +35,11 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { IGitHubClient, GitHubPullOptions, GitHubPullResult } from '../interfaces/IGitHubClient.js';
 import { logger } from '../logger.js';
 
-/**
- * Options for cloning or pulling a repository.
- */
-export interface GitHubPullOptions {
-  /** Full GitHub repository URL (HTTPS format) */
-  repoUrl: string;
-  /** Branch to checkout (default: repository's default branch) */
-  branch?: string;
-  /** Custom directory name for the clone (default: extracted from URL) */
-  directory?: string;
-  /** GitHub access token for private repositories */
-  accessToken?: string;
-  /** Root directory where repositories are cloned */
-  workspaceRoot: string;
-}
-
-/**
- * Result of a clone or pull operation.
- */
-export interface GitHubPullResult {
-  /** Absolute path to the repository directory */
-  targetPath: string;
-  /** `true` if the repo was cloned fresh, `false` if it was pulled */
-  wasCloned: boolean;
-  /** The actual branch that was checked out */
-  branch: string;
-}
+// Re-export types from interface for backwards compatibility
+export type { GitHubPullOptions, GitHubPullResult } from '../interfaces/IGitHubClient.js';
 
 /**
  * GitHub repository client for clone and pull operations.
@@ -83,7 +59,7 @@ export interface GitHubPullResult {
  * const repo = client.extractRepoName('https://github.com/org/repo');
  * ```
  */
-export class GitHubClient {
+export class GitHubClient implements IGitHubClient {
   private git: SimpleGit;
 
   /**

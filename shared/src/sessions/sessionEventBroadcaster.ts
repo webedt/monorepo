@@ -9,19 +9,14 @@
  */
 
 import { EventEmitter } from 'events';
-
-interface SessionEvent {
-  eventType: string;
-  data: unknown;
-  timestamp: Date;
-}
+import type { ISessionEventBroadcaster, SessionEvent } from '../interfaces/ISessionEventBroadcaster.js';
 
 interface Subscriber {
   id: string;
   callback: (event: SessionEvent) => void;
 }
 
-class SessionEventBroadcaster extends EventEmitter {
+class SessionEventBroadcaster extends EventEmitter implements ISessionEventBroadcaster {
   // Map of sessionId -> array of subscribers
   private subscribers: Map<string, Subscriber[]> = new Map();
 

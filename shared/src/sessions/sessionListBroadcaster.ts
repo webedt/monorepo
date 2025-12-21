@@ -10,23 +10,19 @@
  */
 
 import { EventEmitter } from 'events';
+import type { ISessionListBroadcaster, SessionListEvent, SessionUpdateType } from '../interfaces/ISessionListBroadcaster.js';
 import { logger } from '../logger.js';
 import type { ChatSession } from '../db/schema.js';
 
-export type SessionUpdateType = 'created' | 'updated' | 'deleted' | 'status_changed';
-
-export interface SessionListEvent {
-  type: SessionUpdateType;
-  session: Partial<ChatSession> & { id: string };
-  timestamp: Date;
-}
+// Re-export types from interface for backwards compatibility
+export type { SessionUpdateType, SessionListEvent } from '../interfaces/ISessionListBroadcaster.js';
 
 interface Subscriber {
   id: string;
   callback: (event: SessionListEvent) => void;
 }
 
-class SessionListBroadcaster extends EventEmitter {
+class SessionListBroadcaster extends EventEmitter implements ISessionListBroadcaster {
   // Map of userId -> array of subscribers
   private subscribers: Map<string, Subscriber[]> = new Map();
 

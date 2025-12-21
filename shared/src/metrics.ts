@@ -5,12 +5,12 @@
  * API call success rates, task completion times, and error rates.
  */
 
+import type { MetricLabels } from './interfaces/IMetricsRegistry.js';
 import { logger } from './logger.js';
 import { circuitBreakerRegistry } from './circuitBreaker.js';
 
-export interface MetricLabels {
-  [key: string]: string;
-}
+// Re-export types from interface for backwards compatibility
+export type { MetricLabels } from './interfaces/IMetricsRegistry.js';
 
 interface CounterData {
   value: number;

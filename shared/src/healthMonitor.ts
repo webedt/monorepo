@@ -9,70 +9,29 @@
  * - Automatic recovery mechanisms
  */
 
+import type {
+  IHealthMonitor,
+  HealthCheckResult,
+  ServiceHealth,
+  DetailedHealthStatus,
+  HealthCheckFunction,
+} from './interfaces/IHealthMonitor.js';
 import { logger } from './logger.js';
 import { metrics } from './metrics.js';
-import { circuitBreakerRegistry, type CircuitBreakerStats } from './circuitBreaker.js';
+import { circuitBreakerRegistry } from './circuitBreaker.js';
 
-export interface HealthCheckResult {
-  name: string;
-  status: 'healthy' | 'degraded' | 'unhealthy';
-  message?: string;
-  latencyMs?: number;
-  lastCheck?: Date;
-  details?: Record<string, any>;
-}
-
-export interface ServiceHealth {
-  status: 'healthy' | 'degraded' | 'unhealthy';
-  checks: HealthCheckResult[];
-  circuitBreakers: Record<string, CircuitBreakerStats>;
-  metrics: {
-    uptime: number;
-    totalRequests: number;
-    errorRate: number;
-    avgResponseTime: number;
-  };
-  timestamp: string;
-}
-
-export interface DetailedHealthStatus {
-  status: 'healthy' | 'degraded' | 'unhealthy';
-  version: string;
-  service: string;
-  containerId: string;
-  build: {
-    commitSha: string;
-    timestamp: string;
-    imageTag: string;
-  };
-  checks: HealthCheckResult[];
-  services: {
-    database: HealthCheckResult;
-    storage?: HealthCheckResult;
-  };
-  circuitBreakers: Record<string, CircuitBreakerStats>;
-  metrics: ReturnType<typeof metrics.getSummary>;
-  cleanupStatus: {
-    lastRun: Date | null;
-    lastSuccess: boolean;
-    totalCleaned: number;
-    intervalMinutes: number;
-  };
-  memory: {
-    heapUsedMb: number;
-    heapTotalMb: number;
-    rssMb: number;
-    externalMb: number;
-  };
-  timestamp: string;
-}
-
-type HealthCheckFunction = () => Promise<HealthCheckResult>;
+// Re-export types from interface for backwards compatibility
+export type {
+  HealthCheckResult,
+  ServiceHealth,
+  DetailedHealthStatus,
+  HealthCheckFunction,
+} from './interfaces/IHealthMonitor.js';
 
 /**
  * Health Monitor Class
  */
-class HealthMonitor {
+class HealthMonitor implements IHealthMonitor {
   private healthChecks: Map<string, HealthCheckFunction> = new Map();
   private lastCheckResults: Map<string, HealthCheckResult> = new Map();
   private checkInterval: NodeJS.Timeout | null = null;

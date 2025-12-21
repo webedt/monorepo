@@ -2,6 +2,9 @@
  * Shared utilities and core business logic for WebEDT monorepo
  */
 
+// Interfaces - High-level API definitions for all classes
+export * from './interfaces/index.js';
+
 // Types
 export type { SessionMetadata, StorageSessionInfo, AIProvider } from './types.js';
 

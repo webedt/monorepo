@@ -8,41 +8,23 @@
  * - HALF_OPEN: Testing if service has recovered
  */
 
+import type {
+  ICircuitBreaker,
+  ICircuitBreakerRegistry,
+  CircuitState,
+  CircuitBreakerConfig,
+  CircuitBreakerStats,
+  CircuitBreakerResult,
+} from './interfaces/ICircuitBreaker.js';
 import { logger } from './logger.js';
 
-export type CircuitState = 'closed' | 'open' | 'half_open';
-
-export interface CircuitBreakerConfig {
-  /** Number of consecutive failures before opening the circuit */
-  failureThreshold: number;
-  /** Number of consecutive successes needed to close the circuit from half-open */
-  successThreshold: number;
-  /** Time in ms to wait before transitioning from open to half-open */
-  resetTimeoutMs: number;
-  /** Maximum attempts allowed in half-open state */
-  halfOpenMaxAttempts: number;
-  /** Name for logging and metrics */
-  name: string;
-}
-
-export interface CircuitBreakerStats {
-  state: CircuitState;
-  consecutiveFailures: number;
-  consecutiveSuccesses: number;
-  totalSuccesses: number;
-  totalFailures: number;
-  lastFailureTime: Date | null;
-  lastSuccessTime: Date | null;
-  lastError: string | null;
-  halfOpenAttempts: number;
-}
-
-export interface CircuitBreakerResult<T> {
-  success: boolean;
-  data?: T;
-  error?: Error;
-  wasRejected: boolean;
-}
+// Re-export types from interface for backwards compatibility
+export type {
+  CircuitState,
+  CircuitBreakerConfig,
+  CircuitBreakerStats,
+  CircuitBreakerResult,
+} from './interfaces/ICircuitBreaker.js';
 
 const DEFAULT_CONFIG: CircuitBreakerConfig = {
   failureThreshold: 5,
@@ -52,7 +34,7 @@ const DEFAULT_CONFIG: CircuitBreakerConfig = {
   name: 'default',
 };
 
-export class CircuitBreaker {
+export class CircuitBreaker implements ICircuitBreaker {
   private config: CircuitBreakerConfig;
   private state: CircuitState = 'closed';
   private consecutiveFailures = 0;
@@ -314,7 +296,7 @@ export function createCircuitBreaker(config: Partial<CircuitBreakerConfig> = {})
 /**
  * Circuit breaker registry for managing multiple breakers
  */
-class CircuitBreakerRegistry {
+class CircuitBreakerRegistry implements ICircuitBreakerRegistry {
   private breakers: Map<string, CircuitBreaker> = new Map();
 
   /**
