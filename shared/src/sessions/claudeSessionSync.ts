@@ -579,11 +579,129 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
           continue;
         }
 
-        // No matching session found, create a new one
-        const sessionId = uuidv4();
+        // No matching session found by above criteria
+        // Generate sessionPath to check for existing session with same path
         const sessionPath = repositoryOwner && repositoryName && branch
           ? generateSessionPath(repositoryOwner, repositoryName, branch)
           : undefined;
+
+        // Fourth fallback: Check for existing session with same sessionPath (GLOBALLY)
+        // The sessionPath constraint is unique across ALL users (not per-user)
+        // This handles cases where:
+        // 1. executeRemote set the sessionPath but we didn't match earlier
+        // 2. Another user already has a session with this sessionPath (same remote session)
+        if (sessionPath) {
+          const [sessionPathMatch] = await db
+            .select()
+            .from(chatSessions)
+            .where(
+              and(
+                eq(chatSessions.sessionPath, sessionPath),
+                isNull(chatSessions.deletedAt)
+              )
+            )
+            .limit(1);
+
+          if (sessionPathMatch) {
+            // Found a session with the same sessionPath
+            // Check if it belongs to a different user
+            if (sessionPathMatch.userId !== userId) {
+              // Session belongs to another user - just skip (don't modify their data)
+              result.skipped++;
+              logger.info(`[SessionSync] Session with same sessionPath exists for different user (skipping)`, {
+                component: 'SessionSync',
+                existingSessionId: sessionPathMatch.id,
+                existingUserId: sessionPathMatch.userId,
+                currentUserId: userId,
+                remoteSessionId: remoteSession.id,
+                sessionPath
+              });
+              continue; // Skip creating a new session
+            }
+
+            // Session belongs to current user - link it instead of creating duplicate
+            logger.info(`[SessionSync] Found matching session by sessionPath`, {
+              component: 'SessionSync',
+              existingSessionId: sessionPathMatch.id,
+              remoteSessionId: remoteSession.id,
+              sessionPath
+            });
+
+            // Update existing session with remote session info (if not already linked)
+            if (!sessionPathMatch.remoteSessionId) {
+              let totalCost: string | undefined;
+              const resultEvent = sessionEvents.find(e => e.type === 'result' && e.total_cost_usd);
+              if (resultEvent?.total_cost_usd) {
+                totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+              }
+
+              await db
+                .update(chatSessions)
+                .set({
+                  remoteSessionId: remoteSession.id,
+                  remoteWebUrl: `https://claude.ai/code/${remoteSession.id}`,
+                  status: status,
+                  branch: branch || sessionPathMatch.branch,
+                  totalCost: totalCost || sessionPathMatch.totalCost,
+                  completedAt: status === 'completed' || status === 'error'
+                    ? new Date(remoteSession.updated_at)
+                    : sessionPathMatch.completedAt,
+                })
+                .where(eq(chatSessions.id, sessionPathMatch.id));
+
+              // Import any missing events
+              const existingEventUuids = new Set(
+                (await db
+                  .select({ eventData: events.eventData })
+                  .from(events)
+                  .where(eq(events.chatSessionId, sessionPathMatch.id)))
+                  .map(e => (e.eventData as any)?.uuid)
+                  .filter(Boolean)
+              );
+
+              let newEventsCount = 0;
+              for (const event of sessionEvents) {
+                if (event.uuid && !existingEventUuids.has(event.uuid)) {
+                  await db.insert(events).values({
+                    chatSessionId: sessionPathMatch.id,
+                    eventData: event,
+                    timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
+                  });
+                  newEventsCount++;
+                }
+              }
+
+              sessionListBroadcaster.notifyStatusChanged(userId, {
+                id: sessionPathMatch.id,
+                status,
+                totalCost,
+                branch,
+              });
+
+              result.updated++;
+              logger.info(`[SessionSync] Linked existing session by sessionPath (prevented duplicate)`, {
+                component: 'SessionSync',
+                existingSessionId: sessionPathMatch.id,
+                remoteSessionId: remoteSession.id,
+                newEventsCount,
+                status
+              });
+            } else {
+              result.skipped++;
+              logger.info(`[SessionSync] Session with same sessionPath already has remoteSessionId`, {
+                component: 'SessionSync',
+                existingSessionId: sessionPathMatch.id,
+                existingRemoteSessionId: sessionPathMatch.remoteSessionId,
+                newRemoteSessionId: remoteSession.id,
+              });
+            }
+
+            continue; // Skip creating a new session
+          }
+        }
+
+        // Create a new session
+        const sessionId = uuidv4();
 
         // Extract user request from first user event or title
         let userRequest = remoteSession.title || 'Synced session';

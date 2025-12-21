@@ -12,7 +12,7 @@ import { db, chatSessions, messages, users, events } from '@webedt/shared';
 import { eq } from 'drizzle-orm';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
-import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl } from '@webedt/shared';
+import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
@@ -421,11 +421,20 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       if (event.type === 'title_generation' && (event as any).status === 'success' && (event as any).title) {
         const newTitle = (event as any).title;
         const newBranch = (event as any).branch_name;
+
+        // Generate sessionPath when we have all the info needed
+        // This prevents duplicate sessions by establishing the unique sessionPath early
+        let newSessionPath: string | undefined;
+        if (newBranch && repositoryOwner && repositoryName) {
+          newSessionPath = generateSessionPath(repositoryOwner, repositoryName, newBranch);
+        }
+
         try {
           await db.update(chatSessions)
             .set({
               userRequest: newTitle,
-              ...(newBranch ? { branch: newBranch } : {})
+              ...(newBranch ? { branch: newBranch } : {}),
+              ...(newSessionPath ? { sessionPath: newSessionPath } : {})
             })
             .where(eq(chatSessions.id, chatSessionId));
           logger.info('Session title saved to database from title_generation', {
@@ -433,6 +442,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             chatSessionId,
             title: newTitle,
             branch: newBranch,
+            sessionPath: newSessionPath,
           });
 
           // Notify session list subscribers about the title update
@@ -574,6 +584,14 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
 
       // Update session with result
       const finalStatus = result.status === 'completed' ? 'completed' : 'error';
+
+      // Generate sessionPath if we have all the info and don't have it yet
+      // This is a fallback in case title_generation event didn't fire
+      let finalSessionPath: string | undefined;
+      if (result.branch && repositoryOwner && repositoryName) {
+        finalSessionPath = generateSessionPath(repositoryOwner, repositoryName, result.branch);
+      }
+
       await db.update(chatSessions)
         .set({
           status: finalStatus,
@@ -582,6 +600,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
           remoteWebUrl: result.remoteWebUrl,
           totalCost: result.totalCost?.toString(),
           completedAt: new Date(),
+          ...(finalSessionPath ? { sessionPath: finalSessionPath } : {}),
         })
         .where(eq(chatSessions.id, chatSessionId));
 
