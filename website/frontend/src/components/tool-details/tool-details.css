@@ -1,0 +1,305 @@
+/**
+ * ToolDetails Component Styles
+ */
+
+.tool-details {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.tool-details:last-child {
+  margin-bottom: 0;
+}
+
+.tool-details[open] .tool-arrow {
+  transform: rotate(90deg);
+}
+
+/* Summary (header row) */
+.tool-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) 0;
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--transition-fast);
+}
+
+.tool-summary:hover {
+  color: var(--color-text-primary);
+}
+
+.tool-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-arrow {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.tool-timestamp {
+  font-family: var(--font-mono);
+  opacity: 0.5;
+  font-size: var(--font-size-sm);
+}
+
+/* Tool parameters with colors */
+.tool-param {
+  font-family: var(--font-mono);
+}
+
+.tool-file {
+  color: var(--color-info);
+}
+
+.tool-command {
+  color: var(--color-success);
+}
+
+.tool-file-edit {
+  color: var(--color-warning);
+}
+
+.tool-file-write {
+  color: var(--color-success);
+}
+
+.tool-pattern {
+  color: #a855f7; /* purple */
+}
+
+.tool-pattern-glob {
+  color: #06b6d4; /* cyan */
+}
+
+.tool-task {
+  color: #f97316; /* orange */
+}
+
+.tool-meta {
+  opacity: 0.5;
+}
+
+.tool-duration {
+  opacity: 0.4;
+}
+
+.tool-error {
+  color: var(--color-error);
+}
+
+.tool-status {
+  font-weight: var(--font-weight-medium);
+}
+
+.tool-status-completed {
+  color: var(--color-success);
+}
+
+.tool-status-running,
+.tool-status-in_progress {
+  color: var(--color-warning);
+}
+
+.tool-status-failed,
+.tool-status-error {
+  color: var(--color-error);
+}
+
+/* Content area */
+.tool-content {
+  margin-left: calc(var(--spacing-sm) + 10px + var(--spacing-sm)); /* align with arrow + gap */
+  padding: var(--spacing-sm);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  overflow: auto;
+  max-height: 400px;
+  font-size: var(--font-size-sm);
+}
+
+/* Waiting state */
+.tool-waiting {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-muted);
+}
+
+.tool-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: tool-spin 0.8s linear infinite;
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Output blocks */
+.tool-output {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.tool-command-full {
+  color: rgba(34, 197, 94, 0.8); /* green-400/80 */
+}
+
+.tool-stderr {
+  color: var(--color-error);
+}
+
+.tool-error-output {
+  color: var(--color-error);
+}
+
+.tool-prompt {
+  background: var(--color-bg-secondary);
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  margin-top: var(--spacing-xs);
+}
+
+.tool-empty {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+/* Sections */
+.tool-section {
+  margin-bottom: var(--spacing-sm);
+}
+
+.tool-section-bordered {
+  margin-top: var(--spacing-sm);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.tool-section-label {
+  opacity: 0.5;
+  margin-bottom: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+}
+
+/* Diff styles */
+.tool-diff .diff-removal {
+  color: #ef4444; /* red-400 */
+  background: rgba(239, 68, 68, 0.1);
+  display: block;
+}
+
+.tool-diff .diff-addition {
+  color: #22c55e; /* green-400 */
+  background: rgba(34, 197, 94, 0.1);
+  display: block;
+}
+
+.tool-diff-simple {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.diff-removal-block {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-addition-block {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-prefix {
+  opacity: 0.5;
+}
+
+/* File list */
+.tool-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tool-file-item {
+  font-family: var(--font-mono);
+  color: rgba(59, 130, 246, 0.8); /* blue-400/80 */
+}
+
+/* Todo list */
+.tool-todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.tool-todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+}
+
+.tool-todo-item.todo-completed .todo-content {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.tool-todo-item.todo-in-progress .todo-content {
+  color: var(--color-primary);
+}
+
+.todo-emoji {
+  flex-shrink: 0;
+}
+
+.todo-content {
+  color: var(--color-text-primary);
+}
+
+/* Nested details (for Task prompts) */
+.tool-nested-details {
+  margin-top: var(--spacing-xs);
+}
+
+.tool-nested-summary {
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
+  list-style: none;
+}
+
+.tool-nested-summary:hover {
+  opacity: 1;
+}
+
+.tool-nested-summary::-webkit-details-marker {
+  display: none;
+}

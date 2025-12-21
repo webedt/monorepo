@@ -2,8 +2,9 @@
 # WebEDT Monorepo - Single Image Build
 # =============================================================================
 # Builds all services into one image:
-# - Website (React client + Express server)
-# - Internal API Server (with Claude Remote Sessions)
+# - Shared library (@webedt/shared)
+# - Website Frontend (Vite preview server on port 3000)
+# - Website Backend (Express API on port 3001)
 # =============================================================================
 
 # Build arguments for version tracking
@@ -25,25 +26,26 @@ COPY shared/src ./src
 RUN npm run build
 
 # =============================================================================
-# Stage 2: Build website client (React)
+# Stage 2: Build website frontend (React)
 # =============================================================================
-FROM node:20-slim AS client-build
+FROM node:20-slim AS frontend-build
 
 ARG BUILD_VERSION
 ARG BUILD_TIMESTAMP
 ARG BUILD_COMMIT_SHA
 
-WORKDIR /app/client
-COPY website/client/package*.json ./
+WORKDIR /app/frontend
+COPY website/frontend/package*.json ./
 # Copy local tarballs if they exist (using shell to handle missing files gracefully)
-RUN --mount=type=bind,source=website/client,target=/tmp/client \
-    find /tmp/client -maxdepth 1 -name "*.tgz" -exec cp {} ./ \; 2>/dev/null || true
+RUN --mount=type=bind,source=website/frontend,target=/tmp/frontend \
+    find /tmp/frontend -maxdepth 1 -name "*.tgz" -exec cp {} ./ \; 2>/dev/null || true
 RUN npm install
 
-COPY website/client/ .
+COPY website/frontend/ .
 
-# Generate version.ts
-RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
+# Generate version.ts (create src dir if it doesn't exist)
+RUN mkdir -p src && \
+    TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
     SHA_VALUE="${BUILD_COMMIT_SHA:-}" && \
     if [ -n "$TIMESTAMP_VALUE" ]; then TIMESTAMP_EXPORT="'$TIMESTAMP_VALUE'"; else TIMESTAMP_EXPORT="null"; fi && \
     if [ -n "$SHA_VALUE" ]; then SHA_EXPORT="'$SHA_VALUE'"; else SHA_EXPORT="null"; fi && \
@@ -56,40 +58,28 @@ RUN TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
 RUN npm run build
 
 # =============================================================================
-# Stage 3: Build website server (Express)
+# Stage 3: Build website backend (Express + API)
 # =============================================================================
-FROM node:20-slim AS server-build
-
-WORKDIR /app/server
-COPY website/server/package*.json ./
-RUN npm install
-COPY website/server/tsconfig.json ./
-COPY website/server/src ./src
-RUN npm run build
-
-# =============================================================================
-# Stage 4: Build internal-api-server
-# =============================================================================
-FROM node:20-slim AS api-build
+FROM node:20-slim AS backend-build
 
 # Install build dependencies for native modules
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy shared package first
+# Copy shared package first (backend depends on it)
 COPY --from=shared-build /app/shared ./shared
 
-# Build internal-api-server
-WORKDIR /app/internal-api-server
-COPY internal-api-server/package*.json ./
+# Build website backend
+WORKDIR /app/backend
+COPY website/backend/package*.json ./
 RUN npm install
-COPY internal-api-server/tsconfig.json ./
-COPY internal-api-server/src ./src
+COPY website/backend/tsconfig.json ./
+COPY website/backend/src ./src
 RUN npm run build
 
 # =============================================================================
-# Stage 5: Production image
+# Stage 4: Production image
 # =============================================================================
 FROM node:20-slim AS production
 
@@ -131,21 +121,19 @@ WORKDIR /app
 # Copy shared package
 COPY --from=shared-build /app/shared ./shared
 
-# Copy website client build
-COPY --from=client-build /app/client/dist ./website/client/dist
+# Copy website frontend (full package for vite preview)
+COPY --from=frontend-build /app/frontend ./website/frontend
 
-# Copy website server
-COPY --from=server-build /app/server/dist ./website/server/dist
-COPY --from=server-build /app/server/node_modules ./website/server/node_modules
-COPY --from=server-build /app/server/package.json ./website/server/
+# Copy website backend
+COPY --from=backend-build /app/backend/dist ./website/backend/dist
+COPY --from=backend-build /app/backend/node_modules ./website/backend/node_modules
+COPY --from=backend-build /app/backend/package.json ./website/backend/
 
-# Copy internal-api-server
-COPY --from=api-build /app/internal-api-server/dist ./internal-api-server/dist
-COPY --from=api-build /app/internal-api-server/node_modules ./internal-api-server/node_modules
-COPY --from=api-build /app/internal-api-server/package.json ./internal-api-server/
+# Copy root package.json for npm start
+COPY package.json ./
 
-# Copy orchestrator script
-COPY scripts/start.js ./scripts/start.js
+# Install concurrently for production start script
+RUN npm install concurrently
 
 # Configure git for worker processes
 RUN git config --global user.email "worker@webedt.local" && \
@@ -153,19 +141,19 @@ RUN git config --global user.email "worker@webedt.local" && \
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV WEBSITE_PORT=3000
-ENV API_PORT=3001
+ENV FRONTEND_PORT=3000
+ENV BACKEND_PORT=3001
 ENV WORKSPACE_DIR=/workspace
 ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA
 ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
 ENV BUILD_IMAGE_TAG=$BUILD_IMAGE_TAG
 
-# Expose main port (website)
-EXPOSE 3000
+# Expose ports (frontend on 3000, backend API on 3001)
+EXPOSE 3000 3001
 
-# Health check
+# Health check on frontend
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:3000/ || exit 1
 
-# Start all services via orchestrator
-CMD ["node", "scripts/start.js"]
+# Start both services via npm start
+CMD ["npm", "start"]

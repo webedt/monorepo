@@ -364,11 +364,8 @@ jobs:
 
           ENV_VARS=$(cat <<ENVEOF
           NODE_ENV=production
-          WEBSITE_PORT=3000
-          API_PORT=3001
-          WORKER_POOL_MODE=local
-          WORKER_POOL_SIZE=2
-          WORKER_BASE_PORT=5001
+          FRONTEND_PORT=3000
+          BACKEND_PORT=3001
           WORKSPACE_DIR=/workspace
           DATABASE_URL=${DATABASE_URL}
           SESSION_SECRET=${SESSION_SECRET}

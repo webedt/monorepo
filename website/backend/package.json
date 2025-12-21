@@ -1,0 +1,43 @@
+{
+  "name": "@webedt/website-backend",
+  "version": "1.0.0",
+  "description": "Website backend - serves API endpoints and static files",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "db:check": "tsx src/scripts/db-check.ts",
+    "db:backup": "tsx src/scripts/db-backup.ts",
+    "db:validate": "tsx src/scripts/db-validate.ts",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@webedt/shared": "file:../../shared",
+    "connect-pg-simple": "^10.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "form-data": "^4.0.1",
+    "multer": "^2.0.2",
+    "node-fetch": "^2.7.0",
+    "tar": "^7.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/express-session": "^1.18.0",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.10.2",
+    "@types/node-fetch": "^2.6.11",
+    "drizzle-kit": "^0.31.8",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -3,26 +3,12 @@
  * Captures logs in a circular buffer for retrieval via API
  */
 
-export interface CapturedLog {
-  timestamp: string;
-  level: 'debug' | 'info' | 'warn' | 'error';
-  message: string;
-  context?: Record<string, unknown>;
-  error?: {
-    message: string;
-    stack?: string;
-  };
-}
+import type { ILogCapture, CapturedLog, LogFilter } from './interfaces/ILogCapture.js';
 
-export interface LogFilter {
-  level?: string;
-  component?: string;
-  sessionId?: string;
-  since?: string;
-  limit?: number;
-}
+// Re-export types from interface for backwards compatibility
+export type { CapturedLog, LogFilter } from './interfaces/ILogCapture.js';
 
-class LogCapture {
+class LogCapture implements ILogCapture {
   private logs: CapturedLog[] = [];
   private maxLogs: number = 5000;
   private enabled: boolean = true;

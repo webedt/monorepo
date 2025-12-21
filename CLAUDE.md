@@ -1,627 +1,253 @@
-# Monorepo Guide for Claude Code
+# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Overview
+
+WebEDT is an AI-powered code editing platform. This monorepo contains a vanilla TypeScript frontend, Express backend, and shared utilities.
+
 ## Monorepo Structure
 
-This is a monorepo containing the following projects:
-
-| Project | Path | Description |
+| Package | Path | Description |
 |---------|------|-------------|
-| **Website** | `/website` | React frontend + Express API facade (proxies public API routes) |
-| **Internal API Server** | `/internal-api-server` | Internal backend handling API, database, storage, and GitHub operations |
-| **AI Coding Worker** | `/ai-coding-worker` | Provider-agnostic ephemeral worker for LLM execution with Docker Swarm orchestration |
-
----
-
-## Architecture Overview
-
-```
-                              FRONTEND
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │                    Website (React + Express Facade)                    │
-  │  - React client (Vite)                                                │
-  │  - Express server serving static files + proxying /api/* routes       │
-  │  - Route whitelisting for public API access                           │
-  └───────────────────────────────────────────────────────────────────────┘
-                                    │
-                         Proxy allowed /api/* routes
-                                    │
-                                    ▼
-                         INTERNAL API SERVER
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │  (Private service - only accessible via dokploy-network)              │
-  │                                                                       │
-  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐       │
-  │  │   API Routes    │  │  Storage Layer  │  │  GitHub Layer   │       │
-  │  │  - /execute     │  │  - MinIO client │  │  - Clone repos  │       │
-  │  │  - /resume      │  │  - File CRUD    │  │  - Create branch│       │
-  │  │  - /sessions    │  │  - Tarball ops  │  │  - Commit/push  │       │
-  │  │  - /admin       │  │                 │  │  - PR operations│       │
-  │  └─────────────────┘  └─────────────────┘  └─────────────────┘       │
-  │                                                                       │
-  │  ┌─────────────────┐  ┌─────────────────┐                            │
-  │  │  Database Layer │  │ Worker Manager  │                            │
-  │  │  - PostgreSQL   │  │  - Spawn workers│                            │
-  │  │  - Drizzle ORM  │  │  - Stream SSE   │                            │
-  │  │  - Sessions/msgs│  │                 │                            │
-  │  └─────────────────┘  └─────────────────┘                            │
-  └───────────────────────────────────────────────────────────────────────┘
-                                    │
-                    Spawn per-request (LLM execution only)
-                                    │
-                                    ▼
-                       AI CODING WORKER (ephemeral)
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │  (Simplified - LLM execution only)                                    │
-  │  - Receives workspace path from Internal API Server                   │
-  │  - Executes Claude Agent SDK / Codex                                  │
-  │  - Streams events back to Internal API Server                         │
-  │  - Exits after each job (Docker Swarm restarts)                       │
-  └───────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Website
-
-The Website (`/website`) contains both the React frontend and an Express API facade server.
-
-### Structure
-
-```
-website/
-├── client/                    # React frontend (Vite)
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── lib/api.ts
-│   │   └── ...
-│   └── package.json
-├── server/                    # Express API facade
-│   ├── src/
-│   │   └── index.ts          # Proxy middleware + static serving
-│   └── package.json
-├── Dockerfile                 # Multi-stage build
-└── docker-compose.yml
-```
-
-### API Facade
-
-The Express server acts as a facade that:
-1. Serves the React static files
-2. Proxies allowed `/api/*` routes to the Internal API Server
-3. Blocks internal-only routes from public access
-
-**Allowed Routes (public):**
-- `/api/auth` - Authentication
-- `/api/user` - User settings
-- `/api/sessions` - Session management
-- `/api/github` - GitHub OAuth & repos
-- `/api/execute` - AI execution
-- `/api/resume` - Session replay
-- `/api/transcribe` - Audio transcription
-- `/api/admin` - Admin (requires admin auth)
-- `/api/logs` - Debug logs (for debugging)
-
-**Blocked Routes (internal only):**
-- `/api/storage/sessions/*/upload` - Only ai-worker should upload
-- `/api/storage/sessions/*/download` - Only ai-worker should download tarballs
-- `/api/storage/sessions/bulk-delete` - Internal batch operations
-- `/api/sessions/*/worker-status` - Only ai-worker reports status
-
-### Deployment URLs
-
-Path-based routing via Dokploy:
-
-```
-https://webedt.etdofresh.com/github/{owner}/{repo}/{branch}/
-```
-
-**IMPORTANT:** For branch names containing slashes (`/`), replace them with hyphens (`-`) in the URL.
-
-**Examples:**
-- `https://webedt.etdofresh.com/github/webedt/monorepo/main/`
-- `https://webedt.etdofresh.com/github/webedt/monorepo/feature-branch/`
-- Branch `claude/fix-bug-123` → `https://webedt.etdofresh.com/github/webedt/monorepo/claude-fix-bug-123/`
-
----
-
-## Internal API Server
-
-The Internal API Server (`/internal-api-server`) is the central backend service that consolidates:
-- All API routes (auth, sessions, execute, etc.)
-- Storage operations (MinIO)
-- GitHub operations (clone, branch, commit, push)
-- User authentication (Lucia)
-- Session management (PostgreSQL)
-
-**Note:** This server is only accessible internally via the dokploy-network. Public access goes through the Website facade.
-
-### Directory Structure
-
-The Internal API Server follows a **separation of interfaces from logic** pattern:
-- `api/` - HTTP interface (Express routes and middleware)
-- `cli/` - CLI interface (commander commands)
-- `logic/` - Business logic (all core functionality)
-
-```
-internal-api-server/
-├── src/
-│   ├── index.ts                    # Express app entrypoint
-│   │
-│   ├── api/                        # HTTP interface (Express)
-│   │   ├── routes/
-│   │   │   ├── execute.ts          # Main /execute endpoint
-│   │   │   ├── executeRemote.ts    # Claude Remote execution
-│   │   │   ├── resume.ts           # Session replay endpoint
-│   │   │   ├── sessions.ts         # Session management
-│   │   │   ├── auth.ts             # Authentication routes
-│   │   │   ├── user.ts             # User management
-│   │   │   ├── github.ts           # GitHub OAuth
-│   │   │   ├── storage.ts          # Storage operations
-│   │   │   ├── admin.ts            # Admin routes
-│   │   │   ├── completions.ts      # Code completions
-│   │   │   ├── transcribe.ts       # Audio transcription
-│   │   │   ├── imageGen.ts         # Image generation
-│   │   │   ├── internalSessions.ts # Claude Remote session mgmt
-│   │   │   └── logs.ts             # Debug log viewing
-│   │   └── middleware/
-│   │       └── auth.ts             # Auth middleware
-│   │
-│   ├── cli/                        # CLI interface (commander)
-│   │   ├── index.ts                # CLI entry point
-│   │   └── commands/
-│   │       ├── session.ts          # session list/get/delete/cleanup
-│   │       ├── github.ts           # github branches/repos/create-branch/create-pr
-│   │       ├── storage.ts          # storage list/files/read/delete-session
-│   │       └── admin.ts            # admin users/create-user/set-admin
-│   │
-│   └── logic/                      # Business logic (all core functionality)
-│       ├── auth/
-│       │   ├── lucia.ts            # Lucia authentication
-│       │   ├── claudeAuth.ts       # Claude OAuth helpers
-│       │   ├── codexAuth.ts        # Codex auth helpers
-│       │   └── geminiAuth.ts       # Gemini auth helpers
-│       ├── config/
-│       │   └── env.ts              # Environment configuration
-│       ├── db/
-│       │   ├── index.ts            # PostgreSQL connection
-│       │   ├── connection.ts       # Database connection management
-│       │   ├── schema.ts           # Drizzle ORM schema
-│       │   └── migrations.ts       # Database migrations
-│       ├── execution/
-│       │   ├── workerCoordinator.ts # Worker pool management
-│       │   ├── localWorkerPool.ts  # Local worker pool
-│       │   └── providers/          # Execution providers
-│       │       ├── claudeRemoteProvider.ts
-│       │       └── types.ts
-│       ├── github/
-│       │   ├── gitHelper.ts        # Low-level git operations
-│       │   ├── githubClient.ts     # Octokit wrapper
-│       │   └── operations.ts       # High-level GitHub ops
-│       ├── sessions/
-│       │   ├── claudeSessionSync.ts      # Background sync service
-│       │   ├── sessionEventBroadcaster.ts # SSE event broadcasting
-│       │   └── sessionListBroadcaster.ts  # Session list updates
-│       ├── storage/
-│       │   ├── minioClient.ts      # MinIO client
-│       │   └── storageService.ts   # Storage operations
-│       ├── aiWorker/
-│       │   └── aiWorkerClient.ts   # Client for AI worker
-│       ├── utils/
-│       │   ├── logger.ts           # Structured logging
-│       │   ├── metrics.ts          # Performance metrics
-│       │   ├── healthMonitor.ts    # Health check system
-│       │   ├── circuitBreaker.ts   # Circuit breaker pattern
-│       │   ├── recovery.ts         # Session recovery
-│       │   ├── retry.ts            # Retry logic
-│       │   ├── emojiMapper.ts      # SSE emoji decoration
-│       │   ├── previewUrlHelper.ts # Preview URL generation
-│       │   └── sessionPathHelper.ts # Session path utilities
-│       └── scripts/
-│           ├── db-check.ts         # Database health check
-│           ├── db-backup.ts        # Database backup utility
-│           └── db-validate.ts      # Schema validation
-│
-├── package.json
-├── tsconfig.json
-├── Dockerfile
-├── docker-compose.yml              # Dokploy deployment
-└── swarm.yml                       # Docker Swarm deployment
-```
-
-### CLI Usage
-
-The Internal API Server includes a CLI for debugging and administration:
-
-```bash
-# Run CLI (requires DATABASE_URL env)
-npm run cli -- <command>
-
-# Session commands
-npm run cli -- session list              # List recent sessions
-npm run cli -- session get <id>          # Get session details
-npm run cli -- session delete <id> -f    # Delete a session
-npm run cli -- session cleanup           # Clean orphaned sessions
-
-# GitHub commands (requires GITHUB_TOKEN)
-npm run cli -- github repos              # List repositories
-npm run cli -- github branches <owner> <repo>
-npm run cli -- github create-branch <owner> <repo> <name>
-npm run cli -- github create-pr <owner> <repo> <head> <base>
-
-# Storage commands (requires MinIO connection)
-npm run cli -- storage list              # List sessions in storage
-npm run cli -- storage files <path>      # List files in a session
-npm run cli -- storage exists <path>     # Check if session exists
-
-# Admin commands
-npm run cli -- admin users               # List all users
-npm run cli -- admin user <id>           # Get user details
-npm run cli -- admin create-user <email> <password>
-npm run cli -- admin set-admin <id> true
-```
-
-### API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check with service status |
-| `/api/execute` | POST | Execute AI coding request (SSE) |
-| `/api/resume/:sessionId` | GET | Replay stored events (SSE) |
-| `/api/auth/*` | - | Authentication (register, login, logout, session) |
-| `/api/user/*` | - | User management (claude-auth, preferred-provider) |
-| `/api/sessions/*` | - | Session CRUD operations |
-| `/api/github/*` | - | GitHub OAuth and repo operations |
-| `/api/storage/*` | - | Storage operations (files, sessions) |
-| `/api/admin/*` | - | Admin user management |
-| `/api/transcribe` | POST | Audio transcription (OpenAI Whisper) |
-| `/api/logs` | GET | View captured server logs |
-| `/api/logs` | DELETE | Clear captured logs |
-| `/api/logs/status` | GET | Log capture status |
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | Server port |
-| `NODE_ENV` | `development` | Environment mode |
-| `DATABASE_URL` | - | PostgreSQL connection string |
-| `MINIO_ENDPOINT` | - | MinIO server hostname |
-| `MINIO_PORT` | `9000` | MinIO server port |
-| `MINIO_ROOT_USER` | - | MinIO access key |
-| `MINIO_ROOT_PASSWORD` | - | MinIO secret key |
-| `MINIO_BUCKET` | `sessions` | Session storage bucket |
-| `AI_WORKER_URL` | `http://ai-coding-worker:5000` | AI Worker endpoint |
-| `SESSION_SECRET` | - | Session encryption secret |
-| `ALLOWED_ORIGINS` | - | CORS allowed origins |
-| `GITHUB_CLIENT_ID` | - | GitHub OAuth client ID |
-| `GITHUB_CLIENT_SECRET` | - | GitHub OAuth client secret |
-| `OPENAI_API_KEY` | - | OpenAI API key (for transcription) |
-
----
-
-## AI Coding Worker
-
-Provider-agnostic ephemeral worker for executing LLM coding requests.
-
-### Key Characteristics
-
-- **Ephemeral**: Exits after each job (`process.exit(0)`)
-- **Docker Swarm**: Automatically restarted after exit
-- **Single Request**: Returns 429 if busy
-- **LLM Execution Only**: No storage or GitHub operations
-
-### Core Components
-
-1. **server.ts** - Express server with SSE streaming
-2. **orchestrator.ts** - Request orchestration
-3. **providers/** - Claude Agent SDK, Codex providers
-4. **emojiMapper** - SSE message decoration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `5000` | Server port |
-| `WORKSPACE_DIR` | `/workspace` | Session workspace root |
-| `INTERNAL_API_URL` | `http://webedt-app-webedt-internal-api-server-juit1b:3000` | Internal API Server URL |
-
----
-
-## Git Commit Message Rules
-
-**MANDATORY:** All commit messages MUST follow these rules.
-
-### Format
-
-```
-Subject Line [Required]
-
-- Detail Line 1 [Optional]
-- Detail Line 2 [Optional]
-```
-
-### Rules
-
-- Use imperative mood, present tense
-- Start with capital letter and verb
-- **NO prefixes** (`feat:`, `fix:`, etc.)
-- **NO emojis**
-
-### Good Examples
-
-```
-Add commit-based versioning system
-Update API endpoint to support dynamic paths
-Fix navigation overlay height issue
-```
-
-### Good Verbs
-
-Add, Update, Remove, Fix, Refactor, Enhance, Rename, Move, Extract, Merge, Improve, Optimize, Document
-
----
-
-## Pre-Commit Checklist
-
-**MANDATORY:** Before committing changes, run these commands in the project folder(s) you modified:
-
-```bash
-npm install        # Ensure dependencies are up to date
-npm run build      # Verify no build/compilation errors
-```
-
-This ensures there are no errors in the application before pushing to the repository.
-
----
-
-## File Management
-
-### Storage Operations
-
-All file operations go through the Internal API Server storage routes (accessed via website facade or directly for internal services):
-
-```
-GET    /api/storage/sessions/:sessionPath/files           - List files
-GET    /api/storage/sessions/:sessionPath/files/*         - Read file
-PUT    /api/storage/sessions/:sessionPath/files/*         - Write file
-DELETE /api/storage/sessions/:sessionPath/files/*         - Delete file
-HEAD   /api/storage/sessions/:sessionPath/files/*         - Check exists
-```
-
-### Session Path Format
-
-`{owner}__{repo}__{branch}` (double underscore separator)
-
-Example: `webedt__monorepo__feature-branch`
-
-**Important:** Session paths must NOT contain `/` characters.
-
-### Frontend API Usage
-
-```typescript
-import { storageWorkerApi } from '@/lib/api';
-
-const sessionPath = `${owner}__${repo}__${branch}`;
-
-// Read file
-const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${filePath}`);
-
-// Write file
-await storageWorkerApi.writeFile(sessionPath, `workspace/${filePath}`, content);
-```
-
----
-
-## SSE Event Types
-
-| Event Type | Source | Description |
-|------------|--------|-------------|
-| `connected` | `ai-coding-worker` | Initial connection |
-| `message` | `ai-coding-worker` | Progress messages |
-| `session_name` | `ai-coding-worker` | Generated session title |
-| `assistant_message` | `claude-agent-sdk` | LLM output |
-| `completed` | `ai-coding-worker` | Job finished |
-| `error` | `ai-coding-worker` | Error occurred |
-
-### Stage Emoji Mapping
-
-| Stage | Emoji | Description |
-|-------|-------|-------------|
-| `preparing` | 🔧 | Initialization |
-| `downloading_session` | 📥 | Downloading from storage |
-| `cloning` | 📥 | Cloning repository |
-| `generating_name` | 🤖 | LLM generating names |
-| `creating_branch` | 🌿 | Creating git branch |
-| `pushing` | 📤 | Pushing to remote |
-| `committing` | 💾 | Creating commit |
-| `error` | ❌ | Operation failed |
-
----
+| **Shared** | `/shared` | Core business logic, auth, database, GitHub operations |
+| **CLI** | `/cli` | Administration CLI (session, admin, github commands) |
+| **Frontend** | `/website/frontend` | Vanilla TypeScript SPA (Vite) |
+| **Backend** | `/website/backend` | Express API server |
+| **Tools** | `/tools/*` | CLI utilities (autonomous-dev-cli, claude-web-cli) |
 
 ## Development Commands
 
-### Node.js
-
 ```bash
-npm install        # Install dependencies
-npm run dev        # Development mode
-npm run build      # Build TypeScript
-npm start          # Production
+# Start all services (shared watch + frontend dev + backend dev)
+npm run dev
+
+# Build everything
+npm run build
+
+# Clean all build artifacts
+npm run clean
 ```
 
-### Docker Swarm
+### Per-Package Commands
 
+**Frontend** (`website/frontend`):
 ```bash
-docker swarm init
-docker stack deploy -c swarm.yml {stack-name}
-docker service ls
-docker service logs {service-name} -f
-docker service scale {service-name}=20
-docker stack rm {stack-name}
+npm run dev      # Vite dev server with hot reload
+npm run build    # Production build
+npm run preview  # Preview production build
+```
+
+**Backend** (`website/backend`):
+```bash
+npm run dev      # tsx watch with auto-reload
+npm run build    # TypeScript compilation
+npm run db:push  # Push schema to database
+npm run db:studio # Open Drizzle Studio
+```
+
+**CLI** (`cli`):
+```bash
+npm run cli              # From monorepo root
+npm run dev -- session list    # List sessions
+npm run dev -- admin users     # List users
+npm run dev -- github repos    # List repos
+```
+
+**Shared** (`shared`):
+```bash
+npm run dev   # tsc --watch
+npm run build # TypeScript compilation
+npm run test  # Run tests
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              FRONTEND                                        │
+│  website/frontend (Vite + Vanilla TypeScript)                               │
+│  - SPA with CSS theming                                                     │
+│  - SSE streaming for real-time updates                                      │
+│  - Component-based UI (vanilla TS, no framework)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                              HTTP/SSE API
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              BACKEND                                         │
+│  website/backend (Express API Server)                                        │
+│  - REST API routes (auth, sessions, github, admin)                          │
+│  - SSE streaming endpoints                                                  │
+│  - Static file serving                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                              Imports from
+                                    │
+┌───────────────────────────────────┴───────────────────────────────────────┐
+│                                                                            │
+▼                                                                            ▼
+┌─────────────────────────────────┐    ┌─────────────────────────────────────┐
+│              CLI                 │    │              SHARED                  │
+│  cli (Administration Commands)   │    │  shared (Core Business Logic)        │
+│  - session list/get/delete      │───▶│  - Authentication (Lucia, OAuth)    │
+│  - admin users/create-user      │    │  - Database (Drizzle + PostgreSQL)  │
+│  - github branches/repos/pr     │    │  - GitHub/Git operations            │
+└─────────────────────────────────┘    │  - Session management               │
+                                       │  - Utilities (retry, circuit breaker)│
+                                       └─────────────────────────────────────┘
+                                                         │
+                                                         ▼
+                                                PostgreSQL Database
 ```
 
 ---
 
-## SSH Access for Docker Status
+### Frontend (`website/frontend/src/`)
 
-To check Docker container status on the production server:
-
-```bash
-ssh ehub2023
-```
-
-**If `ehub2023` is not accessible**, ask the user for the SSH server hostname/alias.
-
-### Common Docker Commands (via SSH)
-
-```bash
-# List running containers
-docker ps
-
-# Check specific service status
-docker service ls
-
-# View container logs
-docker logs <container-id> -f
-
-# Check service logs
-docker service logs <service-name> -f
-```
+- **`components/`** - Vanilla TypeScript UI components (Button, Card, Input, Modal, etc.)
+- **`pages/`** - Page components (Login, Register, Dashboard, Agents, Chat, Code, Settings, Trash)
+- **`stores/`** - Simple state management (authStore, repoStore, workerStore)
+- **`lib/`** - Utilities (api.ts, router.ts, events.ts for SSE, theme.ts)
+- **`styles/`** - CSS with custom properties for theming
 
 ---
 
-## Viewing Server Logs via API
+### Backend (`website/backend/src/`)
 
-The `/api/logs` endpoint exposes captured server logs for debugging.
+The backend is a thin API layer that imports core logic from the shared package.
 
-### Endpoints
+- **`api/routes/`** - Express route handlers
+  - `auth.ts` - Authentication (register, login, logout)
+  - `sessions.ts` - Session CRUD operations
+  - `executeRemote.ts` - Claude Remote execution (SSE)
+  - `resume.ts` - Event replay streaming
+  - `github.ts` - GitHub OAuth and repo operations
+  - `workspace.ts` - Workspace file operations
+  - `admin.ts` - Admin user management
+  - `liveChat.ts` - Live chat endpoints
+  - `transcribe.ts` - Audio transcription (OpenAI Whisper)
+  - `imageGen.ts` - Image generation
+  - `logs.ts` - Server log viewing
+- **`api/middleware/`** - Auth middleware
+- **`scripts/`** - Database utilities (db-check, db-backup, db-validate)
+
+---
+
+### CLI (`cli/src/`)
+
+Standalone administration CLI for managing the platform without the web server.
+
+- **`commands/`** - CLI command modules
+  - `session.ts` - Session management (list, get, delete, cleanup)
+  - `admin.ts` - User administration (users, create-user, set-admin, delete-user)
+  - `github.ts` - GitHub operations (branches, repos, create-branch, create-pr)
+
+---
+
+### Shared (`shared/src/`)
+
+The shared package contains all core business logic, reusable across backend and CLI.
+
+- **`auth/`** - Authentication providers
+  - `lucia.ts` - Lucia auth setup
+  - `claudeAuth.ts` - Claude OAuth helpers
+  - `codexAuth.ts` - Codex auth helpers
+  - `geminiAuth.ts` - Gemini auth helpers
+- **`db/`** - Database layer
+  - `schema.ts` - Drizzle ORM schema (users, sessions, messages, events)
+  - `connection.ts` - PostgreSQL connection management
+  - `migrations.ts` - Database migrations
+- **`github/`** - Git/GitHub operations
+  - `gitHelper.ts` - Low-level git operations (simple-git)
+  - `githubClient.ts` - Octokit wrapper
+  - `operations.ts` - High-level operations (clone, branch, push, PR)
+- **`execution/providers/`** - Execution orchestration
+  - `claudeRemoteProvider.ts` - Claude Remote Sessions provider
+  - `types.ts` - Provider interfaces
+- **`sessions/`** - Session management
+  - `claudeSessionSync.ts` - Background sync service
+  - `sessionEventBroadcaster.ts` - SSE event broadcasting
+  - `sessionListBroadcaster.ts` - Session list updates
+- **`claudeRemote/`** - Claude Remote Sessions API client
+  - `claudeRemoteClient.ts` - API client
+  - `titleGenerator.ts` - Session title generation
+  - `types.ts` - Type definitions
+- **Utilities**:
+  - `circuitBreaker.ts` - Circuit breaker pattern
+  - `healthMonitor.ts` - Health check system
+  - `metrics.ts` - Performance metrics
+  - `recovery.ts` - Session recovery
+  - `retry.ts` - Retry logic with backoff
+  - `logger.ts` / `logCapture.ts` - Structured logging
+  - `emojiMapper.ts` - SSE emoji decoration
+  - `previewUrlHelper.ts` - Preview URL generation
+  - `sessionPathHelper.ts` - Session path utilities
+
+## Database
+
+- **PostgreSQL** with **Drizzle ORM**
+- Tables: `users`, `sessions`, `chatSessions`, `messages`, `events`
+
+## Key API Routes
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/logs` | GET | Get captured logs with optional filtering |
-| `/api/logs` | DELETE | Clear all captured logs |
-| `/api/logs/status` | GET | Get log capture status |
+| `/api/execute-remote` | POST | Execute AI request (SSE) |
+| `/api/resume/:sessionId` | GET | Replay stored events (SSE) |
+| `/api/auth/*` | - | Authentication (register, login, logout, session) |
+| `/api/sessions/*` | - | Session CRUD |
+| `/api/github/*` | - | GitHub OAuth and repo operations |
+| `/health`, `/ready`, `/live` | GET | Health/Kubernetes probes |
 
-### Query Parameters (GET /api/logs)
+## Environment Variables
 
-| Parameter | Description |
-|-----------|-------------|
-| `level` | Filter by log level: `debug`, `info`, `warn`, `error` |
-| `component` | Filter by component name |
-| `sessionId` | Filter by session ID |
-| `since` | Filter logs after this ISO timestamp |
-| `limit` | Max logs to return (default: 100, max: 1000) |
-
-### Example Usage
+Required in `.env` (copy from `.env.example`):
 
 ```bash
-# Get all logs (default limit 100)
-curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs"
-
-# Get error logs only
-curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?level=error"
-
-# Get logs for a specific session
-curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?sessionId=abc123"
-
-# Get logs since a specific time
-curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?since=2025-01-15T10:00:00Z"
-
-# Get last 50 logs
-curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?limit=50"
-
-# Combine filters
-curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs?level=error&limit=20"
-
-# Clear all logs
-curl -X DELETE "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs"
-
-# Check log capture status
-curl "https://webedt.etdofresh.com/github/webedt/monorepo/main/api/logs/status"
+DATABASE_URL=postgresql://user:password@localhost:5432/webedt
+SESSION_SECRET=your-secret-key
+FRONTEND_PORT=3000
+BACKEND_PORT=3001
 ```
 
-### Response Format
+Optional:
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` - GitHub OAuth
+- `CLAUDE_ENVIRONMENT_ID` - Claude Remote Sessions
+- `OPENAI_API_KEY` - Audio transcription
+- `OPENROUTER_API_KEY` - Title generation
 
-```json
-{
-  "success": true,
-  "data": {
-    "logs": [
-      {
-        "timestamp": "2025-01-15T10:30:00.000Z",
-        "level": "info",
-        "component": "execute",
-        "message": "Starting execution",
-        "sessionId": "abc123"
-      }
-    ],
-    "total": 150,
-    "filtered": 25,
-    "status": {
-      "enabled": true,
-      "count": 150,
-      "maxLogs": 1000
-    }
-  }
-}
+## Docker Build
+
+Single multi-stage image containing frontend and backend:
+
+```bash
+docker build \
+  --build-arg BUILD_COMMIT_SHA=$(git rev-parse HEAD) \
+  --build-arg BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  --build-arg BUILD_VERSION=0.0.$(git rev-list --count HEAD) \
+  -t webedt .
 ```
 
----
+Exposes ports 3000 (frontend) and 3001 (backend API).
 
-## Links After Tasks
+## Version Display
 
-**CRITICAL:** After code changes, commits, or pushes, ALWAYS display:
+The frontend displays version as `v0.0.{commit_count}` with toggleable details showing `{sha} [{timestamp}]`. Version info is injected at build time via `vite-plugin-version-mark`.
 
+## Git Commit Messages
+
+- Use imperative mood, present tense
+- Start with capital letter and verb
+- No prefixes (`feat:`, `fix:`, etc.) or emojis
+- Good verbs: Add, Update, Remove, Fix, Refactor, Enhance, Rename
+
+## Pre-Commit Checklist
+
+Before committing, run in modified package folders:
+
+```bash
+npm install
+npm run build
 ```
-**Links:**
-
-GitHub Branch: [https://github.com/webedt/monorepo/tree/{branch}](https://github.com/webedt/monorepo/tree/{branch})
-Live Site: [https://webedt.etdofresh.com/github/webedt/monorepo/{branch-with-slashes-as-hyphens}/](https://webedt.etdofresh.com/github/webedt/monorepo/{branch-with-slashes-as-hyphens}/)
-```
-
-**NOTE:** For the Live Site URL, replace any slashes (`/`) in the branch name with hyphens (`-`).
-Example: Branch `claude/fix-bug` → Live Site URL uses `claude-fix-bug`
-
----
-
-## Repository Links
-
-- GitHub: https://github.com/webedt/monorepo
-- Issues: https://github.com/webedt/monorepo/issues
-
----
-
-## Autonomous Development Workflow
-
-This repo supports long-running autonomous development via the autonomous CLI.
-
-### Key Files
-
-- **SPEC.md** - North star roadmap describing the complete platform vision. This is the aspirational end-state of what WebEDT should become.
-- **STATUS.md** - Implementation status, priorities (P0-P3), and progress tracking. This tracks what's been built vs. what remains.
-
-### Workflow for Implementing Features
-
-1. Read `STATUS.md` to understand current state and priorities
-2. Pick the highest priority (P0 first) incomplete feature
-3. Read the relevant `SPEC.md` sections for detailed requirements
-4. Implement the feature following existing patterns in the codebase
-5. Run `npm install && npm run build` in modified project folders
-6. Update `STATUS.md` with:
-   - New status (✅ Complete, 🟡 Partial)
-   - Key files added/modified
-   - Add entry to Changelog section
-7. Commit changes and repeat
-
-### Priority Tiers
-
-- **P0 (Core MVP):** Essential features for a functional platform
-- **P1 (Important):** Build after core MVP is stable
-- **P2 (Nice to Have):** Enhance the platform experience
-- **P3 (Future):** Long-term vision features
-
----
-
-*Documentation last updated: 2025-12-18*

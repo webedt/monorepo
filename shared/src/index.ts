@@ -1,6 +1,9 @@
 /**
- * Shared utilities for WebEDT monorepo
+ * Shared utilities and core business logic for WebEDT monorepo
  */
+
+// Interfaces - High-level API definitions for all classes
+export * from './interfaces/index.js';
 
 // Types
 export type { SessionMetadata, StorageSessionInfo, AIProvider } from './types.js';
@@ -39,7 +42,7 @@ export type { WebedtConfig } from './previewUrlHelper.js';
 // Claude Remote Sessions API
 export { ClaudeRemoteClient, ClaudeRemoteError, fetchEnvironmentIdFromSessions, generateTitle, generateTitleSync } from './claudeRemote/index.js';
 export type {
-  ClaudeAuth,
+  ClaudeRemoteAuth,
   ClaudeRemoteClientConfig,
   CreateSessionParams,
   CreateSessionResult,
@@ -55,3 +58,36 @@ export type {
   TitleGenerationEvent,
   TitleGenerationCallback,
 } from './claudeRemote/index.js';
+
+// Utilities - Circuit Breaker
+export * from './circuitBreaker.js';
+
+// Utilities - Health Monitor
+export * from './healthMonitor.js';
+
+// Utilities - Metrics
+export * from './metrics.js';
+
+// Utilities - Recovery
+export * from './recovery.js';
+
+// Utilities - Retry
+export * from './retry.js';
+
+// Auth
+export * from './auth/index.js';
+
+// Config
+export * from './config/index.js';
+
+// Database
+export * from './db/index.js';
+
+// Execution
+export * from './execution/index.js';
+
+// GitHub
+export * from './github/index.js';
+
+// Sessions
+export * from './sessions/index.js';
