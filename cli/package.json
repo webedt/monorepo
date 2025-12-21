@@ -8,7 +8,7 @@
     "webedt": "./dist/index.js"
   },
   "scripts": {
-    "dev": "tsx --env-file=../.env src/index.ts",
+    "dev": "QUIET_DB=true tsx --env-file=../.env src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "clean": "rm -rf dist *.tsbuildinfo"

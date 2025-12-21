@@ -2,6 +2,7 @@
  * Database Configuration - PostgreSQL with Drizzle ORM
  *
  * Features:
+ * - Lazy initialization (only connects when first used)
  * - Automatic schema migration with version tracking
  * - Schema validation on startup with clear error messages
  * - Connection health checks with automatic reconnection
@@ -11,7 +12,7 @@
  * See SQLITE_REMOVED.md in this directory for instructions on reintroducing SQLite if needed.
  */
 
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from './schema.js';
 import {
@@ -33,56 +34,163 @@ import {
 
 const { Pool } = pg;
 
-// Database URL from environment
-if (!process.env.DATABASE_URL) {
-  console.error('');
-  console.error('❌ DATABASE_URL environment variable is required');
-  console.error('');
-  console.error('PostgreSQL is the only supported database.');
-  console.error('');
-  console.error('Set DATABASE_URL in your environment:');
-  console.error('  export DATABASE_URL=postgresql://user:pass@localhost:5432/dbname');
-  console.error('');
-  console.error('For local development with Docker:');
-  console.error('  DATABASE_URL=postgresql://postgres:postgres@localhost:5432/webedt');
-  console.error('');
-  throw new Error('DATABASE_URL environment variable is required. PostgreSQL is the only supported database.');
-}
+// ============================================================================
+// LAZY INITIALIZATION
+// ============================================================================
+// Database is only initialized when first accessed via getDb() or initializeDatabase()
+// This allows CLI commands that don't need DB to run without DATABASE_URL
 
-console.log('Connecting to PostgreSQL database...');
-
-// Create the pool immediately for backward compatibility
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000, // 10s timeout for remote DB connections
-  ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
-});
-
-// Create Drizzle instance immediately for backward compatibility
-export const db = drizzle(pool, { schema, logger: process.env.NODE_ENV === 'development' && process.env.DEBUG_SQL === 'true' });
-
-// Re-export schema tables
-export const { users, sessions, chatSessions, messages, events } = schema;
-
-// Connection manager for health checks (created lazily)
+let _pool: pg.Pool | null = null;
+let _db: NodePgDatabase<typeof schema> | null = null;
 let connectionManager: DatabaseConnection | null = null;
 let initializationComplete = false;
 let initializationError: Error | null = null;
+let initializationPromise: Promise<void> | null = null;
+
+// Skip verbose logging if QUIET_DB is set (for CLI commands)
+const quietMode = process.env.QUIET_DB === 'true';
+
+/**
+ * Get or create the database pool (lazy initialization)
+ */
+function ensurePool(): pg.Pool {
+  if (!_pool) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error(
+        'DATABASE_URL environment variable is required. PostgreSQL is the only supported database.\n' +
+        'Set DATABASE_URL in your environment:\n' +
+        '  export DATABASE_URL=postgresql://user:pass@localhost:5432/dbname'
+      );
+    }
+
+    if (!quietMode) {
+      console.log('Connecting to PostgreSQL database...');
+    }
+
+    _pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
+    });
+  }
+  return _pool;
+}
+
+/**
+ * Get or create the Drizzle database instance (lazy initialization)
+ */
+function getDbInstance(): NodePgDatabase<typeof schema> {
+  if (!_db) {
+    const pool = ensurePool();
+    _db = drizzle(pool, {
+      schema,
+      logger: process.env.NODE_ENV === 'development' && process.env.DEBUG_SQL === 'true'
+    });
+  }
+  return _db;
+}
+
+// Create proxies for backward compatibility
+// These will lazily initialize the pool/db on first access
+export const pool: pg.Pool = new Proxy({} as pg.Pool, {
+  get(_, prop) {
+    const realPool = ensurePool();
+    const value = (realPool as any)[prop];
+    return typeof value === 'function' ? value.bind(realPool) : value;
+  },
+});
+
+export const db: NodePgDatabase<typeof schema> = new Proxy({} as NodePgDatabase<typeof schema>, {
+  get(_, prop) {
+    const realDb = getDbInstance();
+    const value = (realDb as any)[prop];
+    return typeof value === 'function' ? value.bind(realDb) : value;
+  },
+});
+
+// Re-export schema tables (these don't need DB connection)
+export const { users, sessions, chatSessions, messages, events } = schema;
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+/**
+ * Display database statistics
+ */
+async function showDatabaseStats(): Promise<void> {
+  try {
+    const realPool = ensurePool();
+    const result = await realPool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM users) as users_count,
+        (SELECT COUNT(*) FROM sessions) as sessions_count,
+        (SELECT COUNT(*) FROM chat_sessions) as chat_sessions_count,
+        (SELECT COUNT(*) FROM chat_sessions WHERE deleted_at IS NULL) as active_chat_sessions_count,
+        (SELECT COUNT(*) FROM messages) as messages_count,
+        (SELECT COUNT(*) FROM events) as events_count
+    `);
+
+    console.log('');
+    console.log('Database Statistics:');
+    if (result && result.rows && result.rows[0]) {
+      const stats = result.rows[0];
+      console.log(`  Users:              ${stats.users_count}`);
+      console.log(`  Sessions:           ${stats.sessions_count}`);
+      console.log(`  Chat Sessions:      ${stats.chat_sessions_count} (${stats.active_chat_sessions_count} active)`);
+      console.log(`  Messages:           ${stats.messages_count}`);
+      console.log(`  Events:             ${stats.events_count}`);
+    } else {
+      console.log('  (No stats available)');
+    }
+  } catch (error) {
+    console.log('  (Stats unavailable - tables may not exist yet)');
+  }
+}
 
 /**
  * Initialize database with migrations and validation
- * This runs automatically on import but can be awaited for completion
+ * Call this explicitly when you need full initialization (backend, CLI db commands)
  */
-async function initializeDatabase(): Promise<void> {
+export async function initializeDatabase(): Promise<void> {
+  // Return existing promise if initialization is in progress
+  if (initializationPromise) {
+    return initializationPromise;
+  }
+
+  // Skip if already complete
+  if (initializationComplete) {
+    return;
+  }
+
+  initializationPromise = doInitialize();
+  return initializationPromise;
+}
+
+async function doInitialize(): Promise<void> {
+  // Quick mode: just verify connection
+  if (quietMode) {
+    try {
+      const realPool = ensurePool();
+      await realPool.query('SELECT 1');
+      initializationComplete = true;
+    } catch (error) {
+      initializationError = error instanceof Error ? error : new Error(String(error));
+    }
+    return;
+  }
+
   console.log('');
   console.log('📦 Initializing PostgreSQL database...');
   console.log('');
 
   try {
+    const realPool = ensurePool();
+
     // Test basic connectivity first
-    await pool.query('SELECT 1');
+    await realPool.query('SELECT 1');
     console.log('  ✅ Database connection established');
 
     // Run migrations unless skipped
@@ -105,7 +213,6 @@ async function initializeDatabase(): Promise<void> {
             console.error('  ', detail);
           }
         }
-        // Don't throw - allow server to start with existing schema
         console.warn('⚠️  Continuing with existing schema');
       } else {
         if (migrationResult.details) {
@@ -121,7 +228,7 @@ async function initializeDatabase(): Promise<void> {
     // Auto-migrate: add any missing columns
     console.log('');
     console.log('Checking for schema updates...');
-    const schemaUpdate = await ensureSchemaUpToDate(pool);
+    const schemaUpdate = await ensureSchemaUpToDate(realPool);
 
     if (schemaUpdate.columnsAdded.length > 0) {
       console.log('  Added missing columns:');
@@ -158,13 +265,12 @@ async function initializeDatabase(): Promise<void> {
     // Validate schema
     console.log('');
     console.log('Validating database schema...');
-    const validation = await validateSchema(pool);
+    const validation = await validateSchema(realPool);
 
     if (!validation.valid) {
       console.error('');
       console.error(formatSchemaErrors(validation));
 
-      // In production, warn about validation errors
       if (process.env.NODE_ENV === 'production') {
         console.warn('⚠️  Schema validation failed - some features may not work correctly');
       }
@@ -182,15 +288,12 @@ async function initializeDatabase(): Promise<void> {
 
     // Set up connection manager for health checks
     connectionManager = createConnection(process.env.DATABASE_URL!, {
-      maxConnections: 1, // Use minimal connections for health checks only
+      maxConnections: 1,
       minConnections: 0,
       maxRetries: 3,
       baseRetryDelayMs: 1000,
       maxRetryDelayMs: 10000,
     });
-
-    // Don't start health checks yet - pool is managed separately
-    // Health checks can be started manually if needed
 
     console.log('');
     console.log('✅ Database initialization complete');
@@ -206,52 +309,18 @@ async function initializeDatabase(): Promise<void> {
     console.error('');
     console.error(getDatabaseDiagnostics(err));
 
-    // Don't throw - let the application decide how to handle this
     console.warn('⚠️  Database may not be fully initialized');
   }
 }
-
-/**
- * Display database statistics
- */
-async function showDatabaseStats(): Promise<void> {
-  try {
-    const result = await pool.query(`
-      SELECT
-        (SELECT COUNT(*) FROM users) as users_count,
-        (SELECT COUNT(*) FROM sessions) as sessions_count,
-        (SELECT COUNT(*) FROM chat_sessions) as chat_sessions_count,
-        (SELECT COUNT(*) FROM chat_sessions WHERE deleted_at IS NULL) as active_chat_sessions_count,
-        (SELECT COUNT(*) FROM messages) as messages_count,
-        (SELECT COUNT(*) FROM events) as events_count
-    `);
-
-    console.log('');
-    console.log('Database Statistics:');
-    if (result && result.rows && result.rows[0]) {
-      const stats = result.rows[0];
-      console.log(`  Users:              ${stats.users_count}`);
-      console.log(`  Sessions:           ${stats.sessions_count}`);
-      console.log(`  Chat Sessions:      ${stats.chat_sessions_count} (${stats.active_chat_sessions_count} active)`);
-      console.log(`  Messages:           ${stats.messages_count}`);
-      console.log(`  Events:             ${stats.events_count}`);
-    } else {
-      console.log('  (No stats available)');
-    }
-  } catch (error) {
-    console.log('  (Stats unavailable - tables may not exist yet)');
-  }
-}
-
-// Start initialization (runs in background)
-const initializationPromise = initializeDatabase();
 
 /**
  * Wait for database initialization to complete
  * Use this if you need to ensure migrations have run before proceeding
  */
 export async function waitForDatabase(): Promise<void> {
-  await initializationPromise;
+  if (initializationPromise) {
+    await initializationPromise;
+  }
   if (initializationError) {
     throw initializationError;
   }
@@ -267,25 +336,27 @@ export function isInitialized(): boolean {
 /**
  * Get the database instance
  */
-export function getDb(): typeof db {
-  return db;
+export function getDb(): NodePgDatabase<typeof schema> {
+  return getDbInstance();
 }
 
 /**
  * Get the raw pool instance
  */
 export function getPool(): pg.Pool {
-  return pool;
+  return ensurePool();
 }
 
 /**
  * Get connection statistics
  */
 export function getConnectionStats(): ConnectionStats | null {
+  if (!_pool) return null;
+
   return connectionManager?.getStats() || {
-    totalCount: pool.totalCount,
-    idleCount: pool.idleCount,
-    waitingCount: pool.waitingCount,
+    totalCount: _pool.totalCount,
+    idleCount: _pool.idleCount,
+    waitingCount: _pool.waitingCount,
     maxConnections: 20,
     healthy: true,
     lastHealthCheck: null,
@@ -301,7 +372,8 @@ export async function checkHealth(): Promise<DatabaseHealthCheckResult> {
   const start = Date.now();
 
   try {
-    await pool.query('SELECT 1');
+    const realPool = ensurePool();
+    await realPool.query('SELECT 1');
     return {
       healthy: true,
       latencyMs: Date.now() - start,
@@ -321,7 +393,8 @@ export async function checkHealth(): Promise<DatabaseHealthCheckResult> {
  * Check if the database is healthy
  */
 export function isHealthy(): boolean {
-  return pool.totalCount > 0 && pool.idleCount >= 0;
+  if (!_pool) return false;
+  return _pool.totalCount > 0 && _pool.idleCount >= 0;
 }
 
 /**
@@ -332,7 +405,11 @@ export async function closeDatabase(): Promise<void> {
     await connectionManager.close();
     connectionManager = null;
   }
-  await pool.end();
+  if (_pool) {
+    await _pool.end();
+    _pool = null;
+    _db = null;
+  }
   console.log('Database connection closed');
 }
 

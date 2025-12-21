@@ -16,8 +16,8 @@ let cachedCredentials: { accessToken: string; environmentId?: string } | null = 
  * Get Claude credentials with fallback chain:
  * 1. CLI options (--token, --environment)
  * 2. Environment variables (CLAUDE_ACCESS_TOKEN, CLAUDE_ENVIRONMENT_ID)
- * 3. Database (first user with claudeAuth)
- * 4. ~/.claude/.credentials.json
+ * 3. ~/.claude/.credentials.json (fast, local)
+ * 4. Database (slow, requires network connection)
  */
 async function getClientConfig(options: { token?: string; environment?: string; org?: string }): Promise<{
   accessToken: string;
@@ -47,7 +47,25 @@ async function getClientConfig(options: { token?: string; environment?: string; 
     environmentId = process.env.CLAUDE_ENVIRONMENT_ID;
   }
 
-  // 3. Check database for first user with claudeAuth
+  // 3. Check ~/.claude/.credentials.json (fast, local file)
+  if (!accessToken) {
+    try {
+      if (existsSync(CLAUDE_CREDENTIALS_PATH)) {
+        const credentialsContent = readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8');
+        const credentials = JSON.parse(credentialsContent);
+
+        if (credentials.claudeAiOauth?.accessToken) {
+          accessToken = credentials.claudeAiOauth.accessToken;
+          source = '~/.claude/.credentials.json';
+          console.log('Using credentials from ~/.claude/.credentials.json');
+        }
+      }
+    } catch {
+      // File doesn't exist or is invalid, continue
+    }
+  }
+
+  // 4. Check database for first user with claudeAuth (slow, requires network)
   if (!accessToken) {
     try {
       const usersWithAuth = await db
@@ -69,25 +87,7 @@ async function getClientConfig(options: { token?: string; environment?: string; 
         }
       }
     } catch {
-      // Database not available, continue to next fallback
-    }
-  }
-
-  // 4. Check ~/.claude/.credentials.json
-  if (!accessToken) {
-    try {
-      if (existsSync(CLAUDE_CREDENTIALS_PATH)) {
-        const credentialsContent = readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8');
-        const credentials = JSON.parse(credentialsContent);
-
-        if (credentials.claudeAiOauth?.accessToken) {
-          accessToken = credentials.claudeAiOauth.accessToken;
-          source = '~/.claude/.credentials.json';
-          console.log('Using credentials from ~/.claude/.credentials.json');
-        }
-      }
-    } catch (error) {
-      // File doesn't exist or is invalid, continue
+      // Database not available, continue to error
     }
   }
 
@@ -96,8 +96,8 @@ async function getClientConfig(options: { token?: string; environment?: string; 
     console.error('\nClaude access token not found. Checked:');
     console.error('  1. --token CLI option');
     console.error('  2. CLAUDE_ACCESS_TOKEN environment variable');
-    console.error('  3. Database (users with claudeAuth)');
-    console.error(`  4. ${CLAUDE_CREDENTIALS_PATH}`);
+    console.error(`  3. ${CLAUDE_CREDENTIALS_PATH}`);
+    console.error('  4. Database (users with claudeAuth)');
     console.error('\nTo authenticate, either:');
     console.error('  - Set CLAUDE_ACCESS_TOKEN in your .env file');
     console.error('  - Run `claude` CLI to authenticate (creates ~/.claude/.credentials.json)');
