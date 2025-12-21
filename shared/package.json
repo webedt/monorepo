@@ -9,8 +9,9 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "test": "node --import tsx --test src/**/*.test.ts",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts --test-name-pattern '(?!.*Live Integration).*'",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts",
+    "test:integration": "node --import tsx --env-file=../.env --test src/**/*.integration.test.ts"
   },
   "keywords": [
     "webedt",
