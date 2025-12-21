@@ -500,6 +500,359 @@ webCommand
   });
 
 // ============================================================================
+// TEST SCENARIOS
+// ============================================================================
+
+const testCommand = new Command('test')
+  .description('Run test scenarios for Claude Remote Sessions');
+
+// Helper to sleep
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Helper to format elapsed time
+const elapsed = (start: number) => `${((Date.now() - start) / 1000).toFixed(1)}s`;
+
+// Test repo - uses a simple test repo
+const TEST_GIT_URL = 'https://github.com/anthropics/claude-code';
+
+testCommand
+  .command('scenario1')
+  .description('Scenario 1: Execute + wait + resume')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+
+    console.log('\n=== SCENARIO 1: Execute + Wait + Resume ===\n');
+
+    // Step 1: Start session
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a file called test-scenario1.txt with the text "Hello from scenario 1"',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    console.log(`[${elapsed(startTime)}] Web URL: ${createResult.webUrl}`);
+
+    // Step 2: Poll until completion
+    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for events...`);
+    let eventCount = 0;
+    const result1 = await client.pollSession(createResult.sessionId, (event) => {
+      eventCount++;
+      console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+    });
+    console.log(`[${elapsed(startTime)}] First execution completed: ${result1.status}`);
+    console.log(`[${elapsed(startTime)}] Total events from first execution: ${eventCount}`);
+
+    // Step 3: Resume with new prompt
+    console.log(`\n[${elapsed(startTime)}] Step 3: Resuming session...`);
+    let resumeEventCount = 0;
+    const result2 = await client.resume(
+      createResult.sessionId,
+      'Now add a second line to test-scenario1.txt that says "Resumed successfully"',
+      (event) => {
+        resumeEventCount++;
+        console.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+      }
+    );
+    console.log(`[${elapsed(startTime)}] Resume completed: ${result2.status}`);
+    console.log(`[${elapsed(startTime)}] Total events from resume: ${resumeEventCount}`);
+
+    // Summary
+    console.log('\n=== SCENARIO 1 SUMMARY ===');
+    console.log(`Session ID: ${createResult.sessionId}`);
+    console.log(`First execution events: ${eventCount}`);
+    console.log(`Resume events: ${resumeEventCount}`);
+    console.log(`Total time: ${elapsed(startTime)}`);
+    console.log(`Final status: ${result2.status}`);
+  });
+
+testCommand
+  .command('scenario2')
+  .description('Scenario 2: Execute + early terminate + interrupt')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--wait-ms <ms>', 'How long to wait before interrupting', '5000')
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+    const waitMs = parseInt(options.waitMs, 10);
+
+    console.log('\n=== SCENARIO 2: Execute + Early Terminate + Interrupt ===\n');
+
+    // Step 1: Start session
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a comprehensive README.md file with multiple sections about this project. Make it detailed with at least 500 words.',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+
+    // Step 2: Poll for a short time then abort
+    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms then stopping...`);
+    const abortController = new AbortController();
+    let eventCount = 0;
+
+    // Set timeout to abort
+    setTimeout(() => {
+      console.log(`\n[${elapsed(startTime)}] Aborting poll after ${waitMs}ms...`);
+      abortController.abort();
+    }, waitMs);
+
+    try {
+      await client.pollSession(createResult.sessionId, (event) => {
+        eventCount++;
+        console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+      }, { abortSignal: abortController.signal });
+    } catch (error) {
+      if ((error as Error).message?.includes('aborted')) {
+        console.log(`[${elapsed(startTime)}] Poll aborted as expected`);
+      } else {
+        throw error;
+      }
+    }
+    console.log(`[${elapsed(startTime)}] Events received before abort: ${eventCount}`);
+
+    // Step 3: Send interrupt
+    console.log(`\n[${elapsed(startTime)}] Step 3: Sending interrupt signal...`);
+    await client.interruptSession(createResult.sessionId);
+    console.log(`[${elapsed(startTime)}] Interrupt sent`);
+
+    // Wait a moment and check status
+    await sleep(2000);
+    const session = await client.getSession(createResult.sessionId);
+    console.log(`[${elapsed(startTime)}] Session status after interrupt: ${session.session_status}`);
+
+    // Summary
+    console.log('\n=== SCENARIO 2 SUMMARY ===');
+    console.log(`Session ID: ${createResult.sessionId}`);
+    console.log(`Events before abort: ${eventCount}`);
+    console.log(`Final status: ${session.session_status}`);
+    console.log(`Total time: ${elapsed(startTime)}`);
+  });
+
+testCommand
+  .command('scenario3')
+  .description('Scenario 3: Execute + early terminate + queue resume')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--wait-ms <ms>', 'How long to wait before stopping poll', '5000')
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+    const waitMs = parseInt(options.waitMs, 10);
+
+    console.log('\n=== SCENARIO 3: Execute + Early Terminate + Queue Resume ===\n');
+
+    // Step 1: Start session
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a file called test-scenario3.txt with some initial content.',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+
+    // Step 2: Poll for a short time then stop (without interrupting)
+    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms then stopping (no interrupt)...`);
+    const abortController = new AbortController();
+    let eventCount = 0;
+
+    setTimeout(() => {
+      console.log(`\n[${elapsed(startTime)}] Stopping poll...`);
+      abortController.abort();
+    }, waitMs);
+
+    try {
+      await client.pollSession(createResult.sessionId, (event) => {
+        eventCount++;
+        console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+      }, { abortSignal: abortController.signal });
+    } catch (error) {
+      if ((error as Error).message?.includes('aborted')) {
+        console.log(`[${elapsed(startTime)}] Poll stopped`);
+      } else {
+        throw error;
+      }
+    }
+
+    // Step 3: Queue a resume message (session might still be running)
+    console.log(`\n[${elapsed(startTime)}] Step 3: Sending resume message (queuing)...`);
+    await client.sendMessage(createResult.sessionId, 'After you finish, also add a second line saying "Queued message received"');
+    console.log(`[${elapsed(startTime)}] Resume message sent/queued`);
+
+    // Step 4: Now poll to see all remaining events
+    console.log(`\n[${elapsed(startTime)}] Step 4: Polling for remaining events...`);
+    let resumeEventCount = 0;
+    const result = await client.pollSession(createResult.sessionId, (event) => {
+      resumeEventCount++;
+      console.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+    }, { skipExistingEvents: false }); // Get all events to see the full picture
+
+    // Summary
+    console.log('\n=== SCENARIO 3 SUMMARY ===');
+    console.log(`Session ID: ${createResult.sessionId}`);
+    console.log(`Events in first poll: ${eventCount}`);
+    console.log(`Events in second poll: ${resumeEventCount}`);
+    console.log(`Final status: ${result.status}`);
+    console.log(`Total time: ${elapsed(startTime)}`);
+  });
+
+testCommand
+  .command('scenario4')
+  .description('Scenario 4: Execute + terminate + interrupt + resume')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--wait-ms <ms>', 'How long to wait before interrupting', '5000')
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+    const waitMs = parseInt(options.waitMs, 10);
+
+    console.log('\n=== SCENARIO 4: Execute + Terminate + Interrupt + Resume ===\n');
+
+    // Step 1: Start session
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a detailed file called test-scenario4.txt explaining what you are doing step by step.',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+
+    // Step 2: Poll briefly
+    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms...`);
+    const abortController = new AbortController();
+    let eventCount = 0;
+
+    setTimeout(() => abortController.abort(), waitMs);
+
+    try {
+      await client.pollSession(createResult.sessionId, (event) => {
+        eventCount++;
+        console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+      }, { abortSignal: abortController.signal });
+    } catch {
+      console.log(`[${elapsed(startTime)}] Poll stopped`);
+    }
+
+    // Step 3: Interrupt
+    console.log(`\n[${elapsed(startTime)}] Step 3: Sending interrupt...`);
+    await client.interruptSession(createResult.sessionId);
+    console.log(`[${elapsed(startTime)}] Interrupt sent`);
+
+    // Wait for interrupt to take effect
+    await sleep(3000);
+    let session = await client.getSession(createResult.sessionId);
+    console.log(`[${elapsed(startTime)}] Status after interrupt: ${session.session_status}`);
+
+    // Step 4: Resume
+    console.log(`\n[${elapsed(startTime)}] Step 4: Resuming with new prompt...`);
+    let resumeEventCount = 0;
+    const resumeResult = await client.resume(
+      createResult.sessionId,
+      'Please continue and add "Resumed after interrupt" to the file.',
+      (event) => {
+        resumeEventCount++;
+        console.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+      }
+    );
+
+    // Summary
+    console.log('\n=== SCENARIO 4 SUMMARY ===');
+    console.log(`Session ID: ${createResult.sessionId}`);
+    console.log(`Events before interrupt: ${eventCount}`);
+    console.log(`Events after resume: ${resumeEventCount}`);
+    console.log(`Final status: ${resumeResult.status}`);
+    console.log(`Total time: ${elapsed(startTime)}`);
+  });
+
+testCommand
+  .command('scenario5')
+  .description('Scenario 5: Double-queue - execute + terminate + queue + terminate + queue again')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--wait-ms <ms>', 'How long to wait before each stop', '3000')
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+    const waitMs = parseInt(options.waitMs, 10);
+
+    console.log('\n=== SCENARIO 5: Double-Queue ===\n');
+
+    // Step 1: Start session
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a file called test-scenario5.txt with "Step 1 content"',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+
+    // Step 2: Poll briefly then stop
+    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms...`);
+    let abort1 = new AbortController();
+    let eventCount1 = 0;
+    setTimeout(() => abort1.abort(), waitMs);
+
+    try {
+      await client.pollSession(createResult.sessionId, (event) => {
+        eventCount1++;
+        console.log(`[${elapsed(startTime)}] Poll1 Event ${eventCount1}: ${formatEvent(event)}`);
+      }, { abortSignal: abort1.signal });
+    } catch {
+      console.log(`[${elapsed(startTime)}] Poll 1 stopped`);
+    }
+
+    // Step 3: Queue first resume
+    console.log(`\n[${elapsed(startTime)}] Step 3: Queuing first resume message...`);
+    await client.sendMessage(createResult.sessionId, 'Add "Step 2 - first queued message" to the file');
+    console.log(`[${elapsed(startTime)}] First resume queued`);
+
+    // Step 4: Poll briefly again
+    console.log(`\n[${elapsed(startTime)}] Step 4: Polling for another ${waitMs}ms...`);
+    let abort2 = new AbortController();
+    let eventCount2 = 0;
+    setTimeout(() => abort2.abort(), waitMs);
+
+    try {
+      await client.pollSession(createResult.sessionId, (event) => {
+        eventCount2++;
+        console.log(`[${elapsed(startTime)}] Poll2 Event ${eventCount2}: ${formatEvent(event)}`);
+      }, { abortSignal: abort2.signal });
+    } catch {
+      console.log(`[${elapsed(startTime)}] Poll 2 stopped`);
+    }
+
+    // Step 5: Queue second resume
+    console.log(`\n[${elapsed(startTime)}] Step 5: Queuing second resume message...`);
+    await client.sendMessage(createResult.sessionId, 'Add "Step 3 - second queued message" to the file');
+    console.log(`[${elapsed(startTime)}] Second resume queued`);
+
+    // Step 6: Poll until completion
+    console.log(`\n[${elapsed(startTime)}] Step 6: Polling until completion...`);
+    let finalEventCount = 0;
+    const result = await client.pollSession(createResult.sessionId, (event) => {
+      finalEventCount++;
+      console.log(`[${elapsed(startTime)}] Final Event ${finalEventCount}: ${formatEvent(event)}`);
+    });
+
+    // Get final events for analysis
+    console.log(`\n[${elapsed(startTime)}] Fetching all events for analysis...`);
+    const allEvents = await client.getEvents(createResult.sessionId);
+
+    // Summary
+    console.log('\n=== SCENARIO 5 SUMMARY ===');
+    console.log(`Session ID: ${createResult.sessionId}`);
+    console.log(`Events in poll 1: ${eventCount1}`);
+    console.log(`Events in poll 2: ${eventCount2}`);
+    console.log(`Events in final poll: ${finalEventCount}`);
+    console.log(`Total events in session: ${allEvents.data?.length || 0}`);
+    console.log(`Final status: ${result.status}`);
+    console.log(`Total time: ${elapsed(startTime)}`);
+  });
+
+webCommand.addCommand(testCommand);
+
+// ============================================================================
 // REGISTER SUBCOMMANDS
 // ============================================================================
 
