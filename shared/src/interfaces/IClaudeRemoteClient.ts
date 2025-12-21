@@ -138,14 +138,108 @@ export interface IClaudeRemoteClient {
   renameSession(sessionId: string, newTitle: string): Promise<Session>;
 
   /**
-   * Interrupt a running session.
+   * Interrupt a running session via WebSocket.
    *
-   * Sends an interrupt signal to stop the current operation.
+   * Sends an interrupt signal to stop the current operation. The session
+   * will transition to an idle state and can be resumed with new instructions.
    *
    * @param sessionId - The session ID to interrupt
+   * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
    * @throws {ClaudeRemoteError} If the interrupt fails
    */
-  interruptSession(sessionId: string): Promise<void>;
+  interruptSession(sessionId: string, timeoutMs?: number): Promise<void>;
+
+  /**
+   * Send a user message via WebSocket.
+   *
+   * More responsive than HTTP POST for sending messages, especially
+   * useful for resume operations after interrupt.
+   *
+   * @param sessionId - The session ID to send message to
+   * @param message - Message content (string or content blocks with images)
+   * @param options - Options for message sending
+   * @throws {ClaudeRemoteError} If sending fails
+   */
+  sendMessageViaWebSocket(
+    sessionId: string,
+    message: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>,
+    options?: { timeoutMs?: number; parentToolUseId?: string | null }
+  ): Promise<void>;
+
+  /**
+   * Stream session events in real-time via WebSocket.
+   *
+   * Unlike HTTP polling, this receives events as they happen without delay.
+   *
+   * @param sessionId - The session ID to stream events from
+   * @param onEvent - Callback invoked for each event
+   * @param options - Streaming options
+   * @returns Session result with status and metadata
+   */
+  streamEvents(
+    sessionId: string,
+    onEvent: EventCallback,
+    options?: {
+      timeoutMs?: number;
+      abortSignal?: AbortSignal;
+      skipExistingEvents?: boolean;
+    }
+  ): Promise<SessionResult>;
+
+  /**
+   * Initialize a session via WebSocket.
+   *
+   * Sends the initialize control request that sets up the session.
+   *
+   * @param sessionId - The session ID to initialize
+   * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
+   */
+  initializeSession(sessionId: string, timeoutMs?: number): Promise<void>;
+
+  /**
+   * Set the permission mode for a session via WebSocket.
+   *
+   * Controls what actions Claude can take without explicit approval.
+   *
+   * @param sessionId - The session ID
+   * @param mode - Permission mode ('acceptEdits' allows file edits without approval)
+   * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
+   */
+  setPermissionMode(
+    sessionId: string,
+    mode?: 'acceptEdits' | 'requireApproval',
+    timeoutMs?: number
+  ): Promise<void>;
+
+  /**
+   * Check if a session can be resumed.
+   *
+   * A session can be resumed when its status is 'idle'.
+   *
+   * @param sessionId - The session ID to check
+   * @param checkEvents - Also check events for completion (default: true)
+   * @returns Object with `canResume` boolean and `reason` if not resumable
+   */
+  canResume(
+    sessionId: string,
+    checkEvents?: boolean
+  ): Promise<{ canResume: boolean; reason?: string; status?: string; hasCompletedEvent?: boolean }>;
+
+  /**
+   * Wait for a session to become resumable.
+   *
+   * Polls the session status until it becomes idle and ready for resume.
+   *
+   * @param sessionId - The session ID to wait for
+   * @param maxWaitMs - Maximum time to wait in milliseconds (default: 30000)
+   * @param pollIntervalMs - Polling interval in milliseconds (default: 1000)
+   * @returns Object with `canResume` boolean and final status
+   */
+  waitForResumable(
+    sessionId: string,
+    maxWaitMs?: number,
+    pollIntervalMs?: number
+  ): Promise<{ canResume: boolean; reason?: string; status?: string }>;
 
   /**
    * Poll a session until completion.

@@ -245,11 +245,11 @@ sessionsCommand
         .select({
           id: events.id,
           eventData: events.eventData,
-          createdAt: events.createdAt,
+          timestamp: events.timestamp,
         })
         .from(events)
         .where(eq(events.chatSessionId, sessionId))
-        .orderBy(desc(events.createdAt))
+        .orderBy(desc(events.timestamp))
         .limit(limit);
 
       if (options.json) {
@@ -268,7 +268,7 @@ sessionsCommand
       for (const event of eventList) {
         const data = event.eventData as { type?: string } | null;
         const type = data?.type || 'unknown';
-        const created = event.createdAt ? new Date(event.createdAt).toISOString().slice(0, 19) : 'N/A';
+        const created = event.timestamp ? new Date(event.timestamp).toISOString().slice(0, 19) : 'N/A';
         console.log(`  [${event.id}] ${type.padEnd(20)} ${created}`);
       }
 

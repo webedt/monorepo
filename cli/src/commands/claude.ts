@@ -850,6 +850,361 @@ testCommand
     console.log(`Total time: ${elapsed(startTime)}`);
   });
 
+testCommand
+  .command('scenario6')
+  .description('Scenario 6: Execute + rename session')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+
+    console.log('\n=== SCENARIO 6: Execute + Rename ===\n');
+
+    // Step 1: Start session with default title
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a file called test-scenario6.txt with "Testing rename feature"',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    console.log(`[${elapsed(startTime)}] Initial title: ${createResult.title}`);
+
+    // Step 2: Rename the session while it's running
+    console.log(`\n[${elapsed(startTime)}] Step 2: Renaming session...`);
+    const newTitle = `Renamed at ${new Date().toISOString().slice(11, 19)}`;
+    await client.renameSession(createResult.sessionId, newTitle);
+    console.log(`[${elapsed(startTime)}] Session renamed to: ${newTitle}`);
+
+    // Verify rename
+    const session = await client.getSession(createResult.sessionId);
+    console.log(`[${elapsed(startTime)}] Verified title: ${session.title}`);
+
+    // Step 3: Poll until completion
+    console.log(`\n[${elapsed(startTime)}] Step 3: Polling for completion...`);
+    let eventCount = 0;
+    const result = await client.pollSession(createResult.sessionId, (event) => {
+      eventCount++;
+      console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+    });
+
+    // Summary
+    console.log('\n=== SCENARIO 6 SUMMARY ===');
+    console.log(`Session ID: ${createResult.sessionId}`);
+    console.log(`Original title: ${createResult.title}`);
+    console.log(`New title: ${newTitle}`);
+    console.log(`Title verified: ${session.title === newTitle ? 'YES' : 'NO'}`);
+    console.log(`Events: ${eventCount}`);
+    console.log(`Final status: ${result.status}`);
+    console.log(`Total time: ${elapsed(startTime)}`);
+  });
+
+testCommand
+  .command('scenario7')
+  .description('Scenario 7: Execute + complete + archive')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+
+    console.log('\n=== SCENARIO 7: Execute + Complete + Archive ===\n');
+
+    // Step 1: Start session
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a file called test-scenario7.txt with "Testing archive feature"',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+
+    // Step 2: Poll until completion
+    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for completion...`);
+    let eventCount = 0;
+    const result = await client.pollSession(createResult.sessionId, (event) => {
+      eventCount++;
+      console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+    });
+    console.log(`[${elapsed(startTime)}] Session completed: ${result.status}`);
+
+    // Step 3: Archive the completed session
+    console.log(`\n[${elapsed(startTime)}] Step 3: Archiving session...`);
+    await client.archiveSession(createResult.sessionId);
+    console.log(`[${elapsed(startTime)}] Archive request sent`);
+
+    // Verify archive
+    const session = await client.getSession(createResult.sessionId);
+    console.log(`[${elapsed(startTime)}] Session status after archive: ${session.session_status}`);
+
+    // Summary
+    console.log('\n=== SCENARIO 7 SUMMARY ===');
+    console.log(`Session ID: ${createResult.sessionId}`);
+    console.log(`Events: ${eventCount}`);
+    console.log(`Completion status: ${result.status}`);
+    console.log(`Post-archive status: ${session.session_status}`);
+    console.log(`Archived: ${session.session_status === 'archived' ? 'YES' : 'NO'}`);
+    console.log(`Total time: ${elapsed(startTime)}`);
+  });
+
+testCommand
+  .command('scenario8')
+  .description('Scenario 8: Execute using WebSocket streaming instead of polling')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const client = await createClient(parentOpts);
+    const startTime = Date.now();
+
+    console.log('\n=== SCENARIO 8: WebSocket Streaming ===\n');
+
+    // Step 1: Start session
+    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    const createResult = await client.createSession({
+      prompt: 'Create a file called test-scenario8.txt with "Testing WebSocket streaming"',
+      gitUrl: options.gitUrl,
+    });
+    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+
+    // Step 2: Stream events via WebSocket instead of polling
+    console.log(`\n[${elapsed(startTime)}] Step 2: Streaming events via WebSocket...`);
+    let eventCount = 0;
+    try {
+      const result = await client.streamEvents(createResult.sessionId, (event) => {
+        eventCount++;
+        console.log(`[${elapsed(startTime)}] WS Event ${eventCount}: ${formatEvent(event)}`);
+      });
+
+      // Summary
+      console.log('\n=== SCENARIO 8 SUMMARY ===');
+      console.log(`Session ID: ${createResult.sessionId}`);
+      console.log(`Events streamed: ${eventCount}`);
+      console.log(`Final status: ${result.status}`);
+      console.log(`Total time: ${elapsed(startTime)}`);
+    } catch (error) {
+      console.log(`\n[${elapsed(startTime)}] WebSocket streaming error: ${(error as Error).message}`);
+      console.log(`[${elapsed(startTime)}] Falling back to check session status...`);
+
+      const session = await client.getSession(createResult.sessionId);
+      console.log('\n=== SCENARIO 8 SUMMARY ===');
+      console.log(`Session ID: ${createResult.sessionId}`);
+      console.log(`Events before error: ${eventCount}`);
+      console.log(`Session status: ${session.session_status}`);
+      console.log(`Total time: ${elapsed(startTime)}`);
+    }
+  });
+
+testCommand
+  .command('all')
+  .description('Run all test scenarios sequentially')
+  .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--skip <scenarios>', 'Comma-separated list of scenarios to skip (e.g., "1,4,5")')
+  .action(async (options, cmd) => {
+    const parentOpts = cmd.parent?.parent?.opts() || {};
+    const skipList = options.skip ? options.skip.split(',').map((s: string) => parseInt(s.trim(), 10)) : [];
+    const startTime = Date.now();
+    const results: { scenario: number; status: string; time: string; error?: string }[] = [];
+
+    console.log('\n========================================');
+    console.log('    RUNNING ALL TEST SCENARIOS');
+    console.log('========================================\n');
+    console.log(`Git URL: ${options.gitUrl}`);
+    console.log(`Skipping: ${skipList.length ? skipList.join(', ') : 'none'}`);
+    console.log('-'.repeat(40));
+
+    const client = await createClient(parentOpts);
+
+    // Define scenario runners inline (avoiding Commander action handler complexity)
+    const scenarios: { [key: number]: () => Promise<void> } = {
+      1: async () => {
+        console.log('\n=== SCENARIO 1: Execute + Wait + Resume ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a file called test-scenario1.txt with the text "Hello from scenario 1"',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}`);
+        let eventCount = 0;
+        await client.pollSession(createResult.sessionId, (event) => {
+          eventCount++;
+          console.log(`Event ${eventCount}: ${formatEvent(event)}`);
+        });
+        console.log('First execution completed');
+        let resumeEventCount = 0;
+        await client.resume(createResult.sessionId, 'Now add a second line to test-scenario1.txt', (event) => {
+          resumeEventCount++;
+          console.log(`Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+        });
+        console.log(`\nSUMMARY: First: ${eventCount} events, Resume: ${resumeEventCount} events`);
+      },
+      2: async () => {
+        console.log('\n=== SCENARIO 2: Execute + Early Terminate + Interrupt ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a comprehensive README.md file with multiple sections about this project.',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}`);
+        const abortController = new AbortController();
+        setTimeout(() => abortController.abort(), 5000);
+        let eventCount = 0;
+        try {
+          await client.pollSession(createResult.sessionId, (event) => {
+            eventCount++;
+            console.log(`Event ${eventCount}: ${formatEvent(event)}`);
+          }, { abortSignal: abortController.signal });
+        } catch { console.log('Poll aborted'); }
+        await client.interruptSession(createResult.sessionId);
+        console.log('Interrupt sent');
+        await sleep(2000);
+        const session = await client.getSession(createResult.sessionId);
+        console.log(`\nSUMMARY: Events: ${eventCount}, Status: ${session.session_status}`);
+      },
+      3: async () => {
+        console.log('\n=== SCENARIO 3: Execute + Early Terminate + Queue Resume ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a file called test-scenario3.txt with some initial content.',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}`);
+        const abortController = new AbortController();
+        setTimeout(() => abortController.abort(), 5000);
+        let eventCount = 0;
+        try {
+          await client.pollSession(createResult.sessionId, (event) => {
+            eventCount++;
+            console.log(`Event ${eventCount}: ${formatEvent(event)}`);
+          }, { abortSignal: abortController.signal });
+        } catch { console.log('Poll stopped'); }
+        await client.sendMessage(createResult.sessionId, 'After you finish, also add "Queued message received"');
+        console.log('Resume message queued');
+        const result = await client.pollSession(createResult.sessionId, () => {});
+        console.log(`\nSUMMARY: Status: ${result.status}`);
+      },
+      4: async () => {
+        console.log('\n=== SCENARIO 4: Execute + Terminate + Interrupt + Resume ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a detailed file called test-scenario4.txt explaining what you are doing.',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}`);
+        const abortController = new AbortController();
+        setTimeout(() => abortController.abort(), 15000);
+        let eventCount = 0;
+        try {
+          await client.pollSession(createResult.sessionId, (event) => {
+            eventCount++;
+            console.log(`Event ${eventCount}: ${formatEvent(event)}`);
+          }, { abortSignal: abortController.signal });
+        } catch { console.log('Poll stopped'); }
+        await client.interruptSession(createResult.sessionId);
+        console.log('Interrupt sent');
+        await sleep(3000);
+        let resumeEventCount = 0;
+        const resumeResult = await client.resume(createResult.sessionId, 'Please continue and add "Resumed after interrupt"', (event) => {
+          resumeEventCount++;
+          console.log(`Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+        });
+        console.log(`\nSUMMARY: Events: ${eventCount}, Resume: ${resumeEventCount}, Status: ${resumeResult.status}`);
+      },
+      5: async () => {
+        console.log('\n=== SCENARIO 5: Double-Queue ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a file called test-scenario5.txt with "Step 1 content"',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}`);
+        // Just poll until completion for simplicity
+        const result = await client.pollSession(createResult.sessionId, (event) => {
+          console.log(`Event: ${formatEvent(event)}`);
+        });
+        console.log(`\nSUMMARY: Status: ${result.status}`);
+      },
+      6: async () => {
+        console.log('\n=== SCENARIO 6: Execute + Rename ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a file called test-scenario6.txt with "Testing rename feature"',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}, Title: ${createResult.title}`);
+        const newTitle = `Renamed at ${new Date().toISOString().slice(11, 19)}`;
+        await client.renameSession(createResult.sessionId, newTitle);
+        console.log(`Renamed to: ${newTitle}`);
+        const session = await client.getSession(createResult.sessionId);
+        console.log(`Verified title: ${session.title}`);
+        const result = await client.pollSession(createResult.sessionId, () => {});
+        console.log(`\nSUMMARY: Status: ${result.status}, Rename verified: ${session.title === newTitle}`);
+      },
+      7: async () => {
+        console.log('\n=== SCENARIO 7: Execute + Complete + Archive ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a file called test-scenario7.txt with "Testing archive feature"',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}`);
+        const result = await client.pollSession(createResult.sessionId, () => {});
+        console.log(`Completed: ${result.status}`);
+        await client.archiveSession(createResult.sessionId);
+        console.log('Archive request sent');
+        const session = await client.getSession(createResult.sessionId);
+        console.log(`\nSUMMARY: Status: ${session.session_status}, Archived: ${session.session_status === 'archived'}`);
+      },
+      8: async () => {
+        console.log('\n=== SCENARIO 8: WebSocket Streaming ===\n');
+        const createResult = await client.createSession({
+          prompt: 'Create a file called test-scenario8.txt with "Testing WebSocket streaming"',
+          gitUrl: options.gitUrl,
+        });
+        console.log(`Session created: ${createResult.sessionId}`);
+        try {
+          let eventCount = 0;
+          const result = await client.streamEvents(createResult.sessionId, (event) => {
+            eventCount++;
+            console.log(`WS Event ${eventCount}: ${formatEvent(event)}`);
+          });
+          console.log(`\nSUMMARY: Events: ${eventCount}, Status: ${result.status}`);
+        } catch (error) {
+          console.log(`WebSocket error: ${(error as Error).message}`);
+          const session = await client.getSession(createResult.sessionId);
+          console.log(`\nSUMMARY: Session status: ${session.session_status}`);
+        }
+      },
+    };
+
+    // Run each scenario
+    for (let i = 1; i <= 8; i++) {
+      if (skipList.includes(i)) {
+        console.log(`\n[SKIPPED] Scenario ${i}`);
+        results.push({ scenario: i, status: 'skipped', time: '0s' });
+        continue;
+      }
+
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`[STARTING] Scenario ${i}`);
+      console.log(`${'='.repeat(60)}`);
+
+      const scenarioStart = Date.now();
+      try {
+        await scenarios[i]();
+        results.push({ scenario: i, status: 'success', time: elapsed(scenarioStart) });
+      } catch (error) {
+        console.error(`\n[ERROR] Scenario ${i} failed: ${(error as Error).message}`);
+        results.push({ scenario: i, status: 'failed', time: elapsed(scenarioStart), error: (error as Error).message });
+      }
+    }
+
+    // Final Summary
+    console.log('\n' + '='.repeat(60));
+    console.log('    ALL SCENARIOS COMPLETE');
+    console.log('='.repeat(60));
+    console.log('\nResults:');
+    console.log('-'.repeat(40));
+    for (const r of results) {
+      const statusIcon = r.status === 'success' ? '✓' : r.status === 'skipped' ? '⊘' : '✗';
+      console.log(`  ${statusIcon} Scenario ${r.scenario}: ${r.status.toUpperCase()} (${r.time})${r.error ? ` - ${r.error.slice(0, 50)}` : ''}`);
+    }
+    console.log('-'.repeat(40));
+    console.log(`Total time: ${elapsed(startTime)}`);
+    console.log(`Success: ${results.filter(r => r.status === 'success').length}/${results.filter(r => r.status !== 'skipped').length}`);
+  });
+
 webCommand.addCommand(testCommand);
 
 // ============================================================================
