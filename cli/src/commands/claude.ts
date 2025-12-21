@@ -702,7 +702,7 @@ testCommand
   .command('scenario4')
   .description('Scenario 4: Execute + terminate + interrupt + resume')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
-  .option('--wait-ms <ms>', 'How long to wait before interrupting', '5000')
+  .option('--wait-ms <ms>', 'How long to wait before interrupting (needs 15s+ for Claude to start)', '15000')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await createClient(parentOpts);

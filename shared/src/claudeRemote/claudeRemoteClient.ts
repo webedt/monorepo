@@ -702,6 +702,7 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
    * @param options - Polling options
    * @param options.skipExistingEvents - Skip events that existed before polling started
    * @param options.existingEventIds - Pre-captured event IDs to skip (for resume)
+   * @param options.waitForActive - Wait for session to become active before checking for idle completion (for resume after interrupt)
    * @param options.pollIntervalMs - Interval between polls (default: 2000ms)
    * @param options.maxPolls - Maximum number of polls (default: 300)
    * @param options.abortSignal - Signal to abort polling early
@@ -750,6 +751,7 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
     const {
       skipExistingEvents = false,
       existingEventIds,
+      waitForActive = false,
       pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
       maxPolls = DEFAULT_MAX_POLLS,
       abortSignal,
@@ -760,6 +762,7 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
     let pollCount = 0;
     let title: string | undefined;
     let branch: string | undefined;
+    let hasSeenActive = false; // Track if session became active (for waitForActive)
 
     // For resume: mark existing events as seen (only if not already provided)
     if (skipExistingEvents && !existingEventIds) {
@@ -817,6 +820,11 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
           }
         }
 
+        // Track if we've seen activity (session became running)
+        if (session.session_status === 'running') {
+          hasSeenActive = true;
+        }
+
         // Check if session is done
         if (session.session_status === 'completed' || session.session_status === 'failed') {
           return {
@@ -827,14 +835,39 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
           };
         }
 
-        // For resume: exit if session goes idle
+        // For waitForActive: check if there's a NEW result event (not in our existing set)
+        // This handles the case where the session errored and has a result event
+        // but the API still returns 'running' status
+        if (waitForActive) {
+          // Find a result event that wasn't in our pre-captured set
+          const newResultEvent = events.find(e => e.type === 'result' && !seenEventIds.has(e.uuid));
+          if (newResultEvent) {
+            return {
+              sessionId,
+              status: 'completed',
+              title: title || session.title,
+              branch,
+              totalCost: newResultEvent.total_cost_usd as number | undefined,
+              durationMs: newResultEvent.duration_ms as number | undefined,
+              numTurns: newResultEvent.num_turns as number | undefined,
+              result: newResultEvent.result as string | undefined,
+            };
+          }
+        }
+
+        // For resume: exit if session goes idle (but only after it became active if waitForActive is set)
         if (skipExistingEvents && session.session_status === 'idle') {
-          return {
-            sessionId,
-            status: 'idle',
-            title: title || session.title,
-            branch,
-          };
+          // If waitForActive is set, only exit if we've seen the session become active first
+          // This handles the race condition after interrupt where session is still idle
+          if (!waitForActive || hasSeenActive) {
+            return {
+              sessionId,
+              status: 'idle',
+              title: title || session.title,
+              branch,
+            };
+          }
+          // Otherwise, keep polling - session hasn't started processing yet
         }
 
         // Wait before next poll
@@ -999,10 +1032,13 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
     await this.sendMessage(sessionId, message);
 
     // Poll for new events only, passing the pre-captured event IDs
+    // Use waitForActive to handle the case where session was just interrupted
+    // (session might still be idle briefly before the message triggers activity)
     return this.pollSession(sessionId, onEvent, {
       ...options,
       skipExistingEvents: true,
       existingEventIds, // Pass pre-captured IDs
+      waitForActive: true, // Wait for session to become active before checking for idle exit
     });
   }
 }

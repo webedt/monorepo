@@ -175,6 +175,8 @@ export interface PollOptions {
   skipExistingEvents?: boolean;
   /** Pre-captured existing event IDs to skip (used by resume to avoid race condition) */
   existingEventIds?: Set<string>;
+  /** Wait for session to become active before checking for idle completion (for resume after interrupt) */
+  waitForActive?: boolean;
   /** Polling interval in milliseconds (default: 2000) */
   pollIntervalMs?: number;
   /** Maximum number of polls before timeout (default: 300 = 10 min) */
