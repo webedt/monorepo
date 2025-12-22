@@ -135,4 +135,4 @@ class LogCapture implements ILogCapture {
 }
 
 // Singleton instance
-export const logCapture = new LogCapture();
+export const logCapture: ILogCapture = new LogCapture();

@@ -298,7 +298,7 @@ class HealthMonitor implements IHealthMonitor {
 }
 
 // Global health monitor instance
-export const healthMonitor = new HealthMonitor();
+export const healthMonitor: IHealthMonitor = new HealthMonitor();
 
 /**
  * Create a database health check function

@@ -7,6 +7,7 @@
 
 import {
   ClaudeWebClient,
+  type IClaudeWebClient,
   type SessionEvent,
   type CreateSessionParams,
   type TitleGenerationEvent,
@@ -63,7 +64,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
   /**
    * Create a ClaudeWebClient with the given auth
    */
-  private createClient(claudeAuth: ClaudeAuth, environmentId?: string): ClaudeWebClient {
+  private createClient(claudeAuth: ClaudeAuth, environmentId?: string): IClaudeWebClient {
     return new ClaudeWebClient({
       accessToken: claudeAuth.accessToken,
       environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,

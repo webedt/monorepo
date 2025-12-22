@@ -5,7 +5,7 @@
  * API call success rates, task completion times, and error rates.
  */
 
-import type { MetricLabels } from './IMetricsRegistry.js';
+import type { IMetricsRegistry, MetricLabels } from './IMetricsRegistry.js';
 import { logger } from '../logging/logger.js';
 import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
 
@@ -577,4 +577,4 @@ class MetricsRegistry {
 }
 
 // Global metrics instance
-export const metrics = new MetricsRegistry();
+export const metrics: IMetricsRegistry = new MetricsRegistry();

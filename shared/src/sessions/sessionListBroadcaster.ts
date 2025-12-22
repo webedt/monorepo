@@ -149,4 +149,4 @@ class SessionListBroadcaster extends EventEmitter implements ISessionListBroadca
 }
 
 // Export a singleton instance
-export const sessionListBroadcaster = new SessionListBroadcaster();
+export const sessionListBroadcaster: ISessionListBroadcaster = new SessionListBroadcaster();

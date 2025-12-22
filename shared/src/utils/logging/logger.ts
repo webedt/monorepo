@@ -50,7 +50,7 @@
  */
 
 import { logCapture } from './logCapture.js';
-import type { LogContext as ILogContext } from './ILogger.js';
+import type { ILogger, LogContext as ILogContext } from './ILogger.js';
 
 /**
  * Log severity levels.
@@ -232,6 +232,6 @@ class Logger {
  * logger.error('Operation failed', error);
  * ```
  */
-export const logger = new Logger();
+export const logger: ILogger = new Logger();
 
 export type { LogContext };

@@ -8,7 +8,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './githubClient.js';
+import type { IGitHubClient } from './IGitHubClient.js';
 import { GitHelper } from './gitHelper.js';
+import type { IGitHelper } from './IGitHelper.js';
 import { logger } from '../utils/logging/logger.js';
 import { generateSessionPath, parseRepoUrl } from '../utils/helpers/sessionPathHelper.js';
 
@@ -160,7 +162,7 @@ export type ProgressCallback = (event: {
 // ============================================================================
 
 export class GitHubOperations {
-  private githubClient: GitHubClient;
+  private githubClient: IGitHubClient;
 
   constructor() {
     this.githubClient = new GitHubClient();

@@ -289,7 +289,7 @@ export class CircuitBreaker implements ICircuitBreaker {
 /**
  * Create a circuit breaker instance
  */
-export function createCircuitBreaker(config: Partial<CircuitBreakerConfig> = {}): CircuitBreaker {
+export function createCircuitBreaker(config: Partial<CircuitBreakerConfig> = {}): ICircuitBreaker {
   return new CircuitBreaker(config);
 }
 
@@ -297,12 +297,12 @@ export function createCircuitBreaker(config: Partial<CircuitBreakerConfig> = {})
  * Circuit breaker registry for managing multiple breakers
  */
 class CircuitBreakerRegistry implements ICircuitBreakerRegistry {
-  private breakers: Map<string, CircuitBreaker> = new Map();
+  private breakers: Map<string, ICircuitBreaker> = new Map();
 
   /**
    * Get or create a circuit breaker by name
    */
-  get(name: string, config?: Partial<CircuitBreakerConfig>): CircuitBreaker {
+  get(name: string, config?: Partial<CircuitBreakerConfig>): ICircuitBreaker {
     let breaker = this.breakers.get(name);
     if (!breaker) {
       breaker = createCircuitBreaker({ ...config, name });
@@ -340,4 +340,4 @@ class CircuitBreakerRegistry implements ICircuitBreakerRegistry {
 }
 
 // Global registry instance
-export const circuitBreakerRegistry = new CircuitBreakerRegistry();
+export const circuitBreakerRegistry: ICircuitBreakerRegistry = new CircuitBreakerRegistry();

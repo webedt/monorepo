@@ -27,6 +27,7 @@ import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {
   logger,
   ClaudeWebClient,
+  type IClaudeWebClient,
   generateTitle,
   type ClaudeSessionEvent as SessionEvent,
   type TitleGenerationEvent,
@@ -88,7 +89,7 @@ async function getClaudeAuth(userId: string): Promise<ClaudeAuth | null> {
 /**
  * Create a ClaudeWebClient for a user
  */
-function createClient(claudeAuth: ClaudeAuth, environmentId?: string): ClaudeWebClient {
+function createClient(claudeAuth: ClaudeAuth, environmentId?: string): IClaudeWebClient {
   return new ClaudeWebClient({
     accessToken: claudeAuth.accessToken,
     environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || '',
