@@ -5,8 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { db, users, chatSessions, events } from '@webedt/shared';
-import { eq, and, isNull } from 'drizzle-orm';
+import { db, users, chatSessions, events, eq, and, isNull } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger, ClaudeRemoteClient } from '@webedt/shared';

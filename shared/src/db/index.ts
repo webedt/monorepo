@@ -472,3 +472,28 @@ export {
   type ConnectionStats,
   type DatabaseHealthCheckResult,
 } from './connection.js';
+
+// Re-export drizzle-orm operators to prevent duplicate package issues in Docker builds
+// Consumers should import these from @webedt/shared instead of drizzle-orm directly
+export {
+  eq,
+  and,
+  or,
+  not,
+  lt,
+  lte,
+  gt,
+  gte,
+  ne,
+  sql,
+  asc,
+  desc,
+  isNull,
+  isNotNull,
+  inArray,
+  notInArray,
+  like,
+  ilike,
+  between,
+  exists,
+} from 'drizzle-orm';

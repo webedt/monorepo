@@ -21,8 +21,7 @@
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, chatSessions, events, users } from '@webedt/shared';
-import { eq, desc, asc, and, isNull } from 'drizzle-orm';
+import { db, chatSessions, events, users, eq, desc, asc, and, isNull } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {

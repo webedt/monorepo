@@ -41,8 +41,7 @@ import liveChatRoutes from './api/routes/liveChat.js';
 import workspaceRoutes from './api/routes/workspace.js';
 
 // Import database for orphan cleanup
-import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats } from '@webedt/shared';
-import { eq, and, lt, sql } from 'drizzle-orm';
+import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
 
 // Import middleware
 import { authMiddleware } from './api/middleware/auth.js';

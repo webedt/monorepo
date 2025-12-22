@@ -6,9 +6,8 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import { generateIdFromEntropySize } from 'lucia';
-import { db, users } from '@webedt/shared';
+import { db, users, eq } from '@webedt/shared';
 import { lucia } from '@webedt/shared';
-import { eq } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import { ensureValidCodexToken, isValidCodexAuth, CodexAuth } from '@webedt/shared';

@@ -4,8 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users } from '@webedt/shared';
-import { eq } from 'drizzle-orm';
+import { db, users, eq } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { shouldRefreshClaudeToken, refreshClaudeToken, type ClaudeAuth } from '@webedt/shared';

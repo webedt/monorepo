@@ -5,9 +5,8 @@
 
 import { Router, Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
-import { db, chatSessions, messages, users, events } from '@webedt/shared';
+import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull } from '@webedt/shared';
 import type { ChatSession } from '@webedt/shared';
-import { eq, desc, inArray, and, asc, isNull, isNotNull } from 'drizzle-orm';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from '@webedt/shared';
