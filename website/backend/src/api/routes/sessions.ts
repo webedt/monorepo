@@ -1122,7 +1122,7 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
         const result = await archiveClaudeRemoteSession(
           session.remoteSessionId,
           authReq.user.claudeAuth,
-          session.environmentId || undefined
+          undefined // environmentId not stored in DB, will use default from config
         );
 
         archiveResults.push({

@@ -761,13 +761,19 @@ export class ChatPage extends Page<ChatPageOptions> {
         // Extract messages from assistant event - can include text AND tool_use blocks
         return this.extractMessagesFromAssistant(event, data);
 
-      case 'error':
+      case 'error': {
+        const errorContent = data.message || data.error || 'An error occurred';
+        // Filter out abort-related error messages - these will be shown as 'interrupted' event instead
+        if (errorContent.includes('aborted') || errorContent.includes('Aborted')) {
+          return [null];
+        }
         return [{
           id: event.id || `error-${Date.now()}`,
           type: 'error',
-          content: data.message || data.error || 'An error occurred',
+          content: errorContent,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
+      }
 
       case 'tool_use':
         // Direct tool_use event (from streaming)
@@ -820,6 +826,49 @@ export class ChatPage extends Page<ChatPageOptions> {
           id: event.id || `result-${Date.now()}`,
           type: 'result',
           content: stats ? `Completed (${stats})` : 'Completed',
+          timestamp: new Date(event.timestamp || Date.now()),
+        }];
+      }
+
+      case 'user': {
+        // Check for interrupt messages in tool_result content
+        // These appear when the user stops/interrupts a session
+        const messageContent = data.message?.content;
+        if (Array.isArray(messageContent)) {
+          for (const block of messageContent) {
+            if (block.type === 'tool_result' && block.is_error === true) {
+              const content = block.content || '';
+              if (content.includes('interrupted by user')) {
+                return [{
+                  id: event.id || `interrupt-${Date.now()}`,
+                  type: 'error',
+                  content: '⏹️ Request interrupted by user',
+                  timestamp: new Date(event.timestamp || Date.now()),
+                }];
+              }
+            }
+          }
+        }
+        // Also check tool_use_result field (alternative format)
+        const toolResult = data.tool_use_result;
+        if (typeof toolResult === 'string' && toolResult.includes('interrupted by user')) {
+          return [{
+            id: event.id || `interrupt-${Date.now()}`,
+            type: 'error',
+            content: '⏹️ Request interrupted by user',
+            timestamp: new Date(event.timestamp || Date.now()),
+          }];
+        }
+        return [null];
+      }
+
+      case 'interrupted': {
+        // Interrupt event from the server when user stops the session
+        const message = data.message || 'Request interrupted by user';
+        return [{
+          id: event.id || `interrupted-${Date.now()}`,
+          type: 'error',
+          content: `⏹️ ${message}`,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
       }
@@ -1559,29 +1608,34 @@ export class ChatPage extends Page<ChatPageOptions> {
   private async handleStop(): Promise<void> {
     if (!this.session) return;
 
+    // Update local state FIRST to prevent "Connection lost" error from showing
+    // This must happen before the interrupt API call because the abort will
+    // trigger the EventSource onerror before the API response is received
+    this.updateSessionStatus('completed');
+    workerStore.stopExecution();
+
+    // Close the event source immediately
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+
     try {
       // Call the interrupt API
       const response = await sessionsApi.interrupt(this.session.id);
 
       if (response.success) {
         toast.success('Session interrupted');
-
-        // Update local state
-        this.updateSessionStatus('completed');
-        workerStore.stopExecution();
-
-        // Close the event source
-        if (this.eventSource) {
-          this.eventSource.close();
-          this.eventSource = null;
-        }
-
         // Update button state
         this.updateSendButton();
       } else {
+        // Revert status if interrupt failed
+        this.updateSessionStatus('running');
         toast.error(response.error || 'Failed to interrupt session');
       }
     } catch (error) {
+      // Revert status if interrupt failed
+      this.updateSessionStatus('running');
       const message = error instanceof Error ? error.message : 'Failed to interrupt session';
       toast.error(message);
       console.error('Failed to interrupt session:', error);
