@@ -43,7 +43,7 @@ RUN npm install
 
 COPY website/frontend/ .
 
-# Generate version.ts (create src dir if it doesn't exist)
+# Generate version.ts with constants and getter functions (create src dir if it doesn't exist)
 RUN mkdir -p src && \
     TIMESTAMP_VALUE="${BUILD_TIMESTAMP:-}" && \
     SHA_VALUE="${BUILD_COMMIT_SHA:-}" && \
@@ -53,7 +53,12 @@ RUN mkdir -p src && \
     echo "export const VERSION = '${BUILD_VERSION}';" >> src/version.ts && \
     echo "export const VERSION_TIMESTAMP: string | null = $TIMESTAMP_EXPORT;" >> src/version.ts && \
     echo "export const VERSION_SHA: string | null = $SHA_EXPORT;" >> src/version.ts && \
-    echo "export const GITHUB_REPO_URL = 'https://github.com/webedt/monorepo';" >> src/version.ts
+    echo "export const GITHUB_REPO_URL = 'https://github.com/webedt/monorepo';" >> src/version.ts && \
+    echo "" >> src/version.ts && \
+    echo "// Getter functions for runtime access" >> src/version.ts && \
+    echo "export function getVersion(): string { return VERSION; }" >> src/version.ts && \
+    echo "export function getVersionSHA(): string | null { return VERSION_SHA; }" >> src/version.ts && \
+    echo "export function getVersionTimestamp(): string | null { return VERSION_TIMESTAMP; }" >> src/version.ts
 
 RUN npm run build
 
