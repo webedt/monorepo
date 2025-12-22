@@ -40,50 +40,14 @@ import {
   CLAUDE_COOKIES,
   OPENROUTER_API_KEY,
 } from '@webedt/shared';
+import {
+  registerActiveStream,
+  unregisterActiveStream,
+  abortActiveStream,
+  hasActiveStream,
+} from '../activeStreamManager.js';
 
 const router = Router();
-
-// ============================================================================
-// Active Stream Management (for INTERRUPT functionality)
-// ============================================================================
-
-// Map of chatSessionId → AbortController for active streaming connections
-const activeStreams = new Map<string, AbortController>();
-
-/**
- * Register an active stream for a session
- */
-function registerActiveStream(chatSessionId: string): AbortController {
-  // Clean up existing stream if any
-  const existing = activeStreams.get(chatSessionId);
-  if (existing) {
-    existing.abort();
-  }
-
-  const controller = new AbortController();
-  activeStreams.set(chatSessionId, controller);
-  return controller;
-}
-
-/**
- * Unregister an active stream when completed
- */
-function unregisterActiveStream(chatSessionId: string): void {
-  activeStreams.delete(chatSessionId);
-}
-
-/**
- * Abort an active stream (for interrupt)
- */
-function abortActiveStream(chatSessionId: string): boolean {
-  const controller = activeStreams.get(chatSessionId);
-  if (controller) {
-    controller.abort();
-    activeStreams.delete(chatSessionId);
-    return true;
-  }
-  return false;
-}
 
 // ============================================================================
 // Helper Functions
@@ -559,7 +523,7 @@ const streamHandler = async (req: Request, res: Response) => {
     sendSSE(res, { type: 'replay_end', totalEvents: storedEvents.length, timestamp: new Date().toISOString() });
 
     // Check if session is still running and we should subscribe to live events
-    const isActive = activeStreams.has(id);
+    const isActive = hasActiveStream(id);
     const isRunning = session.status === 'running';
 
     if (isActive || isRunning) {

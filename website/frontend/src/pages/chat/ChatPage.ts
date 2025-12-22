@@ -183,7 +183,8 @@ export class ChatPage extends Page<ChatPageOptions> {
               rows="1"
             ></textarea>
             <button class="send-btn" data-action="send" disabled>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              <svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
             </button>
           </div>
           <p class="chat-input-hint">Press Enter to send, Shift+Enter for new line</p>
@@ -215,10 +216,17 @@ export class ChatPage extends Page<ChatPageOptions> {
       });
     }
 
-    // Setup send button
+    // Setup send button (handles both send and stop)
     const sendBtn = this.$('[data-action="send"]') as HTMLButtonElement;
     if (sendBtn) {
-      sendBtn.addEventListener('click', () => this.handleSend());
+      sendBtn.addEventListener('click', () => {
+        // Check if we should stop or send
+        if (this.isSessionRunning() && !this.inputValue.trim()) {
+          this.handleStop();
+        } else {
+          this.handleSend();
+        }
+      });
     }
 
     // Setup textarea
@@ -507,6 +515,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     } finally {
       this.isLoading = false;
       this.updateLoadingState();
+      // Initialize send/stop button state after loading
+      this.updateSendButton();
     }
   }
 
@@ -751,13 +761,19 @@ export class ChatPage extends Page<ChatPageOptions> {
         // Extract messages from assistant event - can include text AND tool_use blocks
         return this.extractMessagesFromAssistant(event, data);
 
-      case 'error':
+      case 'error': {
+        const errorContent = data.message || data.error || 'An error occurred';
+        // Filter out abort-related error messages - these will be shown as 'interrupted' event instead
+        if (errorContent.includes('aborted') || errorContent.includes('Aborted')) {
+          return [null];
+        }
         return [{
           id: event.id || `error-${Date.now()}`,
           type: 'error',
-          content: data.message || data.error || 'An error occurred',
+          content: errorContent,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
+      }
 
       case 'tool_use':
         // Direct tool_use event (from streaming)
@@ -810,6 +826,49 @@ export class ChatPage extends Page<ChatPageOptions> {
           id: event.id || `result-${Date.now()}`,
           type: 'result',
           content: stats ? `Completed (${stats})` : 'Completed',
+          timestamp: new Date(event.timestamp || Date.now()),
+        }];
+      }
+
+      case 'user': {
+        // Check for interrupt messages in tool_result content
+        // These appear when the user stops/interrupts a session
+        const messageContent = data.message?.content;
+        if (Array.isArray(messageContent)) {
+          for (const block of messageContent) {
+            if (block.type === 'tool_result' && block.is_error === true) {
+              const content = block.content || '';
+              if (content.includes('interrupted by user')) {
+                return [{
+                  id: event.id || `interrupt-${Date.now()}`,
+                  type: 'error',
+                  content: '⏹️ Request interrupted by user',
+                  timestamp: new Date(event.timestamp || Date.now()),
+                }];
+              }
+            }
+          }
+        }
+        // Also check tool_use_result field (alternative format)
+        const toolResult = data.tool_use_result;
+        if (typeof toolResult === 'string' && toolResult.includes('interrupted by user')) {
+          return [{
+            id: event.id || `interrupt-${Date.now()}`,
+            type: 'error',
+            content: '⏹️ Request interrupted by user',
+            timestamp: new Date(event.timestamp || Date.now()),
+          }];
+        }
+        return [null];
+      }
+
+      case 'interrupted': {
+        // Interrupt event from the server when user stops the session
+        const message = data.message || 'Request interrupted by user';
+        return [{
+          id: event.id || `interrupted-${Date.now()}`,
+          type: 'error',
+          content: `⏹️ ${message}`,
           timestamp: new Date(event.timestamp || Date.now()),
         }];
       }
@@ -1123,6 +1182,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     if (this.session) {
       this.session.status = status as any;
       this.updateHeader();
+      this.updateSendButton();
     }
   }
 
@@ -1471,11 +1531,8 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     this.inputValue = this.inputElement.value;
 
-    // Enable/disable send button
-    const sendBtn = this.$('[data-action="send"]') as HTMLButtonElement;
-    if (sendBtn) {
-      sendBtn.disabled = !this.inputValue.trim() || this.isSending;
-    }
+    // Update send/stop button state
+    this.updateSendButton();
 
     // Auto-resize textarea
     this.inputElement.style.height = 'auto';
@@ -1538,12 +1595,74 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
   }
 
+  /**
+   * Check if the session is currently running
+   */
+  private isSessionRunning(): boolean {
+    return this.session?.status === 'running' || workerStore.isExecuting();
+  }
+
+  /**
+   * Handle stop button click - interrupt the running session
+   */
+  private async handleStop(): Promise<void> {
+    if (!this.session) return;
+
+    // Update local state FIRST to prevent "Connection lost" error from showing
+    // This must happen before the interrupt API call because the abort will
+    // trigger the EventSource onerror before the API response is received
+    this.updateSessionStatus('completed');
+    workerStore.stopExecution();
+
+    // Close the event source immediately
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+
+    try {
+      // Call the interrupt API
+      const response = await sessionsApi.interrupt(this.session.id);
+
+      if (response.success) {
+        toast.success('Session interrupted');
+        // Update button state
+        this.updateSendButton();
+      } else {
+        // Revert status if interrupt failed
+        this.updateSessionStatus('running');
+        toast.error(response.error || 'Failed to interrupt session');
+      }
+    } catch (error) {
+      // Revert status if interrupt failed
+      this.updateSessionStatus('running');
+      const message = error instanceof Error ? error.message : 'Failed to interrupt session';
+      toast.error(message);
+      console.error('Failed to interrupt session:', error);
+    }
+  }
+
   private updateSendButton(): void {
     const sendBtn = this.$('[data-action="send"]') as HTMLButtonElement;
-    if (sendBtn) {
-      sendBtn.disabled = !this.inputValue.trim() || this.isSending;
-      sendBtn.classList.toggle('loading', this.isSending);
-    }
+    if (!sendBtn) return;
+
+    const sendIcon = sendBtn.querySelector('.send-icon') as SVGElement;
+    const stopIcon = sendBtn.querySelector('.stop-icon') as SVGElement;
+    const isRunning = this.isSessionRunning();
+    const hasInput = !!this.inputValue.trim();
+
+    // Show stop button when running and no input, otherwise show send
+    const showStop = isRunning && !hasInput;
+
+    if (sendIcon) sendIcon.style.display = showStop ? 'none' : '';
+    if (stopIcon) stopIcon.style.display = showStop ? '' : 'none';
+
+    // Update button styling
+    sendBtn.classList.toggle('stop-mode', showStop);
+
+    // Enable button if we can stop OR if we have input to send (and not already sending)
+    sendBtn.disabled = showStop ? false : (!hasInput || this.isSending);
+    sendBtn.classList.toggle('loading', this.isSending);
   }
 
   private scrollToBottom(): void {

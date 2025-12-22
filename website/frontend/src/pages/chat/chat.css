@@ -402,6 +402,15 @@
   height: 20px;
 }
 
+/* Stop mode styling */
+.send-btn.stop-mode {
+  background: var(--color-error);
+}
+
+.send-btn.stop-mode:hover:not(:disabled) {
+  background: var(--color-error-hover, #dc2626);
+}
+
 .chat-input-hint {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);

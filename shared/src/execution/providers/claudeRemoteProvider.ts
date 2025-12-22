@@ -150,6 +150,16 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
         webUrl,
       });
 
+      // Emit session_created event so executeRemote.ts can save remoteSessionId immediately
+      // This is critical for archive functionality - the remoteSessionId must be persisted
+      await onEvent({
+        type: 'session_created',
+        timestamp: new Date().toISOString(),
+        source,
+        remoteSessionId: sessionId,
+        remoteWebUrl: webUrl,
+      });
+
       // Poll for events - pass raw events directly
       const result = await client.pollSession(
         sessionId,

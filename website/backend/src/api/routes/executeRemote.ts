@@ -21,6 +21,10 @@ import {
   getExecutionProvider,
   type ExecutionEvent,
 } from '@webedt/shared';
+import {
+  registerActiveStream,
+  unregisterActiveStream,
+} from '../activeStreamManager.js';
 
 const router = Router();
 
@@ -549,6 +553,9 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
     // Get execution provider
     const provider = getExecutionProvider();
 
+    // Register this stream so interrupt requests can abort it
+    const abortController = registerActiveStream(chatSessionId);
+
     try {
       let result;
 
@@ -563,6 +570,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             prompt: userRequest,
             claudeAuth,
             environmentId,
+            abortSignal: abortController.signal,
           },
           sendEvent
         );
@@ -577,6 +585,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
             gitUrl: repoUrl,
             claudeAuth,
             environmentId,
+            abortSignal: abortController.signal,
           },
           sendEvent
         );
@@ -640,27 +649,60 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       res.write(`data: ${JSON.stringify(completedData)}\n\n`);
 
     } catch (error) {
+      // Check if this was an abort (user interrupt)
+      // AbortError is standard, but ClaudeRemoteError with "aborted by signal" message is also used
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isAbort = error instanceof Error && (
+        error.name === 'AbortError' ||
+        errorMessage.includes('aborted by signal') ||
+        errorMessage.includes('aborted')
+      );
 
-      logger.error('Execute Remote failed', error, {
-        component: 'ExecuteRemoteRoute',
-        chatSessionId,
-      });
+      if (isAbort) {
+        logger.info('Execute Remote aborted by user', {
+          component: 'ExecuteRemoteRoute',
+          chatSessionId,
+        });
 
-      // Update session status
-      await db.update(chatSessions)
-        .set({ status: 'error' })
-        .where(eq(chatSessions.id, chatSessionId));
+        // Update session status to completed (interrupted = successful stop)
+        await db.update(chatSessions)
+          .set({ status: 'completed', completedAt: new Date() })
+          .where(eq(chatSessions.id, chatSessionId));
 
-      // Notify subscribers about error status
-      sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSessionId, status: 'error' });
+        // Notify subscribers about status change
+        sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSessionId, status: 'completed' });
 
-      // Send error event
-      await sendEvent({
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        error: errorMessage,
-      });
+        // Send interrupted event
+        await sendEvent({
+          type: 'interrupted',
+          timestamp: new Date().toISOString(),
+          source: 'user',
+          message: 'Request interrupted by user',
+        });
+      } else {
+        logger.error('Execute Remote failed', error, {
+          component: 'ExecuteRemoteRoute',
+          chatSessionId,
+        });
+
+        // Update session status
+        await db.update(chatSessions)
+          .set({ status: 'error' })
+          .where(eq(chatSessions.id, chatSessionId));
+
+        // Notify subscribers about error status
+        sessionListBroadcaster.notifyStatusChanged(user.id, { id: chatSessionId, status: 'error' });
+
+        // Send error event
+        await sendEvent({
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          error: errorMessage,
+        });
+      }
+    } finally {
+      // Always unregister the stream when execution ends
+      unregisterActiveStream(chatSessionId);
     }
 
     // Clean up

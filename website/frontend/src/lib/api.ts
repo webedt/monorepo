@@ -457,6 +457,12 @@ export const sessionsApi = {
   abort: (id: string) =>
     fetchApi(`/api/sessions/${id}/abort`, { method: 'POST' }),
 
+  interrupt: (id: string) =>
+    fetchApi<{ success: boolean; error?: string; data?: { sessionId: string; interrupted: boolean; wasActive: boolean } }>(
+      `/api/internal/sessions/${id}/interrupt`,
+      { method: 'POST' }
+    ),
+
   sendMessage: (id: string, content: string, images?: Array<{ data: string; mediaType: string }>) =>
     fetchApi<{ success: boolean; error?: string }>(`/api/sessions/${id}/send`, {
       method: 'POST',

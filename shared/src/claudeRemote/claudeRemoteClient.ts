@@ -26,6 +26,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import WebSocket from 'ws';
 import type { IClaudeRemoteClient } from '../interfaces/IClaudeRemoteClient.js';
 import {
   ClaudeRemoteClientConfig,
@@ -617,15 +618,550 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
   }
 
   /**
-   * Interrupt a running session.
+   * Check if a session can be resumed.
+   *
+   * A session can be resumed when:
+   * - Status is 'idle' (not running, completed, failed, or archived)
+   * - No COMPLETED or error events indicate the session has finished
+   *
+   * Note: The API's session_status can be stale (show "running" when session
+   * actually completed). We check events as a fallback for reliability.
+   *
+   * Use this before sending a resume message to avoid messages being dropped.
+   *
+   * @param sessionId - The session ID to check
+   * @param checkEvents - Also check events for completion (default: true)
+   * @returns Object with `canResume` boolean and `reason` if not resumable
+   *
+   * @example
+   * ```typescript
+   * const check = await client.canResume('session_abc123');
+   * if (!check.canResume) {
+   *   console.log(`Cannot resume: ${check.reason}`);
+   * }
+   * ```
+   */
+  async canResume(
+    sessionId: string,
+    checkEvents: boolean = true
+  ): Promise<{ canResume: boolean; reason?: string; status?: string; hasCompletedEvent?: boolean }> {
+    const session = await this.getSession(sessionId);
+
+    // Check session status
+    if (session.session_status === 'completed') {
+      return { canResume: false, reason: 'Session is completed', status: session.session_status };
+    }
+    if (session.session_status === 'failed') {
+      return { canResume: false, reason: 'Session has failed', status: session.session_status };
+    }
+    if (session.session_status === 'archived') {
+      return { canResume: false, reason: 'Session is archived', status: session.session_status };
+    }
+
+    // If status is 'running', check events for completion (API status can be stale)
+    if (session.session_status === 'running' && checkEvents) {
+      try {
+        const events = await this.getEvents(sessionId);
+        // Check for COMPLETED event in the events (case-insensitive type check)
+        const hasCompletedEvent = events.data?.some(event => {
+          const eventType = String(event.type || '').toLowerCase();
+          return eventType === 'completed' || eventType === 'result';
+        });
+
+        if (hasCompletedEvent) {
+          // Session has completed event but status is stale - it's actually idle
+          return { canResume: true, status: 'idle', hasCompletedEvent: true };
+        }
+
+        // No completed event - session is genuinely still running
+        return { canResume: false, reason: 'Session is currently running', status: session.session_status };
+      } catch {
+        // If we can't check events, fall back to status-only check
+        return { canResume: false, reason: 'Session is currently running', status: session.session_status };
+      }
+    }
+
+    if (session.session_status === 'running') {
+      return { canResume: false, reason: 'Session is currently running', status: session.session_status };
+    }
+
+    // Status is 'idle' - session can be resumed
+    return { canResume: true, status: session.session_status };
+  }
+
+  /**
+   * Wait for a session to become resumable.
+   *
+   * Polls the session status until it becomes idle and ready for resume.
+   * Useful after interrupting a session to ensure it's ready for new messages.
+   *
+   * @param sessionId - The session ID to wait for
+   * @param maxWaitMs - Maximum time to wait in milliseconds (default: 30000)
+   * @param pollIntervalMs - Polling interval in milliseconds (default: 1000)
+   * @returns Object with `canResume` boolean and final status
+   * @throws {ClaudeRemoteError} If wait times out
+   *
+   * @example
+   * ```typescript
+   * // Wait for session to be ready after interrupt
+   * await client.interruptSession(sessionId);
+   * const ready = await client.waitForResumable(sessionId);
+   * if (ready.canResume) {
+   *   await client.resume(sessionId, 'Continue with...', onEvent);
+   * }
+   * ```
+   */
+  async waitForResumable(
+    sessionId: string,
+    maxWaitMs: number = 30000,
+    pollIntervalMs: number = 1000
+  ): Promise<{ canResume: boolean; reason?: string; status?: string }> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const check = await this.canResume(sessionId);
+
+      // If resumable, return immediately
+      if (check.canResume) {
+        return check;
+      }
+
+      // If in a terminal state (completed, failed, archived), don't wait
+      if (check.status === 'completed' || check.status === 'failed' || check.status === 'archived') {
+        return check;
+      }
+
+      // Still running, wait and retry
+      await this.sleep(pollIntervalMs);
+    }
+
+    // Timeout - return current state
+    const finalCheck = await this.canResume(sessionId);
+    if (!finalCheck.canResume) {
+      return {
+        canResume: false,
+        reason: `Timeout waiting for session to become resumable (status: ${finalCheck.status})`,
+        status: finalCheck.status
+      };
+    }
+    return finalCheck;
+  }
+
+  /**
+   * Build the WebSocket URL for a session.
+   *
+   * @param sessionId - The session ID
+   * @returns The WebSocket URL for subscribing to session events
+   */
+  private buildWebSocketUrl(sessionId: string): string {
+    // Convert HTTP base URL to WebSocket URL
+    // https://api.anthropic.com -> wss://api.anthropic.com
+    // Note: claude.ai uses wss://claude.ai/v1/sessions/ws/{sessionId}/subscribe
+    const wsBase = this.baseUrl.replace(/^https?:\/\//, 'wss://');
+    let url = `${wsBase}/v1/sessions/ws/${sessionId}/subscribe`;
+    if (this.orgUuid) {
+      url += `?organization_uuid=${this.orgUuid}`;
+    }
+    return url;
+  }
+
+  /**
+   * Create a WebSocket connection to a session.
+   *
+   * Returns a connected WebSocket that can be used for sending messages,
+   * receiving events, and sending control requests.
+   *
+   * @param sessionId - The session ID to connect to
+   * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
+   * @returns Connected WebSocket instance
+   * @throws {ClaudeRemoteError} If connection fails
+   */
+  private async createWebSocket(sessionId: string, timeoutMs: number = 10000): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const wsUrl = this.buildWebSocketUrl(sessionId);
+
+      const ws = new WebSocket(wsUrl, {
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'ccr-byoc-2025-07-29',
+        }
+      });
+
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new ClaudeRemoteError(
+          `WebSocket connection timeout after ${timeoutMs}ms`,
+          408
+        ));
+      }, timeoutMs);
+
+      ws.on('open', () => {
+        clearTimeout(timeout);
+        resolve(ws);
+      });
+
+      ws.on('error', (error: Error) => {
+        clearTimeout(timeout);
+        reject(new ClaudeRemoteError(
+          `WebSocket connection error: ${error.message}`,
+          500
+        ));
+      });
+    });
+  }
+
+  /**
+   * Send a control request via WebSocket and wait for response.
+   *
+   * @param ws - Connected WebSocket
+   * @param subtype - Control request subtype (interrupt, initialize, set_permission_mode)
+   * @param additionalData - Additional data to include in the request
+   * @param timeoutMs - Response timeout in milliseconds
+   * @returns The control response
+   */
+  private sendControlRequest(
+    ws: WebSocket,
+    subtype: string,
+    additionalData: Record<string, unknown> = {},
+    timeoutMs: number = 10000
+  ): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      const requestId = randomUUID();
+
+      const timeout = setTimeout(() => {
+        reject(new ClaudeRemoteError(
+          `Control request '${subtype}' timeout after ${timeoutMs}ms`,
+          408
+        ));
+      }, timeoutMs);
+
+      const messageHandler = (data: Buffer | string) => {
+        try {
+          const message = JSON.parse(data.toString());
+          if (message.type === 'control_response' && message.response?.request_id === requestId) {
+            clearTimeout(timeout);
+            ws.off('message', messageHandler);
+
+            if (message.response.subtype === 'success') {
+              resolve(message.response);
+            } else if (message.response.subtype === 'error') {
+              reject(new ClaudeRemoteError(
+                `Control request '${subtype}' failed: ${message.response.error || 'Unknown error'}`,
+                400
+              ));
+            } else {
+              resolve(message.response);
+            }
+          }
+        } catch {
+          // Ignore parse errors for non-JSON messages
+        }
+      };
+
+      ws.on('message', messageHandler);
+
+      const controlMessage = JSON.stringify({
+        request_id: requestId,
+        type: 'control_request',
+        request: { subtype, ...additionalData }
+      });
+      ws.send(controlMessage);
+    });
+  }
+
+  /**
+   * Send a user message via WebSocket.
+   *
+   * This is more responsive than HTTP POST for sending messages, especially
+   * useful for resume operations after interrupt.
+   *
+   * @param sessionId - The session ID to send message to
+   * @param message - Message content (string or content blocks with images)
+   * @param options - Options for message sending
+   * @param options.timeoutMs - Connection timeout (default: 10000)
+   * @param options.parentToolUseId - Parent tool use ID (for tool results)
+   * @throws {ClaudeRemoteError} If sending fails
+   *
+   * @example
+   * ```typescript
+   * // Send a message via WebSocket (more responsive than HTTP)
+   * await client.sendMessageViaWebSocket('session_abc123', 'Continue with the task');
+   * ```
+   */
+  async sendMessageViaWebSocket(
+    sessionId: string,
+    message: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>,
+    options: { timeoutMs?: number; parentToolUseId?: string | null } = {}
+  ): Promise<void> {
+    const { timeoutMs = 10000, parentToolUseId = null } = options;
+    const ws = await this.createWebSocket(sessionId, timeoutMs);
+
+    try {
+      // Format from HAR: {"uuid":"...","type":"user","session_id":"...","parent_tool_use_id":null,"message":{"role":"user","content":"..."}}
+      const userMessage = JSON.stringify({
+        uuid: randomUUID(),
+        type: 'user',
+        session_id: sessionId,
+        parent_tool_use_id: parentToolUseId,
+        message: {
+          role: 'user',
+          content: message
+        }
+      });
+
+      ws.send(userMessage);
+
+      // Wait briefly for the message to be acknowledged (WebSocket is async)
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } finally {
+      ws.close();
+    }
+  }
+
+  /**
+   * Stream session events in real-time via WebSocket.
+   *
+   * Unlike HTTP polling, this receives events as they happen without delay.
+   * The callback is invoked for each new event. Returns when session completes
+   * or the abort signal is triggered.
+   *
+   * @param sessionId - The session ID to stream events from
+   * @param onEvent - Callback invoked for each event
+   * @param options - Streaming options
+   * @param options.timeoutMs - Initial connection timeout (default: 10000)
+   * @param options.abortSignal - Signal to abort streaming
+   * @param options.skipExistingEvents - Skip events that existed before streaming started
+   * @returns Session result with status and metadata
+   *
+   * @example
+   * ```typescript
+   * // Stream events in real-time
+   * const result = await client.streamEvents(
+   *   'session_abc123',
+   *   (event) => console.log('Event:', event.type),
+   *   { abortSignal: controller.signal }
+   * );
+   * ```
+   */
+  async streamEvents(
+    sessionId: string,
+    onEvent: EventCallback,
+    options: {
+      timeoutMs?: number;
+      abortSignal?: AbortSignal;
+      skipExistingEvents?: boolean;
+    } = {}
+  ): Promise<SessionResult> {
+    const { timeoutMs = 10000, abortSignal, skipExistingEvents = false } = options;
+
+    // Get existing event IDs if skipping
+    const seenEventIds = new Set<string>();
+    if (skipExistingEvents) {
+      try {
+        const existingEvents = await this.getEvents(sessionId);
+        for (const event of existingEvents.data || []) {
+          seenEventIds.add(event.uuid);
+        }
+      } catch {
+        // Ignore errors fetching existing events
+      }
+    }
+
+    const ws = await this.createWebSocket(sessionId, timeoutMs);
+    let title: string | undefined;
+    let branch: string | undefined;
+
+    return new Promise((resolve, reject) => {
+      // Handle abort signal
+      const abortHandler = () => {
+        ws.close();
+        reject(new ClaudeRemoteError('Streaming aborted by signal'));
+      };
+
+      if (abortSignal) {
+        if (abortSignal.aborted) {
+          ws.close();
+          reject(new ClaudeRemoteError('Streaming aborted by signal'));
+          return;
+        }
+        abortSignal.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      ws.on('message', async (data: Buffer | string) => {
+        try {
+          const message = JSON.parse(data.toString());
+
+          // Handle session events (type: event or just the event data)
+          if (message.type === 'event' && message.data) {
+            const event = message.data as SessionEvent;
+            if (!seenEventIds.has(event.uuid)) {
+              seenEventIds.add(event.uuid);
+              await onEvent(event);
+
+              // Extract branch from events
+              if (!branch) {
+                branch = this.extractBranchName([event]);
+              }
+
+              // Check for completion
+              if (event.type === 'result') {
+                if (abortSignal) {
+                  abortSignal.removeEventListener('abort', abortHandler);
+                }
+                ws.close();
+                resolve({
+                  sessionId,
+                  status: 'completed',
+                  title: title || '',
+                  branch,
+                  totalCost: event.total_cost_usd as number | undefined,
+                  durationMs: event.duration_ms as number | undefined,
+                  numTurns: event.num_turns as number | undefined,
+                  result: event.result as string | undefined,
+                });
+              }
+            }
+          }
+
+          // Handle raw events (some WebSocket implementations send events directly)
+          if (message.uuid && message.type && message.type !== 'event') {
+            const event = message as SessionEvent;
+            if (!seenEventIds.has(event.uuid)) {
+              seenEventIds.add(event.uuid);
+              await onEvent(event);
+
+              if (!branch) {
+                branch = this.extractBranchName([event]);
+              }
+
+              if (event.type === 'result') {
+                if (abortSignal) {
+                  abortSignal.removeEventListener('abort', abortHandler);
+                }
+                ws.close();
+                resolve({
+                  sessionId,
+                  status: 'completed',
+                  title: title || '',
+                  branch,
+                  totalCost: event.total_cost_usd as number | undefined,
+                  durationMs: event.duration_ms as number | undefined,
+                  numTurns: event.num_turns as number | undefined,
+                  result: event.result as string | undefined,
+                });
+              }
+            }
+          }
+
+          // Handle session status updates
+          if (message.type === 'session_status') {
+            if (message.status === 'completed' || message.status === 'failed') {
+              if (abortSignal) {
+                abortSignal.removeEventListener('abort', abortHandler);
+              }
+              ws.close();
+              resolve({
+                sessionId,
+                status: message.status,
+                title: title || '',
+                branch,
+              });
+            }
+          }
+        } catch {
+          // Ignore parse errors for non-JSON messages
+        }
+      });
+
+      ws.on('error', (error: Error) => {
+        if (abortSignal) {
+          abortSignal.removeEventListener('abort', abortHandler);
+        }
+        reject(new ClaudeRemoteError(
+          `WebSocket error during streaming: ${error.message}`,
+          500
+        ));
+      });
+
+      ws.on('close', (code: number) => {
+        if (abortSignal) {
+          abortSignal.removeEventListener('abort', abortHandler);
+        }
+        // Normal closure codes: 1000 (normal), 1001 (going away)
+        if (code !== 1000 && code !== 1001) {
+          reject(new ClaudeRemoteError(
+            `WebSocket closed unexpectedly with code ${code}`,
+            500
+          ));
+        }
+      });
+
+      // Send keep-alive periodically to maintain connection
+      const keepAliveInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'keep_alive' }));
+        } else {
+          clearInterval(keepAliveInterval);
+        }
+      }, 30000); // Every 30 seconds
+
+      ws.on('close', () => {
+        clearInterval(keepAliveInterval);
+      });
+    });
+  }
+
+  /**
+   * Initialize a session via WebSocket.
+   *
+   * Sends the initialize control request that sets up the session.
+   * Usually called automatically when connecting to a new session.
+   *
+   * @param sessionId - The session ID to initialize
+   * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
+   */
+  async initializeSession(sessionId: string, timeoutMs: number = 10000): Promise<void> {
+    const ws = await this.createWebSocket(sessionId, timeoutMs);
+    try {
+      await this.sendControlRequest(ws, 'initialize', {}, timeoutMs);
+    } finally {
+      ws.close();
+    }
+  }
+
+  /**
+   * Set the permission mode for a session via WebSocket.
+   *
+   * Controls what actions Claude can take without explicit approval.
+   *
+   * @param sessionId - The session ID
+   * @param mode - Permission mode ('acceptEdits' allows file edits without approval)
+   * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
+   */
+  async setPermissionMode(
+    sessionId: string,
+    mode: 'acceptEdits' | 'requireApproval' = 'acceptEdits',
+    timeoutMs: number = 10000
+  ): Promise<void> {
+    const ws = await this.createWebSocket(sessionId, timeoutMs);
+    try {
+      await this.sendControlRequest(ws, 'set_permission_mode', { mode }, timeoutMs);
+    } finally {
+      ws.close();
+    }
+  }
+
+  /**
+   * Interrupt a running session via WebSocket.
    *
    * Sends an interrupt signal to stop the current operation. The session
    * will transition to an idle state and can be resumed with new instructions.
    *
-   * **Note:** This uses HTTP. WebSocket-based interrupts are more responsive
-   * but require the `ws` package.
+   * Uses WebSocket for more responsive and reliable interrupts compared to HTTP.
    *
    * @param sessionId - The session ID to interrupt
+   * @param timeoutMs - Connection timeout in milliseconds (default: 10000)
    * @throws {ClaudeRemoteError} If the interrupt fails
    *
    * @example
@@ -637,26 +1173,12 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
    * await client.resume('session_abc123', 'Stop that and instead...', onEvent);
    * ```
    */
-  async interruptSession(sessionId: string): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/v1/sessions/${sessionId}/events`, {
-      method: 'POST',
-      headers: this.buildHeaders(),
-      body: JSON.stringify({
-        events: [{
-          type: 'control_request',
-          action: 'interrupt',
-          uuid: randomUUID()
-        }]
-      })
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new ClaudeRemoteError(
-        `Failed to interrupt session: ${response.status} ${text}`,
-        response.status,
-        text
-      );
+  async interruptSession(sessionId: string, timeoutMs: number = 10000): Promise<void> {
+    const ws = await this.createWebSocket(sessionId, timeoutMs);
+    try {
+      await this.sendControlRequest(ws, 'interrupt', {}, timeoutMs);
+    } finally {
+      ws.close();
     }
   }
 
@@ -686,27 +1208,24 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
   }
 
   /**
-   * Poll a session until completion.
+   * Poll a session until completion using WebSocket streaming.
    *
-   * Continuously fetches session events and calls the callback for each new event.
-   * Automatically handles event deduplication and tracks session state.
+   * Streams session events in real-time via WebSocket. The callback is invoked
+   * for each new event. Automatically handles event deduplication and tracks session state.
    *
    * Polling continues until:
    * - Session status becomes `completed` or `failed`
    * - A `result` event is received
    * - The abort signal is triggered
-   * - Maximum polls is reached (default: 300 = ~10 minutes)
    *
    * @param sessionId - The session ID to poll
    * @param onEvent - Callback invoked for each new event
    * @param options - Polling options
    * @param options.skipExistingEvents - Skip events that existed before polling started
    * @param options.existingEventIds - Pre-captured event IDs to skip (for resume)
-   * @param options.pollIntervalMs - Interval between polls (default: 2000ms)
-   * @param options.maxPolls - Maximum number of polls (default: 300)
    * @param options.abortSignal - Signal to abort polling early
    * @returns Session result with status, branch, cost, and duration
-   * @throws {ClaudeRemoteError} If polling times out or is aborted
+   * @throws {ClaudeRemoteError} If streaming fails or is aborted
    *
    * @example
    * ```typescript
@@ -750,16 +1269,11 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
     const {
       skipExistingEvents = false,
       existingEventIds,
-      pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-      maxPolls = DEFAULT_MAX_POLLS,
       abortSignal,
     } = options;
 
-    // Use pre-captured event IDs if provided (from resume()), otherwise create new set
+    // Build the set of event IDs to skip
     const seenEventIds = existingEventIds ? new Set(existingEventIds) : new Set<string>();
-    let pollCount = 0;
-    let title: string | undefined;
-    let branch: string | undefined;
 
     // For resume: mark existing events as seen (only if not already provided)
     if (skipExistingEvents && !existingEventIds) {
@@ -773,86 +1287,11 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
       }
     }
 
-    while (pollCount < maxPolls) {
-      // Check for abort
-      if (abortSignal?.aborted) {
-        throw new ClaudeRemoteError('Polling aborted by signal');
-      }
-
-      try {
-        // Get session status
-        const session = await this.getSession(sessionId);
-        if (session.title && session.title !== title) {
-          title = session.title;
-        }
-
-        // Get events
-        const eventsResponse = await this.getEvents(sessionId);
-        const events = eventsResponse.data || [];
-
-        // Extract branch if not found yet
-        if (!branch) {
-          branch = this.extractBranchName(events);
-        }
-
-        // Process new events
-        for (const event of events) {
-          if (!seenEventIds.has(event.uuid)) {
-            seenEventIds.add(event.uuid);
-            await onEvent(event);
-
-            // Check for completion
-            if (event.type === 'result') {
-              return {
-                sessionId,
-                status: 'completed',
-                title: title || session.title,
-                branch,
-                totalCost: event.total_cost_usd as number | undefined,
-                durationMs: event.duration_ms as number | undefined,
-                numTurns: event.num_turns as number | undefined,
-                result: event.result as string | undefined,
-              };
-            }
-          }
-        }
-
-        // Check if session is done
-        if (session.session_status === 'completed' || session.session_status === 'failed') {
-          return {
-            sessionId,
-            status: session.session_status,
-            title: title || session.title,
-            branch,
-          };
-        }
-
-        // For resume: exit if session goes idle
-        if (skipExistingEvents && session.session_status === 'idle') {
-          return {
-            sessionId,
-            status: 'idle',
-            title: title || session.title,
-            branch,
-          };
-        }
-
-        // Wait before next poll
-        await this.sleep(pollIntervalMs, abortSignal);
-        pollCount++;
-
-      } catch (error) {
-        // Don't throw on polling errors, just continue
-        if (error instanceof ClaudeRemoteError && error.message.includes('aborted')) {
-          throw error;
-        }
-        await this.sleep(pollIntervalMs, abortSignal);
-        pollCount++;
-      }
-    }
-
-    // Timeout
-    throw new ClaudeRemoteError(`Polling timeout after ${maxPolls} polls (${Math.round(maxPolls * pollIntervalMs / 1000 / 60)} minutes)`);
+    // Use WebSocket streaming
+    return this.streamEvents(sessionId, onEvent, {
+      abortSignal,
+      skipExistingEvents: seenEventIds.size > 0,
+    });
   }
 
   /**
@@ -943,16 +1382,17 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
    * Use this to continue a conversation or provide additional instructions.
    *
    * The method:
-   * 1. Captures existing event IDs to avoid duplicates
-   * 2. Sends the new message
-   * 3. Polls for new events only
+   * 1. Waits for session to be resumable (idle, not running/completed/failed)
+   * 2. Captures existing event IDs to avoid duplicates
+   * 3. Sends the new message
+   * 4. Polls for new events only
    *
    * @param sessionId - The session ID to resume
    * @param message - Follow-up message (string or content blocks with images)
    * @param onEvent - Callback invoked for each new event
    * @param options - Polling options (see `pollSession`)
    * @returns Session result with updated status
-   * @throws {ClaudeRemoteError} If resuming fails
+   * @throws {ClaudeRemoteError} If resuming fails or session cannot be resumed
    *
    * @example
    * ```typescript
@@ -983,7 +1423,22 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
     onEvent: EventCallback,
     options: PollOptions = {}
   ): Promise<SessionResult> {
-    // IMPORTANT: Capture existing event IDs BEFORE sending the message
+    // STEP 1: Wait for session to be resumable (idle, not still processing an interrupt)
+    // This is critical for scenario 4: after interrupt, session may still be "running" briefly
+    const resumeCheck = await this.waitForResumable(sessionId, 30000, 1000);
+
+    if (!resumeCheck.canResume) {
+      // Session cannot be resumed - return early with status
+      const session = await this.getSession(sessionId);
+      return {
+        sessionId,
+        status: resumeCheck.status as 'idle' | 'running' | 'completed' | 'failed' | 'archived',
+        title: session.title,
+        result: `Cannot resume session: ${resumeCheck.reason}`,
+      };
+    }
+
+    // STEP 2: Capture existing event IDs BEFORE sending the message
     // This ensures we can properly filter out old events during polling
     const existingEventIds = new Set<string>();
     try {
@@ -995,14 +1450,13 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
       // Ignore errors fetching existing events
     }
 
-    // Send the message
-    await this.sendMessage(sessionId, message);
+    // STEP 3: Send the message via WebSocket (more responsive than HTTP POST)
+    await this.sendMessageViaWebSocket(sessionId, message);
 
-    // Poll for new events only, passing the pre-captured event IDs
-    return this.pollSession(sessionId, onEvent, {
-      ...options,
-      skipExistingEvents: true,
-      existingEventIds, // Pass pre-captured IDs
+    // STEP 4: Stream events via WebSocket, skipping existing events
+    return this.streamEvents(sessionId, onEvent, {
+      abortSignal: options.abortSignal,
+      skipExistingEvents: existingEventIds.size > 0,
     });
   }
 }

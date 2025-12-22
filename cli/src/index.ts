@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import { Command } from 'commander';
-import { sessionCommand } from './commands/session.js';
+import { dbCommand } from './commands/db.js';
+import { claudeCommand } from './commands/claude.js';
 import { githubCommand } from './commands/github.js';
-import { adminCommand } from './commands/admin.js';
 
 const program = new Command();
 
@@ -12,9 +12,9 @@ program
   .description('CLI for WebEDT administration')
   .version('1.0.0');
 
-// Add commands
-program.addCommand(sessionCommand);
+// Add command groups
+program.addCommand(dbCommand);
+program.addCommand(claudeCommand);
 program.addCommand(githubCommand);
-program.addCommand(adminCommand);
 
 program.parse();

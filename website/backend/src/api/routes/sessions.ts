@@ -1108,6 +1108,49 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
       return;
     }
 
+    // Archive Claude Remote sessions before permanently deleting from local DB
+    const archiveResults: { sessionId: string; remoteSessionId: string | null; archived: boolean; message: string }[] = [];
+
+    for (const session of sessions) {
+      if (session.remoteSessionId && authReq.user?.claudeAuth) {
+        logger.info('Archiving Claude Remote session before permanent delete', {
+          component: 'Sessions',
+          sessionId: session.id,
+          remoteSessionId: session.remoteSessionId,
+        });
+
+        const result = await archiveClaudeRemoteSession(
+          session.remoteSessionId,
+          authReq.user.claudeAuth,
+          undefined // environmentId not stored in DB, will use default from config
+        );
+
+        archiveResults.push({
+          sessionId: session.id,
+          remoteSessionId: session.remoteSessionId,
+          archived: result.success,
+          message: result.message,
+        });
+
+        logger.info('Claude Remote archive result', {
+          component: 'Sessions',
+          sessionId: session.id,
+          remoteSessionId: session.remoteSessionId,
+          success: result.success,
+          message: result.message,
+        });
+      } else {
+        archiveResults.push({
+          sessionId: session.id,
+          remoteSessionId: session.remoteSessionId,
+          archived: false,
+          message: session.remoteSessionId
+            ? 'No Claude auth available'
+            : 'No remote session ID',
+        });
+      }
+    }
+
     // Permanently delete all sessions from database
     await db
       .delete(chatSessions)
@@ -1118,11 +1161,16 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
         )
       );
 
+    const archivedCount = archiveResults.filter(r => r.archived).length;
+    const remoteCount = archiveResults.filter(r => r.remoteSessionId).length;
+
     res.json({
       success: true,
       data: {
         message: `${ids.length} session${ids.length !== 1 ? 's' : ''} permanently deleted`,
-        count: ids.length
+        count: ids.length,
+        remoteArchived: archivedCount,
+        remoteTotal: remoteCount,
       }
     });
   } catch (error) {
