@@ -92,14 +92,81 @@ export interface GitOutcomeInfo {
 }
 
 /**
- * Raw event from Claude Remote sessions API
- * Events are passed through as-is without transformation
+ * Tool use information in a session event
  */
-export type SessionEvent = Record<string, unknown> & {
-  uuid: string;
+export interface ToolUseInfo {
+  id?: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+/**
+ * Message content block
+ */
+export interface MessageContentBlock {
   type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+/**
+ * Message information in a session event
+ */
+export interface MessageInfo {
+  id?: string;
+  role?: string;
+  content: string | MessageContentBlock[];
+  model?: string;
+  stop_reason?: string;
+}
+
+/**
+ * Raw event from Claude Remote sessions API.
+ *
+ * Events have a `type` field indicating the event kind:
+ * - `tool_use`: Claude is using a tool (has `tool_use` field)
+ * - `assistant`: Claude's response message (has `message` field)
+ * - `result`: Session completed (has `total_cost_usd`, `duration_ms`, etc.)
+ * - `env_manager_log`: Environment log (has `data.message`)
+ * - `user`: User message
+ * - `error`: Error occurred
+ */
+export interface SessionEvent {
+  /** Unique event identifier */
+  uuid: string;
+  /** Event type (tool_use, assistant, result, env_manager_log, user, error, etc.) */
+  type: string;
+  /** Event timestamp */
   timestamp?: string;
-};
+
+  // Tool use events
+  /** Tool use information (present when type === 'tool_use') */
+  tool_use?: ToolUseInfo;
+
+  // Assistant message events
+  /** Message information (present when type === 'assistant') */
+  message?: MessageInfo;
+
+  // Result events
+  /** Total cost in USD (present when type === 'result') */
+  total_cost_usd?: number;
+  /** Duration in milliseconds */
+  duration_ms?: number;
+  /** Session result status */
+  result_status?: string;
+
+  // Environment manager events
+  /** Event data (present for env_manager_log and other events) */
+  data?: {
+    message?: string;
+    [key: string]: unknown;
+  };
+
+  // Allow additional properties for forward compatibility
+  [key: string]: unknown;
+}
 
 /**
  * Image source for base64 encoded images
