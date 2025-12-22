@@ -11,8 +11,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, events } from '@webedt/shared';
-import { eq, and, or, asc } from 'drizzle-orm';
+import { db, chatSessions, events, eq, and, or, asc } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';

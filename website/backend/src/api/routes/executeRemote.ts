@@ -8,8 +8,7 @@
 
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, chatSessions, messages, users, events } from '@webedt/shared';
-import { eq } from 'drizzle-orm';
+import { db, chatSessions, messages, users, events, eq } from '@webedt/shared';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import { logger, fetchEnvironmentIdFromSessions, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';

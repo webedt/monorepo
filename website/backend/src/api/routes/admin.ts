@@ -4,10 +4,8 @@
  */
 
 import { Router } from 'express';
-import { db } from '@webedt/shared';
-import { users, sessions } from '@webedt/shared';
+import { db, users, sessions, eq, sql } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
-import { eq, sql } from 'drizzle-orm';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
 
