@@ -30,14 +30,22 @@
     "tar": "^7.4.3"
   },
   "devDependencies": {
+    "@octokit/rest": "^21.1.1",
+    "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.0",
     "@types/multer": "^2.0.0",
     "@types/node": "^22.10.2",
     "@types/node-fetch": "^2.6.11",
+    "@types/pg": "^8.11.10",
+    "@types/uuid": "^10.0.0",
+    "bcrypt": "^5.1.1",
     "drizzle-kit": "^0.31.8",
+    "drizzle-orm": "^0.38.3",
+    "lucia": "^3.2.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "uuid": "^13.0.0"
   }
 }
