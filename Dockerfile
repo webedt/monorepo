@@ -78,6 +78,10 @@ COPY --from=shared-build /app/shared ./shared
 # Build website backend
 WORKDIR /app/backend
 COPY website/backend/package*.json ./
+# Fix the shared package path for Docker's directory structure
+# In Docker: backend is at /app/backend, shared is at /app/shared
+# So we need file:../shared instead of file:../../shared
+RUN sed -i 's|"file:../../shared"|"file:../shared"|g' package.json
 RUN npm install
 COPY website/backend/tsconfig.json ./
 COPY website/backend/src ./src
