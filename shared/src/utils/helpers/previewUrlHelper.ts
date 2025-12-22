@@ -46,7 +46,7 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { logger } from './logger.js';
+import { logger } from '../logging/logger.js';
 
 /**
  * Configuration from `.webedt` file.

@@ -1,5 +1,5 @@
 /**
- * Claude Remote Sessions Client
+ * Claude Web Sessions Client
  *
  * TypeScript client for Anthropic's Remote Sessions API, enabling execution of
  * Claude Code tasks on Anthropic's cloud infrastructure.
@@ -21,13 +21,13 @@
  * - `PATCH /v1/sessions/{id}` - Update session (rename)
  * - `POST /v1/sessions/{id}/archive` - Archive session
  *
- * @see {@link ClaudeRemoteClient} for the main client class
+ * @see {@link ClaudeWebClient} for the main client class
  * @see {@link fetchEnvironmentIdFromSessions} for environment ID discovery
  */
 
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
-import type { IClaudeRemoteClient } from '../interfaces/IClaudeRemoteClient.js';
+import type { IClaudeWebClient } from './IClaudeWebClient.js';
 import {
   ClaudeRemoteClientConfig,
   CreateSessionParams,
@@ -143,7 +143,7 @@ export async function fetchEnvironmentIdFromSessions(
  * @see {@link CreateSessionParams} for session creation options
  * @see {@link SessionResult} for execution results
  */
-export class ClaudeRemoteClient implements IClaudeRemoteClient {
+export class ClaudeWebClient implements IClaudeWebClient {
   private accessToken: string;
   private environmentId: string;
   private orgUuid?: string;
@@ -151,7 +151,7 @@ export class ClaudeRemoteClient implements IClaudeRemoteClient {
   private model: string;
 
   /**
-   * Create a new Claude Remote client.
+   * Create a new Claude Web client.
    *
    * @param config - Client configuration options
    * @param config.accessToken - OAuth access token from Claude.ai

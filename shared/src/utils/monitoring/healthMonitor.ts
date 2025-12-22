@@ -15,10 +15,10 @@ import type {
   ServiceHealth,
   DetailedHealthStatus,
   HealthCheckFunction,
-} from './interfaces/IHealthMonitor.js';
-import { logger } from './logger.js';
+} from './IHealthMonitor.js';
+import { logger } from '../logging/logger.js';
 import { metrics } from './metrics.js';
-import { circuitBreakerRegistry } from './circuitBreaker.js';
+import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
 
 // Re-export types from interface for backwards compatibility
 export type {
@@ -26,7 +26,7 @@ export type {
   ServiceHealth,
   DetailedHealthStatus,
   HealthCheckFunction,
-} from './interfaces/IHealthMonitor.js';
+} from './IHealthMonitor.js';
 
 /**
  * Health Monitor Class

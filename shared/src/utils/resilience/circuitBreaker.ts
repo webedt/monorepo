@@ -15,8 +15,8 @@ import type {
   CircuitBreakerConfig,
   CircuitBreakerStats,
   CircuitBreakerResult,
-} from './interfaces/ICircuitBreaker.js';
-import { logger } from './logger.js';
+} from './ICircuitBreaker.js';
+import { logger } from '../logging/logger.js';
 
 // Re-export types from interface for backwards compatibility
 export type {
@@ -24,7 +24,7 @@ export type {
   CircuitBreakerConfig,
   CircuitBreakerStats,
   CircuitBreakerResult,
-} from './interfaces/ICircuitBreaker.js';
+} from './ICircuitBreaker.js';
 
 const DEFAULT_CONFIG: CircuitBreakerConfig = {
   failureThreshold: 5,

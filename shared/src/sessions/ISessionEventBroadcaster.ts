@@ -10,13 +10,18 @@
  */
 
 /**
- * Event broadcast from a session.
+ * Event broadcast from a session via the broadcaster system.
  */
-export interface SessionEvent {
+export interface BroadcastEvent {
   eventType: string;
   data: unknown;
   timestamp: Date;
 }
+
+/**
+ * @deprecated Use BroadcastEvent instead. This alias exists for backward compatibility.
+ */
+export type SessionEvent = BroadcastEvent;
 
 /**
  * Session event broadcaster interface for real-time event streaming.

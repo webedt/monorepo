@@ -9,8 +9,8 @@ import * as path from 'path';
 import { Octokit } from '@octokit/rest';
 import { GitHubClient } from './githubClient.js';
 import { GitHelper } from './gitHelper.js';
-import { logger } from '../logger.js';
-import { generateSessionPath } from '../sessionPathHelper.js';
+import { logger } from '../utils/logging/logger.js';
+import { generateSessionPath, parseRepoUrl } from '../utils/helpers/sessionPathHelper.js';
 
 // ============================================================================
 // Types
@@ -153,16 +153,7 @@ export type ProgressCallback = (event: {
 // Helper Functions
 // ============================================================================
 
-/**
- * Parse owner and repo from a GitHub URL
- */
-export function parseRepoUrl(repoUrl: string): { owner: string; repo: string } {
-  const match = repoUrl.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(\.git)?$/);
-  if (!match) {
-    throw new Error(`Invalid GitHub URL: ${repoUrl}`);
-  }
-  return { owner: match[1], repo: match[2] };
-}
+// parseRepoUrl is imported from sessionPathHelper
 
 // ============================================================================
 // GitHub Operations Service

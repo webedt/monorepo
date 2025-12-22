@@ -9,7 +9,7 @@
  * @module interfaces/IHealthMonitor
  */
 
-import type { CircuitBreakerStats } from './ICircuitBreaker.js';
+import type { CircuitBreakerStats } from '../resilience/ICircuitBreaker.js';
 
 /**
  * Result of a single health check.

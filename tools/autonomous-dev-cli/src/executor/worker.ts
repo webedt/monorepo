@@ -99,8 +99,8 @@ import {
 import { loadSpecContext, type SpecContext } from '../discovery/spec-reader.js';
 import { refreshClaudeToken, shouldRefreshToken, InvalidRefreshTokenError } from '../utils/claudeAuth.js';
 import {
-  ClaudeRemoteClient,
-  type SessionEvent,
+  ClaudeWebClient,
+  type ClaudeSessionEvent as SessionEvent,
   type SessionResult,
 } from '@webedt/shared';
 
@@ -2003,7 +2003,7 @@ export class Worker {
     const prompt = this.buildPrompt(issue);
 
     // Create the remote client
-    const client = new ClaudeRemoteClient({
+    const client = new ClaudeWebClient({
       accessToken: this.options.claudeAuth.accessToken,
       environmentId: this.options.claudeEnvironmentId,
     });

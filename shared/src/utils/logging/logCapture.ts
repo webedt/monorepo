@@ -3,10 +3,10 @@
  * Captures logs in a circular buffer for retrieval via API
  */
 
-import type { ILogCapture, CapturedLog, LogFilter } from './interfaces/ILogCapture.js';
+import type { ILogCapture, CapturedLog, LogFilter } from './ILogCapture.js';
 
 // Re-export types from interface for backwards compatibility
-export type { CapturedLog, LogFilter } from './interfaces/ILogCapture.js';
+export type { CapturedLog, LogFilter } from './ILogCapture.js';
 
 class LogCapture implements ILogCapture {
   private logs: CapturedLog[] = [];

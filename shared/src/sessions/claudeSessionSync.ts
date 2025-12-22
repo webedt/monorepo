@@ -8,9 +8,9 @@
 import { db, chatSessions, events, users } from '../db/index.js';
 import { eq, and, or, isNotNull, isNull, gte, ne, lte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { ClaudeRemoteClient } from '../claudeRemote/index.js';
-import { generateSessionPath, normalizeRepoUrl } from '../sessionPathHelper.js';
-import { logger } from '../logger.js';
+import { ClaudeWebClient } from '../claudeWeb/index.js';
+import { generateSessionPath, normalizeRepoUrl } from '../utils/helpers/sessionPathHelper.js';
+import { logger } from '../utils/logging/logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
 import { sessionListBroadcaster } from './sessionListBroadcaster.js';
 import {
@@ -179,7 +179,7 @@ async function syncUserSessions(userId: string, claudeAuth: NonNullable<typeof u
     }
 
     // Create Claude client
-    const client = new ClaudeRemoteClient({
+    const client = new ClaudeWebClient({
       accessToken: refreshedAuth.accessToken,
       environmentId: CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,

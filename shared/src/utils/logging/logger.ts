@@ -50,6 +50,7 @@
  */
 
 import { logCapture } from './logCapture.js';
+import type { LogContext as ILogContext } from './ILogger.js';
 
 /**
  * Log severity levels.

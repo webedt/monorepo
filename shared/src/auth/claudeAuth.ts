@@ -3,7 +3,7 @@
  * Consolidated from website/apps/server/src/lib/claudeAuth.ts
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../utils/logging/logger.js';
 
 // Define ClaudeAuth type locally (was previously in @webedt/shared)
 // Must match the schema in db/schema.ts

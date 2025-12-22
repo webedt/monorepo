@@ -38,8 +38,8 @@
  */
 
 import { simpleGit, SimpleGit } from 'simple-git';
-import type { IGitHelper } from '../interfaces/IGitHelper.js';
-import { logger } from '../logger.js';
+import type { IGitHelper } from './IGitHelper.js';
+import { logger } from '../utils/logging/logger.js';
 
 /**
  * Git operations helper for workspace repositories.

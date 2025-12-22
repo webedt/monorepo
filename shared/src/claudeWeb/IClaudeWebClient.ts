@@ -1,11 +1,11 @@
 /**
- * Interface for Claude Remote Sessions Client
+ * Interface for Claude Web Sessions Client
  *
  * Defines the contract for interacting with Anthropic's Remote Sessions API.
  * Enables execution of Claude Code tasks on Anthropic's cloud infrastructure.
  *
- * @see ClaudeRemoteClient for the implementation
- * @module interfaces/IClaudeRemoteClient
+ * @see ClaudeWebClient for the implementation
+ * @module claudeWeb/IClaudeWebClient
  */
 
 import type {
@@ -17,17 +17,17 @@ import type {
   SessionResult,
   EventCallback,
   PollOptions,
-} from '../claudeRemote/types.js';
+} from './types.js';
 
 /**
- * Client interface for interacting with the Claude Remote Sessions API.
+ * Client interface for interacting with the Claude Web Sessions API.
  *
  * Provides a high-level interface for executing Claude Code tasks on Anthropic's
  * cloud infrastructure. Handles session creation, event polling, and message sending.
  *
  * @example
  * ```typescript
- * const client: IClaudeRemoteClient = new ClaudeRemoteClient({
+ * const client: IClaudeWebClient = new ClaudeWebClient({
  *   accessToken: 'oauth-access-token',
  *   environmentId: 'env_xxx',
  * });
@@ -38,7 +38,7 @@ import type {
  * );
  * ```
  */
-export interface IClaudeRemoteClient {
+export interface IClaudeWebClient {
   /**
    * Update the access token.
    *

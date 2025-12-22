@@ -10,12 +10,12 @@
  */
 
 import { EventEmitter } from 'events';
-import type { ISessionListBroadcaster, SessionListEvent, SessionUpdateType } from '../interfaces/ISessionListBroadcaster.js';
-import { logger } from '../logger.js';
+import type { ISessionListBroadcaster, SessionListEvent, SessionUpdateType } from './ISessionListBroadcaster.js';
+import { logger } from '../utils/logging/logger.js';
 import type { ChatSession } from '../db/schema.js';
 
 // Re-export types from interface for backwards compatibility
-export type { SessionUpdateType, SessionListEvent } from '../interfaces/ISessionListBroadcaster.js';
+export type { SessionUpdateType, SessionListEvent } from './ISessionListBroadcaster.js';
 
 interface Subscriber {
   id: string;

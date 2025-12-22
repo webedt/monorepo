@@ -1,12 +1,12 @@
 /**
- * Claude Remote Sessions API Client
+ * Claude Web Sessions API Client
  *
  * TypeScript client for Anthropic's Remote Sessions API, allowing execution of
  * Claude Code tasks on Anthropic's cloud infrastructure without local compute.
  *
  * ## Overview
  *
- * Claude Remote Sessions enables running Claude Code (the AI coding assistant) via API,
+ * Claude Web Sessions enables running Claude Code (the AI coding assistant) via API,
  * where Anthropic hosts the execution environment. You provide:
  * - OAuth credentials (access token)
  * - An environment ID (from your Claude.ai account)
@@ -23,10 +23,10 @@
  * ## Quick Start
  *
  * ```typescript
- * import { ClaudeRemoteClient } from '@webedt/shared';
+ * import { ClaudeWebClient } from '@webedt/shared';
  *
  * // Create client with OAuth credentials
- * const client = new ClaudeRemoteClient({
+ * const client = new ClaudeWebClient({
  *   accessToken: 'your-oauth-access-token',
  *   environmentId: 'env_xxx', // From Claude.ai settings
  * });
@@ -80,11 +80,17 @@
  * }, onEvent);
  * ```
  *
- * @module claudeRemote
+ * @module claudeWeb
  */
 
-export { ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from './claudeRemoteClient.js';
+// Interface
+export type { IClaudeWebClient } from './IClaudeWebClient.js';
+
+// Implementation
+export { ClaudeWebClient, fetchEnvironmentIdFromSessions } from './claudeWebClient.js';
 export { generateTitle, generateTitleSync } from './titleGenerator.js';
+
+// Types
 export type {
   ClaudeRemoteAuth,
   ClaudeRemoteClientConfig,

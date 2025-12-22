@@ -9,7 +9,7 @@
  */
 
 import { EventEmitter } from 'events';
-import type { ISessionEventBroadcaster, SessionEvent } from '../interfaces/ISessionEventBroadcaster.js';
+import type { ISessionEventBroadcaster, SessionEvent } from './ISessionEventBroadcaster.js';
 
 interface Subscriber {
   id: string;
