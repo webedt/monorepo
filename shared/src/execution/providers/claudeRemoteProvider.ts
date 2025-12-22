@@ -6,13 +6,13 @@
  */
 
 import {
-  ClaudeWebClient,
   type IClaudeWebClient,
   type SessionEvent,
   type CreateSessionParams,
   type TitleGenerationEvent,
   generateTitle,
 } from '../../claudeWeb/index.js';
+import { services } from '../../services/registry.js';
 import { logger } from '../../utils/logging/logger.js';
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL, CLAUDE_ORG_UUID, CLAUDE_COOKIES, OPENROUTER_API_KEY } from '../../config/env.js';
@@ -65,7 +65,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
    * Create a ClaudeWebClient with the given auth
    */
   private createClient(claudeAuth: ClaudeAuth, environmentId?: string): IClaudeWebClient {
-    return new ClaudeWebClient({
+    return services.get<IClaudeWebClient>({
       accessToken: claudeAuth.accessToken,
       environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,

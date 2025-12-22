@@ -65,3 +65,8 @@ export type {
 // Session management
 // Note: Exports BroadcastEvent (renamed from SessionEvent) to avoid conflict with ClaudeSessionEvent
 export * from './sessions/index.js';
+
+// =============================================================================
+// SERVICES - Dependency injection and service registry
+// =============================================================================
+export * from './services/index.js';

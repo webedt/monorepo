@@ -26,7 +26,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth.js';
 import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {
   logger,
-  ClaudeWebClient,
+  services,
   type IClaudeWebClient,
   generateTitle,
   type ClaudeSessionEvent as SessionEvent,
@@ -90,7 +90,7 @@ async function getClaudeAuth(userId: string): Promise<ClaudeAuth | null> {
  * Create a ClaudeWebClient for a user
  */
 function createClient(claudeAuth: ClaudeAuth, environmentId?: string): IClaudeWebClient {
-  return new ClaudeWebClient({
+  return services.get<IClaudeWebClient>({
     accessToken: claudeAuth.accessToken,
     environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || '',
     baseUrl: CLAUDE_API_BASE_URL,

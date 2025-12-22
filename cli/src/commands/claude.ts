@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { ClaudeWebClient, ClaudeRemoteError, fetchEnvironmentIdFromSessions, db, users } from '@webedt/shared';
+import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, db, users, services } from '@webedt/shared';
+import type { IClaudeWebClient } from '@webedt/shared';
 import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
 import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
@@ -138,9 +139,9 @@ async function getClientConfig(options: { token?: string; environment?: string; 
 }
 
 // Helper to create client
-async function createClient(options: { token?: string; environment?: string; org?: string }) {
+async function createClient(options: { token?: string; environment?: string; org?: string }): Promise<IClaudeWebClient> {
   const config = await getClientConfig(options);
-  return new ClaudeWebClient(config);
+  return services.get<IClaudeWebClient>(config);
 }
 
 // Format event for display
