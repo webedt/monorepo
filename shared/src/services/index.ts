@@ -4,11 +4,10 @@
  */
 
 export {
-  services,
-  setServiceFactory,
-  resetServices,
-  type IServiceRegistry,
-  type ServiceConfigMap,
+  ServiceProvider,
+  ServiceScope,
+  // Type exports
+  type ConfigFor,
   type ServiceType,
   // Re-exported interfaces
   type ILogger,
@@ -22,4 +21,6 @@ export {
   type IClaudeWebClient,
   type IGitHelper,
   type IGitHubClient,
+  type ClaudeRemoteClientConfig,
+  type CircuitBreakerConfig,
 } from './registry.js';

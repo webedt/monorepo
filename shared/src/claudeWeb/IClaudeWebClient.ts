@@ -40,6 +40,21 @@ import type {
  */
 export interface IClaudeWebClient {
   /**
+   * Reconfigure the client with new settings.
+   *
+   * Use this method to update the client configuration without creating
+   * a new instance. Useful for updating tokens, environment, or model.
+   *
+   * @param config - New client configuration
+   */
+  configure(config: {
+    accessToken: string;
+    environmentId?: string;
+    baseUrl?: string;
+    model?: string;
+  }): void;
+
+  /**
    * Update the access token.
    *
    * Use this method to refresh the token when it expires without creating

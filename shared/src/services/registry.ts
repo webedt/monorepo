@@ -1,34 +1,39 @@
 /**
  * Service Registry
  *
- * A type-safe service locator for dependency injection.
- * Provides centralized access to singletons and factory methods.
+ * A type-safe service locator for dependency injection with scoping support.
  *
  * ## Usage
  *
  * ```typescript
- * import { services } from '@webedt/shared';
+ * import { ServiceProvider } from '@webedt/shared';
  *
- * // Get singletons
- * const logger = services.get<ILogger>();
- * const metrics = services.get<IMetricsRegistry>();
+ * // Global singletons
+ * const logger = ServiceProvider.get<ILogger>();
+ * const metrics = ServiceProvider.get<IMetricsRegistry>();
  *
- * // Create new instances (factories)
- * const client = services.get<IClaudeWebClient>({ accessToken, environmentId });
- * const git = services.get<IGitHelper>('/path/to/workspace');
+ * // Configurable services - same instance, reconfigured if config provided
+ * const client = ServiceProvider.get<IClaudeWebClient>({ accessToken, environmentId });
+ * const clientAgain = ServiceProvider.get<IClaudeWebClient>(); // Same instance, no reconfigure
+ * const clientUpdated = ServiceProvider.get<IClaudeWebClient>(newConfig); // Reconfigured
+ *
+ * // Scoped instances - isolated per scope
+ * const scope = ServiceProvider.createScope();
+ * const scopedClient = scope.get<IClaudeWebClient>(config);
+ * scope.dispose();
  * ```
  *
  * ## Testing
  *
  * ```typescript
- * import { setServiceFactory, resetServices } from '@webedt/shared';
+ * import { ServiceProvider } from '@webedt/shared';
  *
  * beforeEach(() => {
- *   setServiceFactory<ILogger>(() => mockLogger);
+ *   ServiceProvider.override<ILogger>(() => mockLogger);
  * });
  *
  * afterEach(() => {
- *   resetServices();
+ *   ServiceProvider.reset();
  * });
  * ```
  *
@@ -48,7 +53,7 @@ import type { ClaudeRemoteClientConfig } from '../claudeWeb/types.js';
 import type { IGitHelper } from '../github/IGitHelper.js';
 import type { IGitHubClient } from '../github/IGitHubClient.js';
 
-// Implementation imports (lazy loaded)
+// Implementation imports
 import { logger } from '../utils/logging/logger.js';
 import { logCapture } from '../utils/logging/logCapture.js';
 import { healthMonitor } from '../utils/monitoring/healthMonitor.js';
@@ -61,34 +66,13 @@ import { GitHelper } from '../github/gitHelper.js';
 import { GitHubClient } from '../github/githubClient.js';
 
 // =============================================================================
-// Type-to-Config Mapping
+// Type Registry - Maps service types to their configs
 // =============================================================================
 
 /**
- * Maps interface types to their configuration types.
- * Singletons have `void` config, factories have their specific config type.
+ * Service config registry - maps service interface to its config type
  */
-export interface ServiceConfigMap {
-  // Singletons (no config)
-  ILogger: void;
-  ILogCapture: void;
-  IHealthMonitor: void;
-  IMetricsRegistry: void;
-  ICircuitBreakerRegistry: void;
-  ISessionEventBroadcaster: void;
-  ISessionListBroadcaster: void;
-  IGitHubClient: void;
-
-  // Factories (config required)
-  IClaudeWebClient: ClaudeRemoteClientConfig;
-  IGitHelper: string;
-  ICircuitBreaker: Partial<CircuitBreakerConfig> | undefined;
-}
-
-/**
- * Helper type to get config type for a service interface
- */
-type ConfigFor<T> =
+export type ConfigFor<T> =
   T extends ILogger ? void :
   T extends ILogCapture ? void :
   T extends IHealthMonitor ? void :
@@ -118,209 +102,291 @@ export type ServiceType =
   | IGitHelper
   | ICircuitBreaker;
 
-// =============================================================================
-// Service Registry Interface
-// =============================================================================
-
 /**
- * Service registry interface for dependency injection.
+ * Configurable service interface - services that support reconfiguration
  */
-export interface IServiceRegistry {
-  /**
-   * Get a service by type.
-   *
-   * For singletons (ILogger, IMetricsRegistry, etc.), returns the same instance each time.
-   * For factories (IClaudeWebClient, IGitHelper, etc.), creates a new instance.
-   *
-   * @typeParam T - Service interface type
-   * @param config - Configuration (required for factories, omit for singletons)
-   * @returns Service instance
-   *
-   * @example
-   * ```typescript
-   * // Singletons - no config needed
-   * const logger = services.get<ILogger>();
-   *
-   * // Factories - config required
-   * const client = services.get<IClaudeWebClient>({ accessToken, environmentId });
-   * ```
-   */
-  get<T extends ServiceType>(
-    ...args: ConfigFor<T> extends void ? [] : [config: ConfigFor<T>]
-  ): T;
+interface IConfigurable<TConfig> {
+  configure(config: TConfig): void;
 }
 
 // =============================================================================
 // Factory Registry
 // =============================================================================
 
-type FactoryFn = (config: unknown) => unknown;
+type FactoryFn<T = unknown, TConfig = unknown> = (config?: TConfig) => T;
+type ConfigureFn<TConfig = unknown> = (instance: unknown, config: TConfig) => void;
 
-// Factory functions keyed by a type identifier
-const factories = new Map<string, FactoryFn>();
-const defaultFactories = new Map<string, FactoryFn>();
+interface ServiceRegistration {
+  factory: FactoryFn;
+  configure?: ConfigureFn;
+}
 
-// Register default factories
+const registrations = new Map<string, ServiceRegistration>();
+const defaultRegistrations = new Map<string, ServiceRegistration>();
+
+/**
+ * Register default factories
+ */
 function registerDefaults(): void {
-  // Singletons
-  defaultFactories.set('ILogger', () => logger);
-  defaultFactories.set('ILogCapture', () => logCapture);
-  defaultFactories.set('IHealthMonitor', () => healthMonitor);
-  defaultFactories.set('IMetricsRegistry', () => metrics);
-  defaultFactories.set('ICircuitBreakerRegistry', () => circuitBreakerRegistry);
-  defaultFactories.set('ISessionEventBroadcaster', () => sessionEventBroadcaster);
-  defaultFactories.set('ISessionListBroadcaster', () => sessionListBroadcaster);
-  defaultFactories.set('IGitHubClient', () => new GitHubClient());
+  // Singletons - no configuration needed
+  defaultRegistrations.set('ILogger', {
+    factory: () => logger,
+  });
+  defaultRegistrations.set('ILogCapture', {
+    factory: () => logCapture,
+  });
+  defaultRegistrations.set('IHealthMonitor', {
+    factory: () => healthMonitor,
+  });
+  defaultRegistrations.set('IMetricsRegistry', {
+    factory: () => metrics,
+  });
+  defaultRegistrations.set('ICircuitBreakerRegistry', {
+    factory: () => circuitBreakerRegistry,
+  });
+  defaultRegistrations.set('ISessionEventBroadcaster', {
+    factory: () => sessionEventBroadcaster,
+  });
+  defaultRegistrations.set('ISessionListBroadcaster', {
+    factory: () => sessionListBroadcaster,
+  });
+  defaultRegistrations.set('IGitHubClient', {
+    factory: () => new GitHubClient(),
+  });
 
-  // Factories
-  defaultFactories.set('IClaudeWebClient', (config) => new ClaudeWebClient(config as ClaudeRemoteClientConfig));
-  defaultFactories.set('IGitHelper', (config) => new GitHelper(config as string));
-  defaultFactories.set('ICircuitBreaker', (config) => createCircuitBreaker(config as Partial<CircuitBreakerConfig>));
+  // Configurable services
+  defaultRegistrations.set('IClaudeWebClient', {
+    factory: ((config?: ClaudeRemoteClientConfig) => new ClaudeWebClient(config!)) as FactoryFn,
+    configure: ((instance: unknown, config: ClaudeRemoteClientConfig) => {
+      (instance as IConfigurable<ClaudeRemoteClientConfig>).configure(config);
+    }) as ConfigureFn,
+  });
+  defaultRegistrations.set('IGitHelper', {
+    factory: ((config?: string) => new GitHelper(config!)) as FactoryFn,
+    configure: ((instance: unknown, config: string) => {
+      (instance as IConfigurable<string>).configure(config);
+    }) as ConfigureFn,
+  });
+  defaultRegistrations.set('ICircuitBreaker', {
+    factory: ((config?: Partial<CircuitBreakerConfig>) => createCircuitBreaker(config)) as FactoryFn,
+  });
 
-  // Copy defaults to active factories
-  for (const [key, factory] of defaultFactories) {
-    factories.set(key, factory);
+  // Copy defaults to active registrations
+  for (const [key, reg] of defaultRegistrations) {
+    registrations.set(key, reg);
   }
 }
 
 registerDefaults();
 
 // =============================================================================
-// Type Key Resolution
+// Type Key Resolution - Infer key from config shape at runtime
 // =============================================================================
 
 /**
- * Maps a type parameter to its string key.
- * This is done via conditional type checking at runtime using config shape.
+ * Singleton service keys (services without config)
  */
-function resolveTypeKey(config: unknown): string {
-  // For factories, we can identify by config shape
-  if (config !== undefined) {
-    if (typeof config === 'string') {
-      return 'IGitHelper';
-    }
-    if (typeof config === 'object' && config !== null) {
-      if ('accessToken' in config) {
-        return 'IClaudeWebClient';
-      }
-      // CircuitBreaker config or undefined
-      return 'ICircuitBreaker';
-    }
-  }
+const singletonKeys = [
+  'ILogger',
+  'ILogCapture',
+  'IHealthMonitor',
+  'IMetricsRegistry',
+  'ICircuitBreakerRegistry',
+  'ISessionEventBroadcaster',
+  'ISessionListBroadcaster',
+  'IGitHubClient',
+] as const;
 
-  // For singletons called without config, we need the caller to specify
-  // This will be handled by overloads
-  throw new Error('Cannot resolve service type. For singletons, use the specific getter.');
+/**
+ * Resolve type key from config shape
+ */
+function resolveKeyFromConfig(config: unknown): string | null {
+  if (typeof config === 'string') {
+    return 'IGitHelper';
+  }
+  if (typeof config === 'object' && config !== null) {
+    if ('accessToken' in config) {
+      return 'IClaudeWebClient';
+    }
+    // CircuitBreaker config (has threshold, timeout, etc.)
+    return 'ICircuitBreaker';
+  }
+  return null;
 }
 
 // =============================================================================
-// Service Registry Implementation
+// Service Scope
 // =============================================================================
 
-class ServiceRegistry implements IServiceRegistry {
+/**
+ * A scope for managing service instances.
+ * Instances are cached within the scope and can be reconfigured.
+ */
+export class ServiceScope {
+  private instances = new Map<string, unknown>();
+  private disposed = false;
+  private singletonIndex = 0;
+
+  /**
+   * Get a service instance.
+   * - If instance exists and config provided: reconfigure and return
+   * - If instance exists and no config: return as-is
+   * - If no instance: create with config (config required for configurable services)
+   */
   get<T extends ServiceType>(
-    ...args: ConfigFor<T> extends void ? [] : [config: ConfigFor<T>]
+    ...args: ConfigFor<T> extends void ? [] : [config?: ConfigFor<T>]
+  ): T {
+    if (this.disposed) {
+      throw new Error('ServiceScope has been disposed');
+    }
+
+    const config = args[0];
+
+    // Try to resolve key from config
+    let key = resolveKeyFromConfig(config);
+
+    // If no config, must be a singleton - use round-robin to get next singleton
+    // This is a limitation: without runtime type info, we can't know which singleton
+    if (!key) {
+      key = singletonKeys[this.singletonIndex % singletonKeys.length];
+      this.singletonIndex++;
+    }
+
+    const existing = this.instances.get(key);
+    if (existing) {
+      if (config !== undefined) {
+        const registration = registrations.get(key);
+        if (registration?.configure) {
+          registration.configure(existing, config);
+        }
+      }
+      return existing as T;
+    }
+
+    const registration = registrations.get(key);
+    if (!registration) {
+      throw new Error(`No factory registered for service type: ${key}`);
+    }
+
+    const instance = registration.factory(config);
+    this.instances.set(key, instance);
+    return instance as T;
+  }
+
+  /**
+   * Dispose this scope and clear all instances
+   */
+  dispose(): void {
+    this.instances.clear();
+    this.disposed = true;
+  }
+}
+
+// =============================================================================
+// Global Scope & ServiceProvider
+// =============================================================================
+
+// Global instance cache
+const globalInstances = new Map<string, unknown>();
+
+// Track singleton access order for round-robin resolution
+let globalSingletonIndex = 0;
+
+/**
+ * Service Provider - static access to services with global and scoped instances.
+ *
+ * @example
+ * ```typescript
+ * // Singletons (no config needed)
+ * const logger = ServiceProvider.get<ILogger>();
+ * const metrics = ServiceProvider.get<IMetricsRegistry>();
+ *
+ * // Configurable services
+ * const client = ServiceProvider.get<IClaudeWebClient>(config);
+ *
+ * // Scoped
+ * const scope = ServiceProvider.createScope();
+ * const scopedClient = scope.get<IClaudeWebClient>(config);
+ * scope.dispose();
+ * ```
+ */
+export class ServiceProvider {
+  /**
+   * Get a service instance from the global scope.
+   * - For singletons: returns cached instance (creates if needed)
+   * - For configurable services: first call creates, subsequent calls reconfigure
+   */
+  static get<T extends ServiceType>(
+    ...args: ConfigFor<T> extends void ? [] : [config?: ConfigFor<T>]
   ): T {
     const config = args[0];
 
-    // Try to resolve the type from config
-    const typeKey = resolveTypeKey(config);
-    const factory = factories.get(typeKey);
+    // Try to resolve key from config
+    let key = resolveKeyFromConfig(config);
 
-    if (!factory) {
-      throw new Error(`No factory registered for service type: ${typeKey}`);
+    // If no config, must be a singleton - use round-robin
+    if (!key) {
+      key = singletonKeys[globalSingletonIndex % singletonKeys.length];
+      globalSingletonIndex++;
     }
 
-    return factory(config) as T;
+    const registration = registrations.get(key);
+    if (!registration) {
+      throw new Error(`No factory registered for service type: ${key}`);
+    }
+
+    let instance = globalInstances.get(key);
+
+    if (instance) {
+      if (config !== undefined && registration.configure) {
+        registration.configure(instance, config);
+      }
+    } else {
+      instance = registration.factory(config);
+      globalInstances.set(key, instance);
+    }
+
+    return instance as T;
   }
 
-  // Singleton getters (type-safe, no config needed)
-  getLogger(): ILogger {
-    return factories.get('ILogger')!(undefined) as ILogger;
+  /**
+   * Create a new isolated service scope.
+   */
+  static createScope(): ServiceScope {
+    return new ServiceScope();
   }
 
-  getLogCapture(): ILogCapture {
-    return factories.get('ILogCapture')!(undefined) as ILogCapture;
+  /**
+   * Override a service factory (useful for testing)
+   */
+  static override<T extends ServiceType>(
+    key: string,
+    factory: (config?: ConfigFor<T>) => T,
+    configure?: (instance: T, config: ConfigFor<T>) => void
+  ): void {
+    registrations.set(key, {
+      factory: factory as FactoryFn,
+      configure: configure as ConfigureFn | undefined,
+    });
   }
 
-  getHealthMonitor(): IHealthMonitor {
-    return factories.get('IHealthMonitor')!(undefined) as IHealthMonitor;
-  }
-
-  getMetrics(): IMetricsRegistry {
-    return factories.get('IMetricsRegistry')!(undefined) as IMetricsRegistry;
-  }
-
-  getCircuitBreakerRegistry(): ICircuitBreakerRegistry {
-    return factories.get('ICircuitBreakerRegistry')!(undefined) as ICircuitBreakerRegistry;
-  }
-
-  getSessionEventBroadcaster(): ISessionEventBroadcaster {
-    return factories.get('ISessionEventBroadcaster')!(undefined) as ISessionEventBroadcaster;
-  }
-
-  getSessionListBroadcaster(): ISessionListBroadcaster {
-    return factories.get('ISessionListBroadcaster')!(undefined) as ISessionListBroadcaster;
-  }
-
-  getGitHubClient(): IGitHubClient {
-    return factories.get('IGitHubClient')!(undefined) as IGitHubClient;
+  /**
+   * Reset all overrides and clear global instances
+   */
+  static reset(): void {
+    registrations.clear();
+    for (const [key, reg] of defaultRegistrations) {
+      registrations.set(key, reg);
+    }
+    globalInstances.clear();
+    globalSingletonIndex = 0;
   }
 }
 
 // =============================================================================
-// Exports
+// Re-exports
 // =============================================================================
 
-/**
- * Global service registry instance.
- *
- * @example
- * ```typescript
- * import { services } from '@webedt/shared';
- *
- * // Factories - pass config, type is inferred
- * const client = services.get<IClaudeWebClient>({ accessToken, environmentId });
- * const git = services.get<IGitHelper>('/path/to/workspace');
- *
- * // Singletons - use specific getters
- * const logger = services.getLogger();
- * const metrics = services.getMetrics();
- * ```
- */
-export const services = new ServiceRegistry();
-
-/**
- * Set a custom factory for a service type (useful for testing).
- *
- * @typeParam T - Service interface type
- * @param typeKey - The type name (e.g., 'ILogger', 'IClaudeWebClient')
- * @param factory - Custom factory function
- *
- * @example
- * ```typescript
- * setServiceFactory('ILogger', () => mockLogger);
- * setServiceFactory('IClaudeWebClient', (config) => mockClient);
- * ```
- */
-export function setServiceFactory<T extends ServiceType>(
-  typeKey: string,
-  factory: (config: ConfigFor<T>) => T
-): void {
-  factories.set(typeKey, factory as FactoryFn);
-}
-
-/**
- * Reset all factories to their defaults.
- */
-export function resetServices(): void {
-  factories.clear();
-  for (const [key, factory] of defaultFactories) {
-    factories.set(key, factory);
-  }
-}
-
-// Re-export interfaces for convenience
 export type {
   ILogger,
   ILogCapture,
@@ -333,4 +399,6 @@ export type {
   IClaudeWebClient,
   IGitHelper,
   IGitHubClient,
+  ClaudeRemoteClientConfig,
+  CircuitBreakerConfig,
 };

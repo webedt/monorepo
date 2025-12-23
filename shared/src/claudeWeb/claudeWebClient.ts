@@ -177,6 +177,41 @@ export class ClaudeWebClient implements IClaudeWebClient {
   }
 
   /**
+   * Reconfigure the client with new settings.
+   *
+   * Use this method to update the client configuration without creating
+   * a new instance. Useful for updating tokens, environment, or model.
+   *
+   * @param config - New client configuration
+   *
+   * @example
+   * ```typescript
+   * // Reconfigure with new environment
+   * client.configure({
+   *   accessToken: newToken,
+   *   environmentId: 'env_new',
+   * });
+   * ```
+   */
+  configure(config: {
+    accessToken: string;
+    environmentId?: string;
+    baseUrl?: string;
+    model?: string;
+  }): void {
+    this.accessToken = config.accessToken;
+    if (config.environmentId !== undefined) {
+      this.environmentId = config.environmentId;
+    }
+    if (config.baseUrl !== undefined) {
+      this.baseUrl = config.baseUrl;
+    }
+    if (config.model !== undefined) {
+      this.model = config.model;
+    }
+  }
+
+  /**
    * Update the access token.
    *
    * Use this method to refresh the token when it expires without creating

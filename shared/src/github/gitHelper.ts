@@ -82,6 +82,20 @@ export class GitHelper implements IGitHelper {
   }
 
   /**
+   * Reconfigure the helper with a new workspace path.
+   *
+   * Use this method to change the workspace path without creating
+   * a new instance.
+   *
+   * @param workspacePath - New workspace path
+   */
+  configure(workspacePath: string): void {
+    this.workspacePath = workspacePath;
+    this.git = simpleGit(workspacePath);
+    this.safeDirectoryAdded = false; // Reset so safe.directory is added for new path
+  }
+
+  /**
    * Add the workspace to git's safe.directory config to avoid
    * "dubious ownership" errors when running git commands on
    * directories owned by different users

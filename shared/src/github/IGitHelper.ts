@@ -27,6 +27,16 @@
  */
 export interface IGitHelper {
   /**
+   * Reconfigure the helper with a new workspace path.
+   *
+   * Use this method to change the workspace path without creating
+   * a new instance.
+   *
+   * @param workspacePath - New workspace path
+   */
+  configure(workspacePath: string): void;
+
+  /**
    * Get human-readable git status.
    *
    * Returns a formatted string showing the current branch, modified files,
