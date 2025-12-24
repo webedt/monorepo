@@ -8,26 +8,17 @@
  * @see ClaudeWebClient for the concrete implementation
  */
 
-import type {
-  CreateSessionParams,
-  CreateSessionResult,
-  Session,
-  EventsResponse,
-  ListSessionsResponse,
-  SessionResult,
-  EventCallback,
-  PollOptions,
-} from './types.js';
+import type { ClaudeWebClientConfig } from './types.js';
+import type { CreateSessionParams } from './types.js';
+import type { CreateSessionResult } from './types.js';
+import type { Session } from './types.js';
+import type { EventsResponse } from './types.js';
+import type { ListSessionsResponse } from './types.js';
+import type { SessionResult } from './types.js';
+import type { EventCallback } from './types.js';
+import type { PollOptions } from './types.js';
 
-/**
- * Configuration for the Claude Web Client.
- */
-export interface ClaudeWebClientConfig {
-  accessToken: string;
-  environmentId?: string;
-  baseUrl?: string;
-  model?: string;
-}
+export type { ClaudeWebClientConfig } from './types.js';
 
 /**
  * Interface for Claude Web Client with full documentation.

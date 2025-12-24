@@ -31,6 +31,16 @@ export interface ClaudeRemoteClientConfig {
 }
 
 /**
+ * Configuration for the Claude Web Client.
+ */
+export type ClaudeWebClientConfig = {
+  accessToken: string;
+  environmentId?: string;
+  baseUrl?: string;
+  model?: string;
+};
+
+/**
  * Parameters for creating a new session
  */
 export interface CreateSessionParams {

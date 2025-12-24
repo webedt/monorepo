@@ -1,36 +1,21 @@
-/**
- * Claude Web Sessions Client
- *
- * @see IClaudeWebClient for full method documentation
- * @see fetchEnvironmentIdFromSessions for environment ID discovery
- */
-
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { AClaudeWebClient } from './AClaudeWebClient.js';
-import {
-  ClaudeRemoteClientConfig,
-  CreateSessionParams,
-  CreateSessionResult,
-  Session,
-  SessionEvent,
-  EventsResponse,
-  ListSessionsResponse,
-  SessionResult,
-  EventCallback,
-  PollOptions,
-  ClaudeRemoteError,
-} from './types.js';
+import type { ClaudeRemoteClientConfig } from './types.js';
+import type { CreateSessionParams } from './types.js';
+import type { CreateSessionResult } from './types.js';
+import type { Session } from './types.js';
+import type { SessionEvent } from './types.js';
+import type { EventsResponse } from './types.js';
+import type { ListSessionsResponse } from './types.js';
+import type { SessionResult } from './types.js';
+import type { EventCallback } from './types.js';
+import type { PollOptions } from './types.js';
+import { ClaudeRemoteError } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 const DEFAULT_MODEL = 'claude-opus-4-5-20251101';
 
-/**
- * Fetch environment ID from a user's recent sessions.
- *
- * This utility discovers a user's environment ID by querying their existing sessions.
- * Useful when `CLAUDE_ENVIRONMENT_ID` is not configured in the environment.
- */
 export async function fetchEnvironmentIdFromSessions(
   accessToken: string,
   baseUrl: string = DEFAULT_BASE_URL,
@@ -63,11 +48,6 @@ export async function fetchEnvironmentIdFromSessions(
   }
 }
 
-/**
- * Client for interacting with the Claude Remote Sessions API.
- *
- * @see IClaudeWebClient for full method documentation
- */
 export class ClaudeWebClient extends AClaudeWebClient {
   private accessToken: string;
   private environmentId: string;
