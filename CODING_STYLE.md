@@ -68,7 +68,7 @@ abstract methodName(
 
 - **Classes:** PascalCase (`ClaudeWebClient`)
 - **Abstract classes:** Prefix with `A` (`AClaudeWebClient`)
-- **Interfaces:** Prefix with `I` for documentation interfaces (`IClaudeWebClient`)
+- **Documentation interfaces:** Prefix with `I` and suffix with `Documentation` (`IClaudeWebClientDocumentation`)
 - **Types:** PascalCase (`SessionResult`, `EventCallback`)
 - **Functions/methods:** camelCase (`createSession`, `pollSession`)
 - **Constants:** SCREAMING_SNAKE_CASE (`DEFAULT_BASE_URL`)
