@@ -1,11 +1,8 @@
-/**
- * In-memory log capture for debugging
- * Captures logs in a circular buffer for retrieval via API
- */
+import { ALogCapture } from './ALogCapture.js';
+import type { CapturedLog } from './ALogCapture.js';
+import type { LogFilter } from './ALogCapture.js';
+import type { LogCaptureStatus } from './ALogCapture.js';
 
-import { ALogCapture, type CapturedLog, type LogFilter } from './ALogCapture.js';
-
-// Re-export types from abstract for backwards compatibility
 export type { CapturedLog, LogFilter, LogCaptureStatus } from './ALogCapture.js';
 
 class LogCapture extends ALogCapture {
@@ -13,9 +10,6 @@ class LogCapture extends ALogCapture {
   private maxLogs: number = 5000;
   private enabled: boolean = true;
 
-  /**
-   * Capture a log entry
-   */
   capture(
     level: CapturedLog['level'],
     message: string,
@@ -46,16 +40,16 @@ class LogCapture extends ALogCapture {
 
     this.logs.push(entry);
 
-    // Circular buffer - remove oldest logs if over limit
     if (this.logs.length > this.maxLogs) {
       this.logs = this.logs.slice(-this.maxLogs);
     }
   }
 
-  /**
-   * Get logs with optional filtering
-   */
-  getLogs(filter?: LogFilter): { logs: CapturedLog[]; total: number; filtered: number } {
+  getLogs(filter?: LogFilter): {
+    logs: CapturedLog[];
+    total: number;
+    filtered: number;
+  } {
     const total = this.logs.length;
     let filtered = this.logs;
 
@@ -83,11 +77,9 @@ class LogCapture extends ALogCapture {
         );
       }
 
-      // Apply limit (default to 100, max 1000)
       const limit = Math.min(filter.limit || 100, 1000);
       filtered = filtered.slice(-limit);
     } else {
-      // Default: return last 100 logs
       filtered = filtered.slice(-100);
     }
 
@@ -98,16 +90,10 @@ class LogCapture extends ALogCapture {
     };
   }
 
-  /**
-   * Clear all captured logs
-   */
   clear(): void {
     this.logs = [];
   }
 
-  /**
-   * Set maximum number of logs to retain
-   */
   setMaxLogs(max: number): void {
     this.maxLogs = max;
     if (this.logs.length > this.maxLogs) {
@@ -115,17 +101,11 @@ class LogCapture extends ALogCapture {
     }
   }
 
-  /**
-   * Enable or disable log capture
-   */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
   }
 
-  /**
-   * Get capture status
-   */
-  getStatus(): { enabled: boolean; count: number; maxLogs: number } {
+  getStatus(): LogCaptureStatus {
     return {
       enabled: this.enabled,
       count: this.logs.length,
@@ -134,5 +114,4 @@ class LogCapture extends ALogCapture {
   }
 }
 
-// Singleton instance
 export const logCapture: ALogCapture = new LogCapture();

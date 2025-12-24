@@ -1,30 +1,11 @@
-/**
- * Circuit Breaker Pattern Implementation
- *
- * Provides protection against cascading failures when external services fail.
- * The circuit breaker has three states:
- * - CLOSED: Normal operation, requests pass through
- * - OPEN: Service is failing, requests are rejected immediately
- * - HALF_OPEN: Testing if service has recovered
- */
-
-import {
-  ACircuitBreaker,
-  ACircuitBreakerRegistry,
-  type CircuitState,
-  type CircuitBreakerConfig,
-  type CircuitBreakerStats,
-  type CircuitBreakerResult,
-} from './ACircuitBreaker.js';
+import { ACircuitBreaker, ACircuitBreakerRegistry } from './ACircuitBreaker.js';
+import type { CircuitState } from './ACircuitBreaker.js';
+import type { CircuitBreakerConfig } from './ACircuitBreaker.js';
+import type { CircuitBreakerStats } from './ACircuitBreaker.js';
+import type { CircuitBreakerResult } from './ACircuitBreaker.js';
 import { logger } from '../logging/logger.js';
 
-// Re-export types from abstract for backwards compatibility
-export type {
-  CircuitState,
-  CircuitBreakerConfig,
-  CircuitBreakerStats,
-  CircuitBreakerResult,
-} from './ACircuitBreaker.js';
+export type { CircuitState, CircuitBreakerConfig, CircuitBreakerStats, CircuitBreakerResult } from './ACircuitBreaker.js';
 
 const DEFAULT_CONFIG: CircuitBreakerConfig = {
   failureThreshold: 5,
@@ -52,16 +33,10 @@ export class CircuitBreaker extends ACircuitBreaker {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  /**
-   * Register a listener for state changes
-   */
   onStateChange(listener: (state: CircuitState, prevState: CircuitState) => void): void {
     this.stateChangeListeners.push(listener);
   }
 
-  /**
-   * Get the current circuit breaker statistics
-   */
   getStats(): CircuitBreakerStats {
     return {
       state: this.state,
@@ -76,16 +51,12 @@ export class CircuitBreaker extends ACircuitBreaker {
     };
   }
 
-  /**
-   * Check if requests can be made
-   */
   canExecute(): boolean {
     if (this.state === 'closed') {
       return true;
     }
 
     if (this.state === 'open') {
-      // Check if enough time has passed to try half-open
       const timeSinceFailure = this.lastFailureTime
         ? Date.now() - this.lastFailureTime.getTime()
         : Infinity;
@@ -97,13 +68,9 @@ export class CircuitBreaker extends ACircuitBreaker {
       return false;
     }
 
-    // Half-open state: allow limited attempts
     return this.halfOpenAttempts < this.config.halfOpenMaxAttempts;
   }
 
-  /**
-   * Execute an operation through the circuit breaker
-   */
   async execute<T>(operation: () => Promise<T>): Promise<CircuitBreakerResult<T>> {
     if (!this.canExecute()) {
       logger.warn(`Circuit breaker [${this.config.name}] rejected request - circuit is open`, {
@@ -134,9 +101,6 @@ export class CircuitBreaker extends ACircuitBreaker {
     }
   }
 
-  /**
-   * Execute with fallback - returns fallback value if circuit is open or operation fails
-   */
   async executeWithFallback<T>(
     operation: () => Promise<T>,
     fallback: T
@@ -158,9 +122,6 @@ export class CircuitBreaker extends ACircuitBreaker {
     return { value: fallback, degraded: true };
   }
 
-  /**
-   * Record a successful operation
-   */
   private recordSuccess(): void {
     this.consecutiveFailures = 0;
     this.consecutiveSuccesses++;
@@ -181,9 +142,6 @@ export class CircuitBreaker extends ACircuitBreaker {
     });
   }
 
-  /**
-   * Record a failed operation
-   */
   private recordFailure(error: Error): void {
     this.consecutiveSuccesses = 0;
     this.consecutiveFailures++;
@@ -208,9 +166,6 @@ export class CircuitBreaker extends ACircuitBreaker {
     }
   }
 
-  /**
-   * Transition to a new state
-   */
   private transitionTo(newState: CircuitState): void {
     const prevState = this.state;
     if (prevState === newState) return;
@@ -231,7 +186,6 @@ export class CircuitBreaker extends ACircuitBreaker {
       newState,
     });
 
-    // Notify listeners
     for (const listener of this.stateChangeListeners) {
       try {
         listener(newState, prevState);
@@ -241,9 +195,6 @@ export class CircuitBreaker extends ACircuitBreaker {
     }
   }
 
-  /**
-   * Manually reset the circuit breaker to closed state
-   */
   reset(): void {
     const prevState = this.state;
     this.state = 'closed';
@@ -258,51 +209,30 @@ export class CircuitBreaker extends ACircuitBreaker {
     });
   }
 
-  /**
-   * Check if the circuit is open (rejecting requests)
-   */
   isOpen(): boolean {
     return this.state === 'open';
   }
 
-  /**
-   * Check if the circuit is closed (normal operation)
-   */
   isClosed(): boolean {
     return this.state === 'closed';
   }
 
-  /**
-   * Get the current state
-   */
   getState(): CircuitState {
     return this.state;
   }
 
-  /**
-   * Get the circuit breaker name
-   */
   getName(): string {
     return this.config.name;
   }
 }
 
-/**
- * Create a circuit breaker instance
- */
 export function createCircuitBreaker(config: Partial<CircuitBreakerConfig> = {}): ACircuitBreaker {
   return new CircuitBreaker(config);
 }
 
-/**
- * Circuit breaker registry for managing multiple breakers
- */
 class CircuitBreakerRegistry extends ACircuitBreakerRegistry {
   private breakers: Map<string, ACircuitBreaker> = new Map();
 
-  /**
-   * Get or create a circuit breaker by name
-   */
   get(name: string, config?: Partial<CircuitBreakerConfig>): ACircuitBreaker {
     let breaker = this.breakers.get(name);
     if (!breaker) {
@@ -312,9 +242,6 @@ class CircuitBreakerRegistry extends ACircuitBreakerRegistry {
     return breaker;
   }
 
-  /**
-   * Get all circuit breaker statistics
-   */
   getAllStats(): Record<string, CircuitBreakerStats> {
     const stats: Record<string, CircuitBreakerStats> = {};
     for (const [name, breaker] of this.breakers) {
@@ -323,22 +250,15 @@ class CircuitBreakerRegistry extends ACircuitBreakerRegistry {
     return stats;
   }
 
-  /**
-   * Reset all circuit breakers
-   */
   resetAll(): void {
     for (const breaker of this.breakers.values()) {
       breaker.reset();
     }
   }
 
-  /**
-   * Get the number of registered circuit breakers
-   */
   size(): number {
     return this.breakers.size;
   }
 }
 
-// Global registry instance
 export const circuitBreakerRegistry: ACircuitBreakerRegistry = new CircuitBreakerRegistry();

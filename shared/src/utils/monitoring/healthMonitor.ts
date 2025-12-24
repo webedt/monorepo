@@ -1,36 +1,14 @@
-/**
- * Health Monitoring Service
- *
- * Provides comprehensive health monitoring with:
- * - Database health checks
- * - External service status
- * - Circuit breaker states
- * - Metrics aggregation
- * - Automatic recovery mechanisms
- */
-
-import {
-  AHealthMonitor,
-  type HealthCheckResult,
-  type ServiceHealth,
-  type DetailedHealthStatus,
-  type HealthCheckFunction,
-} from './AHealthMonitor.js';
+import { AHealthMonitor } from './AHealthMonitor.js';
+import type { HealthCheckResult } from './AHealthMonitor.js';
+import type { ServiceHealth } from './AHealthMonitor.js';
+import type { DetailedHealthStatus } from './AHealthMonitor.js';
+import type { HealthCheckFunction } from './AHealthMonitor.js';
 import { logger } from '../logging/logger.js';
 import { metrics } from './metrics.js';
 import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
 
-// Re-export types from abstract for backwards compatibility
-export type {
-  HealthCheckResult,
-  ServiceHealth,
-  DetailedHealthStatus,
-  HealthCheckFunction,
-} from './AHealthMonitor.js';
+export type { HealthCheckResult, ServiceHealth, DetailedHealthStatus, HealthCheckFunction } from './AHealthMonitor.js';
 
-/**
- * Health Monitor Class
- */
 class HealthMonitor extends AHealthMonitor {
   private healthChecks: Map<string, HealthCheckFunction> = new Map();
   private lastCheckResults: Map<string, HealthCheckResult> = new Map();
@@ -42,25 +20,16 @@ class HealthMonitor extends AHealthMonitor {
     intervalMinutes: 5,
   };
 
-  /**
-   * Register a health check function
-   */
   registerCheck(name: string, checkFn: HealthCheckFunction): void {
     this.healthChecks.set(name, checkFn);
     logger.debug(`Registered health check: ${name}`, { component: 'HealthMonitor' });
   }
 
-  /**
-   * Remove a health check
-   */
   unregisterCheck(name: string): void {
     this.healthChecks.delete(name);
     this.lastCheckResults.delete(name);
   }
 
-  /**
-   * Run a single health check
-   */
   async runCheck(name: string): Promise<HealthCheckResult> {
     const checkFn = this.healthChecks.get(name);
     if (!checkFn) {
@@ -102,9 +71,6 @@ class HealthMonitor extends AHealthMonitor {
     }
   }
 
-  /**
-   * Run all health checks
-   */
   async runAllChecks(): Promise<HealthCheckResult[]> {
     const checkPromises = Array.from(this.healthChecks.keys()).map(name =>
       this.runCheck(name)
@@ -113,26 +79,20 @@ class HealthMonitor extends AHealthMonitor {
     return Promise.all(checkPromises);
   }
 
-  /**
-   * Get aggregated health status
-   */
   async getHealthStatus(): Promise<ServiceHealth> {
     const checks = await this.runAllChecks();
 
-    // Determine overall status
     let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
     const hasUnhealthy = checks.some(c => c.status === 'unhealthy');
     const hasDegraded = checks.some(c => c.status === 'degraded');
 
     if (hasUnhealthy) {
-      // If some checks are healthy and some unhealthy, it's degraded
       const hasHealthy = checks.some(c => c.status === 'healthy');
       status = hasHealthy ? 'degraded' : 'unhealthy';
     } else if (hasDegraded) {
       status = 'degraded';
     }
 
-    // Update health metrics
     metrics.updateHealthStatus(status === 'healthy');
 
     return {
@@ -144,9 +104,6 @@ class HealthMonitor extends AHealthMonitor {
     };
   }
 
-  /**
-   * Get detailed health status (for /health endpoint)
-   */
   async getDetailedHealthStatus(config: {
     version?: string;
     service?: string;
@@ -155,7 +112,6 @@ class HealthMonitor extends AHealthMonitor {
   }): Promise<DetailedHealthStatus> {
     const checks = await this.runAllChecks();
 
-    // Find specific service checks
     const dbCheck = checks.find(c => c.name === 'database') || {
       name: 'database',
       status: 'unhealthy' as const,
@@ -164,7 +120,6 @@ class HealthMonitor extends AHealthMonitor {
 
     const storageCheck = checks.find(c => c.name === 'storage');
 
-    // Determine overall status
     let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
     const hasUnhealthy = checks.some(c => c.status === 'unhealthy');
     const hasDegraded = checks.some(c => c.status === 'degraded');
@@ -176,7 +131,6 @@ class HealthMonitor extends AHealthMonitor {
       status = 'degraded';
     }
 
-    // Get memory info
     const memUsage = process.memoryUsage();
 
     return {
@@ -207,9 +161,6 @@ class HealthMonitor extends AHealthMonitor {
     };
   }
 
-  /**
-   * Start periodic health checks
-   */
   startPeriodicChecks(intervalMs: number = 30000): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
@@ -230,9 +181,6 @@ class HealthMonitor extends AHealthMonitor {
     });
   }
 
-  /**
-   * Stop periodic health checks
-   */
   stopPeriodicChecks(): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
@@ -241,39 +189,24 @@ class HealthMonitor extends AHealthMonitor {
     }
   }
 
-  /**
-   * Update cleanup status (called by cleanup job)
-   */
   updateCleanupStatus(success: boolean, cleanedCount: number): void {
     this.cleanupStatus.lastRun = new Date();
     this.cleanupStatus.lastSuccess = success;
     this.cleanupStatus.totalCleaned += cleanedCount;
   }
 
-  /**
-   * Set cleanup interval (for status display)
-   */
   setCleanupInterval(minutes: number): void {
     this.cleanupStatus.intervalMinutes = minutes;
   }
 
-  /**
-   * Get the last known result for a check
-   */
   getLastResult(name: string): HealthCheckResult | undefined {
     return this.lastCheckResults.get(name);
   }
 
-  /**
-   * Get all last known results
-   */
   getAllLastResults(): HealthCheckResult[] {
     return Array.from(this.lastCheckResults.values());
   }
 
-  /**
-   * Check if the system is healthy (quick check)
-   */
   isHealthy(): boolean {
     for (const result of this.lastCheckResults.values()) {
       if (result.status === 'unhealthy') {
@@ -283,11 +216,7 @@ class HealthMonitor extends AHealthMonitor {
     return true;
   }
 
-  /**
-   * Check if the system is ready to serve requests
-   */
   async isReady(): Promise<boolean> {
-    // Run critical checks
     const dbCheck = this.healthChecks.get('database');
     if (dbCheck) {
       const result = await this.runCheck('database');
@@ -297,12 +226,8 @@ class HealthMonitor extends AHealthMonitor {
   }
 }
 
-// Global health monitor instance
 export const healthMonitor: AHealthMonitor = new HealthMonitor();
 
-/**
- * Create a database health check function
- */
 export function createDatabaseHealthCheck(
   checkFn: () => Promise<{ healthy: boolean; latencyMs: number; error?: string }>
 ): HealthCheckFunction {
@@ -328,9 +253,6 @@ export function createDatabaseHealthCheck(
   };
 }
 
-/**
- * Create a storage health check function
- */
 export function createStorageHealthCheck(
   checkFn: () => Promise<{ healthy: boolean; latencyMs?: number; error?: string }>
 ): HealthCheckFunction {
@@ -353,9 +275,6 @@ export function createStorageHealthCheck(
   };
 }
 
-/**
- * Create a generic service health check
- */
 export function createServiceHealthCheck(
   serviceName: string,
   checkFn: () => Promise<boolean>

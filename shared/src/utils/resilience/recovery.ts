@@ -1,17 +1,8 @@
-/**
- * Automatic Recovery Mechanisms
- *
- * Provides automatic recovery strategies for common failure scenarios:
- * - Token expiration and refresh
- * - Network timeouts and disconnections
- * - Repository access issues
- * - Rate limiting
- * - Service unavailability
- */
-
 import { logger } from '../logging/logger.js';
-import { retryWithBackoff, RETRY_CONFIGS, type RetryConfig } from './retry.js';
-import { circuitBreakerRegistry, type CircuitBreaker } from './circuitBreaker.js';
+import { retryWithBackoff, RETRY_CONFIGS } from './retry.js';
+import type { RetryConfig } from './retry.js';
+import { circuitBreakerRegistry } from './circuitBreaker.js';
+import type { CircuitBreaker } from './circuitBreaker.js';
 import { metrics } from '../monitoring/metrics.js';
 
 export type RecoveryStrategy =
@@ -45,9 +36,6 @@ export interface RecoveryOptions {
   fallbackValue?: unknown;
 }
 
-/**
- * Error classifier to determine appropriate recovery strategy
- */
 export function classifyError(error: Error): {
   type: string;
   strategy: RecoveryStrategy;
@@ -58,7 +46,6 @@ export function classifyError(error: Error): {
   const errorCode = (error as any).code;
   const statusCode = (error as any).status || (error as any).statusCode;
 
-  // Token/Auth errors
   if (statusCode === 401 || message.includes('unauthorized') ||
       message.includes('token expired') || message.includes('invalid token')) {
     return {
@@ -69,18 +56,16 @@ export function classifyError(error: Error): {
     };
   }
 
-  // Rate limiting
   if (statusCode === 429 || message.includes('rate limit') ||
       message.includes('too many requests')) {
     return {
       type: 'rate_limit',
       strategy: 'backoff',
       isRetryable: true,
-      suggestedDelayMs: 60000, // 1 minute default
+      suggestedDelayMs: 60000,
     };
   }
 
-  // Network errors
   if (errorCode === 'ENOTFOUND' || errorCode === 'ETIMEDOUT' ||
       errorCode === 'ECONNRESET' || errorCode === 'ECONNREFUSED' ||
       message.includes('network') || message.includes('timeout') ||
@@ -93,7 +78,6 @@ export function classifyError(error: Error): {
     };
   }
 
-  // Server errors (5xx)
   if (statusCode >= 500 && statusCode < 600) {
     return {
       type: 'server_error',
@@ -103,7 +87,6 @@ export function classifyError(error: Error): {
     };
   }
 
-  // Repository lock/conflict errors
   if (statusCode === 409 || statusCode === 423 ||
       message.includes('locked') || message.includes('conflict')) {
     return {
@@ -114,7 +97,6 @@ export function classifyError(error: Error): {
     };
   }
 
-  // Not found (usually not retryable)
   if (statusCode === 404) {
     return {
       type: 'not_found',
@@ -124,7 +106,6 @@ export function classifyError(error: Error): {
     };
   }
 
-  // Validation errors (not retryable)
   if (statusCode === 400 || statusCode === 422) {
     return {
       type: 'validation_error',
@@ -134,7 +115,6 @@ export function classifyError(error: Error): {
     };
   }
 
-  // Unknown errors - try generic retry
   return {
     type: 'unknown_error',
     strategy: 'retry',
@@ -143,9 +123,6 @@ export function classifyError(error: Error): {
   };
 }
 
-/**
- * Attempt automatic recovery from an error
- */
 export async function attemptRecovery(
   error: Error,
   context: Omit<RecoveryContext, 'error'>,
@@ -154,7 +131,6 @@ export async function attemptRecovery(
   const classification = classifyError(error);
   const fullContext: RecoveryContext = { ...context, error };
 
-  // Log recovery attempt
   logger.info(`Attempting recovery for ${classification.type}`, {
     component: 'Recovery',
     operation: context.operation,
@@ -163,19 +139,16 @@ export async function attemptRecovery(
     attempt: context.attempt,
   });
 
-  // Notify callback if provided
   if (options.onRecoveryAttempt) {
     options.onRecoveryAttempt(fullContext, classification.strategy);
   }
 
-  // Record metric
   metrics.recordRetryAttempt(
     context.operation,
     context.attempt,
     false
   );
 
-  // Apply recovery strategy
   switch (classification.strategy) {
     case 'token_refresh':
       return handleTokenRefresh(fullContext, options);
@@ -205,7 +178,6 @@ export async function attemptRecovery(
           data: options.fallbackValue,
         };
       }
-      // Fall through to skip if no fallback
 
     case 'skip':
     default:
@@ -218,9 +190,6 @@ export async function attemptRecovery(
   }
 }
 
-/**
- * Handle token refresh recovery
- */
 async function handleTokenRefresh(
   context: RecoveryContext,
   options: RecoveryOptions
@@ -264,9 +233,6 @@ async function handleTokenRefresh(
   }
 }
 
-/**
- * Handle circuit breaker recovery
- */
 async function handleCircuitBreaker(
   context: RecoveryContext,
   options: RecoveryOptions
@@ -278,7 +244,6 @@ async function handleCircuitBreaker(
     halfOpenMaxAttempts: 2,
   });
 
-  // Check if circuit is open
   if (breaker.isOpen()) {
     return {
       recovered: false,
@@ -287,9 +252,6 @@ async function handleCircuitBreaker(
       shouldRetry: false,
     };
   }
-
-  // Record failure in circuit breaker
-  // (This will be done by the calling code when they execute through the breaker)
 
   return {
     recovered: false,
@@ -300,14 +262,10 @@ async function handleCircuitBreaker(
   };
 }
 
-/**
- * Handle backoff recovery (for rate limits and locks)
- */
 async function handleBackoff(
   context: RecoveryContext,
   suggestedDelayMs: number
 ): Promise<RecoveryResult> {
-  // Check for Retry-After header in error
   const retryAfter = (context.error as any).response?.headers?.['retry-after'];
   let delayMs = suggestedDelayMs;
 
@@ -318,7 +276,6 @@ async function handleBackoff(
     }
   }
 
-  // Apply exponential backoff based on attempt number
   delayMs = delayMs * Math.pow(1.5, context.attempt - 1);
 
   logger.info(`Backing off for ${delayMs}ms`, {
@@ -337,9 +294,6 @@ async function handleBackoff(
   };
 }
 
-/**
- * Execute an operation with automatic recovery
- */
 export async function withRecovery<T>(
   operation: () => Promise<T>,
   operationName: string,
@@ -356,7 +310,6 @@ export async function withRecovery<T>(
     try {
       const result = await operation();
 
-      // Record successful recovery if we had to retry
       if (attempt > 1) {
         metrics.recordRetryAttempt(operationName, attempt, true);
         logger.info(`Operation succeeded after ${attempt} attempts`, {
@@ -394,7 +347,6 @@ export async function withRecovery<T>(
     }
   }
 
-  // Exhausted all attempts
   metrics.recordError('recovery_exhausted', operationName);
   logger.error(`Operation failed after ${attempt} attempts`, lastError, {
     component: 'Recovery',
@@ -405,9 +357,6 @@ export async function withRecovery<T>(
   throw lastError || new Error('Operation failed with unknown error');
 }
 
-/**
- * Create a wrapped function with automatic recovery
- */
 export function createRecoverableOperation<T extends (...args: any[]) => Promise<any>>(
   operation: T,
   operationName: string,
@@ -418,9 +367,6 @@ export function createRecoverableOperation<T extends (...args: any[]) => Promise
   }) as T;
 }
 
-/**
- * Dead Letter Queue Entry
- */
 export interface DLQEntry {
   id: string;
   operation: string;
@@ -433,9 +379,6 @@ export interface DLQEntry {
   isRetryable: boolean;
 }
 
-/**
- * Simple in-memory Dead Letter Queue for failed operations
- */
 class DeadLetterQueue {
   private entries: Map<string, DLQEntry> = new Map();
   private maxSize: number;
@@ -444,9 +387,6 @@ class DeadLetterQueue {
     this.maxSize = maxSize;
   }
 
-  /**
-   * Add an entry to the DLQ
-   */
   add(entry: Omit<DLQEntry, 'id' | 'timestamp' | 'lastAttempt'>): DLQEntry {
     const id = `${entry.operation}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date();
@@ -458,9 +398,7 @@ class DeadLetterQueue {
       lastAttempt: now,
     };
 
-    // Enforce max size
     if (this.entries.size >= this.maxSize) {
-      // Remove oldest entry
       const oldest = Array.from(this.entries.keys())[0];
       this.entries.delete(oldest);
     }
@@ -478,30 +416,18 @@ class DeadLetterQueue {
     return dlqEntry;
   }
 
-  /**
-   * Get all entries
-   */
   getAll(): DLQEntry[] {
     return Array.from(this.entries.values());
   }
 
-  /**
-   * Get retryable entries
-   */
   getRetryable(): DLQEntry[] {
     return Array.from(this.entries.values()).filter(e => e.isRetryable);
   }
 
-  /**
-   * Remove an entry
-   */
   remove(id: string): boolean {
     return this.entries.delete(id);
   }
 
-  /**
-   * Update an entry after retry attempt
-   */
   updateAttempt(id: string, error?: string): void {
     const entry = this.entries.get(id);
     if (entry) {
@@ -513,20 +439,13 @@ class DeadLetterQueue {
     }
   }
 
-  /**
-   * Get queue size
-   */
   size(): number {
     return this.entries.size;
   }
 
-  /**
-   * Clear the queue
-   */
   clear(): void {
     this.entries.clear();
   }
 }
 
-// Global DLQ instance
 export const deadLetterQueue = new DeadLetterQueue();

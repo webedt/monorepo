@@ -1,15 +1,10 @@
-/**
- * Metrics Collection Service
- *
- * Provides comprehensive metrics tracking for monitoring daemon performance,
- * API call success rates, task completion times, and error rates.
- */
-
 import { AMetricsRegistry } from './AMetricsRegistry.js';
+import type { MetricsSummary } from './AMetricsRegistry.js';
 import { logger } from '../logging/logger.js';
 import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
 
-// Local type for metric labels (matches the interface)
+export type { MetricsSummary } from './AMetricsRegistry.js';
+
 export type MetricLabels = Record<string, string>;
 
 interface CounterData {
@@ -30,9 +25,6 @@ interface HistogramData {
   labels: MetricLabels;
 }
 
-/**
- * Simple counter metric
- */
 class Counter {
   private name: string;
   private help: string;
@@ -76,9 +68,6 @@ class Counter {
   }
 }
 
-/**
- * Simple gauge metric
- */
 class Gauge {
   private name: string;
   private help: string;
@@ -130,9 +119,6 @@ class Gauge {
   }
 }
 
-/**
- * Simple histogram metric with predefined buckets
- */
 class Histogram {
   private name: string;
   private help: string;
@@ -159,13 +145,11 @@ class Histogram {
       this.data.set(key, data);
     }
 
-    // Increment appropriate buckets
     for (let i = 0; i < this.bucketBoundaries.length; i++) {
       if (value <= this.bucketBoundaries[i]) {
         data.buckets[i]++;
       }
     }
-    // +Inf bucket
     data.buckets[this.bucketBoundaries.length]++;
 
     data.sum += value;
@@ -206,13 +190,9 @@ class Histogram {
   }
 }
 
-/**
- * Metrics Registry - Central collection point for all metrics
- */
 class MetricsRegistry extends AMetricsRegistry {
   private startTime: Date = new Date();
 
-  // HTTP/API metrics
   readonly httpRequestsTotal = new Counter(
     'api_http_requests_total',
     'Total number of HTTP requests received'
@@ -229,7 +209,6 @@ class MetricsRegistry extends AMetricsRegistry {
     'Total number of HTTP errors'
   );
 
-  // Session metrics
   readonly sessionsTotal = new Counter(
     'api_sessions_total',
     'Total number of sessions created'
@@ -246,7 +225,6 @@ class MetricsRegistry extends AMetricsRegistry {
     [1000, 5000, 30000, 60000, 300000, 600000, 1800000]
   );
 
-  // Task/cycle metrics
   readonly cyclesTotal = new Counter(
     'api_cycles_total',
     'Total number of cleanup cycles executed'
@@ -267,7 +245,6 @@ class MetricsRegistry extends AMetricsRegistry {
     'Total number of orphaned sessions cleaned up'
   );
 
-  // GitHub API metrics
   readonly githubApiCallsTotal = new Counter(
     'api_github_api_calls_total',
     'Total number of GitHub API calls'
@@ -283,7 +260,6 @@ class MetricsRegistry extends AMetricsRegistry {
     'GitHub API call duration in milliseconds'
   );
 
-  // Database metrics
   readonly dbQueryTotal = new Counter(
     'api_db_queries_total',
     'Total number of database queries'
@@ -305,13 +281,11 @@ class MetricsRegistry extends AMetricsRegistry {
     'Number of active database connections'
   );
 
-  // Error tracking
   readonly errorsTotal = new Counter(
     'api_errors_total',
     'Total number of errors by type'
   );
 
-  // System metrics
   readonly healthStatus = new Gauge(
     'api_health_status',
     'Health status (1 = healthy, 0 = unhealthy)'
@@ -327,7 +301,6 @@ class MetricsRegistry extends AMetricsRegistry {
     'Memory usage in megabytes'
   );
 
-  // Circuit breaker metrics
   readonly circuitBreakerState = new Gauge(
     'api_circuit_breaker_state',
     'Circuit breaker state (0=closed, 1=half_open, 2=open)'
@@ -338,7 +311,6 @@ class MetricsRegistry extends AMetricsRegistry {
     'Total circuit breaker failures'
   );
 
-  // Retry metrics
   readonly retryAttemptsTotal = new Counter(
     'api_retry_attempts_total',
     'Total number of retry attempts'
@@ -349,9 +321,6 @@ class MetricsRegistry extends AMetricsRegistry {
     'Operations that succeeded after retry'
   );
 
-  /**
-   * Record an HTTP request
-   */
   recordHttpRequest(
     method: string,
     path: string,
@@ -367,9 +336,6 @@ class MetricsRegistry extends AMetricsRegistry {
     }
   }
 
-  /**
-   * Record a GitHub API call
-   */
   recordGitHubApiCall(
     endpoint: string,
     success: boolean,
@@ -385,9 +351,6 @@ class MetricsRegistry extends AMetricsRegistry {
     }
   }
 
-  /**
-   * Record a database query
-   */
   recordDbQuery(operation: string, success: boolean, durationMs: number): void {
     const labels = { operation };
     this.dbQueryTotal.inc(labels);
@@ -398,9 +361,6 @@ class MetricsRegistry extends AMetricsRegistry {
     }
   }
 
-  /**
-   * Record a cleanup cycle
-   */
   recordCleanupCycle(success: boolean, sessionsCleaned: number, durationMs: number): void {
     this.cyclesTotal.inc({});
     this.cycleDurationMs.observe({}, durationMs);
@@ -414,16 +374,10 @@ class MetricsRegistry extends AMetricsRegistry {
     }
   }
 
-  /**
-   * Record an error
-   */
   recordError(errorType: string, component: string): void {
     this.errorsTotal.inc({ error_type: errorType, component });
   }
 
-  /**
-   * Record a retry attempt
-   */
   recordRetryAttempt(operation: string, attempt: number, success: boolean): void {
     this.retryAttemptsTotal.inc({ operation, attempt: String(attempt) });
 
@@ -432,46 +386,31 @@ class MetricsRegistry extends AMetricsRegistry {
     }
   }
 
-  /**
-   * Update health status
-   */
   updateHealthStatus(healthy: boolean): void {
     this.healthStatus.set({}, healthy ? 1 : 0);
   }
 
-  /**
-   * Update system metrics (call periodically)
-   */
   updateSystemMetrics(): void {
     const memUsage = process.memoryUsage();
     this.memoryUsageMb.set({}, Math.round(memUsage.heapUsed / (1024 * 1024)));
     this.uptimeSeconds.set({}, Math.floor((Date.now() - this.startTime.getTime()) / 1000));
   }
 
-  /**
-   * Update database connection metrics
-   */
   updateDbConnections(active: number, idle: number, waiting: number): void {
     this.dbConnectionsActive.set({ state: 'active' }, active);
     this.dbConnectionsActive.set({ state: 'idle' }, idle);
     this.dbConnectionsActive.set({ state: 'waiting' }, waiting);
   }
 
-  /**
-   * Update circuit breaker metrics
-   */
   updateCircuitBreakerMetrics(): void {
     const allStats = circuitBreakerRegistry.getAllStats();
     for (const [name, stats] of Object.entries(allStats)) {
       const stateValue = stats.state === 'closed' ? 0 : stats.state === 'half_open' ? 1 : 2;
       this.circuitBreakerState.set({ circuit: name }, stateValue);
-      this.circuitBreakerFailures.inc({ circuit: name }, 0); // Initialize if not exists
+      this.circuitBreakerFailures.inc({ circuit: name }, 0);
     }
   }
 
-  /**
-   * Get all metrics as JSON
-   */
   getMetricsJson(): Record<string, any> {
     this.updateSystemMetrics();
     this.updateCircuitBreakerMetrics();
@@ -519,17 +458,7 @@ class MetricsRegistry extends AMetricsRegistry {
     };
   }
 
-  /**
-   * Get summary statistics
-   */
-  getSummary(): {
-    uptime: number;
-    totalRequests: number;
-    errorRate: number;
-    avgResponseTime: number;
-    activeConnections: number;
-    healthStatus: string;
-  } {
+  getSummary(): MetricsSummary {
     this.updateSystemMetrics();
 
     const totalRequests = this.httpRequestsTotal.get({});
@@ -546,9 +475,6 @@ class MetricsRegistry extends AMetricsRegistry {
     };
   }
 
-  /**
-   * Reset all metrics (useful for testing)
-   */
   reset(): void {
     this.httpRequestsTotal.reset();
     this.httpRequestDurationMs.reset();
@@ -576,5 +502,4 @@ class MetricsRegistry extends AMetricsRegistry {
   }
 }
 
-// Global metrics instance
 export const metrics: AMetricsRegistry = new MetricsRegistry();
