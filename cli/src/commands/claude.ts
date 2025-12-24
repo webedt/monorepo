@@ -150,17 +150,30 @@ webCommand
   .command('list')
   .description('List remote sessions from Anthropic API')
   .option('-l, --limit <number>', 'Limit number of results', '20')
+  .option('--today', 'Only show sessions created today')
+  .option('--json', 'Output as JSON')
   .action(async (options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await getClient(parentOpts);
+      const client = await getClient({ ...parentOpts, silent: options.json });
       const limit = parseInt(options.limit, 10);
 
       const response = await client.listSessions(limit);
-      const sessions = response.data || [];
+      let sessions = response.data || [];
+
+      // Filter to today's sessions if requested
+      if (options.today) {
+        const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        sessions = sessions.filter(s => s.created_at?.startsWith(today));
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(sessions, null, 2));
+        return;
+      }
 
       if (sessions.length === 0) {
-        console.log('No remote sessions found.');
+        console.log(options.today ? 'No sessions found for today.' : 'No remote sessions found.');
         return;
       }
 
@@ -186,7 +199,7 @@ webCommand
       }
 
       console.log('-'.repeat(120));
-      console.log(`Total: ${sessions.length} session(s)${response.has_more ? ' (more available)' : ''}`);
+      console.log(`Total: ${sessions.length} session(s)${response.has_more && !options.today ? ' (more available)' : ''}`);
     } catch (error) {
       if (error instanceof ClaudeRemoteError) {
         console.error(`API Error: ${error.message}`);
@@ -384,20 +397,67 @@ webCommand
   });
 
 webCommand
-  .command('archive <sessionId>')
-  .description('Archive a remote session')
-  .action(async (sessionId, options, cmd) => {
+  .command('archive [sessionIds...]')
+  .description('Archive one or more remote sessions')
+  .option('--today', 'Archive all sessions created today')
+  .option('--all', 'Archive all sessions (use with caution)')
+  .option('-l, --limit <number>', 'Limit for --today/--all', '100')
+  .action(async (sessionIds, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
       const client = await getClient(parentOpts);
 
-      await client.archiveSession(sessionId);
-      console.log(`Session ${sessionId} archived successfully.`);
+      let idsToArchive: string[] = sessionIds || [];
+
+      // If --today or --all, fetch sessions and get their IDs
+      if (options.today || options.all) {
+        const limit = parseInt(options.limit, 10);
+        const response = await client.listSessions(limit);
+        let sessions = response.data || [];
+
+        if (options.today) {
+          const today = new Date().toISOString().slice(0, 10);
+          sessions = sessions.filter(s => s.created_at?.startsWith(today));
+        }
+
+        // Filter out already archived sessions
+        sessions = sessions.filter(s => s.session_status !== 'archived');
+        idsToArchive = sessions.map(s => s.id).filter((id): id is string => !!id);
+
+        if (idsToArchive.length === 0) {
+          console.log(options.today ? 'No unarchived sessions found for today.' : 'No unarchived sessions found.');
+          return;
+        }
+
+        console.log(`Found ${idsToArchive.length} session(s) to archive.`);
+      }
+
+      if (idsToArchive.length === 0) {
+        console.error('No session IDs provided. Use session IDs, --today, or --all.');
+        process.exit(1);
+      }
+
+      let archived = 0;
+      let failed = 0;
+
+      for (const id of idsToArchive) {
+        try {
+          await client.archiveSession(id);
+          console.log(`Archived: ${id}`);
+          archived++;
+        } catch (error) {
+          const msg = error instanceof ClaudeRemoteError ? error.message : String(error);
+          console.error(`Failed to archive ${id}: ${msg}`);
+          failed++;
+        }
+      }
+
+      console.log(`\nDone. Archived: ${archived}, Failed: ${failed}`);
     } catch (error) {
       if (error instanceof ClaudeRemoteError) {
         console.error(`API Error: ${error.message}`);
       } else {
-        console.error('Error archiving session:', error);
+        console.error('Error archiving sessions:', error);
       }
       process.exit(1);
     }
