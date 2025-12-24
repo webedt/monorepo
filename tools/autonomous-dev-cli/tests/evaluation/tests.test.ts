@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { runTests } from './tests.js';
+import { runTests } from '../../src/evaluation/tests.js';
 
 describe('runTests', () => {
   let testDir: string;

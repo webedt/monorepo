@@ -25,7 +25,7 @@ describe('runEvaluation', () => {
   describe('EvaluationOptions interface', () => {
     it('should define correct structure', async () => {
       // Import dynamically to test exports
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const options = {
         repoPath: testDir,
@@ -54,7 +54,7 @@ describe('runEvaluation', () => {
 
   describe('with all checks disabled', () => {
     it('should pass when all checks are skipped', async () => {
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -79,7 +79,7 @@ describe('runEvaluation', () => {
     });
 
     it('should have correct duration', async () => {
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -111,7 +111,7 @@ describe('runEvaluation', () => {
         },
       }));
 
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -144,7 +144,7 @@ describe('runEvaluation', () => {
         },
       }));
 
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -180,7 +180,7 @@ describe('runEvaluation', () => {
         },
       }));
 
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -213,7 +213,7 @@ describe('runEvaluation', () => {
         },
       }));
 
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -245,7 +245,7 @@ describe('runEvaluation', () => {
         },
       }));
 
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -274,7 +274,7 @@ describe('runEvaluation', () => {
         },
       }));
 
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -298,7 +298,7 @@ describe('runEvaluation', () => {
 
   describe('EvaluationResult', () => {
     it('should include all required fields', async () => {
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
 
       const result = await runEvaluation({
         repoPath: testDir,
@@ -324,37 +324,37 @@ describe('runEvaluation', () => {
 
   describe('exports', () => {
     it('should export runBuild', async () => {
-      const { runBuild } = await import('./index.js');
+      const { runBuild } = await import('../../src/evaluation/index.js');
       assert.ok(typeof runBuild === 'function');
     });
 
     it('should export runTypeCheck', async () => {
-      const { runTypeCheck } = await import('./index.js');
+      const { runTypeCheck } = await import('../../src/evaluation/index.js');
       assert.ok(typeof runTypeCheck === 'function');
     });
 
     it('should export BuildCache', async () => {
-      const { BuildCache } = await import('./index.js');
+      const { BuildCache } = await import('../../src/evaluation/index.js');
       assert.ok(typeof BuildCache === 'function');
     });
 
     it('should export runTests', async () => {
-      const { runTests } = await import('./index.js');
+      const { runTests } = await import('../../src/evaluation/index.js');
       assert.ok(typeof runTests === 'function');
     });
 
     it('should export runHealthChecks', async () => {
-      const { runHealthChecks } = await import('./index.js');
+      const { runHealthChecks } = await import('../../src/evaluation/index.js');
       assert.ok(typeof runHealthChecks === 'function');
     });
 
     it('should export generatePreviewUrl', async () => {
-      const { generatePreviewUrl } = await import('./index.js');
+      const { generatePreviewUrl } = await import('../../src/evaluation/index.js');
       assert.ok(typeof generatePreviewUrl === 'function');
     });
 
     it('should export runEvaluation', async () => {
-      const { runEvaluation } = await import('./index.js');
+      const { runEvaluation } = await import('../../src/evaluation/index.js');
       assert.ok(typeof runEvaluation === 'function');
     });
   });

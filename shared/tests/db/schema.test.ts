@@ -21,7 +21,7 @@ import {
   type NewMessage,
   type Event,
   type NewEvent
-} from './schema.js';
+} from '../../src/db/schema.js';
 
 describe('Database Schema', () => {
   describe('users table', () => {

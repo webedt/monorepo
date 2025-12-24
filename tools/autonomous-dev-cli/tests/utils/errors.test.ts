@@ -22,7 +22,7 @@ import {
   type RecoveryAction,
   type ErrorContext,
   type RetryConfig,
-} from './errors.js';
+} from '../../src/utils/errors.js';
 
 describe('ErrorCode enum', () => {
   it('should have GitHub error codes', () => {

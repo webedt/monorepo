@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { CodebaseAnalyzer, type AnalyzerConfig, type CodebaseAnalysis, type ValidationResult } from './analyzer.js';
-import { AnalyzerError, ErrorCode } from '../utils/errors.js';
+import { CodebaseAnalyzer, type AnalyzerConfig, type CodebaseAnalysis, type ValidationResult } from '../../src/discovery/analyzer.js';
+import { AnalyzerError, ErrorCode } from '../../src/utils/errors.js';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';

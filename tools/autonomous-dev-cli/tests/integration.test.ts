@@ -20,8 +20,8 @@ import {
   createMockDiscoveredTask,
   createMockCodebaseAnalysis,
   resetMocks,
-} from './test-utils/mocks.js';
-import { ErrorCode, StructuredError } from './utils/errors.js';
+} from '../src/test-utils/mocks.js';
+import { ErrorCode, StructuredError } from '../src/utils/errors.js';
 
 describe('Discovery to Merge Workflow Integration', () => {
   let testDir: string;

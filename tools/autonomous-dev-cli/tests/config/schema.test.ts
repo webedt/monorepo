@@ -12,7 +12,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { z } from 'zod';
-import { ConfigSchema, validateNoCredentialsInConfig, defaultConfig, type Config } from './schema.js';
+import { ConfigSchema, validateNoCredentialsInConfig, defaultConfig, type Config } from '../../src/config/schema.js';
 
 // Base config with all required fields for testing
 const baseConfig = {

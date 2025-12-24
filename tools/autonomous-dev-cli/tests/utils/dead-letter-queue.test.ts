@@ -10,8 +10,8 @@ import {
   type DeadLetterEntry,
   type RetryAttempt,
   type DLQConfig,
-} from './dead-letter-queue.js';
-import { ErrorCode } from './errors.js';
+} from '../../src/utils/dead-letter-queue.js';
+import { ErrorCode } from '../../src/utils/errors.js';
 
 describe('DeadLetterQueue', () => {
   let testDir: string;

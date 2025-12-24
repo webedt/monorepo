@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { Worker, type WorkerOptions, type WorkerTask, type WorkerResult } from './worker.js';
-import { type Issue } from '../github/issues.js';
-import { ExecutionError, ErrorCode } from '../utils/errors.js';
+import { Worker, type WorkerOptions, type WorkerTask, type WorkerResult } from '../../src/executor/worker.js';
+import { type Issue } from '../../src/github/issues.js';
+import { ExecutionError, ErrorCode } from '../../src/utils/errors.js';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';

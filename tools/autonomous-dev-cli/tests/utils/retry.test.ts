@@ -30,8 +30,8 @@ import {
   type ExtendedRetryConfig,
   type RetryContext,
   type RetryAttemptRecord,
-} from './retry.js';
-import { ErrorCode, StructuredError, ClaudeError } from './errors.js';
+} from '../../src/utils/retry.js';
+import { ErrorCode, StructuredError, ClaudeError } from '../../src/utils/errors.js';
 
 describe('calculateBackoffDelay', () => {
   const defaultConfig: ExtendedRetryConfig = {

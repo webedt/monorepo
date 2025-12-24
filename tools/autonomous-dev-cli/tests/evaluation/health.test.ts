@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { runHealthChecks, generatePreviewUrl } from './health.js';
+import { runHealthChecks, generatePreviewUrl } from '../../src/evaluation/health.js';
 
 describe('runHealthChecks', () => {
   let originalFetch: typeof globalThis.fetch;

@@ -23,8 +23,8 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
-import { ClaudeRemoteClient } from './claudeRemoteClient.js';
-import type { Session, SessionEvent } from './types.js';
+import { ClaudeWebClient as ClaudeRemoteClient } from '../../src/claudeWeb/claudeWebClient.js';
+import type { Session, SessionEvent } from '../../src/claudeWeb/types.js';
 
 // =============================================================================
 // Configuration

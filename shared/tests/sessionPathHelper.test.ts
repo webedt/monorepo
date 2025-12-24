@@ -11,7 +11,7 @@ import {
   parseSessionPath,
   sessionPathToDir,
   validateSessionPath
-} from './sessionPathHelper.js';
+} from '../src/utils/helpers/sessionPathHelper.js';
 
 describe('Session Path Helper Module', () => {
   describe('parseRepoUrl', () => {

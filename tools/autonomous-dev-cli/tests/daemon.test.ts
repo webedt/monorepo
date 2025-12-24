@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { Daemon, createDaemon, type DaemonOptions, type CycleResult } from './daemon.js';
-import { StructuredError, ErrorCode, ConfigError } from './utils/errors.js';
+import { Daemon, createDaemon, type DaemonOptions, type CycleResult } from '../src/daemon.js';
+import { StructuredError, ErrorCode, ConfigError } from '../src/utils/errors.js';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';

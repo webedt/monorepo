@@ -5,8 +5,8 @@
 
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { createBranchManager, type Branch, type BranchManager } from './branches.js';
-import { type GitHubClient } from './client.js';
+import { createBranchManager, type Branch, type BranchManager } from '../../src/github/branches.js';
+import { type GitHubClient } from '../../src/github/client.js';
 
 // Mock Octokit responses
 function createMockOctokit() {

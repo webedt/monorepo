@@ -5,7 +5,7 @@
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { logger, type LogContext } from './logger.js';
+import { logger, type LogContext } from '../src/utils/logging/logger.js';
 
 describe('Logger Module', () => {
   let originalEnv: NodeJS.ProcessEnv;

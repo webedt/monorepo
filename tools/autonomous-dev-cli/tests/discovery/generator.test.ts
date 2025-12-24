@@ -8,9 +8,9 @@ import {
   type DiscoveredTaskPriority,
   type DiscoveredTaskCategory,
   type DiscoveredTaskComplexity,
-} from './generator.js';
-import { type Issue } from '../github/issues.js';
-import { ClaudeError, ErrorCode } from '../utils/errors.js';
+} from '../../src/discovery/generator.js';
+import { type Issue } from '../../src/github/issues.js';
+import { ClaudeError, ErrorCode } from '../../src/utils/errors.js';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';

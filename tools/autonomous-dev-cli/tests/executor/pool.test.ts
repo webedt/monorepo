@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { WorkerPool, createWorkerPool, type WorkerPoolOptions, type PoolTask } from './pool.js';
-import { type Issue } from '../github/issues.js';
+import { WorkerPool, createWorkerPool, type WorkerPoolOptions, type PoolTask } from '../../src/executor/pool.js';
+import { type Issue } from '../../src/github/issues.js';
 
 // Create mock issue
 function createMockIssue(number: number, title: string): Issue {

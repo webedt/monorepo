@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { loadConfig, getConfigHelp } from './index.js';
-import { ConfigError, ErrorCode } from '../utils/errors.js';
-import { validateNoCredentialsInConfig, ConfigSchema, defaultConfig } from './schema.js';
+import { loadConfig, getConfigHelp } from '../../src/config/index.js';
+import { ConfigError, ErrorCode } from '../../src/utils/errors.js';
+import { validateNoCredentialsInConfig, ConfigSchema, defaultConfig } from '../../src/config/schema.js';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';

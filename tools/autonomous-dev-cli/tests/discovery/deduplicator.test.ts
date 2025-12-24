@@ -15,9 +15,9 @@ import {
   type ConflictPrediction,
   type DeduplicatedTask,
   type DeduplicatorOptions,
-} from './deduplicator.js';
-import { type DiscoveredTask } from './generator.js';
-import { type Issue } from '../github/issues.js';
+} from '../../src/discovery/deduplicator.js';
+import { type DiscoveredTask } from '../../src/discovery/generator.js';
+import { type Issue } from '../../src/github/issues.js';
 
 // Helper to create a mock DiscoveredTask
 function createMockTask(overrides: Partial<DiscoveredTask> = {}): DiscoveredTask {

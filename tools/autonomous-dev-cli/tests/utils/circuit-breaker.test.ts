@@ -15,8 +15,8 @@ import {
   type CircuitBreakerState,
   type CircuitBreakerConfig,
   type CircuitBreakerHealth,
-} from './circuit-breaker.js';
-import { ClaudeError, ErrorCode } from './errors.js';
+} from '../../src/utils/circuit-breaker.js';
+import { ClaudeError, ErrorCode } from '../../src/utils/errors.js';
 
 describe('CircuitBreaker', () => {
   let circuitBreaker: CircuitBreaker;

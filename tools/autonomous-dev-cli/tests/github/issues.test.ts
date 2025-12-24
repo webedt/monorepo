@@ -11,8 +11,8 @@ import {
   type IssueManager,
   type CreateIssueOptions,
   type DegradedResult,
-} from './issues.js';
-import { type GitHubClient, type ServiceHealth } from './client.js';
+} from '../../src/github/issues.js';
+import { type GitHubClient, type ServiceHealth } from '../../src/github/client.js';
 
 // Mock Octokit responses
 function createMockOctokit() {

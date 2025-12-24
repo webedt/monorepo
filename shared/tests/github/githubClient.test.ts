@@ -6,7 +6,7 @@
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { GitHubClient, type GitHubPullOptions, type GitHubPullResult } from './githubClient.js';
+import { GitHubClient, type GitHubPullOptions, type GitHubPullResult } from '../../src/github/githubClient.js';
 
 describe('GitHubClient', () => {
   let client: GitHubClient;

@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { GitHubClient, createGitHubClient, type GitHubClientOptions } from './client.js';
-import { GitHubError, ErrorCode } from '../utils/errors.js';
+import { GitHubClient, createGitHubClient, type GitHubClientOptions } from '../../src/github/client.js';
+import { GitHubError, ErrorCode } from '../../src/utils/errors.js';
 
 // Mock Octokit responses
 const mockOctokit = {

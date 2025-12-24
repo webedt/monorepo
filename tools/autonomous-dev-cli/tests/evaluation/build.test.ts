@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { BuildCache, runBuild, runTypeCheck, initBuildCache, getBuildCache } from './build.js';
+import { BuildCache, runBuild, runTypeCheck, initBuildCache, getBuildCache } from '../../src/evaluation/build.js';
 
 describe('BuildCache', () => {
   let testDir: string;

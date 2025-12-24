@@ -60,7 +60,7 @@ import {
   type DebugModeConfig,
   type CorrelationContext,
   type RequestPhase,
-} from './logger.js';
+} from '../../src/utils/logger.js';
 
 describe('Debug Mode Functions', () => {
   let originalEnv: NodeJS.ProcessEnv;

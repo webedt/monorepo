@@ -10,7 +10,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { generateSessionPath } from '../sessionPathHelper.js';
+import { generateSessionPath } from '../../src/utils/helpers/sessionPathHelper.js';
 
 /**
  * Test helper to create mock remote session data

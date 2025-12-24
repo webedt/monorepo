@@ -12,8 +12,8 @@ import {
   type CreatePROptions,
   type MergeResult,
   type DegradedResult,
-} from './pulls.js';
-import { type GitHubClient, type ServiceHealth } from './client.js';
+} from '../../src/github/pulls.js';
+import { type GitHubClient, type ServiceHealth } from '../../src/github/client.js';
 
 // Mock Octokit responses
 function createMockOctokit() {

@@ -16,8 +16,8 @@ import {
   createTimedAbortController,
   withCleanup,
   withTimeoutAll,
-} from './timeout.js';
-import { ErrorCode } from './errors.js';
+} from '../../src/utils/timeout.js';
+import { ErrorCode } from '../../src/utils/errors.js';
 
 describe('timeout utilities', () => {
   let originalEnv: NodeJS.ProcessEnv;

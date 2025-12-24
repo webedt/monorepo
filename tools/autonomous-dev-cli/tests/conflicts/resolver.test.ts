@@ -5,9 +5,9 @@ import {
   createConflictResolver,
   type ConflictResolverOptions,
   type MergeAttemptResult,
-} from './resolver.js';
-import { type PRManager, type PullRequest, type MergeResult } from '../github/pulls.js';
-import { type BranchManager } from '../github/branches.js';
+} from '../../src/conflicts/resolver.js';
+import { type PRManager, type PullRequest, type MergeResult } from '../../src/github/pulls.js';
+import { type BranchManager } from '../../src/github/branches.js';
 
 // Create mock PR
 function createMockPR(overrides: Partial<PullRequest> = {}): PullRequest {

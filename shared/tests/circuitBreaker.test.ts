@@ -5,7 +5,7 @@
 
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import { CircuitBreaker, createCircuitBreaker, circuitBreakerRegistry } from './circuitBreaker.js';
+import { CircuitBreaker, createCircuitBreaker, circuitBreakerRegistry } from '../src/utils/resilience/circuitBreaker.js';
 
 describe('CircuitBreaker', () => {
   describe('Initial State', () => {

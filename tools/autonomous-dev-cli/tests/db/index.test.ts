@@ -14,7 +14,7 @@ import {
   generateSessionPath,
   getPoolStats,
   checkPoolHealth,
-} from './index.js';
+} from '../../src/db/index.js';
 
 describe('Database Module', () => {
   describe('generateSessionPath', () => {
