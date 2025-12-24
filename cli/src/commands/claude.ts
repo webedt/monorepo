@@ -1,23 +1,10 @@
 import { Command } from 'commander';
-import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, db, users, ServiceProvider, AClaudeWebClient } from '@webedt/shared';
+import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, getClaudeCredentials } from '@webedt/shared';
 import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
-import { readFileSync, existsSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
-import { desc } from 'drizzle-orm';
-
-// Credentials file path
-const CLAUDE_CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
-
-// Cached credentials
-let cachedCredentials: { accessToken: string; environmentId?: string } | null = null;
 
 /**
- * Get Claude credentials with fallback chain:
- * 1. CLI options (--token, --environment)
- * 2. Environment variables (CLAUDE_ACCESS_TOKEN, CLAUDE_ENVIRONMENT_ID)
- * 3. ~/.claude/.credentials.json (fast, local)
- * 4. Database (slow, requires network connection)
+ * Get Claude client configuration with fallback chain for credentials.
+ * Uses shared getClaudeCredentials() for token retrieval.
  */
 async function getClientConfig(options: { token?: string; environment?: string; org?: string }): Promise<{
   accessToken: string;
@@ -25,84 +12,39 @@ async function getClientConfig(options: { token?: string; environment?: string; 
   orgUuid?: string;
   source: string;
 }> {
-  let accessToken: string | undefined;
-  let environmentId: string | undefined;
-  let source = 'unknown';
+  // Get credentials using shared function
+  const credentials = await getClaudeCredentials({
+    accessToken: options.token,
+    checkDatabase: true,
+  });
 
-  // 1. Check CLI options first
-  if (options.token) {
-    accessToken = options.token;
-    source = 'cli-option';
-  }
-  if (options.environment) {
-    environmentId = options.environment;
-  }
-
-  // 2. Check environment variables
-  if (!accessToken && process.env.CLAUDE_ACCESS_TOKEN) {
-    accessToken = process.env.CLAUDE_ACCESS_TOKEN;
-    source = 'environment';
-  }
-  if (!environmentId && process.env.CLAUDE_ENVIRONMENT_ID) {
-    environmentId = process.env.CLAUDE_ENVIRONMENT_ID;
-  }
-
-  // 3. Check ~/.claude/.credentials.json (fast, local file)
-  if (!accessToken) {
-    try {
-      if (existsSync(CLAUDE_CREDENTIALS_PATH)) {
-        const credentialsContent = readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8');
-        const credentials = JSON.parse(credentialsContent);
-
-        if (credentials.claudeAiOauth?.accessToken) {
-          accessToken = credentials.claudeAiOauth.accessToken;
-          source = '~/.claude/.credentials.json';
-          console.log('Using credentials from ~/.claude/.credentials.json');
-        }
-      }
-    } catch {
-      // File doesn't exist or is invalid, continue
-    }
-  }
-
-  // 4. Check database for first user with claudeAuth (slow, requires network)
-  if (!accessToken) {
-    try {
-      const usersWithAuth = await db
-        .select({
-          id: users.id,
-          email: users.email,
-          claudeAuth: users.claudeAuth,
-        })
-        .from(users)
-        .orderBy(desc(users.createdAt))
-        .limit(10);
-
-      for (const user of usersWithAuth) {
-        if (user.claudeAuth?.accessToken) {
-          accessToken = user.claudeAuth.accessToken;
-          source = `database (${user.email})`;
-          console.log(`Using credentials from database user: ${user.email}`);
-          break;
-        }
-      }
-    } catch {
-      // Database not available, continue to error
-    }
-  }
-
-  // Fail if no access token found
-  if (!accessToken) {
+  if (!credentials) {
     console.error('\nClaude access token not found. Checked:');
     console.error('  1. --token CLI option');
     console.error('  2. CLAUDE_ACCESS_TOKEN environment variable');
-    console.error(`  3. ${CLAUDE_CREDENTIALS_PATH}`);
-    console.error('  4. Database (users with claudeAuth)');
+    console.error('  3. ~/.claude/.credentials.json');
+    console.error('  4. macOS Keychain (Claude Code-credentials)');
+    console.error('  5. Database (users with claudeAuth)');
     console.error('\nTo authenticate, either:');
     console.error('  - Set CLAUDE_ACCESS_TOKEN in your .env file');
     console.error('  - Run `claude` CLI to authenticate (creates ~/.claude/.credentials.json)');
     process.exit(1);
   }
+
+  const accessToken = credentials.accessToken;
+  const source = credentials.source || 'unknown';
+
+  // Log source for user visibility
+  if (source === 'credentials-file') {
+    console.log('Using credentials from ~/.claude/.credentials.json');
+  } else if (source === 'keychain') {
+    console.log('Using credentials from macOS Keychain');
+  } else if (source === 'database') {
+    console.log('Using credentials from database');
+  }
+
+  // Get environment ID from options or env var
+  let environmentId = options.environment || process.env.CLAUDE_ENVIRONMENT_ID;
 
   // If no environment ID, try to discover it
   if (!environmentId) {
