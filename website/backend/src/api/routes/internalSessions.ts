@@ -27,7 +27,8 @@ import { ensureValidToken, ClaudeAuth } from '@webedt/shared';
 import {
   logger,
   ServiceProvider,
-  type IClaudeWebClient,
+  AClaudeWebClient,
+  type ClaudeWebClientConfig,
   generateTitle,
   type ClaudeSessionEvent as SessionEvent,
   type TitleGenerationEvent,
@@ -87,16 +88,17 @@ async function getClaudeAuth(userId: string): Promise<ClaudeAuth | null> {
 }
 
 /**
- * Create a ClaudeWebClient for a user
+ * Get and configure a ClaudeWebClient for a user
  */
-function createClient(claudeAuth: ClaudeAuth, environmentId?: string): IClaudeWebClient {
-  return ServiceProvider.get<IClaudeWebClient>({
+function getClaudeClient(claudeAuth: ClaudeAuth, environmentId?: string): AClaudeWebClient {
+  const client = ServiceProvider.get(AClaudeWebClient);
+  client.configure({
     accessToken: claudeAuth.accessToken,
     environmentId: environmentId || CLAUDE_ENVIRONMENT_ID || '',
     baseUrl: CLAUDE_API_BASE_URL,
     model: CLAUDE_DEFAULT_MODEL,
-    orgUuid: CLAUDE_ORG_UUID,
   });
+  return client;
 }
 
 /**
@@ -149,7 +151,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const client = createClient(claudeAuth);
+    const client = getClaudeClient(claudeAuth);
     const response = await client.listSessions(limit, before);
 
     res.json({
@@ -249,7 +251,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     );
 
     // Create client and session
-    const client = createClient(claudeAuth);
+    const client = getClaudeClient(claudeAuth);
     const { sessionId: remoteSessionId, webUrl, title } = await client.createSession({
       prompt,
       gitUrl,
@@ -535,7 +537,7 @@ const streamHandler = async (req: Request, res: Response) => {
       if (session.remoteSessionId) {
         const claudeAuth = await getClaudeAuth(user.id);
         if (claudeAuth) {
-          const client = createClient(claudeAuth);
+          const client = getClaudeClient(claudeAuth);
 
           // Get current event count to skip already-seen events
           const seenEventIds = new Set(storedEvents.map(e => {
@@ -674,7 +676,7 @@ router.post('/:id', requireAuth, async (req: Request, res: Response) => {
     await storeEvent(id, userMessageEvent);
 
     // Create client and resume session
-    const client = createClient(claudeAuth);
+    const client = getClaudeClient(claudeAuth);
 
     try {
       const result = await client.resume(
@@ -797,7 +799,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     if (session.remoteSessionId) {
       const claudeAuth = await getClaudeAuth(user.id);
       if (claudeAuth) {
-        const client = createClient(claudeAuth);
+        const client = getClaudeClient(claudeAuth);
         await client.renameSession(session.remoteSessionId, title);
       }
     }
@@ -851,7 +853,7 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
     if (session.remoteSessionId) {
       const claudeAuth = await getClaudeAuth(user.id);
       if (claudeAuth) {
-        const client = createClient(claudeAuth);
+        const client = getClaudeClient(claudeAuth);
         await client.archiveSession(session.remoteSessionId);
       }
     }
@@ -954,7 +956,7 @@ router.post('/:id/interrupt', requireAuth, async (req: Request, res: Response) =
       const claudeAuth = await getClaudeAuth(user.id);
       if (claudeAuth) {
         try {
-          const client = createClient(claudeAuth);
+          const client = getClaudeClient(claudeAuth);
           await client.interruptSession(session.remoteSessionId);
         } catch (interruptError) {
           // Log but don't fail - session may already be idle

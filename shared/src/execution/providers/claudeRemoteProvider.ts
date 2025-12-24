@@ -6,13 +6,12 @@
  */
 
 import {
-  type IClaudeWebClient,
   type SessionEvent,
   type CreateSessionParams,
   type TitleGenerationEvent,
   generateTitle,
 } from '../../claudeWeb/index.js';
-import { ServiceProvider } from '../../services/registry.js';
+import { ServiceProvider, AClaudeWebClient } from '../../services/registry.js';
 import { logger } from '../../utils/logging/logger.js';
 import type { ClaudeAuth } from '../../auth/claudeAuth.js';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL, CLAUDE_DEFAULT_MODEL, CLAUDE_ORG_UUID, CLAUDE_COOKIES, OPENROUTER_API_KEY } from '../../config/env.js';
@@ -62,15 +61,17 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
   readonly name = 'claude';
 
   /**
-   * Create a ClaudeWebClient with the given auth
+   * Get and configure a ClaudeWebClient with the given auth
    */
-  private createClient(claudeAuth: ClaudeAuth, environmentId?: string): IClaudeWebClient {
-    return ServiceProvider.get<IClaudeWebClient>({
+  private getClient(claudeAuth: ClaudeAuth, environmentId?: string): AClaudeWebClient {
+    const client = ServiceProvider.get(AClaudeWebClient);
+    client.configure({
       accessToken: claudeAuth.accessToken,
       environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,
       model: CLAUDE_DEFAULT_MODEL,
     });
+    return client;
   }
 
   /**
@@ -90,8 +91,8 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       model: model || CLAUDE_DEFAULT_MODEL,
     });
 
-    // No custom events - just create the client and let Anthropic events flow through
-    const client = this.createClient(claudeAuth, environmentId);
+    // No custom events - just get the client and let Anthropic events flow through
+    const client = this.getClient(claudeAuth, environmentId);
 
     // Extract text from prompt for title generation (images can't be used for title)
     const textPrompt = extractTextFromPrompt(prompt);
@@ -227,7 +228,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
 
     // No custom events for resume - let Anthropic events flow through
 
-    const client = this.createClient(claudeAuth, environmentId);
+    const client = this.getClient(claudeAuth, environmentId);
 
     try {
       // Get current session info
@@ -290,7 +291,7 @@ export class ClaudeRemoteProvider implements ExecutionProvider {
       remoteSessionId,
     });
 
-    const client = this.createClient(claudeAuth);
+    const client = this.getClient(claudeAuth);
     await client.interruptSession(remoteSessionId);
 
     logger.info('Claude Remote session interrupted', {

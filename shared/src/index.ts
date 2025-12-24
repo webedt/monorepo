@@ -35,8 +35,7 @@ export * from './github/index.js';
 // Claude Web Sessions API
 // Note: Exports Session type (API session) as ClaudeSession, SessionEvent as ClaudeSessionEvent
 // to avoid conflicts with db/schema types
-export { ClaudeWebClient, fetchEnvironmentIdFromSessions, generateTitle, generateTitleSync, ClaudeRemoteError } from './claudeWeb/index.js';
-export type { IClaudeWebClient } from './claudeWeb/index.js';
+export { ClaudeWebClient, fetchEnvironmentIdFromSessions, generateTitle, generateTitleSync, ClaudeRemoteError, AClaudeWebClient } from './claudeWeb/index.js';
 export type {
   ClaudeRemoteAuth,
   ClaudeRemoteClientConfig,

@@ -8,7 +8,7 @@ import { Octokit } from '@octokit/rest';
 import { db, users, chatSessions, events, eq, and, isNull } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { logger, ServiceProvider, type IClaudeWebClient } from '@webedt/shared';
+import { logger, ServiceProvider, AClaudeWebClient } from '@webedt/shared';
 import { GitHubOperations } from '@webedt/shared';
 import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
@@ -47,7 +47,8 @@ async function archiveClaudeRemoteSession(
     // Refresh token if needed
     const refreshedAuth = await ensureValidToken(claudeAuth);
 
-    const client = ServiceProvider.get<IClaudeWebClient>({
+    const client = ServiceProvider.get(AClaudeWebClient);
+    client.configure({
       accessToken: refreshedAuth.accessToken,
       environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,

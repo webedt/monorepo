@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, db, users, ServiceProvider, type IClaudeWebClient } from '@webedt/shared';
+import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, db, users, ServiceProvider, AClaudeWebClient } from '@webedt/shared';
 import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
 import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
@@ -137,10 +137,15 @@ async function getClientConfig(options: { token?: string; environment?: string; 
   };
 }
 
-// Helper to create client
-async function createClient(options: { token?: string; environment?: string; org?: string }) {
+// Helper to get and configure client
+async function getClient(options: { token?: string; environment?: string; org?: string }): Promise<AClaudeWebClient> {
   const config = await getClientConfig(options);
-  return ServiceProvider.get<IClaudeWebClient>(config);
+  const client = ServiceProvider.get(AClaudeWebClient);
+  client.configure({
+    accessToken: config.accessToken,
+    environmentId: config.environmentId,
+  });
+  return client;
 }
 
 // Format event for display
@@ -204,7 +209,7 @@ webCommand
   .action(async (options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
       const limit = parseInt(options.limit, 10);
 
       const response = await client.listSessions(limit);
@@ -254,7 +259,7 @@ webCommand
   .action(async (sessionId, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
 
       const session = await client.getSession(sessionId);
 
@@ -285,7 +290,7 @@ webCommand
   .action(async (sessionId, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
 
       const response = await client.getEvents(sessionId);
       const events = response.data || [];
@@ -329,7 +334,7 @@ webCommand
   .action(async (gitUrl, prompt, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
 
       console.log(`\nCreating session for: ${gitUrl}`);
       console.log(`Prompt: ${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}`);
@@ -376,7 +381,7 @@ webCommand
   .action(async (sessionId, message, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
 
       console.log(`\nResuming session: ${sessionId}`);
       console.log(`Message: ${message.slice(0, 100)}${message.length > 100 ? '...' : ''}`);
@@ -414,7 +419,7 @@ webCommand
   .action(async (sessionId, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
 
       await client.archiveSession(sessionId);
       console.log(`Session ${sessionId} archived successfully.`);
@@ -434,7 +439,7 @@ webCommand
   .action(async (sessionId, newTitle, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
 
       await client.renameSession(sessionId, newTitle);
       console.log(`Session ${sessionId} renamed to "${newTitle}".`);
@@ -454,7 +459,7 @@ webCommand
   .action(async (sessionId, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await createClient(parentOpts);
+      const client = await getClient(parentOpts);
 
       await client.interruptSession(sessionId);
       console.log(`Interrupt signal sent to session ${sessionId}.`);
@@ -521,7 +526,7 @@ testCommand
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
 
     console.log('\n=== SCENARIO 1: Execute + Wait + Resume ===\n');
@@ -575,7 +580,7 @@ testCommand
   .option('--wait-ms <ms>', 'How long to wait before interrupting', '5000')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
 
@@ -639,7 +644,7 @@ testCommand
   .option('--wait-ms <ms>', 'How long to wait before stopping poll', '5000')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
 
@@ -705,7 +710,7 @@ testCommand
   .option('--wait-ms <ms>', 'How long to wait before interrupting (needs 15s+ for Claude to start)', '15000')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
 
@@ -773,7 +778,7 @@ testCommand
   .option('--wait-ms <ms>', 'How long to wait before each stop', '3000')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
 
@@ -856,7 +861,7 @@ testCommand
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
 
     console.log('\n=== SCENARIO 6: Execute + Rename ===\n');
@@ -905,7 +910,7 @@ testCommand
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
 
     console.log('\n=== SCENARIO 7: Execute + Complete + Archive ===\n');
@@ -952,7 +957,7 @@ testCommand
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
     const startTime = Date.now();
 
     console.log('\n=== SCENARIO 8: WebSocket Streaming ===\n');
@@ -1011,7 +1016,7 @@ testCommand
     console.log(`Skipping: ${skipList.length ? skipList.join(', ') : 'none'}`);
     console.log('-'.repeat(40));
 
-    const client = await createClient(parentOpts);
+    const client = await getClient(parentOpts);
 
     // Define scenario runners inline (avoiding Commander action handler complexity)
     const scenarios: { [key: number]: () => Promise<void> } = {

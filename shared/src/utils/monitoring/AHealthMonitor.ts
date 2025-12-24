@@ -1,15 +1,13 @@
 /**
- * Interface for Health Monitoring Service
+ * Abstract Health Monitor Service
  *
- * Defines the contract for comprehensive health monitoring with
- * database health checks, external service status, circuit breaker states,
- * and metrics aggregation.
+ * Base class for comprehensive health monitoring with database health checks,
+ * external service status, circuit breaker states, and metrics aggregation.
  *
- * @see HealthMonitor for the implementation
- * @module interfaces/IHealthMonitor
+ * @see HealthMonitor for the concrete implementation
  */
-
-import type { CircuitBreakerStats } from '../resilience/ICircuitBreaker.js';
+import { AService } from '../../services/abstracts/AService.js';
+import type { CircuitBreakerStats } from '../resilience/ACircuitBreaker.js';
 
 /**
  * Result of a single health check.
@@ -87,67 +85,40 @@ export interface DetailedHealthStatus {
 export type HealthCheckFunction = () => Promise<HealthCheckResult>;
 
 /**
- * Health monitor interface for comprehensive service health tracking.
+ * Abstract health monitor service.
  *
- * @example
- * ```typescript
- * const monitor: IHealthMonitor = getHealthMonitor();
- *
- * monitor.registerCheck('database', async () => ({
- *   name: 'database',
- *   status: 'healthy',
- *   latencyMs: 5,
- * }));
- *
- * const health = await monitor.getHealthStatus();
- * console.log(`Status: ${health.status}`);
- * ```
+ * Initialize order is 0 (default).
  */
-export interface IHealthMonitor {
+export abstract class AHealthMonitor extends AService {
   /**
    * Register a health check function.
-   *
-   * @param name - Name of the health check
-   * @param checkFn - Function that performs the check
    */
-  registerCheck(name: string, checkFn: HealthCheckFunction): void;
+  abstract registerCheck(name: string, checkFn: HealthCheckFunction): void;
 
   /**
    * Remove a health check.
-   *
-   * @param name - Name of the health check to remove
    */
-  unregisterCheck(name: string): void;
+  abstract unregisterCheck(name: string): void;
 
   /**
    * Run a single health check.
-   *
-   * @param name - Name of the health check to run
-   * @returns Health check result
    */
-  runCheck(name: string): Promise<HealthCheckResult>;
+  abstract runCheck(name: string): Promise<HealthCheckResult>;
 
   /**
    * Run all health checks.
-   *
-   * @returns Array of all health check results
    */
-  runAllChecks(): Promise<HealthCheckResult[]>;
+  abstract runAllChecks(): Promise<HealthCheckResult[]>;
 
   /**
    * Get aggregated health status.
-   *
-   * @returns Service health with all checks and metrics
    */
-  getHealthStatus(): Promise<ServiceHealth>;
+  abstract getHealthStatus(): Promise<ServiceHealth>;
 
   /**
    * Get detailed health status (for /health endpoint).
-   *
-   * @param config - Configuration with version and build info
-   * @returns Detailed health status
    */
-  getDetailedHealthStatus(config: {
+  abstract getDetailedHealthStatus(config: {
     version?: string;
     service?: string;
     containerId?: string;
@@ -156,57 +127,41 @@ export interface IHealthMonitor {
 
   /**
    * Start periodic health checks.
-   *
-   * @param intervalMs - Interval between checks (default: 30000)
    */
-  startPeriodicChecks(intervalMs?: number): void;
+  abstract startPeriodicChecks(intervalMs?: number): void;
 
   /**
    * Stop periodic health checks.
    */
-  stopPeriodicChecks(): void;
+  abstract stopPeriodicChecks(): void;
 
   /**
    * Update cleanup status (called by cleanup job).
-   *
-   * @param success - Whether cleanup succeeded
-   * @param cleanedCount - Number of items cleaned
    */
-  updateCleanupStatus(success: boolean, cleanedCount: number): void;
+  abstract updateCleanupStatus(success: boolean, cleanedCount: number): void;
 
   /**
    * Set cleanup interval (for status display).
-   *
-   * @param minutes - Cleanup interval in minutes
    */
-  setCleanupInterval(minutes: number): void;
+  abstract setCleanupInterval(minutes: number): void;
 
   /**
    * Get the last known result for a check.
-   *
-   * @param name - Name of the health check
-   * @returns Last known result or undefined
    */
-  getLastResult(name: string): HealthCheckResult | undefined;
+  abstract getLastResult(name: string): HealthCheckResult | undefined;
 
   /**
    * Get all last known results.
-   *
-   * @returns Array of all last known results
    */
-  getAllLastResults(): HealthCheckResult[];
+  abstract getAllLastResults(): HealthCheckResult[];
 
   /**
    * Check if the system is healthy (quick check).
-   *
-   * @returns `true` if all checks are healthy
    */
-  isHealthy(): boolean;
+  abstract isHealthy(): boolean;
 
   /**
    * Check if the system is ready to serve requests.
-   *
-   * @returns `true` if critical services are available
    */
-  isReady(): Promise<boolean>;
+  abstract isReady(): Promise<boolean>;
 }

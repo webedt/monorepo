@@ -3,9 +3,9 @@
  * @module utils/logging
  */
 
-// Interfaces
-export type { ILogger, LogContext } from './ILogger.js';
-export type { ILogCapture, CapturedLog, LogFilter, LogCaptureStatus } from './ILogCapture.js';
+// Abstract classes and types
+export { ALogger, type LogContext } from './ALogger.js';
+export { ALogCapture, type CapturedLog, type LogFilter, type LogCaptureStatus } from './ALogCapture.js';
 
 // Implementations
 export { logger } from './logger.js';

@@ -27,7 +27,7 @@
 
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
-import type { IClaudeWebClient } from './IClaudeWebClient.js';
+import { AClaudeWebClient } from './AClaudeWebClient.js';
 import {
   ClaudeRemoteClientConfig,
   CreateSessionParams,
@@ -143,7 +143,7 @@ export async function fetchEnvironmentIdFromSessions(
  * @see {@link CreateSessionParams} for session creation options
  * @see {@link SessionResult} for execution results
  */
-export class ClaudeWebClient implements IClaudeWebClient {
+export class ClaudeWebClient extends AClaudeWebClient {
   private accessToken: string;
   private environmentId: string;
   private orgUuid?: string;
@@ -169,6 +169,7 @@ export class ClaudeWebClient implements IClaudeWebClient {
    * ```
    */
   constructor(config: ClaudeRemoteClientConfig) {
+    super();
     this.accessToken = config.accessToken;
     this.environmentId = config.environmentId;
     this.orgUuid = config.orgUuid;

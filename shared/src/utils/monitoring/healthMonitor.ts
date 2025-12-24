@@ -9,29 +9,29 @@
  * - Automatic recovery mechanisms
  */
 
-import type {
-  IHealthMonitor,
-  HealthCheckResult,
-  ServiceHealth,
-  DetailedHealthStatus,
-  HealthCheckFunction,
-} from './IHealthMonitor.js';
+import {
+  AHealthMonitor,
+  type HealthCheckResult,
+  type ServiceHealth,
+  type DetailedHealthStatus,
+  type HealthCheckFunction,
+} from './AHealthMonitor.js';
 import { logger } from '../logging/logger.js';
 import { metrics } from './metrics.js';
 import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
 
-// Re-export types from interface for backwards compatibility
+// Re-export types from abstract for backwards compatibility
 export type {
   HealthCheckResult,
   ServiceHealth,
   DetailedHealthStatus,
   HealthCheckFunction,
-} from './IHealthMonitor.js';
+} from './AHealthMonitor.js';
 
 /**
  * Health Monitor Class
  */
-class HealthMonitor implements IHealthMonitor {
+class HealthMonitor extends AHealthMonitor {
   private healthChecks: Map<string, HealthCheckFunction> = new Map();
   private lastCheckResults: Map<string, HealthCheckResult> = new Map();
   private checkInterval: NodeJS.Timeout | null = null;
@@ -298,7 +298,7 @@ class HealthMonitor implements IHealthMonitor {
 }
 
 // Global health monitor instance
-export const healthMonitor: IHealthMonitor = new HealthMonitor();
+export const healthMonitor: AHealthMonitor = new HealthMonitor();
 
 /**
  * Create a database health check function

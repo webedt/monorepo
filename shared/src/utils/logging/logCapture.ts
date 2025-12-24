@@ -3,12 +3,12 @@
  * Captures logs in a circular buffer for retrieval via API
  */
 
-import type { ILogCapture, CapturedLog, LogFilter } from './ILogCapture.js';
+import { ALogCapture, type CapturedLog, type LogFilter } from './ALogCapture.js';
 
-// Re-export types from interface for backwards compatibility
-export type { CapturedLog, LogFilter } from './ILogCapture.js';
+// Re-export types from abstract for backwards compatibility
+export type { CapturedLog, LogFilter, LogCaptureStatus } from './ALogCapture.js';
 
-class LogCapture implements ILogCapture {
+class LogCapture extends ALogCapture {
   private logs: CapturedLog[] = [];
   private maxLogs: number = 5000;
   private enabled: boolean = true;
@@ -135,4 +135,4 @@ class LogCapture implements ILogCapture {
 }
 
 // Singleton instance
-export const logCapture: ILogCapture = new LogCapture();
+export const logCapture: ALogCapture = new LogCapture();

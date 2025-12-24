@@ -3,15 +3,15 @@
  * @module utils/resilience
  */
 
-// Interfaces
-export type {
-  ICircuitBreaker,
-  ICircuitBreakerRegistry,
-  CircuitState,
-  CircuitBreakerConfig,
-  CircuitBreakerStats,
-  CircuitBreakerResult,
-} from './ICircuitBreaker.js';
+// Abstract classes and types
+export {
+  ACircuitBreaker,
+  ACircuitBreakerRegistry,
+  type CircuitState,
+  type CircuitBreakerConfig,
+  type CircuitBreakerStats,
+  type CircuitBreakerResult,
+} from './ACircuitBreaker.js';
 
 // Circuit Breaker
 export { CircuitBreaker, createCircuitBreaker, circuitBreakerRegistry } from './circuitBreaker.js';

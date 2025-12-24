@@ -35,11 +35,11 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { IGitHubClient, GitHubPullOptions, GitHubPullResult } from './IGitHubClient.js';
+import { AGitHubClient, type GitHubPullOptions, type GitHubPullResult } from './AGitHubClient.js';
 import { logger } from '../utils/logging/logger.js';
 
-// Re-export types from interface for backwards compatibility
-export type { GitHubPullOptions, GitHubPullResult } from './IGitHubClient.js';
+// Re-export types from abstract for backwards compatibility
+export type { GitHubPullOptions, GitHubPullResult } from './AGitHubClient.js';
 
 /**
  * GitHub repository client for clone and pull operations.
@@ -59,13 +59,14 @@ export type { GitHubPullOptions, GitHubPullResult } from './IGitHubClient.js';
  * const repo = client.extractRepoName('https://github.com/org/repo');
  * ```
  */
-export class GitHubClient implements IGitHubClient {
+export class GitHubClient extends AGitHubClient {
   private git: SimpleGit;
 
   /**
    * Create a new GitHub client.
    */
   constructor() {
+    super();
     this.git = simpleGit();
   }
 

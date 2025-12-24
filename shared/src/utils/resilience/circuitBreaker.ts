@@ -8,23 +8,23 @@
  * - HALF_OPEN: Testing if service has recovered
  */
 
-import type {
-  ICircuitBreaker,
-  ICircuitBreakerRegistry,
-  CircuitState,
-  CircuitBreakerConfig,
-  CircuitBreakerStats,
-  CircuitBreakerResult,
-} from './ICircuitBreaker.js';
+import {
+  ACircuitBreaker,
+  ACircuitBreakerRegistry,
+  type CircuitState,
+  type CircuitBreakerConfig,
+  type CircuitBreakerStats,
+  type CircuitBreakerResult,
+} from './ACircuitBreaker.js';
 import { logger } from '../logging/logger.js';
 
-// Re-export types from interface for backwards compatibility
+// Re-export types from abstract for backwards compatibility
 export type {
   CircuitState,
   CircuitBreakerConfig,
   CircuitBreakerStats,
   CircuitBreakerResult,
-} from './ICircuitBreaker.js';
+} from './ACircuitBreaker.js';
 
 const DEFAULT_CONFIG: CircuitBreakerConfig = {
   failureThreshold: 5,
@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: CircuitBreakerConfig = {
   name: 'default',
 };
 
-export class CircuitBreaker implements ICircuitBreaker {
+export class CircuitBreaker extends ACircuitBreaker {
   private config: CircuitBreakerConfig;
   private state: CircuitState = 'closed';
   private consecutiveFailures = 0;
@@ -48,6 +48,7 @@ export class CircuitBreaker implements ICircuitBreaker {
   private stateChangeListeners: ((state: CircuitState, prevState: CircuitState) => void)[] = [];
 
   constructor(config: Partial<CircuitBreakerConfig> = {}) {
+    super();
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
@@ -289,20 +290,20 @@ export class CircuitBreaker implements ICircuitBreaker {
 /**
  * Create a circuit breaker instance
  */
-export function createCircuitBreaker(config: Partial<CircuitBreakerConfig> = {}): ICircuitBreaker {
+export function createCircuitBreaker(config: Partial<CircuitBreakerConfig> = {}): ACircuitBreaker {
   return new CircuitBreaker(config);
 }
 
 /**
  * Circuit breaker registry for managing multiple breakers
  */
-class CircuitBreakerRegistry implements ICircuitBreakerRegistry {
-  private breakers: Map<string, ICircuitBreaker> = new Map();
+class CircuitBreakerRegistry extends ACircuitBreakerRegistry {
+  private breakers: Map<string, ACircuitBreaker> = new Map();
 
   /**
    * Get or create a circuit breaker by name
    */
-  get(name: string, config?: Partial<CircuitBreakerConfig>): ICircuitBreaker {
+  get(name: string, config?: Partial<CircuitBreakerConfig>): ACircuitBreaker {
     let breaker = this.breakers.get(name);
     if (!breaker) {
       breaker = createCircuitBreaker({ ...config, name });
@@ -340,4 +341,4 @@ class CircuitBreakerRegistry implements ICircuitBreakerRegistry {
 }
 
 // Global registry instance
-export const circuitBreakerRegistry: ICircuitBreakerRegistry = new CircuitBreakerRegistry();
+export const circuitBreakerRegistry: ACircuitBreakerRegistry = new CircuitBreakerRegistry();

@@ -9,14 +9,18 @@
  */
 
 import { EventEmitter } from 'events';
-import type { ISessionEventBroadcaster, SessionEvent } from './ISessionEventBroadcaster.js';
+import { ASessionEventBroadcaster, type SessionEvent } from './ASessionEventBroadcaster.js';
+
+// Re-export types from abstract for backwards compatibility
+export type { BroadcastEvent, SessionEvent } from './ASessionEventBroadcaster.js';
 
 interface Subscriber {
   id: string;
   callback: (event: SessionEvent) => void;
 }
 
-class SessionEventBroadcaster extends EventEmitter implements ISessionEventBroadcaster {
+class SessionEventBroadcaster extends ASessionEventBroadcaster {
+  private emitter = new EventEmitter();
   // Map of sessionId -> array of subscribers
   private subscribers: Map<string, Subscriber[]> = new Map();
 
@@ -26,7 +30,7 @@ class SessionEventBroadcaster extends EventEmitter implements ISessionEventBroad
   constructor() {
     super();
     // Increase max listeners since we may have many sessions
-    this.setMaxListeners(1000);
+    this.emitter.setMaxListeners(1000);
   }
 
   /**
@@ -143,4 +147,4 @@ class SessionEventBroadcaster extends EventEmitter implements ISessionEventBroad
 }
 
 // Export a singleton instance
-export const sessionEventBroadcaster: ISessionEventBroadcaster = new SessionEventBroadcaster();
+export const sessionEventBroadcaster: ASessionEventBroadcaster = new SessionEventBroadcaster();

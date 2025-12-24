@@ -10,26 +10,27 @@
  */
 
 import { EventEmitter } from 'events';
-import type { ISessionListBroadcaster, SessionListEvent, SessionUpdateType } from './ISessionListBroadcaster.js';
+import { ASessionListBroadcaster, type SessionListEvent, type SessionUpdateType } from './ASessionListBroadcaster.js';
 import { logger } from '../utils/logging/logger.js';
 import type { ChatSession } from '../db/schema.js';
 
-// Re-export types from interface for backwards compatibility
-export type { SessionUpdateType, SessionListEvent } from './ISessionListBroadcaster.js';
+// Re-export types from abstract for backwards compatibility
+export type { SessionUpdateType, SessionListEvent } from './ASessionListBroadcaster.js';
 
 interface Subscriber {
   id: string;
   callback: (event: SessionListEvent) => void;
 }
 
-class SessionListBroadcaster extends EventEmitter implements ISessionListBroadcaster {
+class SessionListBroadcaster extends ASessionListBroadcaster {
+  private emitter = new EventEmitter();
   // Map of userId -> array of subscribers
   private subscribers: Map<string, Subscriber[]> = new Map();
 
   constructor() {
     super();
     // Increase max listeners since we may have many users
-    this.setMaxListeners(1000);
+    this.emitter.setMaxListeners(1000);
   }
 
   /**
@@ -149,4 +150,4 @@ class SessionListBroadcaster extends EventEmitter implements ISessionListBroadca
 }
 
 // Export a singleton instance
-export const sessionListBroadcaster: ISessionListBroadcaster = new SessionListBroadcaster();
+export const sessionListBroadcaster: ASessionListBroadcaster = new SessionListBroadcaster();

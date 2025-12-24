@@ -83,8 +83,8 @@
  * @module claudeWeb
  */
 
-// Interface
-export type { IClaudeWebClient } from './IClaudeWebClient.js';
+// Abstract class
+export { AClaudeWebClient } from './AClaudeWebClient.js';
 
 // Implementation
 export { ClaudeWebClient, fetchEnvironmentIdFromSessions } from './claudeWebClient.js';

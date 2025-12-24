@@ -5,12 +5,12 @@
  * API call success rates, task completion times, and error rates.
  */
 
-import type { IMetricsRegistry, MetricLabels } from './IMetricsRegistry.js';
+import { AMetricsRegistry } from './AMetricsRegistry.js';
 import { logger } from '../logging/logger.js';
 import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
 
-// Re-export types from interface for backwards compatibility
-export type { MetricLabels } from './IMetricsRegistry.js';
+// Local type for metric labels (matches the interface)
+export type MetricLabels = Record<string, string>;
 
 interface CounterData {
   value: number;
@@ -209,7 +209,7 @@ class Histogram {
 /**
  * Metrics Registry - Central collection point for all metrics
  */
-class MetricsRegistry {
+class MetricsRegistry extends AMetricsRegistry {
   private startTime: Date = new Date();
 
   // HTTP/API metrics
@@ -577,4 +577,4 @@ class MetricsRegistry {
 }
 
 // Global metrics instance
-export const metrics: IMetricsRegistry = new MetricsRegistry();
+export const metrics: AMetricsRegistry = new MetricsRegistry();

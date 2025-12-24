@@ -2,9 +2,9 @@
  * GitHub operations module exports
  */
 
-// Interfaces
-export type { IGitHelper } from './IGitHelper.js';
-export type { IGitHubClient, GitHubPullOptions, GitHubPullResult } from './IGitHubClient.js';
+// Abstract classes and types
+export { AGitHelper } from './AGitHelper.js';
+export { AGitHubClient, type GitHubPullOptions, type GitHubPullResult } from './AGitHubClient.js';
 
 // Implementations
 export * from './gitHelper.js';

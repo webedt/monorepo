@@ -38,7 +38,7 @@
  */
 
 import { simpleGit, SimpleGit } from 'simple-git';
-import type { IGitHelper } from './IGitHelper.js';
+import { AGitHelper } from './AGitHelper.js';
 import { logger } from '../utils/logging/logger.js';
 
 /**
@@ -61,7 +61,7 @@ import { logger } from '../utils/logging/logger.js';
  * await git.push('origin', 'claude/fix-bug-123');
  * ```
  */
-export class GitHelper implements IGitHelper {
+export class GitHelper extends AGitHelper {
   private git: SimpleGit;
   private workspacePath: string;
   private safeDirectoryAdded: boolean = false;
@@ -77,6 +77,7 @@ export class GitHelper implements IGitHelper {
    * ```
    */
   constructor(workspacePath: string) {
+    super();
     this.workspacePath = workspacePath;
     this.git = simpleGit(workspacePath);
   }

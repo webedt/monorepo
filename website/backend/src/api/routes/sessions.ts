@@ -9,7 +9,7 @@ import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc,
 import type { ChatSession } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, type IClaudeWebClient } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, type ClaudeWebClientConfig } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -86,6 +86,15 @@ async function deleteGitHubBranch(
   }
 }
 
+/**
+ * Get and configure the Claude Web Client with the given credentials.
+ */
+function getClaudeClient(config: ClaudeWebClientConfig): AClaudeWebClient {
+  const client = ServiceProvider.get(AClaudeWebClient);
+  client.configure(config);
+  return client;
+}
+
 // Helper function to archive Claude Remote session
 async function archiveClaudeRemoteSession(
   remoteSessionId: string,
@@ -111,7 +120,7 @@ async function archiveClaudeRemoteSession(
       tokenRefreshed: refreshedAuth !== claudeAuth,
     });
 
-    const client = ServiceProvider.get<IClaudeWebClient>({
+    const client = getClaudeClient({
       accessToken: refreshedAuth.accessToken,
       environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,
@@ -1729,7 +1738,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
             environmentId: environmentId.slice(0, 10) + '...',
           });
 
-          const client = ServiceProvider.get<IClaudeWebClient>({
+          const client = getClaudeClient({
             accessToken: validAuth.accessToken,
             environmentId,
             baseUrl: CLAUDE_API_BASE_URL,
@@ -1990,7 +1999,7 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Create Claude client
-    const client = ServiceProvider.get<IClaudeWebClient>({
+    const client = getClaudeClient({
       accessToken: refreshedAuth.accessToken,
       environmentId: CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,
@@ -2276,7 +2285,7 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     const refreshedAuth = await ensureValidToken(user.claudeAuth);
 
     // Create Claude client
-    const client = ServiceProvider.get<IClaudeWebClient>({
+    const client = getClaudeClient({
       accessToken: refreshedAuth.accessToken,
       environmentId: CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,

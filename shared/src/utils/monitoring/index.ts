@@ -3,20 +3,22 @@
  * @module utils/monitoring
  */
 
-// Interfaces
-export type {
-  IHealthMonitor,
-  HealthCheckResult,
-  ServiceHealth,
-  DetailedHealthStatus,
-  HealthCheckFunction,
-} from './IHealthMonitor.js';
+// Abstract classes and types
+export {
+  AHealthMonitor,
+  type HealthCheckResult,
+  type ServiceHealth,
+  type DetailedHealthStatus,
+  type HealthCheckFunction,
+} from './AHealthMonitor.js';
 
-export type {
-  IMetricsRegistry,
-  MetricLabels,
-  MetricsSummary,
-} from './IMetricsRegistry.js';
+export {
+  AMetricsRegistry,
+  type MetricsSummary,
+} from './AMetricsRegistry.js';
+
+// Re-export MetricLabels from the implementation
+export type { MetricLabels } from './metrics.js';
 
 // Implementations
 export { healthMonitor, createDatabaseHealthCheck } from './healthMonitor.js';

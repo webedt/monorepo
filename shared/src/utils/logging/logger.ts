@@ -50,39 +50,15 @@
  */
 
 import { logCapture } from './logCapture.js';
-import type { ILogger, LogContext as ILogContext } from './ILogger.js';
+import { ALogger, type LogContext } from './ALogger.js';
 
 /**
  * Log severity levels.
  */
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-/**
- * Context metadata attached to log entries.
- *
- * Standard fields are formatted specially in log output.
- * Additional fields are included as key=value pairs.
- *
- * @example
- * ```typescript
- * const context: LogContext = {
- *   component: 'execute',     // Service component name
- *   sessionId: 'sess_123',    // Session identifier (truncated to 8 chars)
- *   provider: 'claude-remote', // AI provider name
- *   duration: 1500,           // Custom field: operation duration
- * };
- * ```
- */
-interface LogContext {
-  /** Service component name (e.g., 'auth', 'execute', 'storage') */
-  component?: string;
-  /** Session identifier (displayed truncated to 8 chars) */
-  sessionId?: string;
-  /** AI provider name (e.g., 'claude-remote', 'codex') */
-  provider?: string;
-  /** Additional context fields */
-  [key: string]: unknown;
-}
+// Re-export LogContext from abstract
+export type { LogContext } from './ALogger.js';
 
 /**
  * Structured logger class.
@@ -92,7 +68,7 @@ interface LogContext {
  *
  * @see {@link logger} - The singleton instance to use
  */
-class Logger {
+class Logger extends ALogger {
   /**
    * Format a log message with timestamp, level, and context.
    * @internal
@@ -232,6 +208,4 @@ class Logger {
  * logger.error('Operation failed', error);
  * ```
  */
-export const logger: ILogger = new Logger();
-
-export type { LogContext };
+export const logger: ALogger = new Logger();
