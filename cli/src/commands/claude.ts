@@ -6,12 +6,14 @@ import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
  * Get Claude client configuration with fallback chain for credentials.
  * Uses shared getClaudeCredentials() for token retrieval.
  */
-async function getClientConfig(options: { token?: string; environment?: string; org?: string }): Promise<{
+async function getClientConfig(options: { token?: string; environment?: string; org?: string; silent?: boolean }): Promise<{
   accessToken: string;
   environmentId: string;
   orgUuid?: string;
   source: string;
 }> {
+  const log = options.silent ? () => {} : console.log.bind(console);
+
   // Get credentials using shared function
   const credentials = await getClaudeCredentials({
     accessToken: options.token,
@@ -36,11 +38,11 @@ async function getClientConfig(options: { token?: string; environment?: string; 
 
   // Log source for user visibility
   if (source === 'credentials-file') {
-    console.log('Using credentials from ~/.claude/.credentials.json');
+    log('Using credentials from ~/.claude/.credentials.json');
   } else if (source === 'keychain') {
-    console.log('Using credentials from macOS Keychain');
+    log('Using credentials from macOS Keychain');
   } else if (source === 'database') {
-    console.log('Using credentials from database');
+    log('Using credentials from database');
   }
 
   // Get environment ID from options or env var
@@ -48,11 +50,11 @@ async function getClientConfig(options: { token?: string; environment?: string; 
 
   // If no environment ID, try to discover it
   if (!environmentId) {
-    console.log('Environment ID not set, discovering from existing sessions...');
+    log('Environment ID not set, discovering from existing sessions...');
     try {
       environmentId = await fetchEnvironmentIdFromSessions(accessToken) || undefined;
       if (environmentId) {
-        console.log(`Discovered environment ID: ${environmentId}`);
+        log(`Discovered environment ID: ${environmentId}`);
       }
     } catch {
       // Discovery failed
@@ -80,7 +82,7 @@ async function getClientConfig(options: { token?: string; environment?: string; 
 }
 
 // Helper to get and configure client
-async function getClient(options: { token?: string; environment?: string; org?: string }): Promise<AClaudeWebClient> {
+async function getClient(options: { token?: string; environment?: string; org?: string; silent?: boolean }): Promise<AClaudeWebClient> {
   const config = await getClientConfig(options);
   const client = ServiceProvider.get(AClaudeWebClient);
   client.configure({
@@ -273,14 +275,24 @@ webCommand
   .option('-b, --branch-prefix <prefix>', 'Branch prefix (default: claude/{prompt-words})')
   .option('--title <title>', 'Session title')
   .option('--quiet', 'Only show final result, not streaming events')
+  .option('--json', 'Output raw JSON result instead of formatted text')
+  .option('--jsonl', 'Stream events as JSON Lines (one JSON object per line)')
   .action(async (gitUrl, prompt, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const client = await getClient(parentOpts);
+      const silent = options.json || options.jsonl;
 
-      console.log(`\nCreating session for: ${gitUrl}`);
-      console.log(`Prompt: ${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}`);
-      console.log('-'.repeat(80));
+      // Suppress console output when --json or --jsonl is used
+      const log = silent ? () => {} : console.log.bind(console);
+
+      const client = await getClient({ ...parentOpts, silent });
+
+      log(`\nCreating session for: ${gitUrl}`);
+      log(`Prompt: ${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}`);
+      log('-'.repeat(80));
+
+      // Collect the raw result event for --json output
+      let rawResultEvent: SessionEvent | null = null;
 
       const result = await client.execute(
         {
@@ -291,11 +303,27 @@ webCommand
           title: options.title,
         },
         (event) => {
-          if (!options.quiet) {
+          if (options.jsonl) {
+            console.log(JSON.stringify(event));
+          } else if (!options.quiet && !options.json) {
             console.log(formatEvent(event));
+          }
+          // Capture the raw result event
+          if (event.type === 'result') {
+            rawResultEvent = event;
           }
         }
       );
+
+      if (options.jsonl) {
+        return;
+      }
+
+      if (options.json) {
+        // Output raw result event if available, otherwise fall back to processed result
+        console.log(JSON.stringify(rawResultEvent || result, null, 2));
+        return;
+      }
 
       console.log('-'.repeat(80));
       console.log('\nResult:');
