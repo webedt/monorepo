@@ -236,6 +236,40 @@ Exposes ports 3000 (frontend) and 3001 (backend API).
 
 The frontend displays version as `v0.0.{commit_count}` with toggleable details showing `{sha} [{timestamp}]`. Version info is injected at build time via `vite-plugin-version-mark`.
 
+## Coding Style
+
+See [CODING_STYLE.md](CODING_STYLE.md) for detailed conventions. Key points:
+
+### Imports
+
+```typescript
+// Value imports can be grouped
+import { randomUUID } from 'crypto';
+import { AClaudeWebClient } from './AClaudeWebClient.js';
+
+// Type imports: one per line with `import type`
+import type { ClaudeWebClientConfig } from './types.js';
+import type { CreateSessionParams } from './types.js';
+import type { CreateSessionResult } from './types.js';
+```
+
+### Abstract Class Pattern
+
+| File | JSDoc | Purpose |
+|------|-------|---------|
+| `AClassName.ts` | None | Abstract method signatures only, no documentation |
+| `className.doc.ts` | Full | Interface with complete documentation |
+| `className.ts` | None | Implementation, no documentation |
+
+### Method Signatures (Abstract Classes)
+
+```typescript
+abstract methodName(
+  param1: Type1,
+  param2: Type2
+): ReturnType;
+```
+
 ## Git Commit Messages
 
 - Use imperative mood, present tense

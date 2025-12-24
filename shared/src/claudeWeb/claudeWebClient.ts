@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { AClaudeWebClient } from './AClaudeWebClient.js';
 import type { ClaudeRemoteClientConfig } from './types.js';
+import type { ClaudeWebClientConfig } from './types.js';
 import type { CreateSessionParams } from './types.js';
 import type { CreateSessionResult } from './types.js';
 import type { Session } from './types.js';
@@ -64,12 +65,9 @@ export class ClaudeWebClient extends AClaudeWebClient {
     this.model = config.model || DEFAULT_MODEL;
   }
 
-  configure(config: {
-    accessToken: string;
-    environmentId?: string;
-    baseUrl?: string;
-    model?: string;
-  }): void {
+  configure(
+    config: ClaudeWebClientConfig
+  ): void {
     this.accessToken = config.accessToken;
     if (config.environmentId !== undefined) {
       this.environmentId = config.environmentId;
