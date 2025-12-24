@@ -1,12 +1,12 @@
 import { AService } from '../services/abstracts/AService.js';
-import type { ISessionListBroadcaster } from './sessionListBroadcaster.doc.js';
+import type { ISessionListBroadcasterDocumentation } from './sessionListBroadcaster.doc.js';
 import type { SessionListEvent } from './sessionListBroadcaster.doc.js';
 import type { SessionUpdateType } from './sessionListBroadcaster.doc.js';
 import type { ChatSession } from '../db/schema.js';
 
 export type { SessionUpdateType, SessionListEvent } from './sessionListBroadcaster.doc.js';
 
-export abstract class ASessionListBroadcaster extends AService implements ISessionListBroadcaster {
+export abstract class ASessionListBroadcaster extends AService implements ISessionListBroadcasterDocumentation {
   abstract subscribe(
     userId: string,
     subscriberId: string,

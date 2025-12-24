@@ -1,5 +1,5 @@
 import { AService } from '../../services/abstracts/AService.js';
-import type { IHealthMonitor } from './healthMonitor.doc.js';
+import type { IHealthMonitorDocumentation } from './healthMonitor.doc.js';
 import type { HealthCheckResult } from './healthMonitor.doc.js';
 import type { ServiceHealth } from './healthMonitor.doc.js';
 import type { DetailedHealthStatus } from './healthMonitor.doc.js';
@@ -7,7 +7,7 @@ import type { HealthCheckFunction } from './healthMonitor.doc.js';
 
 export type { HealthCheckResult, ServiceHealth, DetailedHealthStatus, HealthCheckFunction } from './healthMonitor.doc.js';
 
-export abstract class AHealthMonitor extends AService implements IHealthMonitor {
+export abstract class AHealthMonitor extends AService implements IHealthMonitorDocumentation {
   abstract registerCheck(name: string, checkFn: HealthCheckFunction): void;
 
   abstract unregisterCheck(name: string): void;

@@ -1,7 +1,7 @@
 import { AService } from '../services/abstracts/AService.js';
-import type { IGitHelper } from './gitHelper.doc.js';
+import type { IGitHelperDocumentation } from './gitHelper.doc.js';
 
-export abstract class AGitHelper extends AService implements IGitHelper {
+export abstract class AGitHelper extends AService implements IGitHelperDocumentation {
   abstract configure(workspacePath: string): void;
 
   abstract getStatus(): Promise<string>;

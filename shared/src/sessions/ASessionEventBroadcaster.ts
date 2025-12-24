@@ -1,11 +1,11 @@
 import { AService } from '../services/abstracts/AService.js';
-import type { ISessionEventBroadcaster } from './sessionEventBroadcaster.doc.js';
+import type { ISessionEventBroadcasterDocumentation } from './sessionEventBroadcaster.doc.js';
 import type { BroadcastEvent } from './sessionEventBroadcaster.doc.js';
 import type { SessionEvent } from './sessionEventBroadcaster.doc.js';
 
 export type { BroadcastEvent, SessionEvent } from './sessionEventBroadcaster.doc.js';
 
-export abstract class ASessionEventBroadcaster extends AService implements ISessionEventBroadcaster {
+export abstract class ASessionEventBroadcaster extends AService implements ISessionEventBroadcasterDocumentation {
   abstract startSession(sessionId: string): void;
 
   abstract endSession(sessionId: string): void;

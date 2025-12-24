@@ -63,7 +63,7 @@ export type SessionEvent = BroadcastEvent;
  * unsubscribe();
  * ```
  */
-export interface ISessionEventBroadcaster {
+export interface ISessionEventBroadcasterDocumentation {
   /**
    * Mark a session as active (currently streaming from AI worker).
    *

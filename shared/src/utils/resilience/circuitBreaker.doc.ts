@@ -115,7 +115,7 @@ export interface CircuitBreakerResult<T> {
  * );
  * ```
  */
-export interface ICircuitBreaker {
+export interface ICircuitBreakerDocumentation {
   /**
    * Register a listener for state changes.
    *
@@ -262,7 +262,7 @@ export interface ICircuitBreaker {
  * circuitBreakerRegistry.resetAll();
  * ```
  */
-export interface ICircuitBreakerRegistry {
+export interface ICircuitBreakerRegistryDocumentation {
   /**
    * Get or create a circuit breaker by name.
    *
@@ -280,7 +280,7 @@ export interface ICircuitBreakerRegistry {
    * });
    * ```
    */
-  get(name: string, config?: Partial<CircuitBreakerConfig>): ICircuitBreaker;
+  get(name: string, config?: Partial<CircuitBreakerConfig>): ICircuitBreakerDocumentation;
 
   /**
    * Get all circuit breaker statistics.

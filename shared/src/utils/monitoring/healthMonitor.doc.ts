@@ -141,7 +141,7 @@ export type HealthCheckFunction = () => Promise<HealthCheckResult>;
  * console.log(`System is ${status.status}`);
  * ```
  */
-export interface IHealthMonitor {
+export interface IHealthMonitorDocumentation {
   /**
    * Register a health check function.
    *

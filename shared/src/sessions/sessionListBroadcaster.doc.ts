@@ -63,7 +63,7 @@ export interface SessionListEvent {
  * unsubscribe();
  * ```
  */
-export interface ISessionListBroadcaster {
+export interface ISessionListBroadcasterDocumentation {
   /**
    * Subscribe to session list updates for a specific user.
    *

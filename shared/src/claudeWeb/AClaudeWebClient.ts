@@ -1,5 +1,5 @@
 import { AService } from '../services/abstracts/AService.js';
-import type { IClaudeWebClient } from './claudeWebClient.doc.js';
+import type { IClaudeWebClientDocumentation } from './claudeWebClient.doc.js';
 import type { ClaudeWebClientConfig } from './types.js';
 import type { CreateSessionParams } from './types.js';
 import type { CreateSessionResult } from './types.js';
@@ -10,7 +10,7 @@ import type { SessionResult } from './types.js';
 import type { EventCallback } from './types.js';
 import type { PollOptions } from './types.js';
 
-export abstract class AClaudeWebClient extends AService implements IClaudeWebClient {
+export abstract class AClaudeWebClient extends AService implements IClaudeWebClientDocumentation {
   override readonly order: number = 50;
 
   abstract configure(

@@ -43,7 +43,7 @@
  * users (e.g., after extracting a tarball), the helper automatically
  * adds the workspace to git's `safe.directory` configuration.
  */
-export interface IGitHelper {
+export interface IGitHelperDocumentation {
   /**
    * Reconfigure the helper with a new workspace path.
    *

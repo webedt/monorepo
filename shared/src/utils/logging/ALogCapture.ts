@@ -1,12 +1,12 @@
 import { AService } from '../../services/abstracts/AService.js';
-import type { ILogCapture } from './logCapture.doc.js';
+import type { ILogCaptureDocumentation } from './logCapture.doc.js';
 import type { CapturedLog } from './logCapture.doc.js';
 import type { LogFilter } from './logCapture.doc.js';
 import type { LogCaptureStatus } from './logCapture.doc.js';
 
 export type { CapturedLog, LogFilter, LogCaptureStatus } from './logCapture.doc.js';
 
-export abstract class ALogCapture extends AService implements ILogCapture {
+export abstract class ALogCapture extends AService implements ILogCaptureDocumentation {
   override readonly order: number = -90;
 
   abstract capture(

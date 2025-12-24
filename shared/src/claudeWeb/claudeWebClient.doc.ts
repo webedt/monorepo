@@ -69,7 +69,7 @@ export type { ClaudeWebClientConfig } from './types.js';
  * 2. **Poll** - `pollSession()` streams events until completion
  * 3. **Resume** - `resume()` sends follow-up messages to existing sessions
  */
-export interface IClaudeWebClient {
+export interface IClaudeWebClientDocumentation {
   /**
    * Reconfigure the client with new settings.
    *

@@ -1,10 +1,10 @@
 import { AService } from '../../services/abstracts/AService.js';
-import type { IMetricsRegistry } from './metrics.doc.js';
+import type { IMetricsRegistryDocumentation } from './metrics.doc.js';
 import type { MetricsSummary } from './metrics.doc.js';
 
 export type { MetricsSummary } from './metrics.doc.js';
 
-export abstract class AMetricsRegistry extends AService implements IMetricsRegistry {
+export abstract class AMetricsRegistry extends AService implements IMetricsRegistryDocumentation {
   override readonly order: number = -50;
 
   abstract recordHttpRequest(

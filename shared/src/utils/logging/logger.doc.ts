@@ -70,7 +70,7 @@ export interface LogContext {
  *
  * - `LOG_LEVEL=debug` - Enable debug-level logging (disabled by default)
  */
-export interface ILogger {
+export interface ILoggerDocumentation {
   /**
    * Log a debug message.
    *

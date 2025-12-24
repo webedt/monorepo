@@ -55,7 +55,7 @@ export interface MetricsSummary {
  * console.log(`Uptime: ${summary.uptime}s, Requests: ${summary.totalRequests}`);
  * ```
  */
-export interface IMetricsRegistry {
+export interface IMetricsRegistryDocumentation {
   /**
    * Record an HTTP request.
    *

@@ -85,7 +85,7 @@ export interface LogCaptureStatus {
  * logCapture.clear();
  * ```
  */
-export interface ILogCapture {
+export interface ILogCaptureDocumentation {
   /**
    * Capture a log entry.
    *

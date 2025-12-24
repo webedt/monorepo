@@ -67,7 +67,7 @@ export interface GitHubPullResult {
  * console.log(`Branch: ${result.branch}`);
  * ```
  */
-export interface IGitHubClient {
+export interface IGitHubClientDocumentation {
   /**
    * Clone or pull a GitHub repository.
    *
