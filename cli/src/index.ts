@@ -2,8 +2,9 @@
 import 'dotenv/config';
 import { Command } from 'commander';
 import { bootstrapServices } from '@webedt/shared';
-import { dbCommand } from './commands/db.js';
+import { authCommand } from './commands/auth.js';
 import { claudeCommand } from './commands/claude.js';
+import { dbCommand } from './commands/db.js';
 import { githubCommand } from './commands/github.js';
 
 async function main() {
@@ -18,8 +19,9 @@ async function main() {
     .version('1.0.0');
 
   // Add command groups
-  program.addCommand(dbCommand);
+  program.addCommand(authCommand);
   program.addCommand(claudeCommand);
+  program.addCommand(dbCommand);
   program.addCommand(githubCommand);
 
   program.parse();

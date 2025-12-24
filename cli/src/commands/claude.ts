@@ -592,6 +592,89 @@ webCommand
   });
 
 webCommand
+  .command('can-resume <sessionId>')
+  .description('Check if a session can be resumed')
+  .option('--check-events', 'Also check if session has a completed event')
+  .option('--json', 'Output as JSON')
+  .action(async (sessionId, options, cmd) => {
+    try {
+      const parentOpts = cmd.parent?.opts() || {};
+      const client = await getClient(parentOpts);
+
+      const result = await client.canResume(sessionId, options.checkEvents);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(`\nSession ${sessionId}:`);
+      console.log(`  Can Resume: ${result.canResume ? 'Yes' : 'No'}`);
+      console.log(`  Status:     ${result.status || 'unknown'}`);
+      if (result.reason) {
+        console.log(`  Reason:     ${result.reason}`);
+      }
+      if (result.hasCompletedEvent !== undefined) {
+        console.log(`  Completed:  ${result.hasCompletedEvent ? 'Yes' : 'No'}`);
+      }
+    } catch (error) {
+      if (error instanceof ClaudeRemoteError) {
+        console.error(`API Error: ${error.message}`);
+      } else {
+        console.error('Error checking session:', error);
+      }
+      process.exit(1);
+    }
+  });
+
+webCommand
+  .command('send <sessionId> <message>')
+  .description('Send a message to a session (fire-and-forget, does not wait for response)')
+  .action(async (sessionId, message, _options, cmd) => {
+    try {
+      const parentOpts = cmd.parent?.opts() || {};
+      const client = await getClient(parentOpts);
+
+      await client.sendMessage(sessionId, message);
+      console.log(`Message sent to session ${sessionId}.`);
+    } catch (error) {
+      if (error instanceof ClaudeRemoteError) {
+        console.error(`API Error: ${error.message}`);
+      } else {
+        console.error('Error sending message:', error);
+      }
+      process.exit(1);
+    }
+  });
+
+webCommand
+  .command('set-permission <sessionId>')
+  .description('Set permission mode for a session')
+  .option('--mode <mode>', 'Permission mode: acceptEdits or requireApproval', 'acceptEdits')
+  .action(async (sessionId, options, cmd) => {
+    try {
+      const parentOpts = cmd.parent?.opts() || {};
+      const client = await getClient(parentOpts);
+
+      const mode = options.mode as 'acceptEdits' | 'requireApproval';
+      if (mode !== 'acceptEdits' && mode !== 'requireApproval') {
+        console.error('Invalid mode. Use: acceptEdits or requireApproval');
+        process.exit(1);
+      }
+
+      await client.setPermissionMode(sessionId, mode);
+      console.log(`Permission mode set to '${mode}' for session ${sessionId}.`);
+    } catch (error) {
+      if (error instanceof ClaudeRemoteError) {
+        console.error(`API Error: ${error.message}`);
+      } else {
+        console.error('Error setting permission mode:', error);
+      }
+      process.exit(1);
+    }
+  });
+
+webCommand
   .command('discover-env')
   .description('Discover your environment ID from existing sessions')
   .action(async (options, cmd) => {
