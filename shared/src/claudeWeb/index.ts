@@ -107,6 +107,7 @@ export type {
   ListSessionsResponse,
   ResumeSessionParams,
   EventCallback,
+  RawMessageCallback,
   PollOptions,
   SessionResult,
   GitOutcomeInfo,

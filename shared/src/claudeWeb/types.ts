@@ -245,6 +245,11 @@ export interface ResumeSessionParams {
 export type EventCallback = (event: SessionEvent) => void | Promise<void>;
 
 /**
+ * Callback for receiving raw WebSocket messages before parsing
+ */
+export type RawMessageCallback = (data: string) => void | Promise<void>;
+
+/**
  * Options for polling session events
  */
 export interface PollOptions {
@@ -260,6 +265,8 @@ export interface PollOptions {
   maxPolls?: number;
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
+  /** Callback for raw WebSocket messages before parsing */
+  onRawMessage?: RawMessageCallback;
 }
 
 /**

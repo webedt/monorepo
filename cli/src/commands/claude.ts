@@ -290,12 +290,13 @@ webCommand
   .option('--quiet', 'Only show final result, not streaming events')
   .option('--json', 'Output raw JSON result instead of formatted text')
   .option('--jsonl', 'Stream events as JSON Lines (one JSON object per line)')
+  .option('--raw', 'Stream raw WebSocket frames before any processing')
   .action(async (gitUrl, prompt, options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
-      const silent = options.json || options.jsonl;
+      const silent = options.json || options.jsonl || options.raw;
 
-      // Suppress console output when --json or --jsonl is used
+      // Suppress console output when --json, --jsonl, or --raw is used
       const log = silent ? () => {} : console.log.bind(console);
 
       const client = await getClient({ ...parentOpts, silent });
@@ -318,17 +319,20 @@ webCommand
         (event) => {
           if (options.jsonl) {
             console.log(JSON.stringify(event));
-          } else if (!options.quiet && !options.json) {
+          } else if (!options.quiet && !options.json && !options.raw) {
             console.log(formatEvent(event));
           }
           // Capture the raw result event
           if (event.type === 'result') {
             rawResultEvent = event;
           }
+        },
+        {
+          onRawMessage: options.raw ? (data: string) => console.log(data) : undefined,
         }
       );
 
-      if (options.jsonl) {
+      if (options.jsonl || options.raw) {
         return;
       }
 

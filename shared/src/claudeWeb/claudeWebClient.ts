@@ -12,6 +12,7 @@ import type { ListSessionsResponse } from './types.js';
 import type { SessionResult } from './types.js';
 import type { EventCallback } from './types.js';
 import type { PollOptions } from './types.js';
+import type { RawMessageCallback } from './types.js';
 import { ClaudeRemoteError } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
@@ -523,9 +524,10 @@ export class ClaudeWebClient extends AClaudeWebClient {
       timeoutMs?: number;
       abortSignal?: AbortSignal;
       skipExistingEvents?: boolean;
+      onRawMessage?: RawMessageCallback;
     } = {}
   ): Promise<SessionResult> {
-    const { timeoutMs = 10000, abortSignal, skipExistingEvents = false } = options;
+    const { timeoutMs = 10000, abortSignal, skipExistingEvents = false, onRawMessage } = options;
 
     const seenEventIds = new Set<string>();
     if (skipExistingEvents) {
@@ -560,7 +562,14 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
       ws.on('message', async (data: Buffer | string) => {
         try {
-          const message = JSON.parse(data.toString());
+          const rawData = data.toString();
+
+          // Call raw message callback before any processing
+          if (onRawMessage) {
+            await onRawMessage(rawData);
+          }
+
+          const message = JSON.parse(rawData);
 
           if (message.type === 'event' && message.data) {
             const event = message.data as SessionEvent;
@@ -735,6 +744,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
       skipExistingEvents = false,
       existingEventIds,
       abortSignal,
+      onRawMessage,
     } = options;
 
     const seenEventIds = existingEventIds ? new Set(existingEventIds) : new Set<string>();
@@ -753,6 +763,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
     return this.streamEvents(sessionId, onEvent, {
       abortSignal,
       skipExistingEvents: seenEventIds.size > 0,
+      onRawMessage,
     });
   }
 
@@ -822,6 +833,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
     return this.streamEvents(sessionId, onEvent, {
       abortSignal: options.abortSignal,
       skipExistingEvents: existingEventIds.size > 0,
+      onRawMessage: options.onRawMessage,
     });
   }
 }
