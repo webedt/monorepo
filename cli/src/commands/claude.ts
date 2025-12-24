@@ -550,57 +550,98 @@ const elapsed = (start: number) => `${((Date.now() - start) / 1000).toFixed(1)}s
 // Test repo - uses a simple test repo
 const TEST_GIT_URL = 'https://github.com/anthropics/claude-code';
 
+// Helper type for test output options
+interface TestOutputOptions {
+  json?: boolean;
+  jsonl?: boolean;
+}
+
+// Helper to create a logger based on output options
+function createTestLogger(options: TestOutputOptions) {
+  const silent = options.json || options.jsonl;
+  return {
+    log: silent ? () => {} : console.log.bind(console),
+    event: (event: SessionEvent) => {
+      if (options.jsonl) {
+        console.log(JSON.stringify(event));
+      }
+    },
+    json: (data: unknown) => {
+      if (options.json) {
+        console.log(JSON.stringify(data, null, 2));
+      }
+    },
+    silent,
+  };
+}
+
 testCommand
   .command('scenario1')
   .description('Scenario 1: Execute + wait + resume')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 1: Execute + Wait + Resume ===\n');
+    logger.log('\n=== SCENARIO 1: Execute + Wait + Resume ===\n');
 
     // Step 1: Start session
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a file called test-scenario1.txt with the text "Hello from scenario 1"',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
-    console.log(`[${elapsed(startTime)}] Web URL: ${createResult.webUrl}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Web URL: ${createResult.webUrl}`);
 
     // Step 2: Poll until completion
-    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for events...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Polling for events...`);
     let eventCount = 0;
     const result1 = await client.pollSession(createResult.sessionId, (event) => {
       eventCount++;
-      console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+      logger.event(event);
+      logger.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
     });
-    console.log(`[${elapsed(startTime)}] First execution completed: ${result1.status}`);
-    console.log(`[${elapsed(startTime)}] Total events from first execution: ${eventCount}`);
+    logger.log(`[${elapsed(startTime)}] First execution completed: ${result1.status}`);
+    logger.log(`[${elapsed(startTime)}] Total events from first execution: ${eventCount}`);
 
     // Step 3: Resume with new prompt
-    console.log(`\n[${elapsed(startTime)}] Step 3: Resuming session...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 3: Resuming session...`);
     let resumeEventCount = 0;
     const result2 = await client.resume(
       createResult.sessionId,
       'Now add a second line to test-scenario1.txt that says "Resumed successfully"',
       (event) => {
         resumeEventCount++;
-        console.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
       }
     );
-    console.log(`[${elapsed(startTime)}] Resume completed: ${result2.status}`);
-    console.log(`[${elapsed(startTime)}] Total events from resume: ${resumeEventCount}`);
+    logger.log(`[${elapsed(startTime)}] Resume completed: ${result2.status}`);
+    logger.log(`[${elapsed(startTime)}] Total events from resume: ${resumeEventCount}`);
 
     // Summary
-    console.log('\n=== SCENARIO 1 SUMMARY ===');
-    console.log(`Session ID: ${createResult.sessionId}`);
-    console.log(`First execution events: ${eventCount}`);
-    console.log(`Resume events: ${resumeEventCount}`);
-    console.log(`Total time: ${elapsed(startTime)}`);
-    console.log(`Final status: ${result2.status}`);
+    logger.log('\n=== SCENARIO 1 SUMMARY ===');
+    logger.log(`Session ID: ${createResult.sessionId}`);
+    logger.log(`First execution events: ${eventCount}`);
+    logger.log(`Resume events: ${resumeEventCount}`);
+    logger.log(`Total time: ${elapsed(startTime)}`);
+    logger.log(`Final status: ${result2.status}`);
+
+    // JSON output
+    logger.json({
+      scenario: 1,
+      sessionId: createResult.sessionId,
+      webUrl: createResult.webUrl,
+      firstExecutionEvents: eventCount,
+      resumeEvents: resumeEventCount,
+      totalTimeMs: Date.now() - startTime,
+      finalStatus: result2.status,
+    });
   });
 
 testCommand
@@ -608,63 +649,76 @@ testCommand
   .description('Scenario 2: Execute + early terminate + interrupt')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .option('--wait-ms <ms>', 'How long to wait before interrupting', '5000')
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 2: Execute + Early Terminate + Interrupt ===\n');
+    logger.log('\n=== SCENARIO 2: Execute + Early Terminate + Interrupt ===\n');
 
     // Step 1: Start session
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a comprehensive README.md file with multiple sections about this project. Make it detailed with at least 500 words.',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
 
     // Step 2: Poll for a short time then abort
-    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms then stopping...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms then stopping...`);
     const abortController = new AbortController();
     let eventCount = 0;
 
     // Set timeout to abort
     setTimeout(() => {
-      console.log(`\n[${elapsed(startTime)}] Aborting poll after ${waitMs}ms...`);
+      logger.log(`\n[${elapsed(startTime)}] Aborting poll after ${waitMs}ms...`);
       abortController.abort();
     }, waitMs);
 
     try {
       await client.pollSession(createResult.sessionId, (event) => {
         eventCount++;
-        console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
       }, { abortSignal: abortController.signal });
     } catch (error) {
       if ((error as Error).message?.includes('aborted')) {
-        console.log(`[${elapsed(startTime)}] Poll aborted as expected`);
+        logger.log(`[${elapsed(startTime)}] Poll aborted as expected`);
       } else {
         throw error;
       }
     }
-    console.log(`[${elapsed(startTime)}] Events received before abort: ${eventCount}`);
+    logger.log(`[${elapsed(startTime)}] Events received before abort: ${eventCount}`);
 
     // Step 3: Send interrupt
-    console.log(`\n[${elapsed(startTime)}] Step 3: Sending interrupt signal...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 3: Sending interrupt signal...`);
     await client.interruptSession(createResult.sessionId);
-    console.log(`[${elapsed(startTime)}] Interrupt sent`);
+    logger.log(`[${elapsed(startTime)}] Interrupt sent`);
 
     // Wait a moment and check status
     await sleep(2000);
     const session = await client.getSession(createResult.sessionId);
-    console.log(`[${elapsed(startTime)}] Session status after interrupt: ${session.session_status}`);
+    logger.log(`[${elapsed(startTime)}] Session status after interrupt: ${session.session_status}`);
 
     // Summary
-    console.log('\n=== SCENARIO 2 SUMMARY ===');
-    console.log(`Session ID: ${createResult.sessionId}`);
-    console.log(`Events before abort: ${eventCount}`);
-    console.log(`Final status: ${session.session_status}`);
-    console.log(`Total time: ${elapsed(startTime)}`);
+    logger.log('\n=== SCENARIO 2 SUMMARY ===');
+    logger.log(`Session ID: ${createResult.sessionId}`);
+    logger.log(`Events before abort: ${eventCount}`);
+    logger.log(`Final status: ${session.session_status}`);
+    logger.log(`Total time: ${elapsed(startTime)}`);
+
+    // JSON output
+    logger.json({
+      scenario: 2,
+      sessionId: createResult.sessionId,
+      eventsBeforeAbort: eventCount,
+      finalStatus: session.session_status,
+      totalTimeMs: Date.now() - startTime,
+    });
   });
 
 testCommand
@@ -672,65 +726,80 @@ testCommand
   .description('Scenario 3: Execute + early terminate + queue resume')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .option('--wait-ms <ms>', 'How long to wait before stopping poll', '5000')
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 3: Execute + Early Terminate + Queue Resume ===\n');
+    logger.log('\n=== SCENARIO 3: Execute + Early Terminate + Queue Resume ===\n');
 
     // Step 1: Start session
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a file called test-scenario3.txt with some initial content.',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
 
     // Step 2: Poll for a short time then stop (without interrupting)
-    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms then stopping (no interrupt)...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms then stopping (no interrupt)...`);
     const abortController = new AbortController();
     let eventCount = 0;
 
     setTimeout(() => {
-      console.log(`\n[${elapsed(startTime)}] Stopping poll...`);
+      logger.log(`\n[${elapsed(startTime)}] Stopping poll...`);
       abortController.abort();
     }, waitMs);
 
     try {
       await client.pollSession(createResult.sessionId, (event) => {
         eventCount++;
-        console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
       }, { abortSignal: abortController.signal });
     } catch (error) {
       if ((error as Error).message?.includes('aborted')) {
-        console.log(`[${elapsed(startTime)}] Poll stopped`);
+        logger.log(`[${elapsed(startTime)}] Poll stopped`);
       } else {
         throw error;
       }
     }
 
     // Step 3: Queue a resume message (session might still be running)
-    console.log(`\n[${elapsed(startTime)}] Step 3: Sending resume message (queuing)...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 3: Sending resume message (queuing)...`);
     await client.sendMessage(createResult.sessionId, 'After you finish, also add a second line saying "Queued message received"');
-    console.log(`[${elapsed(startTime)}] Resume message sent/queued`);
+    logger.log(`[${elapsed(startTime)}] Resume message sent/queued`);
 
     // Step 4: Now poll to see all remaining events
-    console.log(`\n[${elapsed(startTime)}] Step 4: Polling for remaining events...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 4: Polling for remaining events...`);
     let resumeEventCount = 0;
     const result = await client.pollSession(createResult.sessionId, (event) => {
       resumeEventCount++;
-      console.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+      logger.event(event);
+      logger.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
     }, { skipExistingEvents: false }); // Get all events to see the full picture
 
     // Summary
-    console.log('\n=== SCENARIO 3 SUMMARY ===');
-    console.log(`Session ID: ${createResult.sessionId}`);
-    console.log(`Events in first poll: ${eventCount}`);
-    console.log(`Events in second poll: ${resumeEventCount}`);
-    console.log(`Final status: ${result.status}`);
-    console.log(`Total time: ${elapsed(startTime)}`);
+    logger.log('\n=== SCENARIO 3 SUMMARY ===');
+    logger.log(`Session ID: ${createResult.sessionId}`);
+    logger.log(`Events in first poll: ${eventCount}`);
+    logger.log(`Events in second poll: ${resumeEventCount}`);
+    logger.log(`Final status: ${result.status}`);
+    logger.log(`Total time: ${elapsed(startTime)}`);
+
+    // JSON output
+    logger.json({
+      scenario: 3,
+      sessionId: createResult.sessionId,
+      eventsInFirstPoll: eventCount,
+      eventsInSecondPoll: resumeEventCount,
+      finalStatus: result.status,
+      totalTimeMs: Date.now() - startTime,
+    });
   });
 
 testCommand
@@ -738,24 +807,27 @@ testCommand
   .description('Scenario 4: Execute + terminate + interrupt + resume')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .option('--wait-ms <ms>', 'How long to wait before interrupting (needs 15s+ for Claude to start)', '15000')
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 4: Execute + Terminate + Interrupt + Resume ===\n');
+    logger.log('\n=== SCENARIO 4: Execute + Terminate + Interrupt + Resume ===\n');
 
     // Step 1: Start session
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a detailed file called test-scenario4.txt explaining what you are doing step by step.',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
 
     // Step 2: Poll briefly
-    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms...`);
     const abortController = new AbortController();
     let eventCount = 0;
 
@@ -764,41 +836,53 @@ testCommand
     try {
       await client.pollSession(createResult.sessionId, (event) => {
         eventCount++;
-        console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
       }, { abortSignal: abortController.signal });
     } catch {
-      console.log(`[${elapsed(startTime)}] Poll stopped`);
+      logger.log(`[${elapsed(startTime)}] Poll stopped`);
     }
 
     // Step 3: Interrupt
-    console.log(`\n[${elapsed(startTime)}] Step 3: Sending interrupt...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 3: Sending interrupt...`);
     await client.interruptSession(createResult.sessionId);
-    console.log(`[${elapsed(startTime)}] Interrupt sent`);
+    logger.log(`[${elapsed(startTime)}] Interrupt sent`);
 
     // Wait for interrupt to take effect
     await sleep(3000);
-    let session = await client.getSession(createResult.sessionId);
-    console.log(`[${elapsed(startTime)}] Status after interrupt: ${session.session_status}`);
+    const session = await client.getSession(createResult.sessionId);
+    logger.log(`[${elapsed(startTime)}] Status after interrupt: ${session.session_status}`);
 
     // Step 4: Resume
-    console.log(`\n[${elapsed(startTime)}] Step 4: Resuming with new prompt...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 4: Resuming with new prompt...`);
     let resumeEventCount = 0;
     const resumeResult = await client.resume(
       createResult.sessionId,
       'Please continue and add "Resumed after interrupt" to the file.',
       (event) => {
         resumeEventCount++;
-        console.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] Resume Event ${resumeEventCount}: ${formatEvent(event)}`);
       }
     );
 
     // Summary
-    console.log('\n=== SCENARIO 4 SUMMARY ===');
-    console.log(`Session ID: ${createResult.sessionId}`);
-    console.log(`Events before interrupt: ${eventCount}`);
-    console.log(`Events after resume: ${resumeEventCount}`);
-    console.log(`Final status: ${resumeResult.status}`);
-    console.log(`Total time: ${elapsed(startTime)}`);
+    logger.log('\n=== SCENARIO 4 SUMMARY ===');
+    logger.log(`Session ID: ${createResult.sessionId}`);
+    logger.log(`Events before interrupt: ${eventCount}`);
+    logger.log(`Events after resume: ${resumeEventCount}`);
+    logger.log(`Final status: ${resumeResult.status}`);
+    logger.log(`Total time: ${elapsed(startTime)}`);
+
+    // JSON output
+    logger.json({
+      scenario: 4,
+      sessionId: createResult.sessionId,
+      eventsBeforeInterrupt: eventCount,
+      eventsAfterResume: resumeEventCount,
+      finalStatus: resumeResult.status,
+      totalTimeMs: Date.now() - startTime,
+    });
   });
 
 testCommand
@@ -806,225 +890,297 @@ testCommand
   .description('Scenario 5: Double-queue - execute + terminate + queue + terminate + queue again')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .option('--wait-ms <ms>', 'How long to wait before each stop', '3000')
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
     const waitMs = parseInt(options.waitMs, 10);
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 5: Double-Queue ===\n');
+    logger.log('\n=== SCENARIO 5: Double-Queue ===\n');
 
     // Step 1: Start session
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a file called test-scenario5.txt with "Step 1 content"',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
 
     // Step 2: Poll briefly then stop
-    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms...`);
-    let abort1 = new AbortController();
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Polling for ${waitMs}ms...`);
+    const abort1 = new AbortController();
     let eventCount1 = 0;
     setTimeout(() => abort1.abort(), waitMs);
 
     try {
       await client.pollSession(createResult.sessionId, (event) => {
         eventCount1++;
-        console.log(`[${elapsed(startTime)}] Poll1 Event ${eventCount1}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] Poll1 Event ${eventCount1}: ${formatEvent(event)}`);
       }, { abortSignal: abort1.signal });
     } catch {
-      console.log(`[${elapsed(startTime)}] Poll 1 stopped`);
+      logger.log(`[${elapsed(startTime)}] Poll 1 stopped`);
     }
 
     // Step 3: Queue first resume
-    console.log(`\n[${elapsed(startTime)}] Step 3: Queuing first resume message...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 3: Queuing first resume message...`);
     await client.sendMessage(createResult.sessionId, 'Add "Step 2 - first queued message" to the file');
-    console.log(`[${elapsed(startTime)}] First resume queued`);
+    logger.log(`[${elapsed(startTime)}] First resume queued`);
 
     // Step 4: Poll briefly again
-    console.log(`\n[${elapsed(startTime)}] Step 4: Polling for another ${waitMs}ms...`);
-    let abort2 = new AbortController();
+    logger.log(`\n[${elapsed(startTime)}] Step 4: Polling for another ${waitMs}ms...`);
+    const abort2 = new AbortController();
     let eventCount2 = 0;
     setTimeout(() => abort2.abort(), waitMs);
 
     try {
       await client.pollSession(createResult.sessionId, (event) => {
         eventCount2++;
-        console.log(`[${elapsed(startTime)}] Poll2 Event ${eventCount2}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] Poll2 Event ${eventCount2}: ${formatEvent(event)}`);
       }, { abortSignal: abort2.signal });
     } catch {
-      console.log(`[${elapsed(startTime)}] Poll 2 stopped`);
+      logger.log(`[${elapsed(startTime)}] Poll 2 stopped`);
     }
 
     // Step 5: Queue second resume
-    console.log(`\n[${elapsed(startTime)}] Step 5: Queuing second resume message...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 5: Queuing second resume message...`);
     await client.sendMessage(createResult.sessionId, 'Add "Step 3 - second queued message" to the file');
-    console.log(`[${elapsed(startTime)}] Second resume queued`);
+    logger.log(`[${elapsed(startTime)}] Second resume queued`);
 
     // Step 6: Poll until completion
-    console.log(`\n[${elapsed(startTime)}] Step 6: Polling until completion...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 6: Polling until completion...`);
     let finalEventCount = 0;
     const result = await client.pollSession(createResult.sessionId, (event) => {
       finalEventCount++;
-      console.log(`[${elapsed(startTime)}] Final Event ${finalEventCount}: ${formatEvent(event)}`);
+      logger.event(event);
+      logger.log(`[${elapsed(startTime)}] Final Event ${finalEventCount}: ${formatEvent(event)}`);
     });
 
     // Get final events for analysis
-    console.log(`\n[${elapsed(startTime)}] Fetching all events for analysis...`);
+    logger.log(`\n[${elapsed(startTime)}] Fetching all events for analysis...`);
     const allEvents = await client.getEvents(createResult.sessionId);
 
     // Summary
-    console.log('\n=== SCENARIO 5 SUMMARY ===');
-    console.log(`Session ID: ${createResult.sessionId}`);
-    console.log(`Events in poll 1: ${eventCount1}`);
-    console.log(`Events in poll 2: ${eventCount2}`);
-    console.log(`Events in final poll: ${finalEventCount}`);
-    console.log(`Total events in session: ${allEvents.data?.length || 0}`);
-    console.log(`Final status: ${result.status}`);
-    console.log(`Total time: ${elapsed(startTime)}`);
+    logger.log('\n=== SCENARIO 5 SUMMARY ===');
+    logger.log(`Session ID: ${createResult.sessionId}`);
+    logger.log(`Events in poll 1: ${eventCount1}`);
+    logger.log(`Events in poll 2: ${eventCount2}`);
+    logger.log(`Events in final poll: ${finalEventCount}`);
+    logger.log(`Total events in session: ${allEvents.data?.length || 0}`);
+    logger.log(`Final status: ${result.status}`);
+    logger.log(`Total time: ${elapsed(startTime)}`);
+
+    // JSON output
+    logger.json({
+      scenario: 5,
+      sessionId: createResult.sessionId,
+      eventsInPoll1: eventCount1,
+      eventsInPoll2: eventCount2,
+      eventsInFinalPoll: finalEventCount,
+      totalEventsInSession: allEvents.data?.length || 0,
+      finalStatus: result.status,
+      totalTimeMs: Date.now() - startTime,
+    });
   });
 
 testCommand
   .command('scenario6')
   .description('Scenario 6: Execute + rename session')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 6: Execute + Rename ===\n');
+    logger.log('\n=== SCENARIO 6: Execute + Rename ===\n');
 
     // Step 1: Start session with default title
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a file called test-scenario6.txt with "Testing rename feature"',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
-    console.log(`[${elapsed(startTime)}] Initial title: ${createResult.title}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Initial title: ${createResult.title}`);
 
     // Step 2: Rename the session while it's running
-    console.log(`\n[${elapsed(startTime)}] Step 2: Renaming session...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Renaming session...`);
     const newTitle = `Renamed at ${new Date().toISOString().slice(11, 19)}`;
     await client.renameSession(createResult.sessionId, newTitle);
-    console.log(`[${elapsed(startTime)}] Session renamed to: ${newTitle}`);
+    logger.log(`[${elapsed(startTime)}] Session renamed to: ${newTitle}`);
 
     // Verify rename
     const session = await client.getSession(createResult.sessionId);
-    console.log(`[${elapsed(startTime)}] Verified title: ${session.title}`);
+    logger.log(`[${elapsed(startTime)}] Verified title: ${session.title}`);
 
     // Step 3: Poll until completion
-    console.log(`\n[${elapsed(startTime)}] Step 3: Polling for completion...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 3: Polling for completion...`);
     let eventCount = 0;
     const result = await client.pollSession(createResult.sessionId, (event) => {
       eventCount++;
-      console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+      logger.event(event);
+      logger.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
     });
 
     // Summary
-    console.log('\n=== SCENARIO 6 SUMMARY ===');
-    console.log(`Session ID: ${createResult.sessionId}`);
-    console.log(`Original title: ${createResult.title}`);
-    console.log(`New title: ${newTitle}`);
-    console.log(`Title verified: ${session.title === newTitle ? 'YES' : 'NO'}`);
-    console.log(`Events: ${eventCount}`);
-    console.log(`Final status: ${result.status}`);
-    console.log(`Total time: ${elapsed(startTime)}`);
+    logger.log('\n=== SCENARIO 6 SUMMARY ===');
+    logger.log(`Session ID: ${createResult.sessionId}`);
+    logger.log(`Original title: ${createResult.title}`);
+    logger.log(`New title: ${newTitle}`);
+    logger.log(`Title verified: ${session.title === newTitle ? 'YES' : 'NO'}`);
+    logger.log(`Events: ${eventCount}`);
+    logger.log(`Final status: ${result.status}`);
+    logger.log(`Total time: ${elapsed(startTime)}`);
+
+    // JSON output
+    logger.json({
+      scenario: 6,
+      sessionId: createResult.sessionId,
+      originalTitle: createResult.title,
+      newTitle,
+      titleVerified: session.title === newTitle,
+      events: eventCount,
+      finalStatus: result.status,
+      totalTimeMs: Date.now() - startTime,
+    });
   });
 
 testCommand
   .command('scenario7')
   .description('Scenario 7: Execute + complete + archive')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 7: Execute + Complete + Archive ===\n');
+    logger.log('\n=== SCENARIO 7: Execute + Complete + Archive ===\n');
 
     // Step 1: Start session
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a file called test-scenario7.txt with "Testing archive feature"',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
 
     // Step 2: Poll until completion
-    console.log(`\n[${elapsed(startTime)}] Step 2: Polling for completion...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Polling for completion...`);
     let eventCount = 0;
     const result = await client.pollSession(createResult.sessionId, (event) => {
       eventCount++;
-      console.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
+      logger.event(event);
+      logger.log(`[${elapsed(startTime)}] Event ${eventCount}: ${formatEvent(event)}`);
     });
-    console.log(`[${elapsed(startTime)}] Session completed: ${result.status}`);
+    logger.log(`[${elapsed(startTime)}] Session completed: ${result.status}`);
 
     // Step 3: Archive the completed session
-    console.log(`\n[${elapsed(startTime)}] Step 3: Archiving session...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 3: Archiving session...`);
     await client.archiveSession(createResult.sessionId);
-    console.log(`[${elapsed(startTime)}] Archive request sent`);
+    logger.log(`[${elapsed(startTime)}] Archive request sent`);
 
     // Verify archive
     const session = await client.getSession(createResult.sessionId);
-    console.log(`[${elapsed(startTime)}] Session status after archive: ${session.session_status}`);
+    logger.log(`[${elapsed(startTime)}] Session status after archive: ${session.session_status}`);
 
     // Summary
-    console.log('\n=== SCENARIO 7 SUMMARY ===');
-    console.log(`Session ID: ${createResult.sessionId}`);
-    console.log(`Events: ${eventCount}`);
-    console.log(`Completion status: ${result.status}`);
-    console.log(`Post-archive status: ${session.session_status}`);
-    console.log(`Archived: ${session.session_status === 'archived' ? 'YES' : 'NO'}`);
-    console.log(`Total time: ${elapsed(startTime)}`);
+    logger.log('\n=== SCENARIO 7 SUMMARY ===');
+    logger.log(`Session ID: ${createResult.sessionId}`);
+    logger.log(`Events: ${eventCount}`);
+    logger.log(`Completion status: ${result.status}`);
+    logger.log(`Post-archive status: ${session.session_status}`);
+    logger.log(`Archived: ${session.session_status === 'archived' ? 'YES' : 'NO'}`);
+    logger.log(`Total time: ${elapsed(startTime)}`);
+
+    // JSON output
+    logger.json({
+      scenario: 7,
+      sessionId: createResult.sessionId,
+      events: eventCount,
+      completionStatus: result.status,
+      postArchiveStatus: session.session_status,
+      archived: session.session_status === 'archived',
+      totalTimeMs: Date.now() - startTime,
+    });
   });
 
 testCommand
   .command('scenario8')
   .description('Scenario 8: Execute using WebSocket streaming instead of polling')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const client = await getClient(parentOpts);
     const startTime = Date.now();
+    const logger = createTestLogger(options);
 
-    console.log('\n=== SCENARIO 8: WebSocket Streaming ===\n');
+    logger.log('\n=== SCENARIO 8: WebSocket Streaming ===\n');
 
     // Step 1: Start session
-    console.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
+    logger.log(`[${elapsed(startTime)}] Step 1: Creating session...`);
     const createResult = await client.createSession({
       prompt: 'Create a file called test-scenario8.txt with "Testing WebSocket streaming"',
       gitUrl: options.gitUrl,
     });
-    console.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
+    logger.log(`[${elapsed(startTime)}] Session created: ${createResult.sessionId}`);
 
     // Step 2: Stream events via WebSocket instead of polling
-    console.log(`\n[${elapsed(startTime)}] Step 2: Streaming events via WebSocket...`);
+    logger.log(`\n[${elapsed(startTime)}] Step 2: Streaming events via WebSocket...`);
     let eventCount = 0;
     try {
       const result = await client.streamEvents(createResult.sessionId, (event) => {
         eventCount++;
-        console.log(`[${elapsed(startTime)}] WS Event ${eventCount}: ${formatEvent(event)}`);
+        logger.event(event);
+        logger.log(`[${elapsed(startTime)}] WS Event ${eventCount}: ${formatEvent(event)}`);
       });
 
       // Summary
-      console.log('\n=== SCENARIO 8 SUMMARY ===');
-      console.log(`Session ID: ${createResult.sessionId}`);
-      console.log(`Events streamed: ${eventCount}`);
-      console.log(`Final status: ${result.status}`);
-      console.log(`Total time: ${elapsed(startTime)}`);
+      logger.log('\n=== SCENARIO 8 SUMMARY ===');
+      logger.log(`Session ID: ${createResult.sessionId}`);
+      logger.log(`Events streamed: ${eventCount}`);
+      logger.log(`Final status: ${result.status}`);
+      logger.log(`Total time: ${elapsed(startTime)}`);
+
+      // JSON output
+      logger.json({
+        scenario: 8,
+        sessionId: createResult.sessionId,
+        eventsStreamed: eventCount,
+        finalStatus: result.status,
+        totalTimeMs: Date.now() - startTime,
+      });
     } catch (error) {
-      console.log(`\n[${elapsed(startTime)}] WebSocket streaming error: ${(error as Error).message}`);
-      console.log(`[${elapsed(startTime)}] Falling back to check session status...`);
+      logger.log(`\n[${elapsed(startTime)}] WebSocket streaming error: ${(error as Error).message}`);
+      logger.log(`[${elapsed(startTime)}] Falling back to check session status...`);
 
       const session = await client.getSession(createResult.sessionId);
-      console.log('\n=== SCENARIO 8 SUMMARY ===');
-      console.log(`Session ID: ${createResult.sessionId}`);
-      console.log(`Events before error: ${eventCount}`);
-      console.log(`Session status: ${session.session_status}`);
-      console.log(`Total time: ${elapsed(startTime)}`);
+      logger.log('\n=== SCENARIO 8 SUMMARY ===');
+      logger.log(`Session ID: ${createResult.sessionId}`);
+      logger.log(`Events before error: ${eventCount}`);
+      logger.log(`Session status: ${session.session_status}`);
+      logger.log(`Total time: ${elapsed(startTime)}`);
+
+      // JSON output for error case
+      logger.json({
+        scenario: 8,
+        sessionId: createResult.sessionId,
+        eventsBeforeError: eventCount,
+        sessionStatus: session.session_status,
+        error: (error as Error).message,
+        totalTimeMs: Date.now() - startTime,
+      });
     }
   });
 
@@ -1033,18 +1189,21 @@ testCommand
   .description('Run all test scenarios sequentially')
   .option('--git-url <url>', 'Git URL to use', TEST_GIT_URL)
   .option('--skip <scenarios>', 'Comma-separated list of scenarios to skip (e.g., "1,4,5")')
+  .option('--json', 'Output results as JSON')
+  .option('--jsonl', 'Stream events as JSON Lines')
   .action(async (options, cmd) => {
     const parentOpts = cmd.parent?.parent?.opts() || {};
     const skipList = options.skip ? options.skip.split(',').map((s: string) => parseInt(s.trim(), 10)) : [];
     const startTime = Date.now();
-    const results: { scenario: number; status: string; time: string; error?: string }[] = [];
+    const results: { scenario: number; status: string; time: string; timeMs: number; error?: string }[] = [];
+    const logger = createTestLogger(options);
 
-    console.log('\n========================================');
-    console.log('    RUNNING ALL TEST SCENARIOS');
-    console.log('========================================\n');
-    console.log(`Git URL: ${options.gitUrl}`);
-    console.log(`Skipping: ${skipList.length ? skipList.join(', ') : 'none'}`);
-    console.log('-'.repeat(40));
+    logger.log('\n========================================');
+    logger.log('    RUNNING ALL TEST SCENARIOS');
+    logger.log('========================================\n');
+    logger.log(`Git URL: ${options.gitUrl}`);
+    logger.log(`Skipping: ${skipList.length ? skipList.join(', ') : 'none'}`);
+    logger.log('-'.repeat(40));
 
     const client = await getClient(parentOpts);
 
@@ -1206,38 +1365,47 @@ testCommand
     // Run each scenario
     for (let i = 1; i <= 8; i++) {
       if (skipList.includes(i)) {
-        console.log(`\n[SKIPPED] Scenario ${i}`);
-        results.push({ scenario: i, status: 'skipped', time: '0s' });
+        logger.log(`\n[SKIPPED] Scenario ${i}`);
+        results.push({ scenario: i, status: 'skipped', time: '0s', timeMs: 0 });
         continue;
       }
 
-      console.log(`\n${'='.repeat(60)}`);
-      console.log(`[STARTING] Scenario ${i}`);
-      console.log(`${'='.repeat(60)}`);
+      logger.log(`\n${'='.repeat(60)}`);
+      logger.log(`[STARTING] Scenario ${i}`);
+      logger.log(`${'='.repeat(60)}`);
 
       const scenarioStart = Date.now();
       try {
         await scenarios[i]();
-        results.push({ scenario: i, status: 'success', time: elapsed(scenarioStart) });
+        results.push({ scenario: i, status: 'success', time: elapsed(scenarioStart), timeMs: Date.now() - scenarioStart });
       } catch (error) {
-        console.error(`\n[ERROR] Scenario ${i} failed: ${(error as Error).message}`);
-        results.push({ scenario: i, status: 'failed', time: elapsed(scenarioStart), error: (error as Error).message });
+        logger.log(`\n[ERROR] Scenario ${i} failed: ${(error as Error).message}`);
+        results.push({ scenario: i, status: 'failed', time: elapsed(scenarioStart), timeMs: Date.now() - scenarioStart, error: (error as Error).message });
       }
     }
 
     // Final Summary
-    console.log('\n' + '='.repeat(60));
-    console.log('    ALL SCENARIOS COMPLETE');
-    console.log('='.repeat(60));
-    console.log('\nResults:');
-    console.log('-'.repeat(40));
+    logger.log('\n' + '='.repeat(60));
+    logger.log('    ALL SCENARIOS COMPLETE');
+    logger.log('='.repeat(60));
+    logger.log('\nResults:');
+    logger.log('-'.repeat(40));
     for (const r of results) {
       const statusIcon = r.status === 'success' ? '✓' : r.status === 'skipped' ? '⊘' : '✗';
-      console.log(`  ${statusIcon} Scenario ${r.scenario}: ${r.status.toUpperCase()} (${r.time})${r.error ? ` - ${r.error.slice(0, 50)}` : ''}`);
+      logger.log(`  ${statusIcon} Scenario ${r.scenario}: ${r.status.toUpperCase()} (${r.time})${r.error ? ` - ${r.error.slice(0, 50)}` : ''}`);
     }
-    console.log('-'.repeat(40));
-    console.log(`Total time: ${elapsed(startTime)}`);
-    console.log(`Success: ${results.filter(r => r.status === 'success').length}/${results.filter(r => r.status !== 'skipped').length}`);
+    logger.log('-'.repeat(40));
+    logger.log(`Total time: ${elapsed(startTime)}`);
+    logger.log(`Success: ${results.filter(r => r.status === 'success').length}/${results.filter(r => r.status !== 'skipped').length}`);
+
+    // JSON output
+    logger.json({
+      scenarios: results,
+      totalTimeMs: Date.now() - startTime,
+      success: results.filter(r => r.status === 'success').length,
+      failed: results.filter(r => r.status === 'failed').length,
+      skipped: results.filter(r => r.status === 'skipped').length,
+    });
   });
 
 webCommand.addCommand(testCommand);
