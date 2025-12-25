@@ -129,6 +129,7 @@ export class AgentsPage extends Page<PageOptions> {
   private setupInlineForm(): void {
     const repoSelect = this.$('#repo-select') as HTMLSelectElement;
     const branchSelect = this.$('#branch-select') as HTMLSelectElement;
+    const requestInput = this.$('#request-input') as HTMLTextAreaElement;
 
     if (repoSelect) {
       repoSelect.addEventListener('change', async () => {
@@ -150,6 +151,15 @@ export class AgentsPage extends Page<PageOptions> {
     if (branchSelect) {
       branchSelect.addEventListener('change', () => {
         this.selectedBranch = branchSelect.value;
+      });
+    }
+
+    if (requestInput) {
+      requestInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          this.handleCreateSession();
+        }
       });
     }
   }
