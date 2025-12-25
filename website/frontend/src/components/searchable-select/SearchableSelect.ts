@@ -24,6 +24,9 @@ export interface SearchableSelectOptions extends ComponentOptions {
 }
 
 export class SearchableSelect extends Component<HTMLDivElement> {
+  // Static registry to track all instances for closing others when one opens
+  private static instances: Set<SearchableSelect> = new Set();
+
   private triggerElement: HTMLButtonElement;
   private dropdownElement: HTMLDivElement;
   private searchInput: HTMLInputElement;
@@ -77,6 +80,18 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     this.applyOptions();
     this.setupEventListeners();
     this.renderOptions();
+
+    // Register this instance
+    SearchableSelect.instances.add(this);
+  }
+
+  // Close all other open instances
+  private static closeOthers(except: SearchableSelect): void {
+    for (const instance of SearchableSelect.instances) {
+      if (instance !== except && instance.isOpen) {
+        instance.close();
+      }
+    }
   }
 
   private buildStructure(): void {
@@ -319,6 +334,9 @@ export class SearchableSelect extends Component<HTMLDivElement> {
   open(): this {
     if (this.isOpen || this.options.disabled) return this;
 
+    // Close any other open instances
+    SearchableSelect.closeOthers(this);
+
     this.isOpen = true;
     this.element.classList.add('searchable-select--open');
     this.searchInput.value = '';
@@ -426,5 +444,10 @@ export class SearchableSelect extends Component<HTMLDivElement> {
   blur(): this {
     this.triggerElement.blur();
     return this;
+  }
+
+  protected onUnmount(): void {
+    // Remove from static registry
+    SearchableSelect.instances.delete(this);
   }
 }
