@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, getClaudeCredentials } from '@webedt/shared';
+import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, AEventFormatter, getClaudeCredentials } from '@webedt/shared';
 import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
 
 /**
@@ -92,122 +92,10 @@ async function getClient(options: { token?: string; environment?: string; org?: 
   return client;
 }
 
-// Format event for display
+// Format event for display using the shared EventFormatter service
 function formatEvent(event: SessionEvent): string {
-  const type = event.type || 'unknown';
-  const timestamp = new Date().toISOString().slice(11, 19);
-
-  switch (type) {
-    case 'env_manager_log': {
-      const data = event.data as { category?: string; content?: string; level?: string } | undefined;
-      const content = data?.content || '(no content)';
-      return `[${timestamp}] ENV: ${content}`;
-    }
-    case 'system': {
-      const version = (event as { claude_code_version?: string }).claude_code_version || '?';
-      const model = (event as { model?: string }).model || '?';
-      const cwd = (event as { cwd?: string }).cwd || '?';
-      return `[${timestamp}] SYSTEM: v${version} | ${model} | ${cwd}`;
-    }
-    case 'user': {
-      const preview = getMessagePreview(event);
-      if (preview === null) return ''; // Skip tool_result user messages
-      return `[${timestamp}] USER: ${preview}`;
-    }
-    case 'assistant': {
-      const lines = getMessageLines(event);
-      return lines.map(line => `[${timestamp}] ${line}`).join('\n');
-    }
-    case 'tool_use': {
-      const toolName = (event as { tool_name?: string }).tool_name || 'unknown';
-      return `[${timestamp}] TOOL: ${toolName}`;
-    }
-    case 'tool_result':
-      return `[${timestamp}] RESULT: (tool completed)`;
-    case 'result': {
-      const cost = (event as { total_cost_usd?: number }).total_cost_usd;
-      const duration = (event as { duration_ms?: number }).duration_ms;
-      const numTurns = (event as { num_turns?: number }).num_turns;
-      return `[${timestamp}] RESULT: $${cost?.toFixed(4) || '?'} | ${Math.round((duration || 0) / 1000)}s | ${numTurns || '?'} turns`;
-    }
-    default:
-      return `[${timestamp}] ${type.toUpperCase()}:`;
-  }
-}
-
-// Get multiple formatted lines for assistant messages (thinking + text)
-function getMessageLines(event: SessionEvent): string[] {
-  const message = (event as { message?: { content?: string | Array<{ type: string; text?: string; thinking?: string }> } }).message;
-  if (!message?.content) return ['ASSISTANT: (no content)'];
-
-  if (typeof message.content === 'string') {
-    return [`ASSISTANT: ${message.content.slice(0, 80).replace(/\n/g, ' ')}`];
-  }
-
-  const lines: string[] = [];
-
-  // Check for thinking blocks
-  for (const block of message.content) {
-    if (block.type === 'thinking' && block.thinking) {
-      const preview = block.thinking.slice(0, 70).replace(/\n/g, ' ');
-      lines.push(`THINKING: ${preview}${block.thinking.length > 70 ? '...' : ''}`);
-    }
-  }
-
-  // Check for text blocks
-  for (const block of message.content) {
-    if (block.type === 'text' && block.text) {
-      const preview = block.text.slice(0, 70).replace(/\n/g, ' ');
-      lines.push(`ASSISTANT: ${preview}${block.text.length > 70 ? '...' : ''}`);
-    }
-  }
-
-  // Check for tool_use blocks
-  for (const block of message.content) {
-    if (block.type === 'tool_use') {
-      const toolBlock = block as { name?: string; input?: Record<string, unknown> };
-      const name = toolBlock.name || 'unknown';
-      const input = toolBlock.input || {};
-      // Show file_path, pattern, or command if available
-      const filePath = input.file_path as string | undefined;
-      const pattern = input.pattern as string | undefined;
-      const command = input.command as string | undefined;
-      let detail = '';
-      if (filePath) {
-        detail = filePath;
-      } else if (pattern) {
-        detail = pattern;
-      } else if (command) {
-        detail = command.slice(0, 40) + (command.length > 40 ? '...' : '');
-      }
-      lines.push(`TOOL_USE: ${name}${detail ? `: ${detail}` : ''}`);
-    }
-  }
-
-  return lines.length > 0 ? lines : ['ASSISTANT: (no content)'];
-}
-
-function getMessagePreview(event: SessionEvent): string {
-  const message = (event as { message?: { content?: string | Array<{ type: string; text?: string; tool_use_id?: string; content?: string }> } }).message;
-  if (!message?.content) return '(no content)';
-
-  if (typeof message.content === 'string') {
-    return message.content.slice(0, 80).replace(/\n/g, ' ');
-  }
-
-  // Handle content blocks - prefer text over thinking
-  const textBlock = message.content.find(b => b.type === 'text');
-  if (textBlock?.text) {
-    return textBlock.text.slice(0, 80).replace(/\n/g, ' ');
-  }
-
-  // Check for tool_result blocks (these come back as user messages)
-  const toolResults = message.content.filter(b => b.type === 'tool_result');
-  if (toolResults.length > 0) {
-    return null as unknown as string; // Signal to skip this event
-  }
-
-  return '(no text)';
+  const formatter = ServiceProvider.get(AEventFormatter);
+  return formatter.formatEvent(event as Record<string, unknown>);
 }
 
 // ============================================================================

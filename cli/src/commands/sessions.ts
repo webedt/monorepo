@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { db, chatSessions, events, messages, users, ensureValidToken, ServiceProvider, ASession } from '@webedt/shared';
+import { db, chatSessions, events, messages, users, ServiceProvider, ASession, ATokenRefreshService } from '@webedt/shared';
 import type { ClaudeAuth, ExecutionEvent } from '@webedt/shared';
 import { eq, desc, and, lt, sql, count } from 'drizzle-orm';
 
@@ -310,18 +310,13 @@ sessionsCommand
         process.exit(1);
       }
 
-      // Get credentials and refresh if needed
+      // Get credentials and refresh if needed using TokenRefreshService
       let claudeAuth = userData.claudeAuth as ClaudeAuth;
 
       try {
-        const refreshedAuth = await ensureValidToken(claudeAuth);
-        if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
-          await db.update(users)
-            .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
-            .where(eq(users.id, options.user));
-          claudeAuth = refreshedAuth;
-          log('Token refreshed and saved to database');
-        }
+        const tokenService = ServiceProvider.get(ATokenRefreshService);
+        claudeAuth = await tokenService.ensureValidTokenForUser(options.user, claudeAuth);
+        log('Token validated (refreshed if needed)');
       } catch (error) {
         console.error('Failed to refresh Claude token:', (error as Error).message);
         process.exit(1);
@@ -430,16 +425,11 @@ sessionsCommand
 
       let claudeAuth = userData.claudeAuth as ClaudeAuth;
 
-      // Refresh token if needed
+      // Refresh token if needed using TokenRefreshService
       try {
-        const refreshedAuth = await ensureValidToken(claudeAuth);
-        if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
-          await db.update(users)
-            .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
-            .where(eq(users.id, dbSession.userId));
-          claudeAuth = refreshedAuth;
-          log('Token refreshed and saved to database');
-        }
+        const tokenService = ServiceProvider.get(ATokenRefreshService);
+        claudeAuth = await tokenService.ensureValidTokenForUser(dbSession.userId, claudeAuth);
+        log('Token validated (refreshed if needed)');
       } catch (error) {
         console.error('Failed to refresh Claude token:', (error as Error).message);
         process.exit(1);
