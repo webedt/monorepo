@@ -267,3 +267,306 @@
     --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
   }
 }
+
+/* ============================================
+   Additional Themes
+   ============================================ */
+
+/* Synthwave - Retro 80s neon aesthetic */
+[data-theme="synthwave"] {
+  --color-primary-500: #e779c1;
+  --color-primary-400: #f0abfc;
+  --color-primary-600: #db2777;
+
+  --color-bg: #1a103d;
+  --color-bg-primary: #1a103d;
+  --color-bg-secondary: #221551;
+  --color-bg-tertiary: #2d1b69;
+  --color-bg-elevated: #221551;
+  --color-bg-hover: #2d1b69;
+  --color-bg-overlay: rgba(26, 16, 61, 0.9);
+
+  --color-text: #f9fafb;
+  --color-text-primary: #f9fafb;
+  --color-text-secondary: #c4b5fd;
+  --color-text-tertiary: #a78bfa;
+  --color-text-muted: #8b5cf6;
+  --color-text-inverse: #1a103d;
+
+  --color-border: #4c1d95;
+  --color-border-focus: #e779c1;
+
+  --color-link: #f0abfc;
+  --color-link-hover: #e879f9;
+
+  --color-primary: #e779c1;
+  --color-primary-bg: rgba(231, 121, 193, 0.2);
+}
+
+/* Cyberpunk - Neon yellow on dark */
+[data-theme="cyberpunk"] {
+  --color-primary-500: #facc15;
+  --color-primary-400: #fde047;
+  --color-primary-600: #eab308;
+
+  --color-bg: #0f0f23;
+  --color-bg-primary: #0f0f23;
+  --color-bg-secondary: #1a1a2e;
+  --color-bg-tertiary: #16213e;
+  --color-bg-elevated: #1a1a2e;
+  --color-bg-hover: #16213e;
+  --color-bg-overlay: rgba(15, 15, 35, 0.9);
+
+  --color-text: #f8fafc;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #fde68a;
+  --color-text-tertiary: #fbbf24;
+  --color-text-muted: #a3a3a3;
+  --color-text-inverse: #0f0f23;
+
+  --color-border: #374151;
+  --color-border-focus: #facc15;
+
+  --color-link: #fde047;
+  --color-link-hover: #facc15;
+
+  --color-primary: #facc15;
+  --color-primary-bg: rgba(250, 204, 21, 0.15);
+}
+
+/* Dracula - Purple-tinted dark theme */
+[data-theme="dracula"] {
+  --color-primary-500: #bd93f9;
+  --color-primary-400: #caa9fa;
+  --color-primary-600: #9f7aea;
+
+  --color-bg: #282a36;
+  --color-bg-primary: #282a36;
+  --color-bg-secondary: #21222c;
+  --color-bg-tertiary: #343746;
+  --color-bg-elevated: #343746;
+  --color-bg-hover: #44475a;
+  --color-bg-overlay: rgba(40, 42, 54, 0.9);
+
+  --color-text: #f8f8f2;
+  --color-text-primary: #f8f8f2;
+  --color-text-secondary: #d6d6d6;
+  --color-text-tertiary: #9ca3af;
+  --color-text-muted: #6272a4;
+  --color-text-inverse: #282a36;
+
+  --color-border: #44475a;
+  --color-border-focus: #bd93f9;
+
+  --color-link: #8be9fd;
+  --color-link-hover: #50fa7b;
+
+  --color-primary: #bd93f9;
+  --color-primary-bg: rgba(189, 147, 249, 0.15);
+  --color-success: #50fa7b;
+  --color-success-bg: rgba(80, 250, 123, 0.15);
+  --color-warning: #ffb86c;
+  --color-warning-bg: rgba(255, 184, 108, 0.15);
+  --color-error: #ff5555;
+  --color-error-bg: rgba(255, 85, 85, 0.15);
+  --color-info: #8be9fd;
+  --color-info-bg: rgba(139, 233, 253, 0.15);
+}
+
+/* Nord - Arctic, north-bluish color palette */
+[data-theme="nord"] {
+  --color-primary-500: #88c0d0;
+  --color-primary-400: #8fbcbb;
+  --color-primary-600: #5e81ac;
+
+  --color-bg: #2e3440;
+  --color-bg-primary: #2e3440;
+  --color-bg-secondary: #3b4252;
+  --color-bg-tertiary: #434c5e;
+  --color-bg-elevated: #3b4252;
+  --color-bg-hover: #434c5e;
+  --color-bg-overlay: rgba(46, 52, 64, 0.9);
+
+  --color-text: #eceff4;
+  --color-text-primary: #eceff4;
+  --color-text-secondary: #d8dee9;
+  --color-text-tertiary: #a3be8c;
+  --color-text-muted: #81a1c1;
+  --color-text-inverse: #2e3440;
+
+  --color-border: #4c566a;
+  --color-border-focus: #88c0d0;
+
+  --color-link: #88c0d0;
+  --color-link-hover: #81a1c1;
+
+  --color-primary: #88c0d0;
+  --color-primary-bg: rgba(136, 192, 208, 0.15);
+  --color-success: #a3be8c;
+  --color-success-bg: rgba(163, 190, 140, 0.15);
+  --color-warning: #ebcb8b;
+  --color-warning-bg: rgba(235, 203, 139, 0.15);
+  --color-error: #bf616a;
+  --color-error-bg: rgba(191, 97, 106, 0.15);
+}
+
+/* Coffee - Warm brown tones */
+[data-theme="coffee"] {
+  --color-primary-500: #db924b;
+  --color-primary-400: #e7a96e;
+  --color-primary-600: #b87333;
+
+  --color-bg: #20161f;
+  --color-bg-primary: #20161f;
+  --color-bg-secondary: #2d2129;
+  --color-bg-tertiary: #3a2c35;
+  --color-bg-elevated: #2d2129;
+  --color-bg-hover: #3a2c35;
+  --color-bg-overlay: rgba(32, 22, 31, 0.9);
+
+  --color-text: #f5f0eb;
+  --color-text-primary: #f5f0eb;
+  --color-text-secondary: #d6c8be;
+  --color-text-tertiary: #b8a99a;
+  --color-text-muted: #8b7e74;
+  --color-text-inverse: #20161f;
+
+  --color-border: #4a3f46;
+  --color-border-focus: #db924b;
+
+  --color-link: #e7a96e;
+  --color-link-hover: #db924b;
+
+  --color-primary: #db924b;
+  --color-primary-bg: rgba(219, 146, 75, 0.15);
+}
+
+/* Forest - Deep greens */
+[data-theme="forest"] {
+  --color-primary-500: #2dd4bf;
+  --color-primary-400: #5eead4;
+  --color-primary-600: #14b8a6;
+
+  --color-bg: #171c28;
+  --color-bg-primary: #171c28;
+  --color-bg-secondary: #1e2433;
+  --color-bg-tertiary: #252d3d;
+  --color-bg-elevated: #1e2433;
+  --color-bg-hover: #252d3d;
+  --color-bg-overlay: rgba(23, 28, 40, 0.9);
+
+  --color-text: #e8f5e9;
+  --color-text-primary: #e8f5e9;
+  --color-text-secondary: #a7f3d0;
+  --color-text-tertiary: #6ee7b7;
+  --color-text-muted: #34d399;
+  --color-text-inverse: #171c28;
+
+  --color-border: #374151;
+  --color-border-focus: #2dd4bf;
+
+  --color-link: #5eead4;
+  --color-link-hover: #2dd4bf;
+
+  --color-primary: #2dd4bf;
+  --color-primary-bg: rgba(45, 212, 191, 0.15);
+  --color-success: #34d399;
+  --color-success-bg: rgba(52, 211, 153, 0.15);
+}
+
+/* Sunset - Warm orange/pink gradient feel */
+[data-theme="sunset"] {
+  --color-primary-500: #f97316;
+  --color-primary-400: #fb923c;
+  --color-primary-600: #ea580c;
+
+  --color-bg: #1f1720;
+  --color-bg-primary: #1f1720;
+  --color-bg-secondary: #2a1f2d;
+  --color-bg-tertiary: #36283b;
+  --color-bg-elevated: #2a1f2d;
+  --color-bg-hover: #36283b;
+  --color-bg-overlay: rgba(31, 23, 32, 0.9);
+
+  --color-text: #fef3c7;
+  --color-text-primary: #fef3c7;
+  --color-text-secondary: #fed7aa;
+  --color-text-tertiary: #fdba74;
+  --color-text-muted: #fb923c;
+  --color-text-inverse: #1f1720;
+
+  --color-border: #4a3a4d;
+  --color-border-focus: #f97316;
+
+  --color-link: #fb923c;
+  --color-link-hover: #f97316;
+
+  --color-primary: #f97316;
+  --color-primary-bg: rgba(249, 115, 22, 0.15);
+  --color-warning: #fbbf24;
+  --color-warning-bg: rgba(251, 191, 36, 0.15);
+}
+
+/* Cupcake - Soft pink pastels (light theme) */
+[data-theme="cupcake"] {
+  --color-primary-500: #ec4899;
+  --color-primary-400: #f472b6;
+  --color-primary-600: #db2777;
+
+  --color-bg: #faf7f5;
+  --color-bg-primary: #faf7f5;
+  --color-bg-secondary: #fce7f3;
+  --color-bg-tertiary: #fbcfe8;
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: #fce7f3;
+  --color-bg-overlay: rgba(0, 0, 0, 0.3);
+
+  --color-text: #65413e;
+  --color-text-primary: #65413e;
+  --color-text-secondary: #8b5f5d;
+  --color-text-tertiary: #a67f7d;
+  --color-text-muted: #c4a3a1;
+  --color-text-inverse: #faf7f5;
+
+  --color-border: #f9a8d4;
+  --color-border-focus: #ec4899;
+
+  --color-link: #ec4899;
+  --color-link-hover: #db2777;
+
+  --color-primary: #ec4899;
+  --color-primary-bg: rgba(236, 72, 153, 0.1);
+}
+
+/* Emerald - Rich green (light theme) */
+[data-theme="emerald"] {
+  --color-primary-500: #10b981;
+  --color-primary-400: #34d399;
+  --color-primary-600: #059669;
+
+  --color-bg: #f0fdf4;
+  --color-bg-primary: #f0fdf4;
+  --color-bg-secondary: #dcfce7;
+  --color-bg-tertiary: #bbf7d0;
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: #dcfce7;
+  --color-bg-overlay: rgba(0, 0, 0, 0.3);
+
+  --color-text: #14532d;
+  --color-text-primary: #14532d;
+  --color-text-secondary: #166534;
+  --color-text-tertiary: #15803d;
+  --color-text-muted: #22c55e;
+  --color-text-inverse: #f0fdf4;
+
+  --color-border: #86efac;
+  --color-border-focus: #10b981;
+
+  --color-link: #059669;
+  --color-link-hover: #047857;
+
+  --color-primary: #10b981;
+  --color-primary-bg: rgba(16, 185, 129, 0.1);
+  --color-success: #22c55e;
+  --color-success-bg: rgba(34, 197, 94, 0.1);
+}

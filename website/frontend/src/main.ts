@@ -5,7 +5,8 @@
 
 import './styles/index.css';
 import { router } from './lib/router';
-import { theme } from './lib/theme';
+import { theme, THEMES, THEME_META } from './lib/theme';
+import type { Theme } from './lib/theme';
 import { IconButton, Button } from './components';
 import { authStore } from './stores/authStore';
 import { TAGLINES } from './constants/taglines';
@@ -177,6 +178,83 @@ function createLayout(): HTMLElement {
 }
 
 /**
+ * Create the theme dropdown menu
+ */
+function createThemeDropdown(): HTMLElement {
+  const currentTheme = theme.getTheme();
+  const meta = THEME_META[currentTheme];
+
+  const container = document.createElement('div');
+  container.className = 'theme-dropdown';
+
+  // Trigger button (shows emoji only when collapsed)
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'theme-dropdown-trigger';
+  trigger.setAttribute('aria-label', 'Select theme');
+  trigger.innerHTML = `<span class="theme-dropdown-emoji">${meta.emoji}</span>`;
+
+  // Dropdown menu
+  const menu = document.createElement('div');
+  menu.className = 'theme-dropdown-menu';
+
+  // Current theme header
+  const header = document.createElement('div');
+  header.className = 'theme-dropdown-header';
+  header.innerHTML = `
+    <span class="theme-dropdown-current-emoji">${meta.emoji}</span>
+    <span class="theme-dropdown-current-label">${meta.label}</span>
+  `;
+  menu.appendChild(header);
+
+  // Separator
+  const separator = document.createElement('div');
+  separator.className = 'theme-dropdown-separator';
+  menu.appendChild(separator);
+
+  // Theme options
+  const optionsList = document.createElement('div');
+  optionsList.className = 'theme-dropdown-options';
+
+  for (const themeName of THEMES) {
+    const themeMeta = THEME_META[themeName];
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `theme-dropdown-option ${themeName === currentTheme ? 'active' : ''}`;
+    option.dataset.theme = themeName;
+    option.innerHTML = `
+      <span class="theme-option-emoji">${themeMeta.emoji}</span>
+      <span class="theme-option-label">${themeMeta.label}</span>
+    `;
+    option.addEventListener('click', () => {
+      theme.setTheme(themeName as Theme);
+      menu.classList.remove('open');
+      updateHeader();
+    });
+    optionsList.appendChild(option);
+  }
+  menu.appendChild(optionsList);
+
+  container.appendChild(trigger);
+  container.appendChild(menu);
+
+  // Toggle menu on trigger click
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.classList.toggle('open');
+  });
+
+  // Close menu when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!container.contains(e.target as Node)) {
+      menu.classList.remove('open');
+    }
+  });
+
+  return container;
+}
+
+/**
  * Update the header based on auth state
  */
 function updateHeader(): void {
@@ -223,15 +301,9 @@ function updateHeader(): void {
     actions.appendChild(settingsBtn.getElement());
   }
 
-  // Theme toggle
-  const themeToggle = new IconButton(theme.getResolvedTheme() === 'dark' ? 'sun' : 'moon', {
-    label: 'Toggle theme',
-    onClick: () => {
-      theme.toggle();
-      updateHeader();
-    },
-  });
-  actions.appendChild(themeToggle.getElement());
+  // Theme dropdown
+  const themeDropdown = createThemeDropdown();
+  actions.appendChild(themeDropdown);
 
   // Auth button
   if (!isAuthenticated) {
@@ -440,6 +512,127 @@ function addAppStyles(): void {
       font-size: var(--font-size-xl);
       color: var(--color-text-secondary);
       margin: 0;
+    }
+
+    /* Theme Dropdown */
+    .theme-dropdown {
+      position: relative;
+    }
+
+    .theme-dropdown-trigger {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: none;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      transition: color var(--transition-fast), background var(--transition-fast);
+    }
+
+    .theme-dropdown-trigger:hover {
+      color: var(--color-text-primary);
+      background: var(--color-bg-hover);
+    }
+
+    .theme-dropdown-emoji {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .theme-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      min-width: 160px;
+      padding: var(--spacing-sm);
+      background: var(--color-bg-elevated);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-8px);
+      transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
+      z-index: var(--z-dropdown);
+    }
+
+    .theme-dropdown-menu.open {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    .theme-dropdown-header {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-xs) var(--spacing-sm);
+      font-weight: var(--font-weight-medium);
+      color: var(--color-text-primary);
+    }
+
+    .theme-dropdown-current-emoji {
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .theme-dropdown-current-label {
+      font-size: var(--font-size-sm);
+    }
+
+    .theme-dropdown-separator {
+      height: 1px;
+      margin: var(--spacing-sm) 0;
+      background: var(--color-border);
+    }
+
+    .theme-dropdown-options {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .theme-dropdown-option {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      width: 100%;
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border: none;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      text-align: left;
+      transition: color var(--transition-fast), background var(--transition-fast);
+    }
+
+    .theme-dropdown-option:hover {
+      color: var(--color-text-primary);
+      background: var(--color-bg-hover);
+    }
+
+    .theme-dropdown-option.active {
+      color: var(--color-primary);
+      background: var(--color-primary-bg);
+    }
+
+    .theme-option-emoji {
+      font-size: 14px;
+      line-height: 1;
+      width: 20px;
+      text-align: center;
+    }
+
+    .theme-option-label {
+      font-size: var(--font-size-sm);
     }
   `;
   document.head.appendChild(style);

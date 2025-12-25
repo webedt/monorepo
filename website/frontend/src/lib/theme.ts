@@ -1,23 +1,54 @@
 /**
  * Theme Manager
- * Handles light/dark theme switching with system preference support
+ * Handles multiple theme switching with system preference support
  */
 
-export type Theme = 'light' | 'dark' | 'system';
+export const THEMES = [
+  'system',
+  'light',
+  'dark',
+  'synthwave',
+  'cyberpunk',
+  'dracula',
+  'nord',
+  'coffee',
+  'forest',
+  'sunset',
+  'cupcake',
+  'emerald',
+] as const;
 
-const THEME_KEY = 'theme';
+export type Theme = typeof THEMES[number];
+
+export const THEME_META: Record<Theme, { emoji: string; label: string }> = {
+  system: { emoji: '💻', label: 'System' },
+  light: { emoji: '☀️', label: 'Light' },
+  dark: { emoji: '🌙', label: 'Dark' },
+  synthwave: { emoji: '🌃', label: 'Synthwave' },
+  cyberpunk: { emoji: '🤖', label: 'Cyberpunk' },
+  dracula: { emoji: '🧛', label: 'Dracula' },
+  nord: { emoji: '🏔️', label: 'Nord' },
+  coffee: { emoji: '☕', label: 'Coffee' },
+  forest: { emoji: '🌲', label: 'Forest' },
+  sunset: { emoji: '🌅', label: 'Sunset' },
+  cupcake: { emoji: '🧁', label: 'Cupcake' },
+  emerald: { emoji: '💎', label: 'Emerald' },
+};
+
+const THEME_KEY = 'webedt:theme';
 
 class ThemeManager {
   private currentTheme: Theme = 'system';
   private mediaQuery: MediaQueryList;
-  private listeners: Set<(theme: Theme, resolved: 'light' | 'dark') => void> = new Set();
+  private listeners: Set<(theme: Theme, resolved: string) => void> = new Set();
 
   constructor() {
     this.mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     this.mediaQuery.addEventListener('change', () => this.applyTheme());
 
     // Load saved theme
-    this.currentTheme = (localStorage.getItem(THEME_KEY) as Theme) || 'system';
+    const saved = localStorage.getItem(THEME_KEY);
+    this.currentTheme = (saved && THEMES.includes(saved as Theme)) ? saved as Theme : 'system';
     this.applyTheme();
   }
 
@@ -29,13 +60,20 @@ class ThemeManager {
   }
 
   /**
-   * Get resolved theme (always light or dark)
+   * Get resolved theme (actual theme name, not 'system')
    */
-  getResolvedTheme(): 'light' | 'dark' {
+  getResolvedTheme(): string {
     if (this.currentTheme === 'system') {
       return this.mediaQuery.matches ? 'dark' : 'light';
     }
     return this.currentTheme;
+  }
+
+  /**
+   * Get all available themes
+   */
+  getThemes(): readonly Theme[] {
+    return THEMES;
   }
 
   /**
@@ -48,11 +86,16 @@ class ThemeManager {
   }
 
   /**
-   * Toggle between light and dark
+   * Toggle between light and dark (or cycle through if on a custom theme)
    */
   toggle(): void {
     const resolved = this.getResolvedTheme();
-    this.setTheme(resolved === 'light' ? 'dark' : 'light');
+    if (resolved === 'light' || resolved === 'dark') {
+      this.setTheme(resolved === 'light' ? 'dark' : 'light');
+    } else {
+      // If on a custom theme, toggle to the opposite base
+      this.setTheme('light');
+    }
   }
 
   /**
@@ -70,9 +113,10 @@ class ThemeManager {
     // Update meta theme-color for mobile browsers
     const metaThemeColor = document.querySelector('meta[name="theme-color"]');
     if (metaThemeColor) {
+      const isDark = ['dark', 'synthwave', 'cyberpunk', 'dracula', 'nord', 'coffee', 'forest', 'sunset'].includes(resolved);
       metaThemeColor.setAttribute(
         'content',
-        resolved === 'dark' ? '#111827' : '#ffffff'
+        isDark ? '#111827' : '#ffffff'
       );
     }
 
@@ -85,7 +129,7 @@ class ThemeManager {
   /**
    * Subscribe to theme changes
    */
-  onChange(callback: (theme: Theme, resolved: 'light' | 'dark') => void): () => void {
+  onChange(callback: (theme: Theme, resolved: string) => void): () => void {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
   }
