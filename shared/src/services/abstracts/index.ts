@@ -50,7 +50,16 @@ export {
   type CircuitBreakerResult,
 } from '../../utils/resilience/ACircuitBreaker.js';
 
-// Session broadcasting services (from sessions/)
+// Session services (from sessions/)
+export { ASession } from '../../sessions/ASession.js';
+export type {
+  SessionExecuteParams,
+  SessionResumeParams,
+  SessionSyncParams,
+  SessionResult,
+  SessionInfo,
+  SessionEventCallback,
+} from '../../sessions/types.js';
 export {
   ASessionEventBroadcaster,
   type BroadcastEvent,

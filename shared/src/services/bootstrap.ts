@@ -26,6 +26,7 @@ import {
   AMetricsRegistry,
   AHealthMonitor,
   ACircuitBreakerRegistry,
+  ASession,
   ASessionEventBroadcaster,
   ASessionListBroadcaster,
   AClaudeWebClient,
@@ -39,6 +40,7 @@ import { logCapture } from '../utils/logging/logCapture.js';
 import { metrics } from '../utils/monitoring/metrics.js';
 import { healthMonitor } from '../utils/monitoring/healthMonitor.js';
 import { circuitBreakerRegistry } from '../utils/resilience/circuitBreaker.js';
+import { SessionService } from '../sessions/SessionService.js';
 import { sessionEventBroadcaster } from '../sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../sessions/sessionListBroadcaster.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
@@ -80,6 +82,7 @@ export async function bootstrapServices(): Promise<void> {
   ServiceProvider.register(AMetricsRegistry, wrapService(metrics, -50));
   ServiceProvider.register(AHealthMonitor, wrapService(healthMonitor, 0));
   ServiceProvider.register(ACircuitBreakerRegistry, wrapService(circuitBreakerRegistry, -40));
+  ServiceProvider.register(ASession, wrapService(new SessionService(), 10));
   ServiceProvider.register(ASessionEventBroadcaster, wrapService(sessionEventBroadcaster, 0));
   ServiceProvider.register(ASessionListBroadcaster, wrapService(sessionListBroadcaster, 0));
   ServiceProvider.register(AGitHubClient, wrapService(new GitHubClient(), 0));

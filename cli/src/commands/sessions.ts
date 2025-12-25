@@ -1,8 +1,7 @@
 import { Command } from 'commander';
-import { db, chatSessions, events, messages, users, getExecutionProvider, ensureValidToken, normalizeRepoUrl, generateSessionPath } from '@webedt/shared';
+import { db, chatSessions, events, messages, users, ensureValidToken, ServiceProvider, ASession } from '@webedt/shared';
 import type { ClaudeAuth, ExecutionEvent } from '@webedt/shared';
 import { eq, desc, and, lt, sql, count } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
 
 export const sessionsCommand = new Command('sessions')
   .description('Session lifecycle operations');
@@ -277,6 +276,7 @@ sessionsCommand
   .command('execute <gitUrl> <prompt>')
   .description('Execute a task (creates session in database, calls Claude Remote)')
   .option('-u, --user <userId>', 'User ID to create session for (required)')
+  .option('-m, --model <model>', 'Model to use (e.g., claude-sonnet-4-20250514)')
   .option('--quiet', 'Only show final result, not streaming events')
   .option('--json', 'Output raw JSON result')
   .option('--jsonl', 'Stream events as JSON Lines')
@@ -288,7 +288,7 @@ sessionsCommand
       // Require user ID
       if (!options.user) {
         console.error('User ID is required. Use --user <userId> to specify.');
-        console.error('Run `npm run cli -- db users list` to see available users.');
+        console.error('Run `npm run cli -- users list` to see available users.');
         process.exit(1);
       }
 
@@ -310,14 +310,12 @@ sessionsCommand
         process.exit(1);
       }
 
-      // Get credentials - try user's claudeAuth first, then fallback to CLI credentials
+      // Get credentials and refresh if needed
       let claudeAuth = userData.claudeAuth as ClaudeAuth;
 
-      // Refresh token if needed
       try {
         const refreshedAuth = await ensureValidToken(claudeAuth);
         if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
-          // Token was refreshed, save it - cast to any to satisfy drizzle's strict typing
           await db.update(users)
             .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
             .where(eq(users.id, options.user));
@@ -338,159 +336,42 @@ sessionsCommand
         process.exit(1);
       }
 
-      // Normalize repo URL
-      const repoUrl = normalizeRepoUrl(gitUrl);
-      const repoMatch = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)(\.git)?$/);
-      const repositoryOwner = repoMatch ? repoMatch[1] : null;
-      const repositoryName = repoMatch ? repoMatch[2] : null;
-
-      // Create database session (mirrors executeRemote.ts)
-      const chatSessionId = randomUUID();
-
-      log(`\nCreating database session: ${chatSessionId}`);
-      log(`User: ${userData.email}`);
-      log(`Git URL: ${repoUrl}`);
+      log(`\nExecuting session for user: ${userData.email}`);
+      log(`Git URL: ${gitUrl}`);
       log(`Prompt: ${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}`);
       log('-'.repeat(80));
 
-      const [newSession] = await db.insert(chatSessions).values({
-        id: chatSessionId,
-        userId: userData.id,
-        userRequest: prompt.slice(0, 200),
-        status: 'running',
-        provider: 'claude',
-        repositoryUrl: repoUrl,
-        repositoryOwner,
-        repositoryName,
-        baseBranch: 'main',
-      }).returning();
+      // Get session service
+      const session = ServiceProvider.get(ASession);
 
-      log(`Session created in database: ${newSession.id}`);
-
-      // Track stored event UUIDs to prevent duplicates
-      const storedEventUuids = new Set<string>();
-
-      // Store user message
-      await db.insert(messages).values({
-        chatSessionId,
-        type: 'user',
-        content: prompt,
-      });
-
-      // Get execution provider
-      const provider = getExecutionProvider();
-
-      // Event handler that stores to database (mirrors executeRemote.ts)
+      // Event handler for logging
       const handleEvent = async (event: ExecutionEvent) => {
-        // Log event
         if (options.jsonl) {
           console.log(JSON.stringify(event));
         } else if (!options.quiet && !options.json) {
           const timestamp = new Date().toISOString().slice(11, 19);
           console.log(`[${timestamp}] ${event.type}: ${JSON.stringify(event).slice(0, 100)}...`);
         }
-
-        // Store event in database - deduplicate by UUID
-        const eventUuid = (event as { uuid?: string }).uuid;
-        if (eventUuid && storedEventUuids.has(eventUuid)) {
-          return; // Skip duplicate
-        }
-
-        try {
-          await db.insert(events).values({
-            chatSessionId,
-            eventData: event,
-          });
-          if (eventUuid) {
-            storedEventUuids.add(eventUuid);
-          }
-        } catch (err) {
-          // Ignore storage errors
-        }
-
-        // Update session with title from title_generation event
-        if (event.type === 'title_generation' && (event as { status?: string }).status === 'success') {
-          const titleEvent = event as { title?: string; branch_name?: string };
-          const newTitle = titleEvent.title;
-          const newBranch = titleEvent.branch_name;
-
-          let newSessionPath: string | undefined;
-          if (newBranch && repositoryOwner && repositoryName) {
-            newSessionPath = generateSessionPath(repositoryOwner, repositoryName, newBranch);
-          }
-
-          try {
-            await db.update(chatSessions)
-              .set({
-                userRequest: newTitle,
-                ...(newBranch ? { branch: newBranch } : {}),
-                ...(newSessionPath ? { sessionPath: newSessionPath } : {})
-              })
-              .where(eq(chatSessions.id, chatSessionId));
-            log(`Session title updated: ${newTitle}`);
-          } catch (err) {
-            // Ignore update errors
-          }
-        }
-
-        // Save remoteSessionId immediately when session_created
-        if (event.type === 'session_created') {
-          const sessionEvent = event as { remoteSessionId?: string; remoteWebUrl?: string };
-          try {
-            await db.update(chatSessions)
-              .set({
-                remoteSessionId: sessionEvent.remoteSessionId,
-                remoteWebUrl: sessionEvent.remoteWebUrl,
-              })
-              .where(eq(chatSessions.id, chatSessionId));
-            log(`Remote session linked: ${sessionEvent.remoteSessionId}`);
-          } catch (err) {
-            // Ignore update errors
-          }
-        }
       };
 
-      // Execute
+      // Execute via ASession (handles DB + Claude Remote)
       log('\nStarting execution...\n');
 
-      const result = await provider.execute(
+      const result = await session.execute(
         {
           userId: userData.id,
-          chatSessionId,
           prompt,
-          gitUrl: repoUrl,
+          gitUrl,
           claudeAuth,
           environmentId,
+          model: options.model,
         },
         handleEvent
       );
 
-      // Update session with final result
-      const finalStatus = result.status === 'completed' ? 'completed' : 'error';
-
-      let finalSessionPath: string | undefined;
-      if (result.branch && repositoryOwner && repositoryName) {
-        finalSessionPath = generateSessionPath(repositoryOwner, repositoryName, result.branch);
-      }
-
-      await db.update(chatSessions)
-        .set({
-          status: finalStatus,
-          branch: result.branch,
-          remoteSessionId: result.remoteSessionId,
-          remoteWebUrl: result.remoteWebUrl,
-          totalCost: result.totalCost?.toString(),
-          completedAt: new Date(),
-          ...(finalSessionPath ? { sessionPath: finalSessionPath } : {}),
-        })
-        .where(eq(chatSessions.id, chatSessionId));
-
       // Output result
       if (options.json) {
-        console.log(JSON.stringify({
-          chatSessionId,
-          ...result,
-        }, null, 2));
+        console.log(JSON.stringify(result, null, 2));
         return;
       }
 
@@ -500,14 +381,12 @@ sessionsCommand
 
       console.log('-'.repeat(80));
       console.log('\nResult:');
-      console.log(`  Website Session ID: ${chatSessionId}`);
       console.log(`  Remote Session ID:  ${result.remoteSessionId}`);
       console.log(`  Status:             ${result.status}`);
       console.log(`  Branch:             ${result.branch || 'N/A'}`);
       console.log(`  Cost:               $${result.totalCost?.toFixed(4) || 'N/A'}`);
       console.log(`  Duration:           ${result.durationMs ? Math.round(result.durationMs / 1000) + 's' : 'N/A'}`);
       console.log(`  Web URL:            ${result.remoteWebUrl || 'N/A'}`);
-      console.log(`\nView in website:      http://localhost:3000/#/chat/${chatSessionId}`);
     } catch (error) {
       console.error('Error executing session:', error);
       process.exit(1);
@@ -525,20 +404,15 @@ sessionsCommand
       const silent = options.json || options.jsonl;
       const log = silent ? () => {} : console.log.bind(console);
 
-      // Get session from database
-      const [session] = await db
+      // Get session from database to get user's auth
+      const [dbSession] = await db
         .select()
         .from(chatSessions)
         .where(eq(chatSessions.id, sessionId))
         .limit(1);
 
-      if (!session) {
+      if (!dbSession) {
         console.error(`Session not found: ${sessionId}`);
-        process.exit(1);
-      }
-
-      if (!session.remoteSessionId) {
-        console.error('Session does not have a remote session ID. Cannot resume.');
         process.exit(1);
       }
 
@@ -546,7 +420,7 @@ sessionsCommand
       const [userData] = await db
         .select()
         .from(users)
-        .where(eq(users.id, session.userId))
+        .where(eq(users.id, dbSession.userId))
         .limit(1);
 
       if (!userData?.claudeAuth) {
@@ -562,7 +436,7 @@ sessionsCommand
         if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
           await db.update(users)
             .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
-            .where(eq(users.id, session.userId));
+            .where(eq(users.id, dbSession.userId));
           claudeAuth = refreshedAuth;
           log('Token refreshed and saved to database');
         }
@@ -578,29 +452,13 @@ sessionsCommand
       }
 
       log(`\nResuming session: ${sessionId}`);
-      log(`Remote Session: ${session.remoteSessionId}`);
       log(`Message: ${message.slice(0, 100)}${message.length > 100 ? '...' : ''}`);
       log('-'.repeat(80));
 
-      // Update session status
-      await db.update(chatSessions)
-        .set({ status: 'running' })
-        .where(eq(chatSessions.id, sessionId));
+      // Get session service
+      const session = ServiceProvider.get(ASession);
 
-      // Store user message
-      await db.insert(messages).values({
-        chatSessionId: sessionId,
-        type: 'user',
-        content: message,
-      });
-
-      // Track stored event UUIDs
-      const storedEventUuids = new Set<string>();
-
-      // Get execution provider
-      const provider = getExecutionProvider();
-
-      // Event handler
+      // Event handler for logging
       const handleEvent = async (event: ExecutionEvent) => {
         if (options.jsonl) {
           console.log(JSON.stringify(event));
@@ -608,33 +466,14 @@ sessionsCommand
           const timestamp = new Date().toISOString().slice(11, 19);
           console.log(`[${timestamp}] ${event.type}: ${JSON.stringify(event).slice(0, 100)}...`);
         }
-
-        const eventUuid = (event as { uuid?: string }).uuid;
-        if (eventUuid && storedEventUuids.has(eventUuid)) {
-          return;
-        }
-
-        try {
-          await db.insert(events).values({
-            chatSessionId: sessionId,
-            eventData: event,
-          });
-          if (eventUuid) {
-            storedEventUuids.add(eventUuid);
-          }
-        } catch (err) {
-          // Ignore storage errors
-        }
       };
 
-      // Resume
+      // Resume via ASession (handles DB + Claude Remote)
       log('\nStarting resume...\n');
 
-      const result = await provider.resume(
+      const result = await session.resume(
+        sessionId,
         {
-          userId: session.userId,
-          chatSessionId: sessionId,
-          remoteSessionId: session.remoteSessionId,
           prompt: message,
           claudeAuth,
           environmentId,
@@ -642,23 +481,9 @@ sessionsCommand
         handleEvent
       );
 
-      // Update session with final result
-      const finalStatus = result.status === 'completed' ? 'completed' : 'error';
-
-      await db.update(chatSessions)
-        .set({
-          status: finalStatus,
-          totalCost: result.totalCost?.toString(),
-          completedAt: new Date(),
-        })
-        .where(eq(chatSessions.id, sessionId));
-
       // Output result
       if (options.json) {
-        console.log(JSON.stringify({
-          chatSessionId: sessionId,
-          ...result,
-        }, null, 2));
+        console.log(JSON.stringify(result, null, 2));
         return;
       }
 
