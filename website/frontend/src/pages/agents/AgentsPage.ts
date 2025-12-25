@@ -4,7 +4,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Input, Icon, Spinner, Modal, toast } from '../../components';
+import { Button, Input, Icon, Spinner, toast } from '../../components';
 import { sessionsApi, githubApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
@@ -17,15 +17,20 @@ export class AgentsPage extends Page<PageOptions> {
   private sessions: Session[] = [];
   private filteredSessions: Session[] = [];
   private searchInput: Input | null = null;
-  private newSessionBtn: Button | null = null;
+  private createSessionBtn: Button | null = null;
   private spinner: Spinner | null = null;
   private emptyIcon: Icon | null = null;
   private isLoading = true;
 
+  // Inline form state
+  private repos: Repository[] = [];
+  private branches: Branch[] = [];
+  private selectedRepo: Repository | null = null;
+  private selectedBranch: string = '';
+
   // Prefetched GitHub data
   private prefetchedRepos: Repository[] | null = null;
   private prefetchedBranches: Map<string, Branch[]> = new Map();
-  private isPrefetchingRepos = false;
   private reposPrefetchPromise: Promise<void> | null = null;
 
   // Session list updates subscription
@@ -41,7 +46,6 @@ export class AgentsPage extends Page<PageOptions> {
           </div>
           <div class="agents-header-right">
             <div class="search-container"></div>
-            <div class="new-session-btn"></div>
             <a href="#/trash" class="trash-link" title="View deleted sessions">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
@@ -49,6 +53,19 @@ export class AgentsPage extends Page<PageOptions> {
             </a>
           </div>
         </header>
+
+        <div class="new-session-input-box">
+          <textarea class="new-session-textarea" id="request-input" placeholder="Describe what you want the AI to help with..."></textarea>
+          <div class="new-session-controls">
+            <select class="inline-form-select" id="repo-select" disabled>
+              <option value="">Loading repos...</option>
+            </select>
+            <select class="inline-form-select" id="branch-select" disabled>
+              <option value="">Select branch...</option>
+            </select>
+            <div class="create-session-btn"></div>
+          </div>
+        </div>
 
         <div class="sessions-container">
           <div class="sessions-loading">
@@ -79,15 +96,18 @@ export class AgentsPage extends Page<PageOptions> {
       this.searchInput.mount(searchContainer);
     }
 
-    // Create new session button
-    const newBtnContainer = this.$('.new-session-btn') as HTMLElement;
-    if (newBtnContainer) {
-      this.newSessionBtn = new Button('New Session', {
+    // Create session button in inline form
+    const createBtnContainer = this.$('.create-session-btn') as HTMLElement;
+    if (createBtnContainer) {
+      this.createSessionBtn = new Button('Create', {
         variant: 'primary',
-        onClick: () => this.handleNewSession(),
+        onClick: () => this.handleCreateSession(),
       });
-      this.newSessionBtn.mount(newBtnContainer);
+      this.createSessionBtn.mount(createBtnContainer);
     }
+
+    // Set up inline form event listeners
+    this.setupInlineForm();
 
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
@@ -102,8 +122,214 @@ export class AgentsPage extends Page<PageOptions> {
     // Subscribe to real-time session list updates
     this.subscribeToSessionUpdates();
 
-    // Prefetch GitHub repos in the background
-    this.prefetchGitHubData();
+    // Load GitHub repos for inline form
+    this.loadReposForInlineForm();
+  }
+
+  private setupInlineForm(): void {
+    const repoSelect = this.$('#repo-select') as HTMLSelectElement;
+    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
+
+    if (repoSelect) {
+      repoSelect.addEventListener('change', async () => {
+        const value = repoSelect.value;
+        if (value) {
+          const [owner, name] = value.split('/');
+          this.selectedRepo = this.repos.find(r => r.owner.login === owner && r.name === name) || null;
+          this.selectedBranch = '';
+          await this.loadBranchesForInlineForm();
+        } else {
+          this.selectedRepo = null;
+          this.selectedBranch = '';
+          this.branches = [];
+          this.updateBranchSelect();
+        }
+      });
+    }
+
+    if (branchSelect) {
+      branchSelect.addEventListener('change', () => {
+        this.selectedBranch = branchSelect.value;
+      });
+    }
+  }
+
+  private async loadReposForInlineForm(): Promise<void> {
+    const repoSelect = this.$('#repo-select') as HTMLSelectElement;
+    if (!repoSelect) return;
+
+    // Check if we already have prefetched repos
+    if (this.prefetchedRepos !== null) {
+      this.repos = this.prefetchedRepos;
+      this.updateRepoSelect();
+      await this.autoSelectLastRepo();
+      return;
+    }
+
+    // If prefetch is in progress, wait for it
+    if (this.reposPrefetchPromise) {
+      await this.reposPrefetchPromise;
+      this.repos = this.prefetchedRepos || [];
+      this.updateRepoSelect();
+      await this.autoSelectLastRepo();
+      return;
+    }
+
+    // Otherwise fetch repos now
+    try {
+      const response = await githubApi.getRepos();
+      this.repos = response.repos || [];
+      this.prefetchedRepos = this.repos;
+    } catch (error) {
+      console.error('Failed to load repos:', error);
+      this.repos = [];
+    } finally {
+      this.updateRepoSelect();
+      await this.autoSelectLastRepo();
+    }
+  }
+
+  private async autoSelectLastRepo(): Promise<void> {
+    const lastUsedRepo = localStorage.getItem('webedt_last_repo');
+    if (lastUsedRepo && this.repos.length > 0) {
+      const [owner, name] = lastUsedRepo.split('/');
+      const lastRepo = this.repos.find(r => r.owner.login === owner && r.name === name);
+      if (lastRepo) {
+        this.selectedRepo = lastRepo;
+        const repoSelect = this.$('#repo-select') as HTMLSelectElement;
+        if (repoSelect) {
+          repoSelect.value = `${owner}/${name}`;
+        }
+        await this.loadBranchesForInlineForm();
+      }
+    }
+  }
+
+  private updateRepoSelect(): void {
+    const repoSelect = this.$('#repo-select') as HTMLSelectElement;
+    if (!repoSelect) return;
+
+    if (this.repos.length === 0) {
+      repoSelect.innerHTML = '<option value="">No repositories found</option>';
+      repoSelect.disabled = true;
+    } else {
+      repoSelect.innerHTML = `
+        <option value="">Select repository...</option>
+        ${this.repos.map(repo => `
+          <option value="${repo.owner.login}/${repo.name}">
+            ${repo.owner.login}/${repo.name}
+          </option>
+        `).join('')}
+      `;
+      repoSelect.disabled = false;
+    }
+  }
+
+  private async loadBranchesForInlineForm(): Promise<void> {
+    if (!this.selectedRepo) return;
+
+    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
+    if (!branchSelect) return;
+
+    const repoKey = `${this.selectedRepo.owner.login}/${this.selectedRepo.name}`;
+
+    // Check cache first
+    const cachedBranches = this.prefetchedBranches.get(repoKey);
+    if (cachedBranches) {
+      this.branches = cachedBranches;
+      this.updateBranchSelect();
+      this.autoSelectDefaultBranch();
+      return;
+    }
+
+    branchSelect.innerHTML = '<option value="">Loading branches...</option>';
+    branchSelect.disabled = true;
+
+    try {
+      const response = await githubApi.getBranches(this.selectedRepo.owner.login, this.selectedRepo.name);
+      this.branches = response.branches || [];
+      this.prefetchedBranches.set(repoKey, this.branches);
+    } catch (error) {
+      console.error('Failed to load branches:', error);
+      this.branches = [];
+    } finally {
+      this.updateBranchSelect();
+      this.autoSelectDefaultBranch();
+    }
+  }
+
+  private updateBranchSelect(): void {
+    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
+    if (!branchSelect) return;
+
+    if (!this.selectedRepo) {
+      branchSelect.innerHTML = '<option value="">Select branch...</option>';
+      branchSelect.disabled = true;
+    } else if (this.branches.length === 0) {
+      branchSelect.innerHTML = '<option value="">No branches found</option>';
+      branchSelect.disabled = true;
+    } else {
+      branchSelect.innerHTML = `
+        <option value="">Select branch...</option>
+        ${this.branches.map(branch => `
+          <option value="${branch.name}">
+            ${branch.name}${branch.name === 'main' || branch.name === 'master' ? ' (default)' : ''}
+          </option>
+        `).join('')}
+      `;
+      branchSelect.disabled = false;
+    }
+  }
+
+  private autoSelectDefaultBranch(): void {
+    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
+    if (!branchSelect) return;
+
+    const defaultBranch = this.branches.find(b => b.name === 'main' || b.name === 'master');
+    if (defaultBranch) {
+      this.selectedBranch = defaultBranch.name;
+      branchSelect.value = defaultBranch.name;
+    }
+  }
+
+  private async handleCreateSession(): Promise<void> {
+    if (!this.selectedRepo || !this.selectedBranch) {
+      toast.error('Please select a repository and branch');
+      return;
+    }
+
+    const requestInput = this.$('#request-input') as HTMLTextAreaElement;
+    const initialRequest = requestInput?.value?.trim() || '';
+
+    this.createSessionBtn?.setDisabled(true);
+    this.createSessionBtn?.setLoading(true);
+
+    try {
+      const response = await sessionsApi.createCodeSession({
+        repositoryOwner: this.selectedRepo.owner.login,
+        repositoryName: this.selectedRepo.name,
+        baseBranch: this.selectedBranch,
+        branch: `claude/session-${Date.now()}`,
+        title: initialRequest || undefined,
+      });
+
+      // Save the selected repository to localStorage for next time
+      localStorage.setItem('webedt_last_repo', `${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
+
+      // Clear the input
+      if (requestInput) {
+        requestInput.value = '';
+      }
+
+      toast.success('Session created!');
+      this.navigate(`/session/${response.session.id}/chat`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create session';
+      toast.error(message);
+    } finally {
+      this.createSessionBtn?.setDisabled(false);
+      this.createSessionBtn?.setLoading(false);
+    }
   }
 
   /**
@@ -182,59 +408,6 @@ export class AgentsPage extends Page<PageOptions> {
     this.sessionUpdatesEventSource.onerror = (error) => {
       console.error('[AgentsPage] Session updates SSE error:', error);
     };
-  }
-
-  /**
-   * Prefetch GitHub repos and branches in the background
-   * so they're ready when the user clicks "New Session"
-   */
-  private prefetchGitHubData(): void {
-    if (this.isPrefetchingRepos || this.prefetchedRepos !== null) return;
-
-    this.isPrefetchingRepos = true;
-    this.reposPrefetchPromise = (async () => {
-      try {
-        const response = await githubApi.getRepos();
-        this.prefetchedRepos = response.repos || [];
-
-        // Also prefetch branches for the last used repo
-        const lastUsedRepo = localStorage.getItem('webedt_last_repo');
-        if (lastUsedRepo && this.prefetchedRepos.length > 0) {
-          const [owner, name] = lastUsedRepo.split('/');
-          const repo = this.prefetchedRepos.find(r => r.owner.login === owner && r.name === name);
-          if (repo) {
-            await this.prefetchBranches(owner, name);
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to prefetch GitHub repos:', error);
-        this.prefetchedRepos = [];
-      } finally {
-        this.isPrefetchingRepos = false;
-      }
-    })();
-  }
-
-  /**
-   * Prefetch branches for a specific repo
-   */
-  private async prefetchBranches(owner: string, name: string): Promise<Branch[]> {
-    const key = `${owner}/${name}`;
-
-    // Return cached branches if available
-    if (this.prefetchedBranches.has(key)) {
-      return this.prefetchedBranches.get(key)!;
-    }
-
-    try {
-      const response = await githubApi.getBranches(owner, name);
-      const branches = response.branches || [];
-      this.prefetchedBranches.set(key, branches);
-      return branches;
-    } catch (error) {
-      console.warn(`Failed to prefetch branches for ${key}:`, error);
-      return [];
-    }
   }
 
   private async loadSessions(): Promise<void> {
@@ -375,334 +548,9 @@ export class AgentsPage extends Page<PageOptions> {
     this.renderSessions();
   }
 
-  private handleNewSession(): void {
-    this.showNewSessionModal();
-  }
-
-  private showNewSessionModal(): void {
-    const modal = new Modal({
-      title: 'New Agent Session',
-      size: 'md',
-      onClose: () => {
-        modal.unmount();
-      },
-    });
-
-    // Get last used repository from localStorage
-    const lastUsedRepo = localStorage.getItem('webedt_last_repo');
-
-    // Use prefetched data if available
-    const hasPrefetchedRepos = this.prefetchedRepos !== null;
-    const prefetchedBranchesForLastRepo = lastUsedRepo
-      ? this.prefetchedBranches.get(lastUsedRepo)
-      : undefined;
-
-    // State for the form - initialize with prefetched data
-    let repos: Repository[] = this.prefetchedRepos || [];
-    let branches: Branch[] = [];
-    let selectedRepo: Repository | null = null;
-    let selectedBranch: string = '';
-    let initialRequest: string = '';
-    let isLoadingRepos = !hasPrefetchedRepos && this.isPrefetchingRepos;
-    let isLoadingBranches = false;
-
-    // If we have prefetched repos and a last used repo, auto-select it
-    if (hasPrefetchedRepos && lastUsedRepo && repos.length > 0) {
-      const [owner, name] = lastUsedRepo.split('/');
-      const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
-      if (lastRepo) {
-        selectedRepo = lastRepo;
-        // Use prefetched branches if available
-        if (prefetchedBranchesForLastRepo) {
-          branches = prefetchedBranchesForLastRepo;
-          // Auto-select main or master
-          const defaultBranch = branches.find(b => b.name === 'main' || b.name === 'master');
-          if (defaultBranch) {
-            selectedBranch = defaultBranch.name;
-          }
-        }
-      }
-    }
-
-    // Build the form HTML
-    const updateBody = () => {
-      const body = modal.getBody();
-      body.innerHTML = `
-        <div class="new-session-form">
-          <div class="form-group">
-            <label class="form-label">Repository</label>
-            ${isLoadingRepos ? `
-              <div class="form-loading">Loading repositories...</div>
-            ` : repos.length === 0 ? `
-              <div class="form-empty">
-                <p>No repositories found. <a href="#" id="connect-github">Connect GitHub</a> to get started.</p>
-              </div>
-            ` : `
-              <select class="form-select" id="repo-select">
-                <option value="">Select a repository...</option>
-                ${repos.map(repo => `
-                  <option value="${repo.owner.login}/${repo.name}" ${selectedRepo?.owner.login === repo.owner.login && selectedRepo?.name === repo.name ? 'selected' : ''}>
-                    ${repo.owner.login}/${repo.name}
-                  </option>
-                `).join('')}
-              </select>
-            `}
-          </div>
-
-          ${selectedRepo ? `
-            <div class="form-group">
-              <label class="form-label">Branch</label>
-              ${isLoadingBranches ? `
-                <div class="form-loading">Loading branches...</div>
-              ` : `
-                <select class="form-select" id="branch-select">
-                  <option value="">Select a branch...</option>
-                  ${branches.map(branch => `
-                    <option value="${branch.name}" ${selectedBranch === branch.name ? 'selected' : ''}>
-                      ${branch.name}${branch.name === 'main' || branch.name === 'master' ? ' (default)' : ''}
-                    </option>
-                  `).join('')}
-                </select>
-              `}
-            </div>
-          ` : ''}
-
-          ${selectedRepo && selectedBranch ? `
-            <div class="form-group">
-              <label class="form-label">Initial Task (optional)</label>
-              <textarea class="form-textarea" id="request-input" placeholder="Describe what you want the AI to help with...">${initialRequest}</textarea>
-            </div>
-          ` : ''}
-        </div>
-      `;
-
-      // Add event listeners
-      const repoSelect = body.querySelector('#repo-select') as HTMLSelectElement;
-      if (repoSelect) {
-        repoSelect.addEventListener('change', async () => {
-          const value = repoSelect.value;
-          if (value) {
-            const [owner, name] = value.split('/');
-            selectedRepo = repos.find(r => r.owner.login === owner && r.name === name) || null;
-            selectedBranch = '';
-            branches = [];
-            updateBody();
-            await loadBranches();
-          } else {
-            selectedRepo = null;
-            selectedBranch = '';
-            branches = [];
-            updateBody();
-          }
-        });
-      }
-
-      const branchSelect = body.querySelector('#branch-select') as HTMLSelectElement;
-      if (branchSelect) {
-        branchSelect.addEventListener('change', () => {
-          selectedBranch = branchSelect.value;
-          updateBody();
-        });
-      }
-
-      const requestInput = body.querySelector('#request-input') as HTMLTextAreaElement;
-      if (requestInput) {
-        requestInput.addEventListener('input', () => {
-          initialRequest = requestInput.value;
-        });
-      }
-
-      const connectGithubLink = body.querySelector('#connect-github');
-      if (connectGithubLink) {
-        connectGithubLink.addEventListener('click', (e) => {
-          e.preventDefault();
-          modal.close();
-          modal.unmount();
-          githubApi.connect();
-        });
-      }
-    };
-
-    // Load repositories
-    const loadRepos = async () => {
-      // If we already have prefetched repos, use them
-      if (this.prefetchedRepos !== null) {
-        repos = this.prefetchedRepos;
-        isLoadingRepos = false;
-
-        // Auto-select last used repository if available
-        if (lastUsedRepo && repos.length > 0) {
-          const [owner, name] = lastUsedRepo.split('/');
-          const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
-          if (lastRepo) {
-            selectedRepo = lastRepo;
-            updateBody();
-            await loadBranches();
-            return;
-          }
-        }
-        updateBody();
-        return;
-      }
-
-      // If prefetch is in progress, wait for it
-      if (this.reposPrefetchPromise) {
-        isLoadingRepos = true;
-        updateBody();
-
-        await this.reposPrefetchPromise;
-
-        // Use the prefetched results
-        repos = this.prefetchedRepos || [];
-        isLoadingRepos = false;
-
-        // Auto-select last used repository if available
-        if (lastUsedRepo && repos.length > 0) {
-          const [owner, name] = lastUsedRepo.split('/');
-          const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
-          if (lastRepo) {
-            selectedRepo = lastRepo;
-            updateBody();
-            await loadBranches();
-            return;
-          }
-        }
-        updateBody();
-        return;
-      }
-
-      // Otherwise, fetch repos now
-      isLoadingRepos = true;
-      updateBody();
-
-      try {
-        const response = await githubApi.getRepos();
-        repos = response.repos || [];
-        this.prefetchedRepos = repos; // Cache for future use
-
-        // Auto-select last used repository if available
-        if (lastUsedRepo && repos.length > 0) {
-          const [owner, name] = lastUsedRepo.split('/');
-          const lastRepo = repos.find(r => r.owner.login === owner && r.name === name);
-          if (lastRepo) {
-            selectedRepo = lastRepo;
-            isLoadingRepos = false;
-            updateBody();
-            await loadBranches();
-            return;
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load repos:', error);
-        repos = [];
-      } finally {
-        isLoadingRepos = false;
-        updateBody();
-      }
-    };
-
-    // Load branches for selected repo
-    const loadBranches = async () => {
-      if (!selectedRepo) return;
-
-      const repoKey = `${selectedRepo.owner.login}/${selectedRepo.name}`;
-
-      // Check if we have cached branches
-      const cachedBranches = this.prefetchedBranches.get(repoKey);
-      if (cachedBranches) {
-        branches = cachedBranches;
-        // Auto-select main or master if available
-        const defaultBranch = branches.find(b => b.name === 'main' || b.name === 'master');
-        if (defaultBranch) {
-          selectedBranch = defaultBranch.name;
-        }
-        updateBody();
-        return;
-      }
-
-      isLoadingBranches = true;
-      updateBody();
-
-      try {
-        const response = await githubApi.getBranches(selectedRepo.owner.login, selectedRepo.name);
-        branches = response.branches || [];
-        // Cache for future use
-        this.prefetchedBranches.set(repoKey, branches);
-        // Auto-select main or master if available
-        const defaultBranch = branches.find(b => b.name === 'main' || b.name === 'master');
-        if (defaultBranch) {
-          selectedBranch = defaultBranch.name;
-        }
-      } catch (error) {
-        console.error('Failed to load branches:', error);
-        branches = [];
-      } finally {
-        isLoadingBranches = false;
-        updateBody();
-      }
-    };
-
-    // Create session
-    const createSession = async () => {
-      if (!selectedRepo || !selectedBranch) {
-        toast.error('Please select a repository and branch');
-        return;
-      }
-
-      createBtn.setDisabled(true);
-      createBtn.setLoading(true);
-
-      try {
-        const response = await sessionsApi.createCodeSession({
-          repositoryOwner: selectedRepo.owner.login,
-          repositoryName: selectedRepo.name,
-          baseBranch: selectedBranch,
-          branch: `claude/session-${Date.now()}`,
-          title: initialRequest || undefined,
-        });
-
-        // Save the selected repository to localStorage for next time
-        localStorage.setItem('webedt_last_repo', `${selectedRepo.owner.login}/${selectedRepo.name}`);
-
-        modal.close();
-        modal.unmount();
-
-        toast.success('Session created!');
-        this.navigate(`/session/${response.session.id}/chat`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to create session';
-        toast.error(message);
-        createBtn.setDisabled(false);
-        createBtn.setLoading(false);
-      }
-    };
-
-    // Footer buttons
-    const cancelBtn = new Button('Cancel', {
-      variant: 'secondary',
-      onClick: () => {
-        modal.close();
-        modal.unmount();
-      },
-    });
-
-    const createBtn = new Button('Create Session', {
-      variant: 'primary',
-      onClick: createSession,
-    });
-
-    modal.addFooterAction(cancelBtn);
-    modal.addFooterAction(createBtn);
-
-    // Initialize
-    updateBody();
-    modal.open();
-    loadRepos();
-  }
-
   protected onUnmount(): void {
     this.searchInput?.unmount();
-    this.newSessionBtn?.unmount();
+    this.createSessionBtn?.unmount();
     this.spinner?.unmount();
     this.emptyIcon?.unmount();
 
