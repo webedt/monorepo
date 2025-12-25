@@ -325,13 +325,19 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     this.filterOptions('');
     this.focusedIndex = -1;
 
-    // Focus search input after dropdown becomes visible
-    // Use double rAF to ensure styles are applied and rendered
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    // Focus search input after dropdown visibility transition completes
+    const focusAfterTransition = () => {
+      this.searchInput.focus();
+      this.dropdownElement.removeEventListener('transitionend', focusAfterTransition);
+    };
+    this.dropdownElement.addEventListener('transitionend', focusAfterTransition, { once: true });
+
+    // Fallback in case transitionend doesn't fire
+    setTimeout(() => {
+      if (this.isOpen && document.activeElement !== this.searchInput) {
         this.searchInput.focus();
-      });
-    });
+      }
+    }, 200);
 
     return this;
   }

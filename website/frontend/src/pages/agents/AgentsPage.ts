@@ -21,6 +21,7 @@ export class AgentsPage extends Page<PageOptions> {
   private spinner: Spinner | null = null;
   private emptyIcon: Icon | null = null;
   private repoSelect: SearchableSelect | null = null;
+  private branchSelect: SearchableSelect | null = null;
   private isLoading = true;
 
   // Inline form state
@@ -59,9 +60,7 @@ export class AgentsPage extends Page<PageOptions> {
           <textarea class="new-session-textarea" id="request-input" placeholder="Describe what you want the AI to help with..."></textarea>
           <div class="new-session-controls">
             <div class="repo-select-container"></div>
-            <select class="inline-form-select" id="branch-select" disabled>
-              <option value="">Select branch...</option>
-            </select>
+            <div class="branch-select-container"></div>
             <div class="create-session-btn"></div>
           </div>
         </div>
@@ -119,6 +118,20 @@ export class AgentsPage extends Page<PageOptions> {
       this.repoSelect.mount(repoSelectContainer);
     }
 
+    // Create branch select (SearchableSelect)
+    const branchSelectContainer = this.$('.branch-select-container') as HTMLElement;
+    if (branchSelectContainer) {
+      this.branchSelect = new SearchableSelect({
+        placeholder: 'Select branch...',
+        searchPlaceholder: 'Search branches...',
+        disabled: true,
+        onChange: (value) => {
+          this.selectedBranch = value;
+        },
+      });
+      this.branchSelect.mount(branchSelectContainer);
+    }
+
     // Create session button in inline form
     const createBtnContainer = this.$('.create-session-btn') as HTMLElement;
     if (createBtnContainer) {
@@ -150,14 +163,7 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private setupInlineForm(): void {
-    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
     const requestInput = this.$('#request-input') as HTMLTextAreaElement;
-
-    if (branchSelect) {
-      branchSelect.addEventListener('change', () => {
-        this.selectedBranch = branchSelect.value;
-      });
-    }
 
     if (requestInput) {
       requestInput.addEventListener('keydown', (e) => {
@@ -234,10 +240,7 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private async loadBranchesForInlineForm(): Promise<void> {
-    if (!this.selectedRepo) return;
-
-    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
-    if (!branchSelect) return;
+    if (!this.selectedRepo || !this.branchSelect) return;
 
     const repoKey = `${this.selectedRepo.owner.login}/${this.selectedRepo.name}`;
 
@@ -250,8 +253,8 @@ export class AgentsPage extends Page<PageOptions> {
       return;
     }
 
-    branchSelect.innerHTML = '<option value="">Loading branches...</option>';
-    branchSelect.disabled = true;
+    this.branchSelect.setPlaceholder('Loading branches...');
+    this.branchSelect.setDisabled(true);
 
     try {
       const response = await githubApi.getBranches(this.selectedRepo.owner.login, this.selectedRepo.name);
@@ -267,36 +270,36 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private updateBranchSelect(): void {
-    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
-    if (!branchSelect) return;
+    if (!this.branchSelect) return;
 
     if (!this.selectedRepo) {
-      branchSelect.innerHTML = '<option value="">Select branch...</option>';
-      branchSelect.disabled = true;
+      this.branchSelect.setOptions([]);
+      this.branchSelect.setPlaceholder('Select branch...');
+      this.branchSelect.setDisabled(true);
     } else if (this.branches.length === 0) {
-      branchSelect.innerHTML = '<option value="">No branches found</option>';
-      branchSelect.disabled = true;
+      this.branchSelect.setOptions([]);
+      this.branchSelect.setPlaceholder('No branches found');
+      this.branchSelect.setDisabled(true);
     } else {
-      branchSelect.innerHTML = `
-        <option value="">Select branch...</option>
-        ${this.branches.map(branch => `
-          <option value="${branch.name}">
-            ${branch.name}${branch.name === 'main' || branch.name === 'master' ? ' (default)' : ''}
-          </option>
-        `).join('')}
-      `;
-      branchSelect.disabled = false;
+      const options = this.branches.map(branch => ({
+        value: branch.name,
+        label: branch.name === 'main' || branch.name === 'master'
+          ? `${branch.name} (default)`
+          : branch.name,
+      }));
+      this.branchSelect.setOptions(options);
+      this.branchSelect.setPlaceholder('Select branch...');
+      this.branchSelect.setDisabled(false);
     }
   }
 
   private autoSelectDefaultBranch(): void {
-    const branchSelect = this.$('#branch-select') as HTMLSelectElement;
-    if (!branchSelect) return;
+    if (!this.branchSelect) return;
 
     const defaultBranch = this.branches.find(b => b.name === 'main' || b.name === 'master');
     if (defaultBranch) {
       this.selectedBranch = defaultBranch.name;
-      branchSelect.value = defaultBranch.name;
+      this.branchSelect.setValue(defaultBranch.name);
     }
   }
 
@@ -562,6 +565,7 @@ export class AgentsPage extends Page<PageOptions> {
     this.spinner?.unmount();
     this.emptyIcon?.unmount();
     this.repoSelect?.unmount();
+    this.branchSelect?.unmount();
 
     // Close session updates subscription
     if (this.sessionUpdatesEventSource) {
