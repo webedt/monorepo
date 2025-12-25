@@ -10,6 +10,14 @@ export type { ButtonOptions, ButtonVariant, ButtonSize } from './button';
 export { Input, TextArea } from './input';
 export type { InputOptions, InputSize, InputType, TextAreaOptions } from './input';
 
+// Select
+export { Select } from './select';
+export type { SelectOptions, SelectOption, SelectSize } from './select';
+
+// CompositeInput
+export { CompositeInput } from './composite-input';
+export type { CompositeInputOptions } from './composite-input';
+
 // Card
 export { Card, CardHeader, CardBody, CardFooter } from './card';
 export type { CardOptions, CardHeaderOptions, CardBodyOptions, CardFooterOptions } from './card';
@@ -40,6 +48,14 @@ export type {
 // Icon
 export { Icon, IconButton, ICONS } from './icon';
 export type { IconOptions, IconSize, IconColor, IconName, IconButtonOptions } from './icon';
+
+// EmptyState
+export { EmptyState } from './empty-state';
+export type { EmptyStateOptions, EmptyStateSize } from './empty-state';
+
+// StatusBadge
+export { StatusBadge } from './status-badge';
+export type { StatusBadgeOptions, StatusType, StatusBadgeSize } from './status-badge';
 
 // ToolDetails
 export { ToolDetails } from './tool-details';
