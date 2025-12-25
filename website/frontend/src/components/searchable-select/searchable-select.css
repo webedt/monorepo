@@ -1,0 +1,202 @@
+.searchable-select {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.searchable-select-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.searchable-select-label--required::after {
+  content: ' *';
+  color: var(--color-error);
+}
+
+/* Trigger button */
+.searchable-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+  text-align: left;
+}
+
+.searchable-select-trigger:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.searchable-select-trigger:hover:not(:disabled) {
+  border-color: var(--color-primary);
+}
+
+.searchable-select-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.searchable-select-trigger--placeholder .searchable-select-trigger-text {
+  color: var(--color-text-muted);
+}
+
+.searchable-select-trigger-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchable-select-trigger-icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.searchable-select--open .searchable-select-trigger-icon {
+  transform: rotate(180deg);
+}
+
+/* Dropdown */
+.searchable-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: var(--spacing-xs);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
+}
+
+.searchable-select--open .searchable-select-dropdown {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* Search input */
+.searchable-select-search-wrapper {
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.searchable-select-search {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast);
+}
+
+.searchable-select-search:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.searchable-select-search::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Options container */
+.searchable-select-options {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--spacing-xs);
+}
+
+/* Option item */
+.searchable-select-option {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.searchable-select-option:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.searchable-select-option--focused {
+  background: var(--color-bg-hover);
+}
+
+.searchable-select-option--selected {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.searchable-select-option--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Empty state */
+.searchable-select-empty {
+  padding: var(--spacing-md);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Size variants */
+.searchable-select--sm .searchable-select-trigger {
+  padding: 2px var(--spacing-xs);
+  font-size: var(--font-size-xs);
+}
+
+.searchable-select--sm .searchable-select-search,
+.searchable-select--sm .searchable-select-option {
+  font-size: var(--font-size-xs);
+}
+
+.searchable-select--lg .searchable-select-trigger {
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-base);
+}
+
+.searchable-select--lg .searchable-select-search,
+.searchable-select--lg .searchable-select-option {
+  font-size: var(--font-size-base);
+}
+
+/* Disabled state */
+.searchable-select--disabled {
+  pointer-events: none;
+}
+
+/* With label - adjust dropdown position */
+.searchable-select:has(.searchable-select-label) .searchable-select-dropdown {
+  top: calc(100% - var(--spacing-xs));
+}

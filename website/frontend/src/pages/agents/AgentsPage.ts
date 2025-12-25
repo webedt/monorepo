@@ -4,7 +4,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Input, Icon, Spinner, toast } from '../../components';
+import { Button, Input, Icon, Spinner, toast, SearchableSelect } from '../../components';
 import { sessionsApi, githubApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
@@ -20,6 +20,7 @@ export class AgentsPage extends Page<PageOptions> {
   private createSessionBtn: Button | null = null;
   private spinner: Spinner | null = null;
   private emptyIcon: Icon | null = null;
+  private repoSelect: SearchableSelect | null = null;
   private isLoading = true;
 
   // Inline form state
@@ -57,9 +58,7 @@ export class AgentsPage extends Page<PageOptions> {
         <div class="new-session-input-box">
           <textarea class="new-session-textarea" id="request-input" placeholder="Describe what you want the AI to help with..."></textarea>
           <div class="new-session-controls">
-            <select class="inline-form-select" id="repo-select" disabled>
-              <option value="">Loading repos...</option>
-            </select>
+            <div class="repo-select-container"></div>
             <select class="inline-form-select" id="branch-select" disabled>
               <option value="">Select branch...</option>
             </select>
@@ -96,6 +95,30 @@ export class AgentsPage extends Page<PageOptions> {
       this.searchInput.mount(searchContainer);
     }
 
+    // Create repo select (SearchableSelect)
+    const repoSelectContainer = this.$('.repo-select-container') as HTMLElement;
+    if (repoSelectContainer) {
+      this.repoSelect = new SearchableSelect({
+        placeholder: 'Loading repos...',
+        searchPlaceholder: 'Search repositories...',
+        disabled: true,
+        onChange: async (value) => {
+          if (value) {
+            const [owner, name] = value.split('/');
+            this.selectedRepo = this.repos.find(r => r.owner.login === owner && r.name === name) || null;
+            this.selectedBranch = '';
+            await this.loadBranchesForInlineForm();
+          } else {
+            this.selectedRepo = null;
+            this.selectedBranch = '';
+            this.branches = [];
+            this.updateBranchSelect();
+          }
+        },
+      });
+      this.repoSelect.mount(repoSelectContainer);
+    }
+
     // Create session button in inline form
     const createBtnContainer = this.$('.create-session-btn') as HTMLElement;
     if (createBtnContainer) {
@@ -127,26 +150,8 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private setupInlineForm(): void {
-    const repoSelect = this.$('#repo-select') as HTMLSelectElement;
     const branchSelect = this.$('#branch-select') as HTMLSelectElement;
     const requestInput = this.$('#request-input') as HTMLTextAreaElement;
-
-    if (repoSelect) {
-      repoSelect.addEventListener('change', async () => {
-        const value = repoSelect.value;
-        if (value) {
-          const [owner, name] = value.split('/');
-          this.selectedRepo = this.repos.find(r => r.owner.login === owner && r.name === name) || null;
-          this.selectedBranch = '';
-          await this.loadBranchesForInlineForm();
-        } else {
-          this.selectedRepo = null;
-          this.selectedBranch = '';
-          this.branches = [];
-          this.updateBranchSelect();
-        }
-      });
-    }
 
     if (branchSelect) {
       branchSelect.addEventListener('change', () => {
@@ -165,8 +170,7 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private async loadReposForInlineForm(): Promise<void> {
-    const repoSelect = this.$('#repo-select') as HTMLSelectElement;
-    if (!repoSelect) return;
+    if (!this.repoSelect) return;
 
     // Check if we already have prefetched repos
     if (this.prefetchedRepos !== null) {
@@ -206,32 +210,26 @@ export class AgentsPage extends Page<PageOptions> {
       const lastRepo = this.repos.find(r => r.owner.login === owner && r.name === name);
       if (lastRepo) {
         this.selectedRepo = lastRepo;
-        const repoSelect = this.$('#repo-select') as HTMLSelectElement;
-        if (repoSelect) {
-          repoSelect.value = `${owner}/${name}`;
-        }
+        this.repoSelect?.setValue(`${owner}/${name}`);
         await this.loadBranchesForInlineForm();
       }
     }
   }
 
   private updateRepoSelect(): void {
-    const repoSelect = this.$('#repo-select') as HTMLSelectElement;
-    if (!repoSelect) return;
+    if (!this.repoSelect) return;
 
     if (this.repos.length === 0) {
-      repoSelect.innerHTML = '<option value="">No repositories found</option>';
-      repoSelect.disabled = true;
+      this.repoSelect.setPlaceholder('No repositories found');
+      this.repoSelect.setDisabled(true);
     } else {
-      repoSelect.innerHTML = `
-        <option value="">Select repository...</option>
-        ${this.repos.map(repo => `
-          <option value="${repo.owner.login}/${repo.name}">
-            ${repo.owner.login}/${repo.name}
-          </option>
-        `).join('')}
-      `;
-      repoSelect.disabled = false;
+      const options = this.repos.map(repo => ({
+        value: `${repo.owner.login}/${repo.name}`,
+        label: `${repo.owner.login}/${repo.name}`,
+      }));
+      this.repoSelect.setOptions(options);
+      this.repoSelect.setPlaceholder('Select repository...');
+      this.repoSelect.setDisabled(false);
     }
   }
 
@@ -563,6 +561,7 @@ export class AgentsPage extends Page<PageOptions> {
     this.createSessionBtn?.unmount();
     this.spinner?.unmount();
     this.emptyIcon?.unmount();
+    this.repoSelect?.unmount();
 
     // Close session updates subscription
     if (this.sessionUpdatesEventSource) {

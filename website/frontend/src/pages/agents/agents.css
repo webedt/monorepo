@@ -154,6 +154,20 @@
   }
 }
 
+.repo-select-container {
+  max-width: 200px;
+  min-width: 150px;
+}
+
+.repo-select-container .searchable-select {
+  width: 100%;
+}
+
+.repo-select-container .searchable-select-trigger {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-sm);
+}
+
 .create-session-btn {
   flex-shrink: 0;
 }
@@ -164,8 +178,14 @@
     align-items: stretch;
   }
 
+  .repo-select-container {
+    max-width: none;
+    width: 100%;
+  }
+
   .inline-form-select {
     width: 100%;
+    max-width: none;
   }
 
   .create-session-btn {

@@ -57,6 +57,10 @@ export type { EmptyStateOptions, EmptyStateSize } from './empty-state';
 export { StatusBadge } from './status-badge';
 export type { StatusBadgeOptions, StatusType, StatusBadgeSize } from './status-badge';
 
+// SearchableSelect
+export { SearchableSelect } from './searchable-select';
+export type { SearchableSelectOptions, SearchableSelectOption } from './searchable-select';
+
 // ToolDetails
 export { ToolDetails } from './tool-details';
 export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-details';
