@@ -17,7 +17,8 @@ import {
   CLAUDE_SYNC_ENABLED,
   CLAUDE_SYNC_INTERVAL_MS,
   validateEnv,
-  logEnvConfig
+  logEnvConfig,
+  bootstrapServices,
 } from '@webedt/shared';
 
 import { logger } from '@webedt/shared';
@@ -337,7 +338,11 @@ app.use(
 );
 
 // Start server
-app.listen(PORT, () => {
+async function startServer() {
+  // Bootstrap all services (registers singletons with ServiceProvider)
+  await bootstrapServices();
+
+  app.listen(PORT, () => {
   console.log('='.repeat(60));
   console.log('WebEDT Backend Server');
   console.log('='.repeat(60));
@@ -393,6 +398,13 @@ app.listen(PORT, () => {
   } else {
     logger.info('Claude session sync is disabled');
   }
+  });
+}
+
+// Start the server
+startServer().catch((error) => {
+  logger.error('Failed to start server', error);
+  process.exit(1);
 });
 
 // Graceful shutdown

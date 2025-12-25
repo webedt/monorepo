@@ -111,13 +111,13 @@ router.post('/claude-auth/refresh', requireAuth, async (req: Request, res: Respo
     // Update in database
     await db
       .update(users)
-      .set({ claudeAuth: newClaudeAuth })
+      .set({ claudeAuth: newClaudeAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
       .where(eq(users.id, authReq.user!.id));
 
     logger.info('Claude OAuth token refreshed and saved', {
       component: 'UserRoutes',
       userId: authReq.user!.id,
-      newExpiration: new Date(newClaudeAuth.expiresAt).toISOString(),
+      newExpiration: newClaudeAuth.expiresAt ? new Date(newClaudeAuth.expiresAt).toISOString() : 'unknown',
     });
 
     res.json({
@@ -171,7 +171,7 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
         // Update in database
         await db
           .update(users)
-          .set({ claudeAuth })
+          .set({ claudeAuth: claudeAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
           .where(eq(users.id, authReq.user!.id));
 
         logger.info('Token auto-refreshed and saved', { component: 'UserRoutes' });
@@ -187,7 +187,7 @@ router.get('/claude-auth/credentials', requireAuth, async (req: Request, res: Re
         claudeAuth,
         refreshed: wasRefreshed,
         expiresAt: claudeAuth.expiresAt,
-        expiresIn: Math.max(0, claudeAuth.expiresAt - Date.now()),
+        expiresIn: claudeAuth.expiresAt ? Math.max(0, claudeAuth.expiresAt - Date.now()) : 0,
       },
     });
   } catch (error: any) {

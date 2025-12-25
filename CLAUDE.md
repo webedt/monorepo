@@ -140,9 +140,10 @@ The backend is a thin API layer that imports core logic from the shared package.
 Standalone administration CLI for managing the platform without the web server.
 
 - **`commands/`** - CLI command modules
-  - `session.ts` - Session management (list, get, delete, cleanup)
-  - `admin.ts` - User administration (users, create-user, set-admin, delete-user)
-  - `github.ts` - GitHub operations (branches, repos, create-branch, create-pr)
+  - `auth.ts` - Authentication utilities (check, refresh, ensure token validity)
+  - `claude.ts` - Claude Web Sessions (list, execute, resume, archive, test scenarios)
+  - `db.ts` - Database operations (sessions, users CRUD)
+  - `github.ts` - GitHub operations (repos, branches, pull requests)
 
 ---
 
@@ -236,12 +237,174 @@ Exposes ports 3000 (frontend) and 3001 (backend API).
 
 The frontend displays version as `v0.0.{commit_count}` with toggleable details showing `{sha} [{timestamp}]`. Version info is injected at build time via `vite-plugin-version-mark`.
 
+## Coding Style
+
+See [CODING_STYLE.md](CODING_STYLE.md) for detailed conventions. Key points:
+
+### Imports
+
+```typescript
+// Value imports can be grouped
+import { randomUUID } from 'crypto';
+import { AClaudeWebClient } from './AClaudeWebClient.js';
+
+// Type imports: one per line with `import type`
+import type { ClaudeWebClientConfig } from './types.js';
+import type { CreateSessionParams } from './types.js';
+import type { CreateSessionResult } from './types.js';
+```
+
+### Abstract Class Pattern
+
+| File | JSDoc | Purpose |
+|------|-------|---------|
+| `AClassName.ts` | None | Abstract method signatures only, no documentation |
+| `className.doc.ts` | Full | Interface with complete documentation |
+| `className.ts` | None | Implementation, no documentation |
+
+### Method Signatures (Abstract Classes)
+
+```typescript
+abstract methodName(
+  param1: Type1,
+  param2: Type2
+): ReturnType;
+```
+
 ## Git Commit Messages
 
 - Use imperative mood, present tense
 - Start with capital letter and verb
 - No prefixes (`feat:`, `fix:`, etc.) or emojis
 - Good verbs: Add, Update, Remove, Fix, Refactor, Enhance, Rename
+
+## Debugging Strategy
+
+When debugging issues in the website (frontend/backend), use the CLI first to isolate problems:
+
+```
+CLI (direct shared lib) → Backend (shared lib + routes) → Frontend (full stack)
+```
+
+**Why CLI-first debugging:**
+- **Isolated testing** - No browser, no frontend state, no backend routes. Direct calls to the shared library.
+- **Clear output** - See exactly what events come back with `--jsonl` or `--raw` vs formatted default view.
+- **Faster iteration** - Run a command, see the result, tweak, repeat. No UI navigation needed.
+- **Same code path** - CLI and backend both use `ClaudeWebClient` from shared, so CLI success = shared lib works.
+
+**Debugging flow:**
+1. If something fails in the website, try the equivalent CLI command first
+2. If CLI works → problem is in backend routes or frontend
+3. If CLI fails → problem is in the shared library itself
+
+**CLI commands for debugging:**
+```bash
+# Execute and see all events
+npm run dev -- claude web execute <gitUrl> "prompt"
+
+# See raw WebSocket frames (pre-parsing)
+npm run dev -- claude web execute <gitUrl> "prompt" --raw
+
+# See parsed events as JSON Lines
+npm run dev -- claude web execute <gitUrl> "prompt" --jsonl
+
+# Get session details
+npm run dev -- claude web get <sessionId>
+
+# Get session events
+npm run dev -- claude web events <sessionId>
+
+# Resume a session
+npm run dev -- claude web resume <sessionId> "follow-up message"
+```
+
+See [cli/EXAMPLE_RUNS.md](cli/EXAMPLE_RUNS.md) for detailed output examples.
+
+## CLI Command Reference
+
+All commands are run from the monorepo root with `npm run cli -- <command>`.
+
+### Authentication (`auth`)
+
+| Command | Description |
+|---------|-------------|
+| `auth check` | Check Claude authentication status |
+| `auth check --json` | Output auth status as JSON |
+| `auth refresh` | Refresh Claude access token |
+| `auth ensure` | Ensure token is valid (refresh if needed) |
+
+### Claude Web Sessions (`claude web`)
+
+Global options: `--token`, `--environment`, `--org`
+
+| Command | Description |
+|---------|-------------|
+| `claude web list` | List remote sessions |
+| `claude web list --today` | List today's sessions only |
+| `claude web get <sessionId>` | Get session details |
+| `claude web events <sessionId>` | Get session events |
+| `claude web execute <gitUrl> "prompt"` | Execute a task |
+| `claude web execute ... --jsonl` | Stream events as JSON Lines |
+| `claude web execute ... --raw` | Stream raw WebSocket frames |
+| `claude web resume <sessionId> "message"` | Resume with follow-up |
+| `claude web archive <sessionId>` | Archive a session |
+| `claude web archive --today` | Archive all today's sessions |
+| `claude web rename <sessionId> "title"` | Rename a session |
+| `claude web interrupt <sessionId>` | Interrupt running session |
+| `claude web can-resume <sessionId>` | Check if session can be resumed |
+| `claude web send <sessionId> "message"` | Send message (fire-and-forget) |
+| `claude web set-permission <sessionId>` | Set permission mode |
+| `claude web discover-env` | Discover environment ID |
+
+### Claude Test Scenarios (`claude web test`)
+
+| Command | Description |
+|---------|-------------|
+| `claude web test scenario1` | Execute + wait + resume |
+| `claude web test scenario2` | Execute + early terminate + interrupt |
+| `claude web test scenario3` | Execute + terminate + queue resume |
+| `claude web test scenario4` | Execute + terminate + interrupt + resume |
+| `claude web test scenario5` | Double-queue test |
+| `claude web test scenario6` | Execute + rename |
+| `claude web test scenario7` | Execute + complete + archive |
+| `claude web test scenario8` | WebSocket streaming |
+| `claude web test all` | Run all scenarios |
+
+### Database Sessions (`db sessions`)
+
+| Command | Description |
+|---------|-------------|
+| `db sessions list` | List all sessions |
+| `db sessions list -u <userId>` | Filter by user |
+| `db sessions get <sessionId>` | Get session details |
+| `db sessions delete <sessionId> -f` | Delete session |
+| `db sessions cleanup` | Clean orphaned sessions |
+| `db sessions cleanup --dry-run` | Preview cleanup |
+| `db sessions events <sessionId>` | List session events |
+
+### Database Users (`db users`)
+
+| Command | Description |
+|---------|-------------|
+| `db users list` | List all users |
+| `db users get <userId>` | Get user details |
+| `db users create <email> <password>` | Create new user |
+| `db users create ... --admin` | Create admin user |
+| `db users set-admin <userId> true` | Set admin status |
+| `db users delete <userId> -f` | Delete user |
+
+### GitHub (`github`)
+
+Global options: `--token`
+
+| Command | Description |
+|---------|-------------|
+| `github repos list` | List accessible repos |
+| `github branches list <owner> <repo>` | List branches |
+| `github branches create <owner> <repo> <name>` | Create branch |
+| `github branches delete <owner> <repo> <name> -f` | Delete branch |
+| `github pr list <owner> <repo>` | List pull requests |
+| `github pr create <owner> <repo> <head> <base>` | Create PR |
 
 ## Pre-Commit Checklist
 

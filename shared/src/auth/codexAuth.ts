@@ -3,7 +3,7 @@
  * Consolidated from website/apps/server/src/lib/codexAuth.ts
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../utils/logging/logger.js';
 
 // Define CodexAuth type locally (was previously in @webedt/shared)
 export interface CodexAuth {

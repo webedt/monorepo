@@ -224,9 +224,9 @@ router.get('/session', async (req: Request, res: Response) => {
           // Token was refreshed, update database
           await db
             .update(users)
-            .set({ claudeAuth: refreshedClaudeAuth })
+            .set({ claudeAuth: refreshedClaudeAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
             .where(eq(users.id, freshUser.id));
-          claudeAuth = refreshedClaudeAuth;
+          claudeAuth = refreshedClaudeAuth as typeof claudeAuth;
           logger.info('Claude OAuth token refreshed during session check', {
             component: 'AuthRoute',
             userId: freshUser.id

@@ -211,7 +211,7 @@ const executeRemoteHandler = async (req: Request, res: Response) => {
       if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
         // Token was refreshed, save it
         await db.update(users)
-          .set({ claudeAuth: refreshedAuth })
+          .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
           .where(eq(users.id, user.id));
         claudeAuth = refreshedAuth;
       }

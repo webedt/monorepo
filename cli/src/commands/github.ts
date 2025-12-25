@@ -1,14 +1,24 @@
 import { Command } from 'commander';
 import { Octokit } from '@octokit/rest';
+import { getGitHubCredentials } from '@webedt/shared';
 
-// Helper to get GitHub token
+// Helper to get GitHub token using shared credential resolver
 function getToken(options: { token?: string }): string {
-  const token = options.token || process.env.GITHUB_TOKEN;
-  if (!token) {
-    console.error('GitHub token required. Use --token or set GITHUB_TOKEN env.');
+  const credentials = getGitHubCredentials({ token: options.token });
+
+  if (!credentials) {
+    console.error('\nGitHub token not found. Checked:');
+    console.error('  1. --token CLI option');
+    console.error('  2. GITHUB_TOKEN environment variable');
+    console.error('  3. gh CLI (`gh auth token`)');
+    console.error('  4. macOS Keychain (gh:github.com)');
+    console.error('\nTo authenticate, either:');
+    console.error('  - Set GITHUB_TOKEN in your .env file');
+    console.error('  - Run `gh auth login` to authenticate with GitHub CLI');
     process.exit(1);
   }
-  return token;
+
+  return credentials.token;
 }
 
 export const githubCommand = new Command('github')

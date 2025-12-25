@@ -3,7 +3,7 @@
  * Handles token refresh for Gemini CLI OAuth credentials
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../utils/logging/logger.js';
 import type { GeminiAuth } from './lucia.js';
 
 // Google OAuth token endpoint

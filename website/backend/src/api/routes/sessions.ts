@@ -4,51 +4,22 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { Octokit } from '@octokit/rest';
 import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull } from '@webedt/shared';
-import type { ChatSession } from '@webedt/shared';
+import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath, ClaudeRemoteClient, fetchEnvironmentIdFromSessions } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { ensureValidToken, type ClaudeAuth } from '@webedt/shared';
 import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
 
 /**
- * Helper to write SSE data safely.
- * Checks if the stream is still writable before writing.
- * Returns true if write succeeded, false if stream was closed.
+ * Helper to write SSE data safely using the shared SSE helper service.
  */
 function sseWrite(res: Response, data: string): boolean {
-  // Check all conditions that would prevent writing
-  if (res.writableEnded || res.writableFinished) {
-    return false;
-  }
-  if (res.socket && res.socket.destroyed) {
-    return false;
-  }
-  try {
-    // Write the data - res.write returns false if internal buffer is full
-    const writeResult = res.write(data);
-
-    // Try compression middleware flush if available (e.g., from compression middleware)
-    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
-      (res as unknown as { flush: () => void }).flush();
-    }
-
-    // If write returned false, the internal buffer is full
-    // This shouldn't happen often with SSE but log it for debugging
-    if (!writeResult) {
-      console.log('[sseWrite] Internal buffer full, data queued');
-    }
-
-    return true;
-  } catch (err) {
-    console.error('[sseWrite] Error writing:', err);
-    return false;
-  }
+  const sseHelper = ServiceProvider.get(ASseHelper);
+  return sseHelper.write(res, data);
 }
 
 /**
@@ -58,84 +29,34 @@ function sseWriteSync(res: Response, data: string): boolean {
   return sseWrite(res, data);
 }
 
-// Helper function to delete a GitHub branch
+// Helper function to delete a GitHub branch using SessionCleanupService
 async function deleteGitHubBranch(
   githubAccessToken: string,
   owner: string,
   repo: string,
   branch: string
 ): Promise<{ success: boolean; message: string }> {
-  try {
-    const octokit = new Octokit({ auth: githubAccessToken });
-    await octokit.git.deleteRef({
-      owner,
-      repo,
-      ref: `heads/${branch}`,
-    });
-    logger.info(`Deleted GitHub branch ${owner}/${repo}/${branch}`, { component: 'Sessions' });
-    return { success: true, message: 'Branch deleted' };
-  } catch (error: unknown) {
-    const err = error as { status?: number; message?: string };
-    // 422 or 404 means the branch doesn't exist (already deleted or never existed)
-    if (err.status === 422 || err.status === 404) {
-      logger.info(`GitHub branch ${owner}/${repo}/${branch} not found (already deleted)`, { component: 'Sessions' });
-      return { success: true, message: 'Branch already deleted or does not exist' };
-    }
-    logger.error(`Failed to delete GitHub branch ${owner}/${repo}/${branch}`, error as Error, { component: 'Sessions' });
-    return { success: false, message: 'Failed to delete branch' };
-  }
+  const cleanupService = ServiceProvider.get(ASessionCleanupService);
+  return cleanupService.deleteGitHubBranch(githubAccessToken, owner, repo, branch);
 }
 
-// Helper function to archive Claude Remote session
+/**
+ * Get and configure the Claude Web Client with the given credentials.
+ */
+function getClaudeClient(config: ClaudeWebClientConfig): AClaudeWebClient {
+  const client = ServiceProvider.get(AClaudeWebClient);
+  client.configure(config);
+  return client;
+}
+
+// Helper function to archive Claude Remote session using SessionCleanupService
 async function archiveClaudeRemoteSession(
   remoteSessionId: string,
   claudeAuth: ClaudeAuth,
   environmentId?: string
 ): Promise<{ success: boolean; message: string }> {
-  logger.info('archiveClaudeRemoteSession called', {
-    component: 'Sessions',
-    remoteSessionId,
-    hasAccessToken: !!claudeAuth.accessToken,
-    hasRefreshToken: !!claudeAuth.refreshToken,
-    environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
-    baseUrl: CLAUDE_API_BASE_URL,
-  });
-
-  try {
-    // Refresh token if needed
-    logger.info('Refreshing Claude auth token if needed', { component: 'Sessions', remoteSessionId });
-    const refreshedAuth = await ensureValidToken(claudeAuth);
-    logger.info('Token refresh complete', {
-      component: 'Sessions',
-      remoteSessionId,
-      tokenRefreshed: refreshedAuth !== claudeAuth,
-    });
-
-    const client = new ClaudeRemoteClient({
-      accessToken: refreshedAuth.accessToken,
-      environmentId: environmentId || CLAUDE_ENVIRONMENT_ID,
-      baseUrl: CLAUDE_API_BASE_URL,
-    });
-
-    logger.info('Calling ClaudeRemoteClient.archiveSession', { component: 'Sessions', remoteSessionId });
-    await client.archiveSession(remoteSessionId);
-    logger.info(`Successfully archived Claude Remote session ${remoteSessionId}`, { component: 'Sessions' });
-    return { success: true, message: 'Remote session archived' };
-  } catch (error: unknown) {
-    const err = error as { status?: number; message?: string };
-    logger.error('archiveClaudeRemoteSession error', error as Error, {
-      component: 'Sessions',
-      remoteSessionId,
-      errorStatus: err.status,
-      errorMessage: err.message,
-    });
-    // 404 means session doesn't exist (already archived or never existed)
-    if (err.status === 404) {
-      logger.info(`Claude Remote session ${remoteSessionId} not found (already archived)`, { component: 'Sessions' });
-      return { success: true, message: 'Remote session already archived or does not exist' };
-    }
-    return { success: false, message: `Failed to archive remote session: ${err.message || 'Unknown error'}` };
-  }
+  const cleanupService = ServiceProvider.get(ASessionCleanupService);
+  return cleanupService.archiveClaudeRemoteSession(remoteSessionId, claudeAuth, environmentId);
 }
 
 const router = Router();
@@ -221,17 +142,9 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const queryService = ServiceProvider.get(ASessionQueryService);
 
-    const sessions = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.userId, authReq.user!.id),
-          isNull(chatSessions.deletedAt)
-        )
-      )
-      .orderBy(desc(chatSessions.createdAt));
+    const sessions = await queryService.listActive(authReq.user!.id);
 
     res.json({
       success: true,
@@ -343,46 +256,22 @@ router.get('/updates', requireAuth, async (req: Request, res: Response) => {
 router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const queryService = ServiceProvider.get(ASessionQueryService);
 
     // Parse pagination params
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100); // Max 100 per request
     const offset = parseInt(req.query.offset as string) || 0;
 
-    // Get total count
-    const totalResult = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.userId, authReq.user!.id),
-          isNotNull(chatSessions.deletedAt)
-        )
-      );
-
-    const total = totalResult.length;
-
-    // Get paginated sessions
-    const sessions = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.userId, authReq.user!.id),
-          isNotNull(chatSessions.deletedAt)
-        )
-      )
-      .orderBy(desc(chatSessions.deletedAt))
-      .limit(limit)
-      .offset(offset);
+    const result = await queryService.listDeleted(authReq.user!.id, { limit, offset });
 
     res.json({
       success: true,
       data: {
-        sessions,
-        total,
+        sessions: result.items,
+        total: result.total,
         limit,
         offset,
-        hasMore: offset + sessions.length < total,
+        hasMore: result.hasMore,
       },
     });
   } catch (error) {
@@ -402,40 +291,17 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
+    const queryService = ServiceProvider.get(ASessionQueryService);
+    const session = await queryService.getByIdWithPreview(sessionId, authReq.user!.id);
 
     if (!session) {
       res.status(404).json({ success: false, error: 'Session not found' });
       return;
     }
 
-    // Check ownership
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Add preview URL if repository info is available
-    let previewUrl: string | null = null;
-    if (session.repositoryOwner && session.repositoryName && session.branch) {
-      previewUrl = await getPreviewUrl(
-        undefined,
-        session.repositoryOwner,
-        session.repositoryName,
-        session.branch
-      );
-    }
-
     res.json({
       success: true,
-      session: {
-        ...session,
-        previewUrl
-      }
+      session
     });
   } catch (error) {
     logger.error('Get session error', error as Error, { component: 'Sessions' });
@@ -450,30 +316,20 @@ router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
     const sessionId = req.params.id;
     const { eventData } = req.body;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    if (eventData === undefined) {
-      res.status(400).json({ success: false, error: 'eventData is required' });
+    const authService = ServiceProvider.get(ASessionAuthorizationService);
+    const validation = authService.validateRequiredFields({ sessionId, eventData }, ['sessionId', 'eventData']);
+    if (!validation.valid) {
+      res.status(400).json({ success: false, error: validation.error });
       return;
     }
 
     // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
+    const queryService = ServiceProvider.get(ASessionQueryService);
+    const session = await queryService.getById(sessionId);
+    const authResult = authService.verifyOwnership(session, authReq.user!.id);
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
+    if (!authResult.authorized) {
+      res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
 
@@ -1729,7 +1585,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
             environmentId: environmentId.slice(0, 10) + '...',
           });
 
-          const client = new ClaudeRemoteClient({
+          const client = getClaudeClient({
             accessToken: validAuth.accessToken,
             environmentId,
             baseUrl: CLAUDE_API_BASE_URL,
@@ -1985,12 +1841,12 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
     if (refreshedAuth.accessToken !== user.claudeAuth.accessToken) {
       await db
         .update(users)
-        .set({ claudeAuth: refreshedAuth })
+        .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
         .where(eq(users.id, userId));
     }
 
     // Create Claude client
-    const client = new ClaudeRemoteClient({
+    const client = getClaudeClient({
       accessToken: refreshedAuth.accessToken,
       environmentId: CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,
@@ -2276,7 +2132,7 @@ router.post('/:id/sync-events', requireAuth, async (req: Request, res: Response)
     const refreshedAuth = await ensureValidToken(user.claudeAuth);
 
     // Create Claude client
-    const client = new ClaudeRemoteClient({
+    const client = getClaudeClient({
       accessToken: refreshedAuth.accessToken,
       environmentId: CLAUDE_ENVIRONMENT_ID,
       baseUrl: CLAUDE_API_BASE_URL,

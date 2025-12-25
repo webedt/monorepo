@@ -23,7 +23,7 @@ const config = {
   testEnvironment: 'node',
 
   // Root directory for tests
-  roots: ['<rootDir>/src'],
+  roots: ['<rootDir>/tests'],
 
   // Test file patterns - matches existing *.test.ts files
   testMatch: [
@@ -51,7 +51,6 @@ const config = {
   // Coverage configuration
   collectCoverageFrom: [
     'src/**/*.ts',
-    '!src/**/*.test.ts',
     '!src/**/*.d.ts',
     '!src/test-utils/**',
     '!src/types/**',
@@ -98,7 +97,7 @@ const config = {
   // Coverage output directory
   coverageDirectory: '<rootDir>/coverage',
 
-  // Setup files
+  // Setup files (test-utils remains in src as it's shared test infrastructure)
   setupFilesAfterEnv: ['<rootDir>/src/test-utils/jest-setup.ts'],
 
   // Timeout for long-running tests
@@ -120,7 +119,7 @@ const config = {
   forceExit: true,
 
   // Module paths
-  modulePaths: ['<rootDir>/src'],
+  modulePaths: ['<rootDir>/tests', '<rootDir>/src'],
 
   // Files to ignore
   testPathIgnorePatterns: [
