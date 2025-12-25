@@ -70,6 +70,15 @@ export {
   type SessionUpdateType,
   type SessionListEvent,
 } from '../../sessions/ASessionListBroadcaster.js';
+export {
+  ASessionCleanupService,
+  type CleanupResult,
+} from '../../sessions/ASessionCleanupService.js';
+export {
+  AEventStorageService,
+  type StoredEvent,
+  type StoreEventResult,
+} from '../../sessions/AEventStorageService.js';
 
 // Claude Web Client (from claudeWeb/)
 export { AClaudeWebClient } from '../../claudeWeb/AClaudeWebClient.js';
@@ -86,3 +95,12 @@ export {
 // LLM services (from llm/)
 export { ALlm } from '../../llm/ALlm.js';
 export type { LlmExecuteParams, LlmExecuteResult, LlmProvider } from '../../llm/types.js';
+
+// Auth services (from auth/)
+export { ATokenRefreshService } from '../../auth/ATokenRefreshService.js';
+
+// Formatter services (from utils/formatters/)
+export { AEventFormatter, type FormattedEvent } from '../../utils/formatters/AEventFormatter.js';
+
+// HTTP services (from utils/http/)
+export { ASseHelper, type SseWritable } from '../../utils/http/ASseHelper.js';

@@ -29,9 +29,14 @@ import {
   ASession,
   ASessionEventBroadcaster,
   ASessionListBroadcaster,
+  ASessionCleanupService,
+  AEventStorageService,
   AClaudeWebClient,
   AGitHubClient,
   ALlm,
+  ATokenRefreshService,
+  AEventFormatter,
+  ASseHelper,
 } from './abstracts/index.js';
 
 // Import concrete implementations
@@ -43,9 +48,14 @@ import { circuitBreakerRegistry } from '../utils/resilience/circuitBreaker.js';
 import { SessionService } from '../sessions/SessionService.js';
 import { sessionEventBroadcaster } from '../sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../sessions/sessionListBroadcaster.js';
+import { SessionCleanupService } from '../sessions/SessionCleanupService.js';
+import { EventStorageService } from '../sessions/EventStorageService.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { GitHubClient } from '../github/githubClient.js';
 import { Llm } from '../llm/Llm.js';
+import { TokenRefreshService } from '../auth/TokenRefreshService.js';
+import { EventFormatter } from '../utils/formatters/EventFormatter.js';
+import { SseHelper } from '../utils/http/SseHelper.js';
 import type { ClaudeRemoteClientConfig } from '../claudeWeb/types.js';
 
 /**
@@ -85,6 +95,8 @@ export async function bootstrapServices(): Promise<void> {
   ServiceProvider.register(ASession, wrapService(new SessionService(), 10));
   ServiceProvider.register(ASessionEventBroadcaster, wrapService(sessionEventBroadcaster, 0));
   ServiceProvider.register(ASessionListBroadcaster, wrapService(sessionListBroadcaster, 0));
+  ServiceProvider.register(ASessionCleanupService, wrapService(new SessionCleanupService(), 10));
+  ServiceProvider.register(AEventStorageService, wrapService(new EventStorageService(), 0));
   ServiceProvider.register(AGitHubClient, wrapService(new GitHubClient(), 0));
 
   // ClaudeWebClient - needs special handling for initialization
@@ -93,6 +105,15 @@ export async function bootstrapServices(): Promise<void> {
 
   // LLM - one-off requests
   ServiceProvider.register(ALlm, wrapService(new Llm(), 0));
+
+  // Auth services
+  ServiceProvider.register(ATokenRefreshService, wrapService(new TokenRefreshService(), -30));
+
+  // Formatter services
+  ServiceProvider.register(AEventFormatter, wrapService(new EventFormatter(), 0));
+
+  // HTTP services
+  ServiceProvider.register(ASseHelper, wrapService(new SseHelper(), 0));
 
   // Initialize all services in order (sorted by service.order)
   await ServiceProvider.initialize();
