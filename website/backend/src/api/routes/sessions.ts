@@ -1994,7 +1994,7 @@ router.post('/sync', requireAuth, async (req: Request, res: Response) => {
     if (refreshedAuth.accessToken !== user.claudeAuth.accessToken) {
       await db
         .update(users)
-        .set({ claudeAuth: refreshedAuth })
+        .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
         .where(eq(users.id, userId));
     }
 

@@ -75,7 +75,7 @@ async function getClaudeAuth(userId: string): Promise<ClaudeAuth | null> {
     if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
       // Token was refreshed, save it
       await db.update(users)
-        .set({ claudeAuth: refreshedAuth })
+        .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
         .where(eq(users.id, userId));
       claudeAuth = refreshedAuth;
     }
