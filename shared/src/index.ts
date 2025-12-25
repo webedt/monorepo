@@ -65,6 +65,9 @@ export type {
 // Note: Exports BroadcastEvent (renamed from SessionEvent) to avoid conflict with ClaudeSessionEvent
 export * from './sessions/index.js';
 
+// LLM - One-off LLM requests
+export * from './llm/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================

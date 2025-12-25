@@ -30,6 +30,7 @@ import {
   ASessionListBroadcaster,
   AClaudeWebClient,
   AGitHubClient,
+  ALlm,
 } from './abstracts/index.js';
 
 // Import concrete implementations
@@ -42,6 +43,7 @@ import { sessionEventBroadcaster } from '../sessions/sessionEventBroadcaster.js'
 import { sessionListBroadcaster } from '../sessions/sessionListBroadcaster.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { GitHubClient } from '../github/githubClient.js';
+import { Llm } from '../llm/Llm.js';
 import type { ClaudeRemoteClientConfig } from '../claudeWeb/types.js';
 
 /**
@@ -85,6 +87,9 @@ export async function bootstrapServices(): Promise<void> {
   // ClaudeWebClient - needs special handling for initialization
   const claudeClient = new ClaudeWebClient({} as ClaudeRemoteClientConfig);
   ServiceProvider.register(AClaudeWebClient, wrapService(claudeClient, 50));
+
+  // LLM - one-off requests
+  ServiceProvider.register(ALlm, wrapService(new Llm(), 0));
 
   // Initialize all services in order (sorted by service.order)
   await ServiceProvider.initialize();

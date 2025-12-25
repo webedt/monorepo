@@ -73,3 +73,7 @@ export {
   type GitHubPullOptions,
   type GitHubPullResult,
 } from '../../github/AGitHubClient.js';
+
+// LLM services (from llm/)
+export { ALlm } from '../../llm/ALlm.js';
+export type { LlmExecuteParams, LlmExecuteResult, LlmProvider } from '../../llm/types.js';
