@@ -170,6 +170,23 @@
   font-size: var(--font-size-sm);
 }
 
+/* Group label for recent items */
+.searchable-select-group-label {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Separator between groups */
+.searchable-select-separator {
+  height: 1px;
+  margin: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-border);
+}
+
 /* Size variants */
 .searchable-select--sm .searchable-select-trigger {
   padding: 2px var(--spacing-xs);

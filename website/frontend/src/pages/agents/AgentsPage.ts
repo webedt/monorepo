@@ -101,6 +101,7 @@ export class AgentsPage extends Page<PageOptions> {
         placeholder: 'Loading repos...',
         searchPlaceholder: 'Search repositories...',
         disabled: true,
+        recentKey: 'webedt_recent_repos',
         onChange: async (value) => {
           if (value) {
             const [owner, name] = value.split('/');

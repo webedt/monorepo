@@ -21,6 +21,10 @@ export interface SearchableSelectOptions extends ComponentOptions {
   options?: SearchableSelectOption[];
   onChange?: (value: string, option: SearchableSelectOption | null) => void;
   onSearch?: (query: string) => void;
+  /** localStorage key to remember recent selections (up to 3) */
+  recentKey?: string;
+  /** Max number of recent items to show (default: 3) */
+  maxRecent?: number;
 }
 
 export class SearchableSelect extends Component<HTMLDivElement> {
@@ -38,6 +42,7 @@ export class SearchableSelect extends Component<HTMLDivElement> {
   private selectedOption: SearchableSelectOption | null = null;
   private isOpen = false;
   private focusedIndex = -1;
+  private recentValues: string[] = [];
 
   constructor(options: SearchableSelectOptions = {}) {
     super('div', {
@@ -49,11 +54,17 @@ export class SearchableSelect extends Component<HTMLDivElement> {
       size: 'md',
       placeholder: 'Select...',
       searchPlaceholder: 'Search...',
+      maxRecent: 3,
       ...options,
     };
 
     this.selectOptions = options.options ?? [];
     this.filteredOptions = [...this.selectOptions];
+
+    // Load recent values from localStorage
+    if (this.options.recentKey) {
+      this.recentValues = this.loadRecentValues();
+    }
 
     // Find initially selected option
     if (options.value) {
@@ -91,6 +102,41 @@ export class SearchableSelect extends Component<HTMLDivElement> {
       if (instance !== except && instance.isOpen) {
         instance.close();
       }
+    }
+  }
+
+  // Load recent values from localStorage
+  private loadRecentValues(): string[] {
+    if (!this.options.recentKey) return [];
+    try {
+      const stored = localStorage.getItem(this.options.recentKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          return parsed.slice(0, this.options.maxRecent);
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    return [];
+  }
+
+  // Save a value to recent values
+  private saveRecentValue(value: string): void {
+    if (!this.options.recentKey) return;
+
+    // Remove if already exists, then add to front
+    this.recentValues = this.recentValues.filter(v => v !== value);
+    this.recentValues.unshift(value);
+
+    // Keep only maxRecent items
+    this.recentValues = this.recentValues.slice(0, this.options.maxRecent);
+
+    try {
+      localStorage.setItem(this.options.recentKey, JSON.stringify(this.recentValues));
+    } catch {
+      // Ignore storage errors
     }
   }
 
@@ -222,36 +268,82 @@ export class SearchableSelect extends Component<HTMLDivElement> {
       return;
     }
 
-    this.filteredOptions.forEach((opt, index) => {
-      const optionEl = document.createElement('button');
-      optionEl.type = 'button';
-      optionEl.className = 'searchable-select-option';
-      optionEl.dataset.value = opt.value;
-      optionEl.textContent = opt.label;
+    // Check if we should show recent items (only when not filtering)
+    const isFiltering = this.searchInput.value.trim().length > 0;
+    const hasRecents = this.options.recentKey && this.recentValues.length > 0 && !isFiltering;
 
-      if (opt.disabled) {
-        optionEl.classList.add('searchable-select-option--disabled');
-        optionEl.disabled = true;
+    // Get recent options that exist in the current options
+    let recentOptions: SearchableSelectOption[] = [];
+    let remainingOptions = [...this.filteredOptions];
+
+    if (hasRecents) {
+      recentOptions = this.recentValues
+        .map(value => this.selectOptions.find(o => o.value === value))
+        .filter((o): o is SearchableSelectOption => o !== undefined);
+
+      // Remove recent options from remaining to avoid duplicates
+      const recentValues = new Set(recentOptions.map(o => o.value));
+      remainingOptions = this.filteredOptions.filter(o => !recentValues.has(o.value));
+    }
+
+    let globalIndex = 0;
+
+    // Render recent options
+    if (recentOptions.length > 0) {
+      const recentLabel = document.createElement('div');
+      recentLabel.className = 'searchable-select-group-label';
+      recentLabel.textContent = 'Recent';
+      this.optionsContainer.appendChild(recentLabel);
+
+      for (const opt of recentOptions) {
+        this.renderOptionElement(opt, globalIndex);
+        globalIndex++;
       }
 
-      if (this.selectedOption?.value === opt.value) {
-        optionEl.classList.add('searchable-select-option--selected');
+      // Add separator if there are remaining options
+      if (remainingOptions.length > 0) {
+        const separator = document.createElement('div');
+        separator.className = 'searchable-select-separator';
+        this.optionsContainer.appendChild(separator);
       }
+    }
 
-      if (index === this.focusedIndex) {
-        optionEl.classList.add('searchable-select-option--focused');
+    // Render remaining options
+    for (const opt of remainingOptions) {
+      this.renderOptionElement(opt, globalIndex);
+      globalIndex++;
+    }
+  }
+
+  private renderOptionElement(opt: SearchableSelectOption, index: number): void {
+    const optionEl = document.createElement('button');
+    optionEl.type = 'button';
+    optionEl.className = 'searchable-select-option';
+    optionEl.dataset.value = opt.value;
+    optionEl.textContent = opt.label;
+
+    if (opt.disabled) {
+      optionEl.classList.add('searchable-select-option--disabled');
+      optionEl.disabled = true;
+    }
+
+    if (this.selectedOption?.value === opt.value) {
+      optionEl.classList.add('searchable-select-option--selected');
+    }
+
+    if (index === this.focusedIndex) {
+      optionEl.classList.add('searchable-select-option--focused');
+    }
+
+    optionEl.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!opt.disabled) {
+        this.selectOption(opt);
       }
-
-      optionEl.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!opt.disabled) {
-          this.selectOption(opt);
-        }
-      });
-
-      this.optionsContainer.appendChild(optionEl);
     });
+
+    this.optionsContainer.appendChild(optionEl);
   }
 
   private selectOption(option: SearchableSelectOption): void {
@@ -259,6 +351,10 @@ export class SearchableSelect extends Component<HTMLDivElement> {
     this.updateTriggerText();
     this.close();
     this.triggerElement.focus();
+
+    // Save to recent values
+    this.saveRecentValue(option.value);
+
     this.options.onChange?.(option.value, option);
   }
 
