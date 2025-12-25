@@ -31,6 +31,8 @@ import {
   ASessionListBroadcaster,
   ASessionCleanupService,
   AEventStorageService,
+  ASessionQueryService,
+  ASessionAuthorizationService,
   AClaudeWebClient,
   AGitHubClient,
   ALlm,
@@ -50,6 +52,8 @@ import { sessionEventBroadcaster } from '../sessions/sessionEventBroadcaster.js'
 import { sessionListBroadcaster } from '../sessions/sessionListBroadcaster.js';
 import { SessionCleanupService } from '../sessions/SessionCleanupService.js';
 import { EventStorageService } from '../sessions/EventStorageService.js';
+import { SessionQueryService } from '../sessions/SessionQueryService.js';
+import { SessionAuthorizationService } from '../sessions/SessionAuthorizationService.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { GitHubClient } from '../github/githubClient.js';
 import { Llm } from '../llm/Llm.js';
@@ -97,6 +101,8 @@ export async function bootstrapServices(): Promise<void> {
   ServiceProvider.register(ASessionListBroadcaster, wrapService(sessionListBroadcaster, 0));
   ServiceProvider.register(ASessionCleanupService, wrapService(new SessionCleanupService(), 10));
   ServiceProvider.register(AEventStorageService, wrapService(new EventStorageService(), 0));
+  ServiceProvider.register(ASessionQueryService, wrapService(new SessionQueryService(), 0));
+  ServiceProvider.register(ASessionAuthorizationService, wrapService(new SessionAuthorizationService(), 0));
   ServiceProvider.register(AGitHubClient, wrapService(new GitHubClient(), 0));
 
   // ClaudeWebClient - needs special handling for initialization

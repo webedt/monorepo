@@ -26,6 +26,24 @@ export { SessionCleanupService, sessionCleanupService } from './SessionCleanupSe
 export { AEventStorageService, type StoredEvent, type StoreEventResult } from './AEventStorageService.js';
 export { EventStorageService, eventStorageService } from './EventStorageService.js';
 
+// Query service
+export {
+  ASessionQueryService,
+  type SessionQueryOptions,
+  type PaginatedResult,
+  type SessionWithPreview,
+} from './ASessionQueryService.js';
+export { SessionQueryService, sessionQueryService } from './SessionQueryService.js';
+
+// Authorization service
+export {
+  ASessionAuthorizationService,
+  type AuthorizationResult,
+  type ValidationResult,
+  type CleanupConditions,
+} from './ASessionAuthorizationService.js';
+export { SessionAuthorizationService, sessionAuthorizationService } from './SessionAuthorizationService.js';
+
 // Implementations
 export * from './claudeSessionSync.js';
 export * from './sessionEventBroadcaster.js';

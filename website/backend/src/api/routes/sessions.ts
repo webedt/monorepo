@@ -8,7 +8,7 @@ import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc,
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getPreviewUrl, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
+import { getPreviewUrl, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
 import { sessionEventBroadcaster } from '@webedt/shared';
 import { sessionListBroadcaster } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -142,17 +142,9 @@ router.post('/create-code-session', requireAuth, async (req: Request, res: Respo
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const queryService = ServiceProvider.get(ASessionQueryService);
 
-    const sessions = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.userId, authReq.user!.id),
-          isNull(chatSessions.deletedAt)
-        )
-      )
-      .orderBy(desc(chatSessions.createdAt));
+    const sessions = await queryService.listActive(authReq.user!.id);
 
     res.json({
       success: true,
@@ -264,46 +256,22 @@ router.get('/updates', requireAuth, async (req: Request, res: Response) => {
 router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
+    const queryService = ServiceProvider.get(ASessionQueryService);
 
     // Parse pagination params
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100); // Max 100 per request
     const offset = parseInt(req.query.offset as string) || 0;
 
-    // Get total count
-    const totalResult = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.userId, authReq.user!.id),
-          isNotNull(chatSessions.deletedAt)
-        )
-      );
-
-    const total = totalResult.length;
-
-    // Get paginated sessions
-    const sessions = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.userId, authReq.user!.id),
-          isNotNull(chatSessions.deletedAt)
-        )
-      )
-      .orderBy(desc(chatSessions.deletedAt))
-      .limit(limit)
-      .offset(offset);
+    const result = await queryService.listDeleted(authReq.user!.id, { limit, offset });
 
     res.json({
       success: true,
       data: {
-        sessions,
-        total,
+        sessions: result.items,
+        total: result.total,
         limit,
         offset,
-        hasMore: offset + sessions.length < total,
+        hasMore: result.hasMore,
       },
     });
   } catch (error) {
@@ -323,40 +291,17 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
+    const queryService = ServiceProvider.get(ASessionQueryService);
+    const session = await queryService.getByIdWithPreview(sessionId, authReq.user!.id);
 
     if (!session) {
       res.status(404).json({ success: false, error: 'Session not found' });
       return;
     }
 
-    // Check ownership
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Add preview URL if repository info is available
-    let previewUrl: string | null = null;
-    if (session.repositoryOwner && session.repositoryName && session.branch) {
-      previewUrl = await getPreviewUrl(
-        undefined,
-        session.repositoryOwner,
-        session.repositoryName,
-        session.branch
-      );
-    }
-
     res.json({
       success: true,
-      session: {
-        ...session,
-        previewUrl
-      }
+      session
     });
   } catch (error) {
     logger.error('Get session error', error as Error, { component: 'Sessions' });
@@ -371,30 +316,20 @@ router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
     const sessionId = req.params.id;
     const { eventData } = req.body;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    if (eventData === undefined) {
-      res.status(400).json({ success: false, error: 'eventData is required' });
+    const authService = ServiceProvider.get(ASessionAuthorizationService);
+    const validation = authService.validateRequiredFields({ sessionId, eventData }, ['sessionId', 'eventData']);
+    if (!validation.valid) {
+      res.status(400).json({ success: false, error: validation.error });
       return;
     }
 
     // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
+    const queryService = ServiceProvider.get(ASessionQueryService);
+    const session = await queryService.getById(sessionId);
+    const authResult = authService.verifyOwnership(session, authReq.user!.id);
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
+    if (!authResult.authorized) {
+      res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
       return;
     }
 

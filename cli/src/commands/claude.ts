@@ -1,5 +1,7 @@
 import { Command } from 'commander';
 import { ClaudeRemoteError, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, AEventFormatter, getClaudeCredentials } from '@webedt/shared';
+import { handleCommandError } from '../utils/errorHandler.js';
+
 import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
 
 /**
@@ -170,12 +172,7 @@ webCommand
       console.log('-'.repeat(120));
       console.log(`Total: ${sessions.length} session(s)${response.has_more && !options.today ? ' (more available)' : ''}`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error listing sessions:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'listing sessions', { json: options.json });
     }
   });
 
@@ -200,12 +197,7 @@ webCommand
       console.log(`Web URL:      https://claude.ai/code/${session.id}`);
       console.log('-'.repeat(60));
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error getting session:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'getting session');
     }
   });
 
@@ -242,12 +234,7 @@ webCommand
       console.log('-'.repeat(100));
       console.log(`Total: ${events.length} event(s)`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error getting events:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'getting events', { json: options.json });
     }
   });
 
@@ -323,12 +310,7 @@ webCommand
       console.log(`  Duration:   ${result.durationMs ? Math.round(result.durationMs / 1000) + 's' : 'N/A'}`);
       console.log(`  Web URL:    https://claude.ai/code/${result.sessionId}`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error executing session:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'executing session', { json: options.json });
     }
   });
 
@@ -363,12 +345,7 @@ webCommand
       console.log(`  Cost:       $${result.totalCost?.toFixed(4) || 'N/A'}`);
       console.log(`  Duration:   ${result.durationMs ? Math.round(result.durationMs / 1000) + 's' : 'N/A'}`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error resuming session:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'resuming session');
     }
   });
 
@@ -430,12 +407,7 @@ webCommand
 
       console.log(`\nDone. Archived: ${archived}, Failed: ${failed}`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error archiving sessions:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'archiving sessions');
     }
   });
 
@@ -450,12 +422,7 @@ webCommand
       await client.renameSession(sessionId, newTitle);
       console.log(`Session ${sessionId} renamed to "${newTitle}".`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error renaming session:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'renaming session');
     }
   });
 
@@ -470,12 +437,7 @@ webCommand
       await client.interruptSession(sessionId);
       console.log(`Interrupt signal sent to session ${sessionId}.`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error interrupting session:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'interrupting session');
     }
   });
 
@@ -506,12 +468,7 @@ webCommand
         console.log(`  Completed:  ${result.hasCompletedEvent ? 'Yes' : 'No'}`);
       }
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error checking session:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'checking session', { json: options.json });
     }
   });
 
@@ -526,12 +483,7 @@ webCommand
       await client.sendMessage(sessionId, message);
       console.log(`Message sent to session ${sessionId}.`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error sending message:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'sending message');
     }
   });
 
@@ -553,12 +505,7 @@ webCommand
       await client.setPermissionMode(sessionId, mode);
       console.log(`Permission mode set to '${mode}' for session ${sessionId}.`);
     } catch (error) {
-      if (error instanceof ClaudeRemoteError) {
-        console.error(`API Error: ${error.message}`);
-      } else {
-        console.error('Error setting permission mode:', error);
-      }
-      process.exit(1);
+      handleCommandError(error, 'setting permission mode');
     }
   });
 

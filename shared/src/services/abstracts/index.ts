@@ -79,6 +79,18 @@ export {
   type StoredEvent,
   type StoreEventResult,
 } from '../../sessions/AEventStorageService.js';
+export {
+  ASessionQueryService,
+  type SessionQueryOptions,
+  type PaginatedResult,
+  type SessionWithPreview,
+} from '../../sessions/ASessionQueryService.js';
+export {
+  ASessionAuthorizationService,
+  type AuthorizationResult,
+  type ValidationResult,
+  type CleanupConditions,
+} from '../../sessions/ASessionAuthorizationService.js';
 
 // Claude Web Client (from claudeWeb/)
 export { AClaudeWebClient } from '../../claudeWeb/AClaudeWebClient.js';

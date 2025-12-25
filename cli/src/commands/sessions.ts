@@ -150,6 +150,88 @@ sessionsCommand
   });
 
 sessionsCommand
+  .command('delete-bulk')
+  .description('Delete multiple sessions at once')
+  .option('--today', 'Delete all sessions created today')
+  .option('--date <date>', 'Delete all sessions created on a specific date (YYYY-MM-DD)')
+  .option('-f, --force', 'Skip confirmation')
+  .option('--dry-run', 'Show what would be deleted without making changes')
+  .action(async (options) => {
+    try {
+      let targetDate: string;
+
+      if (options.today) {
+        targetDate = new Date().toISOString().slice(0, 10);
+      } else if (options.date) {
+        targetDate = options.date;
+      } else {
+        console.error('Must specify --today or --date <YYYY-MM-DD>');
+        process.exit(1);
+      }
+
+      // Find sessions created on target date
+      const startOfDay = new Date(`${targetDate}T00:00:00.000Z`);
+      const endOfDay = new Date(`${targetDate}T23:59:59.999Z`);
+
+      const sessionsToDelete = await db
+        .select({
+          id: chatSessions.id,
+          userRequest: chatSessions.userRequest,
+          status: chatSessions.status,
+          createdAt: chatSessions.createdAt,
+        })
+        .from(chatSessions)
+        .where(
+          and(
+            sql`${chatSessions.createdAt} >= ${startOfDay}`,
+            sql`${chatSessions.createdAt} <= ${endOfDay}`
+          )
+        );
+
+      if (sessionsToDelete.length === 0) {
+        console.log(`No sessions found for ${targetDate}.`);
+        return;
+      }
+
+      console.log(`\nFound ${sessionsToDelete.length} session(s) for ${targetDate}:`);
+      console.log('-'.repeat(100));
+
+      for (const session of sessionsToDelete) {
+        const created = session.createdAt ? new Date(session.createdAt).toISOString().slice(11, 19) : 'N/A';
+        console.log(`  ${session.id} - ${(session.userRequest || '').slice(0, 40)}... (${session.status}, ${created})`);
+      }
+
+      if (options.dryRun) {
+        console.log('\nDry run - no changes made.');
+        return;
+      }
+
+      if (!options.force) {
+        console.log('\nUse --force to confirm deletion.');
+        return;
+      }
+
+      console.log('\nDeleting...');
+      let deleted = 0;
+
+      for (const session of sessionsToDelete) {
+        // Delete events first
+        await db.delete(events).where(eq(events.chatSessionId, session.id));
+        // Delete messages
+        await db.delete(messages).where(eq(messages.chatSessionId, session.id));
+        // Delete session
+        await db.delete(chatSessions).where(eq(chatSessions.id, session.id));
+        deleted++;
+      }
+
+      console.log(`\nDeleted ${deleted} session(s).`);
+    } catch (error) {
+      console.error('Error deleting sessions:', error);
+      process.exit(1);
+    }
+  });
+
+sessionsCommand
   .command('cleanup')
   .description('Clean up orphaned sessions stuck in running/pending status')
   .option('-t, --timeout <minutes>', 'Timeout threshold in minutes', '30')
