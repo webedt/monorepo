@@ -283,6 +283,8 @@ export class Input extends Component<HTMLDivElement> {
 export interface TextAreaOptions extends Omit<InputOptions, 'type'> {
   rows?: number;
   resize?: 'none' | 'vertical' | 'horizontal' | 'both';
+  /** Submit callback when Enter is pressed at the end of text (Shift+Enter for newlines) */
+  onSubmit?: (value: string) => void;
 }
 
 export class TextArea extends Component<HTMLDivElement> {
@@ -380,7 +382,7 @@ export class TextArea extends Component<HTMLDivElement> {
   }
 
   private setupEventListeners(): void {
-    const { onChange, onInput, onBlur, onFocus, onKeyDown } = this.options;
+    const { onChange, onInput, onBlur, onFocus, onKeyDown, onSubmit } = this.options;
 
     if (onChange) {
       this.on(this.textareaElement, 'change', (e) => {
@@ -404,6 +406,19 @@ export class TextArea extends Component<HTMLDivElement> {
 
     if (onKeyDown) {
       this.on(this.textareaElement, 'keydown', (e) => onKeyDown(e as KeyboardEvent));
+    }
+
+    if (onSubmit) {
+      this.on(this.textareaElement, 'keydown', (e) => {
+        const keyEvent = e as KeyboardEvent;
+        if (keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
+          const isAtEnd = this.textareaElement.selectionStart === this.textareaElement.value.length;
+          if (isAtEnd) {
+            keyEvent.preventDefault();
+            onSubmit(this.textareaElement.value);
+          }
+        }
+      });
     }
   }
 

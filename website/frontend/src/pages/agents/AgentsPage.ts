@@ -4,7 +4,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Input, Icon, Spinner, toast, SearchableSelect } from '../../components';
+import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect } from '../../components';
 import { sessionsApi, githubApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
@@ -22,6 +22,7 @@ export class AgentsPage extends Page<PageOptions> {
   private emptyIcon: Icon | null = null;
   private repoSelect: SearchableSelect | null = null;
   private branchSelect: SearchableSelect | null = null;
+  private requestTextArea: TextArea | null = null;
   private isLoading = true;
 
   // Inline form state
@@ -57,7 +58,7 @@ export class AgentsPage extends Page<PageOptions> {
         </header>
 
         <div class="new-session-input-box">
-          <textarea class="new-session-textarea" id="request-input" placeholder="Describe what you want the AI to help with..."></textarea>
+          <div class="request-textarea-container"></div>
           <div class="new-session-controls">
             <div class="repo-select-container"></div>
             <div class="branch-select-container"></div>
@@ -82,6 +83,18 @@ export class AgentsPage extends Page<PageOptions> {
 
   protected onMount(): void {
     super.onMount();
+
+    // Create request textarea
+    const textareaContainer = this.$('.request-textarea-container') as HTMLElement;
+    if (textareaContainer) {
+      this.requestTextArea = new TextArea({
+        placeholder: 'Describe what you want the AI to help with...',
+        rows: 3,
+        resize: 'vertical',
+        onSubmit: () => this.handleCreateSession(),
+      });
+      this.requestTextArea.mount(textareaContainer);
+    }
 
     // Create search input
     const searchContainer = this.$('.search-container') as HTMLElement;
@@ -143,9 +156,6 @@ export class AgentsPage extends Page<PageOptions> {
       this.createSessionBtn.mount(createBtnContainer);
     }
 
-    // Set up inline form event listeners
-    this.setupInlineForm();
-
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
     if (spinnerContainer) {
@@ -161,19 +171,6 @@ export class AgentsPage extends Page<PageOptions> {
 
     // Load GitHub repos for inline form
     this.loadReposForInlineForm();
-  }
-
-  private setupInlineForm(): void {
-    const requestInput = this.$('#request-input') as HTMLTextAreaElement;
-
-    if (requestInput) {
-      requestInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          this.handleCreateSession();
-        }
-      });
-    }
   }
 
   private async loadReposForInlineForm(): Promise<void> {
@@ -310,8 +307,7 @@ export class AgentsPage extends Page<PageOptions> {
       return;
     }
 
-    const requestInput = this.$('#request-input') as HTMLTextAreaElement;
-    const initialRequest = requestInput?.value?.trim() || '';
+    const initialRequest = this.requestTextArea?.getValue()?.trim() || '';
 
     this.createSessionBtn?.setDisabled(true);
     this.createSessionBtn?.setLoading(true);
@@ -329,9 +325,7 @@ export class AgentsPage extends Page<PageOptions> {
       localStorage.setItem('webedt_last_repo', `${this.selectedRepo.owner.login}/${this.selectedRepo.name}`);
 
       // Clear the input
-      if (requestInput) {
-        requestInput.value = '';
-      }
+      this.requestTextArea?.clear();
 
       toast.success('Session created!');
       this.navigate(`/session/${response.session.id}/chat`);
@@ -561,6 +555,7 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   protected onUnmount(): void {
+    this.requestTextArea?.unmount();
     this.searchInput?.unmount();
     this.createSessionBtn?.unmount();
     this.spinner?.unmount();
