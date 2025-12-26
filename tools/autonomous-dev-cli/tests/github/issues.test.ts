@@ -8,6 +8,7 @@ import assert from 'node:assert';
 import {
   createIssueManager,
   type Issue,
+  type IssueComment,
   type IssueManager,
   type CreateIssueOptions,
   type DegradedResult,
@@ -24,7 +25,11 @@ function createMockOctokit() {
       update: mock.fn(),
       addLabels: mock.fn(),
       removeLabel: mock.fn(),
+      listComments: mock.fn(),
+      getComment: mock.fn(),
       createComment: mock.fn(),
+      updateComment: mock.fn(),
+      deleteComment: mock.fn(),
     },
   };
 }
@@ -76,6 +81,19 @@ function createMockApiIssue(overrides: Record<string, any> = {}) {
     created_at: new Date().toISOString(),
     assignee: null,
     pull_request: undefined,
+    ...overrides,
+  };
+}
+
+// Helper to create mock API comment response
+function createMockApiComment(overrides: Record<string, any> = {}) {
+  return {
+    id: 1,
+    body: 'Test comment',
+    html_url: 'https://github.com/owner/repo/issues/1#issuecomment-1',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    user: { login: 'test-user' },
     ...overrides,
   };
 }
@@ -435,16 +453,109 @@ describe('IssueManager', () => {
     });
   });
 
-  describe('addComment', () => {
-    it('should add comment to issue', async () => {
-      mockOctokit.issues.createComment.mock.mockImplementation(async () => ({}));
+  describe('listComments', () => {
+    it('should return list of comments for an issue', async () => {
+      const mockComments = [
+        createMockApiComment({ id: 1, body: 'First comment' }),
+        createMockApiComment({ id: 2, body: 'Second comment' }),
+      ];
 
-      await issueManager.addComment(1, 'This is a comment');
+      mockOctokit.issues.listComments.mock.mockImplementation(async () => ({
+        data: mockComments,
+      }));
+
+      const comments = await issueManager.listComments(1);
+
+      assert.strictEqual(comments.length, 2);
+      assert.strictEqual(comments[0].id, 1);
+      assert.strictEqual(comments[0].body, 'First comment');
+      assert.strictEqual(comments[1].id, 2);
+    });
+
+    it('should return empty array when no comments', async () => {
+      mockOctokit.issues.listComments.mock.mockImplementation(async () => ({
+        data: [],
+      }));
+
+      const comments = await issueManager.listComments(1);
+
+      assert.strictEqual(comments.length, 0);
+    });
+
+    it('should map user correctly', async () => {
+      mockOctokit.issues.listComments.mock.mockImplementation(async () => ({
+        data: [createMockApiComment({ user: { login: 'john-doe' } })],
+      }));
+
+      const comments = await issueManager.listComments(1);
+
+      assert.strictEqual(comments[0].user, 'john-doe');
+    });
+
+    it('should handle null user', async () => {
+      mockOctokit.issues.listComments.mock.mockImplementation(async () => ({
+        data: [createMockApiComment({ user: null })],
+      }));
+
+      const comments = await issueManager.listComments(1);
+
+      assert.strictEqual(comments[0].user, null);
+    });
+  });
+
+  describe('getComment', () => {
+    it('should return comment details', async () => {
+      mockOctokit.issues.getComment.mock.mockImplementation(async () => ({
+        data: createMockApiComment({ id: 42, body: 'Specific comment' }),
+      }));
+
+      const comment = await issueManager.getComment(42);
+
+      assert.ok(comment);
+      assert.strictEqual(comment.id, 42);
+      assert.strictEqual(comment.body, 'Specific comment');
+    });
+
+    it('should return null for non-existent comment', async () => {
+      const notFoundError: any = new Error('Not Found');
+      notFoundError.status = 404;
+      mockOctokit.issues.getComment.mock.mockImplementation(async () => {
+        throw notFoundError;
+      });
+
+      const comment = await issueManager.getComment(999);
+
+      assert.strictEqual(comment, null);
+    });
+
+    it('should throw for other errors', async () => {
+      const serverError: any = new Error('Server Error');
+      serverError.status = 500;
+      mockOctokit.issues.getComment.mock.mockImplementation(async () => {
+        throw serverError;
+      });
+
+      await assert.rejects(
+        async () => issueManager.getComment(1),
+        /Server Error/
+      );
+    });
+  });
+
+  describe('addComment', () => {
+    it('should add comment to issue and return the comment', async () => {
+      mockOctokit.issues.createComment.mock.mockImplementation(async () => ({
+        data: createMockApiComment({ id: 123, body: 'This is a comment' }),
+      }));
+
+      const comment = await issueManager.addComment(1, 'This is a comment');
 
       assert.strictEqual(mockOctokit.issues.createComment.mock.callCount(), 1);
       const call = mockOctokit.issues.createComment.mock.calls[0];
       assert.strictEqual(call.arguments[0].issue_number, 1);
       assert.strictEqual(call.arguments[0].body, 'This is a comment');
+      assert.strictEqual(comment.id, 123);
+      assert.strictEqual(comment.body, 'This is a comment');
     });
 
     it('should throw on failure', async () => {
@@ -460,15 +571,19 @@ describe('IssueManager', () => {
   });
 
   describe('addCommentWithFallback', () => {
-    it('should return degraded false on success', async () => {
-      mockOctokit.issues.createComment.mock.mockImplementation(async () => ({}));
+    it('should return comment with degraded false on success', async () => {
+      mockOctokit.issues.createComment.mock.mockImplementation(async () => ({
+        data: createMockApiComment({ id: 456, body: 'Test comment' }),
+      }));
 
       const result = await issueManager.addCommentWithFallback(1, 'Test comment');
 
       assert.strictEqual(result.degraded, false);
+      assert.ok(result.value);
+      assert.strictEqual(result.value.id, 456);
     });
 
-    it('should return degraded true on failure', async () => {
+    it('should return null with degraded true on failure', async () => {
       mockOctokit.issues.createComment.mock.mockImplementation(async () => {
         throw new Error('API Error');
       });
@@ -476,6 +591,58 @@ describe('IssueManager', () => {
       const result = await issueManager.addCommentWithFallback(1, 'Test');
 
       assert.strictEqual(result.degraded, true);
+      assert.strictEqual(result.value, null);
+    });
+  });
+
+  describe('updateComment', () => {
+    it('should update comment and return updated comment', async () => {
+      mockOctokit.issues.updateComment.mock.mockImplementation(async () => ({
+        data: createMockApiComment({ id: 123, body: 'Updated comment' }),
+      }));
+
+      const comment = await issueManager.updateComment(123, 'Updated comment');
+
+      assert.strictEqual(mockOctokit.issues.updateComment.mock.callCount(), 1);
+      const call = mockOctokit.issues.updateComment.mock.calls[0];
+      assert.strictEqual(call.arguments[0].comment_id, 123);
+      assert.strictEqual(call.arguments[0].body, 'Updated comment');
+      assert.strictEqual(comment.id, 123);
+      assert.strictEqual(comment.body, 'Updated comment');
+    });
+
+    it('should throw on failure', async () => {
+      mockOctokit.issues.updateComment.mock.mockImplementation(async () => {
+        throw new Error('Update failed');
+      });
+
+      await assert.rejects(
+        async () => issueManager.updateComment(1, 'Test'),
+        /Update failed/
+      );
+    });
+  });
+
+  describe('deleteComment', () => {
+    it('should delete comment', async () => {
+      mockOctokit.issues.deleteComment.mock.mockImplementation(async () => ({}));
+
+      await issueManager.deleteComment(123);
+
+      assert.strictEqual(mockOctokit.issues.deleteComment.mock.callCount(), 1);
+      const call = mockOctokit.issues.deleteComment.mock.calls[0];
+      assert.strictEqual(call.arguments[0].comment_id, 123);
+    });
+
+    it('should throw on failure', async () => {
+      mockOctokit.issues.deleteComment.mock.mockImplementation(async () => {
+        throw new Error('Delete failed');
+      });
+
+      await assert.rejects(
+        async () => issueManager.deleteComment(1),
+        /Delete failed/
+      );
     });
   });
 
@@ -543,6 +710,49 @@ describe('Issue interface', () => {
     };
 
     assert.strictEqual(issue.state, 'closed');
+  });
+});
+
+describe('IssueComment interface', () => {
+  it('should have all required properties', () => {
+    const comment: IssueComment = {
+      id: 1,
+      body: 'Test Comment',
+      htmlUrl: 'https://github.com/owner/repo/issues/1#issuecomment-1',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      user: 'john-doe',
+    };
+
+    assert.strictEqual(comment.id, 1);
+    assert.strictEqual(comment.body, 'Test Comment');
+    assert.strictEqual(comment.user, 'john-doe');
+  });
+
+  it('should handle null user', () => {
+    const comment: IssueComment = {
+      id: 1,
+      body: 'Anonymous Comment',
+      htmlUrl: 'https://github.com/owner/repo/issues/1#issuecomment-1',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      user: null,
+    };
+
+    assert.strictEqual(comment.user, null);
+  });
+
+  it('should track updated timestamp', () => {
+    const comment: IssueComment = {
+      id: 1,
+      body: 'Updated Comment',
+      htmlUrl: 'https://github.com/owner/repo/issues/1#issuecomment-1',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-02T12:00:00Z',
+      user: 'john-doe',
+    };
+
+    assert.notStrictEqual(comment.createdAt, comment.updatedAt);
   });
 });
 
