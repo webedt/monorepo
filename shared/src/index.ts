@@ -68,6 +68,12 @@ export * from './sessions/index.js';
 // LLM - One-off LLM requests
 export * from './llm/index.js';
 
+// Discovery services
+export * from './discovery/index.js';
+
+// Code analysis services
+export * from './codeAnalysis/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
