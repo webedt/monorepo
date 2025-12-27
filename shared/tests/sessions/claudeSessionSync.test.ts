@@ -302,19 +302,173 @@ describe('Duplicate Prevention Logic', () => {
 });
 
 describe('Status Mapping', () => {
-  it('should map remote statuses to local statuses', () => {
+  // Status mapping used in both claudeSessionSync and SessionService.sync
+  const mapRemoteStatus = (anthropicStatus: string): string => {
     const statusMap: Record<string, string> = {
-      'completed': 'completed',
+      'idle': 'completed',
       'running': 'running',
-      'cancelled': 'error',
-      'errored': 'error',
-      'archived': 'completed'
+      'completed': 'completed',
+      'failed': 'error',
+      'archived': 'completed',
     };
+    return statusMap[anthropicStatus] || 'pending';
+  };
 
-    assert.strictEqual(statusMap['completed'], 'completed');
-    assert.strictEqual(statusMap['running'], 'running');
-    assert.strictEqual(statusMap['cancelled'], 'error');
-    assert.strictEqual(statusMap['errored'], 'error');
+  it('should map remote statuses to local statuses', () => {
+    assert.strictEqual(mapRemoteStatus('completed'), 'completed');
+    assert.strictEqual(mapRemoteStatus('running'), 'running');
+    assert.strictEqual(mapRemoteStatus('failed'), 'error');
+    assert.strictEqual(mapRemoteStatus('archived'), 'completed');
+  });
+
+  it('should map idle to completed', () => {
+    assert.strictEqual(mapRemoteStatus('idle'), 'completed');
+  });
+
+  it('should default unknown statuses to pending', () => {
+    assert.strictEqual(mapRemoteStatus('unknown'), 'pending');
+    assert.strictEqual(mapRemoteStatus(''), 'pending');
+  });
+});
+
+describe('SessionService.sync Logic', () => {
+  describe('Change Detection', () => {
+    it('should detect status change', () => {
+      const currentStatus = 'running';
+      const newStatus = 'completed';
+
+      const hasChanges = newStatus !== currentStatus;
+      assert.strictEqual(hasChanges, true);
+    });
+
+    it('should detect no change when status is same', () => {
+      const currentStatus = 'running';
+      const newStatus = 'running';
+
+      const hasChanges = newStatus !== currentStatus;
+      assert.strictEqual(hasChanges, false);
+    });
+
+    it('should detect cost update', () => {
+      const currentCost: string | null = null;
+      const newCost = '0.123456';
+
+      const hasChanges = newCost !== currentCost;
+      assert.strictEqual(hasChanges, true);
+    });
+
+    it('should detect branch update', () => {
+      const currentBranch: string | null = null;
+      const newBranch = 'claude/new-feature';
+
+      const hasChanges = newBranch !== currentBranch;
+      assert.strictEqual(hasChanges, true);
+    });
+
+    it('should detect new events', () => {
+      const newEventsCount = 5;
+      const hasChanges = newEventsCount > 0;
+
+      assert.strictEqual(hasChanges, true);
+    });
+  });
+
+  describe('SessionPath Generation During Sync', () => {
+    it('should generate sessionPath when branch becomes available', () => {
+      const session = {
+        repositoryOwner: 'webedt',
+        repositoryName: 'hello-world',
+        sessionPath: null as string | null,
+        branch: null as string | null,
+      };
+
+      const remoteBranch = 'claude/new-feature';
+      let sessionPath = session.sessionPath;
+
+      if (remoteBranch && session.repositoryOwner && session.repositoryName && !sessionPath) {
+        sessionPath = generateSessionPath(session.repositoryOwner, session.repositoryName, remoteBranch);
+      }
+
+      assert.strictEqual(sessionPath, 'webedt__hello-world__claude-new-feature');
+    });
+
+    it('should preserve existing sessionPath', () => {
+      const existingPath = 'webedt__hello-world__claude-old-feature';
+      const session = {
+        repositoryOwner: 'webedt',
+        repositoryName: 'hello-world',
+        sessionPath: existingPath,
+      };
+
+      const remoteBranch = 'claude/new-feature';
+      let sessionPath: string | undefined = session.sessionPath || undefined;
+
+      // Should not regenerate if already set
+      if (remoteBranch && session.repositoryOwner && session.repositoryName && !sessionPath) {
+        sessionPath = generateSessionPath(session.repositoryOwner, session.repositoryName, remoteBranch);
+      }
+
+      assert.strictEqual(sessionPath, existingPath);
+    });
+  });
+
+  describe('Cost Extraction', () => {
+    it('should extract cost from result event', () => {
+      const events = [
+        { type: 'user', uuid: 'uuid-1' },
+        { type: 'assistant', uuid: 'uuid-2' },
+        { type: 'result', uuid: 'uuid-3', total_cost_usd: 0.123456789 },
+      ];
+
+      const resultEvent = events.find(e => e.type === 'result' && 'total_cost_usd' in e);
+      let totalCost: string | undefined;
+      if (resultEvent && 'total_cost_usd' in resultEvent) {
+        totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+      }
+
+      assert.strictEqual(totalCost, '0.123457'); // Rounds to 6 decimal places
+    });
+
+    it('should handle missing result event', () => {
+      const events = [
+        { type: 'user', uuid: 'uuid-1' },
+        { type: 'assistant', uuid: 'uuid-2' },
+      ];
+
+      const resultEvent = events.find(e => e.type === 'result' && 'total_cost_usd' in e);
+      let totalCost: string | undefined;
+      if (resultEvent && 'total_cost_usd' in resultEvent) {
+        totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+      }
+
+      assert.strictEqual(totalCost, undefined);
+    });
+  });
+
+  describe('Branch Extraction from Remote Session', () => {
+    it('should extract branch from git outcome', () => {
+      const remoteSession = createMockRemoteSession({
+        session_context: {
+          outcomes: [{ type: 'git_repository', git_info: { branches: ['claude/feature-x'] } }]
+        }
+      });
+
+      const gitOutcome = remoteSession.session_context.outcomes?.find(o => o.type === 'git_repository');
+      const branch = gitOutcome?.git_info?.branches?.[0];
+
+      assert.strictEqual(branch, 'claude/feature-x');
+    });
+
+    it('should handle missing git outcome', () => {
+      const remoteSession = createMockRemoteSession({
+        session_context: {}
+      });
+
+      const gitOutcome = remoteSession.session_context.outcomes?.find(o => o.type === 'git_repository');
+      const branch = gitOutcome?.git_info?.branches?.[0];
+
+      assert.strictEqual(branch, undefined);
+    });
   });
 });
 
