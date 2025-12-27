@@ -177,4 +177,17 @@ export interface CodeAnalyzerConfig {
    * @default 120000 (2 minutes)
    */
   timeoutMs?: number;
+
+  /**
+   * Polling interval in milliseconds for checking analysis completion.
+   * @default 2000 (2 seconds)
+   */
+  pollIntervalMs?: number;
+
+  /**
+   * Maximum code size in bytes to analyze.
+   * Prevents memory issues with very large code strings.
+   * @default 1048576 (1MB)
+   */
+  maxCodeSizeBytes?: number;
 }

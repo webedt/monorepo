@@ -5,6 +5,10 @@
  * Analyzes code quality, security, patterns, and more.
  */
 
+import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+
 import { ACodeAnalyzer } from './ACodeAnalyzer.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { getClaudeCredentials } from '../auth/claudeAuth.js';
@@ -20,7 +24,12 @@ import type { AnalysisType } from './types.js';
 import type { SessionEvent } from '../claudeWeb/types.js';
 
 const DEFAULT_TIMEOUT_MS = 120000;
+const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_FINDINGS = 20;
+const DEFAULT_MAX_CODE_SIZE_BYTES = 1024 * 1024; // 1MB
+
+// Path to Claude credentials file (matches getClaudeCredentials in claudeAuth.ts)
+const CLAUDE_CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
 
 /**
  * Build the analysis prompt based on the analysis type
@@ -119,7 +128,10 @@ Limit findings to the top ${maxFindings} most important issues.
 Return ONLY the JSON object, no markdown formatting or additional text.`;
 
   if (code) {
-    prompt += `\n\nCode to analyze:\n\`\`\`\n${code}\n\`\`\``;
+    // Escape triple backticks in code to prevent markdown structure issues
+    // Replace ``` with a placeholder that won't break the markdown
+    const escapedCode = code.replace(/```/g, '\\`\\`\\`');
+    prompt += `\n\nCode to analyze:\n\`\`\`\n${escapedCode}\n\`\`\``;
   }
 
   if (customPrompt) {
@@ -264,6 +276,8 @@ export class CodeAnalyzer extends ACodeAnalyzer {
   private environmentId?: string;
   private fallbackRepoUrl: string;
   private timeoutMs: number;
+  private pollIntervalMs: number;
+  private maxCodeSizeBytes: number;
   private client?: ClaudeWebClient;
 
   constructor(config: CodeAnalyzerConfig = {}) {
@@ -272,6 +286,8 @@ export class CodeAnalyzer extends ACodeAnalyzer {
     this.environmentId = config.environmentId || CLAUDE_ENVIRONMENT_ID;
     this.fallbackRepoUrl = config.fallbackRepoUrl || LLM_FALLBACK_REPO_URL;
     this.timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT_MS;
+    this.pollIntervalMs = config.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS;
+    this.maxCodeSizeBytes = config.maxCodeSizeBytes || DEFAULT_MAX_CODE_SIZE_BYTES;
   }
 
   configure(config: CodeAnalyzerConfig): void {
@@ -288,6 +304,12 @@ export class CodeAnalyzer extends ACodeAnalyzer {
     }
     if (config.timeoutMs !== undefined) {
       this.timeoutMs = config.timeoutMs;
+    }
+    if (config.pollIntervalMs !== undefined) {
+      this.pollIntervalMs = config.pollIntervalMs;
+    }
+    if (config.maxCodeSizeBytes !== undefined) {
+      this.maxCodeSizeBytes = config.maxCodeSizeBytes;
     }
   }
 
@@ -307,16 +329,7 @@ export class CodeAnalyzer extends ACodeAnalyzer {
     // Check for environment variable or credentials file
     // Note: This doesn't verify token validity, just availability
     const hasEnvToken = Boolean(process.env.CLAUDE_ACCESS_TOKEN);
-    const hasCredentialsFile = (() => {
-      try {
-        const { existsSync } = require('fs');
-        const { homedir } = require('os');
-        const { join } = require('path');
-        return existsSync(join(homedir(), '.claude', '.credentials.json'));
-      } catch {
-        return false;
-      }
-    })();
+    const hasCredentialsFile = existsSync(CLAUDE_CREDENTIALS_PATH);
 
     return hasEnvToken || hasCredentialsFile;
   }
@@ -351,6 +364,7 @@ export class CodeAnalyzer extends ACodeAnalyzer {
   async analyze(params: CodeAnalysisParams): Promise<CodeAnalysisResult> {
     const startTime = Date.now();
 
+    // Validate input: either code or gitUrl must be provided
     if (!params.code && !params.gitUrl) {
       return {
         success: false,
@@ -363,29 +377,60 @@ export class CodeAnalyzer extends ACodeAnalyzer {
       };
     }
 
+    // Validate code size to prevent memory issues
+    if (params.code && params.code.length > this.maxCodeSizeBytes) {
+      const sizeMB = (params.code.length / (1024 * 1024)).toFixed(2);
+      const maxMB = (this.maxCodeSizeBytes / (1024 * 1024)).toFixed(2);
+      return {
+        success: false,
+        findings: [],
+        summary: calculateSummary([]),
+        assessment: `Code size exceeds maximum allowed size.`,
+        provider: 'claude-web',
+        durationMs: Date.now() - startTime,
+        error: `Code size (${sizeMB}MB) exceeds maximum allowed size (${maxMB}MB). Consider analyzing smaller portions.`,
+      };
+    }
+
+    // Determine gitUrl with fallback, and validate it's not empty
+    const gitUrl = params.gitUrl || this.fallbackRepoUrl;
+    if (!gitUrl) {
+      return {
+        success: false,
+        findings: [],
+        summary: calculateSummary([]),
+        assessment: 'No repository URL available for analysis.',
+        provider: 'claude-web',
+        durationMs: Date.now() - startTime,
+        error: 'Neither gitUrl nor fallbackRepoUrl is configured. Set LLM_FALLBACK_REPO_URL or provide a gitUrl.',
+      };
+    }
+
+    const usingFallbackRepo = !params.gitUrl;
+
     logger.info('Starting code analysis', {
       component: 'CodeAnalyzer',
       analysisType: params.analysisType || 'general',
       hasCode: Boolean(params.code),
       hasGitUrl: Boolean(params.gitUrl),
       fileCount: params.filePaths?.length,
+      codeSizeBytes: params.code?.length,
     });
 
+    let sessionId: string | undefined;
+    let client: ClaudeWebClient | undefined;
+
     try {
-      const client = await this.getClient();
+      client = await this.getClient();
 
       // Build the analysis prompt
       const prompt = buildAnalysisPrompt(params);
 
-      // Use the provided gitUrl or fallback repo.
-      // When analyzing raw code without a gitUrl, we use a fallback repository
-      // (typically an empty or minimal repo) to satisfy the Claude Web API requirement.
-      // The analysis is performed on the code provided in the prompt, not the repo contents.
-      // Note: Sessions created this way will be associated with the fallback repo for auditing.
-      const gitUrl = params.gitUrl || this.fallbackRepoUrl;
-      const usingFallbackRepo = !params.gitUrl;
-
       if (usingFallbackRepo) {
+        // When analyzing raw code without a gitUrl, we use a fallback repository
+        // (typically an empty or minimal repo) to satisfy the Claude Web API requirement.
+        // The analysis is performed on the code provided in the prompt, not the repo contents.
+        // Note: Sessions created this way will be associated with the fallback repo for auditing.
         logger.debug('Using fallback repo for code-only analysis', {
           component: 'CodeAnalyzer',
           fallbackRepo: this.fallbackRepoUrl,
@@ -394,7 +439,6 @@ export class CodeAnalyzer extends ACodeAnalyzer {
 
       // Collect response
       const responseBlocks: string[] = [];
-      let sessionId: string | undefined;
       let totalCost: number | undefined;
 
       const onEvent = (event: SessionEvent) => {
@@ -423,9 +467,7 @@ export class CodeAnalyzer extends ACodeAnalyzer {
       const sessionTitle = `Code Analysis: ${analysisTypeLabel}`;
 
       // Calculate poll options from timeout configuration
-      // Default poll interval is 2000ms, so calculate maxPolls accordingly
-      const pollIntervalMs = 2000;
-      const maxPolls = Math.ceil(this.timeoutMs / pollIntervalMs);
+      const maxPolls = Math.ceil(this.timeoutMs / this.pollIntervalMs);
 
       // Execute the analysis with timeout options
       const result = await client.execute(
@@ -436,27 +478,12 @@ export class CodeAnalyzer extends ACodeAnalyzer {
         },
         onEvent,
         {
-          pollIntervalMs,
+          pollIntervalMs: this.pollIntervalMs,
           maxPolls,
         }
       );
 
       sessionId = result.sessionId;
-
-      // Archive the session to clean up
-      try {
-        await client.archiveSession(sessionId);
-        logger.debug('Archived code analysis session', {
-          component: 'CodeAnalyzer',
-          sessionId,
-        });
-      } catch (archiveError) {
-        logger.warn('Failed to archive code analysis session', {
-          component: 'CodeAnalyzer',
-          sessionId,
-          error: archiveError instanceof Error ? archiveError.message : String(archiveError),
-        });
-      }
 
       const responseText = responseBlocks.join('');
 
@@ -494,6 +521,7 @@ export class CodeAnalyzer extends ACodeAnalyzer {
       logger.error('Code analysis failed', {
         component: 'CodeAnalyzer',
         error: errorMessage,
+        sessionId,
       });
 
       return {
@@ -505,6 +533,23 @@ export class CodeAnalyzer extends ACodeAnalyzer {
         durationMs: Date.now() - startTime,
         error: errorMessage,
       };
+    } finally {
+      // Always attempt to archive the session to prevent orphaned sessions
+      if (sessionId && client) {
+        try {
+          await client.archiveSession(sessionId);
+          logger.debug('Archived code analysis session', {
+            component: 'CodeAnalyzer',
+            sessionId,
+          });
+        } catch (archiveError) {
+          logger.warn('Failed to archive code analysis session', {
+            component: 'CodeAnalyzer',
+            sessionId,
+            error: archiveError instanceof Error ? archiveError.message : String(archiveError),
+          });
+        }
+      }
     }
   }
 }
