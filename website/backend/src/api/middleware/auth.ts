@@ -88,6 +88,10 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 /**
  * Middleware factory that requires a minimum role level
  * Uses role hierarchy: user < editor < developer < admin
+ *
+ * Usage:
+ *   router.get('/editor-only', requireRole('editor'), handler);
+ *   router.get('/dev-only', requireRole('developer'), handler);
  */
 export function requireRole(requiredRole: UserRole) {
   return function (req: Request, res: Response, next: NextFunction): void {
@@ -107,20 +111,4 @@ export function requireRole(requiredRole: UserRole) {
 
     next();
   };
-}
-
-/**
- * Middleware that requires editor role or higher
- * Editors have full access to the editor suite for game creation
- */
-export function requireEditor(req: Request, res: Response, next: NextFunction): void {
-  return requireRole('editor')(req, res, next);
-}
-
-/**
- * Middleware that requires developer role or higher
- * Developers have full access plus development tools and API access
- */
-export function requireDeveloper(req: Request, res: Response, next: NextFunction): void {
-  return requireRole('developer')(req, res, next);
 }
