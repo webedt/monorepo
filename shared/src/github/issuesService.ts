@@ -260,7 +260,8 @@ export class GitHubIssuesService {
 
   /**
    * Get the latest auto-task session info from issue comments
-   * Parses comments looking for session URLs, branch names, and PR numbers
+   * Parses comments looking for session URLs, branch names, and PR numbers.
+   * Aggregates info from multiple comments to get the most complete picture.
    */
   async getLatestAutoTaskInfo(
     owner: string,
@@ -269,15 +270,49 @@ export class GitHubIssuesService {
   ): Promise<AutoTaskCommentInfo | undefined> {
     const comments = await this.listComments(owner, repo, issueNumber);
 
-    // Process comments in reverse order (newest first)
+    // Aggregate info from all comments (newest first for type, but collect all session/branch/PR info)
+    let result: AutoTaskCommentInfo | undefined;
+    let latestSessionId: string | undefined;
+    let latestSessionUrl: string | undefined;
+    let latestBranchName: string | undefined;
+    let latestPrNumber: number | undefined;
+
+    // First pass: get the most recent type and creation date
     for (let i = comments.length - 1; i >= 0; i--) {
       const info = parseAutoTaskComment(comments[i]);
       if (info) {
-        return info;
+        if (!result) {
+          result = info;
+        }
+        // Collect session/branch/PR from all comments (prefer most recent non-empty values)
+        if (info.sessionId && !latestSessionId) {
+          latestSessionId = info.sessionId;
+          latestSessionUrl = info.sessionUrl;
+        }
+        if (info.branchName && !latestBranchName) {
+          latestBranchName = info.branchName;
+        }
+        if (info.prNumber && !latestPrNumber) {
+          latestPrNumber = info.prNumber;
+        }
       }
     }
 
-    return undefined;
+    // Merge collected info into result
+    if (result) {
+      if (latestSessionId) {
+        result.sessionId = latestSessionId;
+        result.sessionUrl = latestSessionUrl;
+      }
+      if (latestBranchName) {
+        result.branchName = latestBranchName;
+      }
+      if (latestPrNumber) {
+        result.prNumber = latestPrNumber;
+      }
+    }
+
+    return result;
   }
 }
 

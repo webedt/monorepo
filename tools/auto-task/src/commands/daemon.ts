@@ -352,31 +352,66 @@ async function startTasks(
       const previousInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
       const isRework = previousInfo?.branchName && previousInfo?.prNumber;
 
-      const prompt = isRework && previousInfo
-        ? buildReworkPrompt(previousInfo, item, issue)
-        : buildTaskPrompt(issue.title, issue.body);
-
       console.log(`   Starting #${item.number}: ${item.title.slice(0, 40)}...`);
       console.log(`   ${isRework ? 'Re-work' : 'New task'}`);
 
-      // Create Claude session
-      const branchPrefix = isRework && previousInfo?.branchName
-        ? previousInfo.branchName
-        : `claude/issue-${item.number}`;
+      let sessionId: string;
+      let webUrl: string;
 
-      const { sessionId, webUrl } = await claudeClient.createSession({
-        prompt,
-        gitUrl,
-        branchPrefix,
-        title: `${isRework ? 'Rework' : 'Issue'} #${item.number}: ${issue.title.slice(0, 50)}`,
-      });
+      if (isRework && previousInfo?.sessionId) {
+        // Re-work: Send message to existing session (fire-and-forget, don't block)
+        const resumePrompt = buildReworkPrompt(previousInfo, item, issue);
 
-      console.log(`   Session created: ${sessionId}`);
+        console.log(`   Resuming session: ${previousInfo.sessionId}`);
+
+        try {
+          // Check if session can be resumed first
+          const session = await claudeClient.getSession(previousInfo.sessionId);
+          if (session.session_status === 'archived' || session.session_status === 'failed') {
+            throw new Error(`Session is ${session.session_status}`);
+          }
+
+          // Send message to resume the session (non-blocking)
+          await claudeClient.sendMessage(previousInfo.sessionId, resumePrompt);
+          sessionId = previousInfo.sessionId;
+          webUrl = previousInfo.sessionUrl || `https://claude.ai/code/${previousInfo.sessionId}`;
+          console.log(`   Session resumed (message sent)`);
+        } catch (resumeError) {
+          // If resume fails (session may be archived/unavailable), fall back to new session
+          console.log(`   Resume failed: ${resumeError}`);
+          console.log(`   Creating new session instead...`);
+
+          const prompt = buildReworkPrompt(previousInfo, item, issue);
+          const result = await claudeClient.createSession({
+            prompt,
+            gitUrl,
+            branchPrefix: previousInfo.branchName,
+            title: `Rework #${item.number}: ${issue.title.slice(0, 50)}`,
+          });
+          sessionId = result.sessionId;
+          webUrl = result.webUrl;
+        }
+      } else {
+        // New task: Create new session
+        const prompt = buildTaskPrompt(issue.title, issue.body);
+        const branchPrefix = `claude/issue-${item.number}`;
+
+        const result = await claudeClient.createSession({
+          prompt,
+          gitUrl,
+          branchPrefix,
+          title: `Issue #${item.number}: ${issue.title.slice(0, 50)}`,
+        });
+        sessionId = result.sessionId;
+        webUrl = result.webUrl;
+        console.log(`   Session created: ${sessionId}`);
+      }
+
       console.log(`   View at: ${webUrl}`);
 
       // Add comment to issue with session link (this IS our session tracking)
       const commentBody = isRework && previousInfo
-        ? `### 🔄 Re-work\n\nAddressing code review feedback.\n\n**Session:** [View in Claude](${webUrl})\n**Branch:** \`${previousInfo.branchName}\`\n**PR:** #${previousInfo.prNumber}`
+        ? `### 🔄 Re-work\n\nAddressing code review feedback (resuming session).\n\n**Session:** [View in Claude](${webUrl})\n**Branch:** \`${previousInfo.branchName}\`\n**PR:** #${previousInfo.prNumber}`
         : `### 🤖 Auto-Task Started\n\nClaude is working on this issue.\n\n**Session:** [View in Claude](${webUrl})`;
 
       await issuesService.addComment(owner, repo, item.number, commentBody);
@@ -855,6 +890,20 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
           // Close the issue (should auto-close from PR, but ensure it)
           await issuesService.closeIssue(owner, repo, item.number);
           console.log(`   Moved to Done, issue closed`);
+
+          // Archive the Claude session now that work is complete
+          if (taskInfo.sessionId) {
+            try {
+              const claudeClient = new ClaudeWebClient({
+                accessToken: claudeAuth.accessToken,
+                environmentId: process.env.CLAUDE_ENVIRONMENT_ID || '',
+              });
+              await claudeClient.archiveSession(taskInfo.sessionId);
+              console.log(`   Session archived: ${taskInfo.sessionId}`);
+            } catch (archiveError) {
+              console.log(`   Warning: Failed to archive session: ${archiveError}`);
+            }
+          }
 
           // Add completion comment
           await issuesService.addComment(
