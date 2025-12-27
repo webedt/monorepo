@@ -338,6 +338,30 @@ export const games = pgTable('games', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Purchases - Transaction records (defined before userLibrary to avoid forward reference)
+export const purchases = pgTable('purchases', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  amount: integer('amount').notNull(), // Amount in cents
+  currency: text('currency').default('USD').notNull(),
+  status: text('status').default('pending').notNull(), // 'pending' | 'completed' | 'pending_refund' | 'refunded' | 'failed'
+  paymentMethod: text('payment_method'), // e.g., 'credit_card', 'wallet', 'paypal', 'free'
+  paymentDetails: json('payment_details').$type<{
+    transactionId?: string;
+    last4?: string;
+    brand?: string;
+  }>(),
+  refundedAt: timestamp('refunded_at'),
+  refundReason: text('refund_reason'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
 // User Library - Games owned by users
 export const userLibrary = pgTable('user_library', {
   id: text('id').primaryKey(), // UUID
@@ -355,31 +379,10 @@ export const userLibrary = pgTable('user_library', {
   favorite: boolean('favorite').default(false).notNull(),
   hidden: boolean('hidden').default(false).notNull(), // Hide from library view
   installStatus: text('install_status').default('not_installed').notNull(), // 'not_installed' | 'installing' | 'installed'
-});
-
-// Purchases - Transaction records
-export const purchases = pgTable('purchases', {
-  id: text('id').primaryKey(), // UUID
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  gameId: text('game_id')
-    .notNull()
-    .references(() => games.id, { onDelete: 'cascade' }),
-  amount: integer('amount').notNull(), // Amount in cents
-  currency: text('currency').default('USD').notNull(),
-  status: text('status').default('pending').notNull(), // 'pending' | 'completed' | 'refunded' | 'failed'
-  paymentMethod: text('payment_method'), // e.g., 'credit_card', 'wallet', 'free'
-  paymentDetails: json('payment_details').$type<{
-    transactionId?: string;
-    last4?: string;
-    brand?: string;
-  }>(),
-  refundedAt: timestamp('refunded_at'),
-  refundReason: text('refund_reason'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  completedAt: timestamp('completed_at'),
-});
+}, (table) => ({
+  // Unique constraint: a user can only have each game once in their library
+  userGameUnique: { name: 'user_library_user_game_unique', columns: [table.userId, table.gameId] },
+}));
 
 // Community Posts - Discussions, reviews, guides
 export const communityPosts = pgTable('community_posts', {
@@ -434,7 +437,12 @@ export const communityVotes = pgTable('community_votes', {
     .references(() => communityComments.id, { onDelete: 'cascade' }),
   vote: integer('vote').notNull(), // 1 = upvote, -1 = downvote
   createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  // Unique constraint: a user can only vote once per post
+  userPostVoteUnique: { name: 'community_votes_user_post_unique', columns: [table.userId, table.postId] },
+  // Unique constraint: a user can only vote once per comment
+  userCommentVoteUnique: { name: 'community_votes_user_comment_unique', columns: [table.userId, table.commentId] },
+}));
 
 // Wishlists - Games users want to buy
 export const wishlists = pgTable('wishlists', {
@@ -448,7 +456,10 @@ export const wishlists = pgTable('wishlists', {
   priority: integer('priority').default(0).notNull(), // For ordering
   notifyOnSale: boolean('notify_on_sale').default(true).notNull(),
   addedAt: timestamp('added_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  // Unique constraint: a user can only have each game once in their wishlist
+  userGameUnique: { name: 'wishlists_user_game_unique', columns: [table.userId, table.gameId] },
+}));
 
 // Type exports for Players feature
 export type Game = typeof games.$inferSelect;

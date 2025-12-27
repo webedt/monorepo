@@ -15,7 +15,6 @@ import {
   and,
   desc,
   asc,
-  isNull,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';

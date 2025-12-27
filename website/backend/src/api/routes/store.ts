@@ -4,10 +4,11 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, wishlists, eq, and, desc, asc, like, ilike, inArray, isNull } from '@webedt/shared';
+import { db, games, userLibrary, wishlists, eq, and, desc } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -296,7 +297,6 @@ router.post('/wishlist/:gameId', requireAuth, async (req: Request, res: Response
     }
 
     // Add to wishlist
-    const { v4: uuidv4 } = await import('uuid');
     const [wishlistItem] = await db
       .insert(wishlists)
       .values({

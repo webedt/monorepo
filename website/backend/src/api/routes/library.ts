@@ -4,16 +4,87 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, purchases, eq, and, desc, asc, isNull } from '@webedt/shared';
+import { db, games, userLibrary, purchases, eq, and, desc } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
-import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
 // All routes require authentication
 router.use(requireAuth);
+
+// Get hidden games (must be before /:gameId to avoid being treated as gameId)
+router.get('/hidden/all', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    const hiddenItems = await db
+      .select({
+        libraryItem: userLibrary,
+        game: games,
+      })
+      .from(userLibrary)
+      .innerJoin(games, eq(userLibrary.gameId, games.id))
+      .where(
+        and(
+          eq(userLibrary.userId, authReq.user!.id),
+          eq(userLibrary.hidden, true)
+        )
+      )
+      .orderBy(desc(userLibrary.acquiredAt));
+
+    res.json({
+      success: true,
+      data: {
+        items: hiddenItems.map((item) => ({
+          ...item.libraryItem,
+          game: item.game,
+        })),
+        total: hiddenItems.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Get hidden games error', error as Error, { component: 'Library' });
+    res.status(500).json({ success: false, error: 'Failed to fetch hidden games' });
+  }
+});
+
+// Get library statistics (must be before /:gameId to avoid being treated as gameId)
+router.get('/stats/summary', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    const libraryItems = await db
+      .select()
+      .from(userLibrary)
+      .where(eq(userLibrary.userId, authReq.user!.id));
+
+    const totalGames = libraryItems.length;
+    const installedGames = libraryItems.filter(
+      (item) => item.installStatus === 'installed'
+    ).length;
+    const favoriteGames = libraryItems.filter((item) => item.favorite).length;
+    const totalPlaytimeMinutes = libraryItems.reduce(
+      (sum, item) => sum + item.playtimeMinutes,
+      0
+    );
+
+    res.json({
+      success: true,
+      data: {
+        totalGames,
+        installedGames,
+        favoriteGames,
+        totalPlaytimeMinutes,
+        totalPlaytimeHours: Math.round(totalPlaytimeMinutes / 60),
+      },
+    });
+  } catch (error) {
+    logger.error('Get library stats error', error as Error, { component: 'Library' });
+    res.status(500).json({ success: false, error: 'Failed to fetch library stats' });
+  }
+});
 
 // Get user's library
 router.get('/', async (req: Request, res: Response) => {
@@ -317,78 +388,6 @@ router.post('/:gameId/playtime', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Update playtime error', error as Error, { component: 'Library' });
     res.status(500).json({ success: false, error: 'Failed to update playtime' });
-  }
-});
-
-// Get hidden games
-router.get('/hidden/all', async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-
-    const hiddenItems = await db
-      .select({
-        libraryItem: userLibrary,
-        game: games,
-      })
-      .from(userLibrary)
-      .innerJoin(games, eq(userLibrary.gameId, games.id))
-      .where(
-        and(
-          eq(userLibrary.userId, authReq.user!.id),
-          eq(userLibrary.hidden, true)
-        )
-      )
-      .orderBy(desc(userLibrary.acquiredAt));
-
-    res.json({
-      success: true,
-      data: {
-        items: hiddenItems.map((item) => ({
-          ...item.libraryItem,
-          game: item.game,
-        })),
-        total: hiddenItems.length,
-      },
-    });
-  } catch (error) {
-    logger.error('Get hidden games error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to fetch hidden games' });
-  }
-});
-
-// Get library statistics
-router.get('/stats/summary', async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-
-    const libraryItems = await db
-      .select()
-      .from(userLibrary)
-      .where(eq(userLibrary.userId, authReq.user!.id));
-
-    const totalGames = libraryItems.length;
-    const installedGames = libraryItems.filter(
-      (item) => item.installStatus === 'installed'
-    ).length;
-    const favoriteGames = libraryItems.filter((item) => item.favorite).length;
-    const totalPlaytimeMinutes = libraryItems.reduce(
-      (sum, item) => sum + item.playtimeMinutes,
-      0
-    );
-
-    res.json({
-      success: true,
-      data: {
-        totalGames,
-        installedGames,
-        favoriteGames,
-        totalPlaytimeMinutes,
-        totalPlaytimeHours: Math.round(totalPlaytimeMinutes / 60),
-      },
-    });
-  } catch (error) {
-    logger.error('Get library stats error', error as Error, { component: 'Library' });
-    res.status(500).json({ success: false, error: 'Failed to fetch library stats' });
   }
 });
 

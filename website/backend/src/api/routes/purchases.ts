@@ -15,6 +15,94 @@ const router = Router();
 // All routes require authentication
 router.use(requireAuth);
 
+// Get purchase statistics (must be before /:purchaseId to avoid being treated as purchaseId)
+router.get('/stats/summary', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    const allPurchases = await db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.userId, authReq.user!.id));
+
+    const completedPurchases = allPurchases.filter(
+      (p) => p.status === 'completed'
+    );
+    const refundedPurchases = allPurchases.filter((p) => p.status === 'refunded');
+
+    const totalSpent = completedPurchases.reduce(
+      (sum, p) => sum + p.amount,
+      0
+    );
+    const totalRefunded = refundedPurchases.reduce(
+      (sum, p) => sum + p.amount,
+      0
+    );
+
+    res.json({
+      success: true,
+      data: {
+        totalPurchases: allPurchases.length,
+        completedPurchases: completedPurchases.length,
+        refundedPurchases: refundedPurchases.length,
+        totalSpentCents: totalSpent,
+        totalRefundedCents: totalRefunded,
+        netSpentCents: totalSpent - totalRefunded,
+      },
+    });
+  } catch (error) {
+    logger.error('Get purchase stats error', error as Error, { component: 'Purchases' });
+    res.status(500).json({ success: false, error: 'Failed to fetch purchase stats' });
+  }
+});
+
+// Get purchase history (must be before /:purchaseId to avoid being treated as purchaseId)
+router.get('/history', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    const purchaseHistory = await db
+      .select({
+        purchase: purchases,
+        game: games,
+      })
+      .from(purchases)
+      .innerJoin(games, eq(purchases.gameId, games.id))
+      .where(eq(purchases.userId, authReq.user!.id))
+      .orderBy(desc(purchases.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const allPurchases = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .where(eq(purchases.userId, authReq.user!.id));
+
+    const total = allPurchases.length;
+
+    res.json({
+      success: true,
+      data: {
+        purchases: purchaseHistory.map((item) => ({
+          ...item.purchase,
+          game: item.game,
+        })),
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      },
+    });
+  } catch (error) {
+    logger.error('Get purchase history error', error as Error, { component: 'Purchases' });
+    res.status(500).json({ success: false, error: 'Failed to fetch purchase history' });
+  }
+});
+
 // Purchase a game
 router.post('/buy/:gameId', async (req: Request, res: Response) => {
   try {
@@ -52,19 +140,37 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
     }
 
     // For free games, we can proceed directly
-    // For paid games, this would integrate with a payment processor
-    if (game.price > 0 && paymentMethod === 'free') {
-      res.status(400).json({
-        success: false,
-        error: 'Payment required for this game',
-        price: game.price,
-        currency: game.currency,
-      });
-      return;
+    // For paid games, require valid payment method and details
+    if (game.price > 0) {
+      const { paymentDetails } = req.body;
+      const validPaymentMethods = ['credit_card', 'wallet', 'paypal'];
+
+      if (!validPaymentMethods.includes(paymentMethod)) {
+        res.status(400).json({
+          success: false,
+          error: 'Valid payment method required for paid games',
+          validMethods: validPaymentMethods,
+          price: game.price,
+          currency: game.currency,
+        });
+        return;
+      }
+
+      // Validate payment details are provided for paid purchases
+      if (!paymentDetails || !paymentDetails.transactionId) {
+        res.status(400).json({
+          success: false,
+          error: 'Payment details with transaction ID required',
+          price: game.price,
+          currency: game.currency,
+        });
+        return;
+      }
     }
 
     // Create purchase record
     const purchaseId = uuidv4();
+    const { paymentDetails } = req.body;
     const [purchase] = await db
       .insert(purchases)
       .values({
@@ -75,6 +181,7 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
         currency: game.currency,
         status: 'completed',
         paymentMethod: game.price === 0 ? 'free' : paymentMethod,
+        paymentDetails: game.price > 0 ? paymentDetails : null,
         completedAt: new Date(),
       })
       .returning();
@@ -127,53 +234,6 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
   }
 });
 
-// Get purchase history
-router.get('/history', async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-    const offset = parseInt(req.query.offset as string) || 0;
-
-    const purchaseHistory = await db
-      .select({
-        purchase: purchases,
-        game: games,
-      })
-      .from(purchases)
-      .innerJoin(games, eq(purchases.gameId, games.id))
-      .where(eq(purchases.userId, authReq.user!.id))
-      .orderBy(desc(purchases.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    // Get total count
-    const allPurchases = await db
-      .select({ id: purchases.id })
-      .from(purchases)
-      .where(eq(purchases.userId, authReq.user!.id));
-
-    const total = allPurchases.length;
-
-    res.json({
-      success: true,
-      data: {
-        purchases: purchaseHistory.map((item) => ({
-          ...item.purchase,
-          game: item.game,
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
-    });
-  } catch (error) {
-    logger.error('Get purchase history error', error as Error, { component: 'Purchases' });
-    res.status(500).json({ success: false, error: 'Failed to fetch purchase history' });
-  }
-});
-
 // Get specific purchase
 router.get('/:purchaseId', async (req: Request, res: Response) => {
   try {
@@ -213,12 +273,20 @@ router.get('/:purchaseId', async (req: Request, res: Response) => {
   }
 });
 
-// Request refund (admin approval would be needed in production)
+// Request refund (requires admin approval)
 router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const purchaseId = req.params.purchaseId;
     const { reason } = req.body;
+
+    if (!reason || reason.trim().length < 10) {
+      res.status(400).json({
+        success: false,
+        error: 'Refund reason is required (minimum 10 characters)',
+      });
+      return;
+    }
 
     const [purchase] = await db
       .select()
@@ -241,6 +309,11 @@ router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
       return;
     }
 
+    if (purchase.status === 'pending_refund') {
+      res.status(400).json({ success: false, error: 'Refund already pending approval' });
+      return;
+    }
+
     if (purchase.status !== 'completed') {
       res.status(400).json({ success: false, error: 'Purchase not eligible for refund' });
       return;
@@ -259,98 +332,34 @@ router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
       return;
     }
 
-    // Process refund
-    const [refundedPurchase] = await db
+    // Set refund as pending - requires admin approval
+    // Library access is NOT removed until admin approves
+    const [pendingRefund] = await db
       .update(purchases)
       .set({
-        status: 'refunded',
-        refundedAt: new Date(),
-        refundReason: reason || 'User requested refund',
+        status: 'pending_refund',
+        refundReason: reason.trim(),
       })
       .where(eq(purchases.id, purchaseId))
       .returning();
 
-    // Remove from library
-    await db
-      .delete(userLibrary)
-      .where(
-        and(
-          eq(userLibrary.userId, authReq.user!.id),
-          eq(userLibrary.gameId, purchase.gameId)
-        )
-      );
-
-    // Decrement download count
-    const [game] = await db
-      .select()
-      .from(games)
-      .where(eq(games.id, purchase.gameId))
-      .limit(1);
-
-    if (game) {
-      await db
-        .update(games)
-        .set({ downloadCount: Math.max(0, game.downloadCount - 1) })
-        .where(eq(games.id, purchase.gameId));
-    }
-
-    logger.info(`Refund processed for purchase ${purchaseId}`, {
+    logger.info(`Refund requested for purchase ${purchaseId}`, {
       component: 'Purchases',
       userId: authReq.user!.id,
       gameId: purchase.gameId,
+      status: 'pending_refund',
     });
 
     res.json({
       success: true,
       data: {
-        purchase: refundedPurchase,
-        message: 'Refund processed successfully',
+        purchase: pendingRefund,
+        message: 'Refund request submitted. An administrator will review your request.',
       },
     });
   } catch (error) {
     logger.error('Refund error', error as Error, { component: 'Purchases' });
     res.status(500).json({ success: false, error: 'Failed to process refund' });
-  }
-});
-
-// Get purchase statistics
-router.get('/stats/summary', async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-
-    const allPurchases = await db
-      .select()
-      .from(purchases)
-      .where(eq(purchases.userId, authReq.user!.id));
-
-    const completedPurchases = allPurchases.filter(
-      (p) => p.status === 'completed'
-    );
-    const refundedPurchases = allPurchases.filter((p) => p.status === 'refunded');
-
-    const totalSpent = completedPurchases.reduce(
-      (sum, p) => sum + p.amount,
-      0
-    );
-    const totalRefunded = refundedPurchases.reduce(
-      (sum, p) => sum + p.amount,
-      0
-    );
-
-    res.json({
-      success: true,
-      data: {
-        totalPurchases: allPurchases.length,
-        completedPurchases: completedPurchases.length,
-        refundedPurchases: refundedPurchases.length,
-        totalSpentCents: totalSpent,
-        totalRefundedCents: totalRefunded,
-        netSpentCents: totalSpent - totalRefunded,
-      },
-    });
-  } catch (error) {
-    logger.error('Get purchase stats error', error as Error, { component: 'Purchases' });
-    res.status(500).json({ success: false, error: 'Failed to fetch purchase stats' });
   }
 });
 
