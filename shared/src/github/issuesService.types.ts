@@ -43,3 +43,25 @@ export interface UpdateIssueOptions {
   title?: string;
   body?: string;
 }
+
+export interface IssueComment {
+  id: number;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  user?: {
+    login: string;
+  };
+}
+
+/**
+ * Parsed information from auto-task comments on issues
+ */
+export interface AutoTaskCommentInfo {
+  sessionId?: string;
+  sessionUrl?: string;
+  branchName?: string;
+  prNumber?: number;
+  type: 'started' | 'rework' | 'complete' | 'failed' | 'review' | 'conflict' | 'unknown';
+  createdAt: string;
+}

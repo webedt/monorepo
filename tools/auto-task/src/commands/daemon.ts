@@ -3,12 +3,11 @@
  * Runs continuous task processing loop
  *
  * Reads tasks directly from GitHub Project (source of truth).
- * Uses minimal local state only for tracking active Claude sessions.
+ * Session tracking is done via GitHub issue comments - no local state.
  */
 
 import { Command } from 'commander';
 import * as path from 'path';
-import * as fs from 'fs';
 import {
   TodoScannerService,
   GitHubIssuesService,
@@ -22,22 +21,7 @@ import type { ClaudeAuth } from '@webedt/shared';
 import type { ClaudeSessionEvent } from '@webedt/shared';
 import type { ReviewIssue } from '@webedt/shared';
 import type { ProjectItem } from '@webedt/shared';
-
-/**
- * Minimal session tracking - stored locally since GitHub can't hold session IDs
- */
-interface ActiveSession {
-  issueNumber: number;
-  sessionId: string;
-  branchName?: string;
-  prNumber?: number;
-  startedAt: string;
-}
-
-interface SessionCache {
-  sessions: ActiveSession[];
-  lastUpdated: string;
-}
+import type { AutoTaskCommentInfo } from '@webedt/shared';
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -99,9 +83,6 @@ export const daemonCommand = new Command('daemon')
       ),
     };
 
-    // Session cache file path
-    const sessionCachePath = path.join(rootDir, '.auto-task-sessions.json');
-
     const context: DaemonContext = {
       rootDir,
       owner,
@@ -111,7 +92,6 @@ export const daemonCommand = new Command('daemon')
       projectCache,
       claudeAuth: claudeCreds ?? undefined,
       githubToken: githubCreds.token,
-      sessionCachePath,
       maxReady,
       maxInProgress,
     };
@@ -161,43 +141,8 @@ interface DaemonContext {
   };
   claudeAuth?: ClaudeAuth;
   githubToken: string;
-  sessionCachePath: string;
   maxReady: number;
   maxInProgress: number;
-}
-
-// Session cache helpers
-function loadSessionCache(cachePath: string): SessionCache {
-  try {
-    if (fs.existsSync(cachePath)) {
-      return JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return { sessions: [], lastUpdated: new Date().toISOString() };
-}
-
-function saveSessionCache(cachePath: string, cache: SessionCache): void {
-  cache.lastUpdated = new Date().toISOString();
-  fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));
-}
-
-function getActiveSession(cache: SessionCache, issueNumber: number): ActiveSession | undefined {
-  return cache.sessions.find((s) => s.issueNumber === issueNumber);
-}
-
-function upsertSession(cache: SessionCache, session: ActiveSession): void {
-  const idx = cache.sessions.findIndex((s) => s.issueNumber === session.issueNumber);
-  if (idx >= 0) {
-    cache.sessions[idx] = session;
-  } else {
-    cache.sessions.push(session);
-  }
-}
-
-function removeSession(cache: SessionCache, issueNumber: number): void {
-  cache.sessions = cache.sessions.filter((s) => s.issueNumber !== issueNumber);
 }
 
 async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
@@ -349,7 +294,7 @@ async function startTasks(
   inProgressCount: number,
   maxInProgress: number
 ): Promise<void> {
-  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, sessionCachePath } = ctx;
+  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo } = ctx;
 
   if (!claudeAuth) {
     console.log('   Skipping: No Claude credentials');
@@ -387,9 +332,6 @@ async function startTasks(
     environmentId,
   });
 
-  // Load session cache
-  const sessionCache = loadSessionCache(sessionCachePath);
-
   for (const item of toStart) {
     if (!item.number) continue;
 
@@ -406,20 +348,20 @@ async function startTasks(
       const issue = await issuesService.getIssue(owner, repo, item.number);
       const gitUrl = `https://github.com/${owner}/${repo}`;
 
-      // Check if this is a re-work (check session cache for existing branch/PR)
-      const existingSession = getActiveSession(sessionCache, item.number);
-      const isRework = !!existingSession?.branchName && !!existingSession?.prNumber;
+      // Check if this is a re-work by looking at previous comments
+      const previousInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      const isRework = previousInfo?.branchName && previousInfo?.prNumber;
 
-      const prompt = isRework && existingSession
-        ? buildReworkPrompt(existingSession, item, issue)
+      const prompt = isRework && previousInfo
+        ? buildReworkPrompt(previousInfo, item, issue)
         : buildTaskPrompt(issue.title, issue.body);
 
       console.log(`   Starting #${item.number}: ${item.title.slice(0, 40)}...`);
       console.log(`   ${isRework ? 'Re-work' : 'New task'}`);
 
       // Create Claude session
-      const branchPrefix = isRework && existingSession?.branchName
-        ? existingSession.branchName
+      const branchPrefix = isRework && previousInfo?.branchName
+        ? previousInfo.branchName
         : `claude/issue-${item.number}`;
 
       const { sessionId, webUrl } = await claudeClient.createSession({
@@ -429,22 +371,12 @@ async function startTasks(
         title: `${isRework ? 'Rework' : 'Issue'} #${item.number}: ${issue.title.slice(0, 50)}`,
       });
 
-      // Store session in cache
-      upsertSession(sessionCache, {
-        issueNumber: item.number,
-        sessionId,
-        branchName: existingSession?.branchName,
-        prNumber: existingSession?.prNumber,
-        startedAt: new Date().toISOString(),
-      });
-      saveSessionCache(sessionCachePath, sessionCache);
-
       console.log(`   Session created: ${sessionId}`);
       console.log(`   View at: ${webUrl}`);
 
-      // Add comment to issue with session link
-      const commentBody = isRework && existingSession
-        ? `### 🔄 Re-work\n\nAddressing code review feedback.\n\n**Session:** [View in Claude](${webUrl})\n**Branch:** \`${existingSession.branchName}\`\n**PR:** #${existingSession.prNumber}`
+      // Add comment to issue with session link (this IS our session tracking)
+      const commentBody = isRework && previousInfo
+        ? `### 🔄 Re-work\n\nAddressing code review feedback.\n\n**Session:** [View in Claude](${webUrl})\n**Branch:** \`${previousInfo.branchName}\`\n**PR:** #${previousInfo.prNumber}`
         : `### 🤖 Auto-Task Started\n\nClaude is working on this issue.\n\n**Session:** [View in Claude](${webUrl})`;
 
       await issuesService.addComment(owner, repo, item.number, commentBody);
@@ -483,7 +415,7 @@ function buildTaskPrompt(title: string, body?: string): string {
 }
 
 function buildReworkPrompt(
-  session: ActiveSession,
+  previousInfo: AutoTaskCommentInfo,
   item: ProjectItem,
   issue: { title: string; body?: string }
 ): string {
@@ -495,14 +427,14 @@ The previous implementation for this task received code review feedback that nee
 
 **Task:** ${cleanTitle}
 
-**Existing Branch:** \`${session.branchName}\`
-**PR:** #${session.prNumber}
+**Existing Branch:** \`${previousInfo.branchName}\`
+**PR:** #${previousInfo.prNumber}
 
 ---
 
 **Instructions:**
-1. Check out the existing branch \`${session.branchName}\`
-2. Review the code review comments on PR #${session.prNumber}
+1. Check out the existing branch \`${previousInfo.branchName}\`
+2. Review the code review comments on PR #${previousInfo.prNumber}
 3. Address all the feedback and issues raised
 4. Commit your changes with a message like "Address code review feedback"
 5. Push the updated branch
@@ -560,7 +492,7 @@ function formatReviewIssuesForComment(issues: ReviewIssue[]): string {
 }
 
 async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[]): Promise<void> {
-  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, githubToken, sessionCachePath } = ctx;
+  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, githubToken } = ctx;
 
   if (inProgress.length === 0) {
     console.log('   No tasks in progress');
@@ -588,16 +520,13 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
     environmentId,
   });
 
-  // Load session cache
-  const sessionCache = loadSessionCache(sessionCachePath);
-
   for (const item of inProgress) {
     if (!item.number) continue;
 
-    // Get session from cache
-    const activeSession = getActiveSession(sessionCache, item.number);
-    if (!activeSession?.sessionId) {
-      console.log(`   #${item.number}: No session ID in cache, skipping`);
+    // Get session info from GitHub comments
+    const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+    if (!taskInfo?.sessionId) {
+      console.log(`   #${item.number}: No session ID found in comments, skipping`);
       continue;
     }
 
@@ -605,19 +534,19 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
       console.log(`   Checking #${item.number}...`);
 
       // Get session status
-      const session = await claudeClient.getSession(activeSession.sessionId);
+      const session = await claudeClient.getSession(taskInfo.sessionId);
       console.log(`   Status: ${session.session_status}`);
 
       if (session.session_status === 'completed' || session.session_status === 'idle') {
         // Session is done - check for branch/PR info
-        const events = await claudeClient.getEvents(activeSession.sessionId);
-        const branchName = extractBranchFromEvents(events.data, session);
+        const events = await claudeClient.getEvents(taskInfo.sessionId);
+        const branchName = taskInfo.branchName || extractBranchFromEvents(events.data, session);
 
         if (branchName) {
           console.log(`   Branch: ${branchName}`);
 
           // Check if PR exists for this branch
-          let prNumber = await findPRForBranch(owner, repo, branchName, githubToken);
+          let prNumber = taskInfo.prNumber || await findPRForBranch(owner, repo, branchName, githubToken);
 
           if (!prNumber) {
             // No PR exists - create one
@@ -645,21 +574,11 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
                   backlogId
                 );
               }
-              removeSession(sessionCache, item.number);
-              saveSessionCache(sessionCachePath, sessionCache);
               continue;
             }
           } else {
             console.log(`   PR #${prNumber} found`);
           }
-
-          // Update session cache with branch/PR info
-          upsertSession(sessionCache, {
-            ...activeSession,
-            branchName,
-            prNumber,
-          });
-          saveSessionCache(sessionCachePath, sessionCache);
 
           // Move to In Review
           if (inReviewId) {
@@ -672,7 +591,7 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           }
           console.log(`   Moved to In Review`);
 
-          // Add comment to issue
+          // Add comment to issue with branch/PR info (for future lookups)
           await issuesService.addComment(
             owner,
             repo,
@@ -699,8 +618,6 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
               backlogId
             );
           }
-          removeSession(sessionCache, item.number);
-          saveSessionCache(sessionCachePath, sessionCache);
 
           // Add failure comment
           await issuesService.addComment(
@@ -721,8 +638,6 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
             backlogId
           );
         }
-        removeSession(sessionCache, item.number);
-        saveSessionCache(sessionCachePath, sessionCache);
 
         // Add failure comment
         await issuesService.addComment(
@@ -862,7 +777,7 @@ Closes #${issueNumber}
 }
 
 async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[]): Promise<void> {
-  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, githubToken, sessionCachePath } = ctx;
+  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, githubToken } = ctx;
 
   if (inReview.length === 0) {
     console.log('   No tasks to review');
@@ -886,24 +801,21 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
     githubToken
   );
 
-  // Load session cache
-  const sessionCache = loadSessionCache(sessionCachePath);
-
   for (const item of inReview) {
     if (!item.number) continue;
 
-    // Get session from cache to find PR number
-    const activeSession = getActiveSession(sessionCache, item.number);
-    if (!activeSession?.prNumber) {
-      console.log(`   #${item.number}: No PR found in cache, skipping review`);
+    // Get task info from GitHub comments to find PR number
+    const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+    if (!taskInfo?.prNumber) {
+      console.log(`   #${item.number}: No PR found in comments, skipping review`);
       continue;
     }
 
     try {
-      console.log(`   Reviewing PR #${activeSession.prNumber} for issue #${item.number}...`);
+      console.log(`   Reviewing PR #${taskInfo.prNumber} for issue #${item.number}...`);
 
       // Run code review
-      const result = await reviewer.reviewPR(owner, repo, activeSession.prNumber, {
+      const result = await reviewer.reviewPR(owner, repo, taskInfo.prNumber, {
         autoApprove: true,
         strict: false,
       });
@@ -912,7 +824,7 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
       console.log(`   Issues found: ${result.issues.length}`);
 
       // Submit the review to GitHub
-      await reviewer.submitReview(owner, repo, activeSession.prNumber, result);
+      await reviewer.submitReview(owner, repo, taskInfo.prNumber, result);
       console.log(`   Review submitted to GitHub`);
 
       if (result.approved) {
@@ -920,8 +832,8 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
         const mergeResult = await checkAndMergePR(
           owner,
           repo,
-          activeSession.prNumber,
-          activeSession.branchName,
+          taskInfo.prNumber,
+          taskInfo.branchName,
           githubToken,
           claudeAuth,
           process.env.CLAUDE_ENVIRONMENT_ID || ''
@@ -944,35 +856,26 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
           await issuesService.closeIssue(owner, repo, item.number);
           console.log(`   Moved to Done, issue closed`);
 
-          // Remove from session cache (task complete)
-          removeSession(sessionCache, item.number);
-          saveSessionCache(sessionCachePath, sessionCache);
-
           // Add completion comment
           await issuesService.addComment(
             owner,
             repo,
             item.number,
-            `### 🎉 Task Complete\n\nPR #${activeSession.prNumber} has been reviewed, approved, and merged.\n\nThis issue is now closed.`
+            `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.\n\nThis issue is now closed.`
           );
         } else if (mergeResult.hasConflicts) {
           // Has merge conflicts - needs resolution
           console.log(`   PR has merge conflicts: ${mergeResult.reason}`);
 
           if (mergeResult.conflictResolutionStarted) {
-            // Claude is fixing conflicts, update session ID
+            // Claude is fixing conflicts - add comment with new session
             console.log(`   Conflict resolution session started`);
-            upsertSession(sessionCache, {
-              ...activeSession,
-              sessionId: mergeResult.sessionId!,
-            });
-            saveSessionCache(sessionCachePath, sessionCache);
 
             await issuesService.addComment(
               owner,
               repo,
               item.number,
-              `### 🔧 Resolving Merge Conflicts\n\nPR #${activeSession.prNumber} has merge conflicts. Claude is working on resolving them.`
+              `### 🔧 Resolving Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts. Claude is working on resolving them.\n\n**Session:** [View in Claude](https://claude.ai/code/${mergeResult.sessionId})\n**Branch:** \`${taskInfo.branchName}\`\n**PR:** #${taskInfo.prNumber}`
             );
           } else {
             // Failed to start conflict resolution - move back to ready
@@ -991,7 +894,7 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
               owner,
               repo,
               item.number,
-              `### ⚠️ Merge Conflicts\n\nPR #${activeSession.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+              `### ⚠️ Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
             );
           }
         } else {
@@ -1020,7 +923,7 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
           owner,
           repo,
           item.number,
-          `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${activeSession.prNumber} is being sent back for re-work.`
+          `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${taskInfo.prNumber} is being sent back for re-work.`
         );
       }
     } catch (error) {

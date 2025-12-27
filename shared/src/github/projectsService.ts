@@ -139,7 +139,7 @@ export class GitHubProjectsService {
       const content = item.content;
       return {
         id: item.id,
-        contentId: content?.id || content?.databaseId?.toString() || '',
+        contentId: content?.id || '',
         contentType: (content?.__typename || 'DraftIssue') as 'Issue' | 'PullRequest' | 'DraftIssue',
         title: content?.title || 'Draft',
         status: statusField?.name,
@@ -388,7 +388,7 @@ const LIST_ITEMS_QUERY = `
                 }
               }
               ... on DraftIssue {
-                id: databaseId
+                id
                 title
                 body
                 __typename
@@ -486,7 +486,6 @@ interface ListItemsResponse {
         id: string;
         content: {
           id?: string;
-          databaseId?: number;
           number?: number;
           title?: string;
           body?: string;

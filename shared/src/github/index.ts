@@ -19,6 +19,8 @@ export type {
   CreateIssueResult,
   ListIssuesOptions,
   UpdateIssueOptions,
+  IssueComment,
+  AutoTaskCommentInfo,
 } from './issuesService.types.js';
 
 // Projects v2 Service

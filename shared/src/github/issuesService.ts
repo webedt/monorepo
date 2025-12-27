@@ -11,6 +11,8 @@ import type { CreateIssueOptions } from './issuesService.types.js';
 import type { CreateIssueResult } from './issuesService.types.js';
 import type { ListIssuesOptions } from './issuesService.types.js';
 import type { UpdateIssueOptions } from './issuesService.types.js';
+import type { IssueComment } from './issuesService.types.js';
+import type { AutoTaskCommentInfo } from './issuesService.types.js';
 
 export class GitHubIssuesService {
   private octokit: Octokit;
@@ -227,4 +229,117 @@ export class GitHubIssuesService {
       body,
     });
   }
+
+  async listComments(
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<IssueComment[]> {
+    logger.debug('Listing comments for issue', {
+      component: 'GitHubIssuesService',
+      owner,
+      repo,
+      issueNumber,
+    });
+
+    const { data: comments } = await this.octokit.issues.listComments({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      per_page: 100,
+    });
+
+    return comments.map((comment) => ({
+      id: comment.id,
+      body: comment.body || '',
+      createdAt: comment.created_at,
+      updatedAt: comment.updated_at,
+      user: comment.user ? { login: comment.user.login } : undefined,
+    }));
+  }
+
+  /**
+   * Get the latest auto-task session info from issue comments
+   * Parses comments looking for session URLs, branch names, and PR numbers
+   */
+  async getLatestAutoTaskInfo(
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<AutoTaskCommentInfo | undefined> {
+    const comments = await this.listComments(owner, repo, issueNumber);
+
+    // Process comments in reverse order (newest first)
+    for (let i = comments.length - 1; i >= 0; i--) {
+      const info = parseAutoTaskComment(comments[i]);
+      if (info) {
+        return info;
+      }
+    }
+
+    return undefined;
+  }
+}
+
+/**
+ * Parse an auto-task comment to extract session/branch/PR info
+ */
+function parseAutoTaskComment(comment: IssueComment): AutoTaskCommentInfo | undefined {
+  const body = comment.body;
+
+  // Check if this is an auto-task comment
+  if (!body.includes('Auto-Task') && !body.includes('Claude') && !body.includes('Session:')) {
+    return undefined;
+  }
+
+  const info: AutoTaskCommentInfo = {
+    type: 'unknown',
+    createdAt: comment.createdAt,
+  };
+
+  // Determine comment type based on headers
+  if (body.includes('🤖 Auto-Task Started') || body.includes('Claude is working on this issue')) {
+    info.type = 'started';
+  } else if (body.includes('🔄 Re-work') || body.includes('Addressing code review feedback')) {
+    info.type = 'rework';
+  } else if (body.includes('✅ Implementation Complete') || body.includes('has finished working')) {
+    info.type = 'complete';
+  } else if (body.includes('❌ Session Failed') || body.includes('⚠️ Session Issue')) {
+    info.type = 'failed';
+  } else if (body.includes('🔄 Review Feedback') || body.includes('Code review found')) {
+    info.type = 'review';
+  } else if (body.includes('🔧 Resolving Merge Conflicts') || body.includes('⚠️ Merge Conflicts')) {
+    info.type = 'conflict';
+  } else if (body.includes('🎉 Task Complete')) {
+    info.type = 'complete';
+  }
+
+  // Extract session URL and ID
+  // Pattern: [View in Claude](https://claude.ai/code/session_xxx)
+  const sessionMatch = body.match(/\[View in Claude\]\((https:\/\/claude\.ai\/code\/(session_[a-zA-Z0-9]+))\)/);
+  if (sessionMatch) {
+    info.sessionUrl = sessionMatch[1];
+    info.sessionId = sessionMatch[2];
+  }
+
+  // Extract branch name
+  // Pattern: **Branch:** `branch-name`
+  const branchMatch = body.match(/\*\*Branch:\*\*\s*`([^`]+)`/);
+  if (branchMatch) {
+    info.branchName = branchMatch[1];
+  }
+
+  // Extract PR number
+  // Pattern: **PR:** #123 or PR #123
+  const prMatch = body.match(/\*\*PR:\*\*\s*#(\d+)|PR\s*#(\d+)/);
+  if (prMatch) {
+    info.prNumber = parseInt(prMatch[1] || prMatch[2], 10);
+  }
+
+  // Only return if we found something useful
+  if (info.sessionId || info.branchName || info.prNumber || info.type !== 'unknown') {
+    return info;
+  }
+
+  return undefined;
 }
