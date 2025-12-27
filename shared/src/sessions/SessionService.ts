@@ -58,15 +58,22 @@ export function mapRemoteStatus(anthropicStatus: string): string {
 }
 
 /**
- * Type guard to validate remote session response structure
+ * Type for validated remote session fields.
+ * Only includes fields that are actually validated by the type guard.
  */
-function isValidRemoteSession(obj: unknown): obj is {
+interface ValidatedRemoteSession {
   session_status: string;
   updated_at: string;
-  session_context?: {
-    outcomes?: Array<{ type: string; git_info?: { branches?: string[] } }>;
-  };
-} {
+  // session_context is not validated, typed as unknown for safe access
+  session_context?: unknown;
+}
+
+/**
+ * Type guard to validate required remote session fields.
+ * Only validates session_status and updated_at - session_context must be
+ * safely accessed with optional chaining after validation.
+ */
+function isValidRemoteSession(obj: unknown): obj is ValidatedRemoteSession {
   if (typeof obj !== 'object' || obj === null) {
     return false;
   }
@@ -428,15 +435,16 @@ export class SessionService extends ASession {
       }
 
       const remoteSession = remoteSessionResponse;
-      const newStatus = this.mapRemoteStatus(remoteSession.session_status);
+      const newStatus = mapRemoteStatus(remoteSession.session_status);
 
       // Fetch remote events
       const eventsResponse = await client.getEvents(session.remoteSessionId);
       const remoteEvents = eventsResponse.data || [];
 
       // Get existing event UUIDs for this session
-      // Note: We fetch eventData to extract UUIDs. A future optimization could add
-      // a dedicated uuid column to the events table for more efficient queries.
+      // TODO(perf): Currently fetches all eventData to extract UUIDs. For sessions with
+      // many events, this can be slow. Consider adding a dedicated 'uuid' column to the
+      // events table with an index for more efficient deduplication queries.
       const existingEvents = await db
         .select({ eventData: events.eventData })
         .from(events)
@@ -459,10 +467,13 @@ export class SessionService extends ASession {
         totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
       }
 
-      // Extract branch from session context
+      // Extract branch from session context (safely access unvalidated structure)
       let branch: string | undefined = session.branch ?? undefined;
-      const gitOutcome = remoteSession.session_context?.outcomes?.find(
-        (o: { type: string }) => o.type === 'git_repository'
+      const sessionContext = remoteSession.session_context as {
+        outcomes?: Array<{ type: string; git_info?: { branches?: string[] } }>;
+      } | undefined;
+      const gitOutcome = sessionContext?.outcomes?.find(
+        (o) => o.type === 'git_repository'
       );
       if (gitOutcome?.git_info?.branches?.[0]) {
         branch = gitOutcome.git_info.branches[0];
@@ -496,13 +507,15 @@ export class SessionService extends ASession {
       // Update session and insert events in a transaction for consistency
       if (hasChanges) {
         await db.transaction(async (tx) => {
-          // Insert new events
-          for (const event of eventsToInsert) {
-            await tx.insert(events).values({
-              chatSessionId: sessionId,
-              eventData: event,
-              timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-            });
+          // Batch insert new events for better performance
+          if (eventsToInsert.length > 0) {
+            await tx.insert(events).values(
+              eventsToInsert.map(event => ({
+                chatSessionId: sessionId,
+                eventData: event,
+                timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
+              }))
+            );
           }
 
           // Update session with new values
@@ -555,13 +568,6 @@ export class SessionService extends ASession {
       // Return current state on error
       return this.mapSessionToInfo(session);
     }
-  }
-
-  /**
-   * Map Anthropic session status to our internal status
-   */
-  mapRemoteStatus(anthropicStatus: string): string {
-    return mapRemoteStatus(anthropicStatus);
   }
 
   /**
