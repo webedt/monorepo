@@ -94,7 +94,7 @@ export {
 
 // Claude Web Client (from claudeWeb/)
 export { AClaudeWebClient } from '../../claudeWeb/AClaudeWebClient.js';
-export type { ClaudeWebClientConfig } from '../../claudeWeb/types.js';
+export type { ClaudeWebClientConfig, IsCompleteResult } from '../../claudeWeb/types.js';
 
 // Git services (from github/)
 export { AGitHelper } from '../../github/AGitHelper.js';

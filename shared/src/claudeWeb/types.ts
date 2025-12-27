@@ -357,3 +357,17 @@ export interface ListSessionsResponse {
   last_id?: string;
   has_more: boolean;
 }
+
+/**
+ * Result from isComplete() check
+ */
+export interface IsCompleteResult {
+  /** Whether the session has completed execution */
+  isComplete: boolean;
+  /** Current session status from API */
+  status: string;
+  /** Human-readable reason for the completion state */
+  reason?: string;
+  /** Whether a result event was found (when checkEvents is true) */
+  hasResultEvent?: boolean;
+}

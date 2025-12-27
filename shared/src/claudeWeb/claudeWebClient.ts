@@ -13,6 +13,7 @@ import type { SessionResult } from './types.js';
 import type { EventCallback } from './types.js';
 import type { PollOptions } from './types.js';
 import type { RawMessageCallback } from './types.js';
+import type { IsCompleteResult } from './types.js';
 import { ClaudeRemoteError } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
@@ -840,7 +841,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
   async isComplete(
     sessionId: string,
     checkEvents: boolean = true
-  ): Promise<{ isComplete: boolean; status: string; reason?: string; hasResultEvent?: boolean }> {
+  ): Promise<IsCompleteResult> {
     const session = await this.getSession(sessionId);
     const status = session.session_status;
 
@@ -859,10 +860,9 @@ export class ClaudeWebClient extends AClaudeWebClient {
     if (checkEvents) {
       try {
         const events = await this.getEvents(sessionId);
-        const hasResultEvent = events.data?.some(event => {
-          const eventType = String(event.type || '').toLowerCase();
-          return eventType === 'result';
-        });
+        const hasResultEvent = events.data?.some(event =>
+          event.type?.toLowerCase() === 'result'
+        );
 
         if (hasResultEvent) {
           return {
@@ -875,7 +875,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
         return { isComplete: false, status, hasResultEvent: false };
       } catch {
-        // If we can't check events, fall through to status-based check
+        // Event fetch can fail for various transient reasons (network issues, rate limits).
+        // Fall back to status-based check rather than failing the entire isComplete call.
         return { isComplete: false, status };
       }
     }

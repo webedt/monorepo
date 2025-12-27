@@ -17,6 +17,7 @@ import type { ListSessionsResponse } from './types.js';
 import type { SessionResult } from './types.js';
 import type { EventCallback } from './types.js';
 import type { PollOptions } from './types.js';
+import type { IsCompleteResult } from './types.js';
 
 export type { ClaudeWebClientConfig } from './types.js';
 
@@ -638,5 +639,5 @@ export interface IClaudeWebClientDocumentation {
   isComplete(
     sessionId: string,
     checkEvents?: boolean
-  ): Promise<{ isComplete: boolean; status: string; reason?: string; hasResultEvent?: boolean }>;
+  ): Promise<IsCompleteResult>;
 }

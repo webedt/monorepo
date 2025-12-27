@@ -10,6 +10,7 @@ import type { SessionResult } from './types.js';
 import type { EventCallback } from './types.js';
 import type { PollOptions } from './types.js';
 import type { RawMessageCallback } from './types.js';
+import type { IsCompleteResult } from './types.js';
 
 export abstract class AClaudeWebClient extends AService implements IClaudeWebClientDocumentation {
   override readonly order: number = 50;
@@ -119,5 +120,5 @@ export abstract class AClaudeWebClient extends AService implements IClaudeWebCli
   abstract isComplete(
     sessionId: string,
     checkEvents?: boolean
-  ): Promise<{ isComplete: boolean; status: string; reason?: string; hasResultEvent?: boolean }>;
+  ): Promise<IsCompleteResult>;
 }
