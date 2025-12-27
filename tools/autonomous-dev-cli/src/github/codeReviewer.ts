@@ -12,6 +12,7 @@ import {
   ErrorCode,
   createGitHubErrorFromResponse,
 } from '../utils/errors.js';
+import type { DegradedResult } from './issues.js';
 
 /**
  * File change in a pull request
@@ -123,14 +124,6 @@ export interface CodeReviewOptions {
   customInstructions?: string;
   /** Whether to include inline comments */
   includeInlineComments?: boolean;
-}
-
-/**
- * Result type for operations that support graceful degradation
- */
-export interface DegradedResult<T> {
-  value: T;
-  degraded: boolean;
 }
 
 /**
