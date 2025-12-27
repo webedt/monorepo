@@ -34,6 +34,14 @@ export interface ProjectItem {
   title: string;
   status?: string;
   statusOptionId?: string;
+  /** Issue/PR number (for Issues and PRs) */
+  number?: number;
+  /** Issue/PR state (OPEN, CLOSED, MERGED) */
+  state?: string;
+  /** Issue/PR body */
+  body?: string;
+  /** Labels on the issue/PR */
+  labels?: string[];
 }
 
 export interface AddItemResult {

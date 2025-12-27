@@ -206,4 +206,25 @@ export class GitHubIssuesService {
       labels,
     });
   }
+
+  async addComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string
+  ): Promise<void> {
+    logger.info('Adding comment to issue', {
+      component: 'GitHubIssuesService',
+      owner,
+      repo,
+      issueNumber,
+    });
+
+    await this.octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      body,
+    });
+  }
 }

@@ -2,3 +2,6 @@ node_modules
 dist
 .env
 *.har
+
+# Auto-task session cache (ephemeral, per-machine)
+.auto-task-sessions.json

@@ -136,13 +136,18 @@ export class GitHubProjectsService {
         (fv) => fv?.field?.name === 'Status'
       );
 
+      const content = item.content;
       return {
         id: item.id,
-        contentId: item.content?.id || '',
-        contentType: item.content?.__typename || 'DraftIssue',
-        title: item.content?.title || 'Draft',
+        contentId: content?.id || content?.databaseId?.toString() || '',
+        contentType: (content?.__typename || 'DraftIssue') as 'Issue' | 'PullRequest' | 'DraftIssue',
+        title: content?.title || 'Draft',
         status: statusField?.name,
         statusOptionId: statusField?.optionId,
+        number: content?.number,
+        state: content?.state,
+        body: content?.body,
+        labels: content?.labels?.nodes?.map((l) => l.name) || [],
       } as ProjectItem;
     });
 
@@ -212,6 +217,32 @@ export class GitHubProjectsService {
   ): Promise<void> {
     const { fieldId, optionId } = await this.getStatusOptionId(projectId, statusName);
     await this.updateItemStatus(projectId, itemId, fieldId, optionId);
+  }
+
+  /**
+   * Get project items grouped by status column
+   */
+  async getItemsByStatus(projectId: string): Promise<Map<string, ProjectItem[]>> {
+    const items = await this.listProjectItems(projectId);
+    const byStatus = new Map<string, ProjectItem[]>();
+
+    for (const item of items) {
+      const status = item.status?.toLowerCase() || 'no status';
+      if (!byStatus.has(status)) {
+        byStatus.set(status, []);
+      }
+      byStatus.get(status)!.push(item);
+    }
+
+    return byStatus;
+  }
+
+  /**
+   * Find a project item by issue number
+   */
+  async findItemByIssueNumber(projectId: string, issueNumber: number): Promise<ProjectItem | undefined> {
+    const items = await this.listProjectItems(projectId);
+    return items.find((item) => item.number === issueNumber);
   }
 
   private mapProject(projectData: ProjectV2Data): Project {
@@ -336,17 +367,30 @@ const LIST_ITEMS_QUERY = `
             content {
               ... on Issue {
                 id
+                number
                 title
+                body
+                state
                 __typename
+                labels(first: 10) {
+                  nodes { name }
+                }
               }
               ... on PullRequest {
                 id
+                number
                 title
+                body
+                state
                 __typename
+                labels(first: 10) {
+                  nodes { name }
+                }
               }
               ... on DraftIssue {
                 id: databaseId
                 title
+                body
                 __typename
               }
             }
@@ -442,9 +486,15 @@ interface ListItemsResponse {
         id: string;
         content: {
           id?: string;
-          databaseId?: string;
+          databaseId?: number;
+          number?: number;
           title?: string;
+          body?: string;
+          state?: string;
           __typename: string;
+          labels?: {
+            nodes: Array<{ name: string }>;
+          };
         } | null;
         fieldValues: {
           nodes: Array<{

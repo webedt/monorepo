@@ -14,9 +14,12 @@ export interface TaskState {
   createdAt: string;
   updatedAt: string;
   sessionId?: string;
+  branchName?: string;
   prNumber?: number;
   errorCount: number;
   lastError?: string;
+  /** Review issues from last code review (for re-work context) */
+  lastReviewIssues?: string;
 }
 
 export interface ProjectCache {

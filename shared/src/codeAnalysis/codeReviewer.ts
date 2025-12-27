@@ -175,13 +175,32 @@ ${diff}
     const event = result.approved ? 'APPROVE' : 'REQUEST_CHANGES';
     const body = this.formatReviewBody(result);
 
-    await this.octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number: prNumber,
-      event,
-      body,
-    });
+    try {
+      await this.octokit.pulls.createReview({
+        owner,
+        repo,
+        pull_number: prNumber,
+        event,
+        body,
+      });
+    } catch (error) {
+      // Can't request changes or approve on own PR - post as comment instead
+      if (error instanceof Error && error.message.includes('own pull request')) {
+        logger.info('Cannot submit formal review on own PR, posting as comment', {
+          component: 'CodeReviewerService',
+          prNumber,
+        });
+
+        await this.octokit.issues.createComment({
+          owner,
+          repo,
+          issue_number: prNumber,
+          body: `## 🤖 Automated Code Review\n\n${body}`,
+        });
+        return;
+      }
+      throw error;
+    }
 
     // Add inline comments for each issue with file/line info
     for (const issue of result.issues) {

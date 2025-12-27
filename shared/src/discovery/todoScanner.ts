@@ -123,8 +123,9 @@ export class TodoScannerService {
 
       // Build regex pattern: TODO:, TODO(user):, TODO -, etc.
       // Must be preceded by comment markers (// or /* or # or <!-- or *)
+      // Requires a separator (: or - or ( ) after the keyword to avoid matching "bugs" in prose
       const patternRegex = new RegExp(
-        `(?:^\\s*(?:\\/\\/|\\/\\*|#|<!--|\\*)\\s*).*\\b(${patterns.join('|')})\\s*[:(-]?\\s*(.*)$`,
+        `(?:^\\s*(?:\\/\\/|\\/\\*|#|<!--|\\*)\\s*).*\\b(${patterns.join('|')})\\s*[:(-]\\s*(.+)$`,
         'i'
       );
 
@@ -134,10 +135,25 @@ export class TodoScannerService {
 
         if (match) {
           const rawType = match[1].toLowerCase();
-          const text = match[2].trim();
+          let text = match[2].trim();
+
+          // Clean up trailing comment markers
+          text = text.replace(/\*\/\s*$/, '').trim();
+          text = text.replace(/-->\s*$/, '').trim();
 
           // Skip empty TODO comments
           if (!text) continue;
+
+          // Skip low-quality matches (too short or just punctuation/fragments)
+          if (text.length < 10) continue;  // Require at least 10 chars for meaningful description
+          if (/^[a-z]\)?$/.test(text)) continue;  // Single letter like "s)" or "s"
+          if (/^[0-9'",;:\/\-\(\)\s]+$/.test(text)) continue;  // Just numbers/punctuation
+          if (/^(comments?\.?|etc\.?|s\)|s$)$/i.test(text)) continue;  // Common false positives
+          if (/^[,\s]/.test(text)) continue;  // Starts with comma or whitespace
+          if (/^[a-z]+[,\s]*\)/.test(text)) continue;  // Ends with closing paren fragment like "s)"
+          if (text.startsWith('Scanner') && text.includes('Service')) continue;  // Self-reference
+          if (/^[a-z]+ (from|or|and|for|to|in|of) /i.test(text) && text.length < 40) continue;  // Sentence fragments
+          if (/fix[,\/]/.test(text) && text.length < 20) continue;  // Partial fix references
 
           // Normalize type
           let type: DiscoveredTaskType;

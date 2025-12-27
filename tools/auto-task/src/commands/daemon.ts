@@ -1,13 +1,16 @@
 /**
  * Daemon Command
  * Runs continuous task processing loop
+ *
+ * Reads tasks directly from GitHub Project (source of truth).
+ * Uses minimal local state only for tracking active Claude sessions.
  */
 
 import { Command } from 'commander';
 import * as path from 'path';
+import * as fs from 'fs';
 import {
   TodoScannerService,
-  SpecReaderService,
   GitHubIssuesService,
   GitHubProjectsService,
   ClaudeWebClient,
@@ -15,10 +18,26 @@ import {
   getClaudeCredentials,
 } from '@webedt/shared';
 
-import { StateManager } from '../state/index.js';
-
 import type { ClaudeAuth } from '@webedt/shared';
-import type { TaskState } from '../state/types.js';
+import type { ClaudeSessionEvent } from '@webedt/shared';
+import type { ReviewIssue } from '@webedt/shared';
+import type { ProjectItem } from '@webedt/shared';
+
+/**
+ * Minimal session tracking - stored locally since GitHub can't hold session IDs
+ */
+interface ActiveSession {
+  issueNumber: number;
+  sessionId: string;
+  branchName?: string;
+  prNumber?: number;
+  startedAt: string;
+}
+
+interface SessionCache {
+  sessions: ActiveSession[];
+  lastUpdated: string;
+}
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -30,9 +49,13 @@ export const daemonCommand = new Command('daemon')
   .option('--root <path>', 'Repository root directory', process.cwd())
   .option('--poll-interval <ms>', 'Poll interval in milliseconds', parseInt)
   .option('--once', 'Run once and exit')
+  .option('--max-ready <n>', 'Max tasks in Ready column', parseInt)
+  .option('--max-in-progress <n>', 'Max tasks in In Progress', parseInt)
   .action(async (options) => {
     const rootDir = path.resolve(options.root);
     const pollInterval = options.pollInterval || POLL_INTERVAL_MS;
+    const maxReady = options.maxReady || 3;
+    const maxInProgress = options.maxInProgress || 3;
 
     console.log('\nAuto-Task Daemon Starting');
     console.log('='.repeat(60));
@@ -56,47 +79,41 @@ export const daemonCommand = new Command('daemon')
     console.log(`Repository: ${owner}/${repo}`);
     console.log(`Project: #${options.project}`);
     console.log(`Poll interval: ${pollInterval / 1000}s`);
+    console.log(`Max Ready: ${maxReady}, Max In Progress: ${maxInProgress}`);
     console.log('');
 
     // Initialize services
-    const stateManager = new StateManager(rootDir);
     const issuesService = new GitHubIssuesService(githubCreds.token);
     const projectsService = new GitHubProjectsService(githubCreds.token);
 
-    // Ensure project cache
-    let projectCache = stateManager.getProjectCache();
-    if (!stateManager.isProjectCacheValid()) {
-      console.log('Fetching project info...');
-      const project = await projectsService.getProject(owner, options.project);
-      const statusField = await projectsService.getStatusField(project.id);
+    // Fetch project info (always fresh from GitHub)
+    console.log('Fetching project info...');
+    const project = await projectsService.getProject(owner, options.project);
+    const statusField = await projectsService.getStatusField(project.id);
 
-      projectCache = {
-        projectId: project.id,
-        statusFieldId: statusField.fieldId,
-        statusOptions: Object.fromEntries(
-          statusField.options.map((o) => [o.name.toLowerCase(), o.id])
-        ),
-        cachedAt: new Date().toISOString(),
-      };
-      stateManager.setProjectCache(projectCache);
-    }
+    const projectCache = {
+      projectId: project.id,
+      statusFieldId: statusField.fieldId,
+      statusOptions: Object.fromEntries(
+        statusField.options.map((o) => [o.name.toLowerCase(), o.id])
+      ),
+    };
 
-    stateManager.setConfig({
-      owner,
-      repo,
-      projectNumber: options.project,
-    });
+    // Session cache file path
+    const sessionCachePath = path.join(rootDir, '.auto-task-sessions.json');
 
     const context: DaemonContext = {
       rootDir,
       owner,
       repo,
-      stateManager,
       issuesService,
       projectsService,
-      projectCache: projectCache!,
+      projectCache,
       claudeAuth: claudeCreds ?? undefined,
       githubToken: githubCreds.token,
+      sessionCachePath,
+      maxReady,
+      maxInProgress,
     };
 
     // Main loop
@@ -115,7 +132,6 @@ export const daemonCommand = new Command('daemon')
     while (running) {
       try {
         await runDaemonCycle(context);
-        stateManager.updateLastDaemonRun();
       } catch (error) {
         console.error('Daemon cycle error:', error);
       }
@@ -136,54 +152,100 @@ interface DaemonContext {
   rootDir: string;
   owner: string;
   repo: string;
-  stateManager: StateManager;
   issuesService: GitHubIssuesService;
   projectsService: GitHubProjectsService;
   projectCache: {
     projectId: string;
     statusFieldId: string;
     statusOptions: Record<string, string>;
-    cachedAt: string;
   };
   claudeAuth?: ClaudeAuth;
   githubToken: string;
+  sessionCachePath: string;
+  maxReady: number;
+  maxInProgress: number;
+}
+
+// Session cache helpers
+function loadSessionCache(cachePath: string): SessionCache {
+  try {
+    if (fs.existsSync(cachePath)) {
+      return JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return { sessions: [], lastUpdated: new Date().toISOString() };
+}
+
+function saveSessionCache(cachePath: string, cache: SessionCache): void {
+  cache.lastUpdated = new Date().toISOString();
+  fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));
+}
+
+function getActiveSession(cache: SessionCache, issueNumber: number): ActiveSession | undefined {
+  return cache.sessions.find((s) => s.issueNumber === issueNumber);
+}
+
+function upsertSession(cache: SessionCache, session: ActiveSession): void {
+  const idx = cache.sessions.findIndex((s) => s.issueNumber === session.issueNumber);
+  if (idx >= 0) {
+    cache.sessions[idx] = session;
+  } else {
+    cache.sessions.push(session);
+  }
+}
+
+function removeSession(cache: SessionCache, issueNumber: number): void {
+  cache.sessions = cache.sessions.filter((s) => s.issueNumber !== issueNumber);
 }
 
 async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
-  const { stateManager } = ctx;
-  const config = stateManager.getState().config;
+  const { projectsService, projectCache, maxReady, maxInProgress } = ctx;
 
   console.log('\n--- Daemon Cycle ---');
   console.log(new Date().toISOString());
 
-  // Step 1: Discover new tasks
+  // Get current project items from GitHub (source of truth)
+  console.log('\nFetching project items from GitHub...');
+  const itemsByStatus = await projectsService.getItemsByStatus(projectCache.projectId);
+
+  // Print current state
+  const statusCounts: Record<string, number> = {};
+  for (const [status, items] of itemsByStatus) {
+    statusCounts[status] = items.length;
+  }
+  console.log('Current status:', Object.entries(statusCounts).map(([k, v]) => `${k}:${v}`).join(' '));
+
+  // Get items by column
+  const backlog = itemsByStatus.get('backlog') || [];
+  const ready = itemsByStatus.get('ready') || [];
+  const inProgress = itemsByStatus.get('in progress') || [];
+  const inReview = itemsByStatus.get('in review') || [];
+
+  // Step 1: Discover new tasks (create issues, add to backlog)
   console.log('\n1. Discovering tasks...');
-  await discoverAndSync(ctx);
+  await discoverAndSync(ctx, backlog.length);
 
-  // Step 2: Move backlog -> ready (top 3 by priority)
+  // Step 2: Move backlog -> ready (top items up to maxReady)
   console.log('\n2. Moving tasks to Ready...');
-  await moveBacklogToReady(ctx, config.maxReady);
+  await moveBacklogToReady(ctx, backlog, ready.length, maxReady);
 
-  // Step 3: Move ready -> in_progress (max 3)
+  // Step 3: Start tasks from ready -> in_progress
   console.log('\n3. Starting task execution...');
-  await startTasks(ctx, config.maxInProgress);
+  await startTasks(ctx, ready, inProgress.length, maxInProgress);
 
   // Step 4: Check in_progress tasks
   console.log('\n4. Checking in-progress tasks...');
-  await checkInProgressTasks(ctx);
+  await checkInProgressTasks(ctx, inProgress);
 
   // Step 5: Review completed tasks
   console.log('\n5. Reviewing completed tasks...');
-  await reviewCompletedTasks(ctx);
-
-  // Print summary
-  const stats = stateManager.getStats();
-  console.log('\nStatus:', Object.entries(stats.byStatus).map(([k, v]) => `${k}:${v}`).join(' '));
+  await reviewCompletedTasks(ctx, inReview);
 }
 
-async function discoverAndSync(ctx: DaemonContext): Promise<void> {
-  const { rootDir, owner, repo, stateManager, issuesService, projectsService, projectCache } = ctx;
-  const backlogCount = stateManager.getTasks('backlog').length;
+async function discoverAndSync(ctx: DaemonContext, backlogCount: number): Promise<void> {
+  const { rootDir, owner, repo, issuesService, projectsService, projectCache } = ctx;
 
   // Check throttling
   if (backlogCount > 10) {
@@ -193,7 +255,7 @@ async function discoverAndSync(ctx: DaemonContext): Promise<void> {
   const todoScanner = new TodoScannerService();
   const todos = await todoScanner.scan(rootDir);
 
-  // Get existing issues
+  // Get existing issues with auto-task label
   const existingIssues = await issuesService.listIssues(owner, repo, {
     labels: ['auto-task'],
     state: 'open',
@@ -228,16 +290,7 @@ async function discoverAndSync(ctx: DaemonContext): Promise<void> {
         );
       }
 
-      stateManager.addTask({
-        issueNumber: issue.number,
-        issueNodeId: issue.nodeId,
-        projectItemId: itemId,
-        title,
-        status: 'backlog',
-        priority: todo.priority === 'critical' ? 200 : todo.priority === 'high' ? 100 : 50,
-        source: todo.type as 'todo' | 'spec' | 'analysis',
-      });
-
+      console.log(`   Created issue #${issue.number}: ${title.slice(0, 50)}...`);
       created++;
     } catch (error) {
       console.error(`   Failed to create issue: ${error}`);
@@ -247,10 +300,14 @@ async function discoverAndSync(ctx: DaemonContext): Promise<void> {
   console.log(`   Created ${created} new issues`);
 }
 
-async function moveBacklogToReady(ctx: DaemonContext, maxReady: number): Promise<void> {
-  const { stateManager, projectsService, projectCache } = ctx;
+async function moveBacklogToReady(
+  ctx: DaemonContext,
+  backlog: ProjectItem[],
+  readyCount: number,
+  maxReady: number
+): Promise<void> {
+  const { projectsService, projectCache } = ctx;
 
-  const readyCount = stateManager.getTasks('ready').length;
   const slotsAvailable = maxReady - readyCount;
 
   if (slotsAvailable <= 0) {
@@ -258,8 +315,11 @@ async function moveBacklogToReady(ctx: DaemonContext, maxReady: number): Promise
     return;
   }
 
-  const backlog = stateManager.getTasks('backlog')
-    .sort((a, b) => b.priority - a.priority)
+  // Sort by issue number (lower = older = higher priority) since we don't have priority stored
+  // Could also sort by labels or other criteria
+  const toMove = backlog
+    .filter((item) => item.contentType === 'Issue' && item.number)
+    .sort((a, b) => (a.number || 0) - (b.number || 0))
     .slice(0, slotsAvailable);
 
   const readyId = projectCache.statusOptions['ready'];
@@ -268,34 +328,34 @@ async function moveBacklogToReady(ctx: DaemonContext, maxReady: number): Promise
     return;
   }
 
-  for (const task of backlog) {
+  for (const item of toMove) {
     try {
-      if (task.projectItemId) {
-        await projectsService.updateItemStatus(
-          projectCache.projectId,
-          task.projectItemId,
-          projectCache.statusFieldId,
-          readyId
-        );
-      }
-
-      stateManager.updateTask(task.id, { status: 'ready' });
-      console.log(`   Moved #${task.issueNumber} to Ready`);
+      await projectsService.updateItemStatus(
+        projectCache.projectId,
+        item.id,
+        projectCache.statusFieldId,
+        readyId
+      );
+      console.log(`   Moved #${item.number} to Ready`);
     } catch (error) {
       console.error(`   Failed to move task: ${error}`);
     }
   }
 }
 
-async function startTasks(ctx: DaemonContext, maxInProgress: number): Promise<void> {
-  const { stateManager, projectsService, projectCache, claudeAuth, owner, repo } = ctx;
+async function startTasks(
+  ctx: DaemonContext,
+  ready: ProjectItem[],
+  inProgressCount: number,
+  maxInProgress: number
+): Promise<void> {
+  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, sessionCachePath } = ctx;
 
   if (!claudeAuth) {
     console.log('   Skipping: No Claude credentials');
     return;
   }
 
-  const inProgressCount = stateManager.getTasks('in_progress').length;
   const slotsAvailable = maxInProgress - inProgressCount;
 
   if (slotsAvailable <= 0) {
@@ -303,8 +363,9 @@ async function startTasks(ctx: DaemonContext, maxInProgress: number): Promise<vo
     return;
   }
 
-  const ready = stateManager.getTasks('ready')
-    .sort((a, b) => b.priority - a.priority)
+  // Filter to issues only and take available slots
+  const toStart = ready
+    .filter((item) => item.contentType === 'Issue' && item.number)
     .slice(0, slotsAvailable);
 
   const inProgressId = projectCache.statusOptions['in progress'];
@@ -313,67 +374,812 @@ async function startTasks(ctx: DaemonContext, maxInProgress: number): Promise<vo
     return;
   }
 
-  for (const task of ready) {
+  // Check for environment ID
+  const environmentId = process.env.CLAUDE_ENVIRONMENT_ID;
+  if (!environmentId) {
+    console.log('   Skipping: CLAUDE_ENVIRONMENT_ID not set');
+    return;
+  }
+
+  // Initialize Claude client
+  const claudeClient = new ClaudeWebClient({
+    accessToken: claudeAuth.accessToken,
+    environmentId,
+  });
+
+  // Load session cache
+  const sessionCache = loadSessionCache(sessionCachePath);
+
+  for (const item of toStart) {
+    if (!item.number) continue;
+
     try {
-      // Update status
-      if (task.projectItemId) {
-        await projectsService.updateItemStatus(
-          projectCache.projectId,
-          task.projectItemId,
-          projectCache.statusFieldId,
-          inProgressId
-        );
-      }
+      // Update status in GitHub Project
+      await projectsService.updateItemStatus(
+        projectCache.projectId,
+        item.id,
+        projectCache.statusFieldId,
+        inProgressId
+      );
 
-      stateManager.updateTask(task.id, { status: 'in_progress' });
+      // Get issue details for prompt
+      const issue = await issuesService.getIssue(owner, repo, item.number);
+      const gitUrl = `https://github.com/${owner}/${repo}`;
 
-      // Start Claude execution
-      console.log(`   Starting #${task.issueNumber}: ${task.title.slice(0, 40)}...`);
+      // Check if this is a re-work (check session cache for existing branch/PR)
+      const existingSession = getActiveSession(sessionCache, item.number);
+      const isRework = !!existingSession?.branchName && !!existingSession?.prNumber;
 
-      // TODO: Actually execute with ClaudeWebClient
-      // For now, just mark it
-      // const client = new ClaudeWebClient({...});
-      // const result = await client.execute({...});
+      const prompt = isRework && existingSession
+        ? buildReworkPrompt(existingSession, item, issue)
+        : buildTaskPrompt(issue.title, issue.body);
+
+      console.log(`   Starting #${item.number}: ${item.title.slice(0, 40)}...`);
+      console.log(`   ${isRework ? 'Re-work' : 'New task'}`);
+
+      // Create Claude session
+      const branchPrefix = isRework && existingSession?.branchName
+        ? existingSession.branchName
+        : `claude/issue-${item.number}`;
+
+      const { sessionId, webUrl } = await claudeClient.createSession({
+        prompt,
+        gitUrl,
+        branchPrefix,
+        title: `${isRework ? 'Rework' : 'Issue'} #${item.number}: ${issue.title.slice(0, 50)}`,
+      });
+
+      // Store session in cache
+      upsertSession(sessionCache, {
+        issueNumber: item.number,
+        sessionId,
+        branchName: existingSession?.branchName,
+        prNumber: existingSession?.prNumber,
+        startedAt: new Date().toISOString(),
+      });
+      saveSessionCache(sessionCachePath, sessionCache);
+
+      console.log(`   Session created: ${sessionId}`);
+      console.log(`   View at: ${webUrl}`);
+
+      // Add comment to issue with session link
+      const commentBody = isRework && existingSession
+        ? `### 🔄 Re-work\n\nAddressing code review feedback.\n\n**Session:** [View in Claude](${webUrl})\n**Branch:** \`${existingSession.branchName}\`\n**PR:** #${existingSession.prNumber}`
+        : `### 🤖 Auto-Task Started\n\nClaude is working on this issue.\n\n**Session:** [View in Claude](${webUrl})`;
+
+      await issuesService.addComment(owner, repo, item.number, commentBody);
 
     } catch (error) {
       console.error(`   Failed to start task: ${error}`);
-      stateManager.incrementError(task.id, String(error));
     }
   }
 }
 
-async function checkInProgressTasks(ctx: DaemonContext): Promise<void> {
-  const { stateManager, projectsService, projectCache } = ctx;
+function buildTaskPrompt(title: string, body?: string): string {
+  const cleanTitle = title.replace(/^\[(TODO|FIXME|HACK|SPEC)\]\s*/i, '');
 
-  const inProgress = stateManager.getTasks('in_progress');
+  let prompt = `Please complete the following task:\n\n**${cleanTitle}**`;
+
+  if (body) {
+    // Extract the actual task description from the issue body
+    // Remove the "Created by auto-task" footer and file location
+    const cleanBody = body
+      .replace(/---\s*\n\*Created by auto-task\*\s*$/, '')
+      .replace(/\*\*File:\*\*\s*`[^`]+`\s*\n\n?/, '')
+      .trim();
+
+    if (cleanBody) {
+      prompt += `\n\n${cleanBody}`;
+    }
+  }
+
+  prompt += `\n\n---\n**Instructions:**
+- Create a new branch and implement the changes
+- Write clean, well-tested code
+- Commit your changes with a descriptive message
+- Push the branch when complete`;
+
+  return prompt;
+}
+
+function buildReworkPrompt(
+  session: ActiveSession,
+  item: ProjectItem,
+  issue: { title: string; body?: string }
+): string {
+  const cleanTitle = issue.title.replace(/^\[(TODO|FIXME|HACK|SPEC)\]\s*/i, '');
+
+  const prompt = `## Re-work Required
+
+The previous implementation for this task received code review feedback that needs to be addressed.
+
+**Task:** ${cleanTitle}
+
+**Existing Branch:** \`${session.branchName}\`
+**PR:** #${session.prNumber}
+
+---
+
+**Instructions:**
+1. Check out the existing branch \`${session.branchName}\`
+2. Review the code review comments on PR #${session.prNumber}
+3. Address all the feedback and issues raised
+4. Commit your changes with a message like "Address code review feedback"
+5. Push the updated branch
+
+**Important:**
+- Do NOT create a new branch - use the existing one
+- The PR will automatically update when you push
+- Focus on addressing the specific issues from the code review`;
+
+  return prompt;
+}
+
+/**
+ * Format review issues for display in comments/prompts
+ */
+function formatReviewIssuesForComment(issues: ReviewIssue[]): string {
+  if (issues.length === 0) return 'No specific issues listed.';
+
+  const errors = issues.filter((i) => i.severity === 'error');
+  const warnings = issues.filter((i) => i.severity === 'warning');
+  const infos = issues.filter((i) => i.severity === 'info');
+
+  const lines: string[] = [];
+
+  if (errors.length > 0) {
+    lines.push(`**Errors (${errors.length})** - Must fix:`);
+    for (const issue of errors) {
+      const loc = issue.file ? `\`${issue.file}${issue.line ? `:${issue.line}` : ''}\`` : '';
+      lines.push(`- ${loc ? `${loc}: ` : ''}${issue.message}`);
+      if (issue.suggestion) lines.push(`  - 💡 ${issue.suggestion}`);
+    }
+    lines.push('');
+  }
+
+  if (warnings.length > 0) {
+    lines.push(`**Warnings (${warnings.length})** - Should address:`);
+    for (const issue of warnings) {
+      const loc = issue.file ? `\`${issue.file}${issue.line ? `:${issue.line}` : ''}\`` : '';
+      lines.push(`- ${loc ? `${loc}: ` : ''}${issue.message}`);
+      if (issue.suggestion) lines.push(`  - 💡 ${issue.suggestion}`);
+    }
+    lines.push('');
+  }
+
+  if (infos.length > 0) {
+    lines.push(`**Suggestions (${infos.length})** - Nice to have:`);
+    for (const issue of infos) {
+      const loc = issue.file ? `\`${issue.file}${issue.line ? `:${issue.line}` : ''}\`` : '';
+      lines.push(`- ${loc ? `${loc}: ` : ''}${issue.message}`);
+      if (issue.suggestion) lines.push(`  - 💡 ${issue.suggestion}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[]): Promise<void> {
+  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, githubToken, sessionCachePath } = ctx;
+
   if (inProgress.length === 0) {
     console.log('   No tasks in progress');
     return;
   }
 
-  const inReviewId = projectCache.statusOptions['in review'];
+  if (!claudeAuth) {
+    console.log('   Skipping: No Claude credentials');
+    return;
+  }
 
-  for (const task of inProgress) {
-    // TODO: Check if Claude session is complete
-    // For now, skip
-    console.log(`   Checking #${task.issueNumber}...`);
+  const inReviewId = projectCache.statusOptions['in review'];
+  const backlogId = projectCache.statusOptions['backlog'];
+
+  // Check for environment ID
+  const environmentId = process.env.CLAUDE_ENVIRONMENT_ID;
+  if (!environmentId) {
+    console.log('   Skipping: CLAUDE_ENVIRONMENT_ID not set');
+    return;
+  }
+
+  // Initialize Claude client
+  const claudeClient = new ClaudeWebClient({
+    accessToken: claudeAuth.accessToken,
+    environmentId,
+  });
+
+  // Load session cache
+  const sessionCache = loadSessionCache(sessionCachePath);
+
+  for (const item of inProgress) {
+    if (!item.number) continue;
+
+    // Get session from cache
+    const activeSession = getActiveSession(sessionCache, item.number);
+    if (!activeSession?.sessionId) {
+      console.log(`   #${item.number}: No session ID in cache, skipping`);
+      continue;
+    }
+
+    try {
+      console.log(`   Checking #${item.number}...`);
+
+      // Get session status
+      const session = await claudeClient.getSession(activeSession.sessionId);
+      console.log(`   Status: ${session.session_status}`);
+
+      if (session.session_status === 'completed' || session.session_status === 'idle') {
+        // Session is done - check for branch/PR info
+        const events = await claudeClient.getEvents(activeSession.sessionId);
+        const branchName = extractBranchFromEvents(events.data, session);
+
+        if (branchName) {
+          console.log(`   Branch: ${branchName}`);
+
+          // Check if PR exists for this branch
+          let prNumber = await findPRForBranch(owner, repo, branchName, githubToken);
+
+          if (!prNumber) {
+            // No PR exists - create one
+            console.log(`   No PR found, creating PR...`);
+            prNumber = await createPRForBranch(
+              owner,
+              repo,
+              branchName,
+              item.number,
+              item.title,
+              githubToken
+            );
+
+            if (prNumber) {
+              console.log(`   Created PR #${prNumber}`);
+            } else {
+              // Failed to create PR - move back to backlog
+              console.log(`   Failed to create PR, moving to backlog`);
+
+              if (backlogId) {
+                await projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  backlogId
+                );
+              }
+              removeSession(sessionCache, item.number);
+              saveSessionCache(sessionCachePath, sessionCache);
+              continue;
+            }
+          } else {
+            console.log(`   PR #${prNumber} found`);
+          }
+
+          // Update session cache with branch/PR info
+          upsertSession(sessionCache, {
+            ...activeSession,
+            branchName,
+            prNumber,
+          });
+          saveSessionCache(sessionCachePath, sessionCache);
+
+          // Move to In Review
+          if (inReviewId) {
+            await projectsService.updateItemStatus(
+              projectCache.projectId,
+              item.id,
+              projectCache.statusFieldId,
+              inReviewId
+            );
+          }
+          console.log(`   Moved to In Review`);
+
+          // Add comment to issue
+          await issuesService.addComment(
+            owner,
+            repo,
+            item.number,
+            `### ✅ Implementation Complete\n\nClaude has finished working on this issue.\n\n**Branch:** \`${branchName}\`\n**PR:** #${prNumber}\n\nThe PR is now being reviewed.`
+          );
+        } else {
+          // No branch created - session failed to produce output
+          console.log(`   No branch found in session events`);
+
+          // Check events for errors
+          const hasError = events.data.some((e) => e.type === 'error');
+          const errorMsg = hasError
+            ? 'Session completed with errors'
+            : 'Session completed but no branch was pushed';
+
+          console.log(`   ${errorMsg}, moving back to backlog`);
+
+          if (backlogId) {
+            await projectsService.updateItemStatus(
+              projectCache.projectId,
+              item.id,
+              projectCache.statusFieldId,
+              backlogId
+            );
+          }
+          removeSession(sessionCache, item.number);
+          saveSessionCache(sessionCachePath, sessionCache);
+
+          // Add failure comment
+          await issuesService.addComment(
+            owner,
+            repo,
+            item.number,
+            `### ⚠️ Session Issue\n\n${errorMsg}\n\nTask moved back to backlog and will be retried.`
+          );
+        }
+      } else if (session.session_status === 'failed') {
+        console.log(`   Session failed, moving back to backlog`);
+
+        if (backlogId) {
+          await projectsService.updateItemStatus(
+            projectCache.projectId,
+            item.id,
+            projectCache.statusFieldId,
+            backlogId
+          );
+        }
+        removeSession(sessionCache, item.number);
+        saveSessionCache(sessionCachePath, sessionCache);
+
+        // Add failure comment
+        await issuesService.addComment(
+          owner,
+          repo,
+          item.number,
+          `### ❌ Session Failed\n\nThe Claude session failed to complete.\n\nTask moved back to backlog and will be retried.`
+        );
+      } else {
+        console.log(`   Still running...`);
+      }
+    } catch (error) {
+      console.error(`   Error checking task: ${error}`);
+    }
   }
 }
 
-async function reviewCompletedTasks(ctx: DaemonContext): Promise<void> {
-  const { stateManager, projectsService, projectCache } = ctx;
+function extractBranchFromEvents(
+  events: ClaudeSessionEvent[],
+  session: { session_context?: { outcomes?: Array<{ type: string; git_info?: { branches?: string[] } }> } }
+): string | undefined {
+  // First, check session context for branch info (most reliable)
+  if (session.session_context?.outcomes) {
+    for (const outcome of session.session_context.outcomes) {
+      if (outcome.git_info?.branches && outcome.git_info.branches.length > 0) {
+        return outcome.git_info.branches[0];
+      }
+    }
+  }
 
-  const inReview = stateManager.getTasks('in_review');
+  // Look for git push events or branch creation in events
+  for (const event of events) {
+    // Check for tool_use events that might have branch info
+    if (event.type === 'tool_use' && event.tool_use?.name === 'Bash') {
+      const input = event.tool_use.input as { command?: string };
+      if (input.command?.includes('git push')) {
+        // Match various push patterns
+        const patterns = [
+          /-u origin (\S+)/,
+          /origin (\S+)/,
+          /--set-upstream origin (\S+)/,
+        ];
+        for (const pattern of patterns) {
+          const match = input.command.match(pattern);
+          if (match) return match[1];
+        }
+      }
+    }
+
+    // Check assistant messages for branch mentions
+    if (event.type === 'result' || event.type === 'assistant') {
+      const content = typeof event.message?.content === 'string'
+        ? event.message.content
+        : '';
+      // Look for common branch mention patterns
+      const patterns = [
+        /pushed.*branch[:\s]+`?([a-zA-Z0-9/_-]+)`?/i,
+        /branch[:\s]+`?([a-zA-Z0-9/_-]+)`?\s+(?:has been|was|is)/i,
+        /created branch[:\s]+`?([a-zA-Z0-9/_-]+)`?/i,
+      ];
+      for (const pattern of patterns) {
+        const match = content.match(pattern);
+        if (match) return match[1];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+async function findPRForBranch(
+  owner: string,
+  repo: string,
+  branchName: string,
+  token: string
+): Promise<number | undefined> {
+  try {
+    const { Octokit } = await import('@octokit/rest');
+    const octokit = new Octokit({ auth: token });
+
+    const { data: prs } = await octokit.pulls.list({
+      owner,
+      repo,
+      head: `${owner}:${branchName}`,
+      state: 'open',
+    });
+
+    if (prs.length > 0) {
+      return prs[0].number;
+    }
+  } catch (error) {
+    console.error(`   Error finding PR: ${error}`);
+  }
+
+  return undefined;
+}
+
+async function createPRForBranch(
+  owner: string,
+  repo: string,
+  branchName: string,
+  issueNumber: number,
+  title: string,
+  token: string
+): Promise<number | undefined> {
+  try {
+    const { Octokit } = await import('@octokit/rest');
+    const octokit = new Octokit({ auth: token });
+
+    // Get default branch
+    const { data: repoData } = await octokit.repos.get({ owner, repo });
+    const baseBranch = repoData.default_branch;
+
+    // Clean up the title for PR
+    const prTitle = title.replace(/^\[(TODO|FIXME|HACK|SPEC)\]\s*/i, '');
+
+    const { data: pr } = await octokit.pulls.create({
+      owner,
+      repo,
+      title: prTitle,
+      head: branchName,
+      base: baseBranch,
+      body: `## Summary
+Automated implementation for issue #${issueNumber}.
+
+Closes #${issueNumber}
+
+---
+*Created by auto-task daemon*`,
+    });
+
+    return pr.number;
+  } catch (error) {
+    console.error(`   Error creating PR: ${error}`);
+    return undefined;
+  }
+}
+
+async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[]): Promise<void> {
+  const { projectsService, projectCache, claudeAuth, issuesService, owner, repo, githubToken, sessionCachePath } = ctx;
+
   if (inReview.length === 0) {
     console.log('   No tasks to review');
     return;
   }
 
-  const doneId = projectCache.statusOptions['done'];
+  if (!claudeAuth) {
+    console.log('   Skipping: No Claude credentials');
+    return;
+  }
 
-  for (const task of inReview) {
-    // TODO: Run CodeReviewerService on PR
-    console.log(`   Reviewing #${task.issueNumber}...`);
+  const doneId = projectCache.statusOptions['done'];
+  const readyId = projectCache.statusOptions['ready'];
+
+  // Dynamically import CodeReviewerService
+  const { CodeReviewerService } = await import('@webedt/shared');
+  const environmentId = process.env.CLAUDE_ENVIRONMENT_ID || '';
+  const reviewer = new CodeReviewerService(
+    { accessToken: claudeAuth.accessToken },
+    environmentId,
+    githubToken
+  );
+
+  // Load session cache
+  const sessionCache = loadSessionCache(sessionCachePath);
+
+  for (const item of inReview) {
+    if (!item.number) continue;
+
+    // Get session from cache to find PR number
+    const activeSession = getActiveSession(sessionCache, item.number);
+    if (!activeSession?.prNumber) {
+      console.log(`   #${item.number}: No PR found in cache, skipping review`);
+      continue;
+    }
+
+    try {
+      console.log(`   Reviewing PR #${activeSession.prNumber} for issue #${item.number}...`);
+
+      // Run code review
+      const result = await reviewer.reviewPR(owner, repo, activeSession.prNumber, {
+        autoApprove: true,
+        strict: false,
+      });
+
+      console.log(`   Review result: ${result.approved ? 'Approved' : 'Changes Requested'}`);
+      console.log(`   Issues found: ${result.issues.length}`);
+
+      // Submit the review to GitHub
+      await reviewer.submitReview(owner, repo, activeSession.prNumber, result);
+      console.log(`   Review submitted to GitHub`);
+
+      if (result.approved) {
+        // Check if PR is mergeable
+        const mergeResult = await checkAndMergePR(
+          owner,
+          repo,
+          activeSession.prNumber,
+          activeSession.branchName,
+          githubToken,
+          claudeAuth,
+          process.env.CLAUDE_ENVIRONMENT_ID || ''
+        );
+
+        if (mergeResult.merged) {
+          // Successfully merged - move to Done
+          console.log(`   PR merged successfully`);
+
+          if (doneId) {
+            await projectsService.updateItemStatus(
+              projectCache.projectId,
+              item.id,
+              projectCache.statusFieldId,
+              doneId
+            );
+          }
+
+          // Close the issue (should auto-close from PR, but ensure it)
+          await issuesService.closeIssue(owner, repo, item.number);
+          console.log(`   Moved to Done, issue closed`);
+
+          // Remove from session cache (task complete)
+          removeSession(sessionCache, item.number);
+          saveSessionCache(sessionCachePath, sessionCache);
+
+          // Add completion comment
+          await issuesService.addComment(
+            owner,
+            repo,
+            item.number,
+            `### 🎉 Task Complete\n\nPR #${activeSession.prNumber} has been reviewed, approved, and merged.\n\nThis issue is now closed.`
+          );
+        } else if (mergeResult.hasConflicts) {
+          // Has merge conflicts - needs resolution
+          console.log(`   PR has merge conflicts: ${mergeResult.reason}`);
+
+          if (mergeResult.conflictResolutionStarted) {
+            // Claude is fixing conflicts, update session ID
+            console.log(`   Conflict resolution session started`);
+            upsertSession(sessionCache, {
+              ...activeSession,
+              sessionId: mergeResult.sessionId!,
+            });
+            saveSessionCache(sessionCachePath, sessionCache);
+
+            await issuesService.addComment(
+              owner,
+              repo,
+              item.number,
+              `### 🔧 Resolving Merge Conflicts\n\nPR #${activeSession.prNumber} has merge conflicts. Claude is working on resolving them.`
+            );
+          } else {
+            // Failed to start conflict resolution - move back to ready
+            console.log(`   Moving back to Ready for manual conflict resolution`);
+
+            if (readyId) {
+              await projectsService.updateItemStatus(
+                projectCache.projectId,
+                item.id,
+                projectCache.statusFieldId,
+                readyId
+              );
+            }
+
+            await issuesService.addComment(
+              owner,
+              repo,
+              item.number,
+              `### ⚠️ Merge Conflicts\n\nPR #${activeSession.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+            );
+          }
+        } else {
+          // Other merge failure
+          console.log(`   Merge failed: ${mergeResult.reason}`);
+          // Keep in review for manual intervention
+        }
+      } else {
+        // Review rejected - move back to Ready for re-work
+        console.log(`   Review rejected, moving back to Ready for re-work`);
+
+        if (readyId) {
+          await projectsService.updateItemStatus(
+            projectCache.projectId,
+            item.id,
+            projectCache.statusFieldId,
+            readyId
+          );
+        }
+
+        // Format review issues for comment (will be visible to Claude on re-work via PR comments)
+        const issuesText = formatReviewIssuesForComment(result.issues);
+
+        // Add comment about review rejection WITH the actual issues
+        await issuesService.addComment(
+          owner,
+          repo,
+          item.number,
+          `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${activeSession.prNumber} is being sent back for re-work.`
+        );
+      }
+    } catch (error) {
+      console.error(`   Error reviewing task: ${error}`);
+    }
+  }
+}
+
+interface MergeResult {
+  merged: boolean;
+  hasConflicts: boolean;
+  conflictResolutionStarted: boolean;
+  sessionId?: string;
+  reason?: string;
+}
+
+async function checkAndMergePR(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  branchName: string | undefined,
+  token: string,
+  claudeAuth: ClaudeAuth,
+  environmentId: string
+): Promise<MergeResult> {
+  try {
+    const { Octokit } = await import('@octokit/rest');
+    const octokit = new Octokit({ auth: token });
+
+    // Get PR details including merge status
+    const { data: pr } = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+
+    // Check mergeable state
+    if (pr.mergeable === null) {
+      // GitHub is still computing mergeability
+      return {
+        merged: false,
+        hasConflicts: false,
+        conflictResolutionStarted: false,
+        reason: 'Mergeability status pending, will retry next cycle',
+      };
+    }
+
+    if (pr.mergeable === false || pr.mergeable_state === 'dirty') {
+      // Has merge conflicts
+      console.log(`   PR has merge conflicts (mergeable_state: ${pr.mergeable_state})`);
+
+      // Try to start a conflict resolution session
+      if (branchName && environmentId) {
+        try {
+          const gitUrl = `https://github.com/${owner}/${repo}`;
+          const conflictPrompt = `The branch "${branchName}" has merge conflicts with the main branch.
+
+Please:
+1. Fetch the latest changes from origin
+2. Merge the main branch into this branch
+3. Resolve any merge conflicts carefully, preserving the intended functionality
+4. Commit the merge resolution
+5. Push the updated branch
+
+Be careful to understand both sides of the conflicts before resolving them.`;
+
+          const claudeClient = new ClaudeWebClient({
+            accessToken: claudeAuth.accessToken,
+            environmentId,
+          });
+
+          const { sessionId } = await claudeClient.createSession({
+            prompt: conflictPrompt,
+            gitUrl,
+            branchPrefix: branchName, // Use existing branch
+            title: `Resolve conflicts: PR #${prNumber}`,
+          });
+
+          return {
+            merged: false,
+            hasConflicts: true,
+            conflictResolutionStarted: true,
+            sessionId,
+            reason: 'Merge conflicts detected',
+          };
+        } catch (error) {
+          console.error(`   Failed to start conflict resolution: ${error}`);
+          return {
+            merged: false,
+            hasConflicts: true,
+            conflictResolutionStarted: false,
+            reason: `Merge conflicts, failed to start resolution: ${error}`,
+          };
+        }
+      }
+
+      return {
+        merged: false,
+        hasConflicts: true,
+        conflictResolutionStarted: false,
+        reason: 'Merge conflicts detected, no branch name to resolve',
+      };
+    }
+
+    // Check if blocked by status checks
+    if (pr.mergeable_state === 'blocked') {
+      return {
+        merged: false,
+        hasConflicts: false,
+        conflictResolutionStarted: false,
+        reason: 'Blocked by status checks',
+      };
+    }
+
+    // PR is mergeable - merge it
+    try {
+      await octokit.pulls.merge({
+        owner,
+        repo,
+        pull_number: prNumber,
+        merge_method: 'squash', // or 'merge' or 'rebase'
+        commit_title: `${pr.title} (#${prNumber})`,
+      });
+
+      // Delete the branch after successful merge
+      if (branchName) {
+        try {
+          await octokit.git.deleteRef({
+            owner,
+            repo,
+            ref: `heads/${branchName}`,
+          });
+          console.log(`   Deleted branch: ${branchName}`);
+        } catch {
+          // Branch deletion failed, not critical
+          console.log(`   Warning: Could not delete branch ${branchName}`);
+        }
+      }
+
+      return {
+        merged: true,
+        hasConflicts: false,
+        conflictResolutionStarted: false,
+      };
+    } catch (error) {
+      return {
+        merged: false,
+        hasConflicts: false,
+        conflictResolutionStarted: false,
+        reason: `Merge failed: ${error}`,
+      };
+    }
+  } catch (error) {
+    return {
+      merged: false,
+      hasConflicts: false,
+      conflictResolutionStarted: false,
+      reason: `Error checking PR: ${error}`,
+    };
   }
 }
 
