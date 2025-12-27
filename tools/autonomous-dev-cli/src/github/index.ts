@@ -43,6 +43,17 @@ export {
   type CreateStatusOptions,
 } from './checks.js';
 export {
+  createCodeReviewerManager,
+  type CodeReviewerManager,
+  type PRFileChange,
+  type PRDiff,
+  type ReviewComment,
+  type ReviewResult,
+  type CodeReviewFinding,
+  type CodeReviewResult,
+  type CodeReviewOptions,
+} from './codeReviewer.js';
+export {
   GitHubManager,
   createGitHubManager,
   OperationPriority,
@@ -56,6 +67,7 @@ import { createIssueManager, type IssueManager } from './issues.js';
 import { createBranchManager, type BranchManager } from './branches.js';
 import { createPRManager, type PRManager } from './pulls.js';
 import { createChecksManager, type ChecksManager } from './checks.js';
+import { createCodeReviewerManager, type CodeReviewerManager } from './codeReviewer.js';
 
 export interface GitHub {
   client: GitHubClient;
@@ -63,6 +75,7 @@ export interface GitHub {
   branches: BranchManager;
   pulls: PRManager;
   checks: ChecksManager;
+  codeReviewer: CodeReviewerManager;
 }
 
 export function createGitHub(options: GitHubClientOptions): GitHub {
@@ -74,5 +87,6 @@ export function createGitHub(options: GitHubClientOptions): GitHub {
     branches: createBranchManager(client),
     pulls: createPRManager(client),
     checks: createChecksManager(client),
+    codeReviewer: createCodeReviewerManager(client),
   };
 }
