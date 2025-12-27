@@ -254,3 +254,108 @@ export interface AdminStats {
   sessionCount: number;
   activeSessionCount: number;
 }
+
+// Game Store types
+export interface Game {
+  id: string;
+  title: string;
+  description?: string;
+  shortDescription?: string;
+  price: number;
+  currency: string;
+  coverImage?: string;
+  screenshots?: string[];
+  trailerUrl?: string;
+  developer?: string;
+  publisher?: string;
+  releaseDate?: string;
+  genres?: string[];
+  tags?: string[];
+  platforms?: string[];
+  rating?: string;
+  averageScore?: number;
+  reviewCount: number;
+  downloadCount: number;
+  featured: boolean;
+  status: 'draft' | 'published' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibraryItem {
+  id: string;
+  userId: string;
+  gameId: string;
+  purchaseId?: string;
+  acquiredAt: string;
+  lastPlayedAt?: string;
+  playtimeMinutes: number;
+  favorite: boolean;
+  hidden: boolean;
+  installStatus: 'not_installed' | 'installing' | 'installed';
+  game?: Game;
+}
+
+export interface Purchase {
+  id: string;
+  userId: string;
+  gameId: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'completed' | 'refunded' | 'failed';
+  paymentMethod?: string;
+  createdAt: string;
+  completedAt?: string;
+  game?: Game;
+}
+
+export interface WishlistItem {
+  id: string;
+  userId: string;
+  gameId: string;
+  priority: number;
+  notifyOnSale: boolean;
+  addedAt: string;
+  game?: Game;
+}
+
+export interface CommunityPost {
+  id: string;
+  userId: string;
+  gameId?: string;
+  type: 'discussion' | 'review' | 'guide' | 'artwork' | 'announcement';
+  title: string;
+  content: string;
+  images?: string[];
+  rating?: number;
+  upvotes: number;
+  downvotes: number;
+  commentCount: number;
+  pinned: boolean;
+  locked: boolean;
+  status: 'draft' | 'published' | 'removed';
+  createdAt: string;
+  updatedAt: string;
+  author?: {
+    id: string;
+    displayName?: string;
+  };
+  game?: Game;
+}
+
+export interface CommunityComment {
+  id: string;
+  postId: string;
+  userId: string;
+  parentId?: string;
+  content: string;
+  upvotes: number;
+  downvotes: number;
+  status: 'published' | 'removed';
+  createdAt: string;
+  updatedAt: string;
+  author?: {
+    id: string;
+    displayName?: string;
+  };
+}
