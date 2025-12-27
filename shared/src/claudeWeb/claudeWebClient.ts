@@ -365,7 +365,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
   async isComplete(
     sessionId: string,
-    checkEvents: boolean = true
+    checkEvents: boolean = false
   ): Promise<{ isComplete: boolean; status?: string; hasResultEvent?: boolean }> {
     const session = await this.getSession(sessionId);
     const status = session.session_status;
@@ -376,11 +376,8 @@ export class ClaudeWebClient extends AClaudeWebClient {
       try {
         const events = await this.getEvents(sessionId);
         return events.data?.some(event => event.type === 'result') ?? false;
-      } catch (error) {
-        // Log at debug level but don't fail - event check is optional
-        if (error instanceof Error) {
-          // Silently continue - events API may be unavailable
-        }
+      } catch {
+        // Silently continue - events API may be unavailable
         return undefined;
       }
     };
@@ -389,11 +386,9 @@ export class ClaudeWebClient extends AClaudeWebClient {
     if (status === 'running') {
       const hasResultEvent = await checkForResultEvent();
       if (hasResultEvent) {
-        // Session has a result event, it's complete even if status says running
-        // Return actual status to avoid misleading callers
-        return { isComplete: true, status, hasResultEvent: true };
+        return { isComplete: true, status, hasResultEvent };
       }
-      return { isComplete: false, status };
+      return { isComplete: false, status, hasResultEvent };
     }
 
     // Terminal and idle states are complete

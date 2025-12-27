@@ -30,19 +30,18 @@ function simulateIsComplete(params: {
 
   // Running sessions are not complete unless they have a result event
   if (status === 'running') {
-    const resultEvent = checkForResultEvent();
-    if (resultEvent) {
-      // Session has a result event, it's complete even if status says running
-      // Return actual status to avoid misleading callers
-      return { isComplete: true, status, hasResultEvent: true };
+    const resultEventCheck = checkForResultEvent();
+    if (resultEventCheck) {
+      return { isComplete: true, status, hasResultEvent: resultEventCheck };
     }
-    return { isComplete: false, status };
+    // Consistent return structure - always include hasResultEvent
+    return { isComplete: false, status, hasResultEvent: resultEventCheck };
   }
 
   // Terminal and idle states are complete
   if (status === 'idle' || status === 'completed' || status === 'failed' || status === 'archived') {
-    const resultEvent = checkForResultEvent();
-    return { isComplete: true, status, hasResultEvent: resultEvent };
+    const resultEventCheck = checkForResultEvent();
+    return { isComplete: true, status, hasResultEvent: resultEventCheck };
   }
 
   // Unknown status, assume not complete

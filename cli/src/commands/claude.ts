@@ -474,8 +474,8 @@ webCommand
 
 webCommand
   .command('is-complete <sessionId>')
-  .description('Check if a session is complete')
-  .option('--check-events', 'Also check if session has a result event')
+  .description('Check if a session is complete (single API call by default)')
+  .option('--check-events', 'Also check for result event (makes additional API call)')
   .option('--json', 'Output as JSON')
   .action(async (sessionId, options, cmd) => {
     try {

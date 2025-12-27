@@ -433,17 +433,22 @@ export interface IClaudeWebClientDocumentation {
    * and no further processing is expected.
    *
    * @param sessionId - The session ID to check
-   * @param checkEvents - Also check events for a result event (default: true)
-   * @returns Object with `isComplete` boolean and session status info
+   * @param checkEvents - Also check events for a result event (default: false).
+   *   When true, makes an additional API call to fetch events.
+   * @returns Object with `isComplete` boolean, session status, and optionally `hasResultEvent`
    *
    * @example
    * ```typescript
+   * // Quick status check (single API call)
    * const check = await client.isComplete('session_abc123');
    * if (check.isComplete) {
    *   console.log(`Session finished with status: ${check.status}`);
-   *   if (check.hasResultEvent) {
-   *     console.log('Session has a result event');
-   *   }
+   * }
+   *
+   * // Also check for result event (two API calls)
+   * const checkWithEvents = await client.isComplete('session_abc123', true);
+   * if (checkWithEvents.hasResultEvent) {
+   *   console.log('Session has a result event');
    * }
    * ```
    */
