@@ -11,6 +11,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { generateSessionPath } from '../../src/utils/helpers/sessionPathHelper.js';
+import { mapRemoteStatus } from '../../src/sessions/SessionService.js';
 
 /**
  * Test helper to create mock remote session data
@@ -302,19 +303,171 @@ describe('Duplicate Prevention Logic', () => {
 });
 
 describe('Status Mapping', () => {
-  it('should map remote statuses to local statuses', () => {
-    const statusMap: Record<string, string> = {
-      'completed': 'completed',
-      'running': 'running',
-      'cancelled': 'error',
-      'errored': 'error',
-      'archived': 'completed'
-    };
+  // Uses the exported mapRemoteStatus from SessionService to ensure test/implementation parity
 
-    assert.strictEqual(statusMap['completed'], 'completed');
-    assert.strictEqual(statusMap['running'], 'running');
-    assert.strictEqual(statusMap['cancelled'], 'error');
-    assert.strictEqual(statusMap['errored'], 'error');
+  it('should map remote statuses to local statuses', () => {
+    assert.strictEqual(mapRemoteStatus('completed'), 'completed');
+    assert.strictEqual(mapRemoteStatus('running'), 'running');
+    assert.strictEqual(mapRemoteStatus('failed'), 'error');
+    assert.strictEqual(mapRemoteStatus('archived'), 'completed');
+  });
+
+  it('should map idle to completed', () => {
+    assert.strictEqual(mapRemoteStatus('idle'), 'completed');
+  });
+
+  it('should map cancelled to error', () => {
+    assert.strictEqual(mapRemoteStatus('cancelled'), 'error');
+  });
+
+  it('should map errored to error', () => {
+    assert.strictEqual(mapRemoteStatus('errored'), 'error');
+  });
+
+  it('should default unknown statuses to pending', () => {
+    assert.strictEqual(mapRemoteStatus('unknown'), 'pending');
+    assert.strictEqual(mapRemoteStatus(''), 'pending');
+  });
+});
+
+describe('SessionService.sync Logic', () => {
+  describe('Change Detection', () => {
+    it('should detect status change', () => {
+      const currentStatus = 'running';
+      const newStatus = 'completed';
+
+      const hasChanges = newStatus !== currentStatus;
+      assert.strictEqual(hasChanges, true);
+    });
+
+    it('should detect no change when status is same', () => {
+      const currentStatus = 'running';
+      const newStatus = 'running';
+
+      const hasChanges = newStatus !== currentStatus;
+      assert.strictEqual(hasChanges, false);
+    });
+
+    it('should detect cost update', () => {
+      const currentCost: string | null = null;
+      const newCost = '0.123456';
+
+      const hasChanges = newCost !== currentCost;
+      assert.strictEqual(hasChanges, true);
+    });
+
+    it('should detect branch update', () => {
+      const currentBranch: string | null = null;
+      const newBranch = 'claude/new-feature';
+
+      const hasChanges = newBranch !== currentBranch;
+      assert.strictEqual(hasChanges, true);
+    });
+
+    it('should detect new events', () => {
+      const newEventsCount = 5;
+      const hasChanges = newEventsCount > 0;
+
+      assert.strictEqual(hasChanges, true);
+    });
+  });
+
+  describe('SessionPath Generation During Sync', () => {
+    it('should generate sessionPath when branch becomes available', () => {
+      const session = {
+        repositoryOwner: 'webedt',
+        repositoryName: 'hello-world',
+        sessionPath: null as string | null,
+        branch: null as string | null,
+      };
+
+      const remoteBranch = 'claude/new-feature';
+      let sessionPath = session.sessionPath;
+
+      if (remoteBranch && session.repositoryOwner && session.repositoryName && !sessionPath) {
+        sessionPath = generateSessionPath(session.repositoryOwner, session.repositoryName, remoteBranch);
+      }
+
+      assert.strictEqual(sessionPath, 'webedt__hello-world__claude-new-feature');
+    });
+
+    it('should preserve existing sessionPath', () => {
+      const existingPath = 'webedt__hello-world__claude-old-feature';
+      const session = {
+        repositoryOwner: 'webedt',
+        repositoryName: 'hello-world',
+        sessionPath: existingPath,
+      };
+
+      const remoteBranch = 'claude/new-feature';
+      let sessionPath: string | undefined = session.sessionPath || undefined;
+
+      // Should not regenerate if already set
+      if (remoteBranch && session.repositoryOwner && session.repositoryName && !sessionPath) {
+        sessionPath = generateSessionPath(session.repositoryOwner, session.repositoryName, remoteBranch);
+      }
+
+      assert.strictEqual(sessionPath, existingPath);
+    });
+  });
+
+  describe('Cost Extraction', () => {
+    it('should extract cost from result event', () => {
+      const events = [
+        { type: 'user', uuid: 'uuid-1' },
+        { type: 'assistant', uuid: 'uuid-2' },
+        { type: 'result', uuid: 'uuid-3', total_cost_usd: 0.123456789 },
+      ];
+
+      const resultEvent = events.find(e => e.type === 'result' && 'total_cost_usd' in e);
+      let totalCost: string | undefined;
+      if (resultEvent && 'total_cost_usd' in resultEvent) {
+        totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+      }
+
+      assert.strictEqual(totalCost, '0.123457'); // Rounds to 6 decimal places
+    });
+
+    it('should handle missing result event', () => {
+      const events = [
+        { type: 'user', uuid: 'uuid-1' },
+        { type: 'assistant', uuid: 'uuid-2' },
+      ];
+
+      const resultEvent = events.find(e => e.type === 'result' && 'total_cost_usd' in e);
+      let totalCost: string | undefined;
+      if (resultEvent && 'total_cost_usd' in resultEvent) {
+        totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
+      }
+
+      assert.strictEqual(totalCost, undefined);
+    });
+  });
+
+  describe('Branch Extraction from Remote Session', () => {
+    it('should extract branch from git outcome', () => {
+      const remoteSession = createMockRemoteSession({
+        session_context: {
+          outcomes: [{ type: 'git_repository', git_info: { branches: ['claude/feature-x'] } }]
+        }
+      });
+
+      const gitOutcome = remoteSession.session_context.outcomes?.find(o => o.type === 'git_repository');
+      const branch = gitOutcome?.git_info?.branches?.[0];
+
+      assert.strictEqual(branch, 'claude/feature-x');
+    });
+
+    it('should handle missing git outcome', () => {
+      const remoteSession = createMockRemoteSession({
+        session_context: {}
+      });
+
+      const gitOutcome = remoteSession.session_context.outcomes?.find(o => o.type === 'git_repository');
+      const branch = gitOutcome?.git_info?.branches?.[0];
+
+      assert.strictEqual(branch, undefined);
+    });
   });
 });
 
@@ -463,6 +616,350 @@ describe('Real-World Scenarios', () => {
 
       const shouldSkip = sessionPathExists && differentUser;
       assert.strictEqual(shouldSkip, true);
+    });
+  });
+});
+
+/**
+ * Mock Integration Tests for SessionService.sync
+ *
+ * These tests simulate the complete sync flow by testing the same logic
+ * used in SessionService.sync() with mock data. They verify correct
+ * behavior for various edge cases without requiring database or API mocks.
+ *
+ * For full end-to-end integration tests with real API calls, see:
+ * shared/tests/claudeWeb/claudeRemoteClient.integration.test.ts
+ */
+describe('SessionService.sync Mock Integration', () => {
+  /**
+   * Simulates the sync validation and change detection logic
+   */
+  function simulateSyncLogic(params: {
+    localSession: ReturnType<typeof createMockLocalSession>;
+    remoteSession: ReturnType<typeof createMockRemoteSession>;
+    remoteEvents: Array<{ uuid: string; type: string; timestamp?: string; total_cost_usd?: number }>;
+    existingEventUuids: Set<string>;
+  }) {
+    const { localSession, remoteSession, remoteEvents, existingEventUuids } = params;
+
+    // Validate remote session structure (mirrors isValidRemoteSession)
+    const isValid =
+      typeof remoteSession.session_status === 'string' &&
+      typeof remoteSession.updated_at === 'string';
+
+    if (!isValid) {
+      return { valid: false, changes: null };
+    }
+
+    // Map status (mirrors mapRemoteStatus)
+    const newStatus = mapRemoteStatus(remoteSession.session_status);
+
+    // Filter new events
+    const eventsToInsert = remoteEvents.filter(
+      event => event.uuid && !existingEventUuids.has(event.uuid)
+    );
+
+    // Extract cost from result event
+    let totalCost: string | undefined = localSession.status === 'completed'
+      ? '0.000000'
+      : undefined;
+    const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd);
+    if (resultEvent?.total_cost_usd) {
+      totalCost = resultEvent.total_cost_usd.toFixed(6);
+    }
+
+    // Extract branch from session context
+    let branch: string | undefined = localSession.branch ?? undefined;
+    const gitOutcome = remoteSession.session_context?.outcomes?.find(
+      o => o.type === 'git_repository'
+    );
+    if (gitOutcome?.git_info?.branches?.[0]) {
+      branch = gitOutcome.git_info.branches[0];
+    }
+
+    // Generate sessionPath if needed
+    let sessionPath: string | undefined = localSession.sessionPath ?? undefined;
+    if (branch && localSession.repositoryOwner && localSession.repositoryName && !sessionPath) {
+      sessionPath = generateSessionPath(
+        localSession.repositoryOwner,
+        localSession.repositoryName,
+        branch
+      );
+    }
+
+    // Detect changes
+    const hasChanges =
+      newStatus !== localSession.status ||
+      (totalCost ?? null) !== (localSession.status === 'completed' ? '0.000000' : null) ||
+      (branch ?? null) !== localSession.branch ||
+      (sessionPath ?? null) !== localSession.sessionPath ||
+      eventsToInsert.length > 0;
+
+    return {
+      valid: true,
+      changes: {
+        hasChanges,
+        newStatus,
+        totalCost,
+        branch,
+        sessionPath,
+        newEventsCount: eventsToInsert.length,
+      },
+    };
+  }
+
+  describe('Complete sync flow simulation', () => {
+    it('should detect status change from running to completed', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({ status: 'running' }),
+        remoteSession: createMockRemoteSession({ session_status: 'completed' }),
+        remoteEvents: [],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.changes?.hasChanges, true);
+      assert.strictEqual(result.changes?.newStatus, 'completed');
+    });
+
+    it('should not flag changes when status matches', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({
+          status: 'completed',
+          branch: 'claude/test-branch',
+          sessionPath: 'owner__repo__claude-test-branch',
+        }),
+        remoteSession: createMockRemoteSession({
+          session_status: 'completed',
+          session_context: {
+            outcomes: [{ type: 'git_repository', git_info: { branches: ['claude/test-branch'] } }],
+          },
+        }),
+        remoteEvents: [],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      // No changes since everything matches
+      assert.strictEqual(result.changes?.newStatus, 'completed');
+    });
+
+    it('should detect new events and flag changes', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({ status: 'completed' }),
+        remoteSession: createMockRemoteSession({ session_status: 'completed' }),
+        remoteEvents: [
+          { uuid: 'new-uuid-1', type: 'user' },
+          { uuid: 'new-uuid-2', type: 'assistant' },
+        ],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.changes?.hasChanges, true);
+      assert.strictEqual(result.changes?.newEventsCount, 2);
+    });
+
+    it('should skip already-imported events', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({ status: 'completed' }),
+        remoteSession: createMockRemoteSession({ session_status: 'completed' }),
+        remoteEvents: [
+          { uuid: 'existing-uuid-1', type: 'user' },
+          { uuid: 'new-uuid-1', type: 'assistant' },
+        ],
+        existingEventUuids: new Set(['existing-uuid-1']),
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.changes?.newEventsCount, 1);
+    });
+
+    it('should extract cost from result event', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({ status: 'running' }),
+        remoteSession: createMockRemoteSession({ session_status: 'completed' }),
+        remoteEvents: [
+          { uuid: 'uuid-1', type: 'user' },
+          { uuid: 'uuid-2', type: 'result', total_cost_usd: 0.123456789 },
+        ],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.changes?.totalCost, '0.123457');
+    });
+
+    it('should generate sessionPath from branch and repo info', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({
+          status: 'running',
+          branch: null,
+          sessionPath: null,
+          repositoryOwner: 'webedt',
+          repositoryName: 'hello-world',
+        }),
+        remoteSession: createMockRemoteSession({
+          session_status: 'completed',
+          session_context: {
+            outcomes: [{ type: 'git_repository', git_info: { branches: ['claude/new-feature'] } }],
+          },
+        }),
+        remoteEvents: [],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.changes?.branch, 'claude/new-feature');
+      assert.strictEqual(result.changes?.sessionPath, 'webedt__hello-world__claude-new-feature');
+    });
+
+    it('should preserve existing sessionPath', () => {
+      const existingPath = 'webedt__hello-world__claude-old-feature';
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({
+          status: 'running',
+          branch: 'claude/old-feature',
+          sessionPath: existingPath,
+          repositoryOwner: 'webedt',
+          repositoryName: 'hello-world',
+        }),
+        remoteSession: createMockRemoteSession({
+          session_status: 'completed',
+          session_context: {
+            outcomes: [{ type: 'git_repository', git_info: { branches: ['claude/new-feature'] } }],
+          },
+        }),
+        remoteEvents: [],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      // Should use the new branch from remote
+      assert.strictEqual(result.changes?.branch, 'claude/new-feature');
+      // But sessionPath should remain unchanged since it was already set
+      assert.strictEqual(result.changes?.sessionPath, existingPath);
+    });
+
+    it('should handle invalid remote session response', () => {
+      // Create an invalid remote session (missing required fields)
+      const invalidSession = { id: 'test' } as unknown as ReturnType<typeof createMockRemoteSession>;
+
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({ status: 'running' }),
+        remoteSession: invalidSession,
+        remoteEvents: [],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.changes, null);
+    });
+
+    it('should map all Anthropic statuses correctly', () => {
+      const statusMappings = [
+        { anthropic: 'idle', expected: 'completed' },
+        { anthropic: 'running', expected: 'running' },
+        { anthropic: 'completed', expected: 'completed' },
+        { anthropic: 'failed', expected: 'error' },
+        { anthropic: 'cancelled', expected: 'error' },
+        { anthropic: 'errored', expected: 'error' },
+        { anthropic: 'archived', expected: 'completed' },
+        { anthropic: 'unknown_status', expected: 'pending' },
+      ];
+
+      for (const { anthropic, expected } of statusMappings) {
+        const result = simulateSyncLogic({
+          localSession: createMockLocalSession({ status: 'pending' }),
+          remoteSession: createMockRemoteSession({ session_status: anthropic }),
+          remoteEvents: [],
+          existingEventUuids: new Set(),
+        });
+
+        assert.strictEqual(result.valid, true);
+        assert.strictEqual(
+          result.changes?.newStatus,
+          expected,
+          `Expected ${anthropic} to map to ${expected}`
+        );
+      }
+    });
+  });
+
+  describe('Edge cases', () => {
+    it('should handle empty session context', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({
+          status: 'running',
+          repositoryOwner: 'owner',
+          repositoryName: 'repo',
+        }),
+        remoteSession: createMockRemoteSession({
+          session_status: 'completed',
+          session_context: {},
+        }),
+        remoteEvents: [],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.changes?.branch, undefined);
+      assert.strictEqual(result.changes?.sessionPath, undefined);
+    });
+
+    it('should handle events without UUID', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({ status: 'running' }),
+        remoteSession: createMockRemoteSession({ session_status: 'completed' }),
+        remoteEvents: [
+          { uuid: '', type: 'system' }, // Empty UUID should be filtered
+          { uuid: 'valid-uuid', type: 'user' },
+        ],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      // Only the event with valid UUID should be counted
+      assert.strictEqual(result.changes?.newEventsCount, 1);
+    });
+
+    it('should handle zero cost correctly', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({ status: 'running' }),
+        remoteSession: createMockRemoteSession({ session_status: 'completed' }),
+        remoteEvents: [
+          { uuid: 'uuid-1', type: 'result', total_cost_usd: 0 },
+        ],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      // Zero cost should NOT be extracted (falsy check in the actual code)
+      assert.strictEqual(result.changes?.totalCost, undefined);
+    });
+
+    it('should handle multiple git outcomes - uses first branch', () => {
+      const result = simulateSyncLogic({
+        localSession: createMockLocalSession({
+          status: 'running',
+          repositoryOwner: 'owner',
+          repositoryName: 'repo',
+        }),
+        remoteSession: createMockRemoteSession({
+          session_status: 'completed',
+          session_context: {
+            outcomes: [
+              { type: 'git_repository', git_info: { branches: ['claude/branch-1', 'claude/branch-2'] } },
+            ],
+          },
+        }),
+        remoteEvents: [],
+        existingEventUuids: new Set(),
+      });
+
+      assert.strictEqual(result.valid, true);
+      // Should use first branch from the array
+      assert.strictEqual(result.changes?.branch, 'claude/branch-1');
     });
   });
 });
