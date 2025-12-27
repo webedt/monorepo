@@ -1,8 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, liveChatMessages, eq, and, desc } from '@webedt/shared';
+import { db, liveChatMessages, users, eq, and, desc } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
+import { logger, ensureValidToken, fetchEnvironmentIdFromSessions, getExecutionProvider } from '@webedt/shared';
+import { CLAUDE_ENVIRONMENT_ID, CLAUDE_API_BASE_URL } from '@webedt/shared';
+import type { ClaudeAuth } from '@webedt/shared';
+import type { ExecutionEvent } from '@webedt/shared';
 
 const router = Router();
 
@@ -143,9 +146,16 @@ router.delete('/:owner/:repo/:branch/messages', async (req: Request, res: Respon
 /**
  * POST /api/live-chat/:owner/:repo/:branch/execute
  * Execute LLM for live chat (streaming response)
- * This connects to the AI worker for execution
+ * This connects to Claude Remote Sessions for execution
  */
 router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response) => {
+  let clientDisconnected = false;
+
+  // Track client disconnect
+  req.on('close', () => {
+    clientDisconnected = true;
+  });
+
   try {
     const { owner, repo, branch } = req.params;
     const { message, images } = req.body;
@@ -162,6 +172,60 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
 
     // Decode branch name
     const decodedBranch = decodeURIComponent(branch);
+
+    // Get user's Claude auth
+    const [userData] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!userData?.claudeAuth) {
+      return res.status(400).json({
+        error: 'Claude authentication not configured. Please connect your Claude account in settings.'
+      });
+    }
+
+    // Refresh token if needed
+    let claudeAuth = userData.claudeAuth as ClaudeAuth;
+    try {
+      const refreshedAuth = await ensureValidToken(claudeAuth);
+      if (refreshedAuth.accessToken !== claudeAuth.accessToken) {
+        // Token was refreshed, save it
+        await db.update(users)
+          .set({ claudeAuth: refreshedAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
+          .where(eq(users.id, userId));
+        claudeAuth = refreshedAuth;
+      }
+    } catch (error) {
+      logger.error('Failed to refresh Claude token', { component: 'liveChat', error });
+      return res.status(401).json({ error: 'Claude token expired. Please reconnect your Claude account.' });
+    }
+
+    // Get environment ID - from config or auto-detect
+    let environmentId = CLAUDE_ENVIRONMENT_ID;
+    if (!environmentId) {
+      logger.info('CLAUDE_ENVIRONMENT_ID not configured, attempting auto-detection', { component: 'liveChat' });
+      const detectedEnvId = await fetchEnvironmentIdFromSessions(
+        claudeAuth.accessToken,
+        CLAUDE_API_BASE_URL
+      );
+
+      if (detectedEnvId) {
+        environmentId = detectedEnvId;
+        logger.info('Auto-detected environment ID', {
+          component: 'liveChat',
+          environmentId: environmentId.slice(0, 10) + '...',
+        });
+      } else {
+        return res.status(500).json({
+          error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first.'
+        });
+      }
+    }
+
+    // Build git URL from owner/repo
+    const gitUrl = `https://github.com/${owner}/${repo}`;
 
     // Save user message first
     const userMessage = {
@@ -182,6 +246,7 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
 
     // Get message history for context
     const history = await db
@@ -200,10 +265,14 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
 
     history.reverse();
 
-    // For now, send a placeholder response indicating Live Chat is ready
-    // Full LLM execution will be implemented in Phase 5b
+    // Helper to send SSE events
     const sendSSE = (event: string, data: unknown) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (clientDisconnected) return;
+      try {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch (error) {
+        logger.warn('Failed to write SSE event', { component: 'liveChat', error });
+      }
     };
 
     sendSSE('connected', {
@@ -211,40 +280,113 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       messageCount: history.length,
     });
 
-    // TODO: Connect to AI worker for actual LLM execution
-    // For now, send a placeholder assistant message
-    const assistantContent = `I'm ready to help you with the codebase at **${owner}/${repo}** on branch **${decodedBranch}**.
+    // Set up heartbeat to prevent proxy timeouts
+    const heartbeatInterval = setInterval(() => {
+      if (!clientDisconnected) {
+        try {
+          res.write(': heartbeat\n\n');
+        } catch {
+          clearInterval(heartbeatInterval);
+        }
+      } else {
+        clearInterval(heartbeatInterval);
+      }
+    }, 15000);
 
-Live Chat is now active. I can help you:
-- Navigate and understand the code
-- Make file changes
-- Answer questions about the codebase
+    // Get execution provider
+    const provider = getExecutionProvider();
+    const chatSessionId = uuidv4(); // Generate a unique ID for this execution
 
-What would you like to work on?`;
+    // Collect assistant content from events
+    let assistantContent = '';
 
-    const assistantMessage = {
-      id: uuidv4(),
-      userId,
-      owner,
-      repo,
-      branch: decodedBranch,
-      role: 'assistant',
-      content: assistantContent,
-      images: null,
-      createdAt: new Date(),
+    // Event handler to stream events to client
+    const handleEvent = async (event: ExecutionEvent) => {
+      if (clientDisconnected) return;
+
+      // Stream the event to the client
+      sendSSE(event.type, event);
+
+      // Collect assistant message content
+      if (event.type === 'assistant' && event.message) {
+        const msg = event.message as { content?: string | Array<{ type: string; text?: string }> };
+        if (typeof msg.content === 'string') {
+          assistantContent += msg.content;
+        } else if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block.type === 'text' && block.text) {
+              assistantContent += block.text;
+            }
+          }
+        }
+      }
     };
 
-    await db.insert(liveChatMessages).values(assistantMessage);
+    try {
+      // Execute using the provider
+      const result = await provider.execute(
+        {
+          userId,
+          chatSessionId,
+          prompt: message,
+          gitUrl,
+          claudeAuth,
+          environmentId,
+        },
+        handleEvent
+      );
 
-    sendSSE('assistant_message', {
-      content: assistantContent,
-    });
+      // Save assistant response to live chat messages
+      if (assistantContent) {
+        const assistantMessage = {
+          id: uuidv4(),
+          userId,
+          owner,
+          repo,
+          branch: decodedBranch,
+          role: 'assistant',
+          content: assistantContent,
+          images: null,
+          createdAt: new Date(),
+        };
 
-    sendSSE('completed', {
-      messageId: assistantMessage.id,
-    });
+        await db.insert(liveChatMessages).values(assistantMessage);
 
-    res.end();
+        sendSSE('assistant_message', {
+          content: assistantContent,
+        });
+      }
+
+      sendSSE('completed', {
+        status: result.status,
+        branch: result.branch,
+        totalCost: result.totalCost,
+        remoteSessionId: result.remoteSessionId,
+        remoteWebUrl: result.remoteWebUrl,
+      });
+
+      logger.info('Execution completed', {
+        component: 'liveChat',
+        owner,
+        repo,
+        branch: decodedBranch,
+        status: result.status,
+      });
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Execution failed', { component: 'liveChat', error: errorMessage });
+
+      sendSSE('error', {
+        error: errorMessage,
+      });
+    } finally {
+      clearInterval(heartbeatInterval);
+    }
+
+    if (!clientDisconnected) {
+      res.end();
+    }
   } catch (error) {
     logger.error('liveChat', 'Failed to execute live chat', { error });
     if (!res.headersSent) {
