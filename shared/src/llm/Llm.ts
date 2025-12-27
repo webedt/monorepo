@@ -140,6 +140,10 @@ export class Llm extends ALlm {
   ): Promise<LlmExecuteResult> {
     const { systemPrompt } = options;
 
+    // Note: Claude Web sessions use a fixed model and don't support maxTokens/temperature.
+    // These parameters are intentionally not passed through as the Claude Web API
+    // manages model selection and generation parameters internally.
+
     // Get Claude credentials
     const credentials = await getClaudeCredentials({ checkDatabase: true });
     if (!credentials) {
@@ -165,6 +169,8 @@ export class Llm extends ALlm {
     const responseBlocks: string[] = [];
     let totalCost: number | undefined;
     let usedModel: string | undefined;
+    let inputTokens: number | undefined;
+    let outputTokens: number | undefined;
 
     const onEvent = (event: SessionEvent) => {
       // Extract text from assistant messages
@@ -185,11 +191,23 @@ export class Llm extends ALlm {
         }
       }
 
-      // Capture cost from result event
-      if (event.type === 'result' && event.total_cost_usd !== undefined) {
-        totalCost = event.total_cost_usd;
+      // Capture cost and token usage from result event
+      if (event.type === 'result') {
+        if (event.total_cost_usd !== undefined) {
+          totalCost = event.total_cost_usd;
+        }
+        // Extract token counts if available
+        if (typeof event.input_tokens === 'number') {
+          inputTokens = event.input_tokens;
+        }
+        if (typeof event.output_tokens === 'number') {
+          outputTokens = event.output_tokens;
+        }
       }
     };
+
+    // Generate a descriptive title from the prompt (first 50 chars)
+    const sessionTitle = `LLM: ${prompt.slice(0, 50).replace(/\n/g, ' ')}${prompt.length > 50 ? '...' : ''}`;
 
     logger.info('Executing Claude Web fallback', {
       component: 'Llm',
@@ -201,7 +219,7 @@ export class Llm extends ALlm {
       {
         prompt: fullPrompt,
         gitUrl: LLM_FALLBACK_REPO_URL,
-        title: 'LLM Request',
+        title: sessionTitle,
       },
       onEvent
     );
@@ -233,6 +251,8 @@ export class Llm extends ALlm {
       provider: 'claude-web',
       model: usedModel || CLAUDE_DEFAULT_MODEL,
       cost: totalCost,
+      inputTokens,
+      outputTokens,
     };
   }
 }
