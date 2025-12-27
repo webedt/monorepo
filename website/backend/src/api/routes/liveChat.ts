@@ -11,7 +11,54 @@ import {
   CLAUDE_API_BASE_URL,
   fetchEnvironmentIdFromSessions,
 } from '@webedt/shared';
-import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
+import type { ClaudeAuth, ClaudeWebClientConfig, ClaudeSessionEvent } from '@webedt/shared';
+
+// Maximum length for accumulated assistant response (100KB)
+const MAX_ASSISTANT_CONTENT_LENGTH = 100 * 1024;
+
+// Execution timeout: 10 minutes with 2 second polls = 300 polls
+const MAX_EXECUTION_POLLS = 300;
+
+/**
+ * Type guard to check if an event is an assistant event with message content
+ */
+function isAssistantEvent(event: ClaudeSessionEvent): boolean {
+  return event.type === 'assistant' && event.message !== undefined;
+}
+
+/**
+ * Type guard to check if an event is a tool event
+ */
+function isToolEvent(event: ClaudeSessionEvent): boolean {
+  return event.type === 'tool_use' || event.type === 'tool_result';
+}
+
+/**
+ * Safely extract text content from an assistant event message
+ */
+function extractTextFromMessage(message: ClaudeSessionEvent['message']): string {
+  if (!message?.content) return '';
+
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+
+  if (Array.isArray(message.content)) {
+    return message.content
+      .filter((block): block is { type: string; text?: string } =>
+        block !== null &&
+        typeof block === 'object' &&
+        'type' in block &&
+        block.type === 'text' &&
+        'text' in block &&
+        typeof block.text === 'string'
+      )
+      .map(block => block.text ?? '')
+      .join('');
+  }
+
+  return '';
+}
 
 const router = Router();
 
@@ -296,6 +343,61 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       return;
     }
 
+    // Persist refreshed token if it changed
+    if (validAuth.accessToken !== claudeAuth.accessToken) {
+      // Only persist if we have the required fields for database storage
+      if (validAuth.refreshToken && validAuth.expiresAt !== undefined) {
+        logger.info('Persisting refreshed Claude token to database', {
+          component: 'LiveChat',
+          userId,
+        });
+        try {
+          await db
+            .update(users)
+            .set({
+              claudeAuth: {
+                accessToken: validAuth.accessToken,
+                refreshToken: validAuth.refreshToken,
+                expiresAt: validAuth.expiresAt,
+                scopes: validAuth.scopes,
+                subscriptionType: validAuth.subscriptionType,
+                rateLimitTier: validAuth.rateLimitTier,
+              },
+            })
+            .where(eq(users.id, userId));
+        } catch (persistError) {
+          logger.error('Failed to persist refreshed token', persistError as Error, {
+            component: 'LiveChat',
+            userId,
+          });
+          // Continue with execution - token is valid, just not persisted
+        }
+      } else {
+        logger.warn('Cannot persist token: missing refreshToken or expiresAt', {
+          component: 'LiveChat',
+          hasRefreshToken: !!validAuth.refreshToken,
+          hasExpiresAt: validAuth.expiresAt !== undefined,
+        });
+      }
+    }
+
+    // Set up abort controller for client disconnection handling
+    const abortController = new AbortController();
+    let clientDisconnected = false;
+
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        clientDisconnected = true;
+        abortController.abort();
+        logger.info('Client disconnected, aborting Claude execution', {
+          component: 'LiveChat',
+          owner,
+          repo,
+          branch: decodedBranch,
+        });
+      }
+    });
+
     // Get environment ID - from config or auto-detect
     let environmentId = CLAUDE_ENVIRONMENT_ID;
     if (!environmentId) {
@@ -339,56 +441,83 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       messageLength: message.length,
     });
 
-    // Collect assistant response text for storage
+    // Collect assistant response text for storage (with size limit)
     let assistantContent = '';
+    let contentTruncated = false;
 
     try {
       // Execute with ClaudeWebClient
+      // Use consistent branch prefix based on repo context to avoid orphaned branches
+      const sanitizedBranch = decodedBranch.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 30);
+      const branchPrefix = `claude/live-chat/${owner}/${repo}/${sanitizedBranch}`;
+
       const result = await client.execute(
         {
           prompt,
           gitUrl,
-          branchPrefix: `claude/chat-${Date.now()}`,
+          branchPrefix,
           title: `Live Chat: ${message.slice(0, 50)}${message.length > 50 ? '...' : ''}`,
         },
-        async (event) => {
-          // Extract text content from assistant events
-          const eventType = (event as { type?: string }).type;
+        async (event: ClaudeSessionEvent) => {
+          // Skip processing if client disconnected
+          if (clientDisconnected) return;
 
-          if (eventType === 'assistant') {
-            const eventMessage = (event as { message?: { content?: unknown } }).message;
-            if (eventMessage?.content) {
-              // Content could be string or array of content blocks
-              if (typeof eventMessage.content === 'string') {
-                assistantContent += eventMessage.content;
-                sendSSE('assistant_message', { content: eventMessage.content, partial: true });
-              } else if (Array.isArray(eventMessage.content)) {
-                for (const block of eventMessage.content) {
-                  if (block && typeof block === 'object' && 'type' in block && block.type === 'text' && 'text' in block) {
-                    assistantContent += block.text;
-                    sendSSE('assistant_message', { content: block.text, partial: true });
-                  }
+          // Extract text content from assistant events using safe type guards
+          if (isAssistantEvent(event)) {
+            const text = extractTextFromMessage(event.message);
+            if (text) {
+              // Enforce size limit on accumulated content
+              if (!contentTruncated && assistantContent.length < MAX_ASSISTANT_CONTENT_LENGTH) {
+                const remainingSpace = MAX_ASSISTANT_CONTENT_LENGTH - assistantContent.length;
+                const textToAdd = text.slice(0, remainingSpace);
+                assistantContent += textToAdd;
+                if (text.length > remainingSpace) {
+                  contentTruncated = true;
+                  logger.warn('Assistant content truncated due to size limit', {
+                    component: 'LiveChat',
+                    currentLength: assistantContent.length,
+                    maxLength: MAX_ASSISTANT_CONTENT_LENGTH,
+                  });
                 }
               }
+              sendSSE('assistant_message', { content: text, partial: true });
             }
           }
 
-          // Forward relevant events to client
-          if (eventType === 'tool_use' || eventType === 'tool_result') {
+          // Forward relevant tool events to client
+          if (isToolEvent(event)) {
             sendSSE('tool_event', event);
           }
+        },
+        {
+          abortSignal: abortController.signal,
+          maxPolls: MAX_EXECUTION_POLLS,
         }
       );
+
+      // Don't send completion if client disconnected
+      if (clientDisconnected) {
+        logger.info('Skipping completion - client already disconnected', {
+          component: 'LiveChat',
+          owner,
+          repo,
+          branch: decodedBranch,
+        });
+        return;
+      }
 
       logger.info('Claude execution completed for live chat', {
         component: 'LiveChat',
         status: result.status,
         branch: result.branch,
         totalCost: result.totalCost,
+        contentTruncated,
       });
 
       // Use collected content or a summary from result
-      const finalContent = assistantContent || result.result || 'Task completed.';
+      const finalContent = contentTruncated
+        ? assistantContent + '\n\n[Response truncated due to length]'
+        : assistantContent || result.result || 'Task completed.';
 
       // Save assistant message
       const assistantMessage = {
@@ -410,9 +539,21 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
         status: result.status,
         branch: result.branch,
         totalCost: result.totalCost,
+        truncated: contentTruncated,
       });
 
     } catch (execError) {
+      // Handle abort (client disconnect) gracefully
+      if (clientDisconnected || (execError instanceof Error && execError.name === 'AbortError')) {
+        logger.info('Claude execution aborted due to client disconnect', {
+          component: 'LiveChat',
+          owner,
+          repo,
+          branch: decodedBranch,
+        });
+        return;
+      }
+
       const errorMessage = execError instanceof Error ? execError.message : 'Execution failed';
       logger.error('Claude execution failed for live chat', execError as Error, {
         component: 'LiveChat',
@@ -421,17 +562,27 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
         branch: decodedBranch,
       });
 
-      sendSSE('error', { error: errorMessage });
+      // Only send error if client is still connected
+      if (!clientDisconnected) {
+        sendSSE('error', { error: errorMessage });
+      }
     }
 
-    res.end();
+    if (!clientDisconnected) {
+      res.end();
+    }
   } catch (error) {
     logger.error('liveChat', 'Failed to execute live chat', { error });
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to execute' });
-    } else {
-      res.write(`event: error\ndata: ${JSON.stringify({ error: 'Execution failed' })}\n\n`);
-      res.end();
+    } else if (!res.writableEnded) {
+      // Only try to write if the stream is still writable
+      try {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: 'Execution failed' })}\n\n`);
+        res.end();
+      } catch {
+        // Client already disconnected, nothing to do
+      }
     }
   }
 });
