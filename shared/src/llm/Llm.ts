@@ -7,9 +7,12 @@
  */
 
 import { ALlm } from './ALlm.js';
-import { OPENROUTER_API_KEY } from '../config/env.js';
+import { OPENROUTER_API_KEY, CLAUDE_ENVIRONMENT_ID, CLAUDE_LLM_FALLBACK_REPO } from '../config/env.js';
+import { getClaudeCredentials, ensureValidToken } from '../auth/claudeAuth.js';
+import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { logger } from '../utils/logging/logger.js';
 import type { LlmExecuteParams, LlmExecuteResult } from './types.js';
+import type { SessionEvent } from '../claudeWeb/types.js';
 
 const OPENROUTER_DEFAULT_MODEL = 'anthropic/claude-3.5-haiku';
 
@@ -34,9 +37,21 @@ export class Llm extends ALlm {
       }
     }
 
-    // TODO: Add Claude Web fallback (empty repo + archive)
-    // For now, throw if OpenRouter is not available
-    throw new Error('No LLM provider available. Set OPENROUTER_API_KEY in your environment.');
+    // Try Claude Web fallback (expensive, but works without API keys)
+    try {
+      return await this.executeClaudeWeb(prompt, {
+        maxTokens,
+        temperature,
+        systemPrompt,
+      });
+    } catch (error) {
+      logger.warn('Claude Web fallback failed', {
+        component: 'Llm',
+        error: (error as Error).message,
+      });
+    }
+
+    throw new Error('No LLM provider available. Set OPENROUTER_API_KEY or configure Claude auth.');
   }
 
   private async executeOpenRouter(
@@ -103,5 +118,113 @@ export class Llm extends ALlm {
       inputTokens,
       outputTokens,
     };
+  }
+
+  private async executeClaudeWeb(
+    prompt: string,
+    options: {
+      maxTokens: number;
+      temperature: number;
+      systemPrompt?: string;
+    }
+  ): Promise<LlmExecuteResult> {
+    const { systemPrompt } = options;
+
+    // Get Claude credentials
+    const claudeAuth = await getClaudeCredentials({ checkDatabase: true });
+    if (!claudeAuth) {
+      throw new Error('No Claude credentials available');
+    }
+
+    // Ensure token is valid
+    const validAuth = await ensureValidToken(claudeAuth);
+
+    // Check for environment ID
+    if (!CLAUDE_ENVIRONMENT_ID) {
+      throw new Error('CLAUDE_ENVIRONMENT_ID not configured');
+    }
+
+    // Create Claude Web client
+    const client = new ClaudeWebClient({
+      accessToken: validAuth.accessToken,
+      environmentId: CLAUDE_ENVIRONMENT_ID,
+    });
+
+    // Build the full prompt with system prompt if provided
+    const fullPrompt = systemPrompt
+      ? `${systemPrompt}\n\n${prompt}`
+      : prompt;
+
+    // Collect assistant messages
+    const assistantMessages: string[] = [];
+    let sessionId: string | undefined;
+    let totalCost: number | undefined;
+
+    try {
+      logger.info('Executing Claude Web fallback', {
+        component: 'Llm',
+        promptLength: fullPrompt.length,
+        gitUrl: CLAUDE_LLM_FALLBACK_REPO,
+      });
+
+      const result = await client.execute(
+        {
+          prompt: fullPrompt,
+          gitUrl: CLAUDE_LLM_FALLBACK_REPO,
+          title: `LLM Request: ${prompt.slice(0, 30)}...`,
+        },
+        (event: SessionEvent) => {
+          // Extract text content from assistant messages
+          if (event.type === 'assistant' && event.message?.content) {
+            const content = event.message.content;
+            if (typeof content === 'string') {
+              assistantMessages.push(content);
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === 'text' && block.text) {
+                  assistantMessages.push(block.text);
+                }
+              }
+            }
+          }
+        }
+      );
+
+      sessionId = result.sessionId;
+      totalCost = result.totalCost;
+
+      const content = assistantMessages.join('\n\n');
+
+      logger.info('Claude Web fallback completed', {
+        component: 'Llm',
+        sessionId,
+        contentLength: content.length,
+        cost: totalCost,
+      });
+
+      return {
+        content,
+        provider: 'claude-web',
+        model: 'claude-opus-4-5-20251101',
+        cost: totalCost,
+      };
+    } finally {
+      // Archive the session to clean up
+      if (sessionId) {
+        try {
+          await client.archiveSession(sessionId);
+          logger.info('Archived Claude Web session', {
+            component: 'Llm',
+            sessionId,
+          });
+        } catch (archiveError) {
+          logger.warn('Failed to archive Claude Web session', {
+            component: 'Llm',
+            sessionId,
+            error: (archiveError as Error).message,
+          });
+        }
+      }
+    }
   }
 }

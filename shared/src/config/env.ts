@@ -50,6 +50,7 @@ export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL || 'claude-
 export const CLAUDE_ORG_UUID = process.env.CLAUDE_ORG_UUID || '';  // For title generation endpoint
 export const CLAUDE_COOKIES = process.env.CLAUDE_COOKIES || '';  // Browser cookies for fast title generation
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // OpenRouter API key for title generation
+export const CLAUDE_LLM_FALLBACK_REPO = process.env.CLAUDE_LLM_FALLBACK_REPO || 'https://github.com/anthropics/claude-code-action';  // Empty/placeholder repo for LLM fallback
 
 // Background sync configuration
 // Automatically syncs Claude Remote sessions from Anthropic API
