@@ -47,7 +47,7 @@ export class Llm extends ALlm {
       });
     }
 
-    throw new Error('No LLM provider available. Set OPENROUTER_API_KEY or configure Claude credentials.');
+    throw new Error('No LLM provider available. Set OPENROUTER_API_KEY or configure Claude credentials with CLAUDE_ENVIRONMENT_ID.');
   }
 
   private async executeOpenRouter(
@@ -144,24 +144,26 @@ export class Llm extends ALlm {
       : prompt;
 
     // Collect response text from events
-    let responseText = '';
+    const responseBlocks: string[] = [];
     let totalCost: number | undefined;
+    let usedModel: string | undefined;
 
-    const events: SessionEvent[] = [];
     const onEvent = (event: SessionEvent) => {
-      events.push(event);
-
       // Extract text from assistant messages
       if (event.type === 'assistant' && event.message) {
         const content = event.message.content;
         if (typeof content === 'string') {
-          responseText += content;
+          responseBlocks.push(content);
         } else if (Array.isArray(content)) {
           for (const block of content) {
             if (block.type === 'text' && block.text) {
-              responseText += block.text;
+              responseBlocks.push(block.text);
             }
           }
+        }
+        // Capture model from assistant message
+        if (event.message.model) {
+          usedModel = event.message.model;
         }
       }
 
@@ -201,6 +203,9 @@ export class Llm extends ALlm {
       });
     }
 
+    // Join response blocks with newlines to preserve formatting between blocks
+    const responseText = responseBlocks.join('\n\n');
+
     if (!responseText) {
       throw new Error('No response received from Claude Web');
     }
@@ -208,7 +213,7 @@ export class Llm extends ALlm {
     return {
       content: responseText.trim(),
       provider: 'claude-web',
-      model: 'claude-opus-4-5-20251101',
+      model: usedModel || 'claude-opus-4-5-20251101',
       cost: totalCost,
     };
   }
