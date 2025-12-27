@@ -11,6 +11,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { generateSessionPath } from '../../src/utils/helpers/sessionPathHelper.js';
+import { mapRemoteStatus } from '../../src/sessions/SessionService.js';
 
 /**
  * Test helper to create mock remote session data
@@ -302,17 +303,7 @@ describe('Duplicate Prevention Logic', () => {
 });
 
 describe('Status Mapping', () => {
-  // Status mapping used in both claudeSessionSync and SessionService.sync
-  const mapRemoteStatus = (anthropicStatus: string): string => {
-    const statusMap: Record<string, string> = {
-      'idle': 'completed',
-      'running': 'running',
-      'completed': 'completed',
-      'failed': 'error',
-      'archived': 'completed',
-    };
-    return statusMap[anthropicStatus] || 'pending';
-  };
+  // Uses the exported mapRemoteStatus from SessionService to ensure test/implementation parity
 
   it('should map remote statuses to local statuses', () => {
     assert.strictEqual(mapRemoteStatus('completed'), 'completed');
@@ -323,6 +314,14 @@ describe('Status Mapping', () => {
 
   it('should map idle to completed', () => {
     assert.strictEqual(mapRemoteStatus('idle'), 'completed');
+  });
+
+  it('should map cancelled to error', () => {
+    assert.strictEqual(mapRemoteStatus('cancelled'), 'error');
+  });
+
+  it('should map errored to error', () => {
+    assert.strictEqual(mapRemoteStatus('errored'), 'error');
   });
 
   it('should default unknown statuses to pending', () => {

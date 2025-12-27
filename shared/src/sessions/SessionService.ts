@@ -40,6 +40,43 @@ function extractTextFromPrompt(prompt: string | { type: string; text?: string }[
     .join('\n');
 }
 
+/**
+ * Map Anthropic session status to our internal status.
+ * Exported for use in tests and other modules.
+ */
+export function mapRemoteStatus(anthropicStatus: string): string {
+  const statusMap: Record<string, string> = {
+    'idle': 'completed',
+    'running': 'running',
+    'completed': 'completed',
+    'failed': 'error',
+    'cancelled': 'error',
+    'errored': 'error',
+    'archived': 'completed',
+  };
+  return statusMap[anthropicStatus] || 'pending';
+}
+
+/**
+ * Type guard to validate remote session response structure
+ */
+function isValidRemoteSession(obj: unknown): obj is {
+  session_status: string;
+  updated_at: string;
+  session_context?: {
+    outcomes?: Array<{ type: string; git_info?: { branches?: string[] } }>;
+  };
+} {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+  const session = obj as Record<string, unknown>;
+  return (
+    typeof session.session_status === 'string' &&
+    typeof session.updated_at === 'string'
+  );
+}
+
 export class SessionService extends ASession {
   private provider: ClaudeRemoteProvider;
 
@@ -378,7 +415,19 @@ export class SessionService extends ASession {
       });
 
       // Fetch remote session status
-      const remoteSession = await client.getSession(session.remoteSessionId);
+      const remoteSessionResponse = await client.getSession(session.remoteSessionId);
+
+      // Validate remote session response structure
+      if (!isValidRemoteSession(remoteSessionResponse)) {
+        logger.warn('Invalid remote session response structure', {
+          component: 'Session',
+          chatSessionId: sessionId,
+          remoteSessionId: session.remoteSessionId,
+        });
+        return this.mapSessionToInfo(session);
+      }
+
+      const remoteSession = remoteSessionResponse;
       const newStatus = this.mapRemoteStatus(remoteSession.session_status);
 
       // Fetch remote events
@@ -386,6 +435,8 @@ export class SessionService extends ASession {
       const remoteEvents = eventsResponse.data || [];
 
       // Get existing event UUIDs for this session
+      // Note: We fetch eventData to extract UUIDs. A future optimization could add
+      // a dedicated uuid column to the events table for more efficient queries.
       const existingEvents = await db
         .select({ eventData: events.eventData })
         .from(events)
@@ -395,28 +446,21 @@ export class SessionService extends ASession {
         existingEvents.map(e => (e.eventData as { uuid?: string })?.uuid).filter(Boolean)
       );
 
-      // Import any new events
-      let newEventsCount = 0;
-      for (const event of remoteEvents) {
-        if (event.uuid && !existingUuids.has(event.uuid)) {
-          await db.insert(events).values({
-            chatSessionId: sessionId,
-            eventData: event,
-            timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-          });
-          newEventsCount++;
-        }
-      }
+      // Filter to only new events
+      const eventsToInsert = remoteEvents.filter(
+        event => event.uuid && !existingUuids.has(event.uuid)
+      );
 
       // Extract total cost from result event
-      let totalCost: string | undefined = session.totalCost || undefined;
+      // Use nullish coalescing (??) to correctly handle falsy values like '0.000000'
+      let totalCost: string | undefined = session.totalCost ?? undefined;
       const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd);
       if (resultEvent?.total_cost_usd) {
         totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
       }
 
       // Extract branch from session context
-      let branch: string | undefined = session.branch || undefined;
+      let branch: string | undefined = session.branch ?? undefined;
       const gitOutcome = remoteSession.session_context?.outcomes?.find(
         (o: { type: string }) => o.type === 'git_repository'
       );
@@ -425,7 +469,7 @@ export class SessionService extends ASession {
       }
 
       // Generate sessionPath if we now have branch info
-      let sessionPath: string | undefined = session.sessionPath || undefined;
+      let sessionPath: string | undefined = session.sessionPath ?? undefined;
       if (branch && session.repositoryOwner && session.repositoryName && !sessionPath) {
         sessionPath = generateSessionPath(session.repositoryOwner, session.repositoryName, branch);
       }
@@ -436,26 +480,43 @@ export class SessionService extends ASession {
         ? new Date(remoteSession.updated_at)
         : session.completedAt;
 
-      // Check if anything changed
+      // Normalize values for comparison to avoid null !== undefined issues
+      const normalizedTotalCost = totalCost ?? null;
+      const normalizedBranch = branch ?? null;
+      const normalizedSessionPath = sessionPath ?? null;
+
+      // Check if anything changed (using normalized values for consistent comparison)
       const hasChanges =
         newStatus !== session.status ||
-        totalCost !== session.totalCost ||
-        branch !== session.branch ||
-        sessionPath !== session.sessionPath ||
-        newEventsCount > 0;
+        normalizedTotalCost !== session.totalCost ||
+        normalizedBranch !== session.branch ||
+        normalizedSessionPath !== session.sessionPath ||
+        eventsToInsert.length > 0;
 
-      // Update session if there are changes
+      // Update session and insert events in a transaction for consistency
       if (hasChanges) {
-        await db
-          .update(chatSessions)
-          .set({
-            status: newStatus,
-            totalCost: totalCost || undefined,
-            branch: branch || undefined,
-            sessionPath: sessionPath || undefined,
-            completedAt: completedAt || undefined,
-          })
-          .where(eq(chatSessions.id, sessionId));
+        await db.transaction(async (tx) => {
+          // Insert new events
+          for (const event of eventsToInsert) {
+            await tx.insert(events).values({
+              chatSessionId: sessionId,
+              eventData: event,
+              timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
+            });
+          }
+
+          // Update session with new values
+          await tx
+            .update(chatSessions)
+            .set({
+              status: newStatus,
+              totalCost: totalCost ?? undefined,
+              branch: branch ?? undefined,
+              sessionPath: sessionPath ?? undefined,
+              completedAt: completedAt ?? undefined,
+            })
+            .where(eq(chatSessions.id, sessionId));
+        });
 
         logger.info('Session synced with remote', {
           component: 'Session',
@@ -463,7 +524,7 @@ export class SessionService extends ASession {
           remoteSessionId: session.remoteSessionId,
           previousStatus: session.status,
           newStatus,
-          newEventsCount,
+          newEventsCount: eventsToInsert.length,
           totalCost,
           branch,
         });
@@ -474,15 +535,15 @@ export class SessionService extends ASession {
         id: session.id,
         userId: session.userId,
         status: newStatus as 'pending' | 'running' | 'completed' | 'error',
-        userRequest: session.userRequest || undefined,
-        repositoryOwner: session.repositoryOwner || undefined,
-        repositoryName: session.repositoryName || undefined,
-        branch: branch || undefined,
-        remoteSessionId: session.remoteSessionId || undefined,
-        remoteWebUrl: session.remoteWebUrl || undefined,
-        totalCost: totalCost || undefined,
-        createdAt: session.createdAt || undefined,
-        completedAt: completedAt || undefined,
+        userRequest: session.userRequest ?? undefined,
+        repositoryOwner: session.repositoryOwner ?? undefined,
+        repositoryName: session.repositoryName ?? undefined,
+        branch: branch ?? undefined,
+        remoteSessionId: session.remoteSessionId ?? undefined,
+        remoteWebUrl: session.remoteWebUrl ?? undefined,
+        totalCost: totalCost ?? undefined,
+        createdAt: session.createdAt ?? undefined,
+        completedAt: completedAt ?? undefined,
       };
 
     } catch (error) {
@@ -499,15 +560,8 @@ export class SessionService extends ASession {
   /**
    * Map Anthropic session status to our internal status
    */
-  private mapRemoteStatus(anthropicStatus: string): string {
-    const statusMap: Record<string, string> = {
-      'idle': 'completed',
-      'running': 'running',
-      'completed': 'completed',
-      'failed': 'error',
-      'archived': 'completed',
-    };
-    return statusMap[anthropicStatus] || 'pending';
+  mapRemoteStatus(anthropicStatus: string): string {
+    return mapRemoteStatus(anthropicStatus);
   }
 
   /**
