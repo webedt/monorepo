@@ -10,13 +10,32 @@ import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzl
 export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
 
 /**
- * Role hierarchy for permission checks
- * Higher index = more permissions
+ * Role hierarchy for permission checks.
+ * Roles are ordered from least to most privileged.
+ * Higher index = more permissions.
+ *
+ * @see hasRolePermission - Use this function to check role permissions
  */
 export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
 
 /**
- * Check if a role has at least the required permission level
+ * Check if a user's role has sufficient permissions for a required access level.
+ * Uses the ROLE_HIERARCHY to determine if the user's role is equal to or higher
+ * than the required role.
+ *
+ * @param userRole - The role of the user being checked
+ * @param requiredRole - The minimum role required for access
+ * @returns true if userRole has sufficient permissions, false otherwise
+ *
+ * @example
+ * // Check if an editor can access editor features
+ * hasRolePermission('editor', 'editor') // true
+ *
+ * // Check if a developer can access admin features
+ * hasRolePermission('developer', 'admin') // false
+ *
+ * // Check if an admin can access user features
+ * hasRolePermission('admin', 'user') // true
  */
 export function hasRolePermission(userRole: UserRole, requiredRole: UserRole): boolean {
   const userLevel = ROLE_HIERARCHY.indexOf(userRole);
