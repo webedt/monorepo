@@ -115,4 +115,9 @@ export abstract class AClaudeWebClient extends AService implements IClaudeWebCli
     onEvent: EventCallback,
     options?: PollOptions
   ): Promise<SessionResult>;
+
+  abstract isComplete(
+    sessionId: string,
+    checkEvents?: boolean
+  ): Promise<{ isComplete: boolean; status: string; reason?: string; hasResultEvent?: boolean }>;
 }

@@ -352,6 +352,7 @@ Global options: `--token`, `--environment`, `--org`
 | `claude web rename <sessionId> "title"` | Rename a session |
 | `claude web interrupt <sessionId>` | Interrupt running session |
 | `claude web can-resume <sessionId>` | Check if session can be resumed |
+| `claude web is-complete <sessionId>` | Check if session is complete |
 | `claude web send <sessionId> "message"` | Send message (fire-and-forget) |
 | `claude web set-permission <sessionId>` | Set permission mode |
 | `claude web discover-env` | Discover environment ID |

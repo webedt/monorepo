@@ -602,4 +602,41 @@ export interface IClaudeWebClientDocumentation {
     onEvent: EventCallback,
     options?: PollOptions
   ): Promise<SessionResult>;
+
+  /**
+   * Check if a session has completed.
+   *
+   * A session is considered complete when:
+   * - Session status is 'completed', 'failed', or 'archived' (terminal states)
+   * - Or, if `checkEvents` is true, when a 'result' event exists (more reliable
+   *   than session_status which can be stale)
+   *
+   * Use this to determine if a session has finished execution and no more
+   * events will be emitted.
+   *
+   * @param sessionId - The session ID to check
+   * @param checkEvents - Also check events for a result event (default: true)
+   * @returns Object with `isComplete` boolean, `status`, and optional `reason`
+   *
+   * @example
+   * ```typescript
+   * const check = await client.isComplete('session_abc123');
+   * if (check.isComplete) {
+   *   console.log(`Session finished with status: ${check.status}`);
+   * } else {
+   *   console.log(`Session still running: ${check.status}`);
+   * }
+   * ```
+   *
+   * @example
+   * ```typescript
+   * // Quick check without event inspection
+   * const check = await client.isComplete(sessionId, false);
+   * console.log(`Complete: ${check.isComplete}`);
+   * ```
+   */
+  isComplete(
+    sessionId: string,
+    checkEvents?: boolean
+  ): Promise<{ isComplete: boolean; status: string; reason?: string; hasResultEvent?: boolean }>;
 }

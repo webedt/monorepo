@@ -836,4 +836,50 @@ export class ClaudeWebClient extends AClaudeWebClient {
       onRawMessage: options.onRawMessage,
     });
   }
+
+  async isComplete(
+    sessionId: string,
+    checkEvents: boolean = true
+  ): Promise<{ isComplete: boolean; status: string; reason?: string; hasResultEvent?: boolean }> {
+    const session = await this.getSession(sessionId);
+    const status = session.session_status;
+
+    // Terminal states are always complete
+    if (status === 'completed') {
+      return { isComplete: true, status, reason: 'Session completed successfully' };
+    }
+    if (status === 'failed') {
+      return { isComplete: true, status, reason: 'Session failed' };
+    }
+    if (status === 'archived') {
+      return { isComplete: true, status, reason: 'Session is archived' };
+    }
+
+    // For running/idle sessions, optionally check events for result
+    if (checkEvents) {
+      try {
+        const events = await this.getEvents(sessionId);
+        const hasResultEvent = events.data?.some(event => {
+          const eventType = String(event.type || '').toLowerCase();
+          return eventType === 'result';
+        });
+
+        if (hasResultEvent) {
+          return {
+            isComplete: true,
+            status,
+            reason: 'Session has result event (status may be stale)',
+            hasResultEvent: true
+          };
+        }
+
+        return { isComplete: false, status, hasResultEvent: false };
+      } catch {
+        // If we can't check events, fall through to status-based check
+        return { isComplete: false, status };
+      }
+    }
+
+    return { isComplete: false, status };
+  }
 }
