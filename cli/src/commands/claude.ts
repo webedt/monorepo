@@ -491,7 +491,7 @@ webCommand
 
       console.log(`\nSession ${sessionId}:`);
       console.log(`  Complete:     ${result.isComplete ? 'Yes' : 'No'}`);
-      console.log(`  Status:       ${result.status || 'unknown'}`);
+      console.log(`  Status:       ${result.status}`);
       if (result.hasResultEvent !== undefined) {
         console.log(`  Has Result:   ${result.hasResultEvent ? 'Yes' : 'No'}`);
       }

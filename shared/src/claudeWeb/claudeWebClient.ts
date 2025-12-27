@@ -368,68 +368,42 @@ export class ClaudeWebClient extends AClaudeWebClient {
     checkEvents: boolean = true
   ): Promise<{ isComplete: boolean; status?: string; hasResultEvent?: boolean }> {
     const session = await this.getSession(sessionId);
+    const status = session.session_status;
 
-    // Running sessions are not complete
-    if (session.session_status === 'running') {
-      // Even if status says running, check events for result event
-      if (checkEvents) {
-        try {
-          const events = await this.getEvents(sessionId);
-          const hasResultEvent = events.data?.some(event => {
-            const eventType = String(event.type || '').toLowerCase();
-            return eventType === 'result';
-          });
-
-          if (hasResultEvent) {
-            // Session has a result event, it's complete even if status says running
-            return { isComplete: true, status: 'idle', hasResultEvent: true };
-          }
-        } catch {
-          // Ignore errors checking events
+    // Helper to check for result event
+    const checkForResultEvent = async (): Promise<boolean | undefined> => {
+      if (!checkEvents) return undefined;
+      try {
+        const events = await this.getEvents(sessionId);
+        return events.data?.some(event => event.type === 'result') ?? false;
+      } catch (error) {
+        // Log at debug level but don't fail - event check is optional
+        if (error instanceof Error) {
+          // Silently continue - events API may be unavailable
         }
+        return undefined;
       }
-      return { isComplete: false, status: session.session_status };
+    };
+
+    // Running sessions are not complete unless they have a result event
+    if (status === 'running') {
+      const hasResultEvent = await checkForResultEvent();
+      if (hasResultEvent) {
+        // Session has a result event, it's complete even if status says running
+        // Return actual status to avoid misleading callers
+        return { isComplete: true, status, hasResultEvent: true };
+      }
+      return { isComplete: false, status };
     }
 
-    // Terminal states are complete
-    if (session.session_status === 'completed' ||
-        session.session_status === 'failed' ||
-        session.session_status === 'archived') {
-      // Optionally check for result event
-      let hasResultEvent: boolean | undefined;
-      if (checkEvents) {
-        try {
-          const events = await this.getEvents(sessionId);
-          hasResultEvent = events.data?.some(event => {
-            const eventType = String(event.type || '').toLowerCase();
-            return eventType === 'result';
-          });
-        } catch {
-          // Ignore errors checking events
-        }
-      }
-      return { isComplete: true, status: session.session_status, hasResultEvent };
-    }
-
-    // 'idle' status is complete (session is at rest after finishing work)
-    if (session.session_status === 'idle') {
-      let hasResultEvent: boolean | undefined;
-      if (checkEvents) {
-        try {
-          const events = await this.getEvents(sessionId);
-          hasResultEvent = events.data?.some(event => {
-            const eventType = String(event.type || '').toLowerCase();
-            return eventType === 'result';
-          });
-        } catch {
-          // Ignore errors checking events
-        }
-      }
-      return { isComplete: true, status: session.session_status, hasResultEvent };
+    // Terminal and idle states are complete
+    if (status === 'idle' || status === 'completed' || status === 'failed' || status === 'archived') {
+      const hasResultEvent = await checkForResultEvent();
+      return { isComplete: true, status, hasResultEvent };
     }
 
     // Unknown status, assume not complete
-    return { isComplete: false, status: session.session_status };
+    return { isComplete: false, status };
   }
 
   async waitForResumable(
