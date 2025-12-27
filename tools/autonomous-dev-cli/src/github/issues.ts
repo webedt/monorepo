@@ -18,6 +18,15 @@ export interface Issue {
   assignee: string | null;
 }
 
+export interface Comment {
+  id: number;
+  body: string;
+  htmlUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  user: string | null;
+}
+
 export interface CreateIssueOptions {
   title: string;
   body: string;
@@ -43,14 +52,27 @@ export interface IssueManager {
   addLabelsWithFallback(issueNumber: number, labels: string[]): Promise<DegradedResult<void>>;
   removeLabel(issueNumber: number, label: string): Promise<void>;
   closeIssue(issueNumber: number, comment?: string): Promise<void>;
-  addComment(issueNumber: number, body: string): Promise<void>;
-  addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<void>>;
+  addComment(issueNumber: number, body: string): Promise<Comment>;
+  addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<Comment | undefined>>;
+  /** List all comments on an issue */
+  listComments(issueNumber: number): Promise<Comment[]>;
+  listCommentsWithFallback(issueNumber: number, fallback?: Comment[]): Promise<DegradedResult<Comment[]>>;
+  /** Get a specific comment by ID */
+  getComment(commentId: number): Promise<Comment | null>;
+  /** Update an existing comment */
+  updateComment(commentId: number, body: string): Promise<Comment>;
+  updateCommentWithFallback(commentId: number, body: string): Promise<DegradedResult<Comment | undefined>>;
+  /** Delete a comment */
+  deleteComment(commentId: number): Promise<void>;
+  deleteCommentWithFallback(commentId: number): Promise<DegradedResult<void>>;
   getServiceHealth(): ServiceHealth;
   isAvailable(): boolean;
   /** Invalidate cached issue data */
   invalidateCache(): void;
   /** Invalidate a specific issue from cache */
   invalidateIssue(number: number): void;
+  /** Invalidate comments cache for a specific issue */
+  invalidateComments(issueNumber: number): void;
 }
 
 export function createIssueManager(client: GitHubClient): IssueManager {
@@ -69,6 +91,18 @@ export function createIssueManager(client: GitHubClient): IssueManager {
     htmlUrl: issue.html_url,
     createdAt: issue.created_at,
     assignee: issue.assignee?.login || null,
+  });
+
+  /**
+   * Helper function to map GitHub API comment response to Comment type
+   */
+  const mapComment = (comment: any): Comment => ({
+    id: comment.id,
+    body: comment.body ?? '',
+    htmlUrl: comment.html_url,
+    createdAt: comment.created_at,
+    updatedAt: comment.updated_at,
+    user: comment.user?.login || null,
   });
 
   /**
@@ -363,36 +397,38 @@ export function createIssueManager(client: GitHubClient): IssueManager {
       }
     },
 
-    async addComment(issueNumber: number, body: string): Promise<void> {
+    async addComment(issueNumber: number, body: string): Promise<Comment> {
       try {
-        await client.execute(
+        return await client.execute(
           async () => {
-            await octokit.issues.createComment({
+            const { data } = await octokit.issues.createComment({
               owner,
               repo,
               issue_number: issueNumber,
               body,
             });
             logger.debug(`Added comment to issue #${issueNumber}`);
+            return mapComment(data);
           },
           `POST /repos/${owner}/${repo}/issues/${issueNumber}/comments`,
           { operation: 'addComment', issueNumber }
         );
       } catch (error) {
-        handleError(error, 'add comment', { issueNumber });
+        return handleError(error, 'add comment', { issueNumber });
       }
     },
 
-    async addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<void>> {
+    async addCommentWithFallback(issueNumber: number, body: string): Promise<DegradedResult<Comment | undefined>> {
       const result = await client.executeWithFallback(
         async () => {
-          await octokit.issues.createComment({
+          const { data } = await octokit.issues.createComment({
             owner,
             repo,
             issue_number: issueNumber,
             body,
           });
           logger.debug(`Added comment to issue #${issueNumber}`);
+          return mapComment(data);
         },
         undefined,
         `POST /repos/${owner}/${repo}/issues/${issueNumber}/comments`,
@@ -406,10 +442,177 @@ export function createIssueManager(client: GitHubClient): IssueManager {
       return result;
     },
 
+    async listComments(issueNumber: number): Promise<Comment[]> {
+      const cacheKey = `comments-${issueNumber}`;
+
+      return client.getCachedOrFetch('comment-list', cacheKey, async () => {
+        try {
+          return await client.execute(
+            async () => {
+              const { data } = await octokit.issues.listComments({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              });
+              return data.map(mapComment);
+            },
+            `GET /repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+            { operation: 'listComments', issueNumber }
+          );
+        } catch (error) {
+          return handleError(error, 'list comments', { issueNumber });
+        }
+      });
+    },
+
+    async listCommentsWithFallback(issueNumber: number, fallback: Comment[] = []): Promise<DegradedResult<Comment[]>> {
+      const result = await client.executeWithFallback(
+        async () => {
+          const { data } = await octokit.issues.listComments({
+            owner,
+            repo,
+            issue_number: issueNumber,
+            per_page: 100,
+          });
+          return data.map(mapComment);
+        },
+        fallback,
+        `GET /repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+        { operation: 'listComments', issueNumber }
+      );
+
+      if (result.degraded) {
+        logger.warn('List comments degraded - using fallback', {
+          issueNumber,
+          fallbackCount: fallback.length,
+        });
+      }
+
+      return result;
+    },
+
+    async getComment(commentId: number): Promise<Comment | null> {
+      const cacheKey = `comment-${commentId}`;
+
+      try {
+        return await client.getCachedOrFetch('comment', cacheKey, async () => {
+          return await client.execute(
+            async () => {
+              const { data } = await octokit.issues.getComment({
+                owner,
+                repo,
+                comment_id: commentId,
+              });
+              return mapComment(data);
+            },
+            `GET /repos/${owner}/${repo}/issues/comments/${commentId}`,
+            { operation: 'getComment', commentId }
+          );
+        });
+      } catch (error: any) {
+        if (error.status === 404) {
+          return null;
+        }
+        return handleError(error, 'get comment', { commentId });
+      }
+    },
+
+    async updateComment(commentId: number, body: string): Promise<Comment> {
+      try {
+        return await client.execute(
+          async () => {
+            const { data } = await octokit.issues.updateComment({
+              owner,
+              repo,
+              comment_id: commentId,
+              body,
+            });
+            logger.debug(`Updated comment #${commentId}`);
+            return mapComment(data);
+          },
+          `PATCH /repos/${owner}/${repo}/issues/comments/${commentId}`,
+          { operation: 'updateComment', commentId }
+        );
+      } catch (error) {
+        return handleError(error, 'update comment', { commentId });
+      }
+    },
+
+    async updateCommentWithFallback(commentId: number, body: string): Promise<DegradedResult<Comment | undefined>> {
+      const result = await client.executeWithFallback(
+        async () => {
+          const { data } = await octokit.issues.updateComment({
+            owner,
+            repo,
+            comment_id: commentId,
+            body,
+          });
+          logger.debug(`Updated comment #${commentId}`);
+          return mapComment(data);
+        },
+        undefined,
+        `PATCH /repos/${owner}/${repo}/issues/comments/${commentId}`,
+        { operation: 'updateComment', commentId }
+      );
+
+      if (result.degraded) {
+        logger.warn('Update comment degraded - operation skipped', { commentId });
+      }
+
+      return result;
+    },
+
+    async deleteComment(commentId: number): Promise<void> {
+      try {
+        await client.execute(
+          async () => {
+            await octokit.issues.deleteComment({
+              owner,
+              repo,
+              comment_id: commentId,
+            });
+            logger.debug(`Deleted comment #${commentId}`);
+          },
+          `DELETE /repos/${owner}/${repo}/issues/comments/${commentId}`,
+          { operation: 'deleteComment', commentId }
+        );
+      } catch (error: any) {
+        // Ignore if comment doesn't exist
+        if (error.status !== 404) {
+          handleError(error, 'delete comment', { commentId });
+        }
+      }
+    },
+
+    async deleteCommentWithFallback(commentId: number): Promise<DegradedResult<void>> {
+      const result = await client.executeWithFallback(
+        async () => {
+          await octokit.issues.deleteComment({
+            owner,
+            repo,
+            comment_id: commentId,
+          });
+          logger.debug(`Deleted comment #${commentId}`);
+        },
+        undefined,
+        `DELETE /repos/${owner}/${repo}/issues/comments/${commentId}`,
+        { operation: 'deleteComment', commentId }
+      );
+
+      if (result.degraded) {
+        logger.warn('Delete comment degraded - operation skipped', { commentId });
+      }
+
+      return result;
+    },
+
     invalidateCache(): void {
       client.invalidateCacheType('issue');
       client.invalidateCacheType('issue-list');
-      logger.debug('Invalidated issue cache');
+      client.invalidateCacheType('comment');
+      client.invalidateCacheType('comment-list');
+      logger.debug('Invalidated issue and comment cache');
     },
 
     invalidateIssue(number: number): void {
@@ -419,6 +622,13 @@ export function createIssueManager(client: GitHubClient): IssueManager {
       // Also invalidate the list cache since it may contain stale data
       client.invalidateCacheType('issue-list');
       logger.debug(`Invalidated cache for issue #${number}`);
+    },
+
+    invalidateComments(issueNumber: number): void {
+      const cache = client.getCache();
+      const cacheKey = cache.generateKey('comment-list', owner, repo, `comments-${issueNumber}`);
+      cache.invalidate(cacheKey);
+      logger.debug(`Invalidated comments cache for issue #${issueNumber}`);
     },
   };
 }

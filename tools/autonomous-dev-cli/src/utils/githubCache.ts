@@ -84,6 +84,8 @@ export type CacheKeyType =
   | 'repo-info'
   | 'issue-list'
   | 'issue'
+  | 'comment-list'
+  | 'comment'
   | 'branch-list'
   | 'branch'
   | 'branch-protection'
@@ -161,8 +163,10 @@ export class GitHubCache {
       case 'repo-info':
         return this.config.repoInfoTtlMs;
       case 'issue-list':
+      case 'comment-list':
         return this.config.issueListTtlMs;
       case 'issue':
+      case 'comment':
         return this.config.issueTtlMs;
       case 'branch-list':
         return this.config.branchListTtlMs;
@@ -435,9 +439,9 @@ export class GitHubCache {
     const byType: Record<CacheKeyType, { entries: number; hits: number; misses: number }> = {} as any;
 
     const types: CacheKeyType[] = [
-      'repo-info', 'issue-list', 'issue', 'branch-list', 'branch',
-      'branch-protection', 'pr-list', 'pr', 'rate-limit', 'user',
-      'codeowners', 'pr-template'
+      'repo-info', 'issue-list', 'issue', 'comment-list', 'comment',
+      'branch-list', 'branch', 'branch-protection', 'pr-list', 'pr',
+      'rate-limit', 'user', 'codeowners', 'pr-template'
     ];
 
     for (const type of types) {
