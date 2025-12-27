@@ -51,6 +51,10 @@ export const CLAUDE_ORG_UUID = process.env.CLAUDE_ORG_UUID || '';  // For title 
 export const CLAUDE_COOKIES = process.env.CLAUDE_COOKIES || '';  // Browser cookies for fast title generation
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // OpenRouter API key for title generation
 
+// LLM fallback configuration
+// Empty repo URL for Claude Web fallback (used when OpenRouter is unavailable)
+export const LLM_FALLBACK_REPO_URL = process.env.LLM_FALLBACK_REPO_URL || 'https://github.com/anthropics/anthropic-quickstarts';
+
 // Background sync configuration
 // Automatically syncs Claude Remote sessions from Anthropic API
 export const CLAUDE_SYNC_ENABLED = process.env.CLAUDE_SYNC_ENABLED !== 'false';  // Enabled by default
