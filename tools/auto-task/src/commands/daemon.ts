@@ -681,6 +681,42 @@ async function checkInProgressTasks(ctx: DaemonContext, inProgress: ProjectItem[
           item.number,
           `### ❌ Session Failed\n\nThe Claude session failed to complete.\n\nTask moved back to backlog and will be retried.`
         );
+      } else if (session.session_status === 'archived') {
+        // Session was archived - check if there's a PR to review
+        console.log(`   Session archived`);
+
+        if (taskInfo.prNumber) {
+          // Has PR - move to In Review
+          console.log(`   PR #${taskInfo.prNumber} exists, moving to In Review`);
+          if (inReviewId) {
+            await projectsService.updateItemStatus(
+              projectCache.projectId,
+              item.id,
+              projectCache.statusFieldId,
+              inReviewId
+            );
+          }
+        } else {
+          // No PR - move back to Ready for re-work with new session
+          console.log(`   No PR found, moving to Ready for re-work`);
+          const readyId = projectCache.statusOptions['ready'];
+          if (readyId) {
+            await projectsService.updateItemStatus(
+              projectCache.projectId,
+              item.id,
+              projectCache.statusFieldId,
+              readyId
+            );
+          }
+
+          // Add comment about archived session
+          await issuesService.addComment(
+            owner,
+            repo,
+            item.number,
+            `### ⚠️ Session Archived\n\nThe Claude session was archived before completing.\n\nTask moved to Ready for a new attempt.`
+          );
+        }
       } else {
         console.log(`   Still running...`);
       }
