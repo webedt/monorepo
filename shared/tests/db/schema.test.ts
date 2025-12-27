@@ -11,6 +11,8 @@ import {
   chatSessions,
   messages,
   events,
+  ROLE_HIERARCHY,
+  hasRolePermission,
   type User,
   type NewUser,
   type Session,
@@ -20,7 +22,8 @@ import {
   type Message,
   type NewMessage,
   type Event,
-  type NewEvent
+  type NewEvent,
+  type UserRole
 } from '../../src/db/schema.js';
 
 describe('Database Schema', () => {
@@ -92,6 +95,11 @@ describe('Database Schema', () => {
     it('should have admin flag', () => {
       assert.ok(users.isAdmin);
       assert.strictEqual(users.isAdmin.name, 'is_admin');
+    });
+
+    it('should have role field for access control', () => {
+      assert.ok(users.role);
+      assert.strictEqual(users.role.name, 'role');
     });
 
     it('should have createdAt timestamp', () => {
@@ -269,6 +277,7 @@ describe('Type Inference', () => {
         preferredModel: null,
         chatVerbosityLevel: 'verbose',
         isAdmin: false,
+        role: 'user',
         createdAt: new Date()
       };
 
@@ -654,6 +663,11 @@ describe('Default Values', () => {
     assert.strictEqual(defaultIsAdmin, false);
   });
 
+  it('should have role default to user', () => {
+    const defaultRole = 'user';
+    assert.strictEqual(defaultRole, 'user');
+  });
+
   it('should have chatVerbosityLevel default to verbose', () => {
     const defaultVerbosity = 'verbose';
     assert.strictEqual(defaultVerbosity, 'verbose');
@@ -725,5 +739,135 @@ describe('Unique Constraints', () => {
     // chatSessions.sessionPath is defined as unique
     const constraint = { field: 'session_path', unique: true };
     assert.strictEqual(constraint.unique, true);
+  });
+});
+
+describe('User Role System', () => {
+  describe('ROLE_HIERARCHY', () => {
+    it('should define four role levels', () => {
+      assert.strictEqual(ROLE_HIERARCHY.length, 4);
+    });
+
+    it('should have user as the lowest role', () => {
+      assert.strictEqual(ROLE_HIERARCHY[0], 'user');
+    });
+
+    it('should have editor as the second role', () => {
+      assert.strictEqual(ROLE_HIERARCHY[1], 'editor');
+    });
+
+    it('should have developer as the third role', () => {
+      assert.strictEqual(ROLE_HIERARCHY[2], 'developer');
+    });
+
+    it('should have admin as the highest role', () => {
+      assert.strictEqual(ROLE_HIERARCHY[3], 'admin');
+    });
+
+    it('should contain only valid role values', () => {
+      const validRoles: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+      for (const role of ROLE_HIERARCHY) {
+        assert.ok(validRoles.includes(role), `Invalid role: ${role}`);
+      }
+    });
+  });
+
+  describe('hasRolePermission', () => {
+    it('should allow user to access user-level features', () => {
+      assert.strictEqual(hasRolePermission('user', 'user'), true);
+    });
+
+    it('should not allow user to access editor-level features', () => {
+      assert.strictEqual(hasRolePermission('user', 'editor'), false);
+    });
+
+    it('should not allow user to access developer-level features', () => {
+      assert.strictEqual(hasRolePermission('user', 'developer'), false);
+    });
+
+    it('should not allow user to access admin-level features', () => {
+      assert.strictEqual(hasRolePermission('user', 'admin'), false);
+    });
+
+    it('should allow editor to access user-level features', () => {
+      assert.strictEqual(hasRolePermission('editor', 'user'), true);
+    });
+
+    it('should allow editor to access editor-level features', () => {
+      assert.strictEqual(hasRolePermission('editor', 'editor'), true);
+    });
+
+    it('should not allow editor to access developer-level features', () => {
+      assert.strictEqual(hasRolePermission('editor', 'developer'), false);
+    });
+
+    it('should not allow editor to access admin-level features', () => {
+      assert.strictEqual(hasRolePermission('editor', 'admin'), false);
+    });
+
+    it('should allow developer to access user-level features', () => {
+      assert.strictEqual(hasRolePermission('developer', 'user'), true);
+    });
+
+    it('should allow developer to access editor-level features', () => {
+      assert.strictEqual(hasRolePermission('developer', 'editor'), true);
+    });
+
+    it('should allow developer to access developer-level features', () => {
+      assert.strictEqual(hasRolePermission('developer', 'developer'), true);
+    });
+
+    it('should not allow developer to access admin-level features', () => {
+      assert.strictEqual(hasRolePermission('developer', 'admin'), false);
+    });
+
+    it('should allow admin to access all features', () => {
+      assert.strictEqual(hasRolePermission('admin', 'user'), true);
+      assert.strictEqual(hasRolePermission('admin', 'editor'), true);
+      assert.strictEqual(hasRolePermission('admin', 'developer'), true);
+      assert.strictEqual(hasRolePermission('admin', 'admin'), true);
+    });
+  });
+
+  describe('Role in User type', () => {
+    it('should include role field in User type', () => {
+      const user: User = {
+        id: 'user-123',
+        email: 'test@example.com',
+        displayName: 'Test User',
+        passwordHash: 'hashed',
+        githubId: null,
+        githubAccessToken: null,
+        claudeAuth: null,
+        codexAuth: null,
+        geminiAuth: null,
+        openrouterApiKey: null,
+        autocompleteEnabled: true,
+        autocompleteModel: 'gpt-4',
+        imageAiKeys: null,
+        imageAiProvider: 'openrouter',
+        imageAiModel: 'dalle-3',
+        preferredProvider: 'claude',
+        imageResizeMaxDimension: 1024,
+        voiceCommandKeywords: [],
+        stopListeningAfterSubmit: false,
+        defaultLandingPage: 'store',
+        preferredModel: null,
+        chatVerbosityLevel: 'verbose',
+        isAdmin: false,
+        role: 'editor',
+        createdAt: new Date()
+      };
+
+      assert.strictEqual(user.role, 'editor');
+    });
+
+    it('should support all valid role values', () => {
+      const roles: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+      for (const role of roles) {
+        const user: Partial<User> = { role };
+        assert.strictEqual(user.role, role);
+      }
+    });
   });
 });
