@@ -2,6 +2,15 @@
  * Core type definitions for WebEDT client
  */
 
+/**
+ * User role - defines access levels for the platform
+ * - user: Basic user access (read-only, limited features)
+ * - editor: Full access to the editor suite for game creation
+ * - developer: Full access plus development tools and API access
+ * - admin: Full administrative access including user management
+ */
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
+
 // User types
 export interface User {
   id: string;
@@ -26,6 +35,7 @@ export interface User {
   autocompleteEnabled?: boolean;
   autocompleteModel?: string;
   isAdmin: boolean;
+  role: UserRole;
   createdAt: string;
 }
 
@@ -293,6 +303,12 @@ export interface AdminStats {
   userCount: number;
   sessionCount: number;
   activeSessionCount: number;
+  roleCounts?: {
+    user: number;
+    editor: number;
+    developer: number;
+    admin: number;
+  };
 }
 
 // Audit log types
