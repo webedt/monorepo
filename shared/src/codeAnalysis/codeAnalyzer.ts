@@ -123,10 +123,13 @@ Limit findings to the top ${maxFindings} most important issues.
 Return ONLY the JSON object, no markdown formatting or additional text.`;
 
   if (code) {
-    // Escape triple backticks in code to prevent markdown structure issues
-    // Replace ``` with a placeholder that won't break the markdown
-    const escapedCode = code.replace(/```/g, '\\`\\`\\`');
-    prompt += `\n\nCode to analyze:\n\`\`\`\n${escapedCode}\n\`\`\``;
+    // Use 4-backtick fence to safely contain code that may have triple backticks.
+    // In markdown, using more backticks than any sequence in the content is valid.
+    // Check if code contains 4+ consecutive backticks and use appropriate fence.
+    const maxBackticks = code.match(/`+/g)?.reduce((max, match) => Math.max(max, match.length), 0) ?? 0;
+    const fenceLength = Math.max(3, maxBackticks + 1);
+    const fence = '`'.repeat(fenceLength);
+    prompt += `\n\nCode to analyze:\n${fence}\n${code}\n${fence}`;
   }
 
   if (customPrompt) {
@@ -139,6 +142,7 @@ Return ONLY the JSON object, no markdown formatting or additional text.`;
 /**
  * Extract JSON object from response content.
  * Uses balanced brace matching to handle nested objects correctly.
+ * Properly handles JSON escape sequences including \uXXXX unicode escapes.
  */
 function extractJsonObject(content: string): string | null {
   const startIndex = content.indexOf('{');
@@ -146,35 +150,41 @@ function extractJsonObject(content: string): string | null {
 
   let depth = 0;
   let inString = false;
-  let escapeNext = false;
+  let i = startIndex;
 
-  for (let i = startIndex; i < content.length; i++) {
+  while (i < content.length) {
     const char = content[i];
 
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-
-    if (char === '\\' && inString) {
-      escapeNext = true;
-      continue;
-    }
-
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-
-    if (!inString) {
-      if (char === '{') depth++;
-      else if (char === '}') {
+    if (inString) {
+      if (char === '\\') {
+        // Handle escape sequences
+        const nextChar = content[i + 1];
+        if (nextChar === 'u') {
+          // Unicode escape: \uXXXX - skip backslash + u + 4 hex digits
+          i += 6;
+          continue;
+        } else {
+          // Other escapes: \", \\, \n, etc. - skip 2 characters
+          i += 2;
+          continue;
+        }
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+      } else if (char === '{') {
+        depth++;
+      } else if (char === '}') {
         depth--;
         if (depth === 0) {
           return content.slice(startIndex, i + 1);
         }
       }
     }
+
+    i++;
   }
 
   return null;
