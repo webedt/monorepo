@@ -7,7 +7,7 @@
  */
 
 import { ALlm } from './ALlm.js';
-import { OPENROUTER_API_KEY, CLAUDE_ENVIRONMENT_ID, LLM_FALLBACK_REPO_URL } from '../config/env.js';
+import { OPENROUTER_API_KEY, CLAUDE_ENVIRONMENT_ID, CLAUDE_DEFAULT_MODEL, LLM_FALLBACK_REPO_URL } from '../config/env.js';
 import { getClaudeCredentials } from '../auth/claudeAuth.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { logger } from '../utils/logging/logger.js';
@@ -20,6 +20,8 @@ export class Llm extends ALlm {
   async execute(params: LlmExecuteParams): Promise<LlmExecuteResult> {
     const { prompt, model, maxTokens = 1024, temperature = 0.7, systemPrompt } = params;
 
+    const errors: string[] = [];
+
     // Try OpenRouter first
     if (OPENROUTER_API_KEY) {
       try {
@@ -30,9 +32,11 @@ export class Llm extends ALlm {
           systemPrompt,
         });
       } catch (error) {
+        const errorMsg = (error as Error).message;
+        errors.push(`OpenRouter: ${errorMsg}`);
         logger.warn('OpenRouter execution failed, trying fallback', {
           component: 'Llm',
-          error: (error as Error).message,
+          error: errorMsg,
         });
       }
     }
@@ -41,13 +45,27 @@ export class Llm extends ALlm {
     try {
       return await this.executeClaudeWeb(prompt, { systemPrompt });
     } catch (error) {
+      const errorMsg = (error as Error).message;
+      errors.push(`Claude Web: ${errorMsg}`);
       logger.warn('Claude Web fallback failed', {
         component: 'Llm',
-        error: (error as Error).message,
+        error: errorMsg,
       });
     }
 
-    throw new Error('No LLM provider available. Set OPENROUTER_API_KEY or configure Claude credentials with CLAUDE_ENVIRONMENT_ID.');
+    // Build informative error message
+    const configHints: string[] = [];
+    if (!OPENROUTER_API_KEY) {
+      configHints.push('OPENROUTER_API_KEY not set');
+    }
+    if (!CLAUDE_ENVIRONMENT_ID) {
+      configHints.push('CLAUDE_ENVIRONMENT_ID not set');
+    }
+
+    const errorDetails = errors.length > 0 ? ` Errors: ${errors.join('; ')}` : '';
+    const configDetails = configHints.length > 0 ? ` Config: ${configHints.join(', ')}.` : '';
+
+    throw new Error(`No LLM provider available.${errorDetails}${configDetails}`);
   }
 
   private async executeOpenRouter(
@@ -203,8 +221,8 @@ export class Llm extends ALlm {
       });
     }
 
-    // Join response blocks with newlines to preserve formatting between blocks
-    const responseText = responseBlocks.join('\n\n');
+    // Join response blocks - content blocks are typically continuous, so join without extra spacing
+    const responseText = responseBlocks.join('');
 
     if (!responseText) {
       throw new Error('No response received from Claude Web');
@@ -213,7 +231,7 @@ export class Llm extends ALlm {
     return {
       content: responseText.trim(),
       provider: 'claude-web',
-      model: usedModel || 'claude-opus-4-5-20251101',
+      model: usedModel || CLAUDE_DEFAULT_MODEL,
       cost: totalCost,
     };
   }
