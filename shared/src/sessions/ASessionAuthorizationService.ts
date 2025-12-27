@@ -1,11 +1,13 @@
 import { AService } from '../services/abstracts/AService.js';
 
 import type { ChatSession } from '../db/schema.js';
+import type { OrganizationRole } from '../db/schema.js';
 
 export interface AuthorizationResult {
   authorized: boolean;
   error?: string;
   statusCode?: number;
+  role?: OrganizationRole | 'owner';
 }
 
 export interface ValidationResult {
@@ -56,4 +58,19 @@ export abstract class ASessionAuthorizationService extends AService {
     session: ChatSession,
     userId: string
   ): AuthorizationResult;
+
+  abstract verifySessionAccess(
+    session: ChatSession | null,
+    userId: string
+  ): Promise<AuthorizationResult>;
+
+  abstract canModifySessionAsync(
+    session: ChatSession,
+    userId: string
+  ): Promise<AuthorizationResult>;
+
+  abstract canDeleteSessionAsync(
+    session: ChatSession,
+    userId: string
+  ): Promise<AuthorizationResult>;
 }

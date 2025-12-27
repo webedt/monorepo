@@ -68,6 +68,9 @@ export * from './sessions/index.js';
 // LLM - One-off LLM requests
 export * from './llm/index.js';
 
+// Organizations/Studios - Group accounts with multi-user support
+export * from './organizations/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================

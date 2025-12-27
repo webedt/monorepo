@@ -40,6 +40,7 @@ import internalSessionsRoutes from './api/routes/internalSessions.js';
 import logsRoutes from './api/routes/logs.js';
 import liveChatRoutes from './api/routes/liveChat.js';
 import workspaceRoutes from './api/routes/workspace.js';
+import organizationsRoutes from './api/routes/organizations.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
@@ -303,6 +304,7 @@ app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Ses
 app.use('/api', logsRoutes);  // Debug logs endpoint
 app.use('/api/live-chat', liveChatRoutes);  // Live Chat for branch-based workspace
 app.use('/api/workspace', workspaceRoutes);  // Workspace presence and events
+app.use('/api/organizations', organizationsRoutes);  // Organizations/Studios management
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');

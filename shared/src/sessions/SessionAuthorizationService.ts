@@ -1,6 +1,8 @@
 import { ASessionAuthorizationService } from './ASessionAuthorizationService.js';
+import { organizationService } from '../organizations/OrganizationService.js';
 
 import type { ChatSession } from '../db/schema.js';
+import type { OrganizationRole } from '../db/schema.js';
 import type { AuthorizationResult, ValidationResult, CleanupConditions } from './ASessionAuthorizationService.js';
 
 export class SessionAuthorizationService extends ASessionAuthorizationService {
@@ -136,6 +138,92 @@ export class SessionAuthorizationService extends ASessionAuthorizationService {
     }
 
     return { authorized: true };
+  }
+
+  async verifySessionAccess(
+    session: ChatSession | null,
+    userId: string
+  ): Promise<AuthorizationResult> {
+    if (!session) {
+      return {
+        authorized: false,
+        error: 'Session not found',
+        statusCode: 404,
+      };
+    }
+
+    if (session.userId === userId) {
+      return { authorized: true, role: 'owner' };
+    }
+
+    if (session.organizationId) {
+      const member = await organizationService.getMember(session.organizationId, userId);
+      if (member) {
+        return { authorized: true, role: member.role as OrganizationRole };
+      }
+    }
+
+    return {
+      authorized: false,
+      error: 'Unauthorized',
+      statusCode: 403,
+    };
+  }
+
+  async canModifySessionAsync(
+    session: ChatSession,
+    userId: string
+  ): Promise<AuthorizationResult> {
+    const access = await this.verifySessionAccess(session, userId);
+    if (!access.authorized) {
+      return access;
+    }
+
+    if (session.organizationId && access.role === 'member') {
+      return {
+        authorized: false,
+        error: 'Organization members cannot modify sessions. Admin or owner access required.',
+        statusCode: 403,
+      };
+    }
+
+    if (session.locked) {
+      return {
+        authorized: false,
+        error: 'Session is locked',
+        statusCode: 423,
+      };
+    }
+
+    return { authorized: true, role: access.role };
+  }
+
+  async canDeleteSessionAsync(
+    session: ChatSession,
+    userId: string
+  ): Promise<AuthorizationResult> {
+    const access = await this.verifySessionAccess(session, userId);
+    if (!access.authorized) {
+      return access;
+    }
+
+    if (session.organizationId && access.role !== 'owner' && session.userId !== userId) {
+      return {
+        authorized: false,
+        error: 'Only the session creator or organization owner can delete sessions',
+        statusCode: 403,
+      };
+    }
+
+    if (session.status === 'running') {
+      return {
+        authorized: false,
+        error: 'Cannot delete a running session',
+        statusCode: 409,
+      };
+    }
+
+    return { authorized: true, role: access.role };
   }
 }
 

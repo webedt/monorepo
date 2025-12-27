@@ -437,6 +437,15 @@ export type {
   NewOrchestratorCycle,
   OrchestratorTask,
   NewOrchestratorTask,
+  Organization,
+  NewOrganization,
+  OrganizationMember,
+  NewOrganizationMember,
+  OrganizationRepository,
+  NewOrganizationRepository,
+  OrganizationInvitation,
+  NewOrganizationInvitation,
+  OrganizationRole,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -447,6 +456,10 @@ export {
   orchestratorJobs,
   orchestratorCycles,
   orchestratorTasks,
+  organizations,
+  organizationMembers,
+  organizationRepositories,
+  organizationInvitations,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

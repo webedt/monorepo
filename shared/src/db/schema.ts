@@ -66,6 +66,8 @@ export const chatSessions = pgTable('chat_sessions', {
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id')
+    .references(() => organizations.id, { onDelete: 'set null' }), // Optional organization ownership
   sessionPath: text('session_path').unique(), // Format: {owner}__{repo}__{branch} - populated after branch creation
   repositoryOwner: text('repository_owner'),
   repositoryName: text('repository_name'),
@@ -177,6 +179,69 @@ export const workspaceEvents = pgTable('workspace_events', {
   page: text('page'), // 'code', 'images', 'sounds', 'scenes', 'chat'
   path: text('path'), // File/resource path affected
   payload: json('payload').$type<Record<string, unknown>>(), // Event-specific data
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Organizations/Studios - Group accounts that can contain multiple users
+export const organizations = pgTable('organizations', {
+  id: text('id').primaryKey(), // UUID
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(), // URL-friendly identifier (e.g., "acme-corp")
+  displayName: text('display_name'), // Optional friendly name
+  description: text('description'),
+  avatarUrl: text('avatar_url'),
+  websiteUrl: text('website_url'),
+  githubOrg: text('github_org'), // Linked GitHub organization name
+  isVerified: boolean('is_verified').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Organization membership roles
+export type OrganizationRole = 'owner' | 'admin' | 'member';
+
+// Organization members - junction table for users and organizations
+export const organizationMembers = pgTable('organization_members', {
+  id: text('id').primaryKey(), // UUID
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member'
+  joinedAt: timestamp('joined_at').defaultNow().notNull(),
+  invitedBy: text('invited_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+});
+
+// Organization repositories - tracks repos owned/managed by organizations
+export const organizationRepositories = pgTable('organization_repositories', {
+  id: text('id').primaryKey(), // UUID
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  repositoryOwner: text('repository_owner').notNull(), // GitHub repo owner
+  repositoryName: text('repository_name').notNull(), // GitHub repo name
+  isDefault: boolean('is_default').default(false).notNull(), // Default repo for new sessions
+  addedBy: text('added_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+});
+
+// Organization invitations - pending invitations
+export const organizationInvitations = pgTable('organization_invitations', {
+  id: text('id').primaryKey(), // UUID
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  role: text('role').notNull().default('member'), // 'admin' | 'member'
+  invitedBy: text('invited_by')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  token: text('token').notNull().unique(), // Invitation token for acceptance
+  expiresAt: timestamp('expires_at').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -306,3 +371,13 @@ export type OrchestratorCycle = typeof orchestratorCycles.$inferSelect;
 export type NewOrchestratorCycle = typeof orchestratorCycles.$inferInsert;
 export type OrchestratorTask = typeof orchestratorTasks.$inferSelect;
 export type NewOrchestratorTask = typeof orchestratorTasks.$inferInsert;
+
+// Organization types
+export type Organization = typeof organizations.$inferSelect;
+export type NewOrganization = typeof organizations.$inferInsert;
+export type OrganizationMember = typeof organizationMembers.$inferSelect;
+export type NewOrganizationMember = typeof organizationMembers.$inferInsert;
+export type OrganizationRepository = typeof organizationRepositories.$inferSelect;
+export type NewOrganizationRepository = typeof organizationRepositories.$inferInsert;
+export type OrganizationInvitation = typeof organizationInvitations.$inferSelect;
+export type NewOrganizationInvitation = typeof organizationInvitations.$inferInsert;
