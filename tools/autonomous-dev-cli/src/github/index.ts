@@ -8,7 +8,7 @@ export {
   type RateLimitConfig,
   type RateLimitState,
 } from './client.js';
-export { createIssueManager, type IssueManager, type Issue, type CreateIssueOptions } from './issues.js';
+export { createIssueManager, type IssueManager, type Issue, type Comment, type CreateIssueOptions } from './issues.js';
 export {
   createBranchManager,
   type BranchManager,
