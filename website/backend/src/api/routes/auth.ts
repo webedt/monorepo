@@ -135,6 +135,8 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
 
     // Check if this email should be admin
     const isAdmin = normalizedEmail === 'etdofresh@gmail.com';
+    // Admin users get admin role, others start as basic users
+    const role = isAdmin ? 'admin' : 'user';
 
     // Create user
     const [newUser] = await db
@@ -144,6 +146,7 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
         email: normalizedEmail,
         passwordHash,
         isAdmin,
+        role,
       })
       .returning();
 
@@ -151,26 +154,32 @@ router.post('/register', authRateLimiter, validateRequest(registerSchema), async
     const session = await lucia.createSession(newUser.id, {});
     const sessionCookie = lucia.createSessionCookie(session.id);
 
-    res.status(201).appendHeader('Set-Cookie', sessionCookie.serialize());
-    sendSuccess(res, {
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        displayName: newUser.displayName,
-        githubId: newUser.githubId,
-        githubAccessToken: newUser.githubAccessToken,
-        claudeAuth: newUser.claudeAuth,
-        codexAuth: newUser.codexAuth,
-        geminiAuth: newUser.geminiAuth,
-        preferredProvider: newUser.preferredProvider || 'claude',
-        imageResizeMaxDimension: newUser.imageResizeMaxDimension,
-        voiceCommandKeywords: newUser.voiceCommandKeywords || [],
-        defaultLandingPage: newUser.defaultLandingPage || 'store',
-        preferredModel: newUser.preferredModel,
-        isAdmin: newUser.isAdmin,
-        createdAt: newUser.createdAt,
-      },
-    }, 201);
+    res
+      .status(201)
+      .appendHeader('Set-Cookie', sessionCookie.serialize())
+      .json({
+        success: true,
+        data: {
+          user: {
+            id: newUser.id,
+            email: newUser.email,
+            displayName: newUser.displayName,
+            githubId: newUser.githubId,
+            githubAccessToken: newUser.githubAccessToken,
+            claudeAuth: newUser.claudeAuth,
+            codexAuth: newUser.codexAuth,
+            geminiAuth: newUser.geminiAuth,
+            preferredProvider: newUser.preferredProvider || 'claude',
+            imageResizeMaxDimension: newUser.imageResizeMaxDimension,
+            voiceCommandKeywords: newUser.voiceCommandKeywords || [],
+            defaultLandingPage: newUser.defaultLandingPage || 'store',
+            preferredModel: newUser.preferredModel,
+            isAdmin: newUser.isAdmin,
+            role: newUser.role,
+            createdAt: newUser.createdAt,
+          },
+        },
+      });
   } catch (error) {
     console.error('Registration error:', error);
     sendInternalError(res);
@@ -286,27 +295,31 @@ router.post('/login', authRateLimiter, validateRequest(loginSchema), async (req:
       sessionCookie = lucia.createSessionCookie(session.id);
     }
 
-    // Sensitive fields are automatically decrypted by Drizzle custom column types
-    res.appendHeader('Set-Cookie', sessionCookie.serialize());
-    sendSuccess(res, {
-      user: {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        githubId: user.githubId,
-        githubAccessToken: user.githubAccessToken,
-        claudeAuth: user.claudeAuth,
-        codexAuth: user.codexAuth,
-        geminiAuth: user.geminiAuth,
-        preferredProvider: user.preferredProvider || 'claude',
-        imageResizeMaxDimension: user.imageResizeMaxDimension,
-        voiceCommandKeywords: user.voiceCommandKeywords || [],
-        defaultLandingPage: user.defaultLandingPage || 'store',
-        preferredModel: user.preferredModel,
-        isAdmin: user.isAdmin,
-        createdAt: user.createdAt,
-      },
-    });
+    res
+      .appendHeader('Set-Cookie', sessionCookie.serialize())
+      .json({
+        success: true,
+        data: {
+          user: {
+            id: user.id,
+            email: user.email,
+            displayName: user.displayName,
+            githubId: user.githubId,
+            githubAccessToken: user.githubAccessToken,
+            claudeAuth: user.claudeAuth,
+            codexAuth: user.codexAuth,
+            geminiAuth: user.geminiAuth,
+            preferredProvider: user.preferredProvider || 'claude',
+            imageResizeMaxDimension: user.imageResizeMaxDimension,
+            voiceCommandKeywords: user.voiceCommandKeywords || [],
+            defaultLandingPage: user.defaultLandingPage || 'store',
+            preferredModel: user.preferredModel,
+            isAdmin: user.isAdmin,
+            role: user.role || 'user',
+            createdAt: user.createdAt,
+          },
+        },
+      });
   } catch (error) {
     console.error('Login error:', error);
     sendInternalError(res);
@@ -491,23 +504,28 @@ router.get('/session', async (req: Request, res: Response) => {
       }
     }
 
-    sendSuccess(res, {
-      user: {
-        id: freshUser.id,
-        email: freshUser.email,
-        displayName: freshUser.displayName,
-        githubId: freshUser.githubId,
-        githubAccessToken: freshUser.githubAccessToken,
-        claudeAuth: claudeAuth,
-        codexAuth: codexAuth,
-        geminiAuth: freshUser.geminiAuth,
-        preferredProvider: freshUser.preferredProvider || 'claude',
-        imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
-        voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
-        defaultLandingPage: freshUser.defaultLandingPage || 'store',
-        preferredModel: freshUser.preferredModel,
-        isAdmin: freshUser.isAdmin,
-        createdAt: freshUser.createdAt,
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: freshUser.id,
+          email: freshUser.email,
+          displayName: freshUser.displayName,
+          githubId: freshUser.githubId,
+          githubAccessToken: freshUser.githubAccessToken,
+          claudeAuth: claudeAuth,
+          codexAuth: codexAuth,
+          geminiAuth: freshUser.geminiAuth,
+          preferredProvider: freshUser.preferredProvider || 'claude',
+          imageResizeMaxDimension: freshUser.imageResizeMaxDimension,
+          voiceCommandKeywords: freshUser.voiceCommandKeywords || [],
+          defaultLandingPage: freshUser.defaultLandingPage || 'store',
+          preferredModel: freshUser.preferredModel,
+          isAdmin: freshUser.isAdmin,
+          role: freshUser.role || 'user',
+          createdAt: freshUser.createdAt,
+        },
+        session: authReq.authSession,
       },
       session: authReq.authSession,
     });

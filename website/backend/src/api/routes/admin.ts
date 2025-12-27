@@ -105,6 +105,7 @@ router.get('/users', requireAdmin, async (req, res) => {
       displayName: users.displayName,
       githubId: users.githubId,
       isAdmin: users.isAdmin,
+      role: users.role,
       createdAt: users.createdAt,
     }).from(users).orderBy(users.createdAt);
 
@@ -170,6 +171,7 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
       imageResizeMaxDimension: users.imageResizeMaxDimension,
       voiceCommandKeywords: users.voiceCommandKeywords,
       isAdmin: users.isAdmin,
+      role: users.role,
       createdAt: users.createdAt,
     }).from(users).where(eq(users.id, id)).limit(1);
 
@@ -265,7 +267,19 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
 // POST /api/admin/users - Create a new user
 router.post('/users', requireAdmin, validateRequest(createUserSchema), async (req, res) => {
   try {
-    const { email, displayName, password, isAdmin } = req.body;
+    const { email, displayName, password, isAdmin, role } = req.body;
+
+    if (!email || !password) {
+      res.status(400).json({ success: false, error: 'Email and password are required' });
+      return;
+    }
+
+    // Validate role if provided
+    const validRoles = ['user', 'editor', 'developer', 'admin'];
+    if (role && !validRoles.includes(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+      return;
+    }
 
     // Check if user already exists
     const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
@@ -280,18 +294,25 @@ router.post('/users', requireAdmin, validateRequest(createUserSchema), async (re
     // Generate user ID
     const userId = crypto.randomUUID();
 
+    // Determine role - if explicitly provided, use it; otherwise derive from isAdmin flag
+    const userRole = role || (isAdmin ? 'admin' : 'user');
+    // Sync isAdmin flag with role
+    const userIsAdmin = isAdmin || role === 'admin';
+
     // Create user
     const newUser = await db.insert(users).values({
       id: userId,
       email,
       displayName: displayName || null,
       passwordHash,
-      isAdmin: isAdmin || false,
+      isAdmin: userIsAdmin,
+      role: userRole,
     }).returning({
       id: users.id,
       email: users.email,
       displayName: users.displayName,
       isAdmin: users.isAdmin,
+      role: users.role,
       createdAt: users.createdAt,
     });
 
@@ -385,19 +406,45 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
   try {
     const authReq = req as AuthRequest;
     const { id } = req.params;
-    const { email, displayName, isAdmin, password } = req.body;
+    const { email, displayName, isAdmin, role, password } = req.body;
 
-    // Prevent user from removing their own admin status
-    if (authReq.user?.id === id && isAdmin === false) {
-      sendError(res, 'Cannot remove your own admin status', 400, ApiErrorCode.FORBIDDEN);
+    // Validate role if provided
+    const validRoles = ['user', 'editor', 'developer', 'admin'];
+    if (role !== undefined && !validRoles.includes(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
       return;
+    }
+
+    // Prevent user from removing their own admin status or demoting themselves
+    if (authReq.user?.id === id) {
+      if (isAdmin === false) {
+        res.status(400).json({ success: false, error: 'Cannot remove your own admin status' });
+        return;
+      }
+      if (role !== undefined && role !== 'admin') {
+        res.status(400).json({ success: false, error: 'Cannot demote your own role' });
+        return;
+      }
     }
 
     const updateData: Record<string, unknown> = {};
 
     if (email !== undefined) updateData.email = email;
     if (displayName !== undefined) updateData.displayName = displayName;
-    if (isAdmin !== undefined) updateData.isAdmin = isAdmin;
+
+    // Handle role and isAdmin synchronization
+    if (role !== undefined) {
+      updateData.role = role;
+      // Sync isAdmin with role
+      updateData.isAdmin = role === 'admin';
+    } else if (isAdmin !== undefined) {
+      updateData.isAdmin = isAdmin;
+      // Sync role with isAdmin - only change role if going to/from admin
+      if (isAdmin) {
+        updateData.role = 'admin';
+      }
+    }
+
     if (password) {
       updateData.passwordHash = await bcrypt.hash(password, 10);
     }
@@ -415,6 +462,7 @@ router.patch('/users/:id', requireAdmin, validateRequest(updateUserSchema), asyn
         email: users.email,
         displayName: users.displayName,
         isAdmin: users.isAdmin,
+        role: users.role,
         createdAt: users.createdAt,
       });
 
@@ -649,10 +697,30 @@ router.get('/stats', requireAdmin, async (req, res) => {
     const totalAdmins = await db.select({ count: sql<number>`count(*)` }).from(users).where(eq(users.isAdmin, true));
     const activeSessions = await db.select({ count: sql<number>`count(*)` }).from(sessions);
 
-    sendSuccess(res, {
-      totalUsers: Number(totalUsers[0].count),
-      totalAdmins: Number(totalAdmins[0].count),
-      activeSessions: Number(activeSessions[0].count),
+    // Get role breakdown
+    const roleStats = await db.select({
+      role: users.role,
+      count: sql<number>`count(*)`,
+    }).from(users).groupBy(users.role);
+
+    const roleCounts: Record<string, number> = {
+      user: 0,
+      editor: 0,
+      developer: 0,
+      admin: 0,
+    };
+    for (const stat of roleStats) {
+      roleCounts[stat.role || 'user'] = Number(stat.count);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        totalUsers: Number(totalUsers[0].count),
+        totalAdmins: Number(totalAdmins[0].count),
+        activeSessions: Number(activeSessions[0].count),
+        roleCounts,
+      }
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
