@@ -130,12 +130,56 @@ Return ONLY the JSON object, no markdown formatting or additional text.`;
 }
 
 /**
+ * Extract JSON object from response content.
+ * Uses balanced brace matching to handle nested objects correctly.
+ */
+function extractJsonObject(content: string): string | null {
+  const startIndex = content.indexOf('{');
+  if (startIndex === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = startIndex; i < content.length; i++) {
+    const char = content[i];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      escapeNext = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === '{') depth++;
+      else if (char === '}') {
+        depth--;
+        if (depth === 0) {
+          return content.slice(startIndex, i + 1);
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Parse the analysis response from Claude
  */
 function parseAnalysisResponse(content: string): { findings: AnalysisFinding[]; assessment: string } {
-  // Try to extract JSON from the response
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+  // Extract JSON using balanced brace matching to handle nested objects
+  const jsonStr = extractJsonObject(content);
+  if (!jsonStr) {
     logger.warn('No JSON found in analysis response', { component: 'CodeAnalyzer', contentLength: content.length });
     return {
       findings: [],
@@ -144,12 +188,13 @@ function parseAnalysisResponse(content: string): { findings: AnalysisFinding[]; 
   }
 
   try {
-    const parsed = JSON.parse(jsonMatch[0]) as { findings?: AnalysisFinding[]; assessment?: string };
+    const parsed = JSON.parse(jsonStr) as { findings?: AnalysisFinding[]; assessment?: string };
 
     const findings = (parsed.findings || []).filter((f): f is AnalysisFinding => {
       return (
         typeof f.severity === 'string' &&
         ['critical', 'high', 'medium', 'low', 'info'].includes(f.severity) &&
+        typeof f.category === 'string' &&
         typeof f.title === 'string' &&
         typeof f.description === 'string'
       );
@@ -247,8 +292,33 @@ export class CodeAnalyzer extends ACodeAnalyzer {
   }
 
   isAvailable(): boolean {
-    // Check if we have an environment ID and can potentially get credentials
-    return Boolean(this.environmentId);
+    // Check if we have an environment ID and either a configured access token
+    // or potential credential sources. This is a synchronous check, so it cannot
+    // verify database credentials, but it catches obvious misconfigurations.
+    if (!this.environmentId) {
+      return false;
+    }
+
+    // If we have an explicit access token, we're available
+    if (this.accessToken) {
+      return true;
+    }
+
+    // Check for environment variable or credentials file
+    // Note: This doesn't verify token validity, just availability
+    const hasEnvToken = Boolean(process.env.CLAUDE_ACCESS_TOKEN);
+    const hasCredentialsFile = (() => {
+      try {
+        const { existsSync } = require('fs');
+        const { homedir } = require('os');
+        const { join } = require('path');
+        return existsSync(join(homedir(), '.claude', '.credentials.json'));
+      } catch {
+        return false;
+      }
+    })();
+
+    return hasEnvToken || hasCredentialsFile;
   }
 
   private async getClient(): Promise<ClaudeWebClient> {
@@ -307,8 +377,20 @@ export class CodeAnalyzer extends ACodeAnalyzer {
       // Build the analysis prompt
       const prompt = buildAnalysisPrompt(params);
 
-      // Use the provided gitUrl or fallback repo
+      // Use the provided gitUrl or fallback repo.
+      // When analyzing raw code without a gitUrl, we use a fallback repository
+      // (typically an empty or minimal repo) to satisfy the Claude Web API requirement.
+      // The analysis is performed on the code provided in the prompt, not the repo contents.
+      // Note: Sessions created this way will be associated with the fallback repo for auditing.
       const gitUrl = params.gitUrl || this.fallbackRepoUrl;
+      const usingFallbackRepo = !params.gitUrl;
+
+      if (usingFallbackRepo) {
+        logger.debug('Using fallback repo for code-only analysis', {
+          component: 'CodeAnalyzer',
+          fallbackRepo: this.fallbackRepoUrl,
+        });
+      }
 
       // Collect response
       const responseBlocks: string[] = [];
@@ -340,14 +422,23 @@ export class CodeAnalyzer extends ACodeAnalyzer {
       const analysisTypeLabel = params.analysisType || 'general';
       const sessionTitle = `Code Analysis: ${analysisTypeLabel}`;
 
-      // Execute the analysis
+      // Calculate poll options from timeout configuration
+      // Default poll interval is 2000ms, so calculate maxPolls accordingly
+      const pollIntervalMs = 2000;
+      const maxPolls = Math.ceil(this.timeoutMs / pollIntervalMs);
+
+      // Execute the analysis with timeout options
       const result = await client.execute(
         {
           prompt,
           gitUrl,
           title: sessionTitle,
         },
-        onEvent
+        onEvent,
+        {
+          pollIntervalMs,
+          maxPolls,
+        }
       );
 
       sessionId = result.sessionId;
