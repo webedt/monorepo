@@ -11,7 +11,7 @@ import {
   CLAUDE_API_BASE_URL,
   fetchEnvironmentIdFromSessions,
 } from '@webedt/shared';
-import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
+import type { ClaudeAuth, ClaudeWebClientConfig, SessionEvent } from '@webedt/shared';
 
 const router = Router();
 
@@ -194,11 +194,53 @@ router.delete('/:owner/:repo/:branch/messages', async (req: Request, res: Respon
 });
 
 /**
+ * Build prompt content with optional images.
+ * Returns content blocks compatible with Claude API.
+ */
+function buildPromptContent(
+  prompt: string,
+  images?: Array<{ data: string; mediaType: string }>
+): string | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> {
+  if (!images || images.length === 0) {
+    return prompt;
+  }
+
+  // Build content blocks with text and images
+  const contentBlocks: Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [
+    { type: 'text', text: prompt }
+  ];
+
+  for (const img of images) {
+    contentBlocks.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: img.mediaType,
+        data: img.data,
+      },
+    });
+  }
+
+  return contentBlocks;
+}
+
+/**
  * POST /api/live-chat/:owner/:repo/:branch/execute
  * Execute LLM for live chat (streaming response)
  * Uses ClaudeWebClient for actual AI execution with full code context
  */
 router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response) => {
+  let clientDisconnected = false;
+  let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Track client disconnect
+  req.on('close', () => {
+    clientDisconnected = true;
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+    }
+  });
+
   try {
     const { owner, repo, branch } = req.params;
     const { message, images } = req.body;
@@ -237,9 +279,30 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
+    // Helper to send SSE events, respecting client disconnect
     const sendSSE = (event: string, data: unknown) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (clientDisconnected) return;
+      try {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch (err) {
+        logger.warn('Failed to write SSE event', { component: 'LiveChat', error: err });
+      }
     };
+
+    // Set up heartbeat to prevent proxy timeouts (15 second interval)
+    heartbeatInterval = setInterval(() => {
+      if (!clientDisconnected) {
+        try {
+          res.write(': heartbeat\n\n');
+        } catch {
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
+        }
+      } else if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
+    }, 15000);
 
     // Get message history for context
     const history = await db
@@ -288,12 +351,24 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       return;
     }
 
-    // Ensure we have a valid token
+    // Ensure we have a valid token and save if refreshed
     const validAuth = await ensureValidToken(claudeAuth);
     if (!validAuth) {
       sendSSE('error', { error: 'Claude token expired and could not be refreshed' });
       res.end();
       return;
+    }
+
+    // Save refreshed token back to database if it changed
+    if (validAuth.accessToken !== claudeAuth.accessToken) {
+      try {
+        await db.update(users)
+          .set({ claudeAuth: validAuth as unknown as typeof users.$inferInsert['claudeAuth'] })
+          .where(eq(users.id, userId));
+        logger.info('Refreshed Claude token saved to database', { component: 'LiveChat', userId });
+      } catch (err) {
+        logger.warn('Failed to save refreshed token', { component: 'LiveChat', error: err });
+      }
     }
 
     // Get environment ID - from config or auto-detect
@@ -313,13 +388,16 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
     }
 
     // Build prompt with conversation context
-    const prompt = buildPromptWithContext(
+    const textPrompt = buildPromptWithContext(
       message,
       history.map(m => ({ role: m.role, content: m.content })),
       owner,
       repo,
       decodedBranch
     );
+
+    // Build prompt content with optional images
+    const promptContent = buildPromptContent(textPrompt, images);
 
     // Build git URL for the repository
     const gitUrl = `https://github.com/${owner}/${repo}`;
@@ -337,6 +415,7 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       repo,
       branch: decodedBranch,
       messageLength: message.length,
+      hasImages: images && images.length > 0,
     });
 
     // Collect assistant response text for storage
@@ -346,36 +425,39 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       // Execute with ClaudeWebClient
       const result = await client.execute(
         {
-          prompt,
+          prompt: promptContent,
           gitUrl,
           branchPrefix: `claude/chat-${Date.now()}`,
           title: `Live Chat: ${message.slice(0, 50)}${message.length > 50 ? '...' : ''}`,
         },
-        async (event) => {
-          // Extract text content from assistant events
-          const eventType = (event as { type?: string }).type;
+        async (event: SessionEvent) => {
+          if (clientDisconnected) return;
 
-          if (eventType === 'assistant') {
-            const eventMessage = (event as { message?: { content?: unknown } }).message;
-            if (eventMessage?.content) {
-              // Content could be string or array of content blocks
-              if (typeof eventMessage.content === 'string') {
-                assistantContent += eventMessage.content;
-                sendSSE('assistant_message', { content: eventMessage.content, partial: true });
-              } else if (Array.isArray(eventMessage.content)) {
-                for (const block of eventMessage.content) {
-                  if (block && typeof block === 'object' && 'type' in block && block.type === 'text' && 'text' in block) {
-                    assistantContent += block.text;
-                    sendSSE('assistant_message', { content: block.text, partial: true });
-                  }
+          // Extract text content from assistant events
+          if (event.type === 'assistant' && event.message?.content) {
+            const content = event.message.content;
+            // Content could be string or array of content blocks
+            if (typeof content === 'string') {
+              assistantContent += content;
+              sendSSE('assistant_message', { content, partial: true });
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === 'text' && block.text) {
+                  assistantContent += block.text;
+                  sendSSE('assistant_message', { content: block.text, partial: true });
                 }
               }
             }
           }
 
           // Forward relevant events to client
-          if (eventType === 'tool_use' || eventType === 'tool_result') {
+          if (event.type === 'tool_use' || event.type === 'tool_result') {
             sendSSE('tool_event', event);
+          }
+
+          // Forward env_manager_log events as status updates
+          if (event.type === 'env_manager_log' && event.data?.message) {
+            sendSSE('status', { message: event.data.message });
           }
         }
       );
@@ -424,12 +506,22 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
       sendSSE('error', { error: errorMessage });
     }
 
-    res.end();
+    // Clean up heartbeat
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+    }
+
+    if (!clientDisconnected) {
+      res.end();
+    }
   } catch (error) {
     logger.error('liveChat', 'Failed to execute live chat', { error });
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+    }
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to execute' });
-    } else {
+    } else if (!clientDisconnected) {
       res.write(`event: error\ndata: ${JSON.stringify({ error: 'Execution failed' })}\n\n`);
       res.end();
     }
