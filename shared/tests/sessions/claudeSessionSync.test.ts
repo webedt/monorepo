@@ -660,11 +660,12 @@ describe('SessionService.sync Mock Integration', () => {
     );
 
     // Extract cost from result event
+    // Use !== undefined to correctly handle zero cost values (0 is a valid cost)
     let totalCost: string | undefined = localSession.status === 'completed'
       ? '0.000000'
       : undefined;
-    const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd);
-    if (resultEvent?.total_cost_usd) {
+    const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd !== undefined);
+    if (resultEvent?.total_cost_usd !== undefined) {
       totalCost = resultEvent.total_cost_usd.toFixed(6);
     }
 
@@ -934,8 +935,8 @@ describe('SessionService.sync Mock Integration', () => {
       });
 
       assert.strictEqual(result.valid, true);
-      // Zero cost should NOT be extracted (falsy check in the actual code)
-      assert.strictEqual(result.changes?.totalCost, undefined);
+      // Zero cost is a valid value that should be extracted and recorded
+      assert.strictEqual(result.changes?.totalCost, '0.000000');
     });
 
     it('should handle multiple git outcomes - uses first branch', () => {

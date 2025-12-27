@@ -460,10 +460,10 @@ export class SessionService extends ASession {
       );
 
       // Extract total cost from result event
-      // Use nullish coalescing (??) to correctly handle falsy values like '0.000000'
+      // Use !== undefined to correctly handle zero cost values (0 is a valid cost)
       let totalCost: string | undefined = session.totalCost ?? undefined;
-      const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd);
-      if (resultEvent?.total_cost_usd) {
+      const resultEvent = remoteEvents.find(e => e.type === 'result' && e.total_cost_usd !== undefined);
+      if (resultEvent?.total_cost_usd !== undefined) {
         totalCost = (resultEvent.total_cost_usd as number).toFixed(6);
       }
 
@@ -479,7 +479,9 @@ export class SessionService extends ASession {
         branch = gitOutcome.git_info.branches[0];
       }
 
-      // Generate sessionPath if we now have branch info
+      // Generate sessionPath if we now have branch info and don't already have one.
+      // Note: sessionPath is only generated once and is not updated if branch changes later.
+      // This is intentional - the sessionPath represents the original working location.
       let sessionPath: string | undefined = session.sessionPath ?? undefined;
       if (branch && session.repositoryOwner && session.repositoryName && !sessionPath) {
         sessionPath = generateSessionPath(session.repositoryOwner, session.repositoryName, branch);
@@ -543,19 +545,12 @@ export class SessionService extends ASession {
         });
       }
 
-      // Return updated session info
+      // Return updated session info with sync-derived overrides
       return {
-        id: session.id,
-        userId: session.userId,
+        ...this.mapSessionToInfo(session),
         status: newStatus as 'pending' | 'running' | 'completed' | 'error',
-        userRequest: session.userRequest ?? undefined,
-        repositoryOwner: session.repositoryOwner ?? undefined,
-        repositoryName: session.repositoryName ?? undefined,
         branch: branch ?? undefined,
-        remoteSessionId: session.remoteSessionId ?? undefined,
-        remoteWebUrl: session.remoteWebUrl ?? undefined,
         totalCost: totalCost ?? undefined,
-        createdAt: session.createdAt ?? undefined,
         completedAt: completedAt ?? undefined,
       };
 
@@ -578,15 +573,15 @@ export class SessionService extends ASession {
       id: session.id,
       userId: session.userId,
       status: session.status as 'pending' | 'running' | 'completed' | 'error',
-      userRequest: session.userRequest || undefined,
-      repositoryOwner: session.repositoryOwner || undefined,
-      repositoryName: session.repositoryName || undefined,
-      branch: session.branch || undefined,
-      remoteSessionId: session.remoteSessionId || undefined,
-      remoteWebUrl: session.remoteWebUrl || undefined,
-      totalCost: session.totalCost || undefined,
-      createdAt: session.createdAt || undefined,
-      completedAt: session.completedAt || undefined,
+      userRequest: session.userRequest ?? undefined,
+      repositoryOwner: session.repositoryOwner ?? undefined,
+      repositoryName: session.repositoryName ?? undefined,
+      branch: session.branch ?? undefined,
+      remoteSessionId: session.remoteSessionId ?? undefined,
+      remoteWebUrl: session.remoteWebUrl ?? undefined,
+      totalCost: session.totalCost ?? undefined,
+      createdAt: session.createdAt ?? undefined,
+      completedAt: session.completedAt ?? undefined,
     };
   }
 
