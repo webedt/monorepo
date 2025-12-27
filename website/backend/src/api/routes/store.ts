@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, wishlists, eq, and, desc } from '@webedt/shared';
+import { db, games, userLibrary, wishlists, eq, and, desc, ilike, or, gte, lte, sql } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -51,83 +51,108 @@ router.get('/browse', async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
     const offset = parseInt(req.query.offset as string) || 0;
 
-    // Build query - start with published games only
-    let baseQuery = db
-      .select()
-      .from(games)
-      .where(eq(games.status, 'published'));
+    // Build conditions array for database-level filtering
+    const conditions = [eq(games.status, 'published')];
 
-    // Fetch all published games first, then filter in memory
-    // (Drizzle doesn't easily support JSON array contains)
-    let allGames = await baseQuery;
-
-    // Apply filters
+    // Text search at database level using ilike
     if (query) {
-      const searchTerm = (query as string).toLowerCase();
-      allGames = allGames.filter(
-        (g) =>
-          g.title.toLowerCase().includes(searchTerm) ||
-          g.description?.toLowerCase().includes(searchTerm) ||
-          g.developer?.toLowerCase().includes(searchTerm) ||
-          g.publisher?.toLowerCase().includes(searchTerm)
+      const searchPattern = `%${query as string}%`;
+      conditions.push(
+        or(
+          ilike(games.title, searchPattern),
+          ilike(games.description, searchPattern),
+          ilike(games.developer, searchPattern),
+          ilike(games.publisher, searchPattern)
+        )!
       );
     }
 
+    // Price filtering at database level
+    if (free === 'true') {
+      conditions.push(eq(games.price, 0));
+    } else {
+      if (minPrice) {
+        const min = parseInt(minPrice as string);
+        if (!isNaN(min)) {
+          conditions.push(gte(games.price, min));
+        }
+      }
+      if (maxPrice) {
+        const max = parseInt(maxPrice as string);
+        if (!isNaN(max)) {
+          conditions.push(lte(games.price, max));
+        }
+      }
+    }
+
+    // Genre/tag filtering using PostgreSQL JSON containment
+    // These use raw SQL since Drizzle doesn't have native JSON array support
     if (genre) {
-      const genreFilter = (genre as string).toLowerCase();
-      allGames = allGames.filter((g) =>
-        g.genres?.some((gen) => gen.toLowerCase() === genreFilter)
+      const genreValue = (genre as string).toLowerCase();
+      conditions.push(
+        sql`EXISTS (SELECT 1 FROM jsonb_array_elements_text(${games.genres}) AS g WHERE LOWER(g) = ${genreValue})`
       );
     }
 
     if (tag) {
-      const tagFilter = (tag as string).toLowerCase();
-      allGames = allGames.filter((g) =>
-        g.tags?.some((t) => t.toLowerCase() === tagFilter)
+      const tagValue = (tag as string).toLowerCase();
+      conditions.push(
+        sql`EXISTS (SELECT 1 FROM jsonb_array_elements_text(${games.tags}) AS t WHERE LOWER(t) = ${tagValue})`
       );
     }
 
-    if (free === 'true') {
-      allGames = allGames.filter((g) => g.price === 0);
-    } else {
-      if (minPrice) {
-        const min = parseInt(minPrice as string);
-        allGames = allGames.filter((g) => g.price >= min);
-      }
-      if (maxPrice) {
-        const max = parseInt(maxPrice as string);
-        allGames = allGames.filter((g) => g.price <= max);
-      }
+    // Determine sort column and order
+    let orderByClause;
+    switch (sort) {
+      case 'title':
+        orderByClause = order === 'asc'
+          ? sql`${games.title} ASC`
+          : sql`${games.title} DESC`;
+        break;
+      case 'price':
+        orderByClause = order === 'asc'
+          ? sql`${games.price} ASC`
+          : sql`${games.price} DESC`;
+        break;
+      case 'rating':
+        orderByClause = order === 'asc'
+          ? sql`COALESCE(${games.averageScore}, 0) ASC`
+          : sql`COALESCE(${games.averageScore}, 0) DESC`;
+        break;
+      case 'downloads':
+        orderByClause = order === 'asc'
+          ? sql`${games.downloadCount} ASC`
+          : sql`${games.downloadCount} DESC`;
+        break;
+      case 'releaseDate':
+      default:
+        orderByClause = order === 'asc'
+          ? sql`COALESCE(${games.releaseDate}, '1970-01-01'::timestamp) ASC`
+          : sql`COALESCE(${games.releaseDate}, '1970-01-01'::timestamp) DESC`;
+        break;
     }
 
-    // Sort
-    const sortOrder = order === 'asc' ? 1 : -1;
-    allGames.sort((a, b) => {
-      switch (sort) {
-        case 'title':
-          return sortOrder * a.title.localeCompare(b.title);
-        case 'price':
-          return sortOrder * (a.price - b.price);
-        case 'rating':
-          return sortOrder * ((a.averageScore || 0) - (b.averageScore || 0));
-        case 'downloads':
-          return sortOrder * (a.downloadCount - b.downloadCount);
-        case 'releaseDate':
-        default:
-          const dateA = a.releaseDate ? new Date(a.releaseDate).getTime() : 0;
-          const dateB = b.releaseDate ? new Date(b.releaseDate).getTime() : 0;
-          return sortOrder * (dateA - dateB);
-      }
-    });
+    // Execute query with all filters at database level
+    const filteredGames = await db
+      .select()
+      .from(games)
+      .where(and(...conditions))
+      .orderBy(orderByClause)
+      .limit(limit)
+      .offset(offset);
 
-    // Paginate
-    const total = allGames.length;
-    const paginatedGames = allGames.slice(offset, offset + limit);
+    // Get total count for pagination (separate query for efficiency)
+    const countResult = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(games)
+      .where(and(...conditions));
+
+    const total = countResult[0]?.count ?? 0;
 
     res.json({
       success: true,
       data: {
-        games: paginatedGames,
+        games: filteredGames,
         total,
         limit,
         offset,

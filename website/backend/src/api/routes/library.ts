@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, purchases, eq, and, desc } from '@webedt/shared';
+import { db, games, userLibrary, eq, and, desc } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';

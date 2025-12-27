@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, json, unique } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -379,10 +379,10 @@ export const userLibrary = pgTable('user_library', {
   favorite: boolean('favorite').default(false).notNull(),
   hidden: boolean('hidden').default(false).notNull(), // Hide from library view
   installStatus: text('install_status').default('not_installed').notNull(), // 'not_installed' | 'installing' | 'installed'
-}, (table) => ({
+}, (table) => [
   // Unique constraint: a user can only have each game once in their library
-  userGameUnique: { name: 'user_library_user_game_unique', columns: [table.userId, table.gameId] },
-}));
+  unique('user_library_user_game_unique').on(table.userId, table.gameId),
+]);
 
 // Community Posts - Discussions, reviews, guides
 export const communityPosts = pgTable('community_posts', {
@@ -437,12 +437,12 @@ export const communityVotes = pgTable('community_votes', {
     .references(() => communityComments.id, { onDelete: 'cascade' }),
   vote: integer('vote').notNull(), // 1 = upvote, -1 = downvote
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => ({
+}, (table) => [
   // Unique constraint: a user can only vote once per post
-  userPostVoteUnique: { name: 'community_votes_user_post_unique', columns: [table.userId, table.postId] },
+  unique('community_votes_user_post_unique').on(table.userId, table.postId),
   // Unique constraint: a user can only vote once per comment
-  userCommentVoteUnique: { name: 'community_votes_user_comment_unique', columns: [table.userId, table.commentId] },
-}));
+  unique('community_votes_user_comment_unique').on(table.userId, table.commentId),
+]);
 
 // Wishlists - Games users want to buy
 export const wishlists = pgTable('wishlists', {
@@ -456,10 +456,10 @@ export const wishlists = pgTable('wishlists', {
   priority: integer('priority').default(0).notNull(), // For ordering
   notifyOnSale: boolean('notify_on_sale').default(true).notNull(),
   addedAt: timestamp('added_at').defaultNow().notNull(),
-}, (table) => ({
+}, (table) => [
   // Unique constraint: a user can only have each game once in their wishlist
-  userGameUnique: { name: 'wishlists_user_game_unique', columns: [table.userId, table.gameId] },
-}));
+  unique('wishlists_user_game_unique').on(table.userId, table.gameId),
+]);
 
 // Type exports for Players feature
 export type Game = typeof games.$inferSelect;

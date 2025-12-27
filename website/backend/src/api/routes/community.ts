@@ -15,6 +15,7 @@ import {
   and,
   desc,
   asc,
+  sql,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -183,6 +184,15 @@ router.post('/posts', requireAuth, async (req: Request, res: Response) => {
     const validTypes = ['discussion', 'review', 'guide', 'artwork', 'announcement'];
     if (!validTypes.includes(type)) {
       res.status(400).json({ success: false, error: 'Invalid post type' });
+      return;
+    }
+
+    // Announcements require admin privileges
+    if (type === 'announcement' && !authReq.user!.isAdmin) {
+      res.status(403).json({
+        success: false,
+        error: 'Only administrators can create announcements',
+      });
       return;
     }
 
@@ -560,22 +570,28 @@ router.post('/posts/:id/vote', requireAuth, async (req: Request, res: Response) 
       if (vote === -1) downvoteChange = 1;
     }
 
-    // Update post vote counts
+    // Update post vote counts atomically to prevent race conditions
+    let updatedPost = post;
     if (upvoteChange !== 0 || downvoteChange !== 0) {
-      await db
+      const [result] = await db
         .update(communityPosts)
         .set({
-          upvotes: post.upvotes + upvoteChange,
-          downvotes: post.downvotes + downvoteChange,
+          upvotes: sql`${communityPosts.upvotes} + ${upvoteChange}`,
+          downvotes: sql`${communityPosts.downvotes} + ${downvoteChange}`,
         })
-        .where(eq(communityPosts.id, postId));
+        .where(eq(communityPosts.id, postId))
+        .returning({ upvotes: communityPosts.upvotes, downvotes: communityPosts.downvotes });
+
+      if (result) {
+        updatedPost = { ...post, upvotes: result.upvotes, downvotes: result.downvotes };
+      }
     }
 
     res.json({
       success: true,
       data: {
-        upvotes: post.upvotes + upvoteChange,
-        downvotes: post.downvotes + downvoteChange,
+        upvotes: updatedPost.upvotes,
+        downvotes: updatedPost.downvotes,
         userVote: vote,
       },
     });
@@ -655,22 +671,28 @@ router.post('/comments/:id/vote', requireAuth, async (req: Request, res: Respons
       if (vote === -1) downvoteChange = 1;
     }
 
-    // Update comment vote counts
+    // Update comment vote counts atomically to prevent race conditions
+    let updatedComment = comment;
     if (upvoteChange !== 0 || downvoteChange !== 0) {
-      await db
+      const [result] = await db
         .update(communityComments)
         .set({
-          upvotes: comment.upvotes + upvoteChange,
-          downvotes: comment.downvotes + downvoteChange,
+          upvotes: sql`${communityComments.upvotes} + ${upvoteChange}`,
+          downvotes: sql`${communityComments.downvotes} + ${downvoteChange}`,
         })
-        .where(eq(communityComments.id, commentId));
+        .where(eq(communityComments.id, commentId))
+        .returning({ upvotes: communityComments.upvotes, downvotes: communityComments.downvotes });
+
+      if (result) {
+        updatedComment = { ...comment, upvotes: result.upvotes, downvotes: result.downvotes };
+      }
     }
 
     res.json({
       success: true,
       data: {
-        upvotes: comment.upvotes + upvoteChange,
-        downvotes: comment.downvotes + downvoteChange,
+        upvotes: updatedComment.upvotes,
+        downvotes: updatedComment.downvotes,
         userVote: vote,
       },
     });
