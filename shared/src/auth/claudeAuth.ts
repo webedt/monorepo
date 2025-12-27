@@ -165,7 +165,7 @@ export async function ensureValidToken(claudeAuth: ClaudeAuth): Promise<ClaudeAu
 }
 
 // Credentials file path for Claude CLI
-const CLAUDE_CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
+export const CLAUDE_CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
 
 // Keychain service name for Claude Code (macOS only)
 const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';

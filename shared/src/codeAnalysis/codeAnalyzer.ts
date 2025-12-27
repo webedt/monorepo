@@ -6,12 +6,10 @@
  */
 
 import { existsSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
 
 import { ACodeAnalyzer } from './ACodeAnalyzer.js';
 import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
-import { getClaudeCredentials } from '../auth/claudeAuth.js';
+import { getClaudeCredentials, CLAUDE_CREDENTIALS_PATH } from '../auth/claudeAuth.js';
 import { logger } from '../utils/logging/logger.js';
 import { CLAUDE_ENVIRONMENT_ID, LLM_FALLBACK_REPO_URL } from '../config/env.js';
 
@@ -27,9 +25,6 @@ const DEFAULT_TIMEOUT_MS = 120000;
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_FINDINGS = 20;
 const DEFAULT_MAX_CODE_SIZE_BYTES = 1024 * 1024; // 1MB
-
-// Path to Claude credentials file (matches getClaudeCredentials in claudeAuth.ts)
-const CLAUDE_CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
 
 /**
  * Build the analysis prompt based on the analysis type
@@ -378,18 +373,22 @@ export class CodeAnalyzer extends ACodeAnalyzer {
     }
 
     // Validate code size to prevent memory issues
-    if (params.code && params.code.length > this.maxCodeSizeBytes) {
-      const sizeMB = (params.code.length / (1024 * 1024)).toFixed(2);
-      const maxMB = (this.maxCodeSizeBytes / (1024 * 1024)).toFixed(2);
-      return {
-        success: false,
-        findings: [],
-        summary: calculateSummary([]),
-        assessment: `Code size exceeds maximum allowed size.`,
-        provider: 'claude-web',
-        durationMs: Date.now() - startTime,
-        error: `Code size (${sizeMB}MB) exceeds maximum allowed size (${maxMB}MB). Consider analyzing smaller portions.`,
-      };
+    // Use Buffer.byteLength for accurate byte count (handles multi-byte UTF-8 characters)
+    if (params.code) {
+      const codeSizeBytes = Buffer.byteLength(params.code, 'utf8');
+      if (codeSizeBytes > this.maxCodeSizeBytes) {
+        const sizeMB = (codeSizeBytes / (1024 * 1024)).toFixed(2);
+        const maxMB = (this.maxCodeSizeBytes / (1024 * 1024)).toFixed(2);
+        return {
+          success: false,
+          findings: [],
+          summary: calculateSummary([]),
+          assessment: `Code size exceeds maximum allowed size.`,
+          provider: 'claude-web',
+          durationMs: Date.now() - startTime,
+          error: `Code size (${sizeMB}MB) exceeds maximum allowed size (${maxMB}MB). Consider analyzing smaller portions.`,
+        };
+      }
     }
 
     // Determine gitUrl with fallback, and validate it's not empty
@@ -414,7 +413,7 @@ export class CodeAnalyzer extends ACodeAnalyzer {
       hasCode: Boolean(params.code),
       hasGitUrl: Boolean(params.gitUrl),
       fileCount: params.filePaths?.length,
-      codeSizeBytes: params.code?.length,
+      codeSizeBytes: params.code ? Buffer.byteLength(params.code, 'utf8') : undefined,
     });
 
     let sessionId: string | undefined;
