@@ -423,6 +423,36 @@ export interface IClaudeWebClientDocumentation {
   ): Promise<{ canResume: boolean; reason?: string; status?: string; hasCompletedEvent?: boolean }>;
 
   /**
+   * Check if a session is complete.
+   *
+   * A session is considered complete when:
+   * - Status is 'idle', 'completed', 'failed', or 'archived'
+   * - Optionally, has a 'result' event indicating work finished
+   *
+   * This is useful for determining if a session has finished all work
+   * and no further processing is expected.
+   *
+   * @param sessionId - The session ID to check
+   * @param checkEvents - Also check events for a result event (default: true)
+   * @returns Object with `isComplete` boolean and session status info
+   *
+   * @example
+   * ```typescript
+   * const check = await client.isComplete('session_abc123');
+   * if (check.isComplete) {
+   *   console.log(`Session finished with status: ${check.status}`);
+   *   if (check.hasResultEvent) {
+   *     console.log('Session has a result event');
+   *   }
+   * }
+   * ```
+   */
+  isComplete(
+    sessionId: string,
+    checkEvents?: boolean
+  ): Promise<{ isComplete: boolean; status?: string; hasResultEvent?: boolean }>;
+
+  /**
    * Wait for a session to become resumable.
    *
    * Polls the session status until it becomes idle and ready for resume.

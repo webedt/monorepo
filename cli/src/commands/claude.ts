@@ -473,6 +473,34 @@ webCommand
   });
 
 webCommand
+  .command('is-complete <sessionId>')
+  .description('Check if a session is complete')
+  .option('--check-events', 'Also check if session has a result event')
+  .option('--json', 'Output as JSON')
+  .action(async (sessionId, options, cmd) => {
+    try {
+      const parentOpts = cmd.parent?.opts() || {};
+      const client = await getClient(parentOpts);
+
+      const result = await client.isComplete(sessionId, options.checkEvents);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(`\nSession ${sessionId}:`);
+      console.log(`  Complete:     ${result.isComplete ? 'Yes' : 'No'}`);
+      console.log(`  Status:       ${result.status || 'unknown'}`);
+      if (result.hasResultEvent !== undefined) {
+        console.log(`  Has Result:   ${result.hasResultEvent ? 'Yes' : 'No'}`);
+      }
+    } catch (error) {
+      handleCommandError(error, 'checking session', { json: options.json });
+    }
+  });
+
+webCommand
   .command('send <sessionId> <message>')
   .description('Send a message to a session (fire-and-forget, does not wait for response)')
   .action(async (sessionId, message, _options, cmd) => {
