@@ -606,6 +606,59 @@ export type ChannelMessage = typeof channelMessages.$inferSelect;
 export type NewChannelMessage = typeof channelMessages.$inferInsert;
 
 // ============================================================================
+// PAYMENT TRANSACTIONS - Stripe and PayPal payment tracking
+// ============================================================================
+
+// Payment Transactions - Tracks payment provider transactions
+export const paymentTransactions = pgTable('payment_transactions', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  purchaseId: text('purchase_id')
+    .references(() => purchases.id, { onDelete: 'set null' }),
+  provider: text('provider').notNull(), // 'stripe' | 'paypal'
+  providerTransactionId: text('provider_transaction_id').notNull(), // Stripe PaymentIntent ID or PayPal Order ID
+  providerSessionId: text('provider_session_id'), // Stripe Checkout Session ID
+  type: text('type').notNull(), // 'checkout' | 'payment_intent' | 'refund'
+  status: text('status').notNull().default('pending'), // 'pending' | 'requires_action' | 'processing' | 'succeeded' | 'failed' | 'cancelled' | 'refunded'
+  amount: integer('amount').notNull(), // Amount in cents
+  currency: text('currency').default('USD').notNull(),
+  metadata: json('metadata').$type<{
+    gameId?: string;
+    gameName?: string;
+    customerEmail?: string;
+    [key: string]: string | undefined;
+  }>(),
+  providerResponse: json('provider_response').$type<Record<string, unknown>>(), // Raw provider response for debugging
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// Payment Webhooks - Logs all webhook events for auditing
+export const paymentWebhooks = pgTable('payment_webhooks', {
+  id: text('id').primaryKey(), // UUID
+  provider: text('provider').notNull(), // 'stripe' | 'paypal'
+  eventId: text('event_id').notNull(), // Provider's event ID
+  eventType: text('event_type').notNull(), // e.g., 'checkout.session.completed'
+  transactionId: text('transaction_id')
+    .references(() => paymentTransactions.id, { onDelete: 'set null' }),
+  payload: json('payload').notNull(), // Raw webhook payload
+  processed: boolean('processed').default(false).notNull(),
+  processedAt: timestamp('processed_at'),
+  error: text('error'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Type exports for Payment
+export type PaymentTransaction = typeof paymentTransactions.$inferSelect;
+export type NewPaymentTransaction = typeof paymentTransactions.$inferInsert;
+export type PaymentWebhook = typeof paymentWebhooks.$inferSelect;
+export type NewPaymentWebhook = typeof paymentWebhooks.$inferInsert;
+
+// ============================================================================
 // TAXONOMY SYSTEM - Admin-configurable categories, tags, and genres
 // ============================================================================
 

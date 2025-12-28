@@ -466,6 +466,11 @@ export type {
   NewCommunityChannel,
   ChannelMessage,
   NewChannelMessage,
+  // Payment types
+  PaymentTransaction,
+  NewPaymentTransaction,
+  PaymentWebhook,
+  NewPaymentWebhook,
   // Taxonomy system types
   Taxonomy,
   NewTaxonomy,
@@ -498,6 +503,9 @@ export {
   // Community channels tables
   communityChannels,
   channelMessages,
+  // Payment tables
+  paymentTransactions,
+  paymentWebhooks,
   // Taxonomy system tables
   taxonomies,
   taxonomyTerms,
