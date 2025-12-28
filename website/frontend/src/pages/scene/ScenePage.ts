@@ -12,10 +12,16 @@ import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { SpriteRenderer } from '../../lib/sprite';
 import { Viewport } from '../../lib/viewport';
-import type { Session } from '../../types';
+import { customComponentsStore } from '../../stores';
+import type {
+  Session,
+  CustomComponentDefinition,
+  CustomComponentChild,
+  CustomComponentPropertyValues,
+} from '../../types';
 import './scene.css';
 
-type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'ui-button' | 'ui-panel' | 'ui-text' | 'ui-image' | 'ui-slider' | 'ui-progress-bar' | 'ui-checkbox';
+type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'custom' | 'ui-button' | 'ui-panel' | 'ui-text' | 'ui-image' | 'ui-slider' | 'ui-progress-bar' | 'ui-checkbox';
 type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
 
 // UI Component specific types
@@ -43,6 +49,9 @@ interface SceneObject {
   // Sprite dimensions (auto-populated when image loads)
   spriteWidth?: number;
   spriteHeight?: number;
+  // Custom component properties
+  customComponentId?: string;
+  customPropertyValues?: CustomComponentPropertyValues;
   // UI Component properties
   uiButtonStyle?: UIButtonStyle;
   uiPanelStyle?: UIPanelStyle;
@@ -105,6 +114,11 @@ export class ScenePage extends Page<ScenePageOptions> {
   private panStart = { x: 0, y: 0 };
   private showOriginCrosshair = true;
   private mouseWorldPos = { x: 0, y: 0 };
+
+  // Custom components library
+  private showComponentsLibrary = false;
+  private componentIdCounter = 0;
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Event listener references for cleanup
   private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
@@ -483,6 +497,47 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.updateZoomDisplay();
           this.renderScene();
         }
+      });
+    }
+
+    // Custom components library
+    const toggleComponentsBtn = this.$('[data-action="toggle-components"]');
+    if (toggleComponentsBtn) {
+      toggleComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary());
+    }
+
+    const closeComponentsBtn = this.$('.close-panel-btn');
+    if (closeComponentsBtn) {
+      closeComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary(false));
+    }
+
+    const saveAsComponentBtn = this.$('[data-action="save-as-component"]');
+    if (saveAsComponentBtn) {
+      saveAsComponentBtn.addEventListener('click', () => this.saveSelectionAsComponent());
+    }
+
+    // Components library search
+    const searchInput = this.$('.components-search-input') as HTMLInputElement;
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
+        this.searchDebounceTimer = setTimeout(() => {
+          this.updateComponentsLibrary(searchInput.value.trim());
+        }, 300);
+      });
+    }
+
+    // Category buttons
+    const componentsPanel = this.$('.components-library-panel');
+    if (componentsPanel) {
+      const categoryBtns = componentsPanel.querySelectorAll('.category-btn');
+      categoryBtns.forEach((btn: Element) => {
+        btn.addEventListener('click', () => {
+          categoryBtns.forEach((b: Element) => b.classList.remove('active'));
+          btn.classList.add('active');
+          const category = (btn as HTMLElement).dataset.category || 'all';
+          this.filterComponentsByCategory(category);
+        });
       });
     }
   }
@@ -1296,6 +1351,164 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.renderScene();
   }
 
+  // Custom Component Methods
+  private addCustomComponent(definition: CustomComponentDefinition): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: this.generateUniqueId('custom'),
+      name: definition.name,
+      type: 'custom',
+      visible: true,
+      locked: false,
+      transform: {
+        x: offset,
+        y: offset,
+        rotation: definition.defaultTransform.rotation,
+        scaleX: definition.defaultTransform.scaleX,
+        scaleY: definition.defaultTransform.scaleY,
+        pivotX: definition.defaultTransform.pivotX,
+        pivotY: definition.defaultTransform.pivotY,
+      },
+      zIndex: this.objects.length,
+      opacity: 1,
+      customComponentId: definition.id,
+      customPropertyValues: this.getDefaultPropertyValues(definition),
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    customComponentsStore.recordUsage(definition.id);
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.success(`Added ${definition.name} to scene`);
+  }
+
+  private generateUniqueId(prefix: string): string {
+    return `${prefix}-${Date.now()}-${++this.componentIdCounter}`;
+  }
+
+  private getDefaultPropertyValues(definition: CustomComponentDefinition): CustomComponentPropertyValues {
+    const values: CustomComponentPropertyValues = {};
+    for (const prop of definition.properties) {
+      values[prop.name] = prop.defaultValue;
+    }
+    return values;
+  }
+
+  private toggleComponentsLibrary(show?: boolean): void {
+    this.showComponentsLibrary = show !== undefined ? show : !this.showComponentsLibrary;
+    const panel = this.$('.components-library-panel') as HTMLElement;
+    const toggleBtn = this.$('[data-action="toggle-components"]');
+    if (panel) panel.style.display = this.showComponentsLibrary ? 'flex' : 'none';
+    if (toggleBtn) toggleBtn.classList.toggle('active', this.showComponentsLibrary);
+    if (this.showComponentsLibrary) this.updateComponentsLibrary();
+  }
+
+  private escapeHtmlForComponent(str: string): string {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  private renderComponentItemHtml(comp: CustomComponentDefinition): string {
+    const escapedName = this.escapeHtmlForComponent(comp.name);
+    const escapedDesc = comp.description ? this.escapeHtmlForComponent(comp.description) : '';
+    const title = escapedName + (escapedDesc ? ': ' + escapedDesc : '');
+    const icon = this.escapeHtmlForComponent(comp.icon || '📦');
+    return `<div class="component-item" data-component-id="${comp.id}" title="${title}"><div class="component-icon">${icon}</div><div class="component-name">${escapedName}</div><div class="component-actions"><button class="component-action-btn" data-action="add" title="Add to scene">+</button><button class="component-action-btn" data-action="delete" title="Delete">×</button></div></div>`;
+  }
+
+  private updateComponentsLibrary(searchQuery?: string): void {
+    const grid = this.$('.components-grid') as HTMLElement;
+    if (!grid) return;
+    const components = searchQuery ? customComponentsStore.search(searchQuery) : customComponentsStore.getAll('name');
+    if (components.length === 0) {
+      grid.innerHTML = '<div class="components-empty"><p>No custom components</p><p class="hint">Select objects and save as component</p></div>';
+      return;
+    }
+    grid.innerHTML = components.map(comp => this.renderComponentItemHtml(comp)).join('');
+    this.bindComponentItemHandlers(grid);
+  }
+
+  private filterComponentsByCategory(category: string): void {
+    const grid = this.$('.components-grid') as HTMLElement;
+    if (!grid) return;
+    let components: CustomComponentDefinition[];
+    if (category === 'all') components = customComponentsStore.getAll('name');
+    else if (category === 'recent') components = customComponentsStore.getRecentlyUsed(10);
+    else components = customComponentsStore.getByCategory(category);
+    if (components.length === 0) {
+      grid.innerHTML = '<div class="components-empty"><p>No components in this category</p></div>';
+      return;
+    }
+    grid.innerHTML = components.map(comp => this.renderComponentItemHtml(comp)).join('');
+    this.bindComponentItemHandlers(grid);
+  }
+
+  private bindComponentItemHandlers(grid: HTMLElement): void {
+    grid.querySelectorAll('.component-item').forEach(item => {
+      const id = (item as HTMLElement).dataset.componentId;
+      if (!id) return;
+      item.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('.component-action-btn')) return;
+        const definition = customComponentsStore.getComponent(id);
+        if (definition) this.addCustomComponent(definition);
+      });
+      const addBtn = item.querySelector('[data-action="add"]');
+      if (addBtn) addBtn.addEventListener('click', () => {
+        const definition = customComponentsStore.getComponent(id);
+        if (definition) this.addCustomComponent(definition);
+      });
+      const deleteBtn = item.querySelector('[data-action="delete"]');
+      if (deleteBtn) deleteBtn.addEventListener('click', () => {
+        if (confirm('Delete this component? This cannot be undone.')) {
+          customComponentsStore.deleteComponent(id);
+          toast.success('Component deleted');
+        }
+      });
+    });
+  }
+
+  private saveSelectionAsComponent(): void {
+    if (!this.selectedObjectId) { toast.error('Select an object first'); return; }
+    const selectedObj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!selectedObj) { toast.error('Selected object not found'); return; }
+    if (selectedObj.type === 'custom') { toast.error('Cannot save a custom component instance as a new component'); return; }
+    if (selectedObj.type === 'group' || selectedObj.type === 'empty') { toast.error('Cannot save group or empty objects as components'); return; }
+    const name = prompt('Enter component name:', selectedObj.name);
+    if (!name) return;
+    const description = prompt('Enter description (optional):', '');
+    const component = customComponentsStore.createFromSelection(name, [{
+      id: selectedObj.id, name: selectedObj.name, type: selectedObj.type as 'sprite' | 'shape' | 'text',
+      shapeType: selectedObj.shapeType, transform: { x: selectedObj.transform.x, y: selectedObj.transform.y, rotation: selectedObj.transform.rotation,
+        scaleX: selectedObj.transform.scaleX, scaleY: selectedObj.transform.scaleY, pivotX: selectedObj.transform.pivotX ?? 0.5, pivotY: selectedObj.transform.pivotY ?? 0.5 },
+      opacity: selectedObj.opacity, color: selectedObj.color, text: selectedObj.text, fontSize: selectedObj.fontSize, fontFamily: selectedObj.fontFamily, zIndex: selectedObj.zIndex
+    }], { description: description || undefined });
+    if (component) { toast.success(`Saved "${name}" as custom component`); this.updateComponentsLibrary(); }
+    else toast.error('Failed to create component');
+  }
+
+  private getCustomComponentBounds(children: CustomComponentChild[]): { width: number; height: number } {
+    if (children.length === 0) return { width: 100, height: 100 };
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const child of children) {
+      let childWidth = 100, childHeight = 100;
+      if (child.type === 'shape' && child.shapeType === 'rectangle') { childWidth = 100; childHeight = 80; }
+      else if (child.type === 'text') { const fontSize = child.fontSize || 24; childWidth = (child.text || 'Text').length * fontSize * 0.6; childHeight = fontSize * 1.2; }
+      const pivotX = child.transform.pivotX ?? 0.5;
+      const pivotY = child.transform.pivotY ?? 0.5;
+      const left = child.transform.x - childWidth * pivotX;
+      const right = left + childWidth;
+      const top = child.transform.y - childHeight * pivotY;
+      const bottom = top + childHeight;
+      minX = Math.min(minX, left); minY = Math.min(minY, top);
+      maxX = Math.max(maxX, right); maxY = Math.max(maxY, bottom);
+    }
+    return { width: Math.max(maxX - minX, 50), height: Math.max(maxY - minY, 50) };
+  }
+
   private moveSelectedUp(): void {
     if (!this.selectedObjectId) return;
     const idx = this.objects.findIndex(o => o.id === this.selectedObjectId);
@@ -1366,6 +1579,14 @@ export class ScenePage extends Page<ScenePageOptions> {
       }
       case 'ui-checkbox':
         return { width: obj.uiWidth || 120, height: obj.uiHeight || 20 };
+      case 'custom':
+        if (obj.customComponentId) {
+          const definition = customComponentsStore.getComponent(obj.customComponentId);
+          if (definition && definition.children.length > 0) {
+            return this.getCustomComponentBounds(definition.children);
+          }
+        }
+        return { width: 100, height: 100 };
       default:
         return { width: 100, height: 100 };
     }
@@ -1509,6 +1730,10 @@ export class ScenePage extends Page<ScenePageOptions> {
 
         case 'ui-checkbox':
           this.renderUICheckbox(obj, dims);
+          break;
+
+        case 'custom':
+          this.renderCustomComponent(obj, dims);
           break;
       }
 
@@ -1940,6 +2165,58 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.ctx.fillText(obj.text || '', boxSize + 8, -height / 2);
   }
 
+  private renderCustomComponent(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx || !obj.customComponentId) return;
+
+    const definition = customComponentsStore.getComponent(obj.customComponentId);
+    if (!definition) {
+      // Draw placeholder for missing component
+      this.ctx.fillStyle = '#f0f0f0';
+      this.ctx.strokeStyle = '#ff6666';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.fillRect(0, -dims.height, dims.width, dims.height);
+      this.ctx.strokeRect(0, -dims.height, dims.width, dims.height);
+      this.ctx.setLineDash([]);
+
+      // Draw missing icon
+      this.ctx.save();
+      this.ctx.translate(dims.width / 2, -dims.height / 2);
+      this.ctx.scale(1, -1);
+      this.ctx.fillStyle = '#ff6666';
+      this.ctx.font = '24px Arial';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText('❌', 0, 0);
+      this.ctx.restore();
+      return;
+    }
+
+    // Draw custom component bounding box
+    this.ctx.fillStyle = '#e8f4e8';
+    this.ctx.strokeStyle = '#4caf50';
+    this.ctx.lineWidth = 1;
+    this.ctx.fillRect(0, -dims.height, dims.width, dims.height);
+    this.ctx.strokeRect(0, -dims.height, dims.width, dims.height);
+
+    // Draw component icon and name
+    this.ctx.save();
+    this.ctx.translate(dims.width / 2, -dims.height / 2);
+    this.ctx.scale(1, -1);
+
+    const icon = definition.icon || '📦';
+    this.ctx.font = '20px Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(icon, 0, -10);
+
+    this.ctx.fillStyle = '#2e7d32';
+    this.ctx.font = 'bold 12px Arial';
+    this.ctx.fillText(definition.name, 0, 10);
+
+    this.ctx.restore();
+  }
+
   // Helper method for drawing rounded rectangles
   private drawRoundedRect(x: number, y: number, width: number, height: number, radius: number): void {
     if (!this.ctx) return;
@@ -2013,6 +2290,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       case 'ui-slider': return '🎚️';
       case 'ui-progress-bar': return '📊';
       case 'ui-checkbox': return '☑️';
+      case 'custom': return '📦';
       default: return '◻';
     }
   }
