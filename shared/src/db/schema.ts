@@ -92,6 +92,7 @@ export const chatSessions = pgTable('chat_sessions', {
   completedAt: timestamp('completed_at'),
   deletedAt: timestamp('deleted_at'), // Soft delete timestamp
   workerLastActivity: timestamp('worker_last_activity'), // Last time worker sent an event (for orphan detection)
+  favorite: boolean('favorite').default(false).notNull(), // User favorite/starred status
 });
 
 export const messages = pgTable('messages', {
