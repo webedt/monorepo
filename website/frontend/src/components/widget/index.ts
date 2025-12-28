@@ -6,6 +6,7 @@ export { StatsWidget } from './StatsWidget';
 export { ActivityWidget } from './ActivityWidget';
 export { QuickActionsWidget } from './QuickActionsWidget';
 export { ChartWidget } from './ChartWidget';
+export { CommunityActivityWidget } from './CommunityActivityWidget';
 
 // Widget Container
 export { WidgetContainer } from './WidgetContainer';
@@ -30,5 +31,6 @@ export type { StatsWidgetOptions } from './StatsWidget';
 export type { ActivityWidgetOptions } from './ActivityWidget';
 export type { QuickActionsWidgetOptions } from './QuickActionsWidget';
 export type { ChartWidgetOptions, ChartType } from './ChartWidget';
+export type { CommunityActivityWidgetOptions } from './CommunityActivityWidget';
 export type { WidgetContainerOptions } from './WidgetContainer';
 export type { WidgetCustomizerOptions } from './WidgetCustomizer';

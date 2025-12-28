@@ -151,3 +151,25 @@
 .recently-played-info .last-played {
   opacity: 0.8;
 }
+
+/* Two Column Layout */
+.dashboard-two-column {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-xl);
+  margin-top: var(--spacing-xl);
+}
+
+@media (max-width: 900px) {
+  .dashboard-two-column {
+    grid-template-columns: 1fr;
+  }
+}
+
+.community-activity-section {
+  margin-bottom: 0;
+}
+
+.community-activity-section .widget {
+  height: 100%;
+}
