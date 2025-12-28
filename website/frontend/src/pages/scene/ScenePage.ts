@@ -19,6 +19,7 @@ import type {
   Session,
   CustomComponentDefinition,
   CustomComponentChild,
+  CustomComponentPropertyValues,
 } from '../../types';
 import type { SceneObject, ShapeType, Scene } from '../../stores/sceneStore';
 import './scene.css';
@@ -38,7 +39,6 @@ export class ScenePage extends Page<ScenePageOptions> {
   private isSaving = false;
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
-  private unsubscribeStore: (() => void) | null = null;
   private isOfflineMode = false;
   private transformEditor: TransformEditor | null = null;
   private sceneTabs: SceneTabs | null = null;
@@ -60,16 +60,20 @@ export class ScenePage extends Page<ScenePageOptions> {
   private showOriginCrosshair = true;
   private mouseWorldPos = { x: 0, y: 0 };
 
+  // Custom components library
+  private showComponentsLibrary = false;
+  private componentIdCounter = 0;
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Event listener references for cleanup
   private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseUp: (() => void) | null = null;
   private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
 
-  // Custom components panel state
-  private showComponentsLibrary = false;
+  // Store subscriptions
+  private unsubscribeStore: (() => void) | null = null;
   private unsubscribeComponents: (() => void) | null = null;
-  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Helper methods to access active scene data
   private get activeScene(): Scene | null {
@@ -96,11 +100,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     return sceneStore.hasUnsavedScenes();
   }
 
-  /**
-   * Generate unique ID with randomness to prevent collisions
-   */
-  private generateUniqueId(prefix: string): string {
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  private markDirty(): void {
+    const scene = this.activeScene;
+    if (scene) {
+      sceneStore.markSceneDirty(scene.id);
+    }
   }
 
   protected render(): string {
@@ -145,8 +149,32 @@ export class ScenePage extends Page<ScenePageOptions> {
             <button class="toolbar-btn" data-action="add-text" title="Add Text">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
             </button>
-            <button class="toolbar-btn" data-action="toggle-components" title="Custom Components Library">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
+          <div class="toolbar-group ui-group">
+            <span class="toolbar-label">UI:</span>
+            <button class="toolbar-btn" data-action="add-ui-button" title="Add UI Button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-panel" title="Add UI Panel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-text" title="Add UI Text">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-image" title="Add UI Image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-slider" title="Add UI Slider">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="12" x2="20" y2="12"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-progress" title="Add Progress Bar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="10" width="12" height="4" rx="1" fill="currentColor"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-checkbox" title="Add UI Checkbox">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 11 12 14 16 10"/></svg>
             </button>
           </div>
 
@@ -156,7 +184,6 @@ export class ScenePage extends Page<ScenePageOptions> {
             <button class="toolbar-btn" data-action="move-up" title="Move Up">↑</button>
             <button class="toolbar-btn" data-action="move-down" title="Move Down">↓</button>
             <button class="toolbar-btn" data-action="delete" title="Delete">🗑</button>
-            <button class="toolbar-btn" data-action="save-as-component" title="Save Selection as Component">📦</button>
           </div>
 
           <div class="toolbar-separator"></div>
@@ -189,29 +216,6 @@ export class ScenePage extends Page<ScenePageOptions> {
               <div class="hierarchy-empty">
                 <p>No objects in scene</p>
                 <p class="hint">Add sprites, shapes, or text</p>
-              </div>
-            </div>
-          </aside>
-
-          <!-- Custom Components Library Panel -->
-          <aside class="components-library-panel" style="display: none;">
-            <div class="panel-header">
-              <span class="panel-title">Components</span>
-              <button class="close-panel-btn" data-action="close-components" title="Close">×</button>
-            </div>
-            <div class="components-library-content">
-              <div class="components-search">
-                <input type="text" class="components-search-input" placeholder="Search components...">
-              </div>
-              <div class="components-categories">
-                <button class="category-btn active" data-category="all">All</button>
-                <button class="category-btn" data-category="recent">Recent</button>
-              </div>
-              <div class="components-grid">
-                <div class="components-empty">
-                  <p>No custom components</p>
-                  <p class="hint">Select objects and save as component</p>
-                </div>
               </div>
             </div>
           </aside>
@@ -288,6 +292,31 @@ export class ScenePage extends Page<ScenePageOptions> {
                     <div class="appearance-row">
                       <label>Locked</label>
                       <input type="checkbox" class="property-checkbox locked-checkbox">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="property-section ui-properties" style="display: none;">
+                  <div class="property-label">UI Properties</div>
+                  <div class="ui-properties-grid">
+                    <div class="ui-prop-row ui-size-row">
+                      <label>Width</label>
+                      <input type="number" class="property-input ui-width" min="10" step="1">
+                      <label>Height</label>
+                      <input type="number" class="property-input ui-height" min="10" step="1">
+                    </div>
+                    <div class="ui-prop-row ui-value-row" style="display: none;">
+                      <label>Value</label>
+                      <input type="range" class="property-slider ui-value-slider" min="0" max="100" value="50">
+                      <span class="ui-value-display">50</span>
+                    </div>
+                    <div class="ui-prop-row ui-checked-row" style="display: none;">
+                      <label>Checked</label>
+                      <input type="checkbox" class="property-checkbox ui-checked">
+                    </div>
+                    <div class="ui-prop-row ui-text-row" style="display: none;">
+                      <label>Text</label>
+                      <input type="text" class="property-input ui-text" placeholder="Button text">
                     </div>
                   </div>
                 </div>
@@ -410,11 +439,6 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Setup property panel event handlers
     this.setupPropertyHandlers();
 
-    // Subscribe to custom components store
-    this.unsubscribeComponents = customComponentsStore.subscribe(() => {
-      this.updateComponentsLibrary();
-    });
-
     // Load session data
     this.loadSession();
   }
@@ -431,47 +455,22 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (addCircleBtn) addCircleBtn.addEventListener('click', () => this.addShape('circle'));
     if (addTextBtn) addTextBtn.addEventListener('click', () => this.addText());
 
-    // Custom components button
-    const toggleComponentsBtn = this.$('[data-action="toggle-components"]');
-    if (toggleComponentsBtn) {
-      toggleComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary());
-    }
+    // UI Component buttons
+    const addUIButtonBtn = this.$('[data-action="add-ui-button"]');
+    const addUIPanelBtn = this.$('[data-action="add-ui-panel"]');
+    const addUITextBtn = this.$('[data-action="add-ui-text"]');
+    const addUIImageBtn = this.$('[data-action="add-ui-image"]');
+    const addUISliderBtn = this.$('[data-action="add-ui-slider"]');
+    const addUIProgressBtn = this.$('[data-action="add-ui-progress"]');
+    const addUICheckboxBtn = this.$('[data-action="add-ui-checkbox"]');
 
-    // Close components panel button
-    const closeComponentsBtn = this.$('[data-action="close-components"]');
-    if (closeComponentsBtn) {
-      closeComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary(false));
-    }
-
-    // Save as component button
-    const saveAsComponentBtn = this.$('[data-action="save-as-component"]');
-    if (saveAsComponentBtn) {
-      saveAsComponentBtn.addEventListener('click', () => this.saveSelectionAsComponent());
-    }
-
-    // Components search with debounce
-    const searchInput = this.$('.components-search-input') as HTMLInputElement;
-    if (searchInput) {
-      searchInput.addEventListener('input', () => {
-        if (this.searchDebounceTimer) {
-          clearTimeout(this.searchDebounceTimer);
-        }
-        this.searchDebounceTimer = setTimeout(() => {
-          this.updateComponentsLibrary(searchInput.value);
-        }, 250);
-      });
-    }
-
-    // Category buttons
-    const categoryBtns = this.$$('.category-btn');
-    categoryBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        categoryBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const category = (btn as HTMLButtonElement).dataset.category || 'all';
-        this.filterComponentsByCategory(category);
-      });
-    });
+    if (addUIButtonBtn) addUIButtonBtn.addEventListener('click', () => this.addUIButton());
+    if (addUIPanelBtn) addUIPanelBtn.addEventListener('click', () => this.addUIPanel());
+    if (addUITextBtn) addUITextBtn.addEventListener('click', () => this.addUIText());
+    if (addUIImageBtn) addUIImageBtn.addEventListener('click', () => this.addUIImage());
+    if (addUISliderBtn) addUISliderBtn.addEventListener('click', () => this.addUISlider());
+    if (addUIProgressBtn) addUIProgressBtn.addEventListener('click', () => this.addUIProgressBar());
+    if (addUICheckboxBtn) addUICheckboxBtn.addEventListener('click', () => this.addUICheckbox());
 
     // Object manipulation buttons
     const moveUpBtn = this.$('[data-action="move-up"]');
@@ -524,6 +523,47 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.updateZoomDisplay();
           this.renderScene();
         }
+      });
+    }
+
+    // Custom components library
+    const toggleComponentsBtn = this.$('[data-action="toggle-components"]');
+    if (toggleComponentsBtn) {
+      toggleComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary());
+    }
+
+    const closeComponentsBtn = this.$('.close-panel-btn');
+    if (closeComponentsBtn) {
+      closeComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary(false));
+    }
+
+    const saveAsComponentBtn = this.$('[data-action="save-as-component"]');
+    if (saveAsComponentBtn) {
+      saveAsComponentBtn.addEventListener('click', () => this.saveSelectionAsComponent());
+    }
+
+    // Components library search
+    const searchInput = this.$('.components-search-input') as HTMLInputElement;
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
+        this.searchDebounceTimer = setTimeout(() => {
+          this.updateComponentsLibrary(searchInput.value.trim());
+        }, 300);
+      });
+    }
+
+    // Category buttons
+    const componentsPanel = this.$('.components-library-panel');
+    if (componentsPanel) {
+      const categoryBtns = componentsPanel.querySelectorAll('.category-btn');
+      categoryBtns.forEach((btn: Element) => {
+        btn.addEventListener('click', () => {
+          categoryBtns.forEach((b: Element) => b.classList.remove('active'));
+          btn.classList.add('active');
+          const category = (btn as HTMLElement).dataset.category || 'all';
+          this.filterComponentsByCategory(category);
+        });
       });
     }
   }
@@ -616,6 +656,75 @@ export class ScenePage extends Page<ScenePageOptions> {
               : o
           );
           sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+          this.renderScene();
+        }
+      });
+    }
+
+    // UI Property handlers
+    const uiWidthInput = this.$('.ui-width') as HTMLInputElement;
+    const uiHeightInput = this.$('.ui-height') as HTMLInputElement;
+    const uiValueSlider = this.$('.ui-value-slider') as HTMLInputElement;
+    const uiCheckedInput = this.$('.ui-checked') as HTMLInputElement;
+    const uiTextInput = this.$('.ui-text') as HTMLInputElement;
+
+    if (uiWidthInput) {
+      uiWidthInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiWidth = Math.max(10, parseInt(uiWidthInput.value) || 100);
+          this.markDirty();
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiHeightInput) {
+      uiHeightInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiHeight = Math.max(10, parseInt(uiHeightInput.value) || 40);
+          this.markDirty();
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiValueSlider) {
+      uiValueSlider.addEventListener('input', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiValue = parseInt(uiValueSlider.value) || 0;
+          const display = this.$('.ui-value-display') as HTMLElement;
+          if (display) display.textContent = String(obj.uiValue);
+          this.markDirty();
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiCheckedInput) {
+      uiCheckedInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiChecked = uiCheckedInput.checked;
+          this.markDirty();
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiTextInput) {
+      uiTextInput.addEventListener('input', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.text = uiTextInput.value;
+          this.markDirty();
           this.renderScene();
         }
       });
@@ -755,50 +864,6 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (coordsStatus) {
       coordsStatus.textContent = `X: ${Math.round(this.mouseWorldPos.x)}, Y: ${Math.round(this.mouseWorldPos.y)}`;
     }
-  }
-
-  /**
-   * Get the base dimensions of an object (before scale transform)
-   */
-  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
-    let width = 100;
-    let height = 100;
-
-    switch (obj.type) {
-      case 'sprite':
-        width = obj.spriteWidth ?? 100;
-        height = obj.spriteHeight ?? 100;
-        break;
-      case 'shape':
-        if (obj.shapeType === 'rectangle') {
-          width = 100;
-          height = 80;
-        } else if (obj.shapeType === 'circle') {
-          width = 100;
-          height = 100;
-        }
-        break;
-      case 'text':
-        // Estimate text dimensions based on fontSize
-        const fontSize = obj.fontSize || 24;
-        const textLength = (obj.text || 'Text').length;
-        width = textLength * fontSize * 0.6; // Approximate character width
-        height = fontSize * 1.2;
-        break;
-      case 'custom':
-        // Calculate bounding box of all children in the custom component
-        if (obj.customComponentId) {
-          const definition = customComponentsStore.getComponent(obj.customComponentId);
-          if (definition && definition.children.length > 0) {
-            const bounds = this.getCustomComponentBounds(definition.children);
-            width = bounds.width;
-            height = bounds.height;
-          }
-        }
-        break;
-    }
-
-    return { width, height };
   }
 
   private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
@@ -1152,6 +1217,209 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.renderScene();
   }
 
+  // UI Component factory methods
+  private addUIButton(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-button-${Date.now()}`,
+      name: `Button ${this.objects.length + 1}`,
+      type: 'ui-button',
+      visible: true,
+      locked: false,
+      transform: { x: -60 + offset, y: -20 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      text: 'Button',
+      uiButtonStyle: 'primary',
+      uiWidth: 120,
+      uiHeight: 40,
+      uiCornerRadius: 6,
+      uiBackgroundColor: '#3b82f6',
+      uiTextColor: '#ffffff',
+      fontSize: 14,
+      fontFamily: 'Arial',
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.markDirty();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIPanel(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-panel-${Date.now()}`,
+      name: `Panel ${this.objects.length + 1}`,
+      type: 'ui-panel',
+      visible: true,
+      locked: false,
+      transform: { x: -100 + offset, y: -75 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiPanelStyle: 'solid',
+      uiWidth: 200,
+      uiHeight: 150,
+      uiCornerRadius: 8,
+      uiBackgroundColor: '#ffffff',
+      uiBorderColor: '#e5e7eb',
+      uiBorderWidth: 1,
+      uiPadding: 16,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.markDirty();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIText(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-text-${Date.now()}`,
+      name: `UI Text ${this.objects.length + 1}`,
+      type: 'ui-text',
+      visible: true,
+      locked: false,
+      transform: { x: -50 + offset, y: offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      text: 'UI Text',
+      uiTextStyle: 'body',
+      uiTextColor: '#1f2937',
+      fontSize: 16,
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.markDirty();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIImage(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-image-${Date.now()}`,
+      name: `Image ${this.objects.length + 1}`,
+      type: 'ui-image',
+      visible: true,
+      locked: false,
+      transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiWidth: 100,
+      uiHeight: 100,
+      uiCornerRadius: 4,
+      uiBackgroundColor: '#f3f4f6',
+      uiBorderColor: '#d1d5db',
+      uiBorderWidth: 1,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.markDirty();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUISlider(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-slider-${Date.now()}`,
+      name: `Slider ${this.objects.length + 1}`,
+      type: 'ui-slider',
+      visible: true,
+      locked: false,
+      transform: { x: -80 + offset, y: -10 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiWidth: 160,
+      uiHeight: 20,
+      uiValue: 50,
+      uiMinValue: 0,
+      uiMaxValue: 100,
+      uiBackgroundColor: '#e5e7eb',
+      color: '#3b82f6',
+      uiCornerRadius: 10,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.markDirty();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIProgressBar(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-progress-${Date.now()}`,
+      name: `Progress ${this.objects.length + 1}`,
+      type: 'ui-progress-bar',
+      visible: true,
+      locked: false,
+      transform: { x: -80 + offset, y: -8 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiWidth: 160,
+      uiHeight: 16,
+      uiValue: 65,
+      uiMinValue: 0,
+      uiMaxValue: 100,
+      uiBackgroundColor: '#e5e7eb',
+      color: '#22c55e',
+      uiCornerRadius: 8,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.markDirty();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUICheckbox(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-checkbox-${Date.now()}`,
+      name: `Checkbox ${this.objects.length + 1}`,
+      type: 'ui-checkbox',
+      visible: true,
+      locked: false,
+      transform: { x: -60 + offset, y: -10 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      text: 'Checkbox label',
+      uiChecked: false,
+      uiWidth: 120,
+      uiHeight: 20,
+      uiBackgroundColor: '#ffffff',
+      uiBorderColor: '#d1d5db',
+      color: '#3b82f6',
+      uiTextColor: '#1f2937',
+      fontSize: 14,
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.markDirty();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  // Custom Component Methods
   private addCustomComponent(definition: CustomComponentDefinition): void {
     const offset = this.objects.length * 20;
     const obj: SceneObject = {
@@ -1176,16 +1444,17 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
-
-    // Record usage in store
+    this.markDirty();
     customComponentsStore.recordUsage(definition.id);
-
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
     this.renderScene();
     toast.success(`Added ${definition.name} to scene`);
+  }
+
+  private generateUniqueId(prefix: string): string {
+    return `${prefix}-${Date.now()}-${++this.componentIdCounter}`;
   }
 
   private getDefaultPropertyValues(definition: CustomComponentDefinition): CustomComponentPropertyValues {
@@ -1198,92 +1467,51 @@ export class ScenePage extends Page<ScenePageOptions> {
 
   private toggleComponentsLibrary(show?: boolean): void {
     this.showComponentsLibrary = show !== undefined ? show : !this.showComponentsLibrary;
-
     const panel = this.$('.components-library-panel') as HTMLElement;
     const toggleBtn = this.$('[data-action="toggle-components"]');
-
-    if (panel) {
-      panel.style.display = this.showComponentsLibrary ? 'flex' : 'none';
-    }
-
-    if (toggleBtn) {
-      toggleBtn.classList.toggle('active', this.showComponentsLibrary);
-    }
-
-    if (this.showComponentsLibrary) {
-      this.updateComponentsLibrary();
-    }
+    if (panel) panel.style.display = this.showComponentsLibrary ? 'flex' : 'none';
+    if (toggleBtn) toggleBtn.classList.toggle('active', this.showComponentsLibrary);
+    if (this.showComponentsLibrary) this.updateComponentsLibrary();
   }
 
-  /**
-   * Render a single component item's HTML with proper escaping
-   */
-  private renderComponentItemHtml(comp: CustomComponentDefinition): string {
-    const escapedName = this.escapeHtml(comp.name);
-    const escapedDesc = comp.description ? this.escapeHtml(comp.description) : '';
-    const title = escapedName + (escapedDesc ? ': ' + escapedDesc : '');
-    // Icon is limited to emoji, but escape just in case
-    const icon = this.escapeHtml(comp.icon || '📦');
+  private escapeHtmlForComponent(str: string): string {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
 
-    return `
-      <div class="component-item" data-component-id="${comp.id}" title="${title}">
-        <div class="component-icon">${icon}</div>
-        <div class="component-name">${escapedName}</div>
-        <div class="component-actions">
-          <button class="component-action-btn" data-action="add" title="Add to scene">+</button>
-          <button class="component-action-btn" data-action="delete" title="Delete">×</button>
-        </div>
-      </div>
-    `;
+  private renderComponentItemHtml(comp: CustomComponentDefinition): string {
+    const escapedName = this.escapeHtmlForComponent(comp.name);
+    const escapedDesc = comp.description ? this.escapeHtmlForComponent(comp.description) : '';
+    const title = escapedName + (escapedDesc ? ': ' + escapedDesc : '');
+    const icon = this.escapeHtmlForComponent(comp.icon || '📦');
+    return `<div class="component-item" data-component-id="${comp.id}" title="${title}"><div class="component-icon">${icon}</div><div class="component-name">${escapedName}</div><div class="component-actions"><button class="component-action-btn" data-action="add" title="Add to scene">+</button><button class="component-action-btn" data-action="delete" title="Delete">×</button></div></div>`;
   }
 
   private updateComponentsLibrary(searchQuery?: string): void {
     const grid = this.$('.components-grid') as HTMLElement;
     if (!grid) return;
-
-    const components = searchQuery
-      ? customComponentsStore.search(searchQuery)
-      : customComponentsStore.getAll('name');
-
+    const components = searchQuery ? customComponentsStore.search(searchQuery) : customComponentsStore.getAll('name');
     if (components.length === 0) {
-      grid.innerHTML = `
-        <div class="components-empty">
-          <p>No custom components</p>
-          <p class="hint">Select objects and save as component</p>
-        </div>
-      `;
+      grid.innerHTML = '<div class="components-empty"><p>No custom components</p><p class="hint">Select objects and save as component</p></div>';
       return;
     }
-
-    const items = components.map(comp => this.renderComponentItemHtml(comp)).join('');
-    grid.innerHTML = items;
+    grid.innerHTML = components.map(comp => this.renderComponentItemHtml(comp)).join('');
     this.bindComponentItemHandlers(grid);
   }
 
   private filterComponentsByCategory(category: string): void {
     const grid = this.$('.components-grid') as HTMLElement;
     if (!grid) return;
-
     let components: CustomComponentDefinition[];
-    if (category === 'all') {
-      components = customComponentsStore.getAll('name');
-    } else if (category === 'recent') {
-      components = customComponentsStore.getRecentlyUsed(10);
-    } else {
-      components = customComponentsStore.getByCategory(category);
-    }
-
+    if (category === 'all') components = customComponentsStore.getAll('name');
+    else if (category === 'recent') components = customComponentsStore.getRecentlyUsed(10);
+    else components = customComponentsStore.getByCategory(category);
     if (components.length === 0) {
-      grid.innerHTML = `
-        <div class="components-empty">
-          <p>No components in this category</p>
-        </div>
-      `;
+      grid.innerHTML = '<div class="components-empty"><p>No components in this category</p></div>';
       return;
     }
-
-    const items = components.map(comp => this.renderComponentItemHtml(comp)).join('');
-    grid.innerHTML = items;
+    grid.innerHTML = components.map(comp => this.renderComponentItemHtml(comp)).join('');
     this.bindComponentItemHandlers(grid);
   }
 
@@ -1291,98 +1519,62 @@ export class ScenePage extends Page<ScenePageOptions> {
     grid.querySelectorAll('.component-item').forEach(item => {
       const id = (item as HTMLElement).dataset.componentId;
       if (!id) return;
-
       item.addEventListener('click', (e) => {
         if ((e.target as HTMLElement).closest('.component-action-btn')) return;
         const definition = customComponentsStore.getComponent(id);
-        if (definition) {
-          this.addCustomComponent(definition);
+        if (definition) this.addCustomComponent(definition);
+      });
+      const addBtn = item.querySelector('[data-action="add"]');
+      if (addBtn) addBtn.addEventListener('click', () => {
+        const definition = customComponentsStore.getComponent(id);
+        if (definition) this.addCustomComponent(definition);
+      });
+      const deleteBtn = item.querySelector('[data-action="delete"]');
+      if (deleteBtn) deleteBtn.addEventListener('click', () => {
+        if (confirm('Delete this component? This cannot be undone.')) {
+          customComponentsStore.deleteComponent(id);
+          toast.success('Component deleted');
         }
       });
-
-      const addBtn = item.querySelector('[data-action="add"]');
-      if (addBtn) {
-        addBtn.addEventListener('click', () => {
-          const definition = customComponentsStore.getComponent(id);
-          if (definition) {
-            this.addCustomComponent(definition);
-          }
-        });
-      }
-
-      const deleteBtn = item.querySelector('[data-action="delete"]');
-      if (deleteBtn) {
-        deleteBtn.addEventListener('click', () => {
-          if (confirm('Delete this component? This cannot be undone.')) {
-            customComponentsStore.deleteComponent(id);
-            toast.success('Component deleted');
-          }
-        });
-      }
     });
   }
 
   private saveSelectionAsComponent(): void {
-    if (!this.selectedObjectId) {
-      toast.error('Select an object first');
-      return;
-    }
-
+    if (!this.selectedObjectId) { toast.error('Select an object first'); return; }
     const selectedObj = this.objects.find(o => o.id === this.selectedObjectId);
-    if (!selectedObj) {
-      toast.error('Selected object not found');
-      return;
-    }
-
-    // For now, only allow saving single non-custom objects
-    if (selectedObj.type === 'custom') {
-      toast.error('Cannot save a custom component instance as a new component');
-      return;
-    }
-
-    if (selectedObj.type === 'group' || selectedObj.type === 'empty') {
-      toast.error('Cannot save group or empty objects as components');
-      return;
-    }
-
+    if (!selectedObj) { toast.error('Selected object not found'); return; }
+    if (selectedObj.type === 'custom') { toast.error('Cannot save a custom component instance as a new component'); return; }
+    if (selectedObj.type === 'group' || selectedObj.type === 'empty') { toast.error('Cannot save group or empty objects as components'); return; }
     const name = prompt('Enter component name:', selectedObj.name);
     if (!name) return;
-
     const description = prompt('Enter description (optional):', '');
+    const component = customComponentsStore.createFromSelection(name, [{
+      id: selectedObj.id, name: selectedObj.name, type: selectedObj.type as 'sprite' | 'shape' | 'text',
+      shapeType: selectedObj.shapeType, transform: { x: selectedObj.transform.x, y: selectedObj.transform.y, rotation: selectedObj.transform.rotation,
+        scaleX: selectedObj.transform.scaleX, scaleY: selectedObj.transform.scaleY, pivotX: selectedObj.transform.pivotX ?? 0.5, pivotY: selectedObj.transform.pivotY ?? 0.5 },
+      opacity: selectedObj.opacity, color: selectedObj.color, text: selectedObj.text, fontSize: selectedObj.fontSize, fontFamily: selectedObj.fontFamily, zIndex: selectedObj.zIndex
+    }], { description: description || undefined });
+    if (component) { toast.success(`Saved "${name}" as custom component`); this.updateComponentsLibrary(); }
+    else toast.error('Failed to create component');
+  }
 
-    // Create component from the selected object
-    const component = customComponentsStore.createFromSelection(
-      name,
-      [{
-        id: selectedObj.id,
-        name: selectedObj.name,
-        type: selectedObj.type as 'sprite' | 'shape' | 'text',
-        shapeType: selectedObj.shapeType,
-        transform: {
-          x: selectedObj.transform.x,
-          y: selectedObj.transform.y,
-          rotation: selectedObj.transform.rotation,
-          scaleX: selectedObj.transform.scaleX,
-          scaleY: selectedObj.transform.scaleY,
-          pivotX: selectedObj.transform.pivotX ?? 0.5,
-          pivotY: selectedObj.transform.pivotY ?? 0.5,
-        },
-        opacity: selectedObj.opacity,
-        color: selectedObj.color,
-        text: selectedObj.text,
-        fontSize: selectedObj.fontSize,
-        fontFamily: selectedObj.fontFamily,
-        zIndex: selectedObj.zIndex,
-      }],
-      { description: description || undefined }
-    );
-
-    if (component) {
-      toast.success(`Saved "${name}" as custom component`);
-      this.updateComponentsLibrary();
-    } else {
-      toast.error('Failed to create component');
+  private getCustomComponentBounds(children: CustomComponentChild[]): { width: number; height: number } {
+    if (children.length === 0) return { width: 100, height: 100 };
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const child of children) {
+      let childWidth = 100, childHeight = 100;
+      if (child.type === 'shape' && child.shapeType === 'rectangle') { childWidth = 100; childHeight = 80; }
+      else if (child.type === 'text') { const fontSize = child.fontSize || 24; childWidth = (child.text || 'Text').length * fontSize * 0.6; childHeight = fontSize * 1.2; }
+      const pivotX = child.transform.pivotX ?? 0.5;
+      const pivotY = child.transform.pivotY ?? 0.5;
+      const left = child.transform.x - childWidth * pivotX;
+      const right = left + childWidth;
+      const top = child.transform.y - childHeight * pivotY;
+      const bottom = top + childHeight;
+      minX = Math.min(minX, left); minY = Math.min(minY, top);
+      maxX = Math.max(maxX, right); maxY = Math.max(maxY, bottom);
     }
+    return { width: Math.max(maxX - minX, 50), height: Math.max(maxY - minY, 50) };
   }
 
   private moveSelectedUp(): void {
@@ -1433,47 +1625,48 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.renderScene();
   }
 
-  private getCustomComponentBounds(children: CustomComponentChild[]): { width: number; height: number } {
-    if (children.length === 0) {
-      return { width: 100, height: 100 };
-    }
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    for (const child of children) {
-      // Get child dimensions based on type
-      let childWidth = 100, childHeight = 100;
-      if (child.type === 'shape') {
-        if (child.shapeType === 'rectangle') {
-          childWidth = 100;
-          childHeight = 80;
+  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
+    switch (obj.type) {
+      case 'sprite':
+        return { width: obj.spriteWidth || 100, height: obj.spriteHeight || 100 };
+      case 'shape':
+        if (obj.shapeType === 'rectangle') {
+          return { width: 100, height: 80 };
+        } else if (obj.shapeType === 'circle') {
+          return { width: 100, height: 100 };
         }
-      } else if (child.type === 'text') {
-        const fontSize = child.fontSize || 24;
-        const textLength = (child.text || 'Text').length;
-        childWidth = textLength * fontSize * 0.6;
-        childHeight = fontSize * 1.2;
+        return { width: 100, height: 100 };
+      case 'text':
+        const fontSize = obj.fontSize || 24;
+        const textLength = (obj.text || 'Text').length;
+        return { width: textLength * fontSize * 0.6, height: fontSize * 1.2 };
+      // UI Components use explicit dimensions
+      case 'ui-button':
+      case 'ui-panel':
+      case 'ui-image':
+      case 'ui-slider':
+      case 'ui-progress-bar':
+        return { width: obj.uiWidth || 100, height: obj.uiHeight || 40 };
+      case 'ui-text': {
+        const uiFontSize = obj.fontSize || 16;
+        const uiTextLength = (obj.text || 'Text').length;
+        return { width: Math.max(uiTextLength * uiFontSize * 0.6, obj.uiWidth || 0), height: uiFontSize * 1.4 };
       }
-
-      // Calculate child bounds
-      const pivotX = child.transform.pivotX ?? 0.5;
-      const pivotY = child.transform.pivotY ?? 0.5;
-      const left = child.transform.x - childWidth * pivotX;
-      const right = left + childWidth;
-      const top = child.transform.y - childHeight * pivotY;
-      const bottom = top + childHeight;
-
-      minX = Math.min(minX, left);
-      minY = Math.min(minY, top);
-      maxX = Math.max(maxX, right);
-      maxY = Math.max(maxY, bottom);
+      case 'ui-checkbox':
+        return { width: obj.uiWidth || 120, height: obj.uiHeight || 20 };
+      case 'custom':
+        if (obj.customComponentId) {
+          const definition = customComponentsStore.getComponent(obj.customComponentId);
+          if (definition && definition.children.length > 0) {
+            return this.getCustomComponentBounds(definition.children);
+          }
+        }
+        return { width: 100, height: 100 };
+      default:
+        return { width: 100, height: 100 };
     }
-
-    return {
-      width: Math.max(maxX - minX, 50),
-      height: Math.max(maxY - minY, 50),
-    };
   }
+
 
   private renderScene(): void {
     if (!this.ctx || !this.sceneCanvas || !this.viewport) return;
@@ -1585,8 +1778,37 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.ctx.fillText(obj.text || 'Text', 0, 0);
           break;
 
+        // UI Components
+        case 'ui-button':
+          this.renderUIButton(obj, dims);
+          break;
+
+        case 'ui-panel':
+          this.renderUIPanel(obj, dims);
+          break;
+
+        case 'ui-text':
+          this.renderUIText(obj, dims);
+          break;
+
+        case 'ui-image':
+          this.renderUIImage(obj, dims);
+          break;
+
+        case 'ui-slider':
+          this.renderUISlider(obj, dims);
+          break;
+
+        case 'ui-progress-bar':
+          this.renderUIProgressBar(obj, dims);
+          break;
+
+        case 'ui-checkbox':
+          this.renderUICheckbox(obj, dims);
+          break;
+
         case 'custom':
-          this.renderCustomComponent(obj);
+          this.renderCustomComponent(obj, dims);
           break;
       }
 
@@ -1599,103 +1821,6 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     this.ctx.restore();
-  }
-
-  private renderCustomComponent(obj: SceneObject): void {
-    if (!this.ctx || !obj.customComponentId) return;
-
-    const definition = customComponentsStore.getComponent(obj.customComponentId);
-    if (!definition) {
-      // Component definition not found - draw placeholder
-      this.ctx.fillStyle = '#cccccc';
-      this.ctx.fillRect(0, -100, 100, 100);
-      this.ctx.fillStyle = '#666666';
-      this.ctx.font = '12px Arial';
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-      this.ctx.fillText('Missing', 50, -50);
-      return;
-    }
-
-    // Render all children of the custom component
-    for (const child of definition.children) {
-      this.ctx.save();
-
-      // Get child dimensions
-      let childWidth = 100, childHeight = 100;
-      if (child.type === 'shape') {
-        if (child.shapeType === 'rectangle') {
-          childWidth = 100;
-          childHeight = 80;
-        }
-      } else if (child.type === 'text') {
-        const fontSize = child.fontSize || 24;
-        const textLength = (child.text || 'Text').length;
-        childWidth = textLength * fontSize * 0.6;
-        childHeight = fontSize * 1.2;
-      }
-
-      // Apply child transform relative to component
-      const pivotX = child.transform.pivotX ?? 0.5;
-      const pivotY = child.transform.pivotY ?? 0.5;
-      const pivotOffsetX = childWidth * pivotX;
-      const pivotOffsetY = childHeight * pivotY;
-
-      this.ctx.translate(child.transform.x, child.transform.y);
-      this.ctx.rotate((child.transform.rotation * Math.PI) / 180);
-      this.ctx.scale(child.transform.scaleX, child.transform.scaleY);
-      this.ctx.translate(-pivotOffsetX, -pivotOffsetY);
-      this.ctx.globalAlpha *= child.opacity;
-
-      // Render child based on type
-      switch (child.type) {
-        case 'sprite':
-          this.ctx.fillStyle = child.color || '#4a90d9';
-          this.ctx.fillRect(0, -100, 100, 100);
-          this.ctx.fillStyle = 'white';
-          this.ctx.font = '40px Arial';
-          this.ctx.textAlign = 'center';
-          this.ctx.textBaseline = 'middle';
-          this.ctx.fillText('🖼', 50, -50);
-          break;
-
-        case 'shape':
-          this.ctx.fillStyle = child.color || '#e74c3c';
-          if (child.shapeType === 'rectangle') {
-            this.ctx.fillRect(0, -80, 100, 80);
-          } else if (child.shapeType === 'circle') {
-            this.ctx.beginPath();
-            this.ctx.arc(50, -50, 50, 0, Math.PI * 2);
-            this.ctx.fill();
-          }
-          break;
-
-        case 'text':
-          this.ctx.fillStyle = child.color || '#333';
-          this.ctx.font = `${child.fontSize || 24}px ${child.fontFamily || 'Arial'}`;
-          this.ctx.textAlign = 'left';
-          this.ctx.textBaseline = 'bottom';
-          this.ctx.fillText(child.text || 'Text', 0, 0);
-          break;
-      }
-
-      this.ctx.restore();
-    }
-
-    // Draw a subtle border around the custom component when not selected
-    if (obj.id !== this.selectedObjectId) {
-      const bounds = this.getCustomComponentBounds(definition.children);
-      this.ctx.strokeStyle = 'rgba(100, 100, 200, 0.3)';
-      this.ctx.lineWidth = 1;
-      this.ctx.setLineDash([3, 3]);
-      this.ctx.strokeRect(
-        -bounds.width * 0.5,
-        -bounds.height * 0.5,
-        bounds.width,
-        bounds.height
-      );
-      this.ctx.setLineDash([]);
-    }
   }
 
   private drawCenteredGrid(): void {
@@ -1854,6 +1979,336 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.ctx.restore();
   }
 
+  // UI Component rendering methods
+  private renderUIButton(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const radius = obj.uiCornerRadius || 6;
+
+    // Get style-based colors
+    let bgColor = obj.uiBackgroundColor || '#3b82f6';
+    let textColor = obj.uiTextColor || '#ffffff';
+    let borderColor = '';
+    let borderWidth = 0;
+
+    switch (obj.uiButtonStyle) {
+      case 'secondary':
+        bgColor = obj.uiBackgroundColor || '#6b7280';
+        break;
+      case 'outline':
+        bgColor = 'transparent';
+        textColor = obj.uiTextColor || '#3b82f6';
+        borderColor = obj.uiBorderColor || '#3b82f6';
+        borderWidth = obj.uiBorderWidth || 2;
+        break;
+      case 'ghost':
+        bgColor = 'transparent';
+        textColor = obj.uiTextColor || '#3b82f6';
+        break;
+      // 'primary' uses defaults
+    }
+
+    // Draw button background (Y-flipped for canvas coordinate system)
+    if (bgColor !== 'transparent') {
+      this.ctx.fillStyle = bgColor;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.fill();
+    }
+
+    // Draw border for outline style
+    if (borderWidth > 0) {
+      this.ctx.strokeStyle = borderColor;
+      this.ctx.lineWidth = borderWidth;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.stroke();
+    }
+
+    // Draw button text
+    this.ctx.fillStyle = textColor;
+    this.ctx.font = `${obj.fontSize || 14}px ${obj.fontFamily || 'Arial'}`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(obj.text || 'Button', width / 2, -height / 2);
+  }
+
+  private renderUIPanel(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const radius = obj.uiCornerRadius || 8;
+
+    // Get style-based appearance
+    let bgColor = obj.uiBackgroundColor || '#ffffff';
+    let borderColor = obj.uiBorderColor || '#e5e7eb';
+    let borderWidth = obj.uiBorderWidth || 1;
+    let bgOpacity = 1;
+    let showHeader = true;
+
+    switch (obj.uiPanelStyle) {
+      case 'bordered':
+        borderWidth = obj.uiBorderWidth || 2;
+        showHeader = false;
+        break;
+      case 'glass':
+        bgOpacity = 0.8;
+        borderColor = 'rgba(255, 255, 255, 0.3)';
+        borderWidth = 1;
+        break;
+      // 'solid' uses defaults
+    }
+
+    // Draw panel background
+    this.ctx.globalAlpha = bgOpacity * (obj.opacity ?? 1);
+    this.ctx.fillStyle = bgColor;
+    this.drawRoundedRect(0, -height, width, height, radius);
+    this.ctx.fill();
+    this.ctx.globalAlpha = obj.opacity ?? 1;
+
+    // Draw panel border
+    if (borderWidth > 0) {
+      this.ctx.strokeStyle = borderColor;
+      this.ctx.lineWidth = borderWidth;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.stroke();
+    }
+
+    // Draw panel header bar (for solid style)
+    if (showHeader) {
+      this.ctx.fillStyle = obj.uiBorderColor || '#e5e7eb';
+      this.ctx.fillRect(0, -height, width, 24);
+
+      // Draw header text
+      this.ctx.fillStyle = '#6b7280';
+      this.ctx.font = '12px Arial';
+      this.ctx.textAlign = 'left';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(obj.name || 'Panel', 8, -height + 12);
+    }
+  }
+
+  private renderUIText(obj: SceneObject, _dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+
+    // Apply text style
+    let fontWeight = 'normal';
+    let fontSize = obj.fontSize || 16;
+
+    switch (obj.uiTextStyle) {
+      case 'heading':
+        fontWeight = 'bold';
+        fontSize = obj.fontSize || 24;
+        break;
+      case 'caption':
+        fontSize = obj.fontSize || 12;
+        break;
+      case 'label':
+        fontWeight = '500';
+        fontSize = obj.fontSize || 14;
+        break;
+    }
+
+    this.ctx.fillStyle = obj.uiTextColor || '#1f2937';
+    this.ctx.font = `${fontWeight} ${fontSize}px ${obj.fontFamily || 'system-ui, sans-serif'}`;
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'bottom';
+    this.ctx.fillText(obj.text || 'Text', 0, 0);
+  }
+
+  private renderUIImage(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const radius = obj.uiCornerRadius || 4;
+
+    // Draw image placeholder background
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#f3f4f6';
+    this.drawRoundedRect(0, -height, width, height, radius);
+    this.ctx.fill();
+
+    // Draw border
+    if (obj.uiBorderWidth && obj.uiBorderWidth > 0) {
+      this.ctx.strokeStyle = obj.uiBorderColor || '#d1d5db';
+      this.ctx.lineWidth = obj.uiBorderWidth;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.stroke();
+    }
+
+    // Draw placeholder icon
+    this.ctx.fillStyle = '#9ca3af';
+    this.ctx.font = `${Math.min(width, height) * 0.4}px Arial`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('🖼', width / 2, -height / 2);
+  }
+
+  private renderUISlider(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const value = obj.uiValue ?? 50;
+    const minValue = obj.uiMinValue ?? 0;
+    const maxValue = obj.uiMaxValue ?? 100;
+    const progress = maxValue !== minValue ? (value - minValue) / (maxValue - minValue) : 0;
+    const trackHeight = 6;
+    const trackY = -height / 2 - trackHeight / 2;
+
+    // Draw track background
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#e5e7eb';
+    this.drawRoundedRect(0, trackY, width, trackHeight, trackHeight / 2);
+    this.ctx.fill();
+
+    // Draw filled portion
+    const filledWidth = width * progress;
+    if (filledWidth > 0) {
+      this.ctx.fillStyle = obj.color || '#3b82f6';
+      this.drawRoundedRect(0, trackY, filledWidth, trackHeight, trackHeight / 2);
+      this.ctx.fill();
+    }
+
+    // Draw thumb
+    const thumbRadius = 8;
+    const thumbX = filledWidth;
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.strokeStyle = obj.color || '#3b82f6';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(thumbX, -height / 2, thumbRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.stroke();
+  }
+
+  private renderUIProgressBar(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const value = obj.uiValue ?? 50;
+    const minValue = obj.uiMinValue ?? 0;
+    const maxValue = obj.uiMaxValue ?? 100;
+    const progress = maxValue !== minValue ? (value - minValue) / (maxValue - minValue) : 0;
+    const radius = obj.uiCornerRadius || 8;
+
+    // Draw track background
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#e5e7eb';
+    this.drawRoundedRect(0, -height, width, height, radius);
+    this.ctx.fill();
+
+    // Draw filled portion
+    const filledWidth = width * progress;
+    if (filledWidth > 0) {
+      this.ctx.fillStyle = obj.color || '#22c55e';
+      this.drawRoundedRect(0, -height, filledWidth, height, radius);
+      this.ctx.fill();
+    }
+
+    // Draw percentage text
+    this.ctx.fillStyle = progress > 0.5 ? '#ffffff' : '#374151';
+    this.ctx.font = `bold ${Math.min(height * 0.7, 12)}px Arial`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(`${Math.round(value)}%`, width / 2, -height / 2);
+  }
+
+  private renderUICheckbox(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { height } = dims;
+    const boxSize = Math.min(height, 18);
+    const isChecked = obj.uiChecked ?? false;
+
+    // Draw checkbox box
+    const boxY = -height / 2 - boxSize / 2;
+    this.ctx.fillStyle = isChecked ? (obj.color || '#3b82f6') : (obj.uiBackgroundColor || '#ffffff');
+    this.ctx.strokeStyle = isChecked ? (obj.color || '#3b82f6') : (obj.uiBorderColor || '#d1d5db');
+    this.ctx.lineWidth = 1.5;
+    this.drawRoundedRect(0, boxY, boxSize, boxSize, 3);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Draw checkmark
+    if (isChecked) {
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.lineCap = 'round';
+      this.ctx.lineJoin = 'round';
+      this.ctx.beginPath();
+      this.ctx.moveTo(4, boxY + boxSize / 2);
+      this.ctx.lineTo(boxSize / 2 - 1, boxY + boxSize - 4);
+      this.ctx.lineTo(boxSize - 3, boxY + 4);
+      this.ctx.stroke();
+    }
+
+    // Draw label
+    this.ctx.fillStyle = obj.uiTextColor || '#1f2937';
+    this.ctx.font = `${obj.fontSize || 14}px ${obj.fontFamily || 'system-ui, sans-serif'}`;
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(obj.text || '', boxSize + 8, -height / 2);
+  }
+
+  private renderCustomComponent(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx || !obj.customComponentId) return;
+
+    const definition = customComponentsStore.getComponent(obj.customComponentId);
+    if (!definition) {
+      // Draw placeholder for missing component
+      this.ctx.fillStyle = '#f0f0f0';
+      this.ctx.strokeStyle = '#ff6666';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.fillRect(0, -dims.height, dims.width, dims.height);
+      this.ctx.strokeRect(0, -dims.height, dims.width, dims.height);
+      this.ctx.setLineDash([]);
+
+      // Draw missing icon
+      this.ctx.save();
+      this.ctx.translate(dims.width / 2, -dims.height / 2);
+      this.ctx.scale(1, -1);
+      this.ctx.fillStyle = '#ff6666';
+      this.ctx.font = '24px Arial';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText('❌', 0, 0);
+      this.ctx.restore();
+      return;
+    }
+
+    // Draw custom component bounding box
+    this.ctx.fillStyle = '#e8f4e8';
+    this.ctx.strokeStyle = '#4caf50';
+    this.ctx.lineWidth = 1;
+    this.ctx.fillRect(0, -dims.height, dims.width, dims.height);
+    this.ctx.strokeRect(0, -dims.height, dims.width, dims.height);
+
+    // Draw component icon and name
+    this.ctx.save();
+    this.ctx.translate(dims.width / 2, -dims.height / 2);
+    this.ctx.scale(1, -1);
+
+    const icon = definition.icon || '📦';
+    this.ctx.font = '20px Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(icon, 0, -10);
+
+    this.ctx.fillStyle = '#2e7d32';
+    this.ctx.font = 'bold 12px Arial';
+    this.ctx.fillText(definition.name, 0, 10);
+
+    this.ctx.restore();
+  }
+
+  // Helper method for drawing rounded rectangles
+  private drawRoundedRect(x: number, y: number, width: number, height: number, radius: number): void {
+    if (!this.ctx) return;
+    const r = Math.min(radius, width / 2, height / 2);
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + r, y);
+    this.ctx.lineTo(x + width - r, y);
+    this.ctx.arcTo(x + width, y, x + width, y + r, r);
+    this.ctx.lineTo(x + width, y + height - r);
+    this.ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
+    this.ctx.lineTo(x + r, y + height);
+    this.ctx.arcTo(x, y + height, x, y + height - r, r);
+    this.ctx.lineTo(x, y + r);
+    this.ctx.arcTo(x, y, x + r, y, r);
+    this.ctx.closePath();
+  }
+
   private updateHierarchy(): void {
     const treeContainer = this.$('.hierarchy-tree') as HTMLElement;
     if (!treeContainer) return;
@@ -1862,7 +2317,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       treeContainer.innerHTML = `
         <div class="hierarchy-empty">
           <p>No objects in scene</p>
-          <p class="hint">Add sprites, shapes, or text</p>
+          <p class="hint">Add sprites, shapes, text, or UI components</p>
         </div>
       `;
       return;
@@ -1902,12 +2357,15 @@ export class ScenePage extends Page<ScenePageOptions> {
         }
       case 'text': return '📝';
       case 'group': return '📁';
-      case 'custom':
-        if (obj.customComponentId) {
-          const definition = customComponentsStore.getComponent(obj.customComponentId);
-          return definition?.icon || '📦';
-        }
-        return '📦';
+      // UI Components
+      case 'ui-button': return '🔘';
+      case 'ui-panel': return '🪟';
+      case 'ui-text': return '🔤';
+      case 'ui-image': return '🖼️';
+      case 'ui-slider': return '🎚️';
+      case 'ui-progress-bar': return '📊';
+      case 'ui-checkbox': return '☑️';
+      case 'custom': return '📦';
       default: return '◻';
     }
   }
@@ -1964,8 +2422,64 @@ export class ScenePage extends Page<ScenePageOptions> {
       btn.classList.toggle('active', isActive);
     });
 
+    // Update UI-specific properties
+    this.updateUIPropertiesPanel(obj);
+
     // Update or create TransformEditor
     this.updateTransformEditor(obj);
+  }
+
+  private updateUIPropertiesPanel(obj: SceneObject): void {
+    const uiPropsSection = this.$('.ui-properties') as HTMLElement;
+    const isUIComponent = obj.type.startsWith('ui-');
+
+    if (!uiPropsSection) return;
+
+    // Show/hide UI properties section based on object type
+    uiPropsSection.style.display = isUIComponent ? 'block' : 'none';
+
+    if (!isUIComponent) return;
+
+    // Update size fields
+    const uiWidthInput = this.$('.ui-width') as HTMLInputElement;
+    const uiHeightInput = this.$('.ui-height') as HTMLInputElement;
+    if (uiWidthInput) uiWidthInput.value = String(obj.uiWidth || 100);
+    if (uiHeightInput) uiHeightInput.value = String(obj.uiHeight || 40);
+
+    // Show/hide value slider for sliders and progress bars
+    const valueRow = this.$('.ui-value-row') as HTMLElement;
+    const hasValue = obj.type === 'ui-slider' || obj.type === 'ui-progress-bar';
+    if (valueRow) {
+      valueRow.style.display = hasValue ? 'flex' : 'none';
+      if (hasValue) {
+        const uiValueSlider = this.$('.ui-value-slider') as HTMLInputElement;
+        const uiValueDisplay = this.$('.ui-value-display') as HTMLElement;
+        if (uiValueSlider) uiValueSlider.value = String(obj.uiValue ?? 50);
+        if (uiValueDisplay) uiValueDisplay.textContent = String(obj.uiValue ?? 50);
+      }
+    }
+
+    // Show/hide checkbox field for checkboxes
+    const checkedRow = this.$('.ui-checked-row') as HTMLElement;
+    const hasChecked = obj.type === 'ui-checkbox';
+    if (checkedRow) {
+      checkedRow.style.display = hasChecked ? 'flex' : 'none';
+      if (hasChecked) {
+        const uiCheckedInput = this.$('.ui-checked') as HTMLInputElement;
+        if (uiCheckedInput) uiCheckedInput.checked = obj.uiChecked ?? false;
+      }
+    }
+
+    // Show/hide text field for buttons and text
+    const textRow = this.$('.ui-text-row') as HTMLElement;
+    const hasText = obj.type === 'ui-button' || obj.type === 'ui-text';
+    if (textRow) {
+      textRow.style.display = hasText ? 'flex' : 'none';
+      if (hasText) {
+        const uiTextInput = this.$('.ui-text') as HTMLInputElement;
+        if (uiTextInput) uiTextInput.value = obj.text || '';
+      }
+    }
   }
 
   private updateTransformEditor(obj: SceneObject): void {
@@ -2307,12 +2821,6 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.boundHandleMouseMove = null;
     this.boundHandleMouseUp = null;
     this.boundHandleWheel = null;
-
-    // Clear search debounce timer
-    if (this.searchDebounceTimer) {
-      clearTimeout(this.searchDebounceTimer);
-      this.searchDebounceTimer = null;
-    }
 
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
