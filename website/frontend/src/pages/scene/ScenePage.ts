@@ -5,25 +5,17 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, TransformEditor } from '../../components';
+import type { Transform } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { Viewport } from '../../lib/viewport';
 import type { Session } from '../../types';
 import './scene.css';
 
 type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty';
 type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
-
-interface Transform {
-  x: number;
-  y: number;
-  rotation: number;
-  scaleX: number;
-  scaleY: number;
-  pivotX: number; // 0 = left, 0.5 = center, 1 = right
-  pivotY: number; // 0 = top, 0.5 = center, 1 = bottom
-}
 
 interface SceneObject {
   id: string;
@@ -60,6 +52,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
+  private transformEditor: TransformEditor | null = null;
 
   // Scene state
   private sceneCanvas: HTMLCanvasElement | null = null;
@@ -74,6 +67,19 @@ export class ScenePage extends Page<ScenePageOptions> {
   private showGrid = true;
   private gridSize = 32;
   private snapToGrid = true;
+
+  // Viewport with center-origin coordinate system
+  private viewport: Viewport | null = null;
+  private isPanning = false;
+  private panStart = { x: 0, y: 0 };
+  private showOriginCrosshair = true;
+  private mouseWorldPos = { x: 0, y: 0 };
+
+  // Event listener references for cleanup
+  private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseUp: (() => void) | null = null;
+  private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
 
   protected render(): string {
     return `
@@ -129,6 +135,8 @@ export class ScenePage extends Page<ScenePageOptions> {
           <div class="toolbar-group">
             <button class="toolbar-btn ${this.showGrid ? 'active' : ''}" data-action="toggle-grid" title="Toggle Grid">⊞</button>
             <button class="toolbar-btn ${this.snapToGrid ? 'active' : ''}" data-action="toggle-snap" title="Toggle Snap">⊟</button>
+            <button class="toolbar-btn ${this.showOriginCrosshair ? 'active' : ''}" data-action="toggle-origin" title="Toggle Origin Crosshair">✛</button>
+            <button class="toolbar-btn" data-action="reset-view" title="Reset View (Center on Origin)">⌂</button>
           </div>
 
           <div class="toolbar-spacer"></div>
@@ -185,24 +193,7 @@ export class ScenePage extends Page<ScenePageOptions> {
 
                 <div class="property-section">
                   <div class="property-label">Transform</div>
-                  <div class="transform-grid">
-                    <div class="transform-row">
-                      <label>X</label>
-                      <input type="number" class="property-input transform-x" value="0">
-                      <label>Y</label>
-                      <input type="number" class="property-input transform-y" value="0">
-                    </div>
-                    <div class="transform-row">
-                      <label>W</label>
-                      <input type="number" class="property-input transform-w" value="100">
-                      <label>H</label>
-                      <input type="number" class="property-input transform-h" value="100">
-                    </div>
-                    <div class="transform-row">
-                      <label>Rotation</label>
-                      <input type="number" class="property-input transform-rotation" value="0" step="1">
-                    </div>
-                  </div>
+                  <div class="transform-editor-container"></div>
                 </div>
 
                 <div class="property-section">
@@ -260,7 +251,11 @@ export class ScenePage extends Page<ScenePageOptions> {
           <span class="status-objects">0 objects</span>
           <span class="status-separator">|</span>
           <span class="status-zoom">100%</span>
+          <span class="status-separator">|</span>
+          <span class="status-coords">X: 0, Y: 0</span>
           <span class="status-spacer"></span>
+          <span class="status-origin-hint">Origin (0,0) at center</span>
+          <span class="status-separator">|</span>
           <span class="status-selection">No selection</span>
         </footer>
       </div>
@@ -368,6 +363,28 @@ export class ScenePage extends Page<ScenePageOptions> {
         toggleSnapBtn.classList.toggle('active', this.snapToGrid);
       });
     }
+
+    // Origin crosshair toggle
+    const toggleOriginBtn = this.$('[data-action="toggle-origin"]');
+    if (toggleOriginBtn) {
+      toggleOriginBtn.addEventListener('click', () => {
+        this.showOriginCrosshair = !this.showOriginCrosshair;
+        toggleOriginBtn.classList.toggle('active', this.showOriginCrosshair);
+        this.renderScene();
+      });
+    }
+
+    // Reset view button
+    const resetViewBtn = this.$('[data-action="reset-view"]');
+    if (resetViewBtn) {
+      resetViewBtn.addEventListener('click', () => {
+        if (this.viewport) {
+          this.viewport.reset();
+          this.updateZoomDisplay();
+          this.renderScene();
+        }
+      });
+    }
   }
 
   private setupCanvas(): void {
@@ -375,11 +392,27 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.sceneCanvas) {
       this.ctx = this.sceneCanvas.getContext('2d');
 
+      // Initialize viewport with center-origin coordinate system
+      this.viewport = new Viewport({
+        width: this.sceneCanvas.width,
+        height: this.sceneCanvas.height,
+        zoom: 1,
+      });
+
+      // Create bound handlers for cleanup
+      this.boundHandleMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
+      this.boundHandleMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
+      this.boundHandleMouseUp = () => this.handleMouseUp();
+      this.boundHandleWheel = (e: WheelEvent) => this.handleWheel(e);
+
       // Mouse events for object selection and dragging
-      this.sceneCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-      this.sceneCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-      this.sceneCanvas.addEventListener('mouseup', () => this.handleMouseUp());
-      this.sceneCanvas.addEventListener('mouseleave', () => this.handleMouseUp());
+      this.sceneCanvas.addEventListener('mousedown', this.boundHandleMouseDown);
+      this.sceneCanvas.addEventListener('mousemove', this.boundHandleMouseMove);
+      this.sceneCanvas.addEventListener('mouseup', this.boundHandleMouseUp);
+      this.sceneCanvas.addEventListener('mouseleave', this.boundHandleMouseUp);
+
+      // Wheel event for zooming
+      this.sceneCanvas.addEventListener('wheel', this.boundHandleWheel);
     }
   }
 
@@ -433,17 +466,28 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private handleMouseDown(e: MouseEvent): void {
-    if (!this.sceneCanvas) return;
+    if (!this.sceneCanvas || !this.viewport) return;
 
     const rect = this.sceneCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    // Convert to world coordinates (center-origin, Y+ up)
+    const worldPos = this.viewport.screenToWorld(screenX, screenY);
+
+    // Middle mouse button or shift+click for panning
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      this.isPanning = true;
+      this.panStart = { x: screenX, y: screenY };
+      e.preventDefault();
+      return;
+    }
 
     // Find clicked object (reverse order for top-most first)
     let clickedObject: SceneObject | null = null;
     for (let i = this.objects.length - 1; i >= 0; i--) {
       const obj = this.objects[i];
-      if (this.isPointInObject(x, y, obj)) {
+      if (this.isPointInObject(worldPos.x, worldPos.y, obj)) {
         clickedObject = obj;
         break;
       }
@@ -452,7 +496,10 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (clickedObject && !clickedObject.locked) {
       this.selectedObjectId = clickedObject.id;
       this.isDragging = true;
-      this.dragStart = { x: x - clickedObject.transform.x, y: y - clickedObject.transform.y };
+      this.dragStart = {
+        x: worldPos.x - clickedObject.transform.x,
+        y: worldPos.y - clickedObject.transform.y,
+      };
     } else {
       this.selectedObjectId = null;
     }
@@ -464,13 +511,36 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private handleMouseMove(e: MouseEvent): void {
-    if (!this.isDragging || !this.selectedObjectId || !this.sceneCanvas) return;
+    if (!this.sceneCanvas || !this.viewport) return;
 
     const rect = this.sceneCanvas.getBoundingClientRect();
-    let x = e.clientX - rect.left - this.dragStart.x;
-    let y = e.clientY - rect.top - this.dragStart.y;
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
 
-    // Snap to grid
+    // Convert to world coordinates
+    const worldPos = this.viewport.screenToWorld(screenX, screenY);
+
+    // Update mouse world position for status bar
+    this.mouseWorldPos = worldPos;
+    this.updateCoordinateDisplay();
+
+    // Handle panning
+    if (this.isPanning) {
+      const deltaX = screenX - this.panStart.x;
+      const deltaY = screenY - this.panStart.y;
+      this.viewport.panByScreen(deltaX, deltaY);
+      this.panStart = { x: screenX, y: screenY };
+      this.renderScene();
+      return;
+    }
+
+    // Handle dragging objects
+    if (!this.isDragging || !this.selectedObjectId) return;
+
+    let x = worldPos.x - this.dragStart.x;
+    let y = worldPos.y - this.dragStart.y;
+
+    // Snap to grid (in world coordinates)
     if (this.snapToGrid) {
       x = Math.round(x / this.gridSize) * this.gridSize;
       y = Math.round(y / this.gridSize) * this.gridSize;
@@ -488,6 +558,40 @@ export class ScenePage extends Page<ScenePageOptions> {
 
   private handleMouseUp(): void {
     this.isDragging = false;
+    this.isPanning = false;
+  }
+
+  private handleWheel(e: WheelEvent): void {
+    if (!this.viewport || !this.sceneCanvas) return;
+
+    e.preventDefault();
+
+    const rect = this.sceneCanvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    // Scale zoom delta based on scroll amount for smoother trackpad experience
+    // Clamp deltaY to reasonable range and scale it
+    const normalizedDelta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 100);
+    const zoomDelta = -normalizedDelta * 0.002;
+    this.viewport.zoomToPoint(screenX, screenY, zoomDelta);
+
+    this.updateZoomDisplay();
+    this.renderScene();
+  }
+
+  private updateZoomDisplay(): void {
+    const zoomStatus = this.$('.status-zoom') as HTMLElement;
+    if (zoomStatus && this.viewport) {
+      zoomStatus.textContent = `${Math.round(this.viewport.zoom * 100)}%`;
+    }
+  }
+
+  private updateCoordinateDisplay(): void {
+    const coordsStatus = this.$('.status-coords') as HTMLElement;
+    if (coordsStatus) {
+      coordsStatus.textContent = `X: ${Math.round(this.mouseWorldPos.x)}, Y: ${Math.round(this.mouseWorldPos.y)}`;
+    }
   }
 
   private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
@@ -532,13 +636,15 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private addSprite(): void {
+    // Place new objects near origin (0, 0) in center-origin coordinates
+    const offset = this.objects.length * 20; // Offset each new object slightly
     const obj: SceneObject = {
       id: `sprite-${Date.now()}`,
       name: `Sprite ${this.objects.length + 1}`,
       type: 'sprite',
       visible: true,
       locked: false,
-      transform: { x: 100, y: 100, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       color: '#4a90d9',
@@ -561,6 +667,8 @@ export class ScenePage extends Page<ScenePageOptions> {
       line: '#f39c12',
     };
 
+    // Place new objects near origin (0, 0) in center-origin coordinates
+    const offset = this.objects.length * 20;
     const obj: SceneObject = {
       id: `shape-${Date.now()}`,
       name: `${shapeType.charAt(0).toUpperCase() + shapeType.slice(1)} ${this.objects.length + 1}`,
@@ -568,7 +676,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       shapeType,
       visible: true,
       locked: false,
-      transform: { x: 150, y: 150, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      transform: { x: -50 + offset, y: -40 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       color: colors[shapeType],
@@ -583,13 +691,15 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private addText(): void {
+    // Place new objects near origin (0, 0) in center-origin coordinates
+    const offset = this.objects.length * 20;
     const obj: SceneObject = {
       id: `text-${Date.now()}`,
       name: `Text ${this.objects.length + 1}`,
       type: 'text',
       visible: true,
       locked: false,
-      transform: { x: 200, y: 200, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      transform: { x: -50 + offset, y: offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       text: 'Sample Text',
@@ -662,35 +772,31 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private renderScene(): void {
-    if (!this.ctx || !this.sceneCanvas) return;
+    if (!this.ctx || !this.sceneCanvas || !this.viewport) return;
 
     const { width, height } = this.sceneCanvas;
 
-    // Clear canvas
+    // Clear canvas (in screen coordinates)
     this.ctx.fillStyle = '#f0f0f0';
     this.ctx.fillRect(0, 0, width, height);
 
-    // Draw grid
+    // Draw grid centered on origin (in world coordinates)
     if (this.showGrid) {
-      this.ctx.strokeStyle = '#ddd';
-      this.ctx.lineWidth = 1;
-
-      for (let x = 0; x <= width; x += this.gridSize) {
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, 0);
-        this.ctx.lineTo(x, height);
-        this.ctx.stroke();
-      }
-
-      for (let y = 0; y <= height; y += this.gridSize) {
-        this.ctx.beginPath();
-        this.ctx.moveTo(0, y);
-        this.ctx.lineTo(width, y);
-        this.ctx.stroke();
-      }
+      this.drawCenteredGrid();
     }
 
-    // Draw objects
+    // Draw origin crosshair
+    if (this.showOriginCrosshair) {
+      this.drawOriginCrosshair();
+    }
+
+    // Draw objects in world coordinates
+    this.ctx.save();
+    this.viewport.applyTransform(this.ctx);
+
+    // Apply Y-flip once for all objects (viewport has Y+ up, canvas draws Y+ down)
+    this.ctx.scale(1, -1);
+
     for (const obj of this.objects) {
       if (!obj.visible) continue;
 
@@ -716,22 +822,22 @@ export class ScenePage extends Page<ScenePageOptions> {
       switch (obj.type) {
         case 'sprite':
           this.ctx.fillStyle = obj.color || '#4a90d9';
-          this.ctx.fillRect(0, 0, 100, 100);
+          this.ctx.fillRect(0, -100, 100, 100);
           // Sprite icon
           this.ctx.fillStyle = 'white';
           this.ctx.font = '40px Arial';
           this.ctx.textAlign = 'center';
           this.ctx.textBaseline = 'middle';
-          this.ctx.fillText('🖼', 50, 50);
+          this.ctx.fillText('🖼', 50, -50);
           break;
 
         case 'shape':
           this.ctx.fillStyle = obj.color || '#e74c3c';
           if (obj.shapeType === 'rectangle') {
-            this.ctx.fillRect(0, 0, 100, 80);
+            this.ctx.fillRect(0, -80, 100, 80);
           } else if (obj.shapeType === 'circle') {
             this.ctx.beginPath();
-            this.ctx.arc(50, 50, 50, 0, Math.PI * 2);
+            this.ctx.arc(50, -50, 50, 0, Math.PI * 2);
             this.ctx.fill();
           }
           break;
@@ -740,7 +846,7 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.ctx.fillStyle = obj.color || '#333';
           this.ctx.font = `${obj.fontSize || 24}px ${obj.fontFamily || 'Arial'}`;
           this.ctx.textAlign = 'left';
-          this.ctx.textBaseline = 'top';
+          this.ctx.textBaseline = 'bottom';
           this.ctx.fillText(obj.text || 'Text', 0, 0);
           break;
       }
@@ -749,12 +855,113 @@ export class ScenePage extends Page<ScenePageOptions> {
 
       // Draw selection outline and pivot indicator
       if (obj.id === this.selectedObjectId) {
-        this.drawSelectionOutline(obj, dims, pivotOffsetX, pivotOffsetY);
+        this.drawPivotSelectionOutline(obj, dims, pivotOffsetX, pivotOffsetY);
       }
+    }
+
+    this.ctx.restore();
+  }
+
+  private drawCenteredGrid(): void {
+    if (!this.ctx || !this.viewport) return;
+
+    const bounds = this.viewport.getVisibleBounds();
+    let gridSize = this.gridSize;
+
+    // Skip grid if lines would be too dense (less than 5 pixels apart)
+    const minPixelSpacing = 5;
+    const screenGridSize = this.viewport.worldDistanceToScreen(gridSize);
+    if (screenGridSize < minPixelSpacing) {
+      // Increase grid size until it's visible
+      const scaleFactor = Math.ceil(minPixelSpacing / screenGridSize);
+      gridSize = this.gridSize * scaleFactor;
+    }
+
+    // Limit maximum number of grid lines to prevent performance issues
+    const maxLines = 200;
+    const horizontalLines = Math.ceil((bounds.maxX - bounds.minX) / gridSize);
+    const verticalLines = Math.ceil((bounds.maxY - bounds.minY) / gridSize);
+    if (horizontalLines > maxLines || verticalLines > maxLines) {
+      return; // Skip grid entirely if too many lines
+    }
+
+    // Calculate grid lines that are visible
+    const startX = Math.floor(bounds.minX / gridSize) * gridSize;
+    const endX = Math.ceil(bounds.maxX / gridSize) * gridSize;
+    const startY = Math.floor(bounds.minY / gridSize) * gridSize;
+    const endY = Math.ceil(bounds.maxY / gridSize) * gridSize;
+
+    this.ctx.strokeStyle = '#ddd';
+    this.ctx.lineWidth = 1;
+
+    // Draw vertical grid lines
+    for (let x = startX; x <= endX; x += gridSize) {
+      const screenStart = this.viewport.worldToScreen(x, bounds.minY);
+      const screenEnd = this.viewport.worldToScreen(x, bounds.maxY);
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(Math.round(screenStart.x) + 0.5, screenStart.y);
+      this.ctx.lineTo(Math.round(screenEnd.x) + 0.5, screenEnd.y);
+      this.ctx.stroke();
+    }
+
+    // Draw horizontal grid lines
+    for (let y = startY; y <= endY; y += gridSize) {
+      const screenStart = this.viewport.worldToScreen(bounds.minX, y);
+      const screenEnd = this.viewport.worldToScreen(bounds.maxX, y);
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenStart.x, Math.round(screenStart.y) + 0.5);
+      this.ctx.lineTo(screenEnd.x, Math.round(screenEnd.y) + 0.5);
+      this.ctx.stroke();
     }
   }
 
-  private drawSelectionOutline(
+  private drawOriginCrosshair(): void {
+    if (!this.ctx || !this.viewport) return;
+
+    const origin = this.viewport.worldToScreen(0, 0);
+    const { width, height } = this.sceneCanvas!;
+
+    // Draw X axis (red)
+    this.ctx.strokeStyle = '#ff4444';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, origin.y);
+    this.ctx.lineTo(width, origin.y);
+    this.ctx.stroke();
+
+    // Draw Y axis (green)
+    this.ctx.strokeStyle = '#44ff44';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(origin.x, 0);
+    this.ctx.lineTo(origin.x, height);
+    this.ctx.stroke();
+
+    // Draw origin point
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.strokeStyle = '#333333';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(origin.x, origin.y, 6, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Draw axis labels
+    this.ctx.fillStyle = '#ff4444';
+    this.ctx.font = 'bold 12px Arial';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'top';
+    this.ctx.fillText('+X', width - 25, origin.y + 5);
+
+    this.ctx.fillStyle = '#44ff44';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'bottom';
+    this.ctx.fillText('+Y', origin.x, 15);
+  }
+
+  private drawPivotSelectionOutline(
     obj: SceneObject,
     dims: { width: number; height: number },
     pivotOffsetX: number,
@@ -881,18 +1088,14 @@ export class ScenePage extends Page<ScenePageOptions> {
 
     // Update form fields
     const nameInput = this.$('.object-name') as HTMLInputElement;
-    const xInput = this.$('.transform-x') as HTMLInputElement;
-    const yInput = this.$('.transform-y') as HTMLInputElement;
-    const rotationInput = this.$('.transform-rotation') as HTMLInputElement;
     const opacitySlider = this.$('.opacity-slider') as HTMLInputElement;
+    const sliderValue = this.$('.slider-value') as HTMLElement;
     const visibleCheckbox = this.$('.visible-checkbox') as HTMLInputElement;
     const lockedCheckbox = this.$('.locked-checkbox') as HTMLInputElement;
 
     if (nameInput) nameInput.value = obj.name;
-    if (xInput) xInput.value = String(Math.round(obj.transform.x));
-    if (yInput) yInput.value = String(Math.round(obj.transform.y));
-    if (rotationInput) rotationInput.value = String(obj.transform.rotation);
     if (opacitySlider) opacitySlider.value = String(obj.opacity * 100);
+    if (sliderValue) sliderValue.textContent = `${Math.round(obj.opacity * 100)}%`;
     if (visibleCheckbox) visibleCheckbox.checked = obj.visible;
     if (lockedCheckbox) lockedCheckbox.checked = obj.locked;
 
@@ -918,6 +1121,65 @@ export class ScenePage extends Page<ScenePageOptions> {
                        Math.abs(presetY - currentPivotY) < EPSILON;
       btn.classList.toggle('active', isActive);
     });
+
+    // Update or create TransformEditor
+    this.updateTransformEditor(obj);
+  }
+
+  private updateTransformEditor(obj: SceneObject): void {
+    const container = this.$('.transform-editor-container') as HTMLElement;
+    if (!container) return;
+
+    // Reuse existing editor if it exists, otherwise create a new one
+    if (this.transformEditor) {
+      // Update existing editor without triggering onChange callback
+      this.transformEditor.updateTransformSilently(obj.transform);
+    } else {
+      // Create new transform editor
+      this.transformEditor = new TransformEditor({
+        transform: obj.transform,
+        linkScale: true,
+        showPosition: true,
+        showRotation: true,
+        showScale: true,
+        compact: true,
+        showLabels: false,
+        onChange: (transform: Transform) => {
+          this.handleTransformChange(transform);
+        },
+      });
+      this.transformEditor.mount(container);
+    }
+  }
+
+  private handleTransformChange(transform: Transform): void {
+    if (!this.selectedObjectId) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Apply snapping if enabled
+    let x = transform.x;
+    let y = transform.y;
+
+    if (this.snapToGrid) {
+      x = Math.round(x / this.gridSize) * this.gridSize;
+      y = Math.round(y / this.gridSize) * this.gridSize;
+    }
+
+    // Preserve pivot values when updating transform
+    obj.transform = {
+      x,
+      y,
+      rotation: transform.rotation,
+      scaleX: transform.scaleX,
+      scaleY: transform.scaleY,
+      pivotX: obj.transform.pivotX ?? 0.5,
+      pivotY: obj.transform.pivotY ?? 0.5,
+    };
+
+    this.hasUnsavedChanges = true;
+    this.renderScene();
   }
 
   private updateStatusBar(): void {
@@ -1099,6 +1361,29 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   protected onUnmount(): void {
+    // Remove canvas event listeners
+    if (this.sceneCanvas) {
+      if (this.boundHandleMouseDown) {
+        this.sceneCanvas.removeEventListener('mousedown', this.boundHandleMouseDown);
+      }
+      if (this.boundHandleMouseMove) {
+        this.sceneCanvas.removeEventListener('mousemove', this.boundHandleMouseMove);
+      }
+      if (this.boundHandleMouseUp) {
+        this.sceneCanvas.removeEventListener('mouseup', this.boundHandleMouseUp);
+        this.sceneCanvas.removeEventListener('mouseleave', this.boundHandleMouseUp);
+      }
+      if (this.boundHandleWheel) {
+        this.sceneCanvas.removeEventListener('wheel', this.boundHandleWheel);
+      }
+    }
+
+    // Clear bound handler references
+    this.boundHandleMouseDown = null;
+    this.boundHandleMouseMove = null;
+    this.boundHandleMouseUp = null;
+    this.boundHandleWheel = null;
+
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
       this.unsubscribeOffline = null;
@@ -1107,6 +1392,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    if (this.transformEditor) {
+      this.transformEditor.unmount();
+      this.transformEditor = null;
     }
   }
 }
