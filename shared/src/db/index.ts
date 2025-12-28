@@ -478,6 +478,13 @@ export type {
   NewTaxonomyTerm,
   ItemTaxonomy,
   NewItemTaxonomy,
+  // Cloud saves types
+  CloudSave,
+  NewCloudSave,
+  CloudSaveVersion,
+  NewCloudSaveVersion,
+  CloudSaveSyncLog,
+  NewCloudSaveSyncLog,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -510,6 +517,10 @@ export {
   taxonomies,
   taxonomyTerms,
   itemTaxonomies,
+  // Cloud saves tables
+  cloudSaves,
+  cloudSaveVersions,
+  cloudSaveSyncLog,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
