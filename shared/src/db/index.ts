@@ -437,6 +437,42 @@ export type {
   NewOrchestratorCycle,
   OrchestratorTask,
   NewOrchestratorTask,
+  Organization,
+  NewOrganization,
+  OrganizationMember,
+  NewOrganizationMember,
+  OrganizationRepository,
+  NewOrganizationRepository,
+  OrganizationInvitation,
+  NewOrganizationInvitation,
+  OrganizationRole,
+  // Players feature types
+  Game,
+  NewGame,
+  UserLibraryItem,
+  NewUserLibraryItem,
+  Purchase,
+  NewPurchase,
+  CommunityPost,
+  NewCommunityPost,
+  CommunityComment,
+  NewCommunityComment,
+  CommunityVote,
+  NewCommunityVote,
+  WishlistItem,
+  NewWishlistItem,
+  // Community channels types
+  CommunityChannel,
+  NewCommunityChannel,
+  ChannelMessage,
+  NewChannelMessage,
+  // Taxonomy system types
+  Taxonomy,
+  NewTaxonomy,
+  TaxonomyTerm,
+  NewTaxonomyTerm,
+  ItemTaxonomy,
+  NewItemTaxonomy,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -447,6 +483,25 @@ export {
   orchestratorJobs,
   orchestratorCycles,
   orchestratorTasks,
+  organizations,
+  organizationMembers,
+  organizationRepositories,
+  organizationInvitations,
+  // Players feature tables
+  games,
+  userLibrary,
+  purchases,
+  communityPosts,
+  communityComments,
+  communityVotes,
+  wishlists,
+  // Community channels tables
+  communityChannels,
+  channelMessages,
+  // Taxonomy system tables
+  taxonomies,
+  taxonomyTerms,
+  itemTaxonomies,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

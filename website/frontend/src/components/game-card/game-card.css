@@ -1,0 +1,168 @@
+.game-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.game-card--interactive {
+  cursor: pointer;
+}
+
+.game-card--interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px var(--shadow-color);
+}
+
+.game-card--interactive:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.game-card--compact {
+  flex-direction: row;
+  align-items: center;
+}
+
+.game-card--compact .game-card__cover {
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+}
+
+.game-card--compact .game-card__info {
+  flex: 1;
+  padding: var(--spacing-sm);
+}
+
+.game-card--compact .game-card__price {
+  padding: var(--spacing-sm);
+  border-top: none;
+  border-left: 1px solid var(--color-border);
+}
+
+/* Cover */
+.game-card__cover {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--color-surface-dark);
+  overflow: hidden;
+}
+
+.game-card__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.game-card__cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  font-weight: bold;
+  color: var(--color-text-muted);
+  background: linear-gradient(135deg, var(--color-surface-dark), var(--color-surface));
+}
+
+/* Badge */
+.game-card__badge {
+  position: absolute;
+  top: var(--spacing-xs);
+  left: var(--spacing-xs);
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+}
+
+.game-card__badge--featured {
+  background: var(--color-warning);
+  color: var(--color-warning-contrast, #000);
+}
+
+.game-card__badge--trailer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  top: auto;
+  bottom: var(--spacing-xs);
+  left: var(--spacing-xs);
+  transition: opacity var(--transition-fast, 150ms) ease;
+}
+
+.game-card__badge--trailer svg {
+  flex-shrink: 0;
+}
+
+/* Hide trailer badge when trailer is playing */
+.game-card--has-trailer:hover .game-card__badge--trailer {
+  opacity: 0;
+}
+
+/* Info */
+.game-card__info {
+  padding: var(--spacing-sm) var(--spacing-md);
+  flex: 1;
+  min-width: 0;
+}
+
+.game-card__title {
+  margin: 0 0 var(--spacing-2xs);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-card__developer {
+  margin: 0 0 var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+}
+
+.game-card__genres {
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-card__rating {
+  color: var(--color-warning);
+  letter-spacing: -1px;
+}
+
+/* Price */
+.game-card__price {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+}
+
+.game-card__price--free {
+  color: var(--color-success);
+}

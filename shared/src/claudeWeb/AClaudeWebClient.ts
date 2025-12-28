@@ -90,6 +90,11 @@ export abstract class AClaudeWebClient extends AService implements IClaudeWebCli
     sessionId: string,
     checkEvents?: boolean
   ): Promise<{ canResume: boolean; reason?: string; status?: string; hasCompletedEvent?: boolean }>;
+
+  abstract isComplete(
+    sessionId: string,
+    checkEvents?: boolean
+  ): Promise<{ isComplete: boolean; status?: string; hasResultEvent?: boolean }>;
   
   abstract waitForResumable(
     sessionId: string,

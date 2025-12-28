@@ -38,8 +38,8 @@ export const daemonCommand = new Command('daemon')
   .action(async (options) => {
     const rootDir = path.resolve(options.root);
     const pollInterval = options.pollInterval || POLL_INTERVAL_MS;
-    const maxReady = options.maxReady || 3;
-    const maxInProgress = options.maxInProgress || 3;
+    const maxReady = options.maxReady || 6;
+    const maxInProgress = options.maxInProgress || 6;
 
     console.log('\nAuto-Task Daemon Starting');
     console.log('='.repeat(60));
@@ -288,8 +288,6 @@ async function moveBacklogToReady(
   }
 }
 
-const MAX_ATTEMPTS = 3; // Maximum number of times to retry a task
-
 async function startTasks(
   ctx: DaemonContext,
   ready: ProjectItem[],
@@ -310,44 +308,10 @@ async function startTasks(
     return;
   }
 
-  // Filter to issues only
-  const candidates = ready.filter((item) => item.contentType === 'Issue' && item.number);
-
-  // Check each candidate for retry limits
-  const toStart: ProjectItem[] = [];
-  for (const item of candidates) {
-    if (toStart.length >= slotsAvailable) break;
-    if (!item.number) continue;
-
-    // Check attempt count from comments
-    const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
-    const attemptCount = taskInfo?.attemptCount || 0;
-
-    if (attemptCount >= MAX_ATTEMPTS) {
-      console.log(`   #${item.number}: Skipping - exceeded max attempts (${attemptCount}/${MAX_ATTEMPTS})`);
-
-      // Move to backlog and add a comment explaining why
-      const backlogId = projectCache.statusOptions['backlog'];
-      if (backlogId) {
-        await projectsService.updateItemStatus(
-          projectCache.projectId,
-          item.id,
-          projectCache.statusFieldId,
-          backlogId
-        );
-      }
-
-      await issuesService.addComment(
-        owner,
-        repo,
-        item.number,
-        `### ⏸️ Task Paused\n\nThis task has failed ${attemptCount} times and has been paused.\n\nPlease review the issue and previous session attempts, then manually move it back to Ready to retry.`
-      );
-      continue;
-    }
-
-    toStart.push(item);
-  }
+  // Filter to issues only and take available slots
+  const toStart = ready
+    .filter((item) => item.contentType === 'Issue' && item.number)
+    .slice(0, slotsAvailable);
 
   const inProgressId = projectCache.statusOptions['in progress'];
   if (!inProgressId) {

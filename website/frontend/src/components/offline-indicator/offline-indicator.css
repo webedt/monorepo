@@ -1,0 +1,123 @@
+/**
+ * Offline Indicator Styles
+ */
+
+.offline-indicator {
+  position: fixed;
+  z-index: 9999;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--color-bg-secondary, #1f2937);
+  border: 1px solid var(--color-border, #374151);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  font-size: 0.875rem;
+  transition: all 0.3s ease-in-out;
+  pointer-events: auto;
+}
+
+/* Positions */
+.offline-indicator--top-right {
+  top: 1rem;
+  right: 1rem;
+}
+
+.offline-indicator--top-left {
+  top: 1rem;
+  left: 1rem;
+}
+
+.offline-indicator--bottom-right {
+  bottom: 1rem;
+  right: 1rem;
+}
+
+.offline-indicator--bottom-left {
+  bottom: 1rem;
+  left: 1rem;
+}
+
+/* Status styles */
+.offline-indicator--offline {
+  background: #7f1d1d;
+  border-color: #991b1b;
+  color: #fecaca;
+}
+
+.offline-indicator--slow {
+  background: #78350f;
+  border-color: #92400e;
+  color: #fde68a;
+}
+
+.offline-indicator--online {
+  background: #14532d;
+  border-color: #166534;
+  color: #bbf7d0;
+}
+
+.offline-indicator--restored {
+  background: #14532d;
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+
+/* Hidden state */
+.offline-indicator--hidden {
+  opacity: 0;
+  transform: translateY(1rem);
+  pointer-events: none;
+}
+
+.offline-indicator--top-right.offline-indicator--hidden,
+.offline-indicator--top-left.offline-indicator--hidden {
+  transform: translateY(-1rem);
+}
+
+/* Content layout */
+.offline-indicator__content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.offline-indicator__icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.offline-indicator__message {
+  font-weight: 500;
+}
+
+.offline-indicator__pending {
+  padding: 0.125rem 0.5rem;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.offline-indicator__details {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+/* Animation for appearing */
+@keyframes offline-indicator-appear {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.offline-indicator:not(.offline-indicator--hidden) {
+  animation: offline-indicator-appear 0.3s ease-out;
+}

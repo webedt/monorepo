@@ -51,6 +51,16 @@ export const CLAUDE_ORG_UUID = process.env.CLAUDE_ORG_UUID || '';  // For title 
 export const CLAUDE_COOKIES = process.env.CLAUDE_COOKIES || '';  // Browser cookies for fast title generation
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';  // OpenRouter API key for title generation
 
+// LLM fallback configuration
+// Empty repo URL for Claude Web fallback (used when OpenRouter is unavailable)
+export const LLM_FALLBACK_REPO_URL = process.env.LLM_FALLBACK_REPO_URL || 'https://github.com/anthropics/anthropic-quickstarts';
+
+// AI Worker configuration (self-hosted worker for LLM execution)
+// When configured, enables the SelfHostedWorkerProvider as an alternative to Claude Remote Sessions
+export const AI_WORKER_URL = process.env.AI_WORKER_URL || '';  // e.g., http://localhost:8080
+export const AI_WORKER_SECRET = process.env.AI_WORKER_SECRET || '';  // Authentication secret for worker
+export const AI_WORKER_ENABLED = process.env.AI_WORKER_ENABLED === 'true';  // Explicitly enable worker provider
+
 // Background sync configuration
 // Automatically syncs Claude Remote sessions from Anthropic API
 export const CLAUDE_SYNC_ENABLED = process.env.CLAUDE_SYNC_ENABLED !== 'false';  // Enabled by default
@@ -102,4 +112,6 @@ export function logEnvConfig(): void {
   console.log(`  CLAUDE_ENVIRONMENT_ID=${CLAUDE_ENVIRONMENT_ID || 'not set'}`);
   console.log(`  CLAUDE_API_BASE_URL=${CLAUDE_API_BASE_URL}`);
   console.log(`  CLAUDE_DEFAULT_MODEL=${CLAUDE_DEFAULT_MODEL}`);
+  console.log(`  AI_WORKER_ENABLED=${AI_WORKER_ENABLED}`);
+  console.log(`  AI_WORKER_URL=${AI_WORKER_URL || 'not set'}`);
 }

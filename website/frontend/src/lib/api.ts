@@ -756,3 +756,536 @@ export const storageWorkerApi = {
     return response.ok;
   },
 };
+
+// ============================================================================
+// Game Store API
+// ============================================================================
+import type {
+  Game,
+  LibraryItem,
+  Purchase,
+  WishlistItem,
+  CommunityPost,
+  CommunityComment,
+  CommunityChannel,
+  ChannelMessage,
+} from '../types';
+
+export const storeApi = {
+  getFeatured: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ games: Game[] }>(`/api/store/featured${queryString ? `?${queryString}` : ''}`);
+  },
+
+  browse: (options?: {
+    q?: string;
+    genre?: string;
+    tag?: string;
+    sort?: 'releaseDate' | 'title' | 'price' | 'rating' | 'downloads';
+    order?: 'asc' | 'desc';
+    minPrice?: number;
+    maxPrice?: number;
+    free?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.q) params.append('q', options.q);
+    if (options?.genre) params.append('genre', options.genre);
+    if (options?.tag) params.append('tag', options.tag);
+    if (options?.sort) params.append('sort', options.sort);
+    if (options?.order) params.append('order', options.order);
+    if (options?.minPrice !== undefined) params.append('minPrice', String(options.minPrice));
+    if (options?.maxPrice !== undefined) params.append('maxPrice', String(options.maxPrice));
+    if (options?.free !== undefined) params.append('free', String(options.free));
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{ games: Game[]; total: number; limit: number; offset: number; hasMore: boolean }>(
+      `/api/store/browse${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  getGame: (id: string) =>
+    fetchApi<{ game: Game }>(`/api/store/games/${id}`),
+
+  checkOwnership: (id: string) =>
+    fetchApi<{ owned: boolean }>(`/api/store/games/${id}/owned`),
+
+  getGenres: () =>
+    fetchApi<{ genres: string[] }>('/api/store/genres'),
+
+  getTags: () =>
+    fetchApi<{ tags: string[] }>('/api/store/tags'),
+
+  getWishlist: () =>
+    fetchApi<{ items: WishlistItem[]; total: number }>('/api/store/wishlist'),
+
+  addToWishlist: (gameId: string) =>
+    fetchApi<{ wishlistItem: WishlistItem }>(`/api/store/wishlist/${gameId}`, { method: 'POST' }),
+
+  removeFromWishlist: (gameId: string) =>
+    fetchApi(`/api/store/wishlist/${gameId}`, { method: 'DELETE' }),
+
+  getNew: (options?: { limit?: number; days?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.days) params.append('days', String(options.days));
+    const queryString = params.toString();
+    return fetchApi<{ games: Game[] }>(`/api/store/new${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getHighlights: (options?: { featuredLimit?: number; newLimit?: number; days?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.featuredLimit) params.append('featuredLimit', String(options.featuredLimit));
+    if (options?.newLimit) params.append('newLimit', String(options.newLimit));
+    if (options?.days) params.append('days', String(options.days));
+    const queryString = params.toString();
+    return fetchApi<{ featured: Game[]; new: Game[]; hasHighlights: boolean }>(
+      `/api/store/highlights${queryString ? `?${queryString}` : ''}`
+    );
+  },
+};
+
+// ============================================================================
+// Library API
+// ============================================================================
+export const libraryApi = {
+  getRecentlyPlayed: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ items: LibraryItem[]; total: number }>(
+      `/api/library/recent${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  getLibrary: (options?: {
+    sort?: 'acquiredAt' | 'title' | 'lastPlayed' | 'playtime';
+    order?: 'asc' | 'desc';
+    favorite?: boolean;
+    installed?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.sort) params.append('sort', options.sort);
+    if (options?.order) params.append('order', options.order);
+    if (options?.favorite !== undefined) params.append('favorite', String(options.favorite));
+    if (options?.installed !== undefined) params.append('installed', String(options.installed));
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{ items: LibraryItem[]; total: number; limit: number; offset: number; hasMore: boolean }>(
+      `/api/library${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  getLibraryItem: (gameId: string) =>
+    fetchApi<LibraryItem>(`/api/library/${gameId}`),
+
+  toggleFavorite: (gameId: string) =>
+    fetchApi<{ item: LibraryItem }>(`/api/library/${gameId}/favorite`, { method: 'POST' }),
+
+  hideGame: (gameId: string, hidden: boolean) =>
+    fetchApi<{ item: LibraryItem }>(`/api/library/${gameId}/hide`, {
+      method: 'POST',
+      body: { hidden },
+    }),
+
+  updateInstallStatus: (gameId: string, status: 'not_installed' | 'installing' | 'installed') =>
+    fetchApi<{ item: LibraryItem }>(`/api/library/${gameId}/install-status`, {
+      method: 'POST',
+      body: { status },
+    }),
+
+  addPlaytime: (gameId: string, minutes: number) =>
+    fetchApi<{ item: LibraryItem }>(`/api/library/${gameId}/playtime`, {
+      method: 'POST',
+      body: { minutes },
+    }),
+
+  getHiddenGames: () =>
+    fetchApi<{ items: LibraryItem[]; total: number }>('/api/library/hidden/all'),
+
+  getStats: () =>
+    fetchApi<{
+      totalGames: number;
+      installedGames: number;
+      favoriteGames: number;
+      totalPlaytimeMinutes: number;
+      totalPlaytimeHours: number;
+    }>('/api/library/stats/summary'),
+};
+
+// ============================================================================
+// Purchases API
+// ============================================================================
+export const purchasesApi = {
+  buyGame: (gameId: string, paymentMethod?: string) =>
+    fetchApi<{ purchase: Purchase; libraryItem: LibraryItem; message: string }>(`/api/purchases/buy/${gameId}`, {
+      method: 'POST',
+      body: { paymentMethod },
+    }),
+
+  getHistory: (options?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{ purchases: Purchase[]; total: number; limit: number; offset: number; hasMore: boolean }>(
+      `/api/purchases/history${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  getPurchase: (purchaseId: string) =>
+    fetchApi<Purchase>(`/api/purchases/${purchaseId}`),
+
+  requestRefund: (purchaseId: string, reason?: string) =>
+    fetchApi<{ purchase: Purchase; message: string }>(`/api/purchases/${purchaseId}/refund`, {
+      method: 'POST',
+      body: { reason },
+    }),
+
+  getStats: () =>
+    fetchApi<{
+      totalPurchases: number;
+      completedPurchases: number;
+      refundedPurchases: number;
+      totalSpentCents: number;
+      totalRefundedCents: number;
+      netSpentCents: number;
+    }>('/api/purchases/stats/summary'),
+};
+
+// ============================================================================
+// Community API
+// ============================================================================
+export const communityApi = {
+  getPosts: (options?: {
+    type?: 'discussion' | 'review' | 'guide' | 'artwork' | 'announcement';
+    gameId?: string;
+    sort?: 'createdAt';
+    order?: 'asc' | 'desc';
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.type) params.append('type', options.type);
+    if (options?.gameId) params.append('gameId', options.gameId);
+    if (options?.sort) params.append('sort', options.sort);
+    if (options?.order) params.append('order', options.order);
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{ posts: CommunityPost[]; total: number; limit: number; offset: number; hasMore: boolean }>(
+      `/api/community/posts${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  getPost: (id: string) =>
+    fetchApi<CommunityPost & { comments: CommunityComment[] }>(`/api/community/posts/${id}`),
+
+  createPost: (data: {
+    type: 'discussion' | 'review' | 'guide' | 'artwork' | 'announcement';
+    title: string;
+    content: string;
+    gameId?: string;
+    rating?: number;
+    images?: string[];
+  }) =>
+    fetchApi<{ post: CommunityPost }>('/api/community/posts', {
+      method: 'POST',
+      body: data,
+    }),
+
+  updatePost: (id: string, data: { title?: string; content?: string; images?: string[] }) =>
+    fetchApi<{ post: CommunityPost }>(`/api/community/posts/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }),
+
+  deletePost: (id: string) =>
+    fetchApi(`/api/community/posts/${id}`, { method: 'DELETE' }),
+
+  addComment: (postId: string, data: { content: string; parentId?: string }) =>
+    fetchApi<{ comment: CommunityComment }>(`/api/community/posts/${postId}/comments`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  deleteComment: (commentId: string) =>
+    fetchApi(`/api/community/comments/${commentId}`, { method: 'DELETE' }),
+
+  votePost: (postId: string, vote: 1 | -1 | 0) =>
+    fetchApi<{ upvotes: number; downvotes: number; userVote: number }>(`/api/community/posts/${postId}/vote`, {
+      method: 'POST',
+      body: { vote },
+    }),
+
+  voteComment: (commentId: string, vote: 1 | -1 | 0) =>
+    fetchApi<{ upvotes: number; downvotes: number; userVote: number }>(`/api/community/comments/${commentId}/vote`, {
+      method: 'POST',
+      body: { vote },
+    }),
+
+  getUserPosts: (userId: string, options?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{ posts: CommunityPost[] }>(`/api/community/users/${userId}/posts${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getGameReviews: (gameId: string, options?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{ reviews: CommunityPost[] }>(`/api/community/games/${gameId}/reviews${queryString ? `?${queryString}` : ''}`);
+  },
+};
+
+// ============================================================================
+// Universal Search API
+// ============================================================================
+export interface SearchResultItem {
+  id: string;
+  type: 'game' | 'user' | 'session' | 'post';
+  title: string;
+  subtitle?: string;
+  description?: string;
+  image?: string;
+  tags?: string[];
+  matchedFields?: string[];
+}
+
+export interface SearchResults {
+  items: SearchResultItem[];
+  total: number;
+  query: string;
+}
+
+export const searchApi = {
+  search: (options: {
+    q: string;
+    types?: ('game' | 'user' | 'session' | 'post')[];
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    params.append('q', options.q);
+    if (options.types?.length) params.append('types', options.types.join(','));
+    if (options.limit) params.append('limit', String(options.limit));
+    const queryString = params.toString();
+    return fetchApi<SearchResults>(`/api/search${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getSuggestions: (q: string, limit?: number) => {
+    const params = new URLSearchParams();
+    params.append('q', q);
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ suggestions: string[] }>(`/api/search/suggestions${queryString ? `?${queryString}` : ''}`);
+  },
+};
+
+// ============================================================================
+// Channels API (Community Activity)
+// ============================================================================
+export const channelsApi = {
+  getChannels: () =>
+    fetchApi<{ channels: CommunityChannel[] }>('/api/channels'),
+
+  getChannel: (id: string) =>
+    fetchApi<CommunityChannel>(`/api/channels/${id}`),
+
+  getChannelBySlug: (slug: string) =>
+    fetchApi<CommunityChannel>(`/api/channels/by-slug/${slug}`),
+
+  getMessages: (channelId: string, options?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{
+      messages: ChannelMessage[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>(`/api/channels/${channelId}/messages${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getRecentActivity: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ messages: ChannelMessage[] }>(
+      `/api/channels/activity/recent${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  postMessage: (channelId: string, data: { content: string; replyToId?: string; images?: string[] }) =>
+    fetchApi<{ message: ChannelMessage }>(`/api/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  editMessage: (messageId: string, content: string) =>
+    fetchApi<{ message: ChannelMessage }>(`/api/channels/messages/${messageId}`, {
+      method: 'PATCH',
+      body: { content },
+    }),
+
+  deleteMessage: (messageId: string) =>
+    fetchApi(`/api/channels/messages/${messageId}`, { method: 'DELETE' }),
+
+  // Admin operations
+  createChannel: (data: {
+    name: string;
+    slug: string;
+    description?: string;
+    gameId?: string;
+    isDefault?: boolean;
+    isReadOnly?: boolean;
+    sortOrder?: number;
+  }) =>
+    fetchApi<{ channel: CommunityChannel }>('/api/channels', {
+      method: 'POST',
+      body: data,
+    }),
+
+  updateChannel: (id: string, data: {
+    name?: string;
+    description?: string;
+    isDefault?: boolean;
+    isReadOnly?: boolean;
+    sortOrder?: number;
+    status?: 'active' | 'archived';
+  }) =>
+    fetchApi<{ channel: CommunityChannel }>(`/api/channels/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }),
+};
+
+// ============================================================================
+// Taxonomy API (Admin-configurable categories, tags, genres)
+// ============================================================================
+import type { Taxonomy, TaxonomyTerm, ItemTaxonomy, TaxonomyWithTerms } from '../types';
+
+export const taxonomyApi = {
+  // Taxonomy CRUD
+  list: () =>
+    fetchApi<ApiResponse<Taxonomy[]>>('/api/taxonomies').then(r => r.data || []),
+
+  get: (id: string) =>
+    fetchApi<ApiResponse<TaxonomyWithTerms>>(`/api/taxonomies/${id}`).then(r => r.data!),
+
+  getBySlug: (slug: string) =>
+    fetchApi<ApiResponse<TaxonomyWithTerms>>(`/api/taxonomies/by-slug/${slug}`).then(r => r.data!),
+
+  create: (data: {
+    name: string;
+    displayName: string;
+    description?: string;
+    allowMultiple?: boolean;
+    isRequired?: boolean;
+    itemTypes?: string[];
+    sortOrder?: number;
+  }) =>
+    fetchApi<ApiResponse<Taxonomy>>('/api/taxonomies', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  update: (id: string, data: {
+    name?: string;
+    displayName?: string;
+    description?: string;
+    allowMultiple?: boolean;
+    isRequired?: boolean;
+    itemTypes?: string[];
+    sortOrder?: number;
+    status?: 'active' | 'archived';
+  }) =>
+    fetchApi<ApiResponse<Taxonomy>>(`/api/taxonomies/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ id: string }>>(`/api/taxonomies/${id}`, { method: 'DELETE' }),
+
+  // Term CRUD
+  getTerms: (taxonomyId: string) =>
+    fetchApi<ApiResponse<TaxonomyTerm[]>>(`/api/taxonomies/${taxonomyId}/terms`).then(r => r.data || []),
+
+  getTerm: (termId: string) =>
+    fetchApi<ApiResponse<TaxonomyTerm>>(`/api/taxonomies/terms/${termId}`).then(r => r.data!),
+
+  createTerm: (taxonomyId: string, data: {
+    name: string;
+    description?: string;
+    parentId?: string;
+    color?: string;
+    icon?: string;
+    metadata?: Record<string, unknown>;
+    sortOrder?: number;
+  }) =>
+    fetchApi<ApiResponse<TaxonomyTerm>>(`/api/taxonomies/${taxonomyId}/terms`, {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  updateTerm: (termId: string, data: {
+    name?: string;
+    description?: string;
+    parentId?: string;
+    color?: string;
+    icon?: string;
+    metadata?: Record<string, unknown>;
+    sortOrder?: number;
+    status?: 'active' | 'archived';
+  }) =>
+    fetchApi<ApiResponse<TaxonomyTerm>>(`/api/taxonomies/terms/${termId}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  deleteTerm: (termId: string) =>
+    fetchApi<ApiResponse<{ id: string }>>(`/api/taxonomies/terms/${termId}`, { method: 'DELETE' }),
+
+  // Item taxonomy assignments
+  getItemTaxonomies: (itemType: string, itemId: string) =>
+    fetchApi<ApiResponse<Array<{ taxonomy: Taxonomy; terms: TaxonomyTerm[] }>>>(
+      `/api/taxonomies/items/${itemType}/${itemId}`
+    ).then(r => r.data || []),
+
+  assignTerm: (itemType: string, itemId: string, termId: string) =>
+    fetchApi<ApiResponse<ItemTaxonomy>>(`/api/taxonomies/items/${itemType}/${itemId}/terms/${termId}`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  removeTerm: (itemType: string, itemId: string, termId: string) =>
+    fetchApi<ApiResponse<{ id: string }>>(`/api/taxonomies/items/${itemType}/${itemId}/terms/${termId}`, {
+      method: 'DELETE',
+    }),
+
+  bulkUpdateItemTerms: (itemType: string, itemId: string, termIds: string[]) =>
+    fetchApi<ApiResponse<ItemTaxonomy[]>>(`/api/taxonomies/items/${itemType}/${itemId}`, {
+      method: 'PUT',
+      body: { termIds },
+    }).then(r => r.data || []),
+
+  getItemsByTerm: (termId: string, itemType?: string) => {
+    const params = new URLSearchParams();
+    if (itemType) params.append('itemType', itemType);
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<ItemTaxonomy[]>>(
+      `/api/taxonomies/items/by-term/${termId}${queryString ? `?${queryString}` : ''}`
+    ).then(r => r.data || []);
+  },
+};

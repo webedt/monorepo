@@ -68,11 +68,17 @@ export * from './sessions/index.js';
 // LLM - One-off LLM requests
 export * from './llm/index.js';
 
-// Discovery services
+// Organizations/Studios - Group accounts with multi-user support
+export * from './organizations/index.js';
+
+// Discovery - Task discovery and scanning
 export * from './discovery/index.js';
 
-// Code analysis services
+// Code Analysis - AI-powered code analysis using ClaudeWebClient
 export * from './codeAnalysis/index.js';
+
+// Storage - User storage quota management
+export * from './storage/index.js';
 
 // =============================================================================
 // SERVICES - Dependency injection and service registry

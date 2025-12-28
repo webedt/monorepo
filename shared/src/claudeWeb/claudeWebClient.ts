@@ -363,6 +363,44 @@ export class ClaudeWebClient extends AClaudeWebClient {
     return { canResume: true, status: session.session_status };
   }
 
+  async isComplete(
+    sessionId: string,
+    checkEvents: boolean = false
+  ): Promise<{ isComplete: boolean; status?: string; hasResultEvent?: boolean }> {
+    const session = await this.getSession(sessionId);
+    const status = session.session_status;
+
+    // Helper to check for result event
+    const checkForResultEvent = async (): Promise<boolean | undefined> => {
+      if (!checkEvents) return undefined;
+      try {
+        const events = await this.getEvents(sessionId);
+        return events.data?.some(event => event.type === 'result') ?? false;
+      } catch {
+        // Silently continue - events API may be unavailable
+        return undefined;
+      }
+    };
+
+    // Running sessions are not complete unless they have a result event
+    if (status === 'running') {
+      const hasResultEvent = await checkForResultEvent();
+      if (hasResultEvent) {
+        return { isComplete: true, status, hasResultEvent };
+      }
+      return { isComplete: false, status, hasResultEvent };
+    }
+
+    // Terminal and idle states are complete
+    if (status === 'idle' || status === 'completed' || status === 'failed' || status === 'archived') {
+      const hasResultEvent = await checkForResultEvent();
+      return { isComplete: true, status, hasResultEvent };
+    }
+
+    // Unknown status, assume not complete
+    return { isComplete: false, status };
+  }
+
   async waitForResumable(
     sessionId: string,
     maxWaitMs: number = 30000,

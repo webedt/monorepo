@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -51,6 +51,9 @@ export const users = pgTable('users', {
   chatVerbosityLevel: text('chat_verbosity_level').default('verbose').notNull(), // 'minimal' | 'normal' | 'verbose'
   isAdmin: boolean('is_admin').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // Storage quota fields - "Few GB per user" default quota
+  storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
+  storageUsedBytes: text('storage_used_bytes').default('0').notNull(), // Current usage (stored as string for bigint precision)
 });
 
 export const sessions = pgTable('sessions', {
@@ -66,6 +69,8 @@ export const chatSessions = pgTable('chat_sessions', {
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id')
+    .references(() => organizations.id, { onDelete: 'set null' }), // Optional organization ownership
   sessionPath: text('session_path').unique(), // Format: {owner}__{repo}__{branch} - populated after branch creation
   repositoryOwner: text('repository_owner'),
   repositoryName: text('repository_name'),
@@ -179,6 +184,75 @@ export const workspaceEvents = pgTable('workspace_events', {
   payload: json('payload').$type<Record<string, unknown>>(), // Event-specific data
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// Organizations/Studios - Group accounts that can contain multiple users
+export const organizations = pgTable('organizations', {
+  id: text('id').primaryKey(), // UUID
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(), // URL-friendly identifier (e.g., "acme-corp")
+  displayName: text('display_name'), // Optional friendly name
+  description: text('description'),
+  avatarUrl: text('avatar_url'),
+  websiteUrl: text('website_url'),
+  githubOrg: text('github_org'), // Linked GitHub organization name
+  isVerified: boolean('is_verified').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Organization membership roles
+export type OrganizationRole = 'owner' | 'admin' | 'member';
+
+// Organization members - junction table for users and organizations
+export const organizationMembers = pgTable('organization_members', {
+  id: text('id').primaryKey(), // UUID
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member'
+  joinedAt: timestamp('joined_at').defaultNow().notNull(),
+  invitedBy: text('invited_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+}, (table) => [
+  uniqueIndex('org_member_unique_idx').on(table.organizationId, table.userId),
+]);
+
+// Organization repositories - tracks repos owned/managed by organizations
+export const organizationRepositories = pgTable('organization_repositories', {
+  id: text('id').primaryKey(), // UUID
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  repositoryOwner: text('repository_owner').notNull(), // GitHub repo owner
+  repositoryName: text('repository_name').notNull(), // GitHub repo name
+  isDefault: boolean('is_default').default(false).notNull(), // Default repo for new sessions
+  addedBy: text('added_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('org_repo_unique_idx').on(table.organizationId, table.repositoryOwner, table.repositoryName),
+]);
+
+// Organization invitations - pending invitations
+export const organizationInvitations = pgTable('organization_invitations', {
+  id: text('id').primaryKey(), // UUID
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  role: text('role').notNull().default('member'), // 'admin' | 'member'
+  invitedBy: text('invited_by')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  token: text('token').notNull().unique(), // Invitation token for acceptance
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('org_invitation_unique_idx').on(table.organizationId, table.email),
+]);
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -306,3 +380,292 @@ export type OrchestratorCycle = typeof orchestratorCycles.$inferSelect;
 export type NewOrchestratorCycle = typeof orchestratorCycles.$inferInsert;
 export type OrchestratorTask = typeof orchestratorTasks.$inferSelect;
 export type NewOrchestratorTask = typeof orchestratorTasks.$inferInsert;
+
+// Organization types
+export type Organization = typeof organizations.$inferSelect;
+export type NewOrganization = typeof organizations.$inferInsert;
+export type OrganizationMember = typeof organizationMembers.$inferSelect;
+export type NewOrganizationMember = typeof organizationMembers.$inferInsert;
+export type OrganizationRepository = typeof organizationRepositories.$inferSelect;
+export type NewOrganizationRepository = typeof organizationRepositories.$inferInsert;
+export type OrganizationInvitation = typeof organizationInvitations.$inferSelect;
+export type NewOrganizationInvitation = typeof organizationInvitations.$inferInsert;
+
+// ============================================================================
+// PLAYERS FEATURE - Store, Library, Purchases, Community
+// ============================================================================
+
+// Games - Store catalog items
+export const games = pgTable('games', {
+  id: text('id').primaryKey(), // UUID
+  title: text('title').notNull(),
+  description: text('description'),
+  shortDescription: text('short_description'), // For cards/previews
+  price: integer('price').notNull().default(0), // Price in cents (0 = free)
+  currency: text('currency').default('USD').notNull(),
+  coverImage: text('cover_image'), // URL to cover image
+  screenshots: json('screenshots').$type<string[]>().default([]), // Array of image URLs
+  trailerUrl: text('trailer_url'), // Video trailer URL
+  developer: text('developer'),
+  publisher: text('publisher'),
+  releaseDate: timestamp('release_date'),
+  genres: json('genres').$type<string[]>().default([]), // e.g., ['Action', 'RPG']
+  tags: json('tags').$type<string[]>().default([]), // e.g., ['Multiplayer', 'Open World']
+  platforms: json('platforms').$type<string[]>().default([]), // e.g., ['Windows', 'Mac', 'Linux']
+  rating: text('rating'), // e.g., 'E', 'T', 'M'
+  averageScore: integer('average_score'), // User rating average (0-100)
+  reviewCount: integer('review_count').default(0).notNull(),
+  downloadCount: integer('download_count').default(0).notNull(),
+  featured: boolean('featured').default(false).notNull(), // Featured on store front
+  status: text('status').default('published').notNull(), // 'draft' | 'published' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Purchases - Transaction records (defined before userLibrary to avoid forward reference)
+export const purchases = pgTable('purchases', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  amount: integer('amount').notNull(), // Amount in cents
+  currency: text('currency').default('USD').notNull(),
+  status: text('status').default('pending').notNull(), // 'pending' | 'completed' | 'pending_refund' | 'refunded' | 'failed'
+  paymentMethod: text('payment_method'), // e.g., 'credit_card', 'wallet', 'paypal', 'free'
+  paymentDetails: json('payment_details').$type<{
+    transactionId?: string;
+    last4?: string;
+    brand?: string;
+  }>(),
+  refundedAt: timestamp('refunded_at'),
+  refundReason: text('refund_reason'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// User Library - Games owned by users
+export const userLibrary = pgTable('user_library', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  purchaseId: text('purchase_id')
+    .references(() => purchases.id, { onDelete: 'set null' }),
+  acquiredAt: timestamp('acquired_at').defaultNow().notNull(), // When user got the game
+  lastPlayedAt: timestamp('last_played_at'),
+  playtimeMinutes: integer('playtime_minutes').default(0).notNull(),
+  favorite: boolean('favorite').default(false).notNull(),
+  hidden: boolean('hidden').default(false).notNull(), // Hide from library view
+  installStatus: text('install_status').default('not_installed').notNull(), // 'not_installed' | 'installing' | 'installed'
+}, (table) => ({
+  // Unique constraint: a user can only have each game once in their library
+  userGameUnique: { name: 'user_library_user_game_unique', columns: [table.userId, table.gameId] },
+}));
+
+// Community Posts - Discussions, reviews, guides
+export const communityPosts = pgTable('community_posts', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .references(() => games.id, { onDelete: 'cascade' }), // Optional - can be general post
+  type: text('type').notNull(), // 'discussion' | 'review' | 'guide' | 'artwork' | 'announcement'
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  images: json('images').$type<string[]>().default([]), // Attached images
+  rating: integer('rating'), // For reviews: 1-5 stars
+  upvotes: integer('upvotes').default(0).notNull(),
+  downvotes: integer('downvotes').default(0).notNull(),
+  commentCount: integer('comment_count').default(0).notNull(),
+  pinned: boolean('pinned').default(false).notNull(), // Pinned by moderator
+  locked: boolean('locked').default(false).notNull(), // Comments disabled
+  status: text('status').default('published').notNull(), // 'draft' | 'published' | 'removed'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Community Comments - Replies to posts
+export const communityComments = pgTable('community_comments', {
+  id: text('id').primaryKey(), // UUID
+  postId: text('post_id')
+    .notNull()
+    .references(() => communityPosts.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  parentId: text('parent_id'), // For nested replies - self-reference
+  content: text('content').notNull(),
+  upvotes: integer('upvotes').default(0).notNull(),
+  downvotes: integer('downvotes').default(0).notNull(),
+  status: text('status').default('published').notNull(), // 'published' | 'removed'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Community Votes - Track user votes on posts/comments
+export const communityVotes = pgTable('community_votes', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  postId: text('post_id')
+    .references(() => communityPosts.id, { onDelete: 'cascade' }),
+  commentId: text('comment_id')
+    .references(() => communityComments.id, { onDelete: 'cascade' }),
+  vote: integer('vote').notNull(), // 1 = upvote, -1 = downvote
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  // Unique constraint: a user can only vote once per post
+  userPostVoteUnique: { name: 'community_votes_user_post_unique', columns: [table.userId, table.postId] },
+  // Unique constraint: a user can only vote once per comment
+  userCommentVoteUnique: { name: 'community_votes_user_comment_unique', columns: [table.userId, table.commentId] },
+}));
+
+// Wishlists - Games users want to buy
+export const wishlists = pgTable('wishlists', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  priority: integer('priority').default(0).notNull(), // For ordering
+  notifyOnSale: boolean('notify_on_sale').default(true).notNull(),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => ({
+  // Unique constraint: a user can only have each game once in their wishlist
+  userGameUnique: { name: 'wishlists_user_game_unique', columns: [table.userId, table.gameId] },
+}));
+
+// Type exports for Players feature
+export type Game = typeof games.$inferSelect;
+export type NewGame = typeof games.$inferInsert;
+export type UserLibraryItem = typeof userLibrary.$inferSelect;
+export type NewUserLibraryItem = typeof userLibrary.$inferInsert;
+export type Purchase = typeof purchases.$inferSelect;
+export type NewPurchase = typeof purchases.$inferInsert;
+export type CommunityPost = typeof communityPosts.$inferSelect;
+export type NewCommunityPost = typeof communityPosts.$inferInsert;
+export type CommunityComment = typeof communityComments.$inferSelect;
+export type NewCommunityComment = typeof communityComments.$inferInsert;
+export type CommunityVote = typeof communityVotes.$inferSelect;
+export type NewCommunityVote = typeof communityVotes.$inferInsert;
+export type WishlistItem = typeof wishlists.$inferSelect;
+export type NewWishlistItem = typeof wishlists.$inferInsert;
+
+// ============================================================================
+// COMMUNITY CHANNELS - Real-time community activity and messaging
+// ============================================================================
+
+// Community Channels - Chat channels for community discussions
+export const communityChannels = pgTable('community_channels', {
+  id: text('id').primaryKey(), // UUID
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(), // URL-friendly identifier (e.g., "general", "help", "showcase")
+  description: text('description'),
+  gameId: text('game_id')
+    .references(() => games.id, { onDelete: 'cascade' }), // Optional - can be game-specific channel
+  isDefault: boolean('is_default').default(false).notNull(), // Default channel for new users
+  isReadOnly: boolean('is_read_only').default(false).notNull(), // Only admins can post
+  sortOrder: integer('sort_order').default(0).notNull(), // For ordering channels
+  status: text('status').default('active').notNull(), // 'active' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Channel Messages - Messages in community channels
+export const channelMessages = pgTable('channel_messages', {
+  id: text('id').primaryKey(), // UUID
+  channelId: text('channel_id')
+    .notNull()
+    .references(() => communityChannels.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  replyToId: text('reply_to_id'), // For threaded replies
+  images: json('images').$type<string[]>().default([]), // Attached images
+  edited: boolean('edited').default(false).notNull(),
+  status: text('status').default('published').notNull(), // 'published' | 'removed'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Type exports for Community Channels
+export type CommunityChannel = typeof communityChannels.$inferSelect;
+export type NewCommunityChannel = typeof communityChannels.$inferInsert;
+export type ChannelMessage = typeof channelMessages.$inferSelect;
+export type NewChannelMessage = typeof channelMessages.$inferInsert;
+
+// ============================================================================
+// TAXONOMY SYSTEM - Admin-configurable categories, tags, and genres
+// ============================================================================
+
+// Taxonomies - Defines taxonomy types (e.g., 'genre', 'category', 'tag', 'platform')
+export const taxonomies = pgTable('taxonomies', {
+  id: text('id').primaryKey(), // UUID
+  name: text('name').notNull().unique(), // Internal name (e.g., 'genre', 'category')
+  displayName: text('display_name').notNull(), // User-facing name (e.g., 'Genre', 'Category')
+  description: text('description'),
+  slug: text('slug').notNull().unique(), // URL-friendly identifier
+  allowMultiple: boolean('allow_multiple').default(true).notNull(), // Can items have multiple terms?
+  isRequired: boolean('is_required').default(false).notNull(), // Must items have at least one term?
+  itemTypes: json('item_types').$type<string[]>().default([]), // Which item types can use this taxonomy (e.g., ['game', 'post'])
+  sortOrder: integer('sort_order').default(0).notNull(), // For ordering taxonomies in UI
+  status: text('status').default('active').notNull(), // 'active' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Taxonomy Terms - Individual terms within a taxonomy (e.g., 'Action', 'RPG' for genre taxonomy)
+export const taxonomyTerms = pgTable('taxonomy_terms', {
+  id: text('id').primaryKey(), // UUID
+  taxonomyId: text('taxonomy_id')
+    .notNull()
+    .references(() => taxonomies.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(), // Display name (e.g., 'Action', 'Role-Playing Game')
+  slug: text('slug').notNull(), // URL-friendly identifier
+  description: text('description'),
+  parentId: text('parent_id'), // For hierarchical taxonomies (self-reference)
+  color: text('color'), // Optional color for UI display (e.g., '#FF5733')
+  icon: text('icon'), // Optional icon name or URL
+  metadata: json('metadata').$type<Record<string, unknown>>(), // Flexible additional data
+  sortOrder: integer('sort_order').default(0).notNull(), // For ordering terms
+  status: text('status').default('active').notNull(), // 'active' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: slug must be unique within a taxonomy
+  uniqueIndex('taxonomy_term_slug_unique_idx').on(table.taxonomyId, table.slug),
+]);
+
+// Item Taxonomies - Junction table linking items to taxonomy terms
+// Polymorphic design: itemType + itemId identifies any entity
+export const itemTaxonomies = pgTable('item_taxonomies', {
+  id: text('id').primaryKey(), // UUID
+  termId: text('term_id')
+    .notNull()
+    .references(() => taxonomyTerms.id, { onDelete: 'cascade' }),
+  itemType: text('item_type').notNull(), // e.g., 'game', 'post', 'session'
+  itemId: text('item_id').notNull(), // ID of the item
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: an item can only have each term once
+  uniqueIndex('item_taxonomy_unique_idx').on(table.termId, table.itemType, table.itemId),
+]);
+
+// Type exports for Taxonomy System
+export type Taxonomy = typeof taxonomies.$inferSelect;
+export type NewTaxonomy = typeof taxonomies.$inferInsert;
+export type TaxonomyTerm = typeof taxonomyTerms.$inferSelect;
+export type NewTaxonomyTerm = typeof taxonomyTerms.$inferInsert;
+export type ItemTaxonomy = typeof itemTaxonomies.$inferSelect;
+export type NewItemTaxonomy = typeof itemTaxonomies.$inferInsert;

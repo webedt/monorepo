@@ -1,17 +1,29 @@
 /**
- * Code Analysis module exports
+ * Code Analysis Module
+ *
+ * Provides AI-powered code analysis using ClaudeWebClient.
  */
 
-export { CodeAnalyzerService } from './codeAnalyzer.js';
+// Abstract class
+export { ACodeAnalyzer } from './ACodeAnalyzer.js';
+
+// Implementation
+export { CodeAnalyzer } from './codeAnalyzer.js';
+
+// Code Reviewer
 export { CodeReviewerService } from './codeReviewer.js';
 
+// Types
 export type {
-  AnalysisCategory,
-  AnalysisSeverity,
-  AnalysisFocus,
-  AnalysisResult,
-  AnalysisOptions,
+  AnalysisType,
+  FindingSeverity,
+  AnalysisFinding,
+  AnalysisSummary,
+  CodeAnalysisParams,
+  CodeAnalysisResult,
+  CodeAnalyzerConfig,
   ReviewIssue,
-  ReviewResult,
+  ReviewIssueSeverity,
   ReviewOptions,
+  ReviewResult,
 } from './types.js';

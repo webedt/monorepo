@@ -1,11 +1,14 @@
 /**
  * Code Page
  * File browser and code editor for agent sessions
+ * Supports offline editing with local caching
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
+import { offlineManager, isOffline } from '../../lib/offline';
+import { offlineStorage } from '../../lib/offlineStorage';
 import type { Session } from '../../types';
 import './code.css';
 
@@ -42,6 +45,9 @@ export class CodePage extends Page<CodePageOptions> {
   private expandedFolders: Set<string> = new Set();
   private isLoading = true;
   private isSaving = false;
+  private offlineIndicator: OfflineIndicator | null = null;
+  private unsubscribeOffline: (() => void) | null = null;
+  private isOfflineMode = false;
 
   protected render(): string {
     return `
@@ -57,9 +63,13 @@ export class CodePage extends Page<CodePageOptions> {
             </div>
           </div>
           <div class="code-header-right">
+            <div class="offline-status-badge" style="display: none;">
+              <span class="offline-badge">Offline Mode</span>
+            </div>
             <div class="save-btn-container"></div>
           </div>
         </header>
+        <div class="offline-indicator-container"></div>
 
         <div class="code-layout">
           <aside class="file-explorer">
@@ -140,6 +150,24 @@ export class CodePage extends Page<CodePageOptions> {
       spinner.mount(spinnerContainer);
     }
 
+    // Setup offline indicator
+    const offlineContainer = this.$('.offline-indicator-container') as HTMLElement;
+    if (offlineContainer) {
+      this.offlineIndicator = new OfflineIndicator({ position: 'bottom-right' });
+      this.offlineIndicator.mount(offlineContainer);
+    }
+
+    // Subscribe to offline status changes
+    this.unsubscribeOffline = offlineManager.subscribe((status, wasOffline) => {
+      this.isOfflineMode = status === 'offline';
+      this.updateOfflineUI();
+
+      // If back online and has unsaved changes, attempt to sync
+      if (status === 'online' && wasOffline) {
+        this.syncPendingChanges();
+      }
+    });
+
     // Load session data
     this.loadSession();
   }
@@ -155,14 +183,44 @@ export class CodePage extends Page<CodePageOptions> {
     this.isLoading = true;
 
     try {
+      if (isOffline()) {
+        // Try to load from cache
+        const cachedSession = await offlineStorage.getCachedSession(sessionId);
+        if (cachedSession) {
+          this.session = cachedSession as unknown as Session;
+          this.updateHeader();
+          await this.loadFilesOffline();
+          toast.info('Loaded from offline cache');
+        } else {
+          toast.error('Session not available offline');
+          this.navigate('/agents');
+        }
+        return;
+      }
+
       const response = await sessionsApi.get(sessionId);
       this.session = response.session;
+
+      // Cache session data for offline use
+      await offlineStorage.cacheSession(sessionId, response.session as unknown as Record<string, unknown>);
+
       this.updateHeader();
       await this.loadFiles();
     } catch (error) {
-      toast.error('Failed to load session');
-      console.error('Failed to load session:', error);
-      this.navigate('/agents');
+      // Try offline cache if network fails
+      const cachedSession = await offlineStorage.getCachedSession(sessionId);
+      if (cachedSession) {
+        this.session = cachedSession as unknown as Session;
+        this.isOfflineMode = true;
+        this.updateHeader();
+        this.updateOfflineUI();
+        await this.loadFilesOffline();
+        toast.info('Loaded from offline cache');
+      } else {
+        toast.error('Failed to load session');
+        console.error('Failed to load session:', error);
+        this.navigate('/agents');
+      }
     }
   }
 
@@ -199,10 +257,71 @@ export class CodePage extends Page<CodePageOptions> {
       this.renderFileTree();
     } catch (error) {
       console.error('Failed to load files:', error);
-      toast.error('Failed to load files');
+      // Try loading from offline cache
+      await this.loadFilesOffline();
     } finally {
       this.isLoading = false;
       this.updateFileTreeState();
+    }
+  }
+
+  private async loadFilesOffline(): Promise<void> {
+    if (!this.session) return;
+
+    this.isLoading = true;
+    this.updateFileTreeState();
+
+    try {
+      const sessionPath = this.getSessionPath();
+      const cachedFiles = await offlineStorage.getSessionFiles(sessionPath);
+
+      if (cachedFiles.length > 0) {
+        // Build tree from cached file paths
+        this.fileTree = this.buildFileTree(cachedFiles);
+        this.renderFileTree();
+      } else {
+        toast.error('No cached files available');
+      }
+    } catch (error) {
+      console.error('Failed to load cached files:', error);
+      toast.error('Failed to load cached files');
+    } finally {
+      this.isLoading = false;
+      this.updateFileTreeState();
+    }
+  }
+
+  private updateOfflineUI(): void {
+    const offlineBadge = this.$('.offline-status-badge') as HTMLElement;
+    if (offlineBadge) {
+      offlineBadge.style.display = this.isOfflineMode ? 'block' : 'none';
+    }
+  }
+
+  private async syncPendingChanges(): Promise<void> {
+    try {
+      const dirtyFiles = await offlineStorage.getDirtyFiles();
+      if (dirtyFiles.length === 0) return;
+
+      toast.info(`Syncing ${dirtyFiles.length} file(s)...`);
+
+      for (const file of dirtyFiles) {
+        try {
+          await storageWorkerApi.writeFile(
+            file.sessionPath,
+            file.filePath,
+            file.content as string
+          );
+          await offlineStorage.markFileSynced(file.sessionPath, file.filePath);
+        } catch (error) {
+          console.error(`Failed to sync file ${file.filePath}:`, error);
+        }
+      }
+
+      toast.success('Changes synced successfully');
+    } catch (error) {
+      console.error('Failed to sync pending changes:', error);
+      toast.error('Failed to sync some changes');
     }
   }
 
@@ -398,7 +517,22 @@ export class CodePage extends Page<CodePageOptions> {
     // Load file content
     try {
       const sessionPath = this.getSessionPath();
-      const content = await storageWorkerApi.getFileText(sessionPath, `workspace/${path}`);
+      const filePath = `workspace/${path}`;
+      let content: string;
+
+      // Try to get from cache first if offline
+      if (this.isOfflineMode || isOffline()) {
+        const cached = await offlineStorage.getCachedFile(sessionPath, filePath);
+        if (cached && cached.contentType === 'text') {
+          content = cached.content as string;
+        } else {
+          throw new Error('File not available offline');
+        }
+      } else {
+        content = await storageWorkerApi.getFileText(sessionPath, filePath);
+        // Cache for offline use
+        await offlineStorage.cacheFile(sessionPath, filePath, content, 'text');
+      }
 
       const tab: EditorTab = {
         path,
@@ -596,11 +730,30 @@ export class CodePage extends Page<CodePageOptions> {
 
     try {
       const sessionPath = this.getSessionPath();
-      await storageWorkerApi.writeFile(sessionPath, `workspace/${tab.path}`, tab.content);
+      const filePath = `workspace/${tab.path}`;
 
-      tab.isDirty = false;
-      this.renderTabs();
-      toast.success('File saved');
+      if (this.isOfflineMode || isOffline()) {
+        // Save locally for later sync
+        await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
+        tab.isDirty = false;
+        this.renderTabs();
+        toast.success('File saved locally (will sync when online)');
+      } else {
+        try {
+          await storageWorkerApi.writeFile(sessionPath, filePath, tab.content);
+          // Also cache the latest version
+          await offlineStorage.cacheFile(sessionPath, filePath, tab.content, 'text');
+          tab.isDirty = false;
+          this.renderTabs();
+          toast.success('File saved');
+        } catch {
+          // If save fails, save locally
+          await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
+          tab.isDirty = false;
+          this.renderTabs();
+          toast.info('Saved locally (will sync when online)');
+        }
+      }
     } catch (error) {
       console.error('Failed to save file:', error);
       toast.error('Failed to save file');
@@ -614,6 +767,18 @@ export class CodePage extends Page<CodePageOptions> {
     const hasUnsaved = this.tabs.some(t => t.isDirty);
     if (hasUnsaved) {
       console.warn('Leaving with unsaved changes');
+    }
+
+    // Cleanup offline subscription
+    if (this.unsubscribeOffline) {
+      this.unsubscribeOffline();
+      this.unsubscribeOffline = null;
+    }
+
+    // Cleanup offline indicator
+    if (this.offlineIndicator) {
+      this.offlineIndicator.unmount();
+      this.offlineIndicator = null;
     }
   }
 }
