@@ -1,0 +1,113 @@
+/**
+ * Widgets Page Styles
+ */
+
+.widgets-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.widgets-header {
+  padding: var(--spacing-6) var(--spacing-6) var(--spacing-4);
+  background: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.widgets-header-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.widgets-header-text {
+  flex: 1;
+}
+
+.widgets-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.widgets-subtitle {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  margin: var(--spacing-1) 0 0;
+}
+
+.widgets-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-shrink: 0;
+}
+
+.widgets-content {
+  flex: 1;
+  overflow: auto;
+  padding: var(--spacing-6);
+}
+
+.widget-container-wrapper {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* Customization Bar */
+.widgets-customize-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-6);
+  background: var(--color-primary-50);
+  border-top: 1px solid var(--color-primary-200);
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .widgets-customize-bar {
+  background: var(--color-primary-900);
+  border-top-color: var(--color-primary-800);
+}
+
+.customize-bar-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-primary-700);
+}
+
+[data-theme="dark"] .customize-bar-text {
+  color: var(--color-primary-300);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .widgets-header {
+    padding: var(--spacing-4);
+  }
+
+  .widgets-header-content {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .widgets-header-actions {
+    justify-content: flex-end;
+  }
+
+  .widgets-content {
+    padding: var(--spacing-4);
+  }
+
+  .widgets-customize-bar {
+    flex-direction: column;
+    gap: var(--spacing-2);
+    text-align: center;
+  }
+}

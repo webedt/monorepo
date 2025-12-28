@@ -11,6 +11,7 @@ export { SettingsPage } from './settings/SettingsPage';
 export { ChatPage } from './chat/ChatPage';
 export { CodePage } from './code/CodePage';
 export { TrashPage } from './trash/TrashPage';
+export { WidgetsPage } from './widgets';
 
 // Players feature pages
 export { StorePage } from './store';
