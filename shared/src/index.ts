@@ -96,6 +96,9 @@ export * from './crdt/index.js';
 // Import - Import content from external sources (URLs)
 export * from './import/index.js';
 
+// Autocomplete - AI-powered code completion
+export * from './autocomplete/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
