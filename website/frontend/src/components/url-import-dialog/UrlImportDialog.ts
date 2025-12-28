@@ -24,6 +24,7 @@ export class UrlImportDialog extends Component {
   private filenameInput: Input | null = null;
   private importBtn: Button | null = null;
   private isImporting = false;
+  private isValidating = false;
   private validationResult: {
     valid: boolean;
     suggestedFilename?: string;
@@ -67,6 +68,9 @@ export class UrlImportDialog extends Component {
           <p class="url-import-hint">
             Leave empty to use the filename from the URL
           </p>
+        </div>
+        <div class="url-import-validating" style="display: none;">
+          <span class="url-import-validating-text">Validating URL...</span>
         </div>
         <div class="url-import-preview" style="display: none;">
           <div class="url-import-preview-header">
@@ -140,6 +144,7 @@ export class UrlImportDialog extends Component {
     const url = this.urlInput?.getValue()?.trim();
     if (!url) {
       this.validationResult = null;
+      this.isValidating = false;
       this.updatePreview();
       this.updateImportButton();
       return;
@@ -150,10 +155,16 @@ export class UrlImportDialog extends Component {
       new URL(url);
     } catch {
       this.validationResult = { valid: false, error: 'Invalid URL format' };
+      this.isValidating = false;
       this.updatePreview();
       this.updateImportButton();
       return;
     }
+
+    // Show loading state
+    this.isValidating = true;
+    this.validationResult = null;
+    this.updatePreview();
 
     try {
       // Validate URL with backend
@@ -167,22 +178,32 @@ export class UrlImportDialog extends Component {
           this.filenameInput?.setValue(this.validationResult.suggestedFilename);
         }
       }
-
-      this.updatePreview();
-      this.updateImportButton();
     } catch (error) {
       this.validationResult = {
         valid: false,
         error: error instanceof Error ? error.message : 'Validation failed',
       };
+    } finally {
+      this.isValidating = false;
       this.updatePreview();
       this.updateImportButton();
     }
   }
 
   private updatePreview(): void {
+    const validatingEl = this.modal.getBody().querySelector('.url-import-validating') as HTMLElement;
     const previewEl = this.modal.getBody().querySelector('.url-import-preview') as HTMLElement;
     const errorEl = this.modal.getBody().querySelector('.url-import-error') as HTMLElement;
+
+    // Show loading indicator during validation
+    if (this.isValidating) {
+      validatingEl.style.display = 'block';
+      previewEl.style.display = 'none';
+      errorEl.style.display = 'none';
+      return;
+    }
+
+    validatingEl.style.display = 'none';
 
     if (!this.validationResult) {
       previewEl.style.display = 'none';

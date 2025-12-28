@@ -49,6 +49,53 @@ function isBinaryContentType(contentType: string): boolean {
 }
 
 /**
+ * Check if a hostname is a private/local address (SSRF protection)
+ */
+function isPrivateOrLocalAddress(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+
+  // IPv4 localhost and special addresses
+  if (
+    lower === 'localhost' ||
+    lower === '127.0.0.1' ||
+    lower === '0.0.0.0' ||
+    lower.endsWith('.local') ||
+    lower.endsWith('.localhost')
+  ) {
+    return true;
+  }
+
+  // IPv6 localhost
+  if (lower === '::1' || lower === '[::1]' || lower === '0:0:0:0:0:0:0:1') {
+    return true;
+  }
+
+  // IPv4 private ranges
+  // 10.0.0.0/8
+  if (/^10\./.test(lower)) {
+    return true;
+  }
+  // 172.16.0.0/12 (172.16.x.x - 172.31.x.x)
+  const match172 = lower.match(/^172\.(\d+)\./);
+  if (match172) {
+    const second = parseInt(match172[1], 10);
+    if (second >= 16 && second <= 31) {
+      return true;
+    }
+  }
+  // 192.168.0.0/16
+  if (/^192\.168\./.test(lower)) {
+    return true;
+  }
+  // 169.254.0.0/16 (link-local)
+  if (/^169\.254\./.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Validate a URL without fetching its content
  */
 export async function validateUrl(url: string): Promise<UrlValidationResult> {
@@ -65,16 +112,7 @@ export async function validateUrl(url: string): Promise<UrlValidationResult> {
     }
 
     // Prevent SSRF attacks - block private IP ranges
-    const hostname = urlObj.hostname.toLowerCase();
-    if (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '0.0.0.0' ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('10.') ||
-      hostname.startsWith('172.16.') ||
-      hostname.endsWith('.local')
-    ) {
+    if (isPrivateOrLocalAddress(urlObj.hostname)) {
       return {
         valid: false,
         error: 'Private or local addresses are not allowed.',
@@ -129,24 +167,59 @@ export async function validateUrl(url: string): Promise<UrlValidationResult> {
 }
 
 /**
+ * Quick URL validation (no HEAD request) - just checks URL format and hostname
+ */
+function quickValidateUrl(url: string): { valid: boolean; error?: string } {
+  try {
+    const urlObj = new URL(url);
+
+    if (!ALLOWED_PROTOCOLS.includes(urlObj.protocol)) {
+      return {
+        valid: false,
+        error: `Invalid protocol: ${urlObj.protocol}. Only HTTP and HTTPS are allowed.`,
+      };
+    }
+
+    if (isPrivateOrLocalAddress(urlObj.hostname)) {
+      return {
+        valid: false,
+        error: 'Private or local addresses are not allowed.',
+      };
+    }
+
+    return { valid: true };
+  } catch {
+    return { valid: false, error: 'Invalid URL format' };
+  }
+}
+
+/**
  * Fetch content from a URL
  */
 export async function fetchFromUrl(options: UrlImportOptions): Promise<UrlImportResult> {
-  const { url, timeout = DEFAULT_TIMEOUT, maxSize = DEFAULT_MAX_SIZE } = options;
+  const { url, timeout = DEFAULT_TIMEOUT, maxSize = DEFAULT_MAX_SIZE, skipValidation = false } = options;
 
   try {
-    // Validate URL first
-    const validation = await validateUrl(url);
-    if (!validation.valid) {
-      return { success: false, error: validation.error };
-    }
+    if (skipValidation) {
+      // Quick validation without HEAD request (when validateUrl was already called)
+      const quickCheck = quickValidateUrl(url);
+      if (!quickCheck.valid) {
+        return { success: false, error: quickCheck.error };
+      }
+    } else {
+      // Full validation with HEAD request
+      const validation = await validateUrl(url);
+      if (!validation.valid) {
+        return { success: false, error: validation.error };
+      }
 
-    // Check content length if available
-    if (validation.contentLength && validation.contentLength > maxSize) {
-      return {
-        success: false,
-        error: `File too large: ${Math.round(validation.contentLength / 1024 / 1024)}MB exceeds ${Math.round(maxSize / 1024 / 1024)}MB limit`,
-      };
+      // Check content length if available
+      if (validation.contentLength && validation.contentLength > maxSize) {
+        return {
+          success: false,
+          error: `File too large: ${Math.round(validation.contentLength / 1024 / 1024)}MB exceeds ${Math.round(maxSize / 1024 / 1024)}MB limit`,
+        };
+      }
     }
 
     // Fetch the content
@@ -190,13 +263,20 @@ export async function fetchFromUrl(options: UrlImportOptions): Promise<UrlImport
           };
         }
 
-        // Convert to base64
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
+        // Convert to base64 - use Buffer in Node.js for efficiency
+        if (typeof Buffer !== 'undefined') {
+          content = Buffer.from(buffer).toString('base64');
+        } else {
+          // Fallback for browser environments (chunked to avoid call stack issues)
+          const bytes = new Uint8Array(buffer);
+          const chunks: string[] = [];
+          const chunkSize = 8192;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            chunks.push(String.fromCharCode(...chunk));
+          }
+          content = btoa(chunks.join(''));
         }
-        content = btoa(binary);
       } else {
         content = await response.text();
         size = new TextEncoder().encode(content).length;

@@ -10,6 +10,8 @@ export interface UrlImportOptions {
   timeout?: number;
   /** Maximum file size in bytes (default: 10MB) */
   maxSize?: number;
+  /** Skip HEAD request validation (use when validation was already done) */
+  skipValidation?: boolean;
 }
 
 export interface UrlImportResult {

@@ -1288,8 +1288,8 @@ export class CodePage extends Page<CodePageOptions> {
       onImportSuccess: (result) => {
         // Refresh file tree after successful import
         this.loadFiles();
-        // Optionally open the imported file
-        if (result.filePath && !result.filePath.startsWith('image/')) {
+        // Optionally open the imported file (skip binary/image files)
+        if (result.filePath && result.contentType && !result.contentType.startsWith('image/')) {
           this.openFile(result.filePath);
         }
       },

@@ -6,11 +6,43 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import { fetchFromUrl, validateUrl, WORKSPACE_DIR } from '@webedt/shared';
+import { fetchFromUrl, validateUrl, WORKSPACE_DIR, db, chatSessions, eq, and } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
+
+/**
+ * Verify that the user has access to the specified session path
+ */
+async function verifySessionAccess(userId: string, sessionPath: string): Promise<boolean> {
+  const session = await db
+    .select({ id: chatSessions.id })
+    .from(chatSessions)
+    .where(and(
+      eq(chatSessions.userId, userId),
+      eq(chatSessions.sessionPath, sessionPath)
+    ))
+    .limit(1);
+
+  return session.length > 0;
+}
+
+/**
+ * Safely resolve a file path within a directory, preventing path traversal
+ */
+function safeResolvePath(baseDir: string, filePath: string): string | null {
+  // Normalize and resolve the path
+  const normalizedPath = path.normalize(filePath).replace(/^(\.\.(\/|\\|$))+/, '');
+  const resolvedPath = path.resolve(baseDir, normalizedPath);
+
+  // Ensure the resolved path is within the base directory
+  if (!resolvedPath.startsWith(baseDir + path.sep) && resolvedPath !== baseDir) {
+    return null;
+  }
+
+  return resolvedPath;
+}
 
 /**
  * Validate a URL before importing
@@ -73,8 +105,15 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Fetch content from URL
-    const fetchResult = await fetchFromUrl({ url });
+    // Verify user has access to this session
+    const hasAccess = await verifySessionAccess(userId, sessionPath);
+    if (!hasAccess) {
+      res.status(403).json({ success: false, error: 'Access denied to this session' });
+      return;
+    }
+
+    // Fetch content from URL (skip HEAD validation since frontend already validated)
+    const fetchResult = await fetchFromUrl({ url, skipValidation: true });
 
     if (!fetchResult.success || !fetchResult.content) {
       res.status(400).json({
@@ -85,14 +124,16 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
     }
 
     // Determine target file path
-    let filePath = targetPath || fetchResult.suggestedFilename || 'imported-file';
+    const filePath = targetPath || fetchResult.suggestedFilename || 'imported-file';
 
-    // Ensure path doesn't try to escape workspace
-    filePath = filePath.replace(/\.\./g, '').replace(/^\/+/, '');
-
-    // Build full workspace path
+    // Build workspace directory and safely resolve full path
     const workspaceDir = path.join(WORKSPACE_DIR, `session-${sessionPath}`, 'workspace');
-    const fullPath = path.join(workspaceDir, filePath);
+    const fullPath = safeResolvePath(workspaceDir, filePath);
+
+    if (!fullPath) {
+      res.status(400).json({ success: false, error: 'Invalid file path' });
+      return;
+    }
 
     // Ensure the target directory exists
     const targetDir = path.dirname(fullPath);
