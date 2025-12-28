@@ -5,6 +5,7 @@
 import { Page, type PageOptions } from '../base/Page';
 import { Card, Button, Input, toast } from '../../components';
 import { authStore } from '../../stores/authStore';
+import { editorSettingsStore } from '../../stores/editorSettingsStore';
 import { githubApi, userApi, billingApi } from '../../lib/api';
 import { router } from '../../lib/router';
 import type { ClaudeAuth } from '../../types';
@@ -45,6 +46,11 @@ export class SettingsPage extends Page<PageOptions> {
           <section class="settings-section">
             <h2 class="section-title">Billing & Storage</h2>
             <div class="section-card billing-card"></div>
+          </section>
+
+          <section class="settings-section">
+            <h2 class="section-title">Editor</h2>
+            <div class="section-card editor-card"></div>
           </section>
 
           <section class="settings-section">
@@ -90,6 +96,7 @@ export class SettingsPage extends Page<PageOptions> {
     super.onMount();
     this.renderAccountSection();
     this.renderBillingSection();
+    this.renderEditorSection();
     this.renderConnectionsSection();
     this.renderDangerSection();
   }
@@ -225,6 +232,89 @@ export class SettingsPage extends Page<PageOptions> {
       ENTERPRISE: 'Enterprise',
     };
     return labels[tier] || tier;
+  }
+
+  private renderEditorSection(): void {
+    const container = this.$('.editor-card') as HTMLElement;
+    if (!container) return;
+
+    const settings = editorSettingsStore.getSettings();
+
+    const content = document.createElement('div');
+    content.className = 'editor-content';
+    content.innerHTML = `
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Format on Save</span>
+          <span class="setting-description">Automatically format code when saving files</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="format-on-save" ${settings.formatOnSave ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Tab Size</span>
+          <span class="setting-description">Number of spaces for indentation</span>
+        </div>
+        <select id="tab-size" class="setting-select">
+          <option value="2" ${settings.tabSize === 2 ? 'selected' : ''}>2 spaces</option>
+          <option value="4" ${settings.tabSize === 4 ? 'selected' : ''}>4 spaces</option>
+          <option value="8" ${settings.tabSize === 8 ? 'selected' : ''}>8 spaces</option>
+        </select>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Indent with Tabs</span>
+          <span class="setting-description">Use tabs instead of spaces for indentation</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="use-tabs" ${settings.useTabs ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-shortcuts">
+        <span class="shortcuts-label">Keyboard Shortcuts:</span>
+        <div class="shortcut-item">
+          <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd> - Format document
+        </div>
+        <div class="shortcut-item">
+          <kbd>Ctrl</kbd> + <kbd>S</kbd> - Save file
+        </div>
+      </div>
+    `;
+
+    // Add event listeners
+    const formatOnSaveCheckbox = content.querySelector('#format-on-save') as HTMLInputElement;
+    if (formatOnSaveCheckbox) {
+      formatOnSaveCheckbox.addEventListener('change', () => {
+        editorSettingsStore.setFormatOnSave(formatOnSaveCheckbox.checked);
+        toast.success('Editor settings saved');
+      });
+    }
+
+    const tabSizeSelect = content.querySelector('#tab-size') as HTMLSelectElement;
+    if (tabSizeSelect) {
+      tabSizeSelect.addEventListener('change', () => {
+        editorSettingsStore.setTabSize(parseInt(tabSizeSelect.value, 10));
+        toast.success('Editor settings saved');
+      });
+    }
+
+    const useTabsCheckbox = content.querySelector('#use-tabs') as HTMLInputElement;
+    if (useTabsCheckbox) {
+      useTabsCheckbox.addEventListener('change', () => {
+        editorSettingsStore.setUseTabs(useTabsCheckbox.checked);
+        toast.success('Editor settings saved');
+      });
+    }
+
+    const card = new Card();
+    const body = card.body();
+    body.getElement().appendChild(content);
+    card.mount(container);
+    this.cards.push(card);
   }
 
   private renderConnectionsSection(): void {

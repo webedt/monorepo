@@ -9,7 +9,8 @@ import { Button, Spinner, toast, OfflineIndicator } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
-import { undoRedoStore } from '../../stores';
+import { formatByFilename, canFormat } from '../../lib/codeFormatter';
+import { undoRedoStore, editorSettingsStore } from '../../stores';
 import type { Session } from '../../types';
 import type { UndoRedoState } from '../../stores/undoRedoStore';
 import type { TabContentState } from '../../stores/undoRedoStore';
@@ -84,6 +85,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10H11a5 5 0 0 0-5 5v2"></path><polyline points="21 10 17 6"></polyline><polyline points="21 10 17 14"></polyline></svg>
               </button>
             </div>
+            <div class="format-btn-container"></div>
             <div class="save-btn-container"></div>
           </div>
         </header>
@@ -141,6 +143,17 @@ export class CodePage extends Page<CodePageOptions> {
     const refreshBtn = this.$('[data-action="refresh"]') as HTMLButtonElement;
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => this.loadFiles());
+    }
+
+    // Setup format button
+    const formatBtnContainer = this.$('.format-btn-container') as HTMLElement;
+    if (formatBtnContainer) {
+      const formatBtn = new Button('Format', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.formatCurrentFile(),
+      });
+      formatBtn.mount(formatBtnContainer);
     }
 
     // Setup save button
@@ -836,6 +849,13 @@ export class CodePage extends Page<CodePageOptions> {
       return;
     }
 
+    // Shift+Alt+F to format
+    if (e.shiftKey && e.altKey && e.key === 'F') {
+      e.preventDefault();
+      this.formatCurrentFile();
+      return;
+    }
+
     // Cmd/Ctrl+Z to undo
     if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
       e.preventDefault();
@@ -863,6 +883,56 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  private formatCurrentFile(): void {
+    if (this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Check if this file type can be formatted
+    if (!canFormat(tab.name)) {
+      toast.info('Formatting not supported for this file type');
+      return;
+    }
+
+    const settings = editorSettingsStore.getSettings();
+    const result = formatByFilename(tab.content, tab.name, {
+      tabSize: settings.tabSize,
+      useTabs: settings.useTabs,
+    });
+
+    if (!result.success) {
+      toast.error(result.error || 'Failed to format file');
+      return;
+    }
+
+    // Only update if content actually changed
+    if (result.content !== tab.content) {
+      const editor = this.$('.code-editor') as HTMLTextAreaElement;
+      const cursorPosition = editor?.selectionStart || 0;
+
+      tab.content = result.content;
+      tab.isDirty = true;
+      tab.isPreview = false;
+
+      // Update editor content
+      if (editor) {
+        editor.value = result.content;
+        // Try to restore cursor position, clamped to new content length
+        const newPosition = Math.min(cursorPosition, result.content.length);
+        editor.selectionStart = editor.selectionEnd = newPosition;
+      }
+
+      // Track change in undo/redo history
+      undoRedoStore.pushChange(tab.path, result.content, cursorPosition);
+
+      this.renderTabs();
+      toast.success('File formatted');
+    } else {
+      toast.info('File already formatted');
+    }
+  }
+
   private async saveCurrentFile(): Promise<void> {
     if (this.activeTabIndex < 0 || this.isSaving) return;
 
@@ -870,6 +940,24 @@ export class CodePage extends Page<CodePageOptions> {
     if (!tab || !tab.isDirty) {
       toast.info('No changes to save');
       return;
+    }
+
+    // Format on save if enabled
+    if (editorSettingsStore.getFormatOnSave() && canFormat(tab.name)) {
+      const settings = editorSettingsStore.getSettings();
+      const result = formatByFilename(tab.content, tab.name, {
+        tabSize: settings.tabSize,
+        useTabs: settings.useTabs,
+      });
+
+      if (result.success && result.content !== tab.content) {
+        const editor = this.$('.code-editor') as HTMLTextAreaElement;
+        tab.content = result.content;
+        if (editor) {
+          editor.value = result.content;
+        }
+        undoRedoStore.pushChange(tab.path, result.content, editor?.selectionStart || 0);
+      }
     }
 
     this.isSaving = true;
