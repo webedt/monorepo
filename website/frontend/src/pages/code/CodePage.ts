@@ -820,11 +820,11 @@ export class CodePage extends Page<CodePageOptions> {
       owner: this.session.repositoryOwner,
       repo: this.session.repositoryName,
       branch: this.session.branch || 'main',
-      onCommitSuccess: (result) => {
+      onCommitSuccess: () => {
         // Clear pending files after successful commit
+        // (CommitDialog already shows success toast)
         this.pendingCommitFiles.clear();
         this.updateCommitButton();
-        toast.success(`Committed: ${result.message}`);
       },
       onClose: () => {
         this.commitDialog = null;

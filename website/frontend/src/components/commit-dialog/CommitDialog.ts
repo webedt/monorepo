@@ -33,6 +33,7 @@ export class CommitDialog extends Component {
   private commitBtn: Button | null = null;
   private isCommitting = false;
   private selectedFiles: Set<string> = new Set();
+  private messageInputListenerAttached = false;
 
   constructor(options: CommitDialogOptions) {
     super('div', { className: 'commit-dialog-wrapper' });
@@ -142,21 +143,30 @@ export class CommitDialog extends Component {
       </label>
     `).join('');
 
-    // Add checkbox handlers
-    listContainer.querySelectorAll('.commit-file-checkbox').forEach(checkbox => {
-      checkbox.addEventListener('change', (e) => {
-        const target = e.target as HTMLInputElement;
-        const item = target.closest('.commit-file-item') as HTMLElement;
-        const path = item?.dataset.path;
-        if (path) {
-          if (target.checked) {
-            this.selectedFiles.add(path);
-          } else {
-            this.selectedFiles.delete(path);
-          }
-          this.updateCommitButton();
+    // Use event delegation on container (only attach once)
+    this.setupFilesListEventDelegation(listContainer);
+  }
+
+  private setupFilesListEventDelegation(listContainer: HTMLElement): void {
+    // Remove any existing listener by cloning and replacing
+    const newContainer = listContainer.cloneNode(true) as HTMLElement;
+    listContainer.parentNode?.replaceChild(newContainer, listContainer);
+
+    // Add single delegated event listener
+    newContainer.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      if (!target.classList.contains('commit-file-checkbox')) return;
+
+      const item = target.closest('.commit-file-item') as HTMLElement;
+      const path = item?.dataset.path;
+      if (path) {
+        if (target.checked) {
+          this.selectedFiles.add(path);
+        } else {
+          this.selectedFiles.delete(path);
         }
-      });
+        this.updateCommitButton();
+      }
     });
   }
 
@@ -234,20 +244,18 @@ export class CommitDialog extends Component {
   }
 
   private generateDefaultMessage(): string {
-    const modifiedCount = this.changedFiles.filter(f =>
-      this.selectedFiles.has(f.path) && f.status === 'modified'
-    ).length;
-    const addedCount = this.changedFiles.filter(f =>
-      this.selectedFiles.has(f.path) && f.status === 'added'
-    ).length;
-    const deletedCount = this.changedFiles.filter(f =>
-      this.selectedFiles.has(f.path) && f.status === 'deleted'
-    ).length;
+    // Count all statuses in a single pass
+    const counts = { modified: 0, added: 0, deleted: 0 };
+    for (const file of this.changedFiles) {
+      if (this.selectedFiles.has(file.path)) {
+        counts[file.status]++;
+      }
+    }
 
     const parts = [];
-    if (addedCount > 0) parts.push(`Add ${addedCount} file${addedCount !== 1 ? 's' : ''}`);
-    if (modifiedCount > 0) parts.push(`Update ${modifiedCount} file${modifiedCount !== 1 ? 's' : ''}`);
-    if (deletedCount > 0) parts.push(`Delete ${deletedCount} file${deletedCount !== 1 ? 's' : ''}`);
+    if (counts.added > 0) parts.push(`Add ${counts.added} file${counts.added !== 1 ? 's' : ''}`);
+    if (counts.modified > 0) parts.push(`Update ${counts.modified} file${counts.modified !== 1 ? 's' : ''}`);
+    if (counts.deleted > 0) parts.push(`Delete ${counts.deleted} file${counts.deleted !== 1 ? 's' : ''}`);
 
     return parts.join(', ') || 'Update files';
   }
@@ -256,11 +264,12 @@ export class CommitDialog extends Component {
    * Open the commit dialog
    */
   open(): this {
-    // Attach message input listener for button state
-    if (this.messageInput) {
+    // Attach message input listener for button state (only once)
+    if (this.messageInput && !this.messageInputListenerAttached) {
       const inputEl = this.messageInput.getElement().querySelector('textarea');
       if (inputEl) {
         inputEl.addEventListener('input', () => this.updateCommitButton());
+        this.messageInputListenerAttached = true;
       }
     }
     this.modal.open();

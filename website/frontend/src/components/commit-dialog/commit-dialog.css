@@ -137,23 +137,3 @@
   color: var(--color-text-secondary);
   margin: 0;
 }
-
-/* Select All / Deselect All */
-.commit-files-actions {
-  display: flex;
-  gap: var(--spacing-2);
-  margin-bottom: var(--spacing-2);
-}
-
-.commit-files-action-btn {
-  font-size: var(--font-size-xs);
-  color: var(--color-primary);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-}
-
-.commit-files-action-btn:hover {
-  text-decoration: underline;
-}
