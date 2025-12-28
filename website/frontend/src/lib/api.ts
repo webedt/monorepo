@@ -1683,3 +1683,35 @@ export const workspacePresenceApi = {
   getStreamUrl: (owner: string, repo: string, branch: string) =>
     `${getApiBaseUrl()}/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}/stream`,
 };
+
+// ============================================================================
+// Import API (Import files from external URLs)
+// ============================================================================
+export interface UrlValidationResult {
+  valid: boolean;
+  suggestedFilename?: string;
+  contentType?: string;
+  contentLength?: number;
+  error?: string;
+}
+
+export interface UrlImportResult {
+  filePath: string;
+  contentType: string;
+  size: number;
+  isBinary: boolean;
+}
+
+export const importApi = {
+  validate: (url: string) =>
+    fetchApi<{ success: boolean; data: UrlValidationResult }>('/api/import/validate', {
+      method: 'POST',
+      body: { url },
+    }),
+
+  fromUrl: (url: string, sessionPath: string, targetPath?: string) =>
+    fetchApi<{ success: boolean; data: UrlImportResult }>('/api/import/url', {
+      method: 'POST',
+      body: { url, sessionPath, targetPath },
+    }),
+};

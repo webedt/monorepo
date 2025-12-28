@@ -93,6 +93,9 @@ export * from './cloudSaves/index.js';
 // Implements undo as forward operations (applying inverse changes)
 export * from './crdt/index.js';
 
+// Import - Import content from external sources (URLs)
+export * from './import/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
