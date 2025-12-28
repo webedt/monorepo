@@ -4,10 +4,12 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect, NewSessionModal } from '../../components';
-import { sessionsApi, githubApi } from '../../lib/api';
+import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect, NewSessionModal, CollectionsPanel } from '../../components';
+import { sessionsApi, githubApi, collectionsApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
+
+type FilterMode = 'all' | 'favorites';
 
 export class AgentsPage extends Page<PageOptions> {
   readonly route = '/agents';
@@ -27,6 +29,8 @@ export class AgentsPage extends Page<PageOptions> {
   private branchSelect: SearchableSelect | null = null;
   private requestTextArea: TextArea | null = null;
   private isLoading = true;
+  private filterMode: FilterMode = 'all';
+  private searchQuery = '';
 
   // Inline form state
   private repos: Repository[] = [];
@@ -42,6 +46,11 @@ export class AgentsPage extends Page<PageOptions> {
   // Session list updates subscription
   private sessionUpdatesEventSource: EventSource | null = null;
 
+  // Collections
+  private collectionsPanel: CollectionsPanel | null = null;
+  private selectedCollectionId: string | null = null;
+  private collectionSessionIds: Set<string> = new Set();
+
   protected render(): string {
     return `
       <div class="agents-page">
@@ -51,6 +60,15 @@ export class AgentsPage extends Page<PageOptions> {
             <p class="agents-subtitle">Manage your AI coding sessions</p>
           </div>
           <div class="agents-header-right">
+            <div class="filter-buttons">
+              <button class="filter-btn filter-btn--active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="favorites">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+                Favorites
+              </button>
+            </div>
             <div class="search-container"></div>
             <div class="new-session-header-btn"></div>
             <a href="#/trash" class="trash-link" title="View deleted sessions">
@@ -85,17 +103,24 @@ export class AgentsPage extends Page<PageOptions> {
           </div>
         </div>
 
-        <div class="sessions-container">
-          <div class="sessions-loading">
-            <div class="spinner-container"></div>
-          </div>
-          <div class="sessions-empty" style="display: none;">
-            <div class="empty-icon"></div>
-            <h3 class="empty-title">No agent sessions yet</h3>
-            <p class="empty-description">Start a new session to begin coding with AI</p>
-            <div class="new-session-empty-btn"></div>
-          </div>
-          <div class="sessions-list" style="display: none;"></div>
+        <div class="agents-content">
+          <aside class="agents-sidebar">
+            <div class="collections-panel-container"></div>
+          </aside>
+          <main class="agents-main">
+            <div class="sessions-container">
+              <div class="sessions-loading">
+                <div class="spinner-container"></div>
+              </div>
+              <div class="sessions-empty" style="display: none;">
+                <div class="empty-icon"></div>
+                <h3 class="empty-title">No agent sessions yet</h3>
+                <p class="empty-description">Start a new session to begin coding with AI</p>
+                <div class="new-session-empty-btn"></div>
+              </div>
+              <div class="sessions-list" style="display: none;"></div>
+            </div>
+          </main>
         </div>
       </div>
     `;
@@ -201,14 +226,43 @@ export class AgentsPage extends Page<PageOptions> {
       this.spinner.mount(spinnerContainer);
     }
 
+    // Create collections panel
+    const collectionsPanelContainer = this.$('.collections-panel-container') as HTMLElement;
+    if (collectionsPanelContainer) {
+      this.collectionsPanel = new CollectionsPanel({
+        onCollectionSelect: (collectionId) => this.handleCollectionSelect(collectionId),
+      });
+      this.collectionsPanel.mount(collectionsPanelContainer);
+    }
+
     // Load sessions
     this.loadSessions();
 
     // Subscribe to real-time session list updates
     this.subscribeToSessionUpdates();
 
+    // Setup filter button handlers
+    this.setupFilterButtons();
+
     // Load GitHub repos for inline form
     this.loadReposForInlineForm();
+  }
+
+  private async handleCollectionSelect(collectionId: string | null): Promise<void> {
+    this.selectedCollectionId = collectionId;
+    this.collectionSessionIds.clear();
+
+    if (collectionId) {
+      try {
+        const result = await collectionsApi.getSessions(collectionId);
+        this.collectionSessionIds = new Set(result.sessions.map((s: Session) => s.id));
+      } catch (error) {
+        console.error('Failed to load collection sessions:', error);
+      }
+    }
+
+    this.applyFilters();
+    this.renderSessions();
   }
 
   private async loadReposForInlineForm(): Promise<void> {
@@ -398,7 +452,7 @@ export class AgentsPage extends Page<PageOptions> {
         const session = data.session as Session;
         // Add new session to the beginning of the list
         this.sessions.unshift(session);
-        this.filteredSessions = [...this.sessions];
+        this.applyFilters();
         this.renderSessions();
         console.log('[AgentsPage] Session created:', session.id);
       } catch (error) {
@@ -414,7 +468,7 @@ export class AgentsPage extends Page<PageOptions> {
         const index = this.sessions.findIndex(s => s.id === updatedSession.id);
         if (index !== -1) {
           this.sessions[index] = { ...this.sessions[index], ...updatedSession };
-          this.filteredSessions = [...this.sessions];
+          this.applyFilters();
           this.renderSessions();
           console.log('[AgentsPage] Session updated:', updatedSession.id, updatedSession);
         }
@@ -431,7 +485,7 @@ export class AgentsPage extends Page<PageOptions> {
         const index = this.sessions.findIndex(s => s.id === updatedSession.id);
         if (index !== -1) {
           this.sessions[index] = { ...this.sessions[index], ...updatedSession };
-          this.filteredSessions = [...this.sessions];
+          this.applyFilters();
           this.renderSessions();
           console.log('[AgentsPage] Session status changed:', updatedSession.id, updatedSession.status);
         }
@@ -446,7 +500,7 @@ export class AgentsPage extends Page<PageOptions> {
         const sessionId = data.session.id;
         // Remove the session from our list
         this.sessions = this.sessions.filter(s => s.id !== sessionId);
-        this.filteredSessions = this.filteredSessions.filter(s => s.id !== sessionId);
+        this.applyFilters();
         this.renderSessions();
         console.log('[AgentsPage] Session deleted:', sessionId);
       } catch (error) {
@@ -466,7 +520,7 @@ export class AgentsPage extends Page<PageOptions> {
     try {
       const response = await sessionsApi.list();
       this.sessions = response.sessions || [];
-      this.filteredSessions = [...this.sessions];
+      this.applyFilters();
       this.renderSessions();
     } catch (error) {
       toast.error('Failed to load agent sessions');
@@ -541,11 +595,18 @@ export class AgentsPage extends Page<PageOptions> {
     const date = new Date(session.createdAt).toLocaleDateString();
     const status = session.status;
     const statusClass = `status-${status}`;
+    const isFavorite = session.favorite ?? false;
+    const starIcon = isFavorite
+      ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
+      : `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
 
     cardEl.innerHTML = `
       <div class="session-card-header">
         <span class="session-status ${statusClass}">${status}</span>
         <div class="session-card-actions">
+          <button class="session-favorite-btn ${isFavorite ? 'session-favorite-btn--active' : ''}" title="${isFavorite ? 'Remove from favorites' : 'Add to favorites'}">
+            ${starIcon}
+          </button>
           <span class="session-date">${date}</span>
           <button class="session-delete-btn" title="Delete session">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -560,6 +621,13 @@ export class AgentsPage extends Page<PageOptions> {
         <span class="session-branch">${this.escapeHtml(branch)}</span>
       </div>
     `;
+
+    // Favorite button handler
+    const favoriteBtn = cardEl.querySelector('.session-favorite-btn');
+    favoriteBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.handleToggleFavorite(session.id);
+    });
 
     // Delete button handler
     const deleteBtn = cardEl.querySelector('.session-delete-btn');
@@ -580,20 +648,78 @@ export class AgentsPage extends Page<PageOptions> {
       await sessionsApi.delete(sessionId);
       toast.success('Session moved to trash');
       this.sessions = this.sessions.filter(s => s.id !== sessionId);
-      this.filteredSessions = this.filteredSessions.filter(s => s.id !== sessionId);
+      this.applyFilters();
       this.renderSessions();
     } catch (error) {
       toast.error('Failed to delete session');
     }
   }
 
-  private handleSearch(query: string): void {
-    const lowerQuery = query.toLowerCase().trim();
+  private async handleToggleFavorite(sessionId: string): Promise<void> {
+    // Find the session and store original value for rollback
+    const index = this.sessions.findIndex(s => s.id === sessionId);
+    if (index === -1) return;
 
-    if (!lowerQuery) {
-      this.filteredSessions = [...this.sessions];
-    } else {
-      this.filteredSessions = this.sessions.filter(session => {
+    const originalFavorite = this.sessions[index].favorite ?? false;
+    const newFavorite = !originalFavorite;
+
+    // Optimistic UI update
+    this.sessions[index] = { ...this.sessions[index], favorite: newFavorite };
+    this.applyFilters();
+    this.renderSessions();
+
+    try {
+      const result = await sessionsApi.toggleFavorite(sessionId);
+      if (!result.success) {
+        // Revert on failure
+        this.sessions[index] = { ...this.sessions[index], favorite: originalFavorite };
+        this.applyFilters();
+        this.renderSessions();
+        toast.error('Failed to update favorite status');
+      }
+    } catch (error) {
+      // Revert on error
+      this.sessions[index] = { ...this.sessions[index], favorite: originalFavorite };
+      this.applyFilters();
+      this.renderSessions();
+      toast.error('Failed to update favorite status');
+    }
+  }
+
+  private setupFilterButtons(): void {
+    const filterButtons = this.$$('.filter-btn') as NodeListOf<HTMLButtonElement>;
+    filterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const filter = btn.dataset.filter as FilterMode;
+        if (filter && filter !== this.filterMode) {
+          this.filterMode = filter;
+          // Update button styles
+          filterButtons.forEach(b => b.classList.remove('filter-btn--active'));
+          btn.classList.add('filter-btn--active');
+          this.applyFilters();
+          this.renderSessions();
+        }
+      });
+    });
+  }
+
+  private applyFilters(): void {
+    let result = [...this.sessions];
+
+    // Apply collection filter
+    if (this.selectedCollectionId && this.collectionSessionIds.size > 0) {
+      result = result.filter(session => this.collectionSessionIds.has(session.id));
+    }
+
+    // Apply favorites filter
+    if (this.filterMode === 'favorites') {
+      result = result.filter(session => session.favorite === true);
+    }
+
+    // Apply search filter
+    const lowerQuery = this.searchQuery.toLowerCase().trim();
+    if (lowerQuery) {
+      result = result.filter(session => {
         const title = session.userRequest?.toLowerCase() || '';
         const repo = `${session.repositoryOwner || ''}/${session.repositoryName || ''}`.toLowerCase();
         const branch = session.branch?.toLowerCase() || '';
@@ -604,6 +730,12 @@ export class AgentsPage extends Page<PageOptions> {
       });
     }
 
+    this.filteredSessions = result;
+  }
+
+  private handleSearch(query: string): void {
+    this.searchQuery = query;
+    this.applyFilters();
     this.renderSessions();
   }
 
@@ -618,6 +750,7 @@ export class AgentsPage extends Page<PageOptions> {
     this.emptyIcon?.unmount();
     this.repoSelect?.unmount();
     this.branchSelect?.unmount();
+    this.collectionsPanel?.unmount();
 
     // Close session updates subscription
     if (this.sessionUpdatesEventSource) {
