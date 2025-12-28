@@ -64,10 +64,10 @@ export class StatsWidget extends Widget {
       const trend = document.createElement('div');
       trend.className = `stats-widget-trend stats-widget-trend--${this.data.change.type}`;
 
-      const trendIcon = this.data.change.type === 'increase' ? 'arrow-up' :
-                        this.data.change.type === 'decrease' ? 'arrow-down' : 'minus';
+      const trendIcon = this.data.change.type === 'increase' ? 'chevronUp' :
+                        this.data.change.type === 'decrease' ? 'chevronDown' : 'minus';
 
-      const icon = new Icon(trendIcon as 'plus' | 'minus', { size: 'sm' });
+      const icon = new Icon(trendIcon, { size: 'sm' });
       trend.appendChild(icon.getElement());
 
       const trendValue = document.createElement('span');

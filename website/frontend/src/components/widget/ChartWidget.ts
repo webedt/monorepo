@@ -134,8 +134,10 @@ export class ChartWidget extends Widget {
     svg.classList.add('chart-line-svg');
 
     // Create path
+    const dataLength = this.data.length;
     const points = this.data.map((d, i) => {
-      const x = (i / (this.data.length - 1)) * 100;
+      // Handle single data point case to avoid division by zero
+      const x = dataLength === 1 ? 50 : (i / (dataLength - 1)) * 100;
       const y = 50 - ((d.value - minValue) / range) * 45;
       return `${x},${y}`;
     });
@@ -151,7 +153,8 @@ export class ChartWidget extends Widget {
 
     // Add dots
     this.data.forEach((d, i) => {
-      const x = (i / (this.data.length - 1)) * 100;
+      // Handle single data point case to avoid division by zero
+      const x = dataLength === 1 ? 50 : (i / (dataLength - 1)) * 100;
       const y = 50 - ((d.value - minValue) / range) * 45;
 
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');

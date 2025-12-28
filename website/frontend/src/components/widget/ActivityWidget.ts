@@ -7,17 +7,18 @@ import { Widget } from './Widget';
 import { Icon } from '../icon';
 
 import type { WidgetOptions, ActivityItem } from './types';
+import type { IconName } from '../icon';
 
 export interface ActivityWidgetOptions extends WidgetOptions {
   items?: ActivityItem[];
   maxItems?: number;
 }
 
-const TYPE_ICONS: Record<ActivityItem['type'], string> = {
+const TYPE_ICONS: Record<ActivityItem['type'], IconName> = {
   info: 'info',
-  success: 'check',
-  warning: 'alert',
-  error: 'x',
+  success: 'checkCircle',
+  warning: 'alertTriangle',
+  error: 'xCircle',
 };
 
 export class ActivityWidget extends Widget {
@@ -59,8 +60,8 @@ export class ActivityWidget extends Widget {
       // Icon
       const iconWrapper = document.createElement('div');
       iconWrapper.className = 'activity-item-icon';
-      const iconName = item.icon || TYPE_ICONS[item.type];
-      const icon = new Icon(iconName as 'info' | 'check', { size: 'sm' });
+      const iconName = (item.icon as IconName) || TYPE_ICONS[item.type];
+      const icon = new Icon(iconName, { size: 'sm' });
       iconWrapper.appendChild(icon.getElement());
       li.appendChild(iconWrapper);
 

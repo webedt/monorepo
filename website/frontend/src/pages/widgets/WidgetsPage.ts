@@ -78,17 +78,7 @@ export class WidgetsPage extends Page<PageOptions> {
     const wrapper = this.$('.widget-container-wrapper') as HTMLElement;
     if (!wrapper) return;
 
-    this.widgetContainer = new WidgetContainer({
-      onWidgetRemove: (id) => {
-        console.log('Widget removed:', id);
-      },
-      onWidgetResize: (id, size) => {
-        console.log('Widget resized:', id, size);
-      },
-      onWidgetSettings: (id) => {
-        console.log('Widget settings:', id);
-      },
-    });
+    this.widgetContainer = new WidgetContainer();
 
     this.widgetContainer.mount(wrapper);
 

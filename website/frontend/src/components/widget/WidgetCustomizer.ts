@@ -12,6 +12,15 @@ import { widgetStore } from '../../stores/widgetStore';
 import type { ComponentOptions } from '../base';
 import type { WidgetType } from './types';
 
+/**
+ * Escape HTML special characters to prevent XSS
+ */
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 export interface WidgetCustomizerOptions extends ComponentOptions {
   onClose?: () => void;
 }
@@ -117,8 +126,8 @@ export class WidgetCustomizer extends Component<HTMLDivElement> {
       item.innerHTML = `
         <div class="widget-manage-icon"></div>
         <div class="widget-manage-info">
-          <div class="widget-manage-title">${widget.title}</div>
-          <div class="widget-manage-meta">${widget.type} · ${widget.size}</div>
+          <div class="widget-manage-title">${escapeHtml(widget.title)}</div>
+          <div class="widget-manage-meta">${escapeHtml(widget.type)} · ${escapeHtml(widget.size)}</div>
         </div>
         <div class="widget-manage-actions">
           <label class="widget-manage-toggle">
