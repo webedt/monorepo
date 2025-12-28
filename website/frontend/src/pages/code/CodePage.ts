@@ -5,10 +5,11 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, LintingPanel } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { LintingService } from '../../lib/linting';
 import { undoRedoStore } from '../../stores';
 import type { Session } from '../../types';
 import type { UndoRedoState } from '../../stores/undoRedoStore';
@@ -58,6 +59,8 @@ export class CodePage extends Page<CodePageOptions> {
     futureLength: 0,
   };
   private unsubscribeUndoRedo: (() => void) | null = null;
+  private lintingService = new LintingService(300);
+  private lintingPanel: LintingPanel | null = null;
 
   protected render(): string {
     return `
@@ -110,17 +113,20 @@ export class CodePage extends Page<CodePageOptions> {
 
           <main class="editor-panel">
             <div class="tabs-bar"></div>
-            <div class="editor-content">
-              <div class="editor-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                <p>Select a file to view or edit</p>
+            <div class="editor-area">
+              <div class="editor-content">
+                <div class="editor-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                  <p>Select a file to view or edit</p>
+                </div>
+                <div class="editor-wrapper" style="display: none;">
+                  <textarea class="code-editor" spellcheck="false"></textarea>
+                </div>
+                <div class="preview-wrapper" style="display: none;">
+                  <img class="image-preview" alt="Preview">
+                </div>
               </div>
-              <div class="editor-wrapper" style="display: none;">
-                <textarea class="code-editor" spellcheck="false"></textarea>
-              </div>
-              <div class="preview-wrapper" style="display: none;">
-                <img class="image-preview" alt="Preview">
-              </div>
+              <div class="linting-panel-container"></div>
             </div>
           </main>
         </div>
@@ -183,6 +189,18 @@ export class CodePage extends Page<CodePageOptions> {
     if (offlineContainer) {
       this.offlineIndicator = new OfflineIndicator({ position: 'bottom-right' });
       this.offlineIndicator.mount(offlineContainer);
+    }
+
+    // Setup linting panel
+    const lintingContainer = this.$('.linting-panel-container') as HTMLElement;
+    if (lintingContainer) {
+      this.lintingPanel = new LintingPanel({
+        collapsible: true,
+        defaultCollapsed: false,
+        maxHeight: 150,
+        onDiagnosticClick: (diagnostic) => this.navigateToLine(diagnostic.line, diagnostic.column),
+      });
+      this.lintingPanel.mount(lintingContainer);
     }
 
     // Subscribe to offline status changes
@@ -589,6 +607,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.renderTabs();
       this.showEditor();
+
+      // Run initial linting
+      this.lintCurrentFile();
     } catch (error) {
       console.error('Failed to open file:', error);
       toast.error('Failed to open file');
@@ -618,6 +639,9 @@ export class CodePage extends Page<CodePageOptions> {
     this.renderTabs();
     this.updateEditorContent();
     this.subscribeToUndoRedo();
+
+    // Update linting for the new active tab
+    this.lintCurrentFile();
   }
 
   private renderTabs(): void {
@@ -710,6 +734,8 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'flex');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
+    // Clear linting panel when no file is open
+    this.lintingPanel?.clear();
   }
 
   private showEditor(): void {
@@ -722,6 +748,8 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'flex');
+    // Clear linting panel for non-text files
+    this.lintingPanel?.clear();
   }
 
   private handleEditorChange(): void {
@@ -739,8 +767,57 @@ export class CodePage extends Page<CodePageOptions> {
 
         // Track change in undo/redo history
         undoRedoStore.pushChange(tab.path, newContent, editor.selectionStart);
+
+        // Trigger linting
+        this.lintCurrentFile();
       }
     }
+  }
+
+  private lintCurrentFile(): void {
+    if (this.activeTabIndex < 0) {
+      this.lintingPanel?.clear();
+      return;
+    }
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) {
+      this.lintingPanel?.clear();
+      return;
+    }
+
+    this.lintingService.lint(tab.content, tab.name, (result) => {
+      this.lintingPanel?.update(result, tab.name);
+    });
+  }
+
+  private navigateToLine(line: number, column: number): void {
+    const editor = this.$('.code-editor') as HTMLTextAreaElement;
+    if (!editor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const lines = tab.content.split('\n');
+    let position = 0;
+
+    // Calculate position for the target line
+    for (let i = 0; i < line - 1 && i < lines.length; i++) {
+      position += lines[i].length + 1; // +1 for newline
+    }
+
+    // Add column offset (1-indexed to 0-indexed)
+    position += Math.min(column - 1, lines[line - 1]?.length || 0);
+
+    // Focus the editor and set cursor position
+    editor.focus();
+    editor.selectionStart = position;
+    editor.selectionEnd = position;
+
+    // Scroll to make the cursor visible
+    const lineHeight = 20; // Approximate line height
+    const targetScroll = (line - 5) * lineHeight; // Show some context above
+    editor.scrollTop = Math.max(0, targetScroll);
   }
 
   private handleUndo(): void {
@@ -938,5 +1015,12 @@ export class CodePage extends Page<CodePageOptions> {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
     }
+
+    // Cleanup linting panel
+    if (this.lintingPanel) {
+      this.lintingPanel.unmount();
+      this.lintingPanel = null;
+    }
+    this.lintingService.clear();
   }
 }

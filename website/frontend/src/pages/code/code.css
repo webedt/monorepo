@@ -286,6 +286,14 @@
   background: var(--color-bg-primary);
 }
 
+/* Editor Area (contains editor content + linting panel) */
+.editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* Tabs */
 .tabs-bar {
   display: flex;
@@ -357,6 +365,12 @@
   flex: 1;
   overflow: hidden;
   position: relative;
+  min-height: 0; /* Allow flex shrinking */
+}
+
+/* Linting Panel Container */
+.linting-panel-container {
+  flex-shrink: 0;
 }
 
 .editor-empty {

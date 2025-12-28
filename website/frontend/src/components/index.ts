@@ -145,3 +145,7 @@ export type { NewSessionModalOptions } from './new-session-modal';
 // CollectionsPanel
 export { CollectionsPanel } from './collections-panel';
 export type { CollectionsPanelOptions } from './collections-panel';
+
+// LintingPanel
+export { LintingPanel } from './linting-panel';
+export type { LintingPanelOptions } from './linting-panel';
