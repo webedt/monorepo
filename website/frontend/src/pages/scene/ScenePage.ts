@@ -209,15 +209,15 @@ export class ScenePage extends Page<ScenePageOptions> {
                   <div class="property-label">Pivot Point</div>
                   <div class="pivot-section">
                     <div class="pivot-grid-visual">
-                      <button class="pivot-preset" data-pivot="0,0" title="Top Left">◸</button>
-                      <button class="pivot-preset" data-pivot="0.5,0" title="Top Center">△</button>
-                      <button class="pivot-preset" data-pivot="1,0" title="Top Right">◹</button>
-                      <button class="pivot-preset" data-pivot="0,0.5" title="Middle Left">◁</button>
-                      <button class="pivot-preset" data-pivot="0.5,0.5" title="Center">◇</button>
-                      <button class="pivot-preset" data-pivot="1,0.5" title="Middle Right">▷</button>
-                      <button class="pivot-preset" data-pivot="0,1" title="Bottom Left">◺</button>
-                      <button class="pivot-preset" data-pivot="0.5,1" title="Bottom Center">▽</button>
-                      <button class="pivot-preset" data-pivot="1,1" title="Bottom Right">◿</button>
+                      <button class="pivot-preset" data-pivot="0,0" title="Top Left" aria-label="Top Left">◸</button>
+                      <button class="pivot-preset" data-pivot="0.5,0" title="Top Center" aria-label="Top Center">△</button>
+                      <button class="pivot-preset" data-pivot="1,0" title="Top Right" aria-label="Top Right">◹</button>
+                      <button class="pivot-preset" data-pivot="0,0.5" title="Middle Left" aria-label="Middle Left">◁</button>
+                      <button class="pivot-preset" data-pivot="0.5,0.5" title="Center" aria-label="Center">◇</button>
+                      <button class="pivot-preset" data-pivot="1,0.5" title="Middle Right" aria-label="Middle Right">▷</button>
+                      <button class="pivot-preset" data-pivot="0,1" title="Bottom Left" aria-label="Bottom Left">◺</button>
+                      <button class="pivot-preset" data-pivot="0.5,1" title="Bottom Center" aria-label="Bottom Center">▽</button>
+                      <button class="pivot-preset" data-pivot="1,1" title="Bottom Right" aria-label="Bottom Right">◿</button>
                     </div>
                     <div class="pivot-inputs">
                       <div class="transform-row">
@@ -516,9 +516,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     localX = rotatedX;
     localY = rotatedY;
 
-    // 3. Reverse scale
-    localX /= obj.transform.scaleX;
-    localY /= obj.transform.scaleY;
+    // 3. Reverse scale (guard against division by zero)
+    const scaleX = obj.transform.scaleX || 0.001;
+    const scaleY = obj.transform.scaleY || 0.001;
+    localX /= scaleX;
+    localY /= scaleY;
 
     // 4. Add pivot offset (reverse the -pivotOffset translation)
     localX += pivotOffsetX;
@@ -768,15 +770,18 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.ctx.scale(obj.transform.scaleX, obj.transform.scaleY);
     this.ctx.translate(-pivotOffsetX, -pivotOffsetY);
 
+    // Calculate scale factor for UI elements (prevent division by zero)
+    const maxScale = Math.max(Math.abs(obj.transform.scaleX), Math.abs(obj.transform.scaleY), 0.001);
+
     // Draw selection rectangle
     this.ctx.strokeStyle = '#0066ff';
-    this.ctx.lineWidth = 2 / Math.max(obj.transform.scaleX, obj.transform.scaleY);
+    this.ctx.lineWidth = 2 / maxScale;
     this.ctx.setLineDash([5, 5]);
     this.ctx.strokeRect(-2, -2, dims.width + 4, dims.height + 4);
     this.ctx.setLineDash([]);
 
     // Draw corner handles
-    const handleSize = 8 / Math.max(obj.transform.scaleX, obj.transform.scaleY);
+    const handleSize = 8 / maxScale;
     this.ctx.fillStyle = '#0066ff';
     this.ctx.fillRect(-handleSize / 2, -handleSize / 2, handleSize, handleSize);
     this.ctx.fillRect(dims.width - handleSize / 2, -handleSize / 2, handleSize, handleSize);
@@ -785,11 +790,11 @@ export class ScenePage extends Page<ScenePageOptions> {
 
     // Draw pivot point indicator
     this.ctx.translate(pivotOffsetX, pivotOffsetY);
-    const pivotSize = 6 / Math.max(obj.transform.scaleX, obj.transform.scaleY);
+    const pivotSize = 6 / maxScale;
 
     // Pivot crosshair
     this.ctx.strokeStyle = '#ff6600';
-    this.ctx.lineWidth = 2 / Math.max(obj.transform.scaleX, obj.transform.scaleY);
+    this.ctx.lineWidth = 2 / maxScale;
     this.ctx.beginPath();
     this.ctx.moveTo(-pivotSize, 0);
     this.ctx.lineTo(pivotSize, 0);
@@ -897,12 +902,21 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (pivotXInput) pivotXInput.value = String(obj.transform.pivotX ?? 0.5);
     if (pivotYInput) pivotYInput.value = String(obj.transform.pivotY ?? 0.5);
 
-    // Highlight active pivot preset
+    // Highlight active pivot preset (use approximate comparison for floating-point)
     const pivotPresets = this.$$('.pivot-preset');
-    const currentPivot = `${obj.transform.pivotX ?? 0.5},${obj.transform.pivotY ?? 0.5}`;
+    const currentPivotX = obj.transform.pivotX ?? 0.5;
+    const currentPivotY = obj.transform.pivotY ?? 0.5;
+    const EPSILON = 0.001;
     pivotPresets.forEach((btn) => {
       const pivotData = (btn as HTMLButtonElement).dataset.pivot;
-      btn.classList.toggle('active', pivotData === currentPivot);
+      if (!pivotData) {
+        btn.classList.remove('active');
+        return;
+      }
+      const [presetX, presetY] = pivotData.split(',').map(Number);
+      const isActive = Math.abs(presetX - currentPivotX) < EPSILON &&
+                       Math.abs(presetY - currentPivotY) < EPSILON;
+      btn.classList.toggle('active', isActive);
     });
   }
 
