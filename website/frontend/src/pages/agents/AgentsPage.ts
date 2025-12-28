@@ -9,6 +9,8 @@ import { sessionsApi, githubApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
 
+type FilterMode = 'all' | 'favorites';
+
 export class AgentsPage extends Page<PageOptions> {
   readonly route = '/agents';
   readonly title = 'Agent Sessions';
@@ -24,6 +26,8 @@ export class AgentsPage extends Page<PageOptions> {
   private branchSelect: SearchableSelect | null = null;
   private requestTextArea: TextArea | null = null;
   private isLoading = true;
+  private filterMode: FilterMode = 'all';
+  private searchQuery = '';
 
   // Inline form state
   private repos: Repository[] = [];
@@ -48,6 +52,15 @@ export class AgentsPage extends Page<PageOptions> {
             <p class="agents-subtitle">Manage your AI coding sessions</p>
           </div>
           <div class="agents-header-right">
+            <div class="filter-buttons">
+              <button class="filter-btn filter-btn--active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="favorites">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+                Favorites
+              </button>
+            </div>
             <div class="search-container"></div>
             <a href="#/trash" class="trash-link" title="View deleted sessions">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -183,6 +196,9 @@ export class AgentsPage extends Page<PageOptions> {
 
     // Subscribe to real-time session list updates
     this.subscribeToSessionUpdates();
+
+    // Setup filter button handlers
+    this.setupFilterButtons();
 
     // Load GitHub repos for inline form
     this.loadReposForInlineForm();
@@ -370,7 +386,7 @@ export class AgentsPage extends Page<PageOptions> {
         const session = data.session as Session;
         // Add new session to the beginning of the list
         this.sessions.unshift(session);
-        this.filteredSessions = [...this.sessions];
+        this.applyFilters();
         this.renderSessions();
         console.log('[AgentsPage] Session created:', session.id);
       } catch (error) {
@@ -386,7 +402,7 @@ export class AgentsPage extends Page<PageOptions> {
         const index = this.sessions.findIndex(s => s.id === updatedSession.id);
         if (index !== -1) {
           this.sessions[index] = { ...this.sessions[index], ...updatedSession };
-          this.filteredSessions = [...this.sessions];
+          this.applyFilters();
           this.renderSessions();
           console.log('[AgentsPage] Session updated:', updatedSession.id, updatedSession);
         }
@@ -403,7 +419,7 @@ export class AgentsPage extends Page<PageOptions> {
         const index = this.sessions.findIndex(s => s.id === updatedSession.id);
         if (index !== -1) {
           this.sessions[index] = { ...this.sessions[index], ...updatedSession };
-          this.filteredSessions = [...this.sessions];
+          this.applyFilters();
           this.renderSessions();
           console.log('[AgentsPage] Session status changed:', updatedSession.id, updatedSession.status);
         }
@@ -438,7 +454,7 @@ export class AgentsPage extends Page<PageOptions> {
     try {
       const response = await sessionsApi.list();
       this.sessions = response.sessions || [];
-      this.filteredSessions = [...this.sessions];
+      this.applyFilters();
       this.renderSessions();
     } catch (error) {
       toast.error('Failed to load agent sessions');
@@ -503,11 +519,18 @@ export class AgentsPage extends Page<PageOptions> {
     const date = new Date(session.createdAt).toLocaleDateString();
     const status = session.status;
     const statusClass = `status-${status}`;
+    const isFavorite = session.favorite ?? false;
+    const starIcon = isFavorite
+      ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
+      : `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
 
     cardEl.innerHTML = `
       <div class="session-card-header">
         <span class="session-status ${statusClass}">${status}</span>
         <div class="session-card-actions">
+          <button class="session-favorite-btn ${isFavorite ? 'session-favorite-btn--active' : ''}" title="${isFavorite ? 'Remove from favorites' : 'Add to favorites'}">
+            ${starIcon}
+          </button>
           <span class="session-date">${date}</span>
           <button class="session-delete-btn" title="Delete session">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -522,6 +545,13 @@ export class AgentsPage extends Page<PageOptions> {
         <span class="session-branch">${this.escapeHtml(branch)}</span>
       </div>
     `;
+
+    // Favorite button handler
+    const favoriteBtn = cardEl.querySelector('.session-favorite-btn');
+    favoriteBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.handleToggleFavorite(session.id);
+    });
 
     // Delete button handler
     const deleteBtn = cardEl.querySelector('.session-delete-btn');
@@ -542,20 +572,59 @@ export class AgentsPage extends Page<PageOptions> {
       await sessionsApi.delete(sessionId);
       toast.success('Session moved to trash');
       this.sessions = this.sessions.filter(s => s.id !== sessionId);
-      this.filteredSessions = this.filteredSessions.filter(s => s.id !== sessionId);
+      this.applyFilters();
       this.renderSessions();
     } catch (error) {
       toast.error('Failed to delete session');
     }
   }
 
-  private handleSearch(query: string): void {
-    const lowerQuery = query.toLowerCase().trim();
+  private async handleToggleFavorite(sessionId: string): Promise<void> {
+    try {
+      const result = await sessionsApi.toggleFavorite(sessionId);
+      if (result.success && result.session) {
+        // Update the session in our list
+        const index = this.sessions.findIndex(s => s.id === sessionId);
+        if (index !== -1) {
+          this.sessions[index] = { ...this.sessions[index], favorite: result.session.favorite };
+        }
+        this.applyFilters();
+        this.renderSessions();
+      }
+    } catch (error) {
+      toast.error('Failed to update favorite status');
+    }
+  }
 
-    if (!lowerQuery) {
-      this.filteredSessions = [...this.sessions];
-    } else {
-      this.filteredSessions = this.sessions.filter(session => {
+  private setupFilterButtons(): void {
+    const filterButtons = this.$$('.filter-btn') as NodeListOf<HTMLButtonElement>;
+    filterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const filter = btn.dataset.filter as FilterMode;
+        if (filter && filter !== this.filterMode) {
+          this.filterMode = filter;
+          // Update button styles
+          filterButtons.forEach(b => b.classList.remove('filter-btn--active'));
+          btn.classList.add('filter-btn--active');
+          this.applyFilters();
+          this.renderSessions();
+        }
+      });
+    });
+  }
+
+  private applyFilters(): void {
+    let result = [...this.sessions];
+
+    // Apply favorites filter
+    if (this.filterMode === 'favorites') {
+      result = result.filter(session => session.favorite === true);
+    }
+
+    // Apply search filter
+    const lowerQuery = this.searchQuery.toLowerCase().trim();
+    if (lowerQuery) {
+      result = result.filter(session => {
         const title = session.userRequest?.toLowerCase() || '';
         const repo = `${session.repositoryOwner || ''}/${session.repositoryName || ''}`.toLowerCase();
         const branch = session.branch?.toLowerCase() || '';
@@ -566,6 +635,12 @@ export class AgentsPage extends Page<PageOptions> {
       });
     }
 
+    this.filteredSessions = result;
+  }
+
+  private handleSearch(query: string): void {
+    this.searchQuery = query;
+    this.applyFilters();
     this.renderSessions();
   }
 

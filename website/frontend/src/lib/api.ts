@@ -482,6 +482,9 @@ export const sessionsApi = {
 
   syncEvents: (id: string) =>
     fetchApi(`/api/sessions/${id}/sync-events`, { method: 'POST' }),
+
+  toggleFavorite: (id: string) =>
+    fetchApi<{ success: boolean; session: Session }>(`/api/sessions/${id}/favorite`, { method: 'POST' }),
 };
 
 // ============================================================================

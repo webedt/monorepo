@@ -72,6 +72,7 @@ export interface Session {
   branch?: string;
   autoCommit?: boolean;
   locked?: boolean;
+  favorite?: boolean;
   createdAt: string;
   completedAt?: string;
   deletedAt?: string;
