@@ -466,6 +466,13 @@ export type {
   NewCommunityChannel,
   ChannelMessage,
   NewChannelMessage,
+  // Taxonomy system types
+  Taxonomy,
+  NewTaxonomy,
+  TaxonomyTerm,
+  NewTaxonomyTerm,
+  ItemTaxonomy,
+  NewItemTaxonomy,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -491,6 +498,10 @@ export {
   // Community channels tables
   communityChannels,
   channelMessages,
+  // Taxonomy system tables
+  taxonomies,
+  taxonomyTerms,
+  itemTaxonomies,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
