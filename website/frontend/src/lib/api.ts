@@ -1542,6 +1542,107 @@ export const announcementsApi = {
 };
 
 // ============================================================================
+// Diffs API (Branch comparison and visualization)
+// ============================================================================
+export interface DiffLine {
+  type: 'addition' | 'deletion' | 'context' | 'header';
+  content: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface DiffHunk {
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: DiffLine[];
+}
+
+export interface FileDiff {
+  oldPath: string;
+  newPath: string;
+  status: 'added' | 'deleted' | 'modified' | 'renamed';
+  hunks: DiffHunk[];
+  isBinary: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface ParsedDiff {
+  files: FileDiff[];
+  totalAdditions: number;
+  totalDeletions: number;
+  totalFilesChanged: number;
+}
+
+export interface CompareResult {
+  diff: ParsedDiff;
+  rawDiff: string;
+  baseBranch: string;
+  headBranch: string;
+  aheadBy: number;
+  behindBy: number;
+  mergeBaseCommit: string;
+}
+
+export interface FileChange {
+  filename: string;
+  status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+  additions: number;
+  deletions: number;
+  changes: number;
+  previousFilename?: string;
+}
+
+export interface DiffStats {
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  totalChanges: number;
+  commits: number;
+  aheadBy: number;
+  behindBy: number;
+  status: string;
+}
+
+export const diffsApi = {
+  compare: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<CompareResult>>(`/api/diffs/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+
+  getChangedFiles: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<{
+      files: FileChange[];
+      totalFiles: number;
+      totalAdditions: number;
+      totalDeletions: number;
+      aheadBy: number;
+      behindBy: number;
+    }>>(`/api/diffs/repos/${owner}/${repo}/changed-files/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+
+  getFileDiff: (owner: string, repo: string, base: string, head: string, filePath: string) =>
+    fetchApi<ApiResponse<{
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      changes: number;
+      patch?: string;
+      rawDiff: string;
+      parsedDiff: FileDiff | null;
+      previousFilename?: string;
+    }>>(`/api/diffs/repos/${owner}/${repo}/file-diff/${encodeURIComponent(base)}/${encodeURIComponent(head)}/${filePath}`)
+      .then(r => r.data!),
+
+  getStats: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<DiffStats>>(`/api/diffs/repos/${owner}/${repo}/stats/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+};
+
+// ============================================================================
 // Cloud Saves API (Game save synchronization across devices)
 // ============================================================================
 export const cloudSavesApi = {
