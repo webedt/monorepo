@@ -508,6 +508,15 @@ export type {
   NewCloudSaveVersion,
   CloudSaveSyncLog,
   NewCloudSaveSyncLog,
+  // Snippets types
+  Snippet,
+  NewSnippet,
+  SnippetCollection,
+  NewSnippetCollection,
+  SnippetInCollection,
+  NewSnippetInCollection,
+  SnippetLanguage,
+  SnippetCategory,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -557,6 +566,12 @@ export {
   cloudSaves,
   cloudSaveVersions,
   cloudSaveSyncLog,
+  // Snippets tables
+  snippets,
+  snippetCollections,
+  snippetsInCollections,
+  SNIPPET_LANGUAGES,
+  SNIPPET_CATEGORIES,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

@@ -1078,3 +1078,109 @@ export type CloudSaveVersion = typeof cloudSaveVersions.$inferSelect;
 export type NewCloudSaveVersion = typeof cloudSaveVersions.$inferInsert;
 export type CloudSaveSyncLog = typeof cloudSaveSyncLog.$inferSelect;
 export type NewCloudSaveSyncLog = typeof cloudSaveSyncLog.$inferInsert;
+
+// ============================================================================
+// SNIPPETS - User code snippets and templates for common patterns
+// ============================================================================
+
+// Supported programming languages for snippets
+export const SNIPPET_LANGUAGES = [
+  'javascript', 'typescript', 'python', 'java', 'csharp', 'cpp', 'c',
+  'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'scala', 'html',
+  'css', 'scss', 'sql', 'bash', 'powershell', 'yaml', 'json', 'xml',
+  'markdown', 'dockerfile', 'terraform', 'graphql', 'other'
+] as const;
+
+export type SnippetLanguage = typeof SNIPPET_LANGUAGES[number];
+
+// Snippet categories for organization
+export const SNIPPET_CATEGORIES = [
+  'function', 'class', 'component', 'hook', 'utility', 'api',
+  'database', 'testing', 'config', 'boilerplate', 'algorithm',
+  'pattern', 'snippet', 'template', 'other'
+] as const;
+
+export type SnippetCategory = typeof SNIPPET_CATEGORIES[number];
+
+// Snippets - User-created code snippets and templates
+export const snippets = pgTable('snippets', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  // Snippet content
+  title: text('title').notNull(),
+  description: text('description'),
+  code: text('code').notNull(),
+
+  // Metadata
+  language: text('language').notNull().default('other'), // Programming language
+  category: text('category').notNull().default('snippet'), // Category for organization
+  tags: json('tags').$type<string[]>().default([]), // User-defined tags
+
+  // Template variables (for parameterized snippets)
+  // Format: { "variableName": { "description": "...", "defaultValue": "..." } }
+  variables: json('variables').$type<Record<string, {
+    description?: string;
+    defaultValue?: string;
+    placeholder?: string;
+  }>>(),
+
+  // Usage and status
+  usageCount: integer('usage_count').default(0).notNull(),
+  isFavorite: boolean('is_favorite').default(false).notNull(),
+  isPublic: boolean('is_public').default(false).notNull(), // Share with community
+
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at'),
+}, (table) => [
+  // Index for faster lookups by user
+  uniqueIndex('snippets_user_title_idx').on(table.userId, table.title),
+]);
+
+// Snippet Collections - Organize snippets into folders/categories
+export const snippetCollections = pgTable('snippet_collections', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  name: text('name').notNull(),
+  description: text('description'),
+  color: text('color'), // Hex color for visual distinction (e.g., '#FF5733')
+  icon: text('icon'), // Icon identifier (e.g., 'folder', 'code', 'star')
+
+  sortOrder: integer('sort_order').default(0).notNull(),
+  isDefault: boolean('is_default').default(false).notNull(), // Default collection for new snippets
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('snippet_collections_user_name_idx').on(table.userId, table.name),
+]);
+
+// Snippets in Collections - Junction table for many-to-many relationship
+export const snippetsInCollections = pgTable('snippets_in_collections', {
+  id: text('id').primaryKey(), // UUID
+  snippetId: text('snippet_id')
+    .notNull()
+    .references(() => snippets.id, { onDelete: 'cascade' }),
+  collectionId: text('collection_id')
+    .notNull()
+    .references(() => snippetCollections.id, { onDelete: 'cascade' }),
+
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('snippets_in_collections_unique_idx').on(table.snippetId, table.collectionId),
+]);
+
+// Type exports for Snippets
+export type Snippet = typeof snippets.$inferSelect;
+export type NewSnippet = typeof snippets.$inferInsert;
+export type SnippetCollection = typeof snippetCollections.$inferSelect;
+export type NewSnippetCollection = typeof snippetCollections.$inferInsert;
+export type SnippetInCollection = typeof snippetsInCollections.$inferSelect;
+export type NewSnippetInCollection = typeof snippetsInCollections.$inferInsert;
