@@ -5,7 +5,8 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, TransformEditor } from '../../components';
+import type { Transform } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
@@ -14,14 +15,6 @@ import './scene.css';
 
 type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty';
 type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
-
-interface Transform {
-  x: number;
-  y: number;
-  rotation: number;
-  scaleX: number;
-  scaleY: number;
-}
 
 interface SceneObject {
   id: string;
@@ -58,6 +51,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
+  private transformEditor: TransformEditor | null = null;
 
   // Scene state
   private sceneCanvas: HTMLCanvasElement | null = null;
@@ -183,24 +177,7 @@ export class ScenePage extends Page<ScenePageOptions> {
 
                 <div class="property-section">
                   <div class="property-label">Transform</div>
-                  <div class="transform-grid">
-                    <div class="transform-row">
-                      <label>X</label>
-                      <input type="number" class="property-input transform-x" value="0">
-                      <label>Y</label>
-                      <input type="number" class="property-input transform-y" value="0">
-                    </div>
-                    <div class="transform-row">
-                      <label>W</label>
-                      <input type="number" class="property-input transform-w" value="100">
-                      <label>H</label>
-                      <input type="number" class="property-input transform-h" value="100">
-                    </div>
-                    <div class="transform-row">
-                      <label>Rotation</label>
-                      <input type="number" class="property-input transform-rotation" value="0" step="1">
-                    </div>
-                  </div>
+                  <div class="transform-editor-container"></div>
                 </div>
 
                 <div class="property-section">
@@ -712,20 +689,73 @@ export class ScenePage extends Page<ScenePageOptions> {
 
     // Update form fields
     const nameInput = this.$('.object-name') as HTMLInputElement;
-    const xInput = this.$('.transform-x') as HTMLInputElement;
-    const yInput = this.$('.transform-y') as HTMLInputElement;
-    const rotationInput = this.$('.transform-rotation') as HTMLInputElement;
     const opacitySlider = this.$('.opacity-slider') as HTMLInputElement;
+    const sliderValue = this.$('.slider-value') as HTMLElement;
     const visibleCheckbox = this.$('.visible-checkbox') as HTMLInputElement;
     const lockedCheckbox = this.$('.locked-checkbox') as HTMLInputElement;
 
     if (nameInput) nameInput.value = obj.name;
-    if (xInput) xInput.value = String(Math.round(obj.transform.x));
-    if (yInput) yInput.value = String(Math.round(obj.transform.y));
-    if (rotationInput) rotationInput.value = String(obj.transform.rotation);
     if (opacitySlider) opacitySlider.value = String(obj.opacity * 100);
+    if (sliderValue) sliderValue.textContent = `${Math.round(obj.opacity * 100)}%`;
     if (visibleCheckbox) visibleCheckbox.checked = obj.visible;
     if (lockedCheckbox) lockedCheckbox.checked = obj.locked;
+
+    // Update or create TransformEditor
+    this.updateTransformEditor(obj);
+  }
+
+  private updateTransformEditor(obj: SceneObject): void {
+    const container = this.$('.transform-editor-container') as HTMLElement;
+    if (!container) return;
+
+    // Remove existing editor if it exists
+    if (this.transformEditor) {
+      this.transformEditor.unmount();
+      this.transformEditor = null;
+    }
+
+    // Create new transform editor with current object's transform
+    this.transformEditor = new TransformEditor({
+      transform: obj.transform,
+      linkScale: true,
+      showPosition: true,
+      showRotation: true,
+      showScale: true,
+      compact: true,
+      showLabels: false,
+      onChange: (transform: Transform) => {
+        this.handleTransformChange(transform);
+      },
+    });
+
+    this.transformEditor.mount(container);
+  }
+
+  private handleTransformChange(transform: Transform): void {
+    if (!this.selectedObjectId) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Apply snapping if enabled
+    let x = transform.x;
+    let y = transform.y;
+
+    if (this.snapToGrid) {
+      x = Math.round(x / this.gridSize) * this.gridSize;
+      y = Math.round(y / this.gridSize) * this.gridSize;
+    }
+
+    obj.transform = {
+      x,
+      y,
+      rotation: transform.rotation,
+      scaleX: transform.scaleX,
+      scaleY: transform.scaleY,
+    };
+
+    this.hasUnsavedChanges = true;
+    this.renderScene();
   }
 
   private updateStatusBar(): void {
@@ -915,6 +945,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    if (this.transformEditor) {
+      this.transformEditor.unmount();
+      this.transformEditor = null;
     }
   }
 }
