@@ -120,6 +120,9 @@ export class CoordinateSystem {
   private _up: Vector3 | undefined;
   private _right: Vector3 | undefined;
   private _forward: Vector3 | undefined;
+  private _down: Vector3 | undefined;
+  private _left: Vector3 | undefined;
+  private _back: Vector3 | undefined;
 
   constructor(config: CoordinateSystemConfig = DEFAULT_COORDINATE_SYSTEM) {
     this.config = config;
@@ -193,17 +196,17 @@ export class CoordinateSystem {
 
   /** Down direction (opposite of up) */
   get down(): Vector3 {
-    return this.up.negate();
+    return this._down ??= this.up.negate();
   }
 
   /** Left direction (opposite of right) */
   get left(): Vector3 {
-    return this.right.negate();
+    return this._left ??= this.right.negate();
   }
 
   /** Back direction (opposite of forward) */
   get back(): Vector3 {
-    return this.forward.negate();
+    return this._back ??= this.forward.negate();
   }
 
   /** Check if this is a right-handed system */

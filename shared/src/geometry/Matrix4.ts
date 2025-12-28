@@ -488,10 +488,16 @@ export class Matrix4 {
 
   // ==================== Vector Transformation ====================
 
-  /** Transform a point (applies translation) */
+  /**
+   * Transform a point (applies translation).
+   * Performs perspective division if w component is non-zero.
+   * When w is near zero (e.g., point at infinity), defaults to no perspective
+   * division (invW = 1) to avoid numerical instability.
+   */
   transformPoint(v: Vector3Like): Vector3 {
     const e = this.elements;
     const w = e[3] * v.x + e[7] * v.y + e[11] * v.z + e[15];
+    // Default to no perspective division when w is near zero to avoid NaN/Infinity
     const invW = Math.abs(w) < EPSILON ? 1 : 1 / w;
 
     return new Vector3(
@@ -532,6 +538,11 @@ export class Matrix4 {
     const sx = Math.sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
     const sy = Math.sqrt(e[4] * e[4] + e[5] * e[5] + e[6] * e[6]);
     const sz = Math.sqrt(e[8] * e[8] + e[9] * e[9] + e[10] * e[10]);
+
+    // Guard against zero scale which would cause division by zero
+    if (sx < EPSILON || sy < EPSILON || sz < EPSILON) {
+      throw new Error('Cannot decompose matrix with zero scale');
+    }
 
     // Determine if we have a negative scale (reflection)
     const det = this.determinant();

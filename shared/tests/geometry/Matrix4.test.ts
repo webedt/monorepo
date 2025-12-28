@@ -265,6 +265,14 @@ describe('Matrix4', () => {
       assert.ok(Math.abs(decomposed.scale.y - scale.y) < 0.0001);
       assert.ok(Math.abs(decomposed.scale.z - scale.z) < 0.0001);
     });
+
+    it('should throw on zero scale', () => {
+      // Matrix with zero scale on X axis
+      const m = Matrix4.scale(0, 1, 1);
+      assert.throws(() => m.decompose(), {
+        message: 'Cannot decompose matrix with zero scale'
+      });
+    });
   });
 
   describe('getters', () => {

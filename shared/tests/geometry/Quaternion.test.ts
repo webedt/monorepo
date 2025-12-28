@@ -236,6 +236,47 @@ describe('Quaternion', () => {
       assert.strictEqual(euler.order, 'XYZ');
     });
 
+    it('should handle gimbal lock at +90 degrees pitch (XYZ order)', () => {
+      // When pitch (Y) is at +90 degrees, we have gimbal lock
+      const q = Quaternion.fromEuler(0, Math.PI / 2, 0, 'XYZ');
+      const euler = q.toEuler('XYZ');
+
+      // Y should be approximately PI/2
+      assert.ok(Math.abs(euler.y - Math.PI / 2) < 0.0001);
+      // Result should still be valid numbers
+      assert.ok(!isNaN(euler.x));
+      assert.ok(!isNaN(euler.z));
+    });
+
+    it('should handle gimbal lock at -90 degrees pitch (XYZ order)', () => {
+      // When pitch (Y) is at -90 degrees, we have gimbal lock
+      const q = Quaternion.fromEuler(0, -Math.PI / 2, 0, 'XYZ');
+      const euler = q.toEuler('XYZ');
+
+      // Y should be approximately -PI/2
+      assert.ok(Math.abs(euler.y + Math.PI / 2) < 0.0001);
+      // Result should still be valid numbers
+      assert.ok(!isNaN(euler.x));
+      assert.ok(!isNaN(euler.z));
+    });
+
+    it('should handle gimbal lock with combined rotations', () => {
+      // Test gimbal lock with non-zero X and Z rotations
+      // At gimbal lock, X and Z rotations combine into a single axis, so
+      // the Euler representation is not unique. We just verify the output
+      // is valid (no NaN/Infinity) and represents a valid rotation.
+      const q = Quaternion.fromEuler(0.5, Math.PI / 2, 0.3, 'XYZ');
+      const euler = q.toEuler('XYZ');
+
+      // Result should still be valid (no NaN or Infinity)
+      assert.ok(Number.isFinite(euler.x), 'euler.x should be finite');
+      assert.ok(Number.isFinite(euler.y), 'euler.y should be finite');
+      assert.ok(Number.isFinite(euler.z), 'euler.z should be finite');
+      // The reconstructed quaternion should be a valid unit quaternion
+      const reconstructed = Quaternion.fromEuler(euler);
+      assert.ok(reconstructed.isUnit(), 'reconstructed should be unit quaternion');
+    });
+
     it('should convert to tuple', () => {
       const q = new Quaternion(1, 2, 3, 4);
       assert.deepStrictEqual([...q.toTuple()], [1, 2, 3, 4]);

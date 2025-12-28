@@ -124,9 +124,15 @@ export interface CoordinateSystemConfig {
   readonly right: SignedAxis;
 }
 
+// ==================== Future Geometry Primitives ====================
+// The following types are defined for future use in intersection testing,
+// raycasting, and collision detection. They are not currently used but
+// provide a foundation for planned geometric operations.
+
 /**
  * Plane in 3D space represented by normal and distance from origin.
  * The plane equation is: normal · point + distance = 0
+ * @future Planned for use in intersection tests and frustum culling.
  */
 export interface Plane {
   readonly normal: Vector3Like;
@@ -135,6 +141,7 @@ export interface Plane {
 
 /**
  * Ray in 3D space with origin and direction.
+ * @future Planned for raycasting and picking operations.
  */
 export interface Ray {
   readonly origin: Vector3Like;
@@ -143,6 +150,7 @@ export interface Ray {
 
 /**
  * Sphere in 3D space with center and radius.
+ * @future Planned for bounding sphere tests and collision detection.
  */
 export interface Sphere {
   readonly center: Vector3Like;
@@ -151,6 +159,7 @@ export interface Sphere {
 
 /**
  * Result of a ray intersection test.
+ * @future Planned return type for raycast operations.
  */
 export interface RayIntersection {
   readonly hit: boolean;
