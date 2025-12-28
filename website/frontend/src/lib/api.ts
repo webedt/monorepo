@@ -368,6 +368,30 @@ export const sessionsApi = {
     fetchApi<ApiResponse<{ sessions: Session[] }>>('/api/sessions')
       .then(r => r.data!),
 
+  search: (params: {
+    q: string;
+    limit?: number;
+    offset?: number;
+    status?: string;
+    favorite?: boolean;
+  }) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('q', params.q);
+    if (params.limit) queryParams.append('limit', String(params.limit));
+    if (params.offset) queryParams.append('offset', String(params.offset));
+    if (params.status) queryParams.append('status', params.status);
+    if (params.favorite !== undefined) queryParams.append('favorite', String(params.favorite));
+    return fetchApi<ApiResponse<{
+      sessions: Session[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+      query: string;
+    }>>(`/api/sessions/search?${queryParams.toString()}`)
+      .then(r => r.data!);
+  },
+
   listDeleted: (params?: { limit?: number; offset?: number }) => {
     const queryParams = new URLSearchParams();
     if (params?.limit) queryParams.append('limit', String(params.limit));

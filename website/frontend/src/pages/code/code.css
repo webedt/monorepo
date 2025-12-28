@@ -113,6 +113,47 @@
   50% { opacity: 0.5; }
 }
 
+/* Undo/Redo Controls */
+.undo-redo-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.undo-btn,
+.redo-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.undo-btn:hover:not(:disabled),
+.redo-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.undo-btn:disabled,
+.redo-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.undo-btn svg,
+.redo-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Offline Indicator Container */
 .offline-indicator-container {
   position: relative;
