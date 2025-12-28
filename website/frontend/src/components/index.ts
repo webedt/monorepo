@@ -149,3 +149,7 @@ export type { CollectionsPanelOptions } from './collections-panel';
 // CollaborativeCursors
 export { CollaborativeCursors } from './collaborative-cursors';
 export type { CollaborativeCursorsOptions } from './collaborative-cursors';
+
+// CommitDialog
+export { CommitDialog } from './commit-dialog';
+export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
