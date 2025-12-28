@@ -12,9 +12,9 @@
  */
 
 import { Component } from '../base';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorState, Compartment, EditorSelection } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo, undoDepth, redoDepth } from '@codemirror/commands';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches, selectNextOccurrence, selectSelectionMatches } from '@codemirror/search';
 import { javascript } from '@codemirror/lang-javascript';
@@ -28,12 +28,22 @@ import type { Extension } from '@codemirror/state';
 import type { KeyBinding } from '@codemirror/view';
 import type { LanguageSupport } from '@codemirror/language';
 
+/**
+ * Serialized editor state for saving/restoring per-tab history
+ */
+export interface EditorStateSnapshot {
+  content: string;
+  selection: { anchor: number; head: number }[];
+  scrollTop: number;
+  scrollLeft: number;
+}
+
 export interface MultiCursorEditorOptions {
   content?: string;
   language?: string;
   readOnly?: boolean;
   lineNumbers?: boolean;
-  onChange?: (content: string, cursorPosition: number) => void;
+  onChange?: (content: string) => void;
   onSave?: (content: string) => void;
 }
 
@@ -234,8 +244,7 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
       EditorView.updateListener.of((update) => {
         if (update.docChanged && this.options.onChange) {
           const content = update.state.doc.toString();
-          const cursorPos = update.state.selection.main.head;
-          this.options.onChange(content, cursorPos);
+          this.options.onChange(content);
         }
       }),
     ];
@@ -297,7 +306,7 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
   }
 
   /**
-   * Set the editor content
+   * Set the editor content (adds to undo history)
    */
   setContent(content: string): void {
     if (!this.view) {
@@ -314,6 +323,180 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
         to: this.view.state.doc.length,
         insert: content,
       },
+    });
+  }
+
+  /**
+   * Load content without adding to undo history (for tab switches)
+   * This creates a fresh editor state, so undo history is reset
+   */
+  loadContent(content: string, language?: string): void {
+    if (!this.view) {
+      this.options.content = content;
+      if (language) this.options.language = language;
+      return;
+    }
+
+    // Create a fresh state with the content, resetting history
+    // This ensures each tab has its own independent undo/redo history
+    this.view.setState(this.createStateWithContent(content, language || this.options.language || 'text'));
+  }
+
+  /**
+   * Create a fresh editor state with content
+   */
+  private createStateWithContent(content: string, language: string): EditorState {
+    const customTheme = EditorView.theme({
+      '&': {
+        height: '100%',
+        fontSize: '13px',
+        backgroundColor: 'var(--color-bg-primary)',
+      },
+      '.cm-content': {
+        fontFamily: 'var(--font-mono)',
+        padding: 'var(--spacing-md)',
+        caretColor: 'var(--color-primary)',
+      },
+      '.cm-cursor': {
+        borderLeftColor: 'var(--color-primary)',
+        borderLeftWidth: '2px',
+      },
+      '.cm-cursor.cm-cursor-secondary': {
+        borderLeftColor: 'var(--color-secondary, #888)',
+        borderLeftWidth: '2px',
+        borderLeftStyle: 'solid',
+      },
+      '.cm-selectionBackground': {
+        backgroundColor: 'var(--color-selection, rgba(66, 133, 244, 0.3)) !important',
+      },
+      '&.cm-focused .cm-selectionBackground': {
+        backgroundColor: 'var(--color-selection, rgba(66, 133, 244, 0.3)) !important',
+      },
+      '.cm-gutters': {
+        backgroundColor: 'var(--color-bg-secondary)',
+        borderRight: '1px solid var(--color-border)',
+        color: 'var(--color-text-muted)',
+      },
+      '.cm-lineNumbers .cm-gutterElement': {
+        padding: '0 8px 0 16px',
+        minWidth: '40px',
+      },
+      '.cm-activeLineGutter': {
+        backgroundColor: 'var(--color-bg-hover)',
+        color: 'var(--color-text-primary)',
+      },
+      '.cm-activeLine': {
+        backgroundColor: 'var(--color-bg-hover, rgba(0, 0, 0, 0.05))',
+      },
+      '.cm-matchingBracket': {
+        backgroundColor: 'var(--color-bracket-match, rgba(66, 133, 244, 0.2))',
+        outline: '1px solid var(--color-primary, #4285f4)',
+      },
+      '.cm-searchMatch': {
+        backgroundColor: 'var(--color-search-match, rgba(255, 213, 0, 0.4))',
+      },
+      '.cm-searchMatch.cm-searchMatch-selected': {
+        backgroundColor: 'var(--color-search-match-selected, rgba(255, 165, 0, 0.6))',
+      },
+      '.cm-foldGutter': {
+        width: '12px',
+      },
+      '.cm-scroller': {
+        overflow: 'auto',
+        fontFamily: 'var(--font-mono)',
+        lineHeight: '1.6',
+      },
+      '.cm-tooltip': {
+        backgroundColor: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-md)',
+      },
+      '.cm-panels': {
+        backgroundColor: 'var(--color-bg-secondary)',
+        borderBottom: '1px solid var(--color-border)',
+      },
+      '.cm-panel.cm-search': {
+        padding: 'var(--spacing-sm)',
+      },
+      '.cm-panel.cm-search input': {
+        backgroundColor: 'var(--color-bg-primary)',
+        color: 'var(--color-text-primary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '4px 8px',
+      },
+      '.cm-panel.cm-search button': {
+        backgroundColor: 'var(--color-bg-tertiary)',
+        color: 'var(--color-text-primary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '4px 8px',
+        cursor: 'pointer',
+      },
+      '.cm-panel.cm-search button:hover': {
+        backgroundColor: 'var(--color-bg-hover)',
+      },
+    }, { dark: false });
+
+    const multiCursorKeymap: KeyBinding[] = [
+      {
+        key: 'Mod-d',
+        run: selectNextOccurrence,
+        preventDefault: true,
+      },
+      {
+        key: 'Mod-Shift-l',
+        run: selectSelectionMatches,
+        preventDefault: true,
+      },
+      {
+        key: 'Mod-s',
+        run: () => {
+          if (this.options.onSave) {
+            this.options.onSave(this.getContent());
+          }
+          return true;
+        },
+        preventDefault: true,
+      },
+    ];
+
+    const extensions: Extension[] = [
+      this.options.lineNumbers ? lineNumbers() : [],
+      this.options.lineNumbers ? highlightActiveLineGutter() : [],
+      highlightSpecialChars(),
+      history(),
+      foldGutter(),
+      drawSelection(),
+      dropCursor(),
+      EditorState.allowMultipleSelections.of(true),
+      indentOnInput(),
+      bracketMatching(),
+      rectangularSelection(),
+      crosshairCursor(),
+      highlightActiveLine(),
+      highlightSelectionMatches(),
+      keymap.of([
+        ...multiCursorKeymap,
+        ...defaultKeymap,
+        ...searchKeymap,
+        ...historyKeymap,
+        ...foldKeymap,
+        indentWithTab,
+      ]),
+      this.languageCompartment.of(this.getLanguageExtension(language)),
+      this.readOnlyCompartment.of(EditorState.readOnly.of(this.options.readOnly || false)),
+      this.themeCompartment.of([customTheme, syntaxHighlighting(defaultHighlightStyle)]),
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged && this.options.onChange) {
+          this.options.onChange(update.state.doc.toString());
+        }
+      }),
+    ];
+
+    return EditorState.create({
+      doc: content,
+      extensions: extensions.flat(),
     });
   }
 
@@ -388,18 +571,11 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
     if (!this.view) return;
 
     const clampedPos = Math.max(0, Math.min(position, this.view.state.doc.length));
+    const currentRanges = this.view.state.selection.ranges;
+    const newCursor = EditorSelection.cursor(clampedPos);
 
     this.view.dispatch({
-      selection: EditorState.create({
-        doc: this.view.state.doc,
-        selection: {
-          anchor: clampedPos,
-          head: clampedPos,
-        },
-      }).selection.addRange(
-        { anchor: clampedPos, head: clampedPos } as any,
-        true
-      ),
+      selection: EditorSelection.create([...currentRanges, newCursor]),
     });
   }
 
@@ -434,6 +610,22 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
   redoChange(): boolean {
     if (!this.view) return false;
     return redo(this.view);
+  }
+
+  /**
+   * Check if undo is available
+   */
+  canUndo(): boolean {
+    if (!this.view) return false;
+    return undoDepth(this.view.state) > 0;
+  }
+
+  /**
+   * Check if redo is available
+   */
+  canRedo(): boolean {
+    if (!this.view) return false;
+    return redoDepth(this.view.state) > 0;
   }
 
   /**

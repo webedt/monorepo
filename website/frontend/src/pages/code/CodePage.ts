@@ -674,16 +674,16 @@ export class CodePage extends Page<CodePageOptions> {
 
     if (this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex]) {
       const tab = this.tabs[this.activeTabIndex];
-      this.multiCursorEditor.setContent(tab.content);
 
-      // Set language based on file extension
+      // Use loadContent to reset history when switching tabs
+      // This prevents undo history from being shared across tabs
       const ext = tab.path.split('.').pop()?.toLowerCase() || 'text';
-      this.multiCursorEditor.setLanguage(ext);
+      this.multiCursorEditor.loadContent(tab.content, ext);
 
       this.showEditor();
       this.multiCursorEditor.focus();
     } else {
-      this.multiCursorEditor.setContent('');
+      this.multiCursorEditor.loadContent('', 'text');
       this.showEmpty();
     }
   }
@@ -764,21 +764,19 @@ export class CodePage extends Page<CodePageOptions> {
   }
 
   /**
-   * Update the undo/redo button states
-   * Note: With CodeMirror, buttons are always enabled as CodeMirror manages its own history
+   * Update the undo/redo button states based on editor history
    */
   private updateUndoRedoButtons(): void {
     const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
     const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
 
-    // Enable buttons when there's an active file
     const hasActiveFile = this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex];
 
     if (undoBtn) {
-      undoBtn.disabled = !hasActiveFile;
+      undoBtn.disabled = !hasActiveFile || !this.multiCursorEditor?.canUndo();
     }
     if (redoBtn) {
-      redoBtn.disabled = !hasActiveFile;
+      redoBtn.disabled = !hasActiveFile || !this.multiCursorEditor?.canRedo();
     }
   }
 
