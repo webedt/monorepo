@@ -10,6 +10,9 @@ export { ACodeAnalyzer } from './ACodeAnalyzer.js';
 // Implementation
 export { CodeAnalyzer } from './codeAnalyzer.js';
 
+// Code Reviewer
+export { CodeReviewerService } from './codeReviewer.js';
+
 // Types
 export type {
   AnalysisType,
@@ -19,4 +22,8 @@ export type {
   CodeAnalysisParams,
   CodeAnalysisResult,
   CodeAnalyzerConfig,
+  ReviewIssue,
+  ReviewIssueSeverity,
+  ReviewOptions,
+  ReviewResult,
 } from './types.js';

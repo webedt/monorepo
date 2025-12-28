@@ -80,9 +80,9 @@ async function searchGames(searchTerm: string): Promise<SearchResultItem[]> {
         id: game.id,
         type: 'game',
         title: game.title,
-        subtitle: game.developer || game.publisher,
-        description: game.shortDescription || game.description?.substring(0, 100),
-        image: game.coverImage,
+        subtitle: game.developer ?? game.publisher ?? undefined,
+        description: game.shortDescription ?? game.description?.substring(0, 100),
+        image: game.coverImage ?? undefined,
         tags: game.tags?.slice(0, 5),
         matchedFields,
       });
@@ -139,7 +139,6 @@ async function searchSessions(searchTerm: string, userId: string): Promise<Searc
         eq(chatSessions.userId, userId),
         sql`${chatSessions.deletedAt} IS NULL`,
         or(
-          ilike(chatSessions.title, searchPattern),
           ilike(chatSessions.userRequest, searchPattern),
           ilike(chatSessions.repositoryName, searchPattern),
           ilike(chatSessions.branch, searchPattern)
@@ -154,9 +153,6 @@ async function searchSessions(searchTerm: string, userId: string): Promise<Searc
   for (const session of matchedSessions) {
     const matchedFields: string[] = [];
 
-    if (session.title?.toLowerCase().includes(lowerSearchTerm)) {
-      matchedFields.push('title');
-    }
     if (session.userRequest?.toLowerCase().includes(lowerSearchTerm)) {
       matchedFields.push('request');
     }
@@ -171,7 +167,7 @@ async function searchSessions(searchTerm: string, userId: string): Promise<Searc
       results.push({
         id: session.id,
         type: 'session',
-        title: session.title || session.userRequest?.substring(0, 50) || 'Untitled Session',
+        title: session.userRequest?.substring(0, 50) || 'Untitled Session',
         subtitle: session.repositoryName ? `${session.repositoryOwner}/${session.repositoryName}` : undefined,
         description: session.userRequest?.substring(0, 100),
         matchedFields,
