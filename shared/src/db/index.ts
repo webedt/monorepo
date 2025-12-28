@@ -466,6 +466,11 @@ export type {
   NewCommunityChannel,
   ChannelMessage,
   NewChannelMessage,
+  // Collections types
+  Collection,
+  NewCollection,
+  SessionCollection,
+  NewSessionCollection,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -491,6 +496,9 @@ export {
   // Community channels tables
   communityChannels,
   channelMessages,
+  // Collections tables
+  collections,
+  sessionCollections,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

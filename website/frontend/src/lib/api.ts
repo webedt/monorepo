@@ -25,6 +25,8 @@ import type {
   GeminiAuth,
   ApiResponse,
   AdminStats,
+  Collection,
+  SessionCollection,
 } from '../types';
 
 // Cached API base URL - computed once on first access
@@ -482,6 +484,62 @@ export const sessionsApi = {
 
   syncEvents: (id: string) =>
     fetchApi(`/api/sessions/${id}/sync-events`, { method: 'POST' }),
+};
+
+// ============================================================================
+// Collections API
+// ============================================================================
+export const collectionsApi = {
+  list: () =>
+    fetchApi<ApiResponse<{ collections: Collection[]; total: number }>>('/api/collections')
+      .then(r => r.data!),
+
+  get: (id: string) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>(`/api/collections/${id}`)
+      .then(r => r.data!),
+
+  create: (data: { name: string; description?: string; color?: string; icon?: string; isDefault?: boolean }) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>('/api/collections', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  update: (id: string, data: { name?: string; description?: string; color?: string; icon?: string; sortOrder?: number; isDefault?: boolean }) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>(`/api/collections/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  delete: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/collections/${id}`, { method: 'DELETE' }),
+
+  getSessions: (id: string) =>
+    fetchApi<ApiResponse<{ collection: Collection; sessions: Session[]; total: number }>>(`/api/collections/${id}/sessions`)
+      .then(r => r.data!),
+
+  addSession: (collectionId: string, sessionId: string) =>
+    fetchApi<ApiResponse<{ membership: SessionCollection }>>(`/api/collections/${collectionId}/sessions/${sessionId}`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  removeSession: (collectionId: string, sessionId: string) =>
+    fetchApi<{ success: boolean }>(`/api/collections/${collectionId}/sessions/${sessionId}`, { method: 'DELETE' }),
+
+  getSessionCollections: (sessionId: string) =>
+    fetchApi<ApiResponse<{ collections: Collection[]; total: number }>>(`/api/collections/session/${sessionId}`)
+      .then(r => r.data!),
+
+  bulkAddSession: (sessionId: string, collectionIds: string[]) =>
+    fetchApi<ApiResponse<{ added: number }>>(`/api/collections/session/${sessionId}/bulk`, {
+      method: 'POST',
+      body: { collectionIds },
+    }).then(r => r.data!),
+
+  reorder: (orderedIds: string[]) =>
+    fetchApi<{ success: boolean }>('/api/collections/reorder', {
+      method: 'POST',
+      body: { orderedIds },
+    }),
 };
 
 // ============================================================================

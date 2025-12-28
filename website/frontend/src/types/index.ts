@@ -403,3 +403,25 @@ export interface ChannelMessage {
     slug: string;
   };
 }
+
+// Collections types
+export interface Collection {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  sortOrder: number;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  sessionCount?: number;
+}
+
+export interface SessionCollection {
+  id: string;
+  sessionId: string;
+  collectionId: string;
+  addedAt: string;
+}

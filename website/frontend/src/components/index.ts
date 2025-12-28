@@ -133,3 +133,7 @@ export type {
 // FilterBar
 export { FilterBar } from './filter-bar';
 export type { FilterBarOptions, FilterConfig, FilterValues } from './filter-bar';
+
+// CollectionsPanel
+export { CollectionsPanel } from './collections-panel';
+export type { CollectionsPanelOptions } from './collections-panel';
