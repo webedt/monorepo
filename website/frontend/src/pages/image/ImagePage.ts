@@ -10,10 +10,19 @@ import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { imageLayersStore } from '../../stores/imageLayersStore';
+import { onionSkinningStore } from '../../stores/onionSkinningStore';
+import type { OnionSkinningSettings } from '../../stores/onionSkinningStore';
 import type { Session } from '../../types';
 import './image.css';
 
 type Tool = 'select' | 'pencil' | 'brush' | 'eraser' | 'fill' | 'rectangle' | 'circle' | 'line';
+
+interface Frame {
+  id: string;
+  name: string;
+  imageData: ImageData;
+  duration: number;
+}
 
 interface ImagePageOptions extends PageOptions {
   params?: {
@@ -63,6 +72,18 @@ export class ImagePage extends Page<ImagePageOptions> {
 
   // Render optimization - batch compositing with requestAnimationFrame
   private renderPending = false;
+
+  // Frame-based animation
+  private frames: Frame[] = [];
+  private currentFrameIndex = 0;
+
+  // Onion skinning
+  private onionSettings: OnionSkinningSettings = onionSkinningStore.getSettings();
+  private unsubscribeOnionSkinning: (() => void) | null = null;
+  private onionCanvas: HTMLCanvasElement | null = null;
+  private onionCtx: CanvasRenderingContext2D | null = null;
+  private tempCanvas: HTMLCanvasElement | null = null;
+  private tempCtx: CanvasRenderingContext2D | null = null;
 
   protected render(): string {
     return `
@@ -150,6 +171,38 @@ export class ImagePage extends Page<ImagePageOptions> {
               </div>
             </div>
 
+            <div class="tools-section onion-section">
+              <div class="tools-section-title">Onion Skinning</div>
+              <div class="onion-toggle-row">
+                <label class="toggle-label">
+                  <input type="checkbox" class="onion-enabled-toggle" ${this.onionSettings.enabled ? 'checked' : ''}>
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">Enable</span>
+                </label>
+              </div>
+              <div class="onion-settings ${this.onionSettings.enabled ? '' : 'disabled'}">
+                <div class="onion-row">
+                  <label class="onion-checkbox-label">
+                    <input type="checkbox" class="onion-prev-toggle" ${this.onionSettings.showPrevious ? 'checked' : ''}>
+                    <span>Previous</span>
+                  </label>
+                  <input type="number" class="onion-prev-count" value="${this.onionSettings.previousCount}" min="1" max="10" title="Number of previous frames">
+                </div>
+                <div class="onion-row">
+                  <label class="onion-checkbox-label">
+                    <input type="checkbox" class="onion-next-toggle" ${this.onionSettings.showNext ? 'checked' : ''}>
+                    <span>Next</span>
+                  </label>
+                  <input type="number" class="onion-next-count" value="${this.onionSettings.nextCount}" min="1" max="10" title="Number of next frames">
+                </div>
+                <div class="onion-opacity-row">
+                  <label>Opacity</label>
+                  <input type="range" class="onion-opacity-slider" min="0" max="100" value="${Math.round(this.onionSettings.previousOpacity * 100)}">
+                  <span class="onion-opacity-value">${Math.round(this.onionSettings.previousOpacity * 100)}%</span>
+                </div>
+              </div>
+            </div>
+
             <div class="tools-section ai-section">
               <div class="tools-section-title">AI Tools</div>
               <div class="ai-notice">
@@ -172,7 +225,10 @@ export class ImagePage extends Page<ImagePageOptions> {
               <p>Loading editor...</p>
             </div>
             <div class="canvas-wrapper" style="display: none;">
-              <canvas class="main-canvas" width="800" height="600"></canvas>
+              <div class="canvas-stack">
+                <canvas class="onion-canvas" width="800" height="600"></canvas>
+                <canvas class="main-canvas" width="800" height="600"></canvas>
+              </div>
             </div>
             <div class="canvas-empty" style="display: none;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
@@ -190,6 +246,26 @@ export class ImagePage extends Page<ImagePageOptions> {
 
           <!-- Layers Panel Container - populated by LayersPanel component -->
           <div class="layers-panel-container"></div>
+        </div>
+
+        <!-- Timeline -->
+        <div class="timeline-panel">
+          <div class="timeline-controls">
+            <button class="timeline-btn" data-action="first-frame" title="First Frame">⏮</button>
+            <button class="timeline-btn" data-action="prev-frame" title="Previous Frame (,)">◀</button>
+            <button class="timeline-btn" data-action="next-frame" title="Next Frame (.)">▶</button>
+            <button class="timeline-btn" data-action="last-frame" title="Last Frame">⏭</button>
+            <span class="timeline-separator"></span>
+            <button class="timeline-btn" data-action="add-frame" title="Add Frame (+)">+</button>
+            <button class="timeline-btn" data-action="duplicate-frame" title="Duplicate Frame">⎘</button>
+            <button class="timeline-btn" data-action="delete-frame" title="Delete Frame (-)">−</button>
+          </div>
+          <div class="timeline-frames">
+            <div class="frames-container"></div>
+          </div>
+          <div class="timeline-info">
+            <span class="frame-counter">Frame 1 / 1</span>
+          </div>
         </div>
 
         <!-- Status Bar -->
@@ -274,8 +350,24 @@ export class ImagePage extends Page<ImagePageOptions> {
     // Setup layers panel
     this.setupLayersPanel();
 
+    // Setup onion canvas
+    this.setupOnionCanvas();
+
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
+
+    // Setup onion skinning controls
+    this.setupOnionSkinningControls();
+
+    // Setup timeline controls
+    this.setupTimelineControls();
+
+    // Subscribe to onion skinning store
+    this.unsubscribeOnionSkinning = onionSkinningStore.subscribe((settings) => {
+      this.onionSettings = settings;
+      this.updateOnionSkinningUI();
+      this.renderOnionSkin();
+    });
 
     // Load session data
     this.loadSession();
@@ -414,6 +506,13 @@ export class ImagePage extends Page<ImagePageOptions> {
     }
   }
 
+  private setupOnionCanvas(): void {
+    this.onionCanvas = this.$('.onion-canvas') as HTMLCanvasElement;
+    if (this.onionCanvas) {
+      this.onionCtx = this.onionCanvas.getContext('2d');
+    }
+  }
+
   private compositeAndRender(): void {
     if (!this.displayCanvas) return;
     imageLayersStore.compositeToCanvas(this.displayCanvas);
@@ -437,6 +536,365 @@ export class ImagePage extends Page<ImagePageOptions> {
     if (statusMode) {
       const activeLayer = imageLayersStore.getActiveLayer();
       statusMode.textContent = activeLayer ? `Layer: ${activeLayer.name}` : 'No Layer';
+    }
+  }
+
+  private setupOnionSkinningControls(): void {
+    const enabledToggle = this.$('.onion-enabled-toggle') as HTMLInputElement;
+    const prevToggle = this.$('.onion-prev-toggle') as HTMLInputElement;
+    const nextToggle = this.$('.onion-next-toggle') as HTMLInputElement;
+    const prevCount = this.$('.onion-prev-count') as HTMLInputElement;
+    const nextCount = this.$('.onion-next-count') as HTMLInputElement;
+    const opacitySlider = this.$('.onion-opacity-slider') as HTMLInputElement;
+
+    if (enabledToggle) {
+      enabledToggle.addEventListener('change', () => {
+        onionSkinningStore.setEnabled(enabledToggle.checked);
+      });
+    }
+
+    if (prevToggle) {
+      prevToggle.addEventListener('change', () => {
+        onionSkinningStore.setShowPrevious(prevToggle.checked);
+      });
+    }
+
+    if (nextToggle) {
+      nextToggle.addEventListener('change', () => {
+        onionSkinningStore.setShowNext(nextToggle.checked);
+      });
+    }
+
+    if (prevCount) {
+      prevCount.addEventListener('change', () => {
+        onionSkinningStore.setPreviousCount(parseInt(prevCount.value) || 1);
+      });
+    }
+
+    if (nextCount) {
+      nextCount.addEventListener('change', () => {
+        onionSkinningStore.setNextCount(parseInt(nextCount.value) || 1);
+      });
+    }
+
+    if (opacitySlider) {
+      opacitySlider.addEventListener('input', () => {
+        const value = parseInt(opacitySlider.value) / 100;
+        onionSkinningStore.updateSettings({
+          previousOpacity: value,
+          nextOpacity: value,
+        });
+        const opacityValue = this.$('.onion-opacity-value') as HTMLElement;
+        if (opacityValue) {
+          opacityValue.textContent = `${opacitySlider.value}%`;
+        }
+      });
+    }
+  }
+
+  private setupTimelineControls(): void {
+    const firstFrameBtn = this.$('[data-action="first-frame"]') as HTMLButtonElement;
+    const prevFrameBtn = this.$('[data-action="prev-frame"]') as HTMLButtonElement;
+    const nextFrameBtn = this.$('[data-action="next-frame"]') as HTMLButtonElement;
+    const lastFrameBtn = this.$('[data-action="last-frame"]') as HTMLButtonElement;
+    const addFrameBtn = this.$('[data-action="add-frame"]') as HTMLButtonElement;
+    const duplicateFrameBtn = this.$('[data-action="duplicate-frame"]') as HTMLButtonElement;
+    const deleteFrameBtn = this.$('[data-action="delete-frame"]') as HTMLButtonElement;
+
+    if (firstFrameBtn) firstFrameBtn.addEventListener('click', () => this.goToFrame(0));
+    if (prevFrameBtn) prevFrameBtn.addEventListener('click', () => this.previousFrame());
+    if (nextFrameBtn) nextFrameBtn.addEventListener('click', () => this.nextFrame());
+    if (lastFrameBtn) lastFrameBtn.addEventListener('click', () => this.goToFrame(this.frames.length - 1));
+    if (addFrameBtn) addFrameBtn.addEventListener('click', () => this.addFrame());
+    if (duplicateFrameBtn) duplicateFrameBtn.addEventListener('click', () => this.duplicateFrame());
+    if (deleteFrameBtn) deleteFrameBtn.addEventListener('click', () => this.deleteFrame());
+  }
+
+  private updateOnionSkinningUI(): void {
+    const settingsPanel = this.$('.onion-settings') as HTMLElement;
+    const enabledToggle = this.$('.onion-enabled-toggle') as HTMLInputElement;
+    const prevToggle = this.$('.onion-prev-toggle') as HTMLInputElement;
+    const nextToggle = this.$('.onion-next-toggle') as HTMLInputElement;
+    const prevCount = this.$('.onion-prev-count') as HTMLInputElement;
+    const nextCount = this.$('.onion-next-count') as HTMLInputElement;
+    const opacitySlider = this.$('.onion-opacity-slider') as HTMLInputElement;
+    const opacityValue = this.$('.onion-opacity-value') as HTMLElement;
+
+    if (settingsPanel) {
+      settingsPanel.classList.toggle('disabled', !this.onionSettings.enabled);
+    }
+    if (enabledToggle) enabledToggle.checked = this.onionSettings.enabled;
+    if (prevToggle) prevToggle.checked = this.onionSettings.showPrevious;
+    if (nextToggle) nextToggle.checked = this.onionSettings.showNext;
+    if (prevCount) prevCount.value = String(this.onionSettings.previousCount);
+    if (nextCount) nextCount.value = String(this.onionSettings.nextCount);
+    if (opacitySlider) opacitySlider.value = String(Math.round(this.onionSettings.previousOpacity * 100));
+    if (opacityValue) opacityValue.textContent = `${Math.round(this.onionSettings.previousOpacity * 100)}%`;
+  }
+
+  private renderOnionSkin(): void {
+    if (!this.onionCanvas || !this.onionCtx || !this.displayCanvas) return;
+
+    // Clear onion canvas
+    this.onionCtx.clearRect(0, 0, this.onionCanvas.width, this.onionCanvas.height);
+
+    // Don't render if disabled or no frames
+    if (!this.onionSettings.enabled || this.frames.length <= 1) return;
+
+    // Render previous frames
+    if (this.onionSettings.showPrevious) {
+      for (let i = 1; i <= this.onionSettings.previousCount; i++) {
+        const frameIndex = this.currentFrameIndex - i;
+        if (frameIndex >= 0 && frameIndex < this.frames.length) {
+          const frame = this.frames[frameIndex];
+          const opacity = this.onionSettings.previousOpacity * (1 - (i - 1) / this.onionSettings.previousCount * 0.5);
+          this.drawOnionFrame(frame.imageData, opacity, this.onionSettings.useColors ? this.onionSettings.previousColor : null);
+        }
+      }
+    }
+
+    // Render next frames
+    if (this.onionSettings.showNext) {
+      for (let i = 1; i <= this.onionSettings.nextCount; i++) {
+        const frameIndex = this.currentFrameIndex + i;
+        if (frameIndex >= 0 && frameIndex < this.frames.length) {
+          const frame = this.frames[frameIndex];
+          const opacity = this.onionSettings.nextOpacity * (1 - (i - 1) / this.onionSettings.nextCount * 0.5);
+          this.drawOnionFrame(frame.imageData, opacity, this.onionSettings.useColors ? this.onionSettings.nextColor : null);
+        }
+      }
+    }
+  }
+
+  private drawOnionFrame(imageData: ImageData, opacity: number, tintColor: string | null): void {
+    if (!this.onionCtx || !this.onionCanvas) return;
+
+    // Reuse or create temporary canvas for the frame
+    if (!this.tempCanvas || !this.tempCtx) {
+      this.tempCanvas = document.createElement('canvas');
+      this.tempCtx = this.tempCanvas.getContext('2d');
+      if (!this.tempCtx) return;
+    }
+
+    // Resize temp canvas if needed
+    if (this.tempCanvas.width !== imageData.width || this.tempCanvas.height !== imageData.height) {
+      this.tempCanvas.width = imageData.width;
+      this.tempCanvas.height = imageData.height;
+    }
+
+    // Clear and put the image data on temp canvas
+    this.tempCtx.globalCompositeOperation = 'source-over';
+    this.tempCtx.putImageData(imageData, 0, 0);
+
+    // Apply tint color if specified
+    if (tintColor) {
+      this.tempCtx.globalCompositeOperation = 'source-atop';
+      this.tempCtx.fillStyle = tintColor;
+      this.tempCtx.fillRect(0, 0, this.tempCanvas.width, this.tempCanvas.height);
+    }
+
+    // Draw to onion canvas with opacity
+    this.onionCtx.globalAlpha = opacity;
+    this.onionCtx.drawImage(this.tempCanvas, 0, 0);
+    this.onionCtx.globalAlpha = 1;
+  }
+
+  private initializeFirstFrame(): void {
+    if (!this.displayCanvas) return;
+
+    // Create first frame from composite of all layers
+    const ctx = this.displayCanvas.getContext('2d');
+    if (!ctx) return;
+
+    const imageData = ctx.getImageData(0, 0, this.displayCanvas.width, this.displayCanvas.height);
+    this.frames = [{
+      id: `frame-${Date.now()}`,
+      name: 'Frame 1',
+      imageData,
+      duration: 100,
+    }];
+    this.currentFrameIndex = 0;
+    this.updateTimeline();
+  }
+
+  private addFrame(): void {
+    if (!this.displayCanvas) return;
+
+    // Save current frame first
+    this.saveCurrentFrame();
+
+    // Create new blank frame
+    const newCanvas = document.createElement('canvas');
+    newCanvas.width = this.displayCanvas.width;
+    newCanvas.height = this.displayCanvas.height;
+    const newCtx = newCanvas.getContext('2d');
+    if (!newCtx) return;
+
+    newCtx.fillStyle = '#ffffff';
+    newCtx.fillRect(0, 0, newCanvas.width, newCanvas.height);
+
+    const newFrame: Frame = {
+      id: `frame-${Date.now()}`,
+      name: `Frame ${this.frames.length + 1}`,
+      imageData: newCtx.getImageData(0, 0, newCanvas.width, newCanvas.height),
+      duration: 100,
+    };
+
+    // Insert after current frame
+    this.frames.splice(this.currentFrameIndex + 1, 0, newFrame);
+    this.currentFrameIndex++;
+    this.loadCurrentFrame();
+    this.updateTimeline();
+    this.renderOnionSkin();
+    this.hasUnsavedChanges = true;
+  }
+
+  private duplicateFrame(): void {
+    if (!this.displayCanvas || this.frames.length === 0) return;
+
+    // Save current frame first
+    this.saveCurrentFrame();
+
+    // Clone current frame
+    const currentFrame = this.frames[this.currentFrameIndex];
+    const clonedImageData = new ImageData(
+      new Uint8ClampedArray(currentFrame.imageData.data),
+      currentFrame.imageData.width,
+      currentFrame.imageData.height
+    );
+
+    const newFrame: Frame = {
+      id: `frame-${Date.now()}`,
+      name: `Frame ${this.frames.length + 1}`,
+      imageData: clonedImageData,
+      duration: currentFrame.duration,
+    };
+
+    // Insert after current frame
+    this.frames.splice(this.currentFrameIndex + 1, 0, newFrame);
+    this.currentFrameIndex++;
+    this.loadCurrentFrame();
+    this.updateTimeline();
+    this.renderOnionSkin();
+    this.hasUnsavedChanges = true;
+  }
+
+  private deleteFrame(): void {
+    if (this.frames.length <= 1) {
+      toast.error('Cannot delete the only frame');
+      return;
+    }
+
+    if (!confirm('Delete current frame?')) return;
+
+    this.frames.splice(this.currentFrameIndex, 1);
+    if (this.currentFrameIndex >= this.frames.length) {
+      this.currentFrameIndex = this.frames.length - 1;
+    }
+    this.loadCurrentFrame();
+    this.updateTimeline();
+    this.renderOnionSkin();
+    this.hasUnsavedChanges = true;
+  }
+
+  private goToFrame(index: number): void {
+    if (index < 0 || index >= this.frames.length) return;
+    if (index === this.currentFrameIndex) return;
+
+    // Save current frame before switching
+    this.saveCurrentFrame();
+
+    this.currentFrameIndex = index;
+    this.loadCurrentFrame();
+    this.updateTimeline();
+    this.renderOnionSkin();
+  }
+
+  private previousFrame(): void {
+    if (this.currentFrameIndex > 0) {
+      this.goToFrame(this.currentFrameIndex - 1);
+    }
+  }
+
+  private nextFrame(): void {
+    if (this.currentFrameIndex < this.frames.length - 1) {
+      this.goToFrame(this.currentFrameIndex + 1);
+    }
+  }
+
+  private saveCurrentFrame(): void {
+    if (!this.displayCanvas || this.frames.length === 0) return;
+    // Save the composite of all layers as the current frame
+    const ctx = this.displayCanvas.getContext('2d');
+    if (!ctx) return;
+    const imageData = ctx.getImageData(0, 0, this.displayCanvas.width, this.displayCanvas.height);
+    this.frames[this.currentFrameIndex].imageData = imageData;
+  }
+
+  private loadCurrentFrame(): void {
+    if (!this.displayCanvas || this.frames.length === 0) return;
+    const frame = this.frames[this.currentFrameIndex];
+    // Load frame into the active layer
+    imageLayersStore.loadImageDataToActiveLayer(frame.imageData);
+    // Re-composite and render
+    this.compositeAndRender();
+    // Reset history for new frame
+    this.history = [];
+    this.historyIndex = -1;
+    this.saveToHistory();
+  }
+
+  private updateTimeline(): void {
+    const container = this.$('.frames-container') as HTMLElement;
+    const counter = this.$('.frame-counter') as HTMLElement;
+
+    if (counter) {
+      counter.textContent = `Frame ${this.currentFrameIndex + 1} / ${this.frames.length}`;
+    }
+
+    if (container) {
+      container.innerHTML = this.frames.map((frame, index) => `
+        <div class="frame-thumb ${index === this.currentFrameIndex ? 'active' : ''}" data-frame="${index}" title="${frame.name}">
+          <canvas class="frame-preview" width="60" height="45"></canvas>
+          <span class="frame-number">${index + 1}</span>
+        </div>
+      `).join('');
+
+      // Ensure temp canvas exists for thumbnail rendering
+      if (!this.tempCanvas || !this.tempCtx) {
+        this.tempCanvas = document.createElement('canvas');
+        this.tempCtx = this.tempCanvas.getContext('2d');
+      }
+
+      // Render thumbnails
+      container.querySelectorAll('.frame-thumb').forEach((thumb, index) => {
+        const preview = thumb.querySelector('.frame-preview') as HTMLCanvasElement;
+        if (preview && this.frames[index] && this.tempCanvas && this.tempCtx) {
+          const previewCtx = preview.getContext('2d');
+          if (previewCtx) {
+            // Scale down the frame to fit preview
+            const frame = this.frames[index];
+            const scale = Math.min(60 / frame.imageData.width, 45 / frame.imageData.height);
+            previewCtx.fillStyle = '#ffffff';
+            previewCtx.fillRect(0, 0, 60, 45);
+
+            // Resize temp canvas if needed
+            if (this.tempCanvas.width !== frame.imageData.width || this.tempCanvas.height !== frame.imageData.height) {
+              this.tempCanvas.width = frame.imageData.width;
+              this.tempCanvas.height = frame.imageData.height;
+            }
+
+            // Use cached temp canvas to hold full frame
+            this.tempCtx.putImageData(frame.imageData, 0, 0);
+            previewCtx.drawImage(this.tempCanvas, 0, 0, frame.imageData.width * scale, frame.imageData.height * scale);
+          }
+        }
+
+        // Click to select frame
+        thumb.addEventListener('click', () => {
+          this.goToFrame(index);
+        });
+      });
     }
   }
 
@@ -482,6 +940,21 @@ export class ImagePage extends Page<ImagePageOptions> {
         const secondaryInput = this.$('.secondary-color') as HTMLInputElement;
         if (primaryInput) primaryInput.value = this.primaryColor;
         if (secondaryInput) secondaryInput.value = this.secondaryColor;
+      }
+
+      // Frame navigation
+      if (e.key === ',') this.previousFrame();
+      if (e.key === '.') this.nextFrame();
+      if (e.key === '+' || e.key === '=') this.addFrame();
+      if (e.key === '-') {
+        if (this.frames.length > 1) {
+          this.deleteFrame();
+        }
+      }
+
+      // O - Toggle onion skinning
+      if (e.key === 'o') {
+        onionSkinningStore.toggleEnabled();
       }
     };
 
@@ -763,6 +1236,16 @@ export class ImagePage extends Page<ImagePageOptions> {
       this.saveToHistory();
       this.hasUnsavedChanges = false;
 
+      // Resize onion canvas
+      if (this.onionCanvas) {
+        this.onionCanvas.width = w;
+        this.onionCanvas.height = h;
+      }
+
+      // Reset frames
+      this.frames = [];
+      this.currentFrameIndex = 0;
+
       // Update status bar
       const dimensions = this.$('.status-dimensions') as HTMLElement;
       if (dimensions) {
@@ -799,6 +1282,16 @@ export class ImagePage extends Page<ImagePageOptions> {
           this.saveToHistory();
           this.hasUnsavedChanges = false;
 
+          // Resize onion canvas
+          if (this.onionCanvas) {
+            this.onionCanvas.width = img.width;
+            this.onionCanvas.height = img.height;
+          }
+
+          // Reset frames
+          this.frames = [];
+          this.currentFrameIndex = 0;
+
           // Update status bar
           const dimensions = this.$('.status-dimensions') as HTMLElement;
           if (dimensions) {
@@ -822,6 +1315,12 @@ export class ImagePage extends Page<ImagePageOptions> {
     if (loading) loading.style.display = 'none';
     if (empty) empty.style.display = 'none';
     if (wrapper) wrapper.style.display = 'flex';
+
+    // Initialize frames if not already done
+    if (this.frames.length === 0) {
+      this.initializeFirstFrame();
+    }
+    this.renderOnionSkin();
   }
 
   private showEmpty(): void {
@@ -1013,6 +1512,11 @@ export class ImagePage extends Page<ImagePageOptions> {
     if (this.unsubscribeLayers) {
       this.unsubscribeLayers();
       this.unsubscribeLayers = null;
+    }
+
+    if (this.unsubscribeOnionSkinning) {
+      this.unsubscribeOnionSkinning();
+      this.unsubscribeOnionSkinning = null;
     }
 
     if (this.offlineIndicator) {

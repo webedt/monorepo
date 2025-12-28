@@ -27,6 +27,13 @@ import type {
   AdminStats,
   Collection,
   SessionCollection,
+  Snippet,
+  SnippetCollection,
+  SnippetLanguage,
+  SnippetCategory,
+  CreateSnippetRequest,
+  UpdateSnippetRequest,
+  SnippetListFilters,
 } from '../types';
 
 // Cached API base URL - computed once on first access
@@ -1535,6 +1542,107 @@ export const announcementsApi = {
 };
 
 // ============================================================================
+// Diffs API (Branch comparison and visualization)
+// ============================================================================
+export interface DiffLine {
+  type: 'addition' | 'deletion' | 'context' | 'header';
+  content: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface DiffHunk {
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: DiffLine[];
+}
+
+export interface FileDiff {
+  oldPath: string;
+  newPath: string;
+  status: 'added' | 'deleted' | 'modified' | 'renamed';
+  hunks: DiffHunk[];
+  isBinary: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface ParsedDiff {
+  files: FileDiff[];
+  totalAdditions: number;
+  totalDeletions: number;
+  totalFilesChanged: number;
+}
+
+export interface CompareResult {
+  diff: ParsedDiff;
+  rawDiff: string;
+  baseBranch: string;
+  headBranch: string;
+  aheadBy: number;
+  behindBy: number;
+  mergeBaseCommit: string;
+}
+
+export interface FileChange {
+  filename: string;
+  status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+  additions: number;
+  deletions: number;
+  changes: number;
+  previousFilename?: string;
+}
+
+export interface DiffStats {
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  totalChanges: number;
+  commits: number;
+  aheadBy: number;
+  behindBy: number;
+  status: string;
+}
+
+export const diffsApi = {
+  compare: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<CompareResult>>(`/api/diffs/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+
+  getChangedFiles: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<{
+      files: FileChange[];
+      totalFiles: number;
+      totalAdditions: number;
+      totalDeletions: number;
+      aheadBy: number;
+      behindBy: number;
+    }>>(`/api/diffs/repos/${owner}/${repo}/changed-files/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+
+  getFileDiff: (owner: string, repo: string, base: string, head: string, filePath: string) =>
+    fetchApi<ApiResponse<{
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      changes: number;
+      patch?: string;
+      rawDiff: string;
+      parsedDiff: FileDiff | null;
+      previousFilename?: string;
+    }>>(`/api/diffs/repos/${owner}/${repo}/file-diff/${encodeURIComponent(base)}/${encodeURIComponent(head)}/${filePath}`)
+      .then(r => r.data!),
+
+  getStats: (owner: string, repo: string, base: string, head: string) =>
+    fetchApi<ApiResponse<DiffStats>>(`/api/diffs/repos/${owner}/${repo}/stats/${encodeURIComponent(base)}/${encodeURIComponent(head)}`)
+      .then(r => r.data!),
+};
+
+// ============================================================================
 // Cloud Saves API (Game save synchronization across devices)
 // ============================================================================
 export const cloudSavesApi = {
@@ -1614,4 +1722,269 @@ export const cloudSavesApi = {
       method: 'POST',
       body: platformData ? { platformData } : undefined,
     }).then(r => r.data!),
+};
+
+// ============================================================================
+// Autocomplete API (AI-powered code completion)
+// ============================================================================
+export interface AutocompleteRequest {
+  prefix: string;
+  suffix: string;
+  language: string;
+  filePath?: string;
+  maxSuggestions?: number;
+  additionalContext?: Array<{
+    filePath: string;
+    content: string;
+    language: string;
+  }>;
+}
+
+export interface AutocompleteSuggestion {
+  text: string;
+  label: string;
+  kind: 'function' | 'method' | 'variable' | 'class' | 'interface' | 'property' | 'keyword' | 'snippet' | 'text';
+  detail?: string;
+  confidence?: number;
+}
+
+export interface AutocompleteResponse {
+  suggestions: AutocompleteSuggestion[];
+  latencyMs: number;
+  cached?: boolean;
+}
+
+export const autocompleteApi = {
+  complete: (request: AutocompleteRequest) =>
+    fetchApi<ApiResponse<AutocompleteResponse>>('/api/autocomplete', {
+      method: 'POST',
+      body: request as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  getLanguages: () =>
+    fetchApi<ApiResponse<{
+      languages: Array<{
+        id: string;
+        name: string;
+        extensions: string[];
+      }>;
+    }>>('/api/autocomplete/languages').then(r => r.data!),
+};
+
+// ============================================================================
+// Snippets API (User code snippets and templates)
+// ============================================================================
+export const snippetsApi = {
+  // List user's snippets with optional filtering
+  list: (filters?: SnippetListFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.language) params.append('language', filters.language);
+    if (filters?.category) params.append('category', filters.category);
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.favorite) params.append('favorite', 'true');
+    if (filters?.collectionId) params.append('collectionId', filters.collectionId);
+    if (filters?.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters?.order) params.append('order', filters.order);
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      snippets: Snippet[];
+      total: number;
+      languages: readonly SnippetLanguage[];
+      categories: readonly SnippetCategory[];
+    }>>(`/api/snippets${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Get a single snippet
+  get: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}`).then(r => r.data!),
+
+  // Create a new snippet
+  create: (data: CreateSnippetRequest) =>
+    fetchApi<ApiResponse<Snippet>>('/api/snippets', {
+      method: 'POST',
+      body: data as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  // Update a snippet
+  update: (id: string, data: UpdateSnippetRequest) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}`, {
+      method: 'PUT',
+      body: data as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  // Delete a snippet
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Record snippet usage
+  use: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/use`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // Toggle favorite status
+  toggleFavorite: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/favorite`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // Duplicate a snippet
+  duplicate: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/duplicate`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // List snippet collections
+  listCollections: () =>
+    fetchApi<ApiResponse<{
+      collections: SnippetCollection[];
+      total: number;
+    }>>('/api/snippets/collections/list').then(r => r.data!),
+
+  // Create a snippet collection
+  createCollection: (data: {
+    name: string;
+    description?: string;
+    color?: string;
+    icon?: string;
+    isDefault?: boolean;
+  }) =>
+    fetchApi<ApiResponse<SnippetCollection>>('/api/snippets/collections', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Update a snippet collection
+  updateCollection: (id: string, data: {
+    name?: string;
+    description?: string;
+    color?: string;
+    icon?: string;
+    sortOrder?: number;
+    isDefault?: boolean;
+  }) =>
+    fetchApi<ApiResponse<SnippetCollection>>(`/api/snippets/collections/${id}`, {
+      method: 'PUT',
+      body: data,
+    }).then(r => r.data!),
+
+  // Delete a snippet collection
+  deleteCollection: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Add snippet to collection
+  addToCollection: (collectionId: string, snippetId: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${collectionId}/snippets/${snippetId}`, {
+      method: 'POST',
+    }),
+
+  // Remove snippet from collection
+  removeFromCollection: (collectionId: string, snippetId: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${collectionId}/snippets/${snippetId}`, {
+      method: 'DELETE',
+    }),
+};
+
+// ============================================================================
+// Workspace Presence API (Collaborative cursors and real-time presence)
+// ============================================================================
+export interface PresenceUser {
+  userId: string;
+  displayName: string;
+  page: string | null;
+  cursorX: number | null;
+  cursorY: number | null;
+  selection: {
+    filePath?: string;
+    startLine?: number;
+    endLine?: number;
+    startCol?: number;
+    endCol?: number;
+  } | null;
+  isCurrentUser: boolean;
+}
+
+export interface PresenceUpdate {
+  users: PresenceUser[];
+}
+
+export const workspacePresenceApi = {
+  // Update presence (heartbeat with cursor position)
+  updatePresence: (data: {
+    owner: string;
+    repo: string;
+    branch: string;
+    page?: string;
+    cursorX?: number;
+    cursorY?: number;
+    selection?: {
+      filePath?: string;
+      startLine?: number;
+      endLine?: number;
+      startCol?: number;
+      endCol?: number;
+    };
+  }) =>
+    fetchApi<{ success: boolean }>('/api/workspace/presence', {
+      method: 'PUT',
+      body: data,
+    }),
+
+  // Get active users on a branch
+  getPresence: (owner: string, repo: string, branch: string) =>
+    fetchApi<{
+      success: boolean;
+      data: {
+        users: PresenceUser[];
+        branch: string;
+        owner: string;
+        repo: string;
+      };
+    }>(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`),
+
+  // Remove presence (leaving workspace)
+  removePresence: (owner: string, repo: string, branch: string) =>
+    fetchApi<{ success: boolean }>(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`, {
+      method: 'DELETE',
+    }),
+
+  // Get SSE stream URL for presence updates
+  getStreamUrl: (owner: string, repo: string, branch: string) =>
+    `${getApiBaseUrl()}/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}/stream`,
+};
+
+// ============================================================================
+// Import API (Import files from external URLs)
+// ============================================================================
+export interface UrlValidationResult {
+  valid: boolean;
+  suggestedFilename?: string;
+  contentType?: string;
+  contentLength?: number;
+  error?: string;
+}
+
+export interface UrlImportResult {
+  filePath: string;
+  contentType: string;
+  size: number;
+  isBinary: boolean;
+}
+
+export const importApi = {
+  validate: (url: string) =>
+    fetchApi<{ success: boolean; data: UrlValidationResult }>('/api/import/validate', {
+      method: 'POST',
+      body: { url },
+    }),
+
+  fromUrl: (url: string, sessionPath: string, targetPath?: string) =>
+    fetchApi<{ success: boolean; data: UrlImportResult }>('/api/import/url', {
+      method: 'POST',
+      body: { url, sessionPath, targetPath },
+    }),
 };

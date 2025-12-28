@@ -552,6 +552,22 @@ function createImageLayersStore() {
     },
 
     /**
+     * Load ImageData into the active layer (for frame-based animation)
+     */
+    loadImageDataToActiveLayer(imageData: ImageData): void {
+      const activeLayer = this.getActiveLayer();
+      if (!activeLayer) {
+        return;
+      }
+
+      const ctx = activeLayer.canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, activeLayer.canvas.width, activeLayer.canvas.height);
+        ctx.putImageData(imageData, 0, 0);
+      }
+    },
+
+    /**
      * Get composite image as data URL
      */
     getCompositeDataURL(type = 'image/png', quality?: number): string {
