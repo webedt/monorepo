@@ -36,14 +36,14 @@ export type {
   UpdateAchievementProgressRequest,
   AchievementStats,
   UserAchievementSummary,
-  // Cloud save types
+  // Cloud save types (renamed to avoid collision with cloudSaves module)
   SaveSyncStatus,
   SaveSlotType,
-  CloudSave,
-  CloudSaveConflict,
-  CreateCloudSaveRequest,
-  ResolveConflictRequest,
-  CloudSaveQuota,
+  CloudSave as GameCloudSaveInfo,
+  CloudSaveConflict as GameCloudSaveConflict,
+  CreateCloudSaveRequest as CreateGameCloudSaveRequest,
+  ResolveConflictRequest as ResolveGameCloudSaveConflictRequest,
+  CloudSaveQuota as GameCloudSaveQuota,
   // Compatibility types
   CompatibilityCheckResult,
   CompatibilityCheck,

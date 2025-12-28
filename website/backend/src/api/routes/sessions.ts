@@ -159,6 +159,64 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// Search sessions by query string
+router.get('/search', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const queryService = ServiceProvider.get(ASessionQueryService);
+
+    // Parse query parameters
+    const query = (req.query.q as string) || '';
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const statusParam = req.query.status as string | undefined;
+    const favorite = req.query.favorite === 'true' ? true : req.query.favorite === 'false' ? false : undefined;
+
+    // Validate status parameter if provided
+    const validStatuses = ['pending', 'running', 'completed', 'error'];
+    let status: string | undefined;
+    if (statusParam) {
+      if (!validStatuses.includes(statusParam)) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+        });
+        return;
+      }
+      status = statusParam;
+    }
+
+    // Require a query string
+    if (!query.trim()) {
+      res.status(400).json({ success: false, error: 'Search query (q) is required' });
+      return;
+    }
+
+    const result = await queryService.search(authReq.user!.id, {
+      query: query.trim(),
+      limit,
+      offset,
+      status,
+      favorite,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        sessions: result.items,
+        total: result.total,
+        limit,
+        offset,
+        hasMore: result.hasMore,
+        query: query.trim(),
+      },
+    });
+  } catch (error) {
+    logger.error('Search sessions error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to search sessions' });
+  }
+});
+
 /**
  * SSE endpoint for real-time session list updates
  *
@@ -619,6 +677,58 @@ router.post('/:id/unlock', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Unlock session error', error as Error, { component: 'Sessions' });
     res.status(500).json({ success: false, error: 'Failed to unlock session' });
+  }
+});
+
+// Toggle favorite status for a chat session
+router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const sessionId = req.params.id;
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: 'Invalid session ID' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    if (session.userId !== authReq.user!.id) {
+      res.status(403).json({ success: false, error: 'Access denied' });
+      return;
+    }
+
+    // Toggle favorite status
+    const newFavoriteStatus = !session.favorite;
+    const [updatedSession] = await db
+      .update(chatSessions)
+      .set({ favorite: newFavoriteStatus })
+      .where(eq(chatSessions.id, sessionId))
+      .returning();
+
+    // Notify subscribers of session update
+    sessionListBroadcaster.notifySessionUpdated(authReq.user!.id, updatedSession);
+
+    logger.info(`Session ${sessionId} favorite status toggled to ${newFavoriteStatus}`, {
+      component: 'Sessions',
+      sessionId,
+      favorite: newFavoriteStatus,
+    });
+
+    res.json({ success: true, session: updatedSession });
+  } catch (error) {
+    logger.error('Toggle favorite error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to toggle favorite status' });
   }
 });
 

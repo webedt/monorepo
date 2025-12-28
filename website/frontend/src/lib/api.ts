@@ -25,6 +25,8 @@ import type {
   GeminiAuth,
   ApiResponse,
   AdminStats,
+  Collection,
+  SessionCollection,
 } from '../types';
 
 // Cached API base URL - computed once on first access
@@ -366,6 +368,30 @@ export const sessionsApi = {
     fetchApi<ApiResponse<{ sessions: Session[] }>>('/api/sessions')
       .then(r => r.data!),
 
+  search: (params: {
+    q: string;
+    limit?: number;
+    offset?: number;
+    status?: string;
+    favorite?: boolean;
+  }) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('q', params.q);
+    if (params.limit) queryParams.append('limit', String(params.limit));
+    if (params.offset) queryParams.append('offset', String(params.offset));
+    if (params.status) queryParams.append('status', params.status);
+    if (params.favorite !== undefined) queryParams.append('favorite', String(params.favorite));
+    return fetchApi<ApiResponse<{
+      sessions: Session[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+      query: string;
+    }>>(`/api/sessions/search?${queryParams.toString()}`)
+      .then(r => r.data!);
+  },
+
   listDeleted: (params?: { limit?: number; offset?: number }) => {
     const queryParams = new URLSearchParams();
     if (params?.limit) queryParams.append('limit', String(params.limit));
@@ -482,6 +508,65 @@ export const sessionsApi = {
 
   syncEvents: (id: string) =>
     fetchApi(`/api/sessions/${id}/sync-events`, { method: 'POST' }),
+
+  toggleFavorite: (id: string) =>
+    fetchApi<{ success: boolean; session: Session }>(`/api/sessions/${id}/favorite`, { method: 'POST' }),
+};
+
+// ============================================================================
+// Collections API
+// ============================================================================
+export const collectionsApi = {
+  list: () =>
+    fetchApi<ApiResponse<{ collections: Collection[]; total: number }>>('/api/collections')
+      .then(r => r.data!),
+
+  get: (id: string) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>(`/api/collections/${id}`)
+      .then(r => r.data!),
+
+  create: (data: { name: string; description?: string; color?: string; icon?: string; isDefault?: boolean }) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>('/api/collections', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  update: (id: string, data: { name?: string; description?: string; color?: string; icon?: string; sortOrder?: number; isDefault?: boolean }) =>
+    fetchApi<ApiResponse<{ collection: Collection }>>(`/api/collections/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  delete: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/collections/${id}`, { method: 'DELETE' }),
+
+  getSessions: (id: string) =>
+    fetchApi<ApiResponse<{ collection: Collection; sessions: Session[]; total: number }>>(`/api/collections/${id}/sessions`)
+      .then(r => r.data!),
+
+  addSession: (collectionId: string, sessionId: string) =>
+    fetchApi<ApiResponse<{ membership: SessionCollection }>>(`/api/collections/${collectionId}/sessions/${sessionId}`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  removeSession: (collectionId: string, sessionId: string) =>
+    fetchApi<{ success: boolean }>(`/api/collections/${collectionId}/sessions/${sessionId}`, { method: 'DELETE' }),
+
+  getSessionCollections: (sessionId: string) =>
+    fetchApi<ApiResponse<{ collections: Collection[]; total: number }>>(`/api/collections/session/${sessionId}`)
+      .then(r => r.data!),
+
+  bulkAddSession: (sessionId: string, collectionIds: string[]) =>
+    fetchApi<ApiResponse<{ added: number }>>(`/api/collections/session/${sessionId}/bulk`, {
+      method: 'POST',
+      body: { collectionIds },
+    }).then(r => r.data!),
+
+  reorder: (orderedIds: string[]) =>
+    fetchApi<{ success: boolean }>('/api/collections/reorder', {
+      method: 'POST',
+      body: { orderedIds },
+    }),
 };
 
 // ============================================================================
@@ -1172,9 +1257,75 @@ export const channelsApi = {
 };
 
 // ============================================================================
+// Billing API
+// ============================================================================
+export interface BillingInfo {
+  tier: string;
+  tierLabel: string;
+  price: number;
+  priceLabel: string;
+  usedBytes: string;
+  quotaBytes: string;
+  availableBytes: string;
+  usagePercent: number;
+  usedFormatted: string;
+  quotaFormatted: string;
+  availableFormatted: string;
+}
+
+export interface PricingTier {
+  id: string;
+  name: string;
+  bytes: string;
+  formatted: string;
+  price: number;
+  priceLabel: string;
+  features: string[];
+}
+
+export const billingApi = {
+  getCurrentPlan: () =>
+    fetchApi<ApiResponse<BillingInfo>>('/api/billing/current').then(r => r.data),
+
+  getTiers: () =>
+    fetchApi<ApiResponse<{ tiers: PricingTier[] }>>('/api/billing/tiers').then(r => r.data),
+
+  changePlan: (tier: string) =>
+    fetchApi<ApiResponse<{
+      message: string;
+      tier: string;
+      tierLabel: string;
+      price: number;
+      priceLabel: string;
+      newQuotaBytes: string;
+      newQuotaFormatted: string;
+    }>>('/api/billing/change-plan', {
+      method: 'POST',
+      body: { tier },
+    }).then(r => r.data),
+};
+
+// ============================================================================
 // Taxonomy API (Admin-configurable categories, tags, genres)
 // ============================================================================
-import type { Taxonomy, TaxonomyTerm, ItemTaxonomy, TaxonomyWithTerms } from '../types';
+import type {
+  Taxonomy,
+  TaxonomyTerm,
+  ItemTaxonomy,
+  TaxonomyWithTerms,
+  Announcement,
+  AnnouncementType,
+  AnnouncementPriority,
+  AnnouncementStatus,
+  CloudSave,
+  CloudSaveVersion,
+  CloudSaveSyncLog,
+  CloudSaveStats,
+  CloudSaveSyncConflict,
+  CloudSavePlatformData,
+  CloudSaveGameProgress,
+  LocalSaveInfo,
+} from '../types';
 
 export const taxonomyApi = {
   // Taxonomy CRUD
@@ -1288,4 +1439,179 @@ export const taxonomyApi = {
       `/api/taxonomies/items/by-term/${termId}${queryString ? `?${queryString}` : ''}`
     ).then(r => r.data || []);
   },
+};
+
+// ============================================================================
+// Announcements API (Official platform updates)
+// ============================================================================
+export const announcementsApi = {
+  // Get published announcements (public)
+  list: (options?: {
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    pinned?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.type) params.append('type', options.type);
+    if (options?.priority) params.append('priority', options.priority);
+    if (options?.pinned !== undefined) params.append('pinned', String(options.pinned));
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      announcements: Announcement[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>>(`/api/announcements${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Get single announcement
+  get: (id: string) =>
+    fetchApi<ApiResponse<Announcement>>(`/api/announcements/${id}`).then(r => r.data!),
+
+  // Admin: List all announcements (including drafts and archived)
+  adminList: (options?: {
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.type) params.append('type', options.type);
+    if (options?.priority) params.append('priority', options.priority);
+    if (options?.status) params.append('status', options.status);
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      announcements: Announcement[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>>(`/api/announcements/admin/all${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Admin: Create announcement
+  create: (data: {
+    title: string;
+    content: string;
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    pinned?: boolean;
+    expiresAt?: string;
+  }) =>
+    fetchApi<ApiResponse<{ announcement: Announcement }>>('/api/announcements', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Admin: Update announcement
+  update: (id: string, data: {
+    title?: string;
+    content?: string;
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    pinned?: boolean;
+    expiresAt?: string | null;
+  }) =>
+    fetchApi<ApiResponse<{ announcement: Announcement }>>(`/api/announcements/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  // Admin: Delete announcement
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/announcements/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
+// ============================================================================
+// Cloud Saves API (Game save synchronization across devices)
+// ============================================================================
+export const cloudSavesApi = {
+  // Get cloud save statistics
+  getStats: () =>
+    fetchApi<ApiResponse<CloudSaveStats>>('/api/cloud-saves/stats').then(r => r.data!),
+
+  // Get sync history
+  getSyncHistory: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{ history: CloudSaveSyncLog[] }>>(
+      `/api/cloud-saves/sync-history${queryString ? `?${queryString}` : ''}`
+    ).then(r => r.data!);
+  },
+
+  // List all saves for the current user
+  listAll: () =>
+    fetchApi<ApiResponse<{ saves: CloudSave[]; total: number }>>('/api/cloud-saves/all')
+      .then(r => r.data!),
+
+  // Check for sync conflicts
+  checkConflicts: (localSaves: LocalSaveInfo[]) =>
+    fetchApi<ApiResponse<{ conflicts: CloudSaveSyncConflict[]; hasConflicts: boolean }>>('/api/cloud-saves/check-conflicts', {
+      method: 'POST',
+      body: { localSaves },
+    }).then(r => r.data!),
+
+  // List saves for a specific game
+  listByGame: (gameId: string) =>
+    fetchApi<ApiResponse<{ saves: CloudSave[]; total: number }>>(`/api/cloud-saves/games/${gameId}`)
+      .then(r => r.data!),
+
+  // Get a specific save slot (includes save data)
+  getSave: (gameId: string, slotNumber: number) =>
+    fetchApi<ApiResponse<{ save: CloudSave; game: { id: string; title: string } | null }>>(
+      `/api/cloud-saves/games/${gameId}/slots/${slotNumber}`
+    ).then(r => r.data!),
+
+  // Upload/update a save
+  uploadSave: (gameId: string, slotNumber: number, data: {
+    slotName?: string;
+    saveData: string;
+    platformData?: CloudSavePlatformData;
+    screenshotUrl?: string;
+    playTimeSeconds?: number;
+    gameProgress?: CloudSaveGameProgress;
+  }) =>
+    fetchApi<ApiResponse<{ save: CloudSave }>>(`/api/cloud-saves/games/${gameId}/slots/${slotNumber}`, {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Delete a save
+  deleteSave: (gameId: string, slotNumber: number, platformData?: CloudSavePlatformData) =>
+    fetchApi<ApiResponse<void>>(`/api/cloud-saves/games/${gameId}/slots/${slotNumber}`, {
+      method: 'DELETE',
+      body: platformData ? { platformData } : undefined,
+    }),
+
+  // Get save versions for recovery
+  getVersions: (saveId: string) =>
+    fetchApi<ApiResponse<{ versions: CloudSaveVersion[]; total: number }>>(
+      `/api/cloud-saves/saves/${saveId}/versions`
+    ).then(r => r.data!),
+
+  // Get a specific version (includes save data)
+  getVersion: (saveId: string, versionId: string) =>
+    fetchApi<ApiResponse<{ version: CloudSaveVersion }>>(
+      `/api/cloud-saves/saves/${saveId}/versions/${versionId}`
+    ).then(r => r.data!),
+
+  // Restore a save from a previous version
+  restoreVersion: (saveId: string, versionId: string, platformData?: CloudSavePlatformData) =>
+    fetchApi<ApiResponse<{ save: CloudSave }>>(`/api/cloud-saves/saves/${saveId}/versions/${versionId}/restore`, {
+      method: 'POST',
+      body: platformData ? { platformData } : undefined,
+    }).then(r => r.data!),
 };

@@ -71,6 +71,9 @@ export * from './llm/index.js';
 // Organizations/Studios - Group accounts with multi-user support
 export * from './organizations/index.js';
 
+// Discovery - Task discovery and scanning
+export * from './discovery/index.js';
+
 // Code Analysis - AI-powered code analysis using ClaudeWebClient
 export * from './codeAnalysis/index.js';
 
@@ -82,6 +85,9 @@ export * from './payment/index.js';
 
 // Games - Shared platform libraries for games
 export * from './games/index.js';
+
+// Cloud Saves - Game save synchronization across devices
+export * from './cloudSaves/index.js';
 
 // =============================================================================
 // SERVICES - Dependency injection and service registry

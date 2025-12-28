@@ -466,6 +466,11 @@ export type {
   NewCommunityChannel,
   ChannelMessage,
   NewChannelMessage,
+  // Collections types
+  Collection,
+  NewCollection,
+  SessionCollection,
+  NewSessionCollection,
   // Payment types
   PaymentTransaction,
   NewPaymentTransaction,
@@ -493,6 +498,16 @@ export type {
   NewUserAchievement,
   GameCloudSave,
   NewGameCloudSave,
+  // Announcements types
+  Announcement,
+  NewAnnouncement,
+  // Cloud saves types
+  CloudSave,
+  NewCloudSave,
+  CloudSaveVersion,
+  NewCloudSaveVersion,
+  CloudSaveSyncLog,
+  NewCloudSaveSyncLog,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -518,6 +533,9 @@ export {
   // Community channels tables
   communityChannels,
   channelMessages,
+  // Collections tables
+  collections,
+  sessionCollections,
   // Payment tables
   paymentTransactions,
   paymentWebhooks,
@@ -533,6 +551,12 @@ export {
   gameAchievements,
   userAchievements,
   gameCloudSaves,
+  // Announcements tables
+  announcements,
+  // Cloud saves tables
+  cloudSaves,
+  cloudSaveVersions,
+  cloudSaveSyncLog,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
