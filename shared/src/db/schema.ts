@@ -335,3 +335,173 @@ export type OrchestratorCycle = typeof orchestratorCycles.$inferSelect;
 export type NewOrchestratorCycle = typeof orchestratorCycles.$inferInsert;
 export type OrchestratorTask = typeof orchestratorTasks.$inferSelect;
 export type NewOrchestratorTask = typeof orchestratorTasks.$inferInsert;
+
+// ============================================================================
+// PLAYERS FEATURE - Store, Library, Purchases, Community
+// ============================================================================
+
+// Games - Store catalog items
+export const games = pgTable('games', {
+  id: text('id').primaryKey(), // UUID
+  title: text('title').notNull(),
+  description: text('description'),
+  shortDescription: text('short_description'), // For cards/previews
+  price: integer('price').notNull().default(0), // Price in cents (0 = free)
+  currency: text('currency').default('USD').notNull(),
+  coverImage: text('cover_image'), // URL to cover image
+  screenshots: json('screenshots').$type<string[]>().default([]), // Array of image URLs
+  trailerUrl: text('trailer_url'), // Video trailer URL
+  developer: text('developer'),
+  publisher: text('publisher'),
+  releaseDate: timestamp('release_date'),
+  genres: json('genres').$type<string[]>().default([]), // e.g., ['Action', 'RPG']
+  tags: json('tags').$type<string[]>().default([]), // e.g., ['Multiplayer', 'Open World']
+  platforms: json('platforms').$type<string[]>().default([]), // e.g., ['Windows', 'Mac', 'Linux']
+  rating: text('rating'), // e.g., 'E', 'T', 'M'
+  averageScore: integer('average_score'), // User rating average (0-100)
+  reviewCount: integer('review_count').default(0).notNull(),
+  downloadCount: integer('download_count').default(0).notNull(),
+  featured: boolean('featured').default(false).notNull(), // Featured on store front
+  status: text('status').default('published').notNull(), // 'draft' | 'published' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Purchases - Transaction records (defined before userLibrary to avoid forward reference)
+export const purchases = pgTable('purchases', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  amount: integer('amount').notNull(), // Amount in cents
+  currency: text('currency').default('USD').notNull(),
+  status: text('status').default('pending').notNull(), // 'pending' | 'completed' | 'pending_refund' | 'refunded' | 'failed'
+  paymentMethod: text('payment_method'), // e.g., 'credit_card', 'wallet', 'paypal', 'free'
+  paymentDetails: json('payment_details').$type<{
+    transactionId?: string;
+    last4?: string;
+    brand?: string;
+  }>(),
+  refundedAt: timestamp('refunded_at'),
+  refundReason: text('refund_reason'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// User Library - Games owned by users
+export const userLibrary = pgTable('user_library', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  purchaseId: text('purchase_id')
+    .references(() => purchases.id, { onDelete: 'set null' }),
+  acquiredAt: timestamp('acquired_at').defaultNow().notNull(), // When user got the game
+  lastPlayedAt: timestamp('last_played_at'),
+  playtimeMinutes: integer('playtime_minutes').default(0).notNull(),
+  favorite: boolean('favorite').default(false).notNull(),
+  hidden: boolean('hidden').default(false).notNull(), // Hide from library view
+  installStatus: text('install_status').default('not_installed').notNull(), // 'not_installed' | 'installing' | 'installed'
+}, (table) => ({
+  // Unique constraint: a user can only have each game once in their library
+  userGameUnique: { name: 'user_library_user_game_unique', columns: [table.userId, table.gameId] },
+}));
+
+// Community Posts - Discussions, reviews, guides
+export const communityPosts = pgTable('community_posts', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .references(() => games.id, { onDelete: 'cascade' }), // Optional - can be general post
+  type: text('type').notNull(), // 'discussion' | 'review' | 'guide' | 'artwork' | 'announcement'
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  images: json('images').$type<string[]>().default([]), // Attached images
+  rating: integer('rating'), // For reviews: 1-5 stars
+  upvotes: integer('upvotes').default(0).notNull(),
+  downvotes: integer('downvotes').default(0).notNull(),
+  commentCount: integer('comment_count').default(0).notNull(),
+  pinned: boolean('pinned').default(false).notNull(), // Pinned by moderator
+  locked: boolean('locked').default(false).notNull(), // Comments disabled
+  status: text('status').default('published').notNull(), // 'draft' | 'published' | 'removed'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Community Comments - Replies to posts
+export const communityComments = pgTable('community_comments', {
+  id: text('id').primaryKey(), // UUID
+  postId: text('post_id')
+    .notNull()
+    .references(() => communityPosts.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  parentId: text('parent_id'), // For nested replies - self-reference
+  content: text('content').notNull(),
+  upvotes: integer('upvotes').default(0).notNull(),
+  downvotes: integer('downvotes').default(0).notNull(),
+  status: text('status').default('published').notNull(), // 'published' | 'removed'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Community Votes - Track user votes on posts/comments
+export const communityVotes = pgTable('community_votes', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  postId: text('post_id')
+    .references(() => communityPosts.id, { onDelete: 'cascade' }),
+  commentId: text('comment_id')
+    .references(() => communityComments.id, { onDelete: 'cascade' }),
+  vote: integer('vote').notNull(), // 1 = upvote, -1 = downvote
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  // Unique constraint: a user can only vote once per post
+  userPostVoteUnique: { name: 'community_votes_user_post_unique', columns: [table.userId, table.postId] },
+  // Unique constraint: a user can only vote once per comment
+  userCommentVoteUnique: { name: 'community_votes_user_comment_unique', columns: [table.userId, table.commentId] },
+}));
+
+// Wishlists - Games users want to buy
+export const wishlists = pgTable('wishlists', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  priority: integer('priority').default(0).notNull(), // For ordering
+  notifyOnSale: boolean('notify_on_sale').default(true).notNull(),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => ({
+  // Unique constraint: a user can only have each game once in their wishlist
+  userGameUnique: { name: 'wishlists_user_game_unique', columns: [table.userId, table.gameId] },
+}));
+
+// Type exports for Players feature
+export type Game = typeof games.$inferSelect;
+export type NewGame = typeof games.$inferInsert;
+export type UserLibraryItem = typeof userLibrary.$inferSelect;
+export type NewUserLibraryItem = typeof userLibrary.$inferInsert;
+export type Purchase = typeof purchases.$inferSelect;
+export type NewPurchase = typeof purchases.$inferInsert;
+export type CommunityPost = typeof communityPosts.$inferSelect;
+export type NewCommunityPost = typeof communityPosts.$inferInsert;
+export type CommunityComment = typeof communityComments.$inferSelect;
+export type NewCommunityComment = typeof communityComments.$inferInsert;
+export type CommunityVote = typeof communityVotes.$inferSelect;
+export type NewCommunityVote = typeof communityVotes.$inferInsert;
+export type WishlistItem = typeof wishlists.$inferSelect;
+export type NewWishlistItem = typeof wishlists.$inferInsert;

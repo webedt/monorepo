@@ -229,6 +229,7 @@ export {
   ATokenRefreshService,
   AEventFormatter,
   ASseHelper,
+  ACodeAnalyzer,
   // Types
   type LogContext,
   type CapturedLog,
@@ -250,6 +251,13 @@ export {
   type ClaudeWebClientConfig,
   type GitHubPullOptions,
   type GitHubPullResult,
+  type AnalysisType,
+  type FindingSeverity,
+  type AnalysisFinding,
+  type AnalysisSummary,
+  type CodeAnalysisParams,
+  type CodeAnalysisResult,
+  type CodeAnalyzerConfig,
 } from './abstracts/index.js';
 
 // =============================================================================

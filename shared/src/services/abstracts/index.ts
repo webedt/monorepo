@@ -116,3 +116,15 @@ export { AEventFormatter, type FormattedEvent } from '../../utils/formatters/AEv
 
 // HTTP services (from utils/http/)
 export { ASseHelper, type SseWritable } from '../../utils/http/ASseHelper.js';
+
+// Code Analysis services (from codeAnalysis/)
+export { ACodeAnalyzer } from '../../codeAnalysis/ACodeAnalyzer.js';
+export type {
+  AnalysisType,
+  FindingSeverity,
+  AnalysisFinding,
+  AnalysisSummary,
+  CodeAnalysisParams,
+  CodeAnalysisResult,
+  CodeAnalyzerConfig,
+} from '../../codeAnalysis/types.js';
