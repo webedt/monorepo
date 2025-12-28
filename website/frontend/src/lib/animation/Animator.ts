@@ -301,6 +301,7 @@ export class Animator {
 
   /**
    * Gets the current animation result (frame or bone pose)
+   * Returns null if no clip is selected or if the animation has no frames/keyframes
    */
   getValue(): AnimatorResult {
     const clip = this.getCurrentClip();
@@ -358,7 +359,8 @@ export class Animator {
   private getEffectiveSpeed(): number {
     const clip = this.getCurrentClip();
     const clipSpeed = clip?.speed ?? 1;
-    return this.playbackSpeed * clipSpeed;
+    // Ensure minimum speed to prevent division by zero
+    return Math.max(0.1, this.playbackSpeed * clipSpeed);
   }
 
   private getAnimationDuration(animation: Animation): number {
@@ -380,9 +382,14 @@ export class Animator {
     return duration;
   }
 
-  private getFrameValue(animation: FrameAnimation): FrameResult {
+  private getFrameValue(animation: FrameAnimation): FrameResult | null {
+    // Handle empty frames array
+    if (animation.frames.length === 0) {
+      return null;
+    }
+
     const frameIndex = this.calculateFrameIndex(animation);
-    const frame = animation.frames[frameIndex] ?? animation.frames[0];
+    const frame = animation.frames[frameIndex];
 
     return {
       type: 'frame',
@@ -426,6 +433,28 @@ export class Animator {
     };
   }
 
+  /**
+   * Binary search to find the index of the last keyframe with time <= target
+   * Returns -1 if all keyframes are after the target time
+   */
+  private findKeyframeIndex(keyframes: BoneKeyframe[], targetTime: number): number {
+    let left = 0;
+    let right = keyframes.length - 1;
+    let result = -1;
+
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      if (keyframes[mid].time <= targetTime) {
+        result = mid;
+        left = mid + 1;
+      } else {
+        right = mid - 1;
+      }
+    }
+
+    return result;
+  }
+
   private interpolateBonePose(animation: BoneAnimation): Record<string, BoneTransform> {
     const pose: Record<string, BoneTransform> = {};
     const { keyframes, bones } = animation;
@@ -438,32 +467,24 @@ export class Animator {
       return pose;
     }
 
-    // Find surrounding keyframes
-    let prevKeyframe: BoneKeyframe | null = null;
-    let nextKeyframe: BoneKeyframe | null = null;
+    // Find surrounding keyframes using binary search (O(log n) instead of O(n))
+    const prevIndex = this.findKeyframeIndex(keyframes, this.currentTime);
 
-    for (let i = 0; i < keyframes.length; i++) {
-      if (keyframes[i].time <= this.currentTime) {
-        prevKeyframe = keyframes[i];
-      }
-      if (keyframes[i].time >= this.currentTime && !nextKeyframe) {
-        nextKeyframe = keyframes[i];
-      }
-    }
+    let prevKeyframe: BoneKeyframe;
+    let nextKeyframe: BoneKeyframe;
 
-    // Handle edge cases
-    if (!prevKeyframe && nextKeyframe) {
-      prevKeyframe = nextKeyframe;
-    }
-    if (!nextKeyframe && prevKeyframe) {
-      nextKeyframe = prevKeyframe;
-    }
-    if (!prevKeyframe || !nextKeyframe) {
-      // No keyframes, return default transforms
-      for (const bone of bones) {
-        pose[bone.name] = { ...bone.localTransform };
-      }
-      return pose;
+    if (prevIndex === -1) {
+      // All keyframes are after current time, use first keyframe for both
+      prevKeyframe = keyframes[0];
+      nextKeyframe = keyframes[0];
+    } else if (prevIndex === keyframes.length - 1) {
+      // At or past the last keyframe
+      prevKeyframe = keyframes[prevIndex];
+      nextKeyframe = keyframes[prevIndex];
+    } else {
+      // Between two keyframes
+      prevKeyframe = keyframes[prevIndex];
+      nextKeyframe = keyframes[prevIndex + 1];
     }
 
     // Calculate interpolation factor
@@ -501,9 +522,8 @@ export class Animator {
   }
 
   private lerpAngle(a: number, b: number, t: number): number {
-    let diff = b - a;
-    while (diff > 180) diff -= 360;
-    while (diff < -180) diff += 360;
+    // Use modulo arithmetic for shortest path rotation (avoids while loops)
+    const diff = ((b - a + 180) % 360 + 360) % 360 - 180;
     return a + diff * t;
   }
 
@@ -542,7 +562,7 @@ export class Animator {
     if (elapsed >= duration) {
       if (shouldLoop) {
         // Handle ping-pong mode
-        if (clip.animation.type === 'frame' && (clip.animation as FrameAnimation).pingPong) {
+        if (clip.animation.type === 'frame' && clip.animation.pingPong) {
           this.isReversing = !this.isReversing;
         }
 
