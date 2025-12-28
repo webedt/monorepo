@@ -69,8 +69,8 @@ export class SaveAsSnippetDialog extends Component {
 
         <div class="snippet-form-row">
           <div class="snippet-form-section snippet-form-half">
-            <label class="snippet-form-label">Language</label>
-            <select class="snippet-form-select language-select">
+            <label class="snippet-form-label" for="snippet-language-select">Language</label>
+            <select id="snippet-language-select" class="snippet-form-select language-select">
               ${SNIPPET_LANGUAGES.map(lang => `
                 <option value="${lang}" ${lang === detectedLanguage ? 'selected' : ''}>
                   ${this.formatLanguageName(lang)}
@@ -80,8 +80,8 @@ export class SaveAsSnippetDialog extends Component {
           </div>
 
           <div class="snippet-form-section snippet-form-half">
-            <label class="snippet-form-label">Category</label>
-            <select class="snippet-form-select category-select">
+            <label class="snippet-form-label" for="snippet-category-select">Category</label>
+            <select id="snippet-category-select" class="snippet-form-select category-select">
               ${SNIPPET_CATEGORIES.map(cat => `
                 <option value="${cat}" ${cat === 'snippet' ? 'selected' : ''}>
                   ${this.formatCategoryName(cat)}
@@ -352,7 +352,6 @@ export class SaveAsSnippetDialog extends Component {
         tags,
       });
 
-      toast.success('Snippet saved successfully');
       this.options.onSuccess?.(snippet);
       this.close();
     } catch (error) {
