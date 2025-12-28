@@ -16,6 +16,8 @@ export interface TransformProperties {
   scaleX?: number;
   scaleY?: number;
   opacity?: number;
+  pivotX?: number; // 0 = left, 0.5 = center, 1 = right
+  pivotY?: number; // 0 = top, 0.5 = center, 1 = bottom
 }
 
 /**
@@ -164,6 +166,22 @@ export function interpolateTransform(
     result.opacity = to.opacity;
   } else if (from.opacity !== undefined) {
     result.opacity = from.opacity;
+  }
+
+  if (from.pivotX !== undefined && to.pivotX !== undefined) {
+    result.pivotX = lerp(from.pivotX, to.pivotX, easedT);
+  } else if (to.pivotX !== undefined) {
+    result.pivotX = to.pivotX;
+  } else if (from.pivotX !== undefined) {
+    result.pivotX = from.pivotX;
+  }
+
+  if (from.pivotY !== undefined && to.pivotY !== undefined) {
+    result.pivotY = lerp(from.pivotY, to.pivotY, easedT);
+  } else if (to.pivotY !== undefined) {
+    result.pivotY = to.pivotY;
+  } else if (from.pivotY !== undefined) {
+    result.pivotY = from.pivotY;
   }
 
   return result;
