@@ -232,6 +232,8 @@ app.get('/health', (req, res) => {
 });
 
 // Detailed health status endpoint (comprehensive health information)
+// Scale expectations: Current deployment supports 1-3 concurrent users
+// Architecture is designed for horizontal scalability when demand increases
 app.get('/health/status', async (req, res) => {
   try {
     const status = await healthMonitor.getDetailedHealthStatus({
@@ -242,6 +244,11 @@ app.get('/health/status', async (req, res) => {
         commitSha: BUILD_COMMIT_SHA,
         timestamp: BUILD_TIMESTAMP,
         imageTag: BUILD_IMAGE_TAG,
+      },
+      scale: {
+        currentCapacity: '1-3 concurrent users',
+        shortTermTarget: 'up to 10 users',
+        architecture: 'horizontally scalable',
       },
     });
 
@@ -360,6 +367,7 @@ async function startServer() {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);
   console.log(`Frontend dist: ${frontendDistPath}`);
+  console.log(`Scale: 1-3 concurrent users (horizontally scalable)`);
   console.log('');
 
   // Log environment configuration
