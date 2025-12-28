@@ -6,6 +6,7 @@
 import { Page } from '../base/Page';
 import { communityApi } from '../../lib/api';
 import { authStore } from '../../stores/authStore';
+import { InfiniteScroll } from '../../lib/infiniteScroll';
 import type { CommunityPost } from '../../types';
 import './community.css';
 
@@ -20,6 +21,8 @@ export class CommunityPage extends Page {
   private total = 0;
   private offset = 0;
   private limit = 20;
+  private loadingMore = false;
+  private infiniteScroll: InfiniteScroll | null = null;
 
   protected render(): string {
     if (this.loading) {
@@ -62,18 +65,12 @@ export class CommunityPage extends Page {
               <p>Be the first to start a discussion!</p>
             </div>
           ` : `
-            <div class="posts-list">
+            <div class="posts-list" id="posts-list">
               ${this.posts.map((post) => this.renderPost(post)).join('')}
             </div>
           `}
 
-          ${this.total > this.offset + this.limit ? `
-            <div class="load-more">
-              <button id="load-more-btn" class="btn btn-secondary">
-                Load More
-              </button>
-            </div>
-          ` : ''}
+          <div id="infinite-scroll-container"></div>
         </div>
 
         <div id="create-post-modal" class="modal hidden">
@@ -178,6 +175,10 @@ export class CommunityPage extends Page {
   }
 
   private async loadPosts(append = false): Promise<void> {
+    if (append) {
+      this.loadingMore = true;
+    }
+
     try {
       const result = await communityApi.getPosts({
         type: this.activeTab !== 'all' ? this.activeTab : undefined,
@@ -187,26 +188,87 @@ export class CommunityPage extends Page {
 
       if (append) {
         this.posts = [...this.posts, ...(result.posts || [])];
+        // Append new posts to the list
+        const postsList = this.$('#posts-list');
+        if (postsList) {
+          for (const post of result.posts || []) {
+            postsList.insertAdjacentHTML('beforeend', this.renderPost(post));
+          }
+          this.setupVoteListeners();
+        }
+        this.infiniteScroll?.updateSentinelState();
       } else {
         this.posts = result.posts || [];
+        this.loading = false;
+        this.element.innerHTML = this.render();
+        this.setupEventListeners();
+        this.setupInfiniteScroll();
       }
       this.total = result.total || 0;
-
-      this.loading = false;
-      this.element.innerHTML = this.render();
-      this.setupEventListeners();
     } catch (error) {
       console.error('Failed to load posts:', error);
-      this.loading = false;
-      this.element.innerHTML = `
-        <div class="community-page">
-          <div class="error-state">
-            <h2>Failed to load community</h2>
-            <p>Please try again later</p>
-            <button onclick="location.reload()">Retry</button>
+      if (!append) {
+        this.loading = false;
+        this.element.innerHTML = `
+          <div class="community-page">
+            <div class="error-state">
+              <h2>Failed to load community</h2>
+              <p>Please try again later</p>
+              <button onclick="location.reload()">Retry</button>
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      }
+    } finally {
+      this.loadingMore = false;
+    }
+  }
+
+  private setupInfiniteScroll(): void {
+    // Clean up previous instance
+    if (this.infiniteScroll) {
+      this.infiniteScroll.destroy();
+      this.infiniteScroll = null;
+    }
+
+    const container = this.$('#infinite-scroll-container');
+    if (!container) return;
+
+    this.infiniteScroll = new InfiniteScroll({
+      onLoadMore: async () => {
+        this.offset += this.limit;
+        await this.loadPosts(true);
+      },
+      hasMore: () => this.total > this.offset + this.limit,
+      isLoading: () => this.loadingMore,
+    });
+
+    const sentinel = this.infiniteScroll.createSentinel();
+    container.appendChild(sentinel);
+    this.infiniteScroll.attach(sentinel);
+  }
+
+  private setupVoteListeners(): void {
+    const voteButtons = this.$$('.vote-btn');
+    voteButtons.forEach((btn) => {
+      // Remove existing listener to avoid duplicates
+      const newBtn = btn.cloneNode(true);
+      btn.parentNode?.replaceChild(newBtn, btn);
+      newBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const vote = parseInt((newBtn as HTMLElement).dataset.vote || '0') as 1 | -1;
+        const postId = (newBtn as HTMLElement).dataset.postId;
+        if (postId) {
+          this.handleVote(postId, vote);
+        }
+      });
+    });
+  }
+
+  protected onUnmount(): void {
+    if (this.infiniteScroll) {
+      this.infiniteScroll.destroy();
+      this.infiniteScroll = null;
     }
   }
 
@@ -223,15 +285,6 @@ export class CommunityPage extends Page {
         }
       });
     });
-
-    // Load more button
-    const loadMoreBtn = this.$('#load-more-btn');
-    if (loadMoreBtn) {
-      loadMoreBtn.addEventListener('click', () => {
-        this.offset += this.limit;
-        this.loadPosts(true);
-      });
-    }
 
     // Create post button
     const createBtn = this.$('#create-post-btn');

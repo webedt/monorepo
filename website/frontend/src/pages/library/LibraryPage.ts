@@ -6,6 +6,7 @@
 import { Page } from '../base/Page';
 import { libraryApi } from '../../lib/api';
 import { GameCard } from '../../components';
+import { InfiniteScroll } from '../../lib/infiniteScroll';
 import type { LibraryItem } from '../../types';
 import './library.css';
 
@@ -25,6 +26,11 @@ export class LibraryPage extends Page {
     favoriteGames: number;
     totalPlaytimeHours: number;
   } | null = null;
+  private total = 0;
+  private offset = 0;
+  private limit = 24;
+  private loadingMore = false;
+  private infiniteScroll: InfiniteScroll | null = null;
 
   protected render(): string {
     if (this.loading) {
@@ -83,6 +89,7 @@ export class LibraryPage extends Page {
           ` : `
             <div class="library-grid" id="library-grid"></div>
           `}
+          <div id="infinite-scroll-container"></div>
         </div>
       </div>
     `;
@@ -90,6 +97,7 @@ export class LibraryPage extends Page {
 
   async load(): Promise<void> {
     this.loading = true;
+    this.offset = 0;
     this.element.innerHTML = this.render();
 
     try {
@@ -100,17 +108,21 @@ export class LibraryPage extends Page {
           order: this.sortBy === 'title' ? 'asc' : 'desc',
           favorite: this.filterFavorites || undefined,
           installed: this.filterInstalled || undefined,
+          limit: this.limit,
+          offset: this.offset,
         }),
         libraryApi.getStats(),
       ]);
 
       this.items = libraryResult.items || [];
+      this.total = libraryResult.total || 0;
       this.stats = statsResult;
 
       this.loading = false;
       this.element.innerHTML = this.render();
       this.renderGameCards();
       this.setupEventListeners();
+      this.setupInfiniteScroll();
     } catch (error) {
       console.error('Failed to load library:', error);
       this.loading = false;
@@ -134,42 +146,7 @@ export class LibraryPage extends Page {
 
     for (const item of this.items) {
       if (!item.game) continue;
-
-      const cardWrapper = document.createElement('div');
-      cardWrapper.className = 'library-item';
-
-      // Create game card
-      const card = new GameCard({
-        game: item.game,
-        showPrice: false,
-        onClick: () => this.navigate(`/game/${item.game!.id}`),
-      });
-
-      cardWrapper.appendChild(card.getElement());
-
-      // Add library-specific info
-      const itemInfo = document.createElement('div');
-      itemInfo.className = 'library-item-info';
-      itemInfo.innerHTML = `
-        <div class="item-stats">
-          ${item.playtimeMinutes > 0 ? `
-            <span class="playtime">${this.formatPlaytime(item.playtimeMinutes)}</span>
-          ` : ''}
-          ${item.lastPlayedAt ? `
-            <span class="last-played">Last played: ${this.formatDate(item.lastPlayedAt)}</span>
-          ` : ''}
-        </div>
-        <div class="item-actions">
-          <button class="action-btn ${item.favorite ? 'active' : ''}" data-action="favorite" data-game-id="${item.gameId}" title="${item.favorite ? 'Remove from favorites' : 'Add to favorites'}">
-            ${item.favorite ? '★' : '☆'}
-          </button>
-          <button class="action-btn" data-action="play" data-game-id="${item.gameId}" title="Play">
-            ▶
-          </button>
-        </div>
-      `;
-
-      cardWrapper.appendChild(itemInfo);
+      const cardWrapper = this.createLibraryItemElement(item);
       grid.appendChild(cardWrapper);
     }
   }
@@ -235,18 +212,145 @@ export class LibraryPage extends Page {
   }
 
   private async refreshLibrary(): Promise<void> {
+    this.offset = 0;
     try {
       const result = await libraryApi.getLibrary({
         sort: this.sortBy,
         order: this.sortBy === 'title' ? 'asc' : 'desc',
         favorite: this.filterFavorites || undefined,
         installed: this.filterInstalled || undefined,
+        limit: this.limit,
+        offset: this.offset,
       });
 
       this.items = result.items || [];
+      this.total = result.total || 0;
       this.renderGameCards();
+      this.infiniteScroll?.reset();
     } catch (error) {
       console.error('Failed to refresh library:', error);
+    }
+  }
+
+  private async loadMoreItems(): Promise<void> {
+    this.loadingMore = true;
+    try {
+      const result = await libraryApi.getLibrary({
+        sort: this.sortBy,
+        order: this.sortBy === 'title' ? 'asc' : 'desc',
+        favorite: this.filterFavorites || undefined,
+        installed: this.filterInstalled || undefined,
+        limit: this.limit,
+        offset: this.offset,
+      });
+
+      const newItems = result.items || [];
+      this.items = [...this.items, ...newItems];
+      this.total = result.total || 0;
+
+      // Append new items to the grid
+      const grid = this.$('#library-grid');
+      if (grid) {
+        for (const item of newItems) {
+          if (!item.game) continue;
+          const cardWrapper = this.createLibraryItemElement(item);
+          grid.appendChild(cardWrapper);
+        }
+        this.setupActionListeners();
+      }
+
+      this.infiniteScroll?.updateSentinelState();
+    } catch (error) {
+      console.error('Failed to load more items:', error);
+    } finally {
+      this.loadingMore = false;
+    }
+  }
+
+  private createLibraryItemElement(item: LibraryItem): HTMLElement {
+    const cardWrapper = document.createElement('div');
+    cardWrapper.className = 'library-item';
+
+    // Create game card
+    const card = new GameCard({
+      game: item.game!,
+      showPrice: false,
+      onClick: () => this.navigate(`/game/${item.game!.id}`),
+    });
+
+    cardWrapper.appendChild(card.getElement());
+
+    // Add library-specific info
+    const itemInfo = document.createElement('div');
+    itemInfo.className = 'library-item-info';
+    itemInfo.innerHTML = `
+      <div class="item-stats">
+        ${item.playtimeMinutes > 0 ? `
+          <span class="playtime">${this.formatPlaytime(item.playtimeMinutes)}</span>
+        ` : ''}
+        ${item.lastPlayedAt ? `
+          <span class="last-played">Last played: ${this.formatDate(item.lastPlayedAt)}</span>
+        ` : ''}
+      </div>
+      <div class="item-actions">
+        <button class="action-btn ${item.favorite ? 'active' : ''}" data-action="favorite" data-game-id="${item.gameId}" title="${item.favorite ? 'Remove from favorites' : 'Add to favorites'}">
+          ${item.favorite ? '★' : '☆'}
+        </button>
+        <button class="action-btn" data-action="play" data-game-id="${item.gameId}" title="Play">
+          ▶
+        </button>
+      </div>
+    `;
+
+    cardWrapper.appendChild(itemInfo);
+    return cardWrapper;
+  }
+
+  private setupInfiniteScroll(): void {
+    // Clean up previous instance
+    if (this.infiniteScroll) {
+      this.infiniteScroll.destroy();
+      this.infiniteScroll = null;
+    }
+
+    const container = this.$('#infinite-scroll-container');
+    if (!container) return;
+
+    this.infiniteScroll = new InfiniteScroll({
+      onLoadMore: async () => {
+        this.offset += this.limit;
+        await this.loadMoreItems();
+      },
+      hasMore: () => this.total > this.offset + this.limit,
+      isLoading: () => this.loadingMore,
+    });
+
+    const sentinel = this.infiniteScroll.createSentinel();
+    container.appendChild(sentinel);
+    this.infiniteScroll.attach(sentinel);
+  }
+
+  private setupActionListeners(): void {
+    const actionButtons = this.$$('.action-btn');
+    actionButtons.forEach((btn) => {
+      // Clone to remove existing listeners
+      const newBtn = btn.cloneNode(true);
+      btn.parentNode?.replaceChild(newBtn, btn);
+      newBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = (newBtn as HTMLElement).dataset.action;
+        const gameId = (newBtn as HTMLElement).dataset.gameId;
+        if (action && gameId) {
+          this.handleAction(action, gameId);
+        }
+      });
+    });
+  }
+
+  protected onUnmount(): void {
+    if (this.infiniteScroll) {
+      this.infiniteScroll.destroy();
+      this.infiniteScroll = null;
     }
   }
 
