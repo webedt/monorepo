@@ -5,12 +5,14 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, CommitDialog, AIInputBox } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox } from '../../components';
 import type { ChangedFile } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
-import { undoRedoStore } from '../../stores';
+import { formatByFilename, canFormat } from '../../lib/codeFormatter';
+import { LintingService } from '../../lib/linting';
+import { undoRedoStore, editorSettingsStore, presenceStore } from '../../stores';
 import type { Session } from '../../types';
 import type { UndoRedoState } from '../../stores/undoRedoStore';
 import type { TabContentState } from '../../stores/undoRedoStore';
@@ -63,6 +65,10 @@ export class CodePage extends Page<CodePageOptions> {
     futureLength: 0,
   };
   private unsubscribeUndoRedo: (() => void) | null = null;
+  private lintingService = new LintingService(300);
+  private lintingPanel: LintingPanel | null = null;
+  private collaborativeCursors: CollaborativeCursors | null = null;
+  private unsubscribePresence: (() => void) | null = null;
 
   protected render(): string {
     return `
@@ -78,6 +84,10 @@ export class CodePage extends Page<CodePageOptions> {
             </div>
           </div>
           <div class="code-header-right">
+            <div class="active-users-badge" style="display: none;">
+              <div class="active-users-avatars"></div>
+              <span class="active-users-count"></span>
+            </div>
             <div class="offline-status-badge" style="display: none;">
               <span class="offline-badge">Offline Mode</span>
             </div>
@@ -89,6 +99,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10H11a5 5 0 0 0-5 5v2"></path><polyline points="21 10 17 6"></polyline><polyline points="21 10 17 14"></polyline></svg>
               </button>
             </div>
+            <div class="format-btn-container"></div>
             <div class="commit-btn-container"></div>
             <div class="save-btn-container"></div>
           </div>
@@ -116,17 +127,21 @@ export class CodePage extends Page<CodePageOptions> {
 
           <main class="editor-panel">
             <div class="tabs-bar"></div>
-            <div class="editor-content">
-              <div class="editor-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                <p>Select a file to view or edit</p>
+            <div class="editor-area">
+              <div class="editor-content">
+                <div class="editor-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                  <p>Select a file to view or edit</p>
+                </div>
+                <div class="editor-wrapper" style="display: none;">
+                  <div class="collaborative-cursors-container"></div>
+                  <textarea class="code-editor" spellcheck="false"></textarea>
+                </div>
+                <div class="preview-wrapper" style="display: none;">
+                  <img class="image-preview" alt="Preview">
+                </div>
               </div>
-              <div class="editor-wrapper" style="display: none;">
-                <textarea class="code-editor" spellcheck="false"></textarea>
-              </div>
-              <div class="preview-wrapper" style="display: none;">
-                <img class="image-preview" alt="Preview">
-              </div>
+              <div class="linting-panel-container"></div>
             </div>
             <div class="ai-input-box-container"></div>
           </main>
@@ -148,6 +163,17 @@ export class CodePage extends Page<CodePageOptions> {
     const refreshBtn = this.$('[data-action="refresh"]') as HTMLButtonElement;
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => this.loadFiles());
+    }
+
+    // Setup format button
+    const formatBtnContainer = this.$('.format-btn-container') as HTMLElement;
+    if (formatBtnContainer) {
+      const formatBtn = new Button('Format', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.formatCurrentFile(),
+      });
+      formatBtn.mount(formatBtnContainer);
     }
 
     // Setup commit button
@@ -188,7 +214,24 @@ export class CodePage extends Page<CodePageOptions> {
     if (editor) {
       editor.addEventListener('input', () => this.handleEditorChange());
       editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e));
+      // Track cursor position for collaborative cursors
+      editor.addEventListener('click', () => this.handleCursorChange());
+      editor.addEventListener('keyup', () => this.handleCursorChange());
+      editor.addEventListener('select', () => this.handleCursorChange());
     }
+
+    // Setup collaborative cursors
+    const cursorsContainer = this.$('.collaborative-cursors-container') as HTMLElement;
+    if (cursorsContainer && editor) {
+      this.collaborativeCursors = new CollaborativeCursors();
+      this.collaborativeCursors.setEditorElement(editor);
+      this.collaborativeCursors.mount(cursorsContainer);
+    }
+
+    // Subscribe to presence updates for the active users badge
+    this.unsubscribePresence = presenceStore.subscribe(() => {
+      this.updateActiveUsersBadge();
+    });
 
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
@@ -202,6 +245,18 @@ export class CodePage extends Page<CodePageOptions> {
     if (offlineContainer) {
       this.offlineIndicator = new OfflineIndicator({ position: 'bottom-right' });
       this.offlineIndicator.mount(offlineContainer);
+    }
+
+    // Setup linting panel
+    const lintingContainer = this.$('.linting-panel-container') as HTMLElement;
+    if (lintingContainer) {
+      this.lintingPanel = new LintingPanel({
+        collapsible: true,
+        defaultCollapsed: false,
+        maxHeight: 150,
+        onDiagnosticClick: (diagnostic) => this.navigateToLine(diagnostic.line, diagnostic.column),
+      });
+      this.lintingPanel.mount(lintingContainer);
     }
 
     // Subscribe to offline status changes
@@ -267,6 +322,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.updateHeader();
       await this.loadFiles();
+
+      // Connect to presence for collaborative cursors
+      this.connectToPresence();
     } catch (error) {
       // Try offline cache if network fails
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
@@ -622,6 +680,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.renderTabs();
       this.showEditor();
+
+      // Run initial linting
+      this.lintCurrentFile();
     } catch (error) {
       console.error('Failed to open file:', error);
       toast.error('Failed to open file');
@@ -651,6 +712,9 @@ export class CodePage extends Page<CodePageOptions> {
     this.renderTabs();
     this.updateEditorContent();
     this.subscribeToUndoRedo();
+
+    // Update linting for the new active tab
+    this.lintCurrentFile();
   }
 
   private renderTabs(): void {
@@ -743,6 +807,8 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'flex');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
+    // Clear linting panel when no file is open
+    this.lintingPanel?.clear();
   }
 
   private showEditor(): void {
@@ -755,6 +821,8 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'flex');
+    // Clear linting panel for non-text files
+    this.lintingPanel?.clear();
   }
 
   private handleEditorChange(): void {
@@ -772,8 +840,57 @@ export class CodePage extends Page<CodePageOptions> {
 
         // Track change in undo/redo history
         undoRedoStore.pushChange(tab.path, newContent, editor.selectionStart);
+
+        // Trigger linting
+        this.lintCurrentFile();
       }
     }
+  }
+
+  private lintCurrentFile(): void {
+    if (this.activeTabIndex < 0) {
+      this.lintingPanel?.clear();
+      return;
+    }
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) {
+      this.lintingPanel?.clear();
+      return;
+    }
+
+    this.lintingService.lint(tab.content, tab.name, (result) => {
+      this.lintingPanel?.update(result, tab.name);
+    });
+  }
+
+  private navigateToLine(line: number, column: number): void {
+    const editor = this.$('.code-editor') as HTMLTextAreaElement;
+    if (!editor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const lines = tab.content.split('\n');
+    let position = 0;
+
+    // Calculate position for the target line
+    for (let i = 0; i < line - 1 && i < lines.length; i++) {
+      position += lines[i].length + 1; // +1 for newline
+    }
+
+    // Add column offset (1-indexed to 0-indexed)
+    position += Math.min(column - 1, lines[line - 1]?.length || 0);
+
+    // Focus the editor and set cursor position
+    editor.focus();
+    editor.selectionStart = position;
+    editor.selectionEnd = position;
+
+    // Scroll to make the cursor visible
+    const lineHeight = 20; // Approximate line height
+    const targetScroll = (line - 5) * lineHeight; // Show some context above
+    editor.scrollTop = Math.max(0, targetScroll);
   }
 
   private handleUndo(): void {
@@ -869,6 +986,13 @@ export class CodePage extends Page<CodePageOptions> {
       return;
     }
 
+    // Shift+Alt+F to format
+    if (e.shiftKey && e.altKey && e.key === 'F') {
+      e.preventDefault();
+      this.formatCurrentFile();
+      return;
+    }
+
     // Cmd/Ctrl+Z to undo
     if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
       e.preventDefault();
@@ -896,6 +1020,56 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  private formatCurrentFile(): void {
+    if (this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Check if this file type can be formatted
+    if (!canFormat(tab.name)) {
+      toast.info('Formatting not supported for this file type');
+      return;
+    }
+
+    const settings = editorSettingsStore.getSettings();
+    const result = formatByFilename(tab.content, tab.name, {
+      tabSize: settings.tabSize,
+      useTabs: settings.useTabs,
+    });
+
+    if (!result.success) {
+      toast.error(result.error || 'Failed to format file');
+      return;
+    }
+
+    // Only update if content actually changed
+    if (result.content !== tab.content) {
+      const editor = this.$('.code-editor') as HTMLTextAreaElement;
+      const cursorPosition = editor?.selectionStart || 0;
+
+      tab.content = result.content;
+      tab.isDirty = true;
+      tab.isPreview = false;
+
+      // Update editor content
+      if (editor) {
+        editor.value = result.content;
+        // Try to restore cursor position, clamped to new content length
+        const newPosition = Math.min(cursorPosition, result.content.length);
+        editor.selectionStart = editor.selectionEnd = newPosition;
+      }
+
+      // Track change in undo/redo history
+      undoRedoStore.pushChange(tab.path, result.content, cursorPosition);
+
+      this.renderTabs();
+      toast.success('File formatted');
+    } else {
+      toast.info('File already formatted');
+    }
+  }
+
   private async saveCurrentFile(): Promise<void> {
     if (this.activeTabIndex < 0 || this.isSaving) return;
 
@@ -903,6 +1077,27 @@ export class CodePage extends Page<CodePageOptions> {
     if (!tab || !tab.isDirty) {
       toast.info('No changes to save');
       return;
+    }
+
+    // Format on save if enabled
+    if (editorSettingsStore.getFormatOnSave() && canFormat(tab.name)) {
+      const settings = editorSettingsStore.getSettings();
+      const result = formatByFilename(tab.content, tab.name, {
+        tabSize: settings.tabSize,
+        useTabs: settings.useTabs,
+      });
+
+      if (result.success && result.content !== tab.content) {
+        const editor = this.$('.code-editor') as HTMLTextAreaElement;
+        tab.content = result.content;
+        if (editor) {
+          editor.value = result.content;
+        }
+        undoRedoStore.pushChange(tab.path, result.content, editor?.selectionStart || 0);
+      } else if (!result.success) {
+        // Warn user that formatting failed but continue with save
+        toast.warning(`Could not format: ${result.error || 'Unknown error'}`);
+      }
     }
 
     this.isSaving = true;
@@ -944,6 +1139,94 @@ export class CodePage extends Page<CodePageOptions> {
       toast.error('Failed to save file');
     } finally {
       this.isSaving = false;
+    }
+  }
+
+  /**
+   * Connect to presence service for collaborative cursors
+   */
+  private connectToPresence(): void {
+    if (!this.session) return;
+
+    const owner = this.session.repositoryOwner;
+    const repo = this.session.repositoryName;
+    const branch = this.session.branch;
+
+    if (owner && repo && branch) {
+      presenceStore.connect(owner, repo, branch).catch(error => {
+        console.error('Failed to connect to presence:', error);
+      });
+    }
+  }
+
+  /**
+   * Handle cursor position changes
+   */
+  private handleCursorChange(): void {
+    const editor = this.$('.code-editor') as HTMLTextAreaElement;
+    if (!editor) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Calculate line and column from cursor position
+    const text = editor.value.substring(0, editor.selectionStart);
+    const lines = text.split('\n');
+    const line = lines.length - 1;
+    const col = lines[lines.length - 1].length;
+
+    // Calculate selection if any
+    const hasSelection = editor.selectionStart !== editor.selectionEnd;
+    if (hasSelection) {
+      const endText = editor.value.substring(0, editor.selectionEnd);
+      const endLines = endText.split('\n');
+      const endLine = endLines.length - 1;
+      const endCol = endLines[endLines.length - 1].length;
+
+      presenceStore.updateSelection(tab.path, line, endLine, col, endCol);
+    } else {
+      presenceStore.updateCursor(tab.path, line, col);
+    }
+
+    // Update the collaborative cursors component with the current file
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.setFilePath(tab.path);
+    }
+  }
+
+  /**
+   * Update the active users badge in the header
+   */
+  private updateActiveUsersBadge(): void {
+    const badge = this.$('.active-users-badge') as HTMLElement;
+    const avatarsContainer = this.$('.active-users-avatars') as HTMLElement;
+    const countEl = this.$('.active-users-count') as HTMLElement;
+
+    if (!badge || !avatarsContainer || !countEl) return;
+
+    const users = presenceStore.getOtherUsersWithColors();
+
+    if (users.length === 0) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    badge.style.display = 'flex';
+
+    // Show up to 3 user avatars
+    const displayUsers = users.slice(0, 3);
+    const remainingCount = users.length - displayUsers.length;
+
+    avatarsContainer.innerHTML = displayUsers.map(user => {
+      const initial = (user.displayName || 'U').charAt(0).toUpperCase();
+      return `<div class="active-user-avatar" style="background-color: ${user.color}" title="${this.escapeHtml(user.displayName)}">${initial}</div>`;
+    }).join('');
+
+    if (remainingCount > 0) {
+      countEl.textContent = `+${remainingCount} more`;
+      countEl.style.display = 'inline';
+    } else {
+      countEl.style.display = 'none';
     }
   }
 
@@ -1043,6 +1326,28 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.aiInputBox) {
       this.aiInputBox.unmount();
       this.aiInputBox = null;
+    }
+
+    // Cleanup linting panel
+    if (this.lintingPanel) {
+      this.lintingPanel.unmount();
+      this.lintingPanel = null;
+    }
+    this.lintingService.clear();
+
+    // Cleanup presence subscription
+    if (this.unsubscribePresence) {
+      this.unsubscribePresence();
+      this.unsubscribePresence = null;
+    }
+
+    // Disconnect from presence
+    presenceStore.disconnect();
+
+    // Cleanup collaborative cursors
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.unmount();
+      this.collaborativeCursors = null;
     }
   }
 }
