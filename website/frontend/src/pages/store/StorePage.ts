@@ -5,8 +5,9 @@
 
 import { Page } from '../base/Page';
 import { storeApi } from '../../lib/api';
-import { GameCard, StoreHighlights } from '../../components';
+import { GameCard, StoreHighlights, FilterBar } from '../../components';
 import type { Game, StoreHighlights as StoreHighlightsData } from '../../types';
+import type { FilterConfig, RangeValue } from '../../components';
 import './store.css';
 
 export class StorePage extends Page {
@@ -17,15 +18,19 @@ export class StorePage extends Page {
   private games: Game[] = [];
   private highlights: StoreHighlightsData | null = null;
   private genres: string[] = [];
+  private tags: string[] = [];
   private loading = true;
   private searchQuery = '';
   private selectedGenre = '';
-  private selectedTag = '';
+  private selectedTags: string[] = [];
+  private priceRange: RangeValue = {};
+  private freeOnly = false;
   private sortBy: 'releaseDate' | 'title' | 'price' | 'rating' = 'releaseDate';
   private total = 0;
   private offset = 0;
   private limit = 20;
   private highlightsComponent: StoreHighlights | null = null;
+  private filterBar: FilterBar | null = null;
 
   protected render(): string {
     if (this.loading) {
@@ -49,30 +54,7 @@ export class StorePage extends Page {
         <div id="store-highlights-container"></div>
 
         <section class="store-browse">
-          <div class="store-filters">
-            <div class="search-box">
-              <input
-                type="text"
-                id="store-search"
-                placeholder="Search games..."
-                value="${this.escapeHtml(this.searchQuery)}"
-              />
-            </div>
-
-            <select id="genre-filter">
-              <option value="">All Genres</option>
-              ${this.genres.map((g) => `
-                <option value="${g}" ${this.selectedGenre === g ? 'selected' : ''}>${g}</option>
-              `).join('')}
-            </select>
-
-            <select id="sort-filter">
-              <option value="releaseDate" ${this.sortBy === 'releaseDate' ? 'selected' : ''}>Newest</option>
-              <option value="title" ${this.sortBy === 'title' ? 'selected' : ''}>Title</option>
-              <option value="price" ${this.sortBy === 'price' ? 'selected' : ''}>Price</option>
-              <option value="rating" ${this.sortBy === 'rating' ? 'selected' : ''}>Rating</option>
-            </select>
-          </div>
+          <div id="store-filter-bar"></div>
 
           <div class="store-results">
             <div class="store-grid" id="games-grid">
@@ -102,21 +84,24 @@ export class StorePage extends Page {
     this.element.innerHTML = this.render();
 
     try {
-      // Load highlights, genres, and initial browse results in parallel
-      const [highlightsResult, genresResult, browseResult] = await Promise.all([
+      // Load highlights, genres, tags, and initial browse results in parallel
+      const [highlightsResult, genresResult, tagsResult, browseResult] = await Promise.all([
         storeApi.getHighlights({ featuredLimit: 6, newLimit: 6 }),
         storeApi.getGenres(),
+        storeApi.getTags(),
         storeApi.browse({ limit: this.limit, sort: this.sortBy, order: 'desc' }),
       ]);
 
       this.highlights = highlightsResult || null;
       this.genres = genresResult.genres || [];
+      this.tags = tagsResult.tags || [];
       this.games = browseResult.games || [];
       this.total = browseResult.total || 0;
 
       this.loading = false;
       this.element.innerHTML = this.render();
       this.renderHighlights();
+      this.renderFilterBar();
       this.renderGameCards();
       this.setupEventListeners();
     } catch (error) {
@@ -150,6 +135,132 @@ export class StorePage extends Page {
     container.appendChild(this.highlightsComponent.getElement());
   }
 
+  private renderFilterBar(): void {
+    const container = this.$('#store-filter-bar');
+    if (!container) return;
+
+    const filters: FilterConfig[] = [
+      {
+        id: 'genre',
+        type: 'select',
+        label: 'Genre',
+        placeholder: 'All Genres',
+        options: this.genres.map((g) => ({ value: g, label: g })),
+        value: this.selectedGenre,
+        searchable: true,
+      },
+      {
+        id: 'tags',
+        type: 'multi-select',
+        label: 'Tags',
+        placeholder: 'All Tags',
+        options: this.tags.map((t) => ({ value: t, label: t })),
+        value: this.selectedTags,
+        searchable: true,
+      },
+      {
+        id: 'price',
+        type: 'range',
+        label: 'Price',
+        placeholder: 'Any Price',
+        min: 0,
+        max: 100,
+        step: 1,
+        unit: '$',
+        value: this.priceRange,
+      },
+      {
+        id: 'free',
+        type: 'checkbox',
+        label: 'Free Only',
+        value: this.freeOnly,
+      },
+      {
+        id: 'sort',
+        type: 'select',
+        label: 'Sort By',
+        placeholder: 'Newest',
+        options: [
+          { value: 'releaseDate', label: 'Newest' },
+          { value: 'title', label: 'Title' },
+          { value: 'price', label: 'Price' },
+          { value: 'rating', label: 'Rating' },
+        ],
+        value: this.sortBy,
+        clearable: false,
+      },
+    ];
+
+    this.filterBar = new FilterBar({
+      filters,
+      searchable: true,
+      searchPlaceholder: 'Search games...',
+      searchValue: this.searchQuery,
+      showClearAll: true,
+      showResultCount: true,
+      resultCount: this.total,
+      onFilterChange: (filterId, value) => {
+        this.handleFilterChange(filterId, value);
+      },
+      onSearchChange: (query) => {
+        this.searchQuery = query;
+        this.offset = 0;
+        this.browseGames();
+      },
+      onClearAll: () => {
+        this.searchQuery = '';
+        this.selectedGenre = '';
+        this.selectedTags = [];
+        this.priceRange = {};
+        this.freeOnly = false;
+        this.sortBy = 'releaseDate';
+        this.offset = 0;
+        this.browseGames();
+      },
+    });
+
+    container.appendChild(this.filterBar.getElement());
+  }
+
+  private handleFilterChange(
+    filterId: string,
+    value: string | string[] | RangeValue | boolean
+  ): void {
+    switch (filterId) {
+      case 'genre':
+        this.selectedGenre = value as string;
+        break;
+      case 'tags':
+        this.selectedTags = value as string[];
+        break;
+      case 'price':
+        this.priceRange = value as RangeValue;
+        // If price range is set, disable free only
+        if (
+          (this.priceRange.min !== undefined && this.priceRange.min > 0) ||
+          this.priceRange.max !== undefined
+        ) {
+          this.freeOnly = false;
+          this.filterBar?.setValue('free', false);
+        }
+        break;
+      case 'free':
+        this.freeOnly = value as boolean;
+        // If free only is enabled, clear price range
+        if (this.freeOnly) {
+          this.priceRange = {};
+          this.filterBar?.setValue('price', {});
+        }
+        break;
+      case 'sort':
+        this.sortBy = (value as string) as typeof this.sortBy || 'releaseDate';
+        break;
+    }
+
+    this.offset = 0;
+    this.browseGames();
+  }
+
   private renderGameCards(): void {
     // Render browse games
     const gamesGrid = this.$('#games-grid');
@@ -166,40 +277,6 @@ export class StorePage extends Page {
   }
 
   private setupEventListeners(): void {
-    // Search input
-    const searchInput = this.$('#store-search') as HTMLInputElement;
-    if (searchInput) {
-      let debounceTimer: number;
-      searchInput.addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = window.setTimeout(() => {
-          this.searchQuery = searchInput.value;
-          this.offset = 0;
-          this.browseGames();
-        }, 300);
-      });
-    }
-
-    // Genre filter
-    const genreFilter = this.$('#genre-filter') as HTMLSelectElement;
-    if (genreFilter) {
-      genreFilter.addEventListener('change', () => {
-        this.selectedGenre = genreFilter.value;
-        this.offset = 0;
-        this.browseGames();
-      });
-    }
-
-    // Sort filter
-    const sortFilter = this.$('#sort-filter') as HTMLSelectElement;
-    if (sortFilter) {
-      sortFilter.addEventListener('change', () => {
-        this.sortBy = sortFilter.value as typeof this.sortBy;
-        this.offset = 0;
-        this.browseGames();
-      });
-    }
-
     // Load more button
     const loadMoreBtn = this.$('#load-more-btn');
     if (loadMoreBtn) {
@@ -212,15 +289,40 @@ export class StorePage extends Page {
 
   private async browseGames(append = false): Promise<void> {
     try {
-      const result = await storeApi.browse({
-        q: this.searchQuery || undefined,
-        genre: this.selectedGenre || undefined,
-        tag: this.selectedTag || undefined,
+      // Build browse options
+      const options: Parameters<typeof storeApi.browse>[0] = {
         sort: this.sortBy,
         order: 'desc',
         limit: this.limit,
         offset: this.offset,
-      });
+      };
+
+      if (this.searchQuery) {
+        options.q = this.searchQuery;
+      }
+
+      if (this.selectedGenre) {
+        options.genre = this.selectedGenre;
+      }
+
+      // For tags, we use the first tag as the API only supports single tag
+      if (this.selectedTags.length > 0) {
+        options.tag = this.selectedTags[0];
+      }
+
+      // Price range
+      if (this.freeOnly) {
+        options.free = true;
+      } else {
+        if (this.priceRange.min !== undefined) {
+          options.minPrice = this.priceRange.min;
+        }
+        if (this.priceRange.max !== undefined) {
+          options.maxPrice = this.priceRange.max;
+        }
+      }
+
+      const result = await storeApi.browse(options);
 
       if (append) {
         this.games = [...this.games, ...(result.games || [])];
@@ -228,6 +330,9 @@ export class StorePage extends Page {
         this.games = result.games || [];
       }
       this.total = result.total || 0;
+
+      // Update result count in filter bar
+      this.filterBar?.setResultCount(this.total);
 
       // Re-render just the games section
       const gamesGrid = this.$('#games-grid');

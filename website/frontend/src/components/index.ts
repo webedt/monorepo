@@ -105,3 +105,16 @@ export type {
   WidgetContainerOptions,
   WidgetCustomizerOptions,
 } from './widget';
+
+// FilterDropdown
+export { FilterDropdown } from './filter-dropdown';
+export type {
+  FilterDropdownOptions,
+  FilterOption,
+  FilterType,
+  RangeValue,
+} from './filter-dropdown';
+
+// FilterBar
+export { FilterBar } from './filter-bar';
+export type { FilterBarOptions, FilterConfig, FilterValues } from './filter-bar';
