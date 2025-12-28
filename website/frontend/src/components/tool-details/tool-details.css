@@ -303,3 +303,47 @@
 .tool-nested-summary::-webkit-details-marker {
   display: none;
 }
+
+/* WebFetch tool */
+.tool-url {
+  color: #3b82f6; /* blue */
+}
+
+.tool-url-full {
+  color: #3b82f6;
+  word-break: break-all;
+}
+
+/* WebSearch tool */
+.tool-query {
+  color: #8b5cf6; /* violet */
+}
+
+/* AskUserQuestion tool */
+.tool-question {
+  color: #f59e0b; /* amber */
+}
+
+.tool-question-full {
+  color: var(--color-text-primary);
+}
+
+/* MultiEdit tool */
+.tool-multi-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.tool-edit-item {
+  padding: var(--spacing-xs);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.tool-edit-file {
+  font-family: var(--font-mono);
+  color: var(--color-warning);
+  margin-bottom: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+}
