@@ -832,6 +832,15 @@ export const storeApi = {
 // Library API
 // ============================================================================
 export const libraryApi = {
+  getRecentlyPlayed: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ items: LibraryItem[]; total: number }>(
+      `/api/library/recent${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
   getLibrary: (options?: {
     sort?: 'acquiredAt' | 'title' | 'lastPlayed' | 'playtime';
     order?: 'asc' | 'desc';

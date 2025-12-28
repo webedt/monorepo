@@ -88,3 +88,66 @@
   gap: var(--spacing-md);
   flex-wrap: wrap;
 }
+
+/* Recently Played Section */
+.recently-played-section {
+  margin-top: var(--spacing-xl);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+}
+
+.section-link {
+  font-size: var(--font-size-sm);
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.section-link:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+}
+
+.recently-played-loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--spacing-xl);
+}
+
+.recently-played-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.recently-played-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.recently-played-item .game-card {
+  width: 100%;
+}
+
+.recently-played-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-xs) var(--spacing-2xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.recently-played-info .playtime {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.recently-played-info .last-played {
+  opacity: 0.8;
+}
