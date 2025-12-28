@@ -1,0 +1,618 @@
+/**
+ * Bone Animation Editor Styles
+ */
+
+.bone-animation-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* Header */
+.bone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.bone-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.bone-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.back-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.back-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.bone-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bone-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  margin: 0;
+}
+
+.bone-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.animation-name-container {
+  display: flex;
+  align-items: center;
+}
+
+.animation-name-input {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  width: 200px;
+}
+
+.animation-name-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* Main Layout */
+.bone-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Panels */
+.bone-hierarchy-panel,
+.bone-properties-panel {
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border);
+}
+
+.bone-properties-panel {
+  border-right: none;
+  border-left: 1px solid var(--color-border);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panel-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.add-bone-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.add-bone-btn:hover {
+  background: var(--color-primary-hover);
+}
+
+/* Bone Tree */
+.bone-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+}
+
+.bone-tree-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.bone-tree-empty .hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-xs);
+}
+
+.bone-tree-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.bone-tree-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.bone-tree-item.selected {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+.bone-icon {
+  font-size: 14px;
+}
+
+.bone-name {
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Main Content Area */
+.bone-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Viewport */
+.bone-viewport {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1a1a;
+  overflow: hidden;
+  min-height: 200px;
+}
+
+.bone-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-md);
+  color: var(--color-text-secondary);
+}
+
+.bone-canvas-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.bone-canvas {
+  background: #2a2a2a;
+  border-radius: var(--radius-md);
+  cursor: crosshair;
+}
+
+/* Timeline */
+.bone-timeline {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+}
+
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.timeline-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 28px;
+  padding: 0 var(--spacing-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.timeline-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.play-btn {
+  min-width: 40px;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.play-btn:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: white;
+}
+
+.timeline-time {
+  font-size: var(--font-size-sm);
+  font-family: monospace;
+  color: var(--color-text-secondary);
+  min-width: 120px;
+  text-align: center;
+}
+
+.timeline-track-container {
+  position: relative;
+  height: 120px;
+  overflow-x: auto;
+  overflow-y: auto;
+  padding: var(--spacing-sm) 10px;
+}
+
+.timeline-ruler {
+  position: relative;
+  height: 20px;
+  margin-bottom: var(--spacing-xs);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ruler-tick {
+  position: absolute;
+  width: 1px;
+  height: 8px;
+  bottom: 0;
+  background: var(--color-border);
+}
+
+.ruler-tick.major {
+  height: 16px;
+  background: var(--color-text-secondary);
+}
+
+.ruler-tick span {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.timeline-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-track-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.timeline-track {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-sm);
+}
+
+.track-label {
+  width: 80px;
+  padding: 0 var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid var(--color-border);
+}
+
+.track-keyframes {
+  flex: 1;
+  position: relative;
+  height: 100%;
+}
+
+.keyframe-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  background: var(--color-primary);
+  border: 2px solid white;
+  border-radius: 2px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  cursor: pointer;
+}
+
+.keyframe-marker:hover {
+  background: var(--color-primary-hover);
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff4444;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.timeline-playhead::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -5px;
+  width: 12px;
+  height: 12px;
+  background: #ff4444;
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.timeline-settings {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.timeline-settings label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.timeline-settings input[type="number"] {
+  width: 60px;
+  padding: 2px var(--spacing-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.timeline-settings input[type="range"] {
+  width: 80px;
+}
+
+.timeline-settings input[type="checkbox"] {
+  margin: 0;
+}
+
+.speed-value {
+  min-width: 24px;
+  text-align: right;
+}
+
+/* Properties Panel */
+.bone-properties-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-md);
+}
+
+.no-bone-selection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.no-bone-selection .hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-xs);
+}
+
+.bone-properties {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.property-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.property-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.property-input {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.property-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.transform-section {
+  padding: var(--spacing-sm);
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-md);
+}
+
+.transform-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.transform-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.transform-row label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  min-width: 50px;
+}
+
+.transform-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.delete-bone-btn {
+  width: 100%;
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.delete-bone-btn:hover {
+  background: var(--color-error);
+  color: white;
+}
+
+/* Status Bar */
+.bone-status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.status-separator {
+  color: var(--color-border);
+}
+
+.status-spacer {
+  flex: 1;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .bone-hierarchy-panel,
+  .bone-properties-panel {
+    width: 200px;
+  }
+}
+
+@media (max-width: 768px) {
+  .bone-layout {
+    flex-direction: column;
+  }
+
+  .bone-hierarchy-panel,
+  .bone-properties-panel {
+    width: 100%;
+    height: 150px;
+    border-right: none;
+    border-left: none;
+  }
+
+  .bone-hierarchy-panel {
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .bone-properties-panel {
+    border-top: 1px solid var(--color-border);
+  }
+}
