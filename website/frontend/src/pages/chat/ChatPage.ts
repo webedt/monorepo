@@ -6,10 +6,14 @@
 import { Page, type PageOptions } from '../base/Page';
 import { Spinner, toast, ToolDetails, type ToolResult, type ToolUseBlock } from '../../components';
 import { sessionsApi, createSessionExecuteEventSource } from '../../lib/api';
+import { highlightCode, getLanguageDisplayName } from '../../lib/highlight';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
 import type { Session } from '../../types';
 import './chat.css';
+
+// View mode determines the level of detail shown
+type ViewMode = 'normal' | 'detailed';
 
 interface ChatMessage {
   id: string;
@@ -58,7 +62,7 @@ const EVENT_EMOJIS: Record<string, string> = {
   thinking: '🧠',
 };
 
-// Default event filters
+// Default event filters (for detailed mode)
 const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   user: true,
   user_message: true,
@@ -84,6 +88,21 @@ const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   thinking: true,
 };
 
+// Events shown in Normal Mode - high-level progress without micro-steps
+// Normal mode provides a summarized view suitable for most users
+const NORMAL_MODE_EVENTS: Set<string> = new Set([
+  'user',           // User messages
+  'user_message',   // User follow-up messages
+  'input_preview',  // User input confirmation (shows what was submitted)
+  'assistant',      // Assistant responses
+  'assistant_message', // Assistant follow-up responses
+  'error',          // Errors are always important
+  'result',         // Final completion stats
+  'completed',      // Session completed
+  'session_created', // Session started
+  'session-created', // Session started (alt format)
+]);
+
 interface ChatPageOptions extends PageOptions {
   params?: {
     sessionId?: string;
@@ -106,8 +125,10 @@ export class ChatPage extends Page<ChatPageOptions> {
   private messagesContainer: HTMLElement | null = null;
   private inputElement: HTMLTextAreaElement | null = null;
   private shownOptimisticUserMessage: string | null = null; // Track optimistic user message to avoid duplicates
+  private attachedImages: Array<{ id: string; data: string; mediaType: string }> = []; // Images pasted from clipboard
 
   // View settings (persisted to localStorage)
+  private viewMode: ViewMode = 'normal'; // Default to normal mode for most users
   private showRawJson = false;
   private showTimestamps = false;
   private widescreen = false;
@@ -137,9 +158,13 @@ export class ChatPage extends Page<ChatPageOptions> {
         <div class="chat-toolbar">
           <div class="toolbar-left">
             <div class="view-toggle">
-              <button class="toggle-btn" data-view="formatted" title="Formatted View">
+              <button class="toggle-btn" data-view="normal" title="Normal View - Summarized progress">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                Chat
+                Normal
+              </button>
+              <button class="toggle-btn" data-view="detailed" title="Detailed View - All events and steps">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                Detailed
               </button>
               <button class="toggle-btn" data-view="raw" title="Raw JSON View">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
@@ -176,6 +201,7 @@ export class ChatPage extends Page<ChatPageOptions> {
         </div>
 
         <div class="chat-input-container">
+          <div class="image-preview-container" style="display: none;"></div>
           <div class="chat-input-wrapper">
             <textarea
               class="chat-input"
@@ -187,7 +213,7 @@ export class ChatPage extends Page<ChatPageOptions> {
               <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
             </button>
           </div>
-          <p class="chat-input-hint">Press Enter to send, Shift+Enter for new line</p>
+          <p class="chat-input-hint">Press Enter to send, Shift+Enter for new line. Paste images with Ctrl+V</p>
         </div>
       </div>
     `;
@@ -234,6 +260,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     if (this.inputElement) {
       this.inputElement.addEventListener('input', () => this.handleInputChange());
       this.inputElement.addEventListener('keydown', (e) => this.handleKeyDown(e));
+      this.inputElement.addEventListener('paste', (e) => this.handlePaste(e));
     }
 
     // Get messages container
@@ -255,10 +282,21 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private loadSettings(): void {
     try {
-      // Load view mode
-      const savedRawJson = localStorage.getItem('chat_showRawJson');
-      if (savedRawJson !== null) {
-        this.showRawJson = savedRawJson === 'true';
+      // Load view mode (normal, detailed, or raw)
+      const savedViewMode = localStorage.getItem('chat_viewMode');
+      if (savedViewMode === 'normal' || savedViewMode === 'detailed') {
+        this.viewMode = savedViewMode;
+        this.showRawJson = false;
+      } else if (savedViewMode === 'raw') {
+        this.viewMode = 'detailed'; // Raw view uses detailed mode data
+        this.showRawJson = true;
+      } else {
+        // Legacy: check old showRawJson setting
+        const savedRawJson = localStorage.getItem('chat_showRawJson');
+        if (savedRawJson === 'true') {
+          this.showRawJson = true;
+          this.viewMode = 'detailed';
+        }
       }
 
       // Load timestamps setting
@@ -273,7 +311,7 @@ export class ChatPage extends Page<ChatPageOptions> {
         this.widescreen = savedWidescreen === 'true';
       }
 
-      // Load event filters
+      // Load event filters (only used in detailed mode)
       const savedFilters = localStorage.getItem('chat_eventFilters');
       if (savedFilters) {
         const parsed = JSON.parse(savedFilters);
@@ -286,7 +324,10 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private saveSettings(): void {
     try {
-      localStorage.setItem('chat_showRawJson', String(this.showRawJson));
+      // Save view mode as: normal, detailed, or raw
+      const viewModeToSave = this.showRawJson ? 'raw' : this.viewMode;
+      localStorage.setItem('chat_viewMode', viewModeToSave);
+      localStorage.setItem('chat_showRawJson', String(this.showRawJson)); // Keep for legacy
       localStorage.setItem('chat_showTimestamps', String(this.showTimestamps));
       localStorage.setItem('chat_widescreen', String(this.widescreen));
       localStorage.setItem('chat_eventFilters', JSON.stringify(this.eventFilters));
@@ -297,10 +338,20 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private setupToolbar(): void {
     // View toggle buttons
-    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
+    const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
+    const detailedBtn = this.$('[data-view="detailed"]') as HTMLButtonElement;
     const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
 
-    formattedBtn?.addEventListener('click', () => {
+    normalBtn?.addEventListener('click', () => {
+      this.viewMode = 'normal';
+      this.showRawJson = false;
+      this.saveSettings();
+      this.updateToolbarState();
+      this.renderContent();
+    });
+
+    detailedBtn?.addEventListener('click', () => {
+      this.viewMode = 'detailed';
       this.showRawJson = false;
       this.saveSettings();
       this.updateToolbarState();
@@ -308,6 +359,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     });
 
     rawBtn?.addEventListener('click', () => {
+      this.viewMode = 'detailed'; // Raw uses detailed mode data
       this.showRawJson = true;
       this.saveSettings();
       this.updateToolbarState();
@@ -357,11 +409,20 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private updateToolbarState(): void {
     // Update view toggle
-    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
+    const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
+    const detailedBtn = this.$('[data-view="detailed"]') as HTMLButtonElement;
     const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
 
-    formattedBtn?.classList.toggle('active', !this.showRawJson);
+    normalBtn?.classList.toggle('active', this.viewMode === 'normal' && !this.showRawJson);
+    detailedBtn?.classList.toggle('active', this.viewMode === 'detailed' && !this.showRawJson);
     rawBtn?.classList.toggle('active', this.showRawJson);
+
+    // Show/hide filters button based on view mode (only useful in detailed/raw mode)
+    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    const filterDropdown = this.$('.filter-dropdown') as HTMLElement;
+    if (filterDropdown) {
+      filterDropdown.style.display = this.viewMode === 'normal' && !this.showRawJson ? 'none' : '';
+    }
 
     // Update timestamps button
     const timestampsBtn = this.$('[data-action="toggle-timestamps"]') as HTMLButtonElement;
@@ -372,9 +433,9 @@ export class ChatPage extends Page<ChatPageOptions> {
     widescreenBtn?.classList.toggle('active', this.widescreen);
     const chatPage = this.$('.chat-page') as HTMLElement;
     chatPage?.classList.toggle('widescreen', this.widescreen);
+    chatPage?.classList.toggle('normal-mode', this.viewMode === 'normal' && !this.showRawJson);
 
-    // Update filters button to show if any filters are active
-    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    // Update filters button to show if any filters are active (only relevant in detailed mode)
     const hasActiveFilters = Object.values(this.eventFilters).some(v => !v);
     filtersBtn?.classList.toggle('has-filters', hasActiveFilters);
   }
@@ -1226,13 +1287,22 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Hide events list in formatted mode
     eventsList?.style.setProperty('display', 'none');
 
-    // Filter messages based on event filters
-    // Always show user and assistant messages regardless of filter settings
-    const alwaysShowTypes = ['user', 'assistant'];
-    const filteredMessages = this.messages.filter(msg => {
-      if (alwaysShowTypes.includes(msg.type)) return true;
-      return this.eventFilters[msg.type] !== false;
-    });
+    // Filter messages based on view mode
+    let filteredMessages: ChatMessage[];
+
+    if (this.viewMode === 'normal') {
+      // Normal Mode: Show only high-level events for a summarized view
+      // This hides micro-steps like individual tool_use, thinking, message events
+      filteredMessages = this.messages.filter(msg => NORMAL_MODE_EVENTS.has(msg.type));
+    } else {
+      // Detailed Mode: Use event filters
+      // Always show user and assistant messages regardless of filter settings
+      const alwaysShowTypes = ['user', 'assistant'];
+      filteredMessages = this.messages.filter(msg => {
+        if (alwaysShowTypes.includes(msg.type)) return true;
+        return this.eventFilters[msg.type] !== false;
+      });
+    }
 
     if (filteredMessages.length === 0) {
       empty?.style.setProperty('display', 'flex');
@@ -1434,8 +1504,11 @@ export class ChatPage extends Page<ChatPageOptions> {
     const codeBlocks: string[] = [];
     let formatted = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
       const idx = codeBlocks.length;
-      const languageLabel = lang ? `<span class="code-lang">${lang}</span>` : '';
-      codeBlocks.push(`<div class="code-block">${languageLabel}<pre><code>${code.trim()}</code></pre></div>`);
+      const trimmedCode = code.trim();
+      const highlightedCode = highlightCode(trimmedCode, lang || undefined);
+      const languageLabel = lang ? `<span class="code-lang">${getLanguageDisplayName(lang)}</span>` : '';
+      const langClass = lang ? ` language-${lang.toLowerCase()}` : '';
+      codeBlocks.push(`<div class="code-block">${languageLabel}<pre><code class="hljs${langClass}">${highlightedCode}</code></pre></div>`);
       return `__CODE_BLOCK_${idx}__`;
     });
 
@@ -1547,22 +1620,169 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
   }
 
+  /**
+   * Handle paste events to detect and attach images from clipboard
+   */
+  private async handlePaste(e: ClipboardEvent): Promise<void> {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    // Check for image files in the clipboard
+    const items = clipboardData.items;
+    const imageItems: DataTransferItem[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        imageItems.push(item);
+      }
+    }
+
+    // If there are images, handle them
+    if (imageItems.length > 0) {
+      e.preventDefault(); // Prevent default paste behavior for images
+
+      for (const item of imageItems) {
+        const file = item.getAsFile();
+        if (file) {
+          await this.addImageFromFile(file);
+        }
+      }
+    }
+  }
+
+  /**
+   * Convert a file to base64 and add to attached images
+   */
+  private async addImageFromFile(file: File): Promise<void> {
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Only image files are supported');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error('Image too large. Maximum size is 10MB');
+      return;
+    }
+
+    try {
+      const base64 = await this.fileToBase64(file);
+      const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+      this.attachedImages.push({
+        id: imageId,
+        data: base64,
+        mediaType: file.type,
+      });
+
+      this.renderImagePreviews();
+      this.updateSendButton();
+      toast.success('Image attached');
+    } catch (error) {
+      console.error('Failed to process image:', error);
+      toast.error('Failed to process image');
+    }
+  }
+
+  /**
+   * Convert a file to base64 data URL (without the data: prefix)
+   */
+  private fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Extract base64 data without the data:image/xxx;base64, prefix
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * Render image previews in the preview container
+   */
+  private renderImagePreviews(): void {
+    const container = this.$('.image-preview-container') as HTMLElement;
+    if (!container) return;
+
+    if (this.attachedImages.length === 0) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    container.style.display = 'flex';
+    container.innerHTML = this.attachedImages.map(img => `
+      <div class="image-preview-item" data-image-id="${img.id}">
+        <img src="data:${img.mediaType};base64,${img.data}" alt="Attached image" />
+        <button class="image-preview-remove" data-action="remove-image" data-image-id="${img.id}" title="Remove image">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    `).join('');
+
+    // Add click handlers for remove buttons
+    container.querySelectorAll('[data-action="remove-image"]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const imageId = (btn as HTMLElement).dataset.imageId;
+        if (imageId) {
+          this.removeImage(imageId);
+        }
+      });
+    });
+  }
+
+  /**
+   * Remove an attached image by ID
+   */
+  private removeImage(imageId: string): void {
+    this.attachedImages = this.attachedImages.filter(img => img.id !== imageId);
+    this.renderImagePreviews();
+    this.updateSendButton();
+  }
+
   private async handleSend(): Promise<void> {
-    if (!this.inputValue.trim() || this.isSending || !this.session) return;
+    const hasText = this.inputValue.trim().length > 0;
+    const hasImages = this.attachedImages.length > 0;
+
+    // Need at least text or images to send
+    if ((!hasText && !hasImages) || this.isSending || !this.session) return;
 
     const content = this.inputValue.trim();
+    const imagesToSend = [...this.attachedImages]; // Copy images before clearing
+
+    // Clear input and images
     this.inputValue = '';
+    this.attachedImages = [];
     if (this.inputElement) {
       this.inputElement.value = '';
       this.inputElement.style.height = 'auto';
     }
+    this.renderImagePreviews();
+
+    // Build display content for optimistic message
+    const displayContent = hasImages && hasText
+      ? `${content}\n\n[${imagesToSend.length} image${imagesToSend.length > 1 ? 's' : ''} attached]`
+      : hasImages
+        ? `[${imagesToSend.length} image${imagesToSend.length > 1 ? 's' : ''} attached]`
+        : content;
 
     // Add user message optimistically and track it to avoid duplicates
-    this.shownOptimisticUserMessage = content;
+    this.shownOptimisticUserMessage = displayContent;
     this.addMessage({
       id: `user-${Date.now()}`,
       type: 'user',
-      content,
+      content: displayContent,
       timestamp: new Date(),
     });
 
@@ -1570,8 +1790,18 @@ export class ChatPage extends Page<ChatPageOptions> {
     this.updateSendButton();
 
     try {
-      // Send message to execute endpoint
-      const response = await sessionsApi.sendMessage(this.session.id, content);
+      // Format images for API (remove the id field, keep only data and mediaType)
+      const imagesForApi = imagesToSend.map(img => ({
+        data: img.data,
+        mediaType: img.mediaType,
+      }));
+
+      // Send message to execute endpoint with images
+      const response = await sessionsApi.sendMessage(
+        this.session.id,
+        content,
+        imagesForApi.length > 0 ? imagesForApi : undefined
+      );
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to send message');
@@ -1650,9 +1880,11 @@ export class ChatPage extends Page<ChatPageOptions> {
     const stopIcon = sendBtn.querySelector('.stop-icon') as SVGElement;
     const isRunning = this.isSessionRunning();
     const hasInput = !!this.inputValue.trim();
+    const hasImages = this.attachedImages.length > 0;
+    const hasContent = hasInput || hasImages;
 
-    // Show stop button when running and no input, otherwise show send
-    const showStop = isRunning && !hasInput;
+    // Show stop button when running and no content, otherwise show send
+    const showStop = isRunning && !hasContent;
 
     if (sendIcon) sendIcon.style.display = showStop ? 'none' : '';
     if (stopIcon) stopIcon.style.display = showStop ? '' : 'none';
@@ -1660,8 +1892,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Update button styling
     sendBtn.classList.toggle('stop-mode', showStop);
 
-    // Enable button if we can stop OR if we have input to send (and not already sending)
-    sendBtn.disabled = showStop ? false : (!hasInput || this.isSending);
+    // Enable button if we can stop OR if we have content to send (and not already sending)
+    sendBtn.disabled = showStop ? false : (!hasContent || this.isSending);
     sendBtn.classList.toggle('loading', this.isSending);
   }
 
