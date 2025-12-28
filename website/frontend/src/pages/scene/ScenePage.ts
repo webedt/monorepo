@@ -81,6 +81,12 @@ export class ScenePage extends Page<ScenePageOptions> {
   private showOriginCrosshair = true;
   private mouseWorldPos = { x: 0, y: 0 };
 
+  // Event listener references for cleanup
+  private boundHandleMouseDown: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundHandleMouseUp: (() => void) | null = null;
+  private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
+
   protected render(): string {
     return `
       <div class="scene-page">
@@ -388,14 +394,20 @@ export class ScenePage extends Page<ScenePageOptions> {
         zoom: 1,
       });
 
+      // Create bound handlers for cleanup
+      this.boundHandleMouseDown = (e: MouseEvent) => this.handleMouseDown(e);
+      this.boundHandleMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
+      this.boundHandleMouseUp = () => this.handleMouseUp();
+      this.boundHandleWheel = (e: WheelEvent) => this.handleWheel(e);
+
       // Mouse events for object selection and dragging
-      this.sceneCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-      this.sceneCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-      this.sceneCanvas.addEventListener('mouseup', () => this.handleMouseUp());
-      this.sceneCanvas.addEventListener('mouseleave', () => this.handleMouseUp());
+      this.sceneCanvas.addEventListener('mousedown', this.boundHandleMouseDown);
+      this.sceneCanvas.addEventListener('mousemove', this.boundHandleMouseMove);
+      this.sceneCanvas.addEventListener('mouseup', this.boundHandleMouseUp);
+      this.sceneCanvas.addEventListener('mouseleave', this.boundHandleMouseUp);
 
       // Wheel event for zooming
-      this.sceneCanvas.addEventListener('wheel', (e) => this.handleWheel(e));
+      this.sceneCanvas.addEventListener('wheel', this.boundHandleWheel);
     }
   }
 
@@ -409,7 +421,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Convert to world coordinates (center-origin, Y+ up)
     const worldPos = this.viewport.screenToWorld(screenX, screenY);
 
-    // Middle mouse button or space+click for panning
+    // Middle mouse button or shift+click for panning
     if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
       this.isPanning = true;
       this.panStart = { x: screenX, y: screenY };
@@ -504,8 +516,10 @@ export class ScenePage extends Page<ScenePageOptions> {
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
 
-    // Zoom towards mouse position
-    const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;
+    // Scale zoom delta based on scroll amount for smoother trackpad experience
+    // Clamp deltaY to reasonable range and scale it
+    const normalizedDelta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 100);
+    const zoomDelta = -normalizedDelta * 0.002;
     this.viewport.zoomToPoint(screenX, screenY, zoomDelta);
 
     this.updateZoomDisplay();
@@ -704,6 +718,9 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.ctx.save();
     this.viewport.applyTransform(this.ctx);
 
+    // Apply Y-flip once for all objects (viewport has Y+ up, canvas draws Y+ down)
+    this.ctx.scale(1, -1);
+
     for (const obj of this.objects) {
       if (!obj.visible) continue;
 
@@ -712,9 +729,6 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.ctx.translate(obj.transform.x, obj.transform.y);
       this.ctx.rotate((obj.transform.rotation * Math.PI) / 180);
       this.ctx.scale(obj.transform.scaleX, obj.transform.scaleY);
-
-      // Flip Y for drawing since viewport has Y+ up but canvas draws Y+ down
-      this.ctx.scale(1, -1);
 
       switch (obj.type) {
         case 'sprite':
@@ -761,7 +775,24 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (!this.ctx || !this.viewport) return;
 
     const bounds = this.viewport.getVisibleBounds();
-    const gridSize = this.gridSize;
+    let gridSize = this.gridSize;
+
+    // Skip grid if lines would be too dense (less than 5 pixels apart)
+    const minPixelSpacing = 5;
+    const screenGridSize = this.viewport.worldDistanceToScreen(gridSize);
+    if (screenGridSize < minPixelSpacing) {
+      // Increase grid size until it's visible
+      const scaleFactor = Math.ceil(minPixelSpacing / screenGridSize);
+      gridSize = this.gridSize * scaleFactor;
+    }
+
+    // Limit maximum number of grid lines to prevent performance issues
+    const maxLines = 200;
+    const horizontalLines = Math.ceil((bounds.maxX - bounds.minX) / gridSize);
+    const verticalLines = Math.ceil((bounds.maxY - bounds.minY) / gridSize);
+    if (horizontalLines > maxLines || verticalLines > maxLines) {
+      return; // Skip grid entirely if too many lines
+    }
 
     // Calculate grid lines that are visible
     const startX = Math.floor(bounds.minX / gridSize) * gridSize;
@@ -1146,6 +1177,29 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   protected onUnmount(): void {
+    // Remove canvas event listeners
+    if (this.sceneCanvas) {
+      if (this.boundHandleMouseDown) {
+        this.sceneCanvas.removeEventListener('mousedown', this.boundHandleMouseDown);
+      }
+      if (this.boundHandleMouseMove) {
+        this.sceneCanvas.removeEventListener('mousemove', this.boundHandleMouseMove);
+      }
+      if (this.boundHandleMouseUp) {
+        this.sceneCanvas.removeEventListener('mouseup', this.boundHandleMouseUp);
+        this.sceneCanvas.removeEventListener('mouseleave', this.boundHandleMouseUp);
+      }
+      if (this.boundHandleWheel) {
+        this.sceneCanvas.removeEventListener('wheel', this.boundHandleWheel);
+      }
+    }
+
+    // Clear bound handler references
+    this.boundHandleMouseDown = null;
+    this.boundHandleMouseMove = null;
+    this.boundHandleMouseUp = null;
+    this.boundHandleWheel = null;
+
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
       this.unsubscribeOffline = null;
