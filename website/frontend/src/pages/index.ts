@@ -14,6 +14,7 @@ export { ImagePage } from './image/ImagePage';
 export { ScenePage } from './scene/ScenePage';
 export { SoundPage } from './sound/SoundPage';
 export { TrashPage } from './trash/TrashPage';
+export { WidgetsPage } from './widgets';
 
 // Players feature pages
 export { StorePage } from './store';
