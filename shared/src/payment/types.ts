@@ -18,7 +18,8 @@ export type PaymentStatus =
   | 'succeeded'
   | 'failed'
   | 'cancelled'
-  | 'refunded';
+  | 'refunded'
+  | 'pending_refund';
 
 /**
  * Payment method types

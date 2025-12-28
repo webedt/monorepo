@@ -461,13 +461,13 @@ export class PayPalProvider extends APaymentProvider {
   ): Promise<WebhookVerification> {
     try {
       // Parse webhook headers from signature parameter
-      // Expected format: "transmission-id|timestamp|crc32|algo|cert-url"
+      // Expected format: "transmission-id|timestamp|transmission-sig|algo|cert-url"
       const headerParts = signature.split('|');
-      if (headerParts.length < 4) {
-        return { isValid: false, error: 'Invalid signature format' };
+      if (headerParts.length < 5) {
+        return { isValid: false, error: 'Invalid signature format - expected 5 parts' };
       }
 
-      const [transmissionId, timestamp, , , certUrl] = headerParts;
+      const [transmissionId, timestamp, transmissionSig, authAlgo, certUrl] = headerParts;
       const payloadString =
         typeof payload === 'string' ? payload : payload.toString('utf8');
       const webhookEvent = JSON.parse(payloadString);
@@ -477,10 +477,10 @@ export class PayPalProvider extends APaymentProvider {
         'POST',
         '/v1/notifications/verify-webhook-signature',
         {
-          auth_algo: 'SHA256withRSA',
+          auth_algo: authAlgo || 'SHA256withRSA',
           cert_url: certUrl,
           transmission_id: transmissionId,
-          transmission_sig: signature,
+          transmission_sig: transmissionSig,
           transmission_time: timestamp,
           webhook_id: this.webhookId,
           webhook_event: webhookEvent,

@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, paymentTransactions, eq, and, desc, getPaymentService } from '@webedt/shared';
+import { db, games, paymentTransactions, userLibrary, eq, and, desc, sql, getPaymentService } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -81,6 +81,26 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
+    // Check if user already owns this game (duplicate purchase protection)
+    const [existingOwnership] = await db
+      .select()
+      .from(userLibrary)
+      .where(
+        and(
+          eq(userLibrary.userId, authReq.user!.id),
+          eq(userLibrary.gameId, gameId)
+        )
+      )
+      .limit(1);
+
+    if (existingOwnership) {
+      res.status(400).json({
+        success: false,
+        error: 'You already own this game',
+      });
+      return;
+    }
+
     const paymentService = getPaymentService();
 
     if (!paymentService.isProviderAvailable(provider)) {
@@ -92,9 +112,12 @@ router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    // Build success and cancel URLs
+    // Build success and cancel URLs (provider-specific placeholders)
     const baseUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.FRONTEND_PORT || 3000}`;
-    const successUrl = `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}`;
+    // Stripe replaces {CHECKOUT_SESSION_ID}; PayPal appends its own token/PayerID params
+    const successUrl = provider === 'stripe'
+      ? `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}&provider=stripe`
+      : `${baseUrl}/store/purchase-success?game_id=${gameId}&provider=paypal`;
     const cancelUrl = `${baseUrl}/store/games/${gameId}`;
 
     const session = await paymentService.createCheckout({
@@ -252,7 +275,15 @@ router.post(
       }
 
       // Get raw body - Express body-parser must be configured to preserve raw body
-      const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+      // Signature verification requires the raw body; JSON.stringify() won't work
+      const rawBody = (req as any).rawBody;
+      if (!rawBody) {
+        logger.warn('Stripe webhook missing raw body - configure express.raw() middleware', {
+          component: 'Payments',
+        });
+        res.status(400).json({ success: false, error: 'Missing raw body for signature verification' });
+        return;
+      }
 
       const paymentService = getPaymentService();
       const result = await paymentService.processWebhook('stripe', rawBody, signature);
@@ -345,19 +376,22 @@ router.get('/transactions', requireAuth, async (req: Request, res: Response) => 
       .limit(limit)
       .offset(offset);
 
-    const allTransactions = await db
-      .select({ id: paymentTransactions.id })
+    // Use efficient COUNT query instead of fetching all IDs
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)` })
       .from(paymentTransactions)
       .where(eq(paymentTransactions.userId, authReq.user!.id));
+
+    const total = Number(countResult?.count ?? 0);
 
     res.json({
       success: true,
       data: {
         transactions,
-        total: allTransactions.length,
+        total,
         limit,
         offset,
-        hasMore: offset + limit < allTransactions.length,
+        hasMore: offset + limit < total,
       },
     });
   } catch (error) {
@@ -419,12 +453,11 @@ router.post('/transactions/:transactionId/refund', requireAuth, async (req: Requ
       return;
     }
 
-    // For now, we update the status to pending_refund
-    // Admin would then approve and trigger actual refund
+    // Update status to pending_refund - admin would then approve and trigger actual refund
     await db
       .update(paymentTransactions)
       .set({
-        status: 'pending' as any, // Will be changed to pending_refund
+        status: 'pending_refund',
         metadata: {
           ...transaction.metadata,
           refundReason: reason.trim(),

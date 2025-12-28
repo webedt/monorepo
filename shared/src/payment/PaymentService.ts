@@ -4,7 +4,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { paymentTransactions, paymentWebhooks, purchases, userLibrary, wishlists, games } from '../db/schema.js';
 import { logger } from '../utils/logging/logger.js';
@@ -14,11 +14,22 @@ import { createPayPalProvider, PayPalProvider } from './paypalProvider.js';
 
 import type { CheckoutSession } from './types.js';
 import type { CreateCheckoutRequest } from './types.js';
+import type { CurrencyCode } from './types.js';
 import type { PaymentProvider } from './types.js';
 import type { ProviderHealthStatus } from './types.js';
 import type { RefundRequest } from './types.js';
 import type { RefundResult } from './types.js';
 import type { WebhookEvent } from './types.js';
+
+const VALID_CURRENCY_CODES: CurrencyCode[] = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
+
+/**
+ * Validates and returns a currency code, defaulting to USD if invalid
+ */
+function toCurrencyCode(currency: string): CurrencyCode {
+  const upper = currency.toUpperCase() as CurrencyCode;
+  return VALID_CURRENCY_CODES.includes(upper) ? upper : 'USD';
+}
 
 export interface CreateCheckoutOptions {
   userId: string;
@@ -83,6 +94,11 @@ export class PaymentService {
   }
 
   async createCheckout(options: CreateCheckoutOptions): Promise<CheckoutSession> {
+    // Validate amount (must be a positive integer representing cents/smallest currency unit)
+    if (!Number.isInteger(options.amount) || options.amount <= 0) {
+      throw new Error(`Invalid amount: ${options.amount}. Amount must be a positive integer in smallest currency unit (e.g., cents)`);
+    }
+
     const provider = this.getProvider(options.provider);
     if (!provider) {
       throw new Error(`Payment provider ${options.provider} not available`);
@@ -98,7 +114,8 @@ export class PaymentService {
       amount: options.amount,
     });
 
-    // Create checkout request
+    // Create checkout request with validated currency
+    const validatedCurrency = toCurrencyCode(options.currency);
     const request: CreateCheckoutRequest = {
       customer: {
         id: options.userId,
@@ -109,7 +126,7 @@ export class PaymentService {
           id: options.gameId,
           name: options.gameName,
           amount: options.amount,
-          currency: options.currency as 'USD',
+          currency: validatedCurrency,
           quantity: 1,
         },
       ],
@@ -465,10 +482,10 @@ export class PaymentService {
       purchaseId,
     });
 
-    // Remove from wishlist if present
+    // Remove from wishlist if present (only the specific game, not all wishlisted items)
     await db
       .delete(wishlists)
-      .where(eq(wishlists.userId, userId));
+      .where(and(eq(wishlists.userId, userId), eq(wishlists.gameId, gameId)));
 
     // Increment download count
     const [game] = await db

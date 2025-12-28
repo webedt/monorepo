@@ -24,7 +24,6 @@ import type { WebhookVerification } from './types.js';
 export interface StripeConfig {
   secretKey: string;
   webhookSecret: string;
-  apiVersion?: string;
 }
 
 /**
@@ -89,8 +88,8 @@ export class StripeProvider extends APaymentProvider {
 
   constructor(config: StripeConfig) {
     super();
+    // Use the Stripe SDK's default API version (recommended for stability)
     this.stripe = new Stripe(config.secretKey, {
-      apiVersion: '2025-04-30.basil' as Stripe.LatestApiVersion,
       typescript: true,
     });
     this.webhookSecret = config.webhookSecret;
