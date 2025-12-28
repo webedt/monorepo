@@ -159,6 +159,64 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// Search sessions by query string
+router.get('/search', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const queryService = ServiceProvider.get(ASessionQueryService);
+
+    // Parse query parameters
+    const query = (req.query.q as string) || '';
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const statusParam = req.query.status as string | undefined;
+    const favorite = req.query.favorite === 'true' ? true : req.query.favorite === 'false' ? false : undefined;
+
+    // Validate status parameter if provided
+    const validStatuses = ['pending', 'running', 'completed', 'error'];
+    let status: string | undefined;
+    if (statusParam) {
+      if (!validStatuses.includes(statusParam)) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+        });
+        return;
+      }
+      status = statusParam;
+    }
+
+    // Require a query string
+    if (!query.trim()) {
+      res.status(400).json({ success: false, error: 'Search query (q) is required' });
+      return;
+    }
+
+    const result = await queryService.search(authReq.user!.id, {
+      query: query.trim(),
+      limit,
+      offset,
+      status,
+      favorite,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        sessions: result.items,
+        total: result.total,
+        limit,
+        offset,
+        hasMore: result.hasMore,
+        query: query.trim(),
+      },
+    });
+  } catch (error) {
+    logger.error('Search sessions error', error as Error, { component: 'Sessions' });
+    res.status(500).json({ success: false, error: 'Failed to search sessions' });
+  }
+});
+
 /**
  * SSE endpoint for real-time session list updates
  *

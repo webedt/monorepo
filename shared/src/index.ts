@@ -83,8 +83,15 @@ export * from './storage/index.js';
 // Payment - Stripe and PayPal payment providers
 export * from './payment/index.js';
 
+// Games - Shared platform libraries for games
+export * from './games/index.js';
+
 // Cloud Saves - Game save synchronization across devices
 export * from './cloudSaves/index.js';
+
+// CRDT - Conflict-free Replicated Data Types for collaborative editing
+// Implements undo as forward operations (applying inverse changes)
+export * from './crdt/index.js';
 
 // =============================================================================
 // SERVICES - Dependency injection and service registry

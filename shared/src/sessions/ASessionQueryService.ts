@@ -8,6 +8,14 @@ export interface SessionQueryOptions {
   offset?: number;
 }
 
+export interface SessionSearchOptions {
+  query: string;
+  limit?: number;
+  offset?: number;
+  status?: string;
+  favorite?: boolean;
+}
+
 export interface PaginatedResult<T> {
   items: T[];
   total: number;
@@ -62,4 +70,9 @@ export abstract class ASessionQueryService extends AService {
   abstract countDeleted(
     userId: string
   ): Promise<number>;
+
+  abstract search(
+    userId: string,
+    options: SessionSearchOptions
+  ): Promise<PaginatedResult<ChatSession>>;
 }

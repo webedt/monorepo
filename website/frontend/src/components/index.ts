@@ -145,3 +145,7 @@ export type { NewSessionModalOptions } from './new-session-modal';
 // CollectionsPanel
 export { CollectionsPanel } from './collections-panel';
 export type { CollectionsPanelOptions } from './collections-panel';
+
+// CommitDialog
+export { CommitDialog } from './commit-dialog';
+export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
