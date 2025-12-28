@@ -170,6 +170,10 @@ export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
 export { UrlImportDialog } from './url-import-dialog';
 export type { UrlImportDialogOptions } from './url-import-dialog';
 
+// SaveAsSnippetDialog
+export { SaveAsSnippetDialog } from './save-as-snippet-dialog';
+export type { SaveAsSnippetDialogOptions } from './save-as-snippet-dialog';
+
 // AutocompleteDropdown
 export { AutocompleteDropdown } from './autocomplete-dropdown';
 export type { AutocompleteDropdownOptions, AutocompleteSuggestion } from './autocomplete-dropdown';

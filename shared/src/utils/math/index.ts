@@ -18,8 +18,32 @@ export { CoordinateSystem2D } from './coordinateSystem.js';
 export type {
   AxisDirection,
   Bounds2D,
-  CoordinateSystemConfig,
+  CoordinateSystemConfig as CoordinateSystem2DConfig,
   ICoordinateSystem2D,
   Rect2D,
   Transform2DMatrix,
 } from './coordinateSystem.js';
+
+// Colliders - Physics collision shapes
+export {
+  BoxCollider,
+  CircleCollider,
+  Collider,
+  Collision,
+  isConvex,
+  isCounterClockwise,
+  LineCollider,
+  PolygonCollider,
+  polygonArea,
+} from './colliders.js';
+export type {
+  ColliderBounds,
+  ColliderType,
+  CollisionResult,
+  IBoxCollider,
+  ICircleCollider,
+  ICollider,
+  ILineCollider,
+  IPolygonCollider,
+  RaycastResult,
+} from './colliders.js';

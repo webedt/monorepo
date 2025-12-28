@@ -6,8 +6,9 @@
 import { createStore } from '../lib/store';
 
 import type { Transform } from '../components';
+import type { CustomComponentPropertyValues } from '../types';
 
-export type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty';
+export type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'custom';
 export type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
 
 export interface SceneObject {
@@ -27,6 +28,12 @@ export interface SceneObject {
   fontSize?: number;
   fontFamily?: string;
   spriteUrl?: string;
+  // Sprite dimensions (auto-populated when image loads)
+  spriteWidth?: number;
+  spriteHeight?: number;
+  // Custom component properties
+  customComponentId?: string;
+  customPropertyValues?: CustomComponentPropertyValues;
 }
 
 export interface SceneSettings {

@@ -11,9 +11,15 @@ import type { Transform } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { SpriteRenderer } from '../../lib/sprite';
 import { Viewport } from '../../lib/viewport';
 import { sceneStore } from '../../stores/sceneStore';
-import type { Session } from '../../types';
+import { customComponentsStore } from '../../stores';
+import type {
+  Session,
+  CustomComponentDefinition,
+  CustomComponentChild,
+} from '../../types';
 import type { SceneObject, ShapeType, Scene } from '../../stores/sceneStore';
 import './scene.css';
 
@@ -44,6 +50,9 @@ export class ScenePage extends Page<ScenePageOptions> {
   private isDragging = false;
   private dragStart = { x: 0, y: 0 };
 
+  // Sprite renderer for displaying images
+  private spriteRenderer: SpriteRenderer = new SpriteRenderer();
+
   // Viewport with center-origin coordinate system
   private viewport: Viewport | null = null;
   private isPanning = false;
@@ -56,6 +65,11 @@ export class ScenePage extends Page<ScenePageOptions> {
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseUp: (() => void) | null = null;
   private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
+
+  // Custom components panel state
+  private showComponentsLibrary = false;
+  private unsubscribeComponents: (() => void) | null = null;
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Helper methods to access active scene data
   private get activeScene(): Scene | null {
@@ -80,6 +94,13 @@ export class ScenePage extends Page<ScenePageOptions> {
 
   private get hasUnsavedChanges(): boolean {
     return sceneStore.hasUnsavedScenes();
+  }
+
+  /**
+   * Generate unique ID with randomness to prevent collisions
+   */
+  private generateUniqueId(prefix: string): string {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }
 
   protected render(): string {
@@ -124,6 +145,9 @@ export class ScenePage extends Page<ScenePageOptions> {
             <button class="toolbar-btn" data-action="add-text" title="Add Text">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
             </button>
+            <button class="toolbar-btn" data-action="toggle-components" title="Custom Components Library">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            </button>
           </div>
 
           <div class="toolbar-separator"></div>
@@ -132,6 +156,7 @@ export class ScenePage extends Page<ScenePageOptions> {
             <button class="toolbar-btn" data-action="move-up" title="Move Up">↑</button>
             <button class="toolbar-btn" data-action="move-down" title="Move Down">↓</button>
             <button class="toolbar-btn" data-action="delete" title="Delete">🗑</button>
+            <button class="toolbar-btn" data-action="save-as-component" title="Save Selection as Component">📦</button>
           </div>
 
           <div class="toolbar-separator"></div>
@@ -164,6 +189,29 @@ export class ScenePage extends Page<ScenePageOptions> {
               <div class="hierarchy-empty">
                 <p>No objects in scene</p>
                 <p class="hint">Add sprites, shapes, or text</p>
+              </div>
+            </div>
+          </aside>
+
+          <!-- Custom Components Library Panel -->
+          <aside class="components-library-panel" style="display: none;">
+            <div class="panel-header">
+              <span class="panel-title">Components</span>
+              <button class="close-panel-btn" data-action="close-components" title="Close">×</button>
+            </div>
+            <div class="components-library-content">
+              <div class="components-search">
+                <input type="text" class="components-search-input" placeholder="Search components...">
+              </div>
+              <div class="components-categories">
+                <button class="category-btn active" data-category="all">All</button>
+                <button class="category-btn" data-category="recent">Recent</button>
+              </div>
+              <div class="components-grid">
+                <div class="components-empty">
+                  <p>No custom components</p>
+                  <p class="hint">Select objects and save as component</p>
+                </div>
               </div>
             </div>
           </aside>
@@ -362,6 +410,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Setup property panel event handlers
     this.setupPropertyHandlers();
 
+    // Subscribe to custom components store
+    this.unsubscribeComponents = customComponentsStore.subscribe(() => {
+      this.updateComponentsLibrary();
+    });
+
     // Load session data
     this.loadSession();
   }
@@ -377,6 +430,48 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (addRectBtn) addRectBtn.addEventListener('click', () => this.addShape('rectangle'));
     if (addCircleBtn) addCircleBtn.addEventListener('click', () => this.addShape('circle'));
     if (addTextBtn) addTextBtn.addEventListener('click', () => this.addText());
+
+    // Custom components button
+    const toggleComponentsBtn = this.$('[data-action="toggle-components"]');
+    if (toggleComponentsBtn) {
+      toggleComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary());
+    }
+
+    // Close components panel button
+    const closeComponentsBtn = this.$('[data-action="close-components"]');
+    if (closeComponentsBtn) {
+      closeComponentsBtn.addEventListener('click', () => this.toggleComponentsLibrary(false));
+    }
+
+    // Save as component button
+    const saveAsComponentBtn = this.$('[data-action="save-as-component"]');
+    if (saveAsComponentBtn) {
+      saveAsComponentBtn.addEventListener('click', () => this.saveSelectionAsComponent());
+    }
+
+    // Components search with debounce
+    const searchInput = this.$('.components-search-input') as HTMLInputElement;
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        if (this.searchDebounceTimer) {
+          clearTimeout(this.searchDebounceTimer);
+        }
+        this.searchDebounceTimer = setTimeout(() => {
+          this.updateComponentsLibrary(searchInput.value);
+        }, 250);
+      });
+    }
+
+    // Category buttons
+    const categoryBtns = this.$$('.category-btn');
+    categoryBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        categoryBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const category = (btn as HTMLButtonElement).dataset.category || 'all';
+        this.filterComponentsByCategory(category);
+      });
+    });
 
     // Object manipulation buttons
     const moveUpBtn = this.$('[data-action="move-up"]');
@@ -662,6 +757,50 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
   }
 
+  /**
+   * Get the base dimensions of an object (before scale transform)
+   */
+  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
+    let width = 100;
+    let height = 100;
+
+    switch (obj.type) {
+      case 'sprite':
+        width = obj.spriteWidth ?? 100;
+        height = obj.spriteHeight ?? 100;
+        break;
+      case 'shape':
+        if (obj.shapeType === 'rectangle') {
+          width = 100;
+          height = 80;
+        } else if (obj.shapeType === 'circle') {
+          width = 100;
+          height = 100;
+        }
+        break;
+      case 'text':
+        // Estimate text dimensions based on fontSize
+        const fontSize = obj.fontSize || 24;
+        const textLength = (obj.text || 'Text').length;
+        width = textLength * fontSize * 0.6; // Approximate character width
+        height = fontSize * 1.2;
+        break;
+      case 'custom':
+        // Calculate bounding box of all children in the custom component
+        if (obj.customComponentId) {
+          const definition = customComponentsStore.getComponent(obj.customComponentId);
+          if (definition && definition.children.length > 0) {
+            const bounds = this.getCustomComponentBounds(definition.children);
+            width = bounds.width;
+            height = bounds.height;
+          }
+        }
+        break;
+    }
+
+    return { width, height };
+  }
+
   private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
     // Get object dimensions
     const dims = this.getObjectDimensions(obj);
@@ -709,26 +848,240 @@ export class ScenePage extends Page<ScenePageOptions> {
       toast.error('Please create or open a scene first');
       return;
     }
+    // Show dialog to get sprite URL
+    this.showSpriteDialog();
+  }
 
-    // Place new objects near origin (0, 0) in center-origin coordinates
-    const offset = this.objects.length * 20; // Offset each new object slightly
-    const obj: SceneObject = {
-      id: `sprite-${Date.now()}`,
-      name: `Sprite ${this.objects.length + 1}`,
-      type: 'sprite',
-      visible: true,
-      locked: false,
-      transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
-      zIndex: this.objects.length,
-      opacity: 1,
-      color: '#4a90d9',
+  /**
+   * Create the HTML content for the sprite dialog
+   */
+  private createSpriteDialogHTML(): string {
+    return `
+      <div class="sprite-dialog">
+        <div class="sprite-dialog-header">
+          <h3>Add Sprite</h3>
+          <button class="sprite-dialog-close">&times;</button>
+        </div>
+        <div class="sprite-dialog-content">
+          <div class="sprite-dialog-tabs">
+            <button class="sprite-tab active" data-tab="url">URL</button>
+            <button class="sprite-tab" data-tab="file">File</button>
+          </div>
+          <div class="sprite-tab-content" data-content="url">
+            <label for="sprite-url">Image URL</label>
+            <input type="url" id="sprite-url" class="sprite-dialog-input" placeholder="https://example.com/image.png">
+            <p class="sprite-dialog-hint">Enter a URL to an image (PNG, JPG, GIF, WebP, SVG)</p>
+          </div>
+          <div class="sprite-tab-content" data-content="file" style="display: none;">
+            <label for="sprite-file">Select Image</label>
+            <input type="file" id="sprite-file" class="sprite-dialog-file" accept="image/*">
+            <div class="sprite-drop-zone">
+              <p>Drop image here or click to browse</p>
+            </div>
+          </div>
+          <div class="sprite-preview-container" style="display: none;">
+            <label>Preview</label>
+            <div class="sprite-preview"></div>
+          </div>
+        </div>
+        <div class="sprite-dialog-footer">
+          <button class="sprite-dialog-btn sprite-dialog-cancel">Cancel</button>
+          <button class="sprite-dialog-btn sprite-dialog-add" disabled>Add Sprite</button>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Update the preview element with an image URL (safe, no XSS)
+   */
+  private updateSpritePreview(
+    preview: HTMLElement,
+    previewContainer: HTMLElement,
+    addBtn: HTMLButtonElement,
+    url: string
+  ): void {
+    if (url) {
+      previewContainer.style.display = 'block';
+      while (preview.firstChild) {
+        preview.removeChild(preview.firstChild);
+      }
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = 'Preview';
+      img.style.maxWidth = '200px';
+      img.style.maxHeight = '150px';
+      preview.appendChild(img);
+      addBtn.disabled = false;
+    } else {
+      previewContainer.style.display = 'none';
+      while (preview.firstChild) {
+        preview.removeChild(preview.firstChild);
+      }
+      addBtn.disabled = true;
+    }
+  }
+
+  /**
+   * Create a sprite object from a loaded image URL
+   */
+  private async createSpriteFromUrl(url: string): Promise<void> {
+    const activeScene = this.activeScene;
+    if (!activeScene) {
+      toast.error('Please create or open a scene first');
+      return;
+    }
+
+    const id = `sprite-${Date.now()}`;
+
+    try {
+      await this.spriteRenderer.load(id, url);
+      const info = this.spriteRenderer.getInfo(id);
+
+      // Place new objects near origin (0, 0) in center-origin coordinates
+      const offset = this.objects.length * 20;
+      const obj: SceneObject = {
+        id,
+        name: `Sprite ${this.objects.length + 1}`,
+        type: 'sprite',
+        visible: true,
+        locked: false,
+        transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+        zIndex: this.objects.length,
+        opacity: 1,
+        spriteUrl: url,
+        spriteWidth: info?.width ?? 100,
+        spriteHeight: info?.height ?? 100,
+      };
+
+      sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
+      this.selectedObjectId = obj.id;
+      this.updateHierarchy();
+      this.updatePropertiesPanel();
+      this.updateStatusBar();
+      this.renderScene();
+
+      toast.success('Sprite added successfully');
+    } catch (error) {
+      console.error('Failed to load sprite:', error);
+      toast.error('Failed to load sprite image');
+    }
+  }
+
+  /**
+   * Convert a File to a data URL
+   */
+  private fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  private showSpriteDialog(): void {
+    const overlay = document.createElement('div');
+    overlay.className = 'sprite-dialog-overlay';
+    overlay.innerHTML = this.createSpriteDialogHTML();
+    document.body.appendChild(overlay);
+
+    // Get elements
+    const closeBtn = overlay.querySelector('.sprite-dialog-close') as HTMLButtonElement;
+    const cancelBtn = overlay.querySelector('.sprite-dialog-cancel') as HTMLButtonElement;
+    const addBtn = overlay.querySelector('.sprite-dialog-add') as HTMLButtonElement;
+    const urlInput = overlay.querySelector('#sprite-url') as HTMLInputElement;
+    const fileInput = overlay.querySelector('#sprite-file') as HTMLInputElement;
+    const dropZone = overlay.querySelector('.sprite-drop-zone') as HTMLElement;
+    const previewContainer = overlay.querySelector('.sprite-preview-container') as HTMLElement;
+    const preview = overlay.querySelector('.sprite-preview') as HTMLElement;
+    const tabs = overlay.querySelectorAll('.sprite-tab');
+    const tabContents = overlay.querySelectorAll('.sprite-tab-content');
+
+    let selectedUrl = '';
+    let selectedFile: File | null = null;
+
+    const closeDialog = () => document.body.removeChild(overlay);
+
+    const updatePreview = (url: string) => {
+      this.updateSpritePreview(preview, previewContainer, addBtn, url);
     };
-    sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
-    this.selectedObjectId = obj.id;
-    this.updateHierarchy();
-    this.updatePropertiesPanel();
-    this.updateStatusBar();
-    this.renderScene();
+
+    const handleFile = (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please select an image file');
+        return;
+      }
+      selectedFile = file;
+      selectedUrl = '';
+      this.fileToDataUrl(file).then(updatePreview);
+    };
+
+    // Close handlers
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeDialog();
+    });
+    closeBtn.addEventListener('click', closeDialog);
+    cancelBtn.addEventListener('click', closeDialog);
+
+    // Tab switching
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = (tab as HTMLElement).dataset.tab;
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        tabContents.forEach(content => {
+          (content as HTMLElement).style.display =
+            (content as HTMLElement).dataset.content === tabName ? 'block' : 'none';
+        });
+      });
+    });
+
+    // URL input handler
+    urlInput.addEventListener('input', () => {
+      selectedUrl = urlInput.value.trim();
+      selectedFile = null;
+      const isValidUrl = selectedUrl && (
+        selectedUrl.startsWith('http://') ||
+        selectedUrl.startsWith('https://') ||
+        selectedUrl.startsWith('data:')
+      );
+      updatePreview(isValidUrl ? selectedUrl : '');
+    });
+
+    // File input handler
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files?.[0]) handleFile(fileInput.files[0]);
+    });
+
+    // Drop zone handlers
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      if (e.dataTransfer?.files?.[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    // Add sprite handler
+    addBtn.addEventListener('click', async () => {
+      let url = selectedUrl;
+      if (selectedFile) {
+        url = await this.fileToDataUrl(selectedFile);
+      }
+      if (!url) {
+        toast.error('Please provide an image URL or file');
+        return;
+      }
+      closeDialog();
+      await this.createSpriteFromUrl(url);
+    });
+
+    urlInput.focus();
   }
 
   private addShape(shapeType: ShapeType): void {
@@ -799,6 +1152,239 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.renderScene();
   }
 
+  private addCustomComponent(definition: CustomComponentDefinition): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: this.generateUniqueId('custom'),
+      name: definition.name,
+      type: 'custom',
+      visible: true,
+      locked: false,
+      transform: {
+        x: offset,
+        y: offset,
+        rotation: definition.defaultTransform.rotation,
+        scaleX: definition.defaultTransform.scaleX,
+        scaleY: definition.defaultTransform.scaleY,
+        pivotX: definition.defaultTransform.pivotX,
+        pivotY: definition.defaultTransform.pivotY,
+      },
+      zIndex: this.objects.length,
+      opacity: 1,
+      customComponentId: definition.id,
+      customPropertyValues: this.getDefaultPropertyValues(definition),
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+
+    // Record usage in store
+    customComponentsStore.recordUsage(definition.id);
+
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.success(`Added ${definition.name} to scene`);
+  }
+
+  private getDefaultPropertyValues(definition: CustomComponentDefinition): CustomComponentPropertyValues {
+    const values: CustomComponentPropertyValues = {};
+    for (const prop of definition.properties) {
+      values[prop.name] = prop.defaultValue;
+    }
+    return values;
+  }
+
+  private toggleComponentsLibrary(show?: boolean): void {
+    this.showComponentsLibrary = show !== undefined ? show : !this.showComponentsLibrary;
+
+    const panel = this.$('.components-library-panel') as HTMLElement;
+    const toggleBtn = this.$('[data-action="toggle-components"]');
+
+    if (panel) {
+      panel.style.display = this.showComponentsLibrary ? 'flex' : 'none';
+    }
+
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('active', this.showComponentsLibrary);
+    }
+
+    if (this.showComponentsLibrary) {
+      this.updateComponentsLibrary();
+    }
+  }
+
+  /**
+   * Render a single component item's HTML with proper escaping
+   */
+  private renderComponentItemHtml(comp: CustomComponentDefinition): string {
+    const escapedName = this.escapeHtml(comp.name);
+    const escapedDesc = comp.description ? this.escapeHtml(comp.description) : '';
+    const title = escapedName + (escapedDesc ? ': ' + escapedDesc : '');
+    // Icon is limited to emoji, but escape just in case
+    const icon = this.escapeHtml(comp.icon || '📦');
+
+    return `
+      <div class="component-item" data-component-id="${comp.id}" title="${title}">
+        <div class="component-icon">${icon}</div>
+        <div class="component-name">${escapedName}</div>
+        <div class="component-actions">
+          <button class="component-action-btn" data-action="add" title="Add to scene">+</button>
+          <button class="component-action-btn" data-action="delete" title="Delete">×</button>
+        </div>
+      </div>
+    `;
+  }
+
+  private updateComponentsLibrary(searchQuery?: string): void {
+    const grid = this.$('.components-grid') as HTMLElement;
+    if (!grid) return;
+
+    const components = searchQuery
+      ? customComponentsStore.search(searchQuery)
+      : customComponentsStore.getAll('name');
+
+    if (components.length === 0) {
+      grid.innerHTML = `
+        <div class="components-empty">
+          <p>No custom components</p>
+          <p class="hint">Select objects and save as component</p>
+        </div>
+      `;
+      return;
+    }
+
+    const items = components.map(comp => this.renderComponentItemHtml(comp)).join('');
+    grid.innerHTML = items;
+    this.bindComponentItemHandlers(grid);
+  }
+
+  private filterComponentsByCategory(category: string): void {
+    const grid = this.$('.components-grid') as HTMLElement;
+    if (!grid) return;
+
+    let components: CustomComponentDefinition[];
+    if (category === 'all') {
+      components = customComponentsStore.getAll('name');
+    } else if (category === 'recent') {
+      components = customComponentsStore.getRecentlyUsed(10);
+    } else {
+      components = customComponentsStore.getByCategory(category);
+    }
+
+    if (components.length === 0) {
+      grid.innerHTML = `
+        <div class="components-empty">
+          <p>No components in this category</p>
+        </div>
+      `;
+      return;
+    }
+
+    const items = components.map(comp => this.renderComponentItemHtml(comp)).join('');
+    grid.innerHTML = items;
+    this.bindComponentItemHandlers(grid);
+  }
+
+  private bindComponentItemHandlers(grid: HTMLElement): void {
+    grid.querySelectorAll('.component-item').forEach(item => {
+      const id = (item as HTMLElement).dataset.componentId;
+      if (!id) return;
+
+      item.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('.component-action-btn')) return;
+        const definition = customComponentsStore.getComponent(id);
+        if (definition) {
+          this.addCustomComponent(definition);
+        }
+      });
+
+      const addBtn = item.querySelector('[data-action="add"]');
+      if (addBtn) {
+        addBtn.addEventListener('click', () => {
+          const definition = customComponentsStore.getComponent(id);
+          if (definition) {
+            this.addCustomComponent(definition);
+          }
+        });
+      }
+
+      const deleteBtn = item.querySelector('[data-action="delete"]');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+          if (confirm('Delete this component? This cannot be undone.')) {
+            customComponentsStore.deleteComponent(id);
+            toast.success('Component deleted');
+          }
+        });
+      }
+    });
+  }
+
+  private saveSelectionAsComponent(): void {
+    if (!this.selectedObjectId) {
+      toast.error('Select an object first');
+      return;
+    }
+
+    const selectedObj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!selectedObj) {
+      toast.error('Selected object not found');
+      return;
+    }
+
+    // For now, only allow saving single non-custom objects
+    if (selectedObj.type === 'custom') {
+      toast.error('Cannot save a custom component instance as a new component');
+      return;
+    }
+
+    if (selectedObj.type === 'group' || selectedObj.type === 'empty') {
+      toast.error('Cannot save group or empty objects as components');
+      return;
+    }
+
+    const name = prompt('Enter component name:', selectedObj.name);
+    if (!name) return;
+
+    const description = prompt('Enter description (optional):', '');
+
+    // Create component from the selected object
+    const component = customComponentsStore.createFromSelection(
+      name,
+      [{
+        id: selectedObj.id,
+        name: selectedObj.name,
+        type: selectedObj.type as 'sprite' | 'shape' | 'text',
+        shapeType: selectedObj.shapeType,
+        transform: {
+          x: selectedObj.transform.x,
+          y: selectedObj.transform.y,
+          rotation: selectedObj.transform.rotation,
+          scaleX: selectedObj.transform.scaleX,
+          scaleY: selectedObj.transform.scaleY,
+          pivotX: selectedObj.transform.pivotX ?? 0.5,
+          pivotY: selectedObj.transform.pivotY ?? 0.5,
+        },
+        opacity: selectedObj.opacity,
+        color: selectedObj.color,
+        text: selectedObj.text,
+        fontSize: selectedObj.fontSize,
+        fontFamily: selectedObj.fontFamily,
+        zIndex: selectedObj.zIndex,
+      }],
+      { description: description || undefined }
+    );
+
+    if (component) {
+      toast.success(`Saved "${name}" as custom component`);
+      this.updateComponentsLibrary();
+    } else {
+      toast.error('Failed to create component');
+    }
+  }
+
   private moveSelectedUp(): void {
     const activeScene = this.activeScene;
     if (!this.selectedObjectId || !activeScene) return;
@@ -832,6 +1418,12 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (!this.selectedObjectId || !activeScene) return;
     if (!confirm('Delete selected object?')) return;
 
+    // Clean up sprite from renderer cache if it's a sprite object
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (obj?.type === 'sprite') {
+      this.spriteRenderer.unload(obj.id);
+    }
+
     const newObjects = this.objects.filter(o => o.id !== this.selectedObjectId);
     sceneStore.updateSceneObjects(activeScene.id, newObjects);
     this.selectedObjectId = null;
@@ -841,24 +1433,46 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.renderScene();
   }
 
-  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
-    switch (obj.type) {
-      case 'sprite':
-        return { width: 100, height: 100 };
-      case 'shape':
-        if (obj.shapeType === 'rectangle') {
-          return { width: 100, height: 80 };
-        } else if (obj.shapeType === 'circle') {
-          return { width: 100, height: 100 };
-        }
-        return { width: 100, height: 100 };
-      case 'text':
-        const fontSize = obj.fontSize || 24;
-        const textLength = (obj.text || 'Text').length;
-        return { width: textLength * fontSize * 0.6, height: fontSize * 1.2 };
-      default:
-        return { width: 100, height: 100 };
+  private getCustomComponentBounds(children: CustomComponentChild[]): { width: number; height: number } {
+    if (children.length === 0) {
+      return { width: 100, height: 100 };
     }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const child of children) {
+      // Get child dimensions based on type
+      let childWidth = 100, childHeight = 100;
+      if (child.type === 'shape') {
+        if (child.shapeType === 'rectangle') {
+          childWidth = 100;
+          childHeight = 80;
+        }
+      } else if (child.type === 'text') {
+        const fontSize = child.fontSize || 24;
+        const textLength = (child.text || 'Text').length;
+        childWidth = textLength * fontSize * 0.6;
+        childHeight = fontSize * 1.2;
+      }
+
+      // Calculate child bounds
+      const pivotX = child.transform.pivotX ?? 0.5;
+      const pivotY = child.transform.pivotY ?? 0.5;
+      const left = child.transform.x - childWidth * pivotX;
+      const right = left + childWidth;
+      const top = child.transform.y - childHeight * pivotY;
+      const bottom = top + childHeight;
+
+      minX = Math.min(minX, left);
+      minY = Math.min(minY, top);
+      maxX = Math.max(maxX, right);
+      maxY = Math.max(maxY, bottom);
+    }
+
+    return {
+      width: Math.max(maxX - minX, 50),
+      height: Math.max(maxY - minY, 50),
+    };
   }
 
   private renderScene(): void {
@@ -911,14 +1525,45 @@ export class ScenePage extends Page<ScenePageOptions> {
 
       switch (obj.type) {
         case 'sprite':
-          this.ctx.fillStyle = obj.color || '#4a90d9';
-          this.ctx.fillRect(0, -100, 100, 100);
-          // Sprite icon
-          this.ctx.fillStyle = 'white';
-          this.ctx.font = '40px Arial';
-          this.ctx.textAlign = 'center';
-          this.ctx.textBaseline = 'middle';
-          this.ctx.fillText('🖼', 50, -50);
+          // Use SpriteRenderer if image is loaded
+          if (obj.spriteUrl && this.spriteRenderer.isLoaded(obj.id)) {
+            const spriteInfo = this.spriteRenderer.getInfo(obj.id);
+            if (spriteInfo?.image) {
+              const w = obj.spriteWidth ?? spriteInfo.width;
+              const h = obj.spriteHeight ?? spriteInfo.height;
+              // Draw image at (0, -h) to account for Y-flip
+              this.ctx.drawImage(spriteInfo.image, 0, -h, w, h);
+            }
+          } else {
+            // Fallback placeholder for sprites without loaded images
+            const w = obj.spriteWidth ?? 100;
+            const h = obj.spriteHeight ?? 100;
+
+            // Draw checkerboard pattern for transparency (accounting for Y-flip)
+            const checkSize = 10;
+            for (let cy = 0; cy < h; cy += checkSize) {
+              for (let cx = 0; cx < w; cx += checkSize) {
+                this.ctx.fillStyle = ((cx + cy) / checkSize) % 2 === 0 ? '#ccc' : '#fff';
+                this.ctx.fillRect(cx, -h + cy, checkSize, checkSize);
+              }
+            }
+
+            // Draw border
+            this.ctx.strokeStyle = '#999';
+            this.ctx.lineWidth = 1;
+            this.ctx.strokeRect(0, -h, w, h);
+
+            // Draw sprite icon (flip text to render correctly)
+            this.ctx.save();
+            this.ctx.translate(w / 2, -h / 2);
+            this.ctx.scale(1, -1); // Flip text back
+            this.ctx.fillStyle = '#666';
+            this.ctx.font = `${Math.min(w, h) * 0.4}px Arial`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText('🖼', 0, 0);
+            this.ctx.restore();
+          }
           break;
 
         case 'shape':
@@ -939,6 +1584,10 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.ctx.textBaseline = 'bottom';
           this.ctx.fillText(obj.text || 'Text', 0, 0);
           break;
+
+        case 'custom':
+          this.renderCustomComponent(obj);
+          break;
       }
 
       this.ctx.restore();
@@ -950,6 +1599,103 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     this.ctx.restore();
+  }
+
+  private renderCustomComponent(obj: SceneObject): void {
+    if (!this.ctx || !obj.customComponentId) return;
+
+    const definition = customComponentsStore.getComponent(obj.customComponentId);
+    if (!definition) {
+      // Component definition not found - draw placeholder
+      this.ctx.fillStyle = '#cccccc';
+      this.ctx.fillRect(0, -100, 100, 100);
+      this.ctx.fillStyle = '#666666';
+      this.ctx.font = '12px Arial';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText('Missing', 50, -50);
+      return;
+    }
+
+    // Render all children of the custom component
+    for (const child of definition.children) {
+      this.ctx.save();
+
+      // Get child dimensions
+      let childWidth = 100, childHeight = 100;
+      if (child.type === 'shape') {
+        if (child.shapeType === 'rectangle') {
+          childWidth = 100;
+          childHeight = 80;
+        }
+      } else if (child.type === 'text') {
+        const fontSize = child.fontSize || 24;
+        const textLength = (child.text || 'Text').length;
+        childWidth = textLength * fontSize * 0.6;
+        childHeight = fontSize * 1.2;
+      }
+
+      // Apply child transform relative to component
+      const pivotX = child.transform.pivotX ?? 0.5;
+      const pivotY = child.transform.pivotY ?? 0.5;
+      const pivotOffsetX = childWidth * pivotX;
+      const pivotOffsetY = childHeight * pivotY;
+
+      this.ctx.translate(child.transform.x, child.transform.y);
+      this.ctx.rotate((child.transform.rotation * Math.PI) / 180);
+      this.ctx.scale(child.transform.scaleX, child.transform.scaleY);
+      this.ctx.translate(-pivotOffsetX, -pivotOffsetY);
+      this.ctx.globalAlpha *= child.opacity;
+
+      // Render child based on type
+      switch (child.type) {
+        case 'sprite':
+          this.ctx.fillStyle = child.color || '#4a90d9';
+          this.ctx.fillRect(0, -100, 100, 100);
+          this.ctx.fillStyle = 'white';
+          this.ctx.font = '40px Arial';
+          this.ctx.textAlign = 'center';
+          this.ctx.textBaseline = 'middle';
+          this.ctx.fillText('🖼', 50, -50);
+          break;
+
+        case 'shape':
+          this.ctx.fillStyle = child.color || '#e74c3c';
+          if (child.shapeType === 'rectangle') {
+            this.ctx.fillRect(0, -80, 100, 80);
+          } else if (child.shapeType === 'circle') {
+            this.ctx.beginPath();
+            this.ctx.arc(50, -50, 50, 0, Math.PI * 2);
+            this.ctx.fill();
+          }
+          break;
+
+        case 'text':
+          this.ctx.fillStyle = child.color || '#333';
+          this.ctx.font = `${child.fontSize || 24}px ${child.fontFamily || 'Arial'}`;
+          this.ctx.textAlign = 'left';
+          this.ctx.textBaseline = 'bottom';
+          this.ctx.fillText(child.text || 'Text', 0, 0);
+          break;
+      }
+
+      this.ctx.restore();
+    }
+
+    // Draw a subtle border around the custom component when not selected
+    if (obj.id !== this.selectedObjectId) {
+      const bounds = this.getCustomComponentBounds(definition.children);
+      this.ctx.strokeStyle = 'rgba(100, 100, 200, 0.3)';
+      this.ctx.lineWidth = 1;
+      this.ctx.setLineDash([3, 3]);
+      this.ctx.strokeRect(
+        -bounds.width * 0.5,
+        -bounds.height * 0.5,
+        bounds.width,
+        bounds.height
+      );
+      this.ctx.setLineDash([]);
+    }
   }
 
   private drawCenteredGrid(): void {
@@ -1156,6 +1902,12 @@ export class ScenePage extends Page<ScenePageOptions> {
         }
       case 'text': return '📝';
       case 'group': return '📁';
+      case 'custom':
+        if (obj.customComponentId) {
+          const definition = customComponentsStore.getComponent(obj.customComponentId);
+          return definition?.icon || '📦';
+        }
+        return '📦';
       default: return '◻';
     }
   }
@@ -1556,6 +2308,12 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.boundHandleMouseUp = null;
     this.boundHandleWheel = null;
 
+    // Clear search debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
       this.unsubscribeOffline = null;
@@ -1564,6 +2322,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.unsubscribeStore) {
       this.unsubscribeStore();
       this.unsubscribeStore = null;
+    }
+
+    if (this.unsubscribeComponents) {
+      this.unsubscribeComponents();
+      this.unsubscribeComponents = null;
     }
 
     if (this.offlineIndicator) {

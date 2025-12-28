@@ -635,6 +635,50 @@ export interface BoneAnimation {
 }
 
 /**
+ * A single frame in a frame-based animation
+ */
+export interface AnimationFrame {
+  /** Frame duration in seconds (or use animation's default if not specified) */
+  duration?: number;
+  /** Image source - can be a URL, data URL, or canvas reference ID */
+  source: string;
+  /** Optional offset for the frame */
+  offset?: Vector2;
+  /** Optional pivot point for rotation/scaling */
+  pivot?: Vector2;
+}
+
+/**
+ * Complete frame-based animation data (sprite sheet / flipbook style)
+ */
+export interface FrameAnimation {
+  name: string;
+  type: 'frame';
+  fps: number;
+  frames: AnimationFrame[];
+  loop: boolean;
+  /** Optional ping-pong mode: play forward then backward */
+  pingPong?: boolean;
+}
+
+/**
+ * Union type for all animation types
+ */
+export type Animation = BoneAnimation | FrameAnimation;
+
+/**
+ * Animation clip reference for use in Animator
+ */
+export interface AnimationClip {
+  name: string;
+  animation: Animation;
+  /** Speed multiplier for this clip */
+  speed?: number;
+  /** Override loop setting for this clip */
+  loop?: boolean;
+}
+
+/**
  * Skeleton instance with current pose
  */
 export interface Skeleton {
@@ -754,4 +798,181 @@ export interface SnippetListFilters {
   collectionId?: string;
   sortBy?: 'title' | 'usageCount' | 'lastUsedAt' | 'createdAt' | 'updatedAt';
   order?: 'asc' | 'desc';
+}
+
+// Custom Component types
+
+/**
+ * Property types that can be exposed on custom components
+ */
+export type CustomPropertyType = 'number' | 'string' | 'boolean' | 'color' | 'select';
+
+/**
+ * Definition of an exposed property on a custom component
+ */
+export interface CustomComponentProperty {
+  name: string;
+  type: CustomPropertyType;
+  label: string;
+  defaultValue: string | number | boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { label: string; value: string }[];
+}
+
+/**
+ * Transform data for custom component definition
+ */
+export interface CustomComponentTransform {
+  x: number;
+  y: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  pivotX: number;
+  pivotY: number;
+}
+
+/**
+ * Child object within a custom component definition
+ */
+export interface CustomComponentChild {
+  id: string;
+  name: string;
+  type: 'sprite' | 'shape' | 'text';
+  shapeType?: 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
+  transform: CustomComponentTransform;
+  opacity: number;
+  color?: string;
+  text?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  zIndex: number;
+}
+
+/**
+ * Complete definition of a user-defined custom component
+ */
+export interface CustomComponentDefinition {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children: CustomComponentChild[];
+  properties: CustomComponentProperty[];
+  defaultTransform: CustomComponentTransform;
+  thumbnail?: string;
+  isPublic: boolean;
+  usageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Simplified summary for component library listings
+ */
+export interface CustomComponentSummary {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  thumbnail?: string;
+  usageCount: number;
+}
+
+/**
+ * Request to create a new custom component
+ */
+export interface CreateCustomComponentRequest {
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children: CustomComponentChild[];
+  properties?: CustomComponentProperty[];
+  defaultTransform?: Partial<CustomComponentTransform>;
+  isPublic?: boolean;
+}
+
+/**
+ * Request to update a custom component
+ */
+export interface UpdateCustomComponentRequest {
+  name?: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children?: CustomComponentChild[];
+  properties?: CustomComponentProperty[];
+  defaultTransform?: Partial<CustomComponentTransform>;
+  isPublic?: boolean;
+}
+
+/**
+ * Property values for an instance of a custom component
+ */
+export type CustomComponentPropertyValues = Record<string, string | number | boolean>;
+
+/**
+ * Instance of a custom component in a scene
+ */
+export interface CustomComponentInstance {
+  definitionId: string;
+  propertyValues: CustomComponentPropertyValues;
+}
+
+// Audio Source types
+
+/**
+ * Oscillator waveform types for audio generation
+ */
+export type WaveformType = 'sine' | 'square' | 'sawtooth' | 'triangle';
+
+/**
+ * ADSR Envelope configuration for audio sources
+ */
+export interface EnvelopeConfig {
+  /** Attack time in seconds */
+  attack: number;
+  /** Decay time in seconds */
+  decay: number;
+  /** Sustain level (0-1) */
+  sustain: number;
+  /** Release time in seconds */
+  release: number;
+}
+
+/**
+ * Audio source configuration
+ */
+export interface AudioSourceConfig {
+  /** Oscillator waveform type */
+  waveform: WaveformType;
+  /** Base frequency in Hz */
+  frequency: number;
+  /** Volume level (0-1) */
+  volume: number;
+  /** Detune in cents */
+  detune: number;
+  /** ADSR envelope */
+  envelope: EnvelopeConfig;
+}
+
+/**
+ * Audio source playback state
+ */
+export interface AudioSourceState {
+  /** Whether audio is currently playing */
+  isPlaying: boolean;
+  /** Current frequency being played */
+  currentFrequency: number;
+  /** Current volume level */
+  currentVolume: number;
 }
