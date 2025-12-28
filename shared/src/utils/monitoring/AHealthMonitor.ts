@@ -23,6 +23,7 @@ export abstract class AHealthMonitor extends AService implements IHealthMonitorD
     service?: string;
     containerId?: string;
     build?: { commitSha: string; timestamp: string; imageTag: string };
+    scale?: { currentCapacity: string; shortTermTarget: string; architecture: string };
   }): Promise<DetailedHealthStatus>;
 
   abstract startPeriodicChecks(intervalMs?: number): void;

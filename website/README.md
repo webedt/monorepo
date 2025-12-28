@@ -77,7 +77,7 @@ Current deployment is designed for small-scale usage:
 
 | Metric | Current | Short-term Target |
 |--------|---------|-------------------|
-| **Concurrent Users** | 1-3 | Up to 10 |
+| **Concurrent Users** | Up to 10 | 50+ |
 | **Storage per User** | Few GB | Few GB |
 | **Architecture** | Single instance | Horizontally scalable |
 
