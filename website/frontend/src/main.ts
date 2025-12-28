@@ -26,6 +26,7 @@ import {
   GameDetailPage,
   LibraryPage,
   CommunityPage,
+  PricingPage,
   AdminPage,
 } from './pages';
 
@@ -874,6 +875,14 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Community | WebEDT',
+      },
+      {
+        path: '/pricing',
+        component: () => {
+          mountPage(PricingPage);
+          return document.createElement('div');
+        },
+        title: 'Pricing | WebEDT',
       },
       // Admin routes
       {
