@@ -478,6 +478,9 @@ export type {
   NewTaxonomyTerm,
   ItemTaxonomy,
   NewItemTaxonomy,
+  // Announcements types
+  Announcement,
+  NewAnnouncement,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -510,6 +513,8 @@ export {
   taxonomies,
   taxonomyTerms,
   itemTaxonomies,
+  // Announcements tables
+  announcements,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

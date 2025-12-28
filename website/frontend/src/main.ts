@@ -26,6 +26,7 @@ import {
   GameDetailPage,
   LibraryPage,
   CommunityPage,
+  AnnouncementsPage,
   AdminPage,
 } from './pages';
 
@@ -874,6 +875,22 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Community | WebEDT',
+      },
+      {
+        path: '/announcements',
+        component: () => {
+          mountPage(AnnouncementsPage);
+          return document.createElement('div');
+        },
+        title: 'Announcements | WebEDT',
+      },
+      {
+        path: '/announcements/:id',
+        component: (params) => {
+          mountPage(AnnouncementsPage, params);
+          return document.createElement('div');
+        },
+        title: 'Announcement | WebEDT',
       },
       // Admin routes
       {

@@ -722,3 +722,29 @@ export type TaxonomyTerm = typeof taxonomyTerms.$inferSelect;
 export type NewTaxonomyTerm = typeof taxonomyTerms.$inferInsert;
 export type ItemTaxonomy = typeof itemTaxonomies.$inferSelect;
 export type NewItemTaxonomy = typeof itemTaxonomies.$inferInsert;
+
+// ============================================================================
+// ANNOUNCEMENTS - Official platform updates
+// ============================================================================
+
+// Announcements - Official platform announcements from admins
+export const announcements = pgTable('announcements', {
+  id: text('id').primaryKey(), // UUID
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  type: text('type').notNull().default('general'), // 'maintenance' | 'feature' | 'alert' | 'general'
+  priority: text('priority').notNull().default('normal'), // 'low' | 'normal' | 'high' | 'critical'
+  status: text('status').notNull().default('draft'), // 'draft' | 'published' | 'archived'
+  authorId: text('author_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'set null' }),
+  publishedAt: timestamp('published_at'),
+  expiresAt: timestamp('expires_at'), // Optional expiration date
+  pinned: boolean('pinned').default(false).notNull(), // Pinned announcements appear at top
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Type exports for Announcements
+export type Announcement = typeof announcements.$inferSelect;
+export type NewAnnouncement = typeof announcements.$inferInsert;

@@ -1,0 +1,403 @@
+/**
+ * Announcements Routes
+ * Handles official platform announcements from admins
+ */
+
+import { Router, Request, Response } from 'express';
+import {
+  db,
+  users,
+  announcements,
+  eq,
+  and,
+  or,
+  desc,
+  asc,
+  gt,
+  isNull,
+} from '@webedt/shared';
+import type { AuthRequest } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { logger } from '@webedt/shared';
+import { v4 as uuidv4 } from 'uuid';
+
+const router = Router();
+
+// Get published announcements (public)
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const { type, priority, pinned } = req.query;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Build base query conditions - only published and not expired
+    const now = new Date();
+    const conditions = [
+      eq(announcements.status, 'published'),
+      or(
+        isNull(announcements.expiresAt),
+        gt(announcements.expiresAt, now)
+      ),
+    ];
+
+    if (type) {
+      conditions.push(eq(announcements.type, type as string));
+    }
+
+    if (priority) {
+      conditions.push(eq(announcements.priority, priority as string));
+    }
+
+    if (pinned === 'true') {
+      conditions.push(eq(announcements.pinned, true));
+    }
+
+    // Get announcements with author info, ordered by pinned first, then by publishedAt
+    const items = await db
+      .select({
+        announcement: announcements,
+        author: {
+          id: users.id,
+          displayName: users.displayName,
+          email: users.email,
+        },
+      })
+      .from(announcements)
+      .innerJoin(users, eq(announcements.authorId, users.id))
+      .where(and(...conditions))
+      .orderBy(desc(announcements.pinned), desc(announcements.publishedAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const allAnnouncements = await db
+      .select({ id: announcements.id })
+      .from(announcements)
+      .where(and(...conditions));
+
+    const total = allAnnouncements.length;
+
+    res.json({
+      success: true,
+      data: {
+        announcements: items.map((a) => ({
+          ...a.announcement,
+          author: {
+            id: a.author.id,
+            displayName: a.author.displayName || a.author.email?.split('@')[0],
+          },
+        })),
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      },
+    });
+  } catch (error) {
+    logger.error('Get announcements error', error as Error, { component: 'Announcements' });
+    res.status(500).json({ success: false, error: 'Failed to fetch announcements' });
+  }
+});
+
+// Get single announcement (public for published, admin for all)
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const announcementId = req.params.id;
+    const authReq = req as AuthRequest;
+    const isAdmin = authReq.user?.isAdmin || false;
+
+    const [item] = await db
+      .select({
+        announcement: announcements,
+        author: {
+          id: users.id,
+          displayName: users.displayName,
+          email: users.email,
+        },
+      })
+      .from(announcements)
+      .innerJoin(users, eq(announcements.authorId, users.id))
+      .where(eq(announcements.id, announcementId))
+      .limit(1);
+
+    if (!item) {
+      res.status(404).json({ success: false, error: 'Announcement not found' });
+      return;
+    }
+
+    // Non-admins can only see published announcements
+    if (!isAdmin && item.announcement.status !== 'published') {
+      res.status(404).json({ success: false, error: 'Announcement not found' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...item.announcement,
+        author: {
+          id: item.author.id,
+          displayName: item.author.displayName || item.author.email?.split('@')[0],
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Get announcement error', error as Error, { component: 'Announcements' });
+    res.status(500).json({ success: false, error: 'Failed to fetch announcement' });
+  }
+});
+
+// Create announcement (admin only)
+router.post('/', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { title, content, type, priority, status, pinned, expiresAt } = req.body;
+
+    // Validate required fields
+    if (!title || !content) {
+      res.status(400).json({
+        success: false,
+        error: 'Title and content are required',
+      });
+      return;
+    }
+
+    // Validate type
+    const validTypes = ['maintenance', 'feature', 'alert', 'general'];
+    if (type && !validTypes.includes(type)) {
+      res.status(400).json({ success: false, error: 'Invalid announcement type' });
+      return;
+    }
+
+    // Validate priority
+    const validPriorities = ['low', 'normal', 'high', 'critical'];
+    if (priority && !validPriorities.includes(priority)) {
+      res.status(400).json({ success: false, error: 'Invalid priority' });
+      return;
+    }
+
+    // Validate status
+    const validStatuses = ['draft', 'published', 'archived'];
+    if (status && !validStatuses.includes(status)) {
+      res.status(400).json({ success: false, error: 'Invalid status' });
+      return;
+    }
+
+    // If publishing, set publishedAt
+    const publishedAt = status === 'published' ? new Date() : null;
+
+    // Create announcement
+    const [announcement] = await db
+      .insert(announcements)
+      .values({
+        id: uuidv4(),
+        title,
+        content,
+        type: type || 'general',
+        priority: priority || 'normal',
+        status: status || 'draft',
+        authorId: authReq.user!.id,
+        publishedAt,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        pinned: pinned || false,
+      })
+      .returning();
+
+    logger.info(`Admin ${authReq.user!.id} created announcement ${announcement.id}`, {
+      component: 'Announcements',
+      type: announcement.type,
+      status: announcement.status,
+    });
+
+    res.json({
+      success: true,
+      data: { announcement },
+    });
+  } catch (error) {
+    logger.error('Create announcement error', error as Error, { component: 'Announcements' });
+    res.status(500).json({ success: false, error: 'Failed to create announcement' });
+  }
+});
+
+// Update announcement (admin only)
+router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const announcementId = req.params.id;
+    const { title, content, type, priority, status, pinned, expiresAt } = req.body;
+
+    // Get existing announcement
+    const [existing] = await db
+      .select()
+      .from(announcements)
+      .where(eq(announcements.id, announcementId))
+      .limit(1);
+
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Announcement not found' });
+      return;
+    }
+
+    // Build update data
+    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+
+    if (title !== undefined) updateData.title = title;
+    if (content !== undefined) updateData.content = content;
+    if (type !== undefined) {
+      const validTypes = ['maintenance', 'feature', 'alert', 'general'];
+      if (!validTypes.includes(type)) {
+        res.status(400).json({ success: false, error: 'Invalid announcement type' });
+        return;
+      }
+      updateData.type = type;
+    }
+    if (priority !== undefined) {
+      const validPriorities = ['low', 'normal', 'high', 'critical'];
+      if (!validPriorities.includes(priority)) {
+        res.status(400).json({ success: false, error: 'Invalid priority' });
+        return;
+      }
+      updateData.priority = priority;
+    }
+    if (status !== undefined) {
+      const validStatuses = ['draft', 'published', 'archived'];
+      if (!validStatuses.includes(status)) {
+        res.status(400).json({ success: false, error: 'Invalid status' });
+        return;
+      }
+      updateData.status = status;
+      // Set publishedAt when first published
+      if (status === 'published' && existing.status !== 'published') {
+        updateData.publishedAt = new Date();
+      }
+    }
+    if (pinned !== undefined) updateData.pinned = pinned;
+    if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
+
+    const [updated] = await db
+      .update(announcements)
+      .set(updateData)
+      .where(eq(announcements.id, announcementId))
+      .returning();
+
+    logger.info(`Admin ${authReq.user!.id} updated announcement ${announcementId}`, {
+      component: 'Announcements',
+    });
+
+    res.json({
+      success: true,
+      data: { announcement: updated },
+    });
+  } catch (error) {
+    logger.error('Update announcement error', error as Error, { component: 'Announcements' });
+    res.status(500).json({ success: false, error: 'Failed to update announcement' });
+  }
+});
+
+// Delete announcement (admin only)
+router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const announcementId = req.params.id;
+
+    // Get existing announcement
+    const [existing] = await db
+      .select()
+      .from(announcements)
+      .where(eq(announcements.id, announcementId))
+      .limit(1);
+
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Announcement not found' });
+      return;
+    }
+
+    // Delete the announcement
+    await db
+      .delete(announcements)
+      .where(eq(announcements.id, announcementId));
+
+    logger.info(`Admin ${authReq.user!.id} deleted announcement ${announcementId}`, {
+      component: 'Announcements',
+    });
+
+    res.json({
+      success: true,
+      data: { message: 'Announcement deleted' },
+    });
+  } catch (error) {
+    logger.error('Delete announcement error', error as Error, { component: 'Announcements' });
+    res.status(500).json({ success: false, error: 'Failed to delete announcement' });
+  }
+});
+
+// List all announcements for admin (including drafts and archived)
+router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { type, priority, status } = req.query;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Build conditions
+    const conditions: ReturnType<typeof eq>[] = [];
+
+    if (type) {
+      conditions.push(eq(announcements.type, type as string));
+    }
+
+    if (priority) {
+      conditions.push(eq(announcements.priority, priority as string));
+    }
+
+    if (status) {
+      conditions.push(eq(announcements.status, status as string));
+    }
+
+    // Get all announcements with author info
+    const items = await db
+      .select({
+        announcement: announcements,
+        author: {
+          id: users.id,
+          displayName: users.displayName,
+          email: users.email,
+        },
+      })
+      .from(announcements)
+      .innerJoin(users, eq(announcements.authorId, users.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(announcements.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const allAnnouncements = await db
+      .select({ id: announcements.id })
+      .from(announcements)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+    const total = allAnnouncements.length;
+
+    res.json({
+      success: true,
+      data: {
+        announcements: items.map((a) => ({
+          ...a.announcement,
+          author: {
+            id: a.author.id,
+            displayName: a.author.displayName || a.author.email?.split('@')[0],
+          },
+        })),
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      },
+    });
+  } catch (error) {
+    logger.error('Get admin announcements error', error as Error, { component: 'Announcements' });
+    res.status(500).json({ success: false, error: 'Failed to fetch announcements' });
+  }
+});
+
+export default router;
