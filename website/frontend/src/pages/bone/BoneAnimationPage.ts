@@ -57,14 +57,45 @@ function lerpVector2(a: Vector2, b: Vector2, t: number): Vector2 {
 }
 
 /**
+ * Lerp angle with shortest path (handles wrapping around 360 degrees)
+ */
+function lerpAngle(a: number, b: number, t: number): number {
+  // Normalize angles to [-180, 180] for shortest path interpolation
+  let diff = b - a;
+  while (diff > 180) diff -= 360;
+  while (diff < -180) diff += 360;
+  return a + diff * t;
+}
+
+/**
  * Lerp between two BoneTransforms
  */
 function lerpTransform(a: BoneTransform, b: BoneTransform, t: number): BoneTransform {
   return {
     position: lerpVector2(a.position, b.position, t),
-    rotation: lerp(a.rotation, b.rotation, t),
+    rotation: lerpAngle(a.rotation, b.rotation, t),
     scale: lerpVector2(a.scale, b.scale, t),
   };
+}
+
+/**
+ * Deep copy a BoneTransform
+ */
+function cloneTransform(transform: BoneTransform): BoneTransform {
+  return {
+    position: { x: transform.position.x, y: transform.position.y },
+    rotation: transform.rotation,
+    scale: { x: transform.scale.x, y: transform.scale.y },
+  };
+}
+
+/**
+ * Escape HTML entities to prevent XSS
+ */
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 /**
@@ -128,10 +159,6 @@ class Matrix2D {
       y: this.m[1] * x + this.m[3] * y + this.m[5],
     };
   }
-
-  applyToContext(ctx: CanvasRenderingContext2D): void {
-    ctx.transform(this.m[0], this.m[1], this.m[2], this.m[3], this.m[4], this.m[5]);
-  }
 }
 
 export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
@@ -179,6 +206,9 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
   // View state
   private viewOffset: Vector2 = { x: 0, y: 0 };
   private viewScale = 1;
+
+  // Event handlers (for cleanup)
+  private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
   protected render(): string {
     return `
@@ -546,7 +576,7 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
   }
 
   private setupKeyboardShortcuts(): void {
-    const handleKeydown = (e: KeyboardEvent) => {
+    this.keydownHandler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
@@ -581,7 +611,7 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
       }
     };
 
-    document.addEventListener('keydown', handleKeydown);
+    document.addEventListener('keydown', this.keydownHandler);
   }
 
   private createDefaultSkeleton(): void {
@@ -623,9 +653,9 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
       transforms: {},
     }];
 
-    // Copy bone transforms to keyframe
+    // Copy bone transforms to keyframe (deep copy to avoid mutation)
     for (const bone of this.animation.bones) {
-      this.animation.keyframes[0].transforms[bone.name] = { ...bone.localTransform };
+      this.animation.keyframes[0].transforms[bone.name] = cloneTransform(bone.localTransform);
     }
   }
 
@@ -690,6 +720,18 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
 
     const bone = this.animation.bones.find(b => b.name === this.selectedBoneName);
     if (!bone) return;
+
+    // Validate: check for duplicate bone names
+    const isDuplicate = this.animation.bones.some(
+      b => b.name === newName && b.name !== this.selectedBoneName
+    );
+    if (isDuplicate) {
+      toast.error(`Bone name "${newName}" already exists`);
+      // Reset the input to the original name
+      const nameInput = this.$('.bone-name-input') as HTMLInputElement;
+      if (nameInput) nameInput.value = bone.name;
+      return;
+    }
 
     const oldName = bone.name;
 
@@ -765,11 +807,11 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
         time: this.currentTime,
         transforms: {},
       };
-      // Copy transforms from nearest keyframe
+      // Copy transforms from nearest keyframe (deep copy to avoid mutation)
       const nearestKeyframe = this.getNearestKeyframe(this.currentTime);
       if (nearestKeyframe) {
         for (const name in nearestKeyframe.transforms) {
-          keyframe.transforms[name] = { ...nearestKeyframe.transforms[name] };
+          keyframe.transforms[name] = cloneTransform(nearestKeyframe.transforms[name]);
         }
       }
       this.animation.keyframes.push(keyframe);
@@ -1288,15 +1330,18 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
     // Build hierarchical tree
     const buildTree = (parentName: string | null, depth: number): string => {
       const children = this.animation.bones.filter(b => b.parent === parentName);
-      return children.map(bone => `
+      return children.map(bone => {
+        const escapedName = escapeHtml(bone.name);
+        return `
         <div class="bone-tree-item ${bone.name === this.selectedBoneName ? 'selected' : ''}"
              style="padding-left: ${depth * 16}px"
-             data-bone="${bone.name}">
+             data-bone="${escapedName}">
           <span class="bone-icon">&#128469;</span>
-          <span class="bone-name">${bone.name}</span>
+          <span class="bone-name">${escapedName}</span>
         </div>
         ${buildTree(bone.name, depth + 1)}
-      `).join('');
+      `;
+      }).join('');
     };
 
     treeContainer.innerHTML = buildTree(null, 0);
@@ -1399,9 +1444,10 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
 
     let tracksHtml = '';
     for (const bone of this.animation.bones) {
+      const escapedName = escapeHtml(bone.name);
       tracksHtml += `
-        <div class="timeline-track" data-bone="${bone.name}">
-          <div class="track-label">${bone.name}</div>
+        <div class="timeline-track" data-bone="${escapedName}">
+          <div class="track-label">${escapedName}</div>
           <div class="track-keyframes">
       `;
 
@@ -1551,5 +1597,11 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
 
   protected onUnmount(): void {
     this.stopPlayback();
+
+    // Clean up keyboard event listener to prevent memory leak
+    if (this.keydownHandler) {
+      document.removeEventListener('keydown', this.keydownHandler);
+      this.keydownHandler = null;
+    }
   }
 }
