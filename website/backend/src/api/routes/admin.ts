@@ -141,7 +141,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     }
 
     // Prevent user from demoting their own role
-    if (authReq.user?.id === id && role && ROLE_HIERARCHY.indexOf(role) < ROLE_HIERARCHY.indexOf(authReq.user.role)) {
+    if (authReq.user?.id === id && role && ROLE_HIERARCHY.indexOf(role) < ROLE_HIERARCHY.indexOf(authReq.user.role || 'user')) {
       res.status(400).json({ success: false, error: 'Cannot demote your own role' });
       return;
     }
