@@ -159,8 +159,9 @@ export type ExecutionEventCallback = (event: ExecutionEvent) => void | Promise<v
  * Execution Provider Interface
  *
  * Providers implement this interface to handle AI execution.
- * Currently supports: ClaudeRemoteProvider
- * Future: SelfHostedWorkerProvider
+ * Available providers:
+ * - ClaudeRemoteProvider: Delegates to Anthropic's Remote Sessions API
+ * - SelfHostedWorkerProvider: Connects to a self-hosted AI worker for LLM execution
  */
 export interface ExecutionProvider {
   /** Provider name for logging */

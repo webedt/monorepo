@@ -41,7 +41,7 @@
     "@octokit/rest": "^21.1.1",
     "@webedt/shared": "file:../shared",
     "chalk": "^5.4.1",
-    "commander": "^13.1.0",
+    "commander": "^14.0.2",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.44.2",
     "ora": "^8.2.0",
@@ -58,7 +58,7 @@
     "jest-watch-typeahead": "^2.2.2",
     "ts-jest": "^29.2.5",
     "tsx": "^4.21.0",
-    "typescript": "5.3"
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=20.0.0"

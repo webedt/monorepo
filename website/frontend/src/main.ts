@@ -20,6 +20,10 @@ import {
   ChatPage,
   CodePage,
   TrashPage,
+  StorePage,
+  GameDetailPage,
+  LibraryPage,
+  CommunityPage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -31,6 +35,9 @@ function getNavIcon(name: string): string {
   const icons: Record<string, string> = {
     'cpu': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg>`,
     'layout-dashboard': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>`,
+    'store': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+    'library': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
+    'community': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
   };
   return icons[name] || '';
 }
@@ -269,9 +276,31 @@ function updateHeader(): void {
 
   const isAuthenticated = authStore.isAuthenticated();
 
+  // Nav links for all users (store is public)
+  const publicNavLinks = [
+    { path: '/store', text: 'Store', icon: 'store' },
+    { path: '/community', text: 'Community', icon: 'community' },
+  ];
+
+  for (const link of publicNavLinks) {
+    const a = document.createElement('a');
+    a.href = `#${link.path}`;
+    a.className = 'nav-link';
+
+    const iconSvg = getNavIcon(link.icon);
+    a.innerHTML = `${iconSvg}<span>${link.text}</span>`;
+
+    if (window.location.hash === `#${link.path}`) {
+      a.classList.add('active');
+    }
+
+    nav.appendChild(a);
+  }
+
   if (isAuthenticated) {
     // Nav links for authenticated users with icons
     const navLinks = [
+      { path: '/library', text: 'Library', icon: 'library' },
       { path: '/agents', text: 'Agents', icon: 'cpu' },
       { path: '/dashboard', text: 'Dashboard', icon: 'layout-dashboard' },
     ];
@@ -786,6 +815,40 @@ async function init(): Promise<void> {
         },
         title: 'Code | WebEDT',
         guard: () => authStore.isAuthenticated(),
+      },
+      // Players feature routes
+      {
+        path: '/store',
+        component: () => {
+          mountPage(StorePage);
+          return document.createElement('div');
+        },
+        title: 'Store | WebEDT',
+      },
+      {
+        path: '/game/:id',
+        component: (params) => {
+          mountPage(GameDetailPage, params);
+          return document.createElement('div');
+        },
+        title: 'Game Details | WebEDT',
+      },
+      {
+        path: '/library',
+        component: () => {
+          mountPage(LibraryPage);
+          return document.createElement('div');
+        },
+        title: 'My Library | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/community',
+        component: () => {
+          mountPage(CommunityPage);
+          return document.createElement('div');
+        },
+        title: 'Community | WebEDT',
       },
     ])
     .start();

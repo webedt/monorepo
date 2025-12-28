@@ -438,6 +438,30 @@ export type {
   OrchestratorTask,
   NewOrchestratorTask,
   UserRole,
+  Organization,
+  NewOrganization,
+  OrganizationMember,
+  NewOrganizationMember,
+  OrganizationRepository,
+  NewOrganizationRepository,
+  OrganizationInvitation,
+  NewOrganizationInvitation,
+  OrganizationRole,
+  // Players feature types
+  Game,
+  NewGame,
+  UserLibraryItem,
+  NewUserLibraryItem,
+  Purchase,
+  NewPurchase,
+  CommunityPost,
+  NewCommunityPost,
+  CommunityComment,
+  NewCommunityComment,
+  CommunityVote,
+  NewCommunityVote,
+  WishlistItem,
+  NewWishlistItem,
 } from './schema.js';
 
 // Re-export role utilities from schema
@@ -451,6 +475,18 @@ export {
   orchestratorJobs,
   orchestratorCycles,
   orchestratorTasks,
+  organizations,
+  organizationMembers,
+  organizationRepositories,
+  organizationInvitations,
+  // Players feature tables
+  games,
+  userLibrary,
+  purchases,
+  communityPosts,
+  communityComments,
+  communityVotes,
+  wishlists,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

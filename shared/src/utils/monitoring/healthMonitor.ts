@@ -109,6 +109,7 @@ class HealthMonitor extends AHealthMonitor {
     service?: string;
     containerId?: string;
     build?: { commitSha: string; timestamp: string; imageTag: string };
+    scale?: { currentCapacity: string; shortTermTarget: string; architecture: string };
   }): Promise<DetailedHealthStatus> {
     const checks = await this.runAllChecks();
 
@@ -157,6 +158,7 @@ class HealthMonitor extends AHealthMonitor {
         rssMb: Math.round(memUsage.rss / (1024 * 1024)),
         externalMb: Math.round(memUsage.external / (1024 * 1024)),
       },
+      scale: config.scale,
       timestamp: new Date().toISOString(),
     };
   }

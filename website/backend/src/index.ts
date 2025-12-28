@@ -40,6 +40,11 @@ import internalSessionsRoutes from './api/routes/internalSessions.js';
 import logsRoutes from './api/routes/logs.js';
 import liveChatRoutes from './api/routes/liveChat.js';
 import workspaceRoutes from './api/routes/workspace.js';
+import organizationsRoutes from './api/routes/organizations.js';
+import storeRoutes from './api/routes/store.js';
+import libraryRoutes from './api/routes/library.js';
+import purchasesRoutes from './api/routes/purchases.js';
+import communityRoutes from './api/routes/community.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
@@ -227,6 +232,8 @@ app.get('/health', (req, res) => {
 });
 
 // Detailed health status endpoint (comprehensive health information)
+// Scale expectations: Current deployment supports up to 10 concurrent users
+// Architecture is designed for horizontal scalability when demand increases
 app.get('/health/status', async (req, res) => {
   try {
     const status = await healthMonitor.getDetailedHealthStatus({
@@ -237,6 +244,11 @@ app.get('/health/status', async (req, res) => {
         commitSha: BUILD_COMMIT_SHA,
         timestamp: BUILD_TIMESTAMP,
         imageTag: BUILD_IMAGE_TAG,
+      },
+      scale: {
+        currentCapacity: 'up to 10 concurrent users',
+        shortTermTarget: '50+ users',
+        architecture: 'horizontally scalable',
       },
     });
 
@@ -303,6 +315,11 @@ app.use('/api/internal/sessions', internalSessionsRoutes);  // Claude Remote Ses
 app.use('/api', logsRoutes);  // Debug logs endpoint
 app.use('/api/live-chat', liveChatRoutes);  // Live Chat for branch-based workspace
 app.use('/api/workspace', workspaceRoutes);  // Workspace presence and events
+app.use('/api/organizations', organizationsRoutes);  // Organizations/Studios management
+app.use('/api/store', storeRoutes);  // Game store browsing and wishlist
+app.use('/api/library', libraryRoutes);  // User's game library management
+app.use('/api/purchases', purchasesRoutes);  // Game purchases and refunds
+app.use('/api/community', communityRoutes);  // Community posts, reviews, and discussions
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');
@@ -350,6 +367,7 @@ async function startServer() {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);
   console.log(`Frontend dist: ${frontendDistPath}`);
+  console.log(`Scale: Up to 10 concurrent users (horizontally scalable)`);
   console.log('');
 
   // Log environment configuration

@@ -7,6 +7,7 @@ import { claudeCommand } from './commands/claude.js';
 import { dbCommand } from './commands/db.js';
 import { githubCommand } from './commands/github.js';
 import { llmCommand } from './commands/llm.js';
+import { organizationsCommand } from './commands/organizations.js';
 import { sessionsCommand } from './commands/sessions.js';
 import { usersCommand } from './commands/users.js';
 
@@ -27,6 +28,7 @@ async function main() {
   program.addCommand(dbCommand);
   program.addCommand(githubCommand);
   program.addCommand(llmCommand);
+  program.addCommand(organizationsCommand);
   program.addCommand(sessionsCommand);
   program.addCommand(usersCommand);
 

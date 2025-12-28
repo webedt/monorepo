@@ -313,7 +313,7 @@ export const ConfigSchema = z.object({
     usePRTemplate: z.boolean().default(true),
     /** Generate AI-powered PR descriptions summarizing changes (default: true) */
     generateDescription: z.boolean().default(true),
-    /** Add category-based labels to PRs (feature/bugfix/etc.) (default: true) */
+    /** Add category-based labels to PRs (e.g., feature, bug, refactor) (default: true) */
     addCategoryLabels: z.boolean().default(true),
     /** Add priority-based labels to PRs (default: false) */
     addPriorityLabels: z.boolean().default(false),
