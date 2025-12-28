@@ -32,6 +32,20 @@ interface FileChange {
   previousFilename?: string;
 }
 
+// Valid statuses from GitHub API that we support
+const VALID_FILE_STATUSES = new Set(['added', 'removed', 'modified', 'renamed', 'copied', 'changed', 'unchanged']);
+
+/**
+ * Safely map GitHub API file status to our FileChange status
+ * Falls back to 'modified' for unknown statuses
+ */
+function normalizeFileStatus(status: string): FileChange['status'] {
+  if (VALID_FILE_STATUSES.has(status)) {
+    return status as FileChange['status'];
+  }
+  return 'modified';
+}
+
 // Get diff comparison between head and base branch
 router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -57,15 +71,33 @@ router.get('/repos/:owner/:repo/compare/:base/:head', requireAuth, async (req: R
       head,
     });
 
-    // Build raw diff from patches
+    // Build raw diff from patches with proper handling for different file statuses
     let rawDiff = '';
     const files = comparison.files || [];
 
     for (const file of files) {
       if (file.patch) {
-        rawDiff += `diff --git a/${file.filename} b/${file.filename}\n`;
-        rawDiff += `--- a/${file.filename}\n`;
-        rawDiff += `+++ b/${file.filename}\n`;
+        const oldPath = file.previous_filename || file.filename;
+        const newPath = file.filename;
+
+        rawDiff += `diff --git a/${oldPath} b/${newPath}\n`;
+
+        // Handle file status correctly
+        if (file.status === 'added') {
+          rawDiff += `--- /dev/null\n`;
+          rawDiff += `+++ b/${newPath}\n`;
+        } else if (file.status === 'removed') {
+          rawDiff += `--- a/${oldPath}\n`;
+          rawDiff += `+++ /dev/null\n`;
+        } else if (file.status === 'renamed') {
+          rawDiff += `rename from ${oldPath}\n`;
+          rawDiff += `rename to ${newPath}\n`;
+          rawDiff += `--- a/${oldPath}\n`;
+          rawDiff += `+++ b/${newPath}\n`;
+        } else {
+          rawDiff += `--- a/${oldPath}\n`;
+          rawDiff += `+++ b/${newPath}\n`;
+        }
         rawDiff += file.patch + '\n';
       }
     }
@@ -127,7 +159,7 @@ router.get('/repos/:owner/:repo/changed-files/:base/:head', requireAuth, async (
 
     const files: FileChange[] = (comparison.files || []).map(file => ({
       filename: file.filename,
-      status: file.status as FileChange['status'],
+      status: normalizeFileStatus(file.status),
       additions: file.additions,
       deletions: file.deletions,
       changes: file.changes,

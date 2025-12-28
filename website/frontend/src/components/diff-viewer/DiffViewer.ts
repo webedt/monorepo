@@ -24,6 +24,7 @@ export class DiffViewer extends Component<HTMLDivElement> {
   private selectedFile: string | null = null;
   private isLoading = true;
   private error: string | null = null;
+  private fileListClickHandler: ((e: Event) => void) | null = null;
 
   constructor(options: DiffViewerOptions) {
     super('div', { className: 'diff-viewer' });
@@ -31,6 +32,19 @@ export class DiffViewer extends Component<HTMLDivElement> {
   }
 
   protected onMount(): void {
+    // Set up event delegation for file list clicks (once, not on every render)
+    this.fileListClickHandler = (e: Event) => {
+      const target = e.target as HTMLElement;
+      const fileItem = target.closest('.diff-file-item') as HTMLElement;
+      if (fileItem) {
+        const filePath = fileItem.dataset.file;
+        if (filePath) {
+          this.selectFile(filePath);
+        }
+      }
+    };
+    this.on('click', this.fileListClickHandler as EventListener);
+
     this.render();
     this.loadDiff();
   }
@@ -274,15 +288,7 @@ export class DiffViewer extends Component<HTMLDivElement> {
       }
     }
 
-    // Add file click handlers
-    this.element.querySelectorAll('.diff-file-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const filePath = (item as HTMLElement).dataset.file;
-        if (filePath) {
-          this.selectFile(filePath);
-        }
-      });
-    });
+    // Note: File click handlers are set up once via event delegation in onMount()
 
     return this;
   }

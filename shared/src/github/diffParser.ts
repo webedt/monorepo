@@ -41,6 +41,8 @@ const OLD_FILE_REGEX = /^--- (?:a\/)?(.+)$/;
 const NEW_FILE_REGEX = /^\+\+\+ (?:b\/)?(.+)$/;
 const HUNK_HEADER_REGEX = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
 const BINARY_FILE_REGEX = /^Binary files .+ and .+ differ$/;
+const RENAME_FROM_REGEX = /^rename from (.+)$/;
+const RENAME_TO_REGEX = /^rename to (.+)$/;
 
 export function parseDiff(diffString: string): ParsedDiff {
   const lines = diffString.split('\n');
@@ -95,6 +97,22 @@ export function parseDiff(diffString: string): ParsedDiff {
     // Check for binary file
     if (BINARY_FILE_REGEX.test(line) && currentFile) {
       currentFile.isBinary = true;
+      continue;
+    }
+
+    // Check for rename from
+    const renameFromMatch = line.match(RENAME_FROM_REGEX);
+    if (renameFromMatch && currentFile) {
+      currentFile.oldPath = renameFromMatch[1];
+      currentFile.status = 'renamed';
+      continue;
+    }
+
+    // Check for rename to
+    const renameToMatch = line.match(RENAME_TO_REGEX);
+    if (renameToMatch && currentFile) {
+      currentFile.newPath = renameToMatch[1];
+      currentFile.status = 'renamed';
       continue;
     }
 

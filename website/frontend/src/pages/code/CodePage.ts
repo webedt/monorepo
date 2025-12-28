@@ -59,6 +59,7 @@ export class CodePage extends Page<CodePageOptions> {
   };
   private unsubscribeUndoRedo: (() => void) | null = null;
   private diffModal: Modal | null = null;
+  private diffViewer: DiffViewer | null = null;
 
   protected render(): string {
     return `
@@ -908,18 +909,29 @@ export class CodePage extends Page<CodePageOptions> {
       title: 'Branch Comparison',
       size: 'xl',
       onClose: () => {
+        // Clean up DiffViewer component when modal closes
+        if (this.diffViewer) {
+          this.diffViewer.unmount();
+          this.diffViewer = null;
+        }
         this.diffModal = null;
       },
     });
 
-    const diffViewer = new DiffViewer({
+    this.diffViewer = new DiffViewer({
       owner: repositoryOwner,
       repo: repositoryName,
       baseBranch: base,
       headBranch: branch,
     });
 
-    this.diffModal.setBody(diffViewer.getElement());
+    // Mount the modal first so body element exists
+    this.diffModal.mount(document.body);
+    // Get the modal body element and mount DiffViewer to it
+    const bodyElement = this.diffModal.getElement().querySelector('.modal-body');
+    if (bodyElement) {
+      this.diffViewer.mount(bodyElement as HTMLElement);
+    }
     this.diffModal.open();
   }
 
@@ -999,7 +1011,11 @@ export class CodePage extends Page<CodePageOptions> {
       this.offlineIndicator = null;
     }
 
-    // Cleanup diff modal
+    // Cleanup diff viewer and modal
+    if (this.diffViewer) {
+      this.diffViewer.unmount();
+      this.diffViewer = null;
+    }
     if (this.diffModal) {
       this.diffModal.close();
       this.diffModal.unmount();
