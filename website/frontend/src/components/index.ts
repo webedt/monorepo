@@ -69,6 +69,10 @@ export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-detail
 export { GameCard } from './game-card';
 export type { GameCardOptions } from './game-card';
 
+// StoreHighlights
+export { StoreHighlights } from './store-highlights';
+export type { StoreHighlightsOptions } from './store-highlights';
+
 // OfflineIndicator
 export { OfflineIndicator } from './offline-indicator';
 export type { OfflineIndicatorOptions } from './offline-indicator';
