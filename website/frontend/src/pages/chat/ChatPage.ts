@@ -6,10 +6,14 @@
 import { Page, type PageOptions } from '../base/Page';
 import { Spinner, toast, ToolDetails, type ToolResult, type ToolUseBlock } from '../../components';
 import { sessionsApi, createSessionExecuteEventSource } from '../../lib/api';
+import { highlightCode, getLanguageDisplayName } from '../../lib/highlight';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
 import type { Session } from '../../types';
 import './chat.css';
+
+// View mode determines the level of detail shown
+type ViewMode = 'normal' | 'detailed';
 
 interface ChatMessage {
   id: string;
@@ -58,7 +62,7 @@ const EVENT_EMOJIS: Record<string, string> = {
   thinking: '🧠',
 };
 
-// Default event filters
+// Default event filters (for detailed mode)
 const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   user: true,
   user_message: true,
@@ -84,6 +88,21 @@ const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   thinking: true,
 };
 
+// Events shown in Normal Mode - high-level progress without micro-steps
+// Normal mode provides a summarized view suitable for most users
+const NORMAL_MODE_EVENTS: Set<string> = new Set([
+  'user',           // User messages
+  'user_message',   // User follow-up messages
+  'input_preview',  // User input confirmation (shows what was submitted)
+  'assistant',      // Assistant responses
+  'assistant_message', // Assistant follow-up responses
+  'error',          // Errors are always important
+  'result',         // Final completion stats
+  'completed',      // Session completed
+  'session_created', // Session started
+  'session-created', // Session started (alt format)
+]);
+
 interface ChatPageOptions extends PageOptions {
   params?: {
     sessionId?: string;
@@ -108,8 +127,8 @@ export class ChatPage extends Page<ChatPageOptions> {
   private shownOptimisticUserMessage: string | null = null; // Track optimistic user message to avoid duplicates
 
   // View settings (persisted to localStorage)
+  private viewMode: ViewMode = 'normal'; // Default to normal mode for most users
   private showRawJson = false;
-  private showVerbose = false; // Verbose mode: shows all steps for debugging
   private showTimestamps = false;
   private widescreen = false;
   private eventFilters: Record<string, boolean> = { ...DEFAULT_EVENT_FILTERS };
@@ -138,13 +157,13 @@ export class ChatPage extends Page<ChatPageOptions> {
         <div class="chat-toolbar">
           <div class="toolbar-left">
             <div class="view-toggle">
-              <button class="toggle-btn" data-view="formatted" title="Formatted View">
+              <button class="toggle-btn" data-view="normal" title="Normal View - Summarized progress">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                Chat
+                Normal
               </button>
-              <button class="toggle-btn" data-view="verbose" title="Verbose Mode - Shows all steps for debugging">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                Verbose
+              <button class="toggle-btn" data-view="detailed" title="Detailed View - All events and steps">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                Detailed
               </button>
               <button class="toggle-btn" data-view="raw" title="Raw JSON View">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
@@ -173,7 +192,6 @@ export class ChatPage extends Page<ChatPageOptions> {
             <div class="spinner-container"></div>
           </div>
           <div class="messages-list" style="display: none;"></div>
-          <div class="verbose-list" style="display: none;"></div>
           <div class="events-list" style="display: none;"></div>
           <div class="chat-empty" style="display: none;">
             <h3>No messages yet</h3>
@@ -261,16 +279,21 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private loadSettings(): void {
     try {
-      // Load view mode
-      const savedRawJson = localStorage.getItem('chat_showRawJson');
-      if (savedRawJson !== null) {
-        this.showRawJson = savedRawJson === 'true';
-      }
-
-      // Load verbose mode
-      const savedVerbose = localStorage.getItem('chat_showVerbose');
-      if (savedVerbose !== null) {
-        this.showVerbose = savedVerbose === 'true';
+      // Load view mode (normal, detailed, or raw)
+      const savedViewMode = localStorage.getItem('chat_viewMode');
+      if (savedViewMode === 'normal' || savedViewMode === 'detailed') {
+        this.viewMode = savedViewMode;
+        this.showRawJson = false;
+      } else if (savedViewMode === 'raw') {
+        this.viewMode = 'detailed'; // Raw view uses detailed mode data
+        this.showRawJson = true;
+      } else {
+        // Legacy: check old showRawJson setting
+        const savedRawJson = localStorage.getItem('chat_showRawJson');
+        if (savedRawJson === 'true') {
+          this.showRawJson = true;
+          this.viewMode = 'detailed';
+        }
       }
 
       // Load timestamps setting
@@ -285,7 +308,7 @@ export class ChatPage extends Page<ChatPageOptions> {
         this.widescreen = savedWidescreen === 'true';
       }
 
-      // Load event filters
+      // Load event filters (only used in detailed mode)
       const savedFilters = localStorage.getItem('chat_eventFilters');
       if (savedFilters) {
         const parsed = JSON.parse(savedFilters);
@@ -298,8 +321,10 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private saveSettings(): void {
     try {
-      localStorage.setItem('chat_showRawJson', String(this.showRawJson));
-      localStorage.setItem('chat_showVerbose', String(this.showVerbose));
+      // Save view mode as: normal, detailed, or raw
+      const viewModeToSave = this.showRawJson ? 'raw' : this.viewMode;
+      localStorage.setItem('chat_viewMode', viewModeToSave);
+      localStorage.setItem('chat_showRawJson', String(this.showRawJson)); // Keep for legacy
       localStorage.setItem('chat_showTimestamps', String(this.showTimestamps));
       localStorage.setItem('chat_widescreen', String(this.widescreen));
       localStorage.setItem('chat_eventFilters', JSON.stringify(this.eventFilters));
@@ -310,29 +335,29 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private setupToolbar(): void {
     // View toggle buttons
-    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
-    const verboseBtn = this.$('[data-view="verbose"]') as HTMLButtonElement;
+    const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
+    const detailedBtn = this.$('[data-view="detailed"]') as HTMLButtonElement;
     const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
 
-    formattedBtn?.addEventListener('click', () => {
+    normalBtn?.addEventListener('click', () => {
+      this.viewMode = 'normal';
       this.showRawJson = false;
-      this.showVerbose = false;
       this.saveSettings();
       this.updateToolbarState();
       this.renderContent();
     });
 
-    verboseBtn?.addEventListener('click', () => {
+    detailedBtn?.addEventListener('click', () => {
+      this.viewMode = 'detailed';
       this.showRawJson = false;
-      this.showVerbose = true;
       this.saveSettings();
       this.updateToolbarState();
       this.renderContent();
     });
 
     rawBtn?.addEventListener('click', () => {
+      this.viewMode = 'detailed'; // Raw uses detailed mode data
       this.showRawJson = true;
-      this.showVerbose = false;
       this.saveSettings();
       this.updateToolbarState();
       this.renderContent();
@@ -380,14 +405,21 @@ export class ChatPage extends Page<ChatPageOptions> {
   }
 
   private updateToolbarState(): void {
-    // Update view toggle (three-way: formatted, verbose, raw)
-    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
-    const verboseBtn = this.$('[data-view="verbose"]') as HTMLButtonElement;
+    // Update view toggle
+    const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
+    const detailedBtn = this.$('[data-view="detailed"]') as HTMLButtonElement;
     const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
 
-    formattedBtn?.classList.toggle('active', !this.showRawJson && !this.showVerbose);
-    verboseBtn?.classList.toggle('active', this.showVerbose);
+    normalBtn?.classList.toggle('active', this.viewMode === 'normal' && !this.showRawJson);
+    detailedBtn?.classList.toggle('active', this.viewMode === 'detailed' && !this.showRawJson);
     rawBtn?.classList.toggle('active', this.showRawJson);
+
+    // Show/hide filters button based on view mode (only useful in detailed/raw mode)
+    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    const filterDropdown = this.$('.filter-dropdown') as HTMLElement;
+    if (filterDropdown) {
+      filterDropdown.style.display = this.viewMode === 'normal' && !this.showRawJson ? 'none' : '';
+    }
 
     // Update timestamps button
     const timestampsBtn = this.$('[data-action="toggle-timestamps"]') as HTMLButtonElement;
@@ -398,9 +430,9 @@ export class ChatPage extends Page<ChatPageOptions> {
     widescreenBtn?.classList.toggle('active', this.widescreen);
     const chatPage = this.$('.chat-page') as HTMLElement;
     chatPage?.classList.toggle('widescreen', this.widescreen);
+    chatPage?.classList.toggle('normal-mode', this.viewMode === 'normal' && !this.showRawJson);
 
-    // Update filters button to show if any filters are active
-    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    // Update filters button to show if any filters are active (only relevant in detailed mode)
     const hasActiveFilters = Object.values(this.eventFilters).some(v => !v);
     filtersBtn?.classList.toggle('has-filters', hasActiveFilters);
   }
@@ -499,8 +531,6 @@ export class ChatPage extends Page<ChatPageOptions> {
   private renderContent(): void {
     if (this.showRawJson) {
       this.renderRawEvents();
-    } else if (this.showVerbose) {
-      this.renderVerboseEvents();
     } else {
       this.renderMessages();
     }
@@ -1230,7 +1260,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     if (message) {
       message.toolResult = result;
       // Re-render to update the tool details
-      if (!this.showRawJson && !this.showVerbose) {
+      if (!this.showRawJson) {
         this.renderMessages();
       }
     }
@@ -1241,9 +1271,6 @@ export class ChatPage extends Page<ChatPageOptions> {
     if (this.showRawJson) {
       this.renderRawEvents();
       this.scrollToBottom();
-    } else if (this.showVerbose) {
-      this.renderVerboseEvents();
-      this.scrollToBottom();
     }
   }
 
@@ -1252,20 +1279,27 @@ export class ChatPage extends Page<ChatPageOptions> {
 
     const empty = this.$('.chat-empty') as HTMLElement;
     const list = this.$('.messages-list') as HTMLElement;
-    const verboseList = this.$('.verbose-list') as HTMLElement;
     const eventsList = this.$('.events-list') as HTMLElement;
 
-    // Hide verbose and events lists in formatted mode
-    verboseList?.style.setProperty('display', 'none');
+    // Hide events list in formatted mode
     eventsList?.style.setProperty('display', 'none');
 
-    // Filter messages based on event filters
-    // Always show user and assistant messages regardless of filter settings
-    const alwaysShowTypes = ['user', 'assistant'];
-    const filteredMessages = this.messages.filter(msg => {
-      if (alwaysShowTypes.includes(msg.type)) return true;
-      return this.eventFilters[msg.type] !== false;
-    });
+    // Filter messages based on view mode
+    let filteredMessages: ChatMessage[];
+
+    if (this.viewMode === 'normal') {
+      // Normal Mode: Show only high-level events for a summarized view
+      // This hides micro-steps like individual tool_use, thinking, message events
+      filteredMessages = this.messages.filter(msg => NORMAL_MODE_EVENTS.has(msg.type));
+    } else {
+      // Detailed Mode: Use event filters
+      // Always show user and assistant messages regardless of filter settings
+      const alwaysShowTypes = ['user', 'assistant'];
+      filteredMessages = this.messages.filter(msg => {
+        if (alwaysShowTypes.includes(msg.type)) return true;
+        return this.eventFilters[msg.type] !== false;
+      });
+    }
 
     if (filteredMessages.length === 0) {
       empty?.style.setProperty('display', 'flex');
@@ -1340,12 +1374,10 @@ export class ChatPage extends Page<ChatPageOptions> {
   private renderRawEvents(): void {
     const empty = this.$('.chat-empty') as HTMLElement;
     const messagesList = this.$('.messages-list') as HTMLElement;
-    const verboseList = this.$('.verbose-list') as HTMLElement;
     const eventsList = this.$('.events-list') as HTMLElement;
 
-    // Hide messages and verbose lists in raw mode
+    // Hide messages list in raw mode
     messagesList?.style.setProperty('display', 'none');
-    verboseList?.style.setProperty('display', 'none');
 
     // Filter events based on event filters
     const filteredEvents = this.rawEvents.filter(event => {
@@ -1385,310 +1417,6 @@ export class ChatPage extends Page<ChatPageOptions> {
           ${timestamp}
         </div>
         <pre class="event-json"><code>${escapedJson}</code></pre>
-      </div>
-    `;
-  }
-
-  /**
-   * Render verbose view - shows ALL events in a step-by-step timeline format
-   * Useful for debugging to see repo creation, file edits, AI interactions, etc.
-   */
-  private renderVerboseEvents(): void {
-    const empty = this.$('.chat-empty') as HTMLElement;
-    const messagesList = this.$('.messages-list') as HTMLElement;
-    const verboseList = this.$('.verbose-list') as HTMLElement;
-    const eventsList = this.$('.events-list') as HTMLElement;
-
-    // Hide messages and events lists in verbose mode
-    messagesList?.style.setProperty('display', 'none');
-    eventsList?.style.setProperty('display', 'none');
-
-    // Show ALL events in verbose mode (no filtering)
-    if (this.rawEvents.length === 0) {
-      empty?.style.setProperty('display', 'flex');
-      verboseList?.style.setProperty('display', 'none');
-    } else {
-      empty?.style.setProperty('display', 'none');
-      verboseList?.style.setProperty('display', 'flex');
-
-      if (verboseList) {
-        verboseList.innerHTML = this.rawEvents
-          .map((event, index) => this.renderVerboseEvent(event, index))
-          .join('');
-      }
-    }
-  }
-
-  /**
-   * Render a single event in verbose mode with step-by-step timeline display
-   */
-  private renderVerboseEvent(event: RawEvent, index: number): string {
-    const emoji = EVENT_EMOJIS[event.type] || '📦';
-    const time = event.timestamp.toLocaleTimeString();
-    const data = event.data;
-
-    // Build the detailed content based on event type
-    let title = '';
-    let details = '';
-    let stepClass = 'verbose-step-default';
-
-    switch (event.type) {
-      case 'connected':
-        title = 'Connected to execution environment';
-        stepClass = 'verbose-step-connection';
-        if (data.sessionId) {
-          details = `<div class="verbose-detail">Session ID: <code>${this.escapeHtml(data.sessionId)}</code></div>`;
-        }
-        break;
-
-      case 'session_created':
-      case 'session-created':
-        title = 'Remote session created';
-        stepClass = 'verbose-step-connection';
-        if (data.remoteSessionId) {
-          details = `<div class="verbose-detail">Remote Session: <code>${this.escapeHtml(data.remoteSessionId)}</code></div>`;
-        }
-        if (data.remoteWebUrl) {
-          details += `<div class="verbose-detail">URL: <a href="${this.escapeHtml(data.remoteWebUrl)}" target="_blank">${this.escapeHtml(data.remoteWebUrl)}</a></div>`;
-        }
-        break;
-
-      case 'message':
-        title = data.stage || data.message || 'Status update';
-        stepClass = 'verbose-step-status';
-        if (data.message && data.message !== title) {
-          details = `<div class="verbose-detail">${this.escapeHtml(data.message)}</div>`;
-        }
-        break;
-
-      case 'user':
-      case 'user_message':
-      case 'input_preview': {
-        title = 'User request';
-        stepClass = 'verbose-step-user';
-        const userContent = data.preview || data.content || data.message?.content || data.data?.preview || '';
-        if (userContent) {
-          const contentStr = typeof userContent === 'string' ? userContent : JSON.stringify(userContent);
-          details = `<div class="verbose-detail verbose-content">${this.escapeHtml(contentStr)}</div>`;
-        }
-        break;
-      }
-
-      case 'assistant':
-      case 'assistant_message': {
-        title = 'AI response';
-        stepClass = 'verbose-step-assistant';
-        const model = data.model || data.message?.model;
-        if (model) {
-          details = `<div class="verbose-detail">Model: <code>${this.escapeHtml(model)}</code></div>`;
-        }
-        // Extract content blocks
-        const contentBlocks = data.content || data.message?.content || [];
-        if (Array.isArray(contentBlocks)) {
-          for (const block of contentBlocks) {
-            if (block.type === 'text' && block.text) {
-              details += `<div class="verbose-detail verbose-content">${this.escapeHtml(block.text)}</div>`;
-            } else if (block.type === 'thinking' && block.thinking) {
-              details += `<div class="verbose-detail verbose-thinking"><strong>Thinking:</strong> ${this.escapeHtml(block.thinking.substring(0, 500))}${block.thinking.length > 500 ? '...' : ''}</div>`;
-            } else if (block.type === 'tool_use') {
-              details += `<div class="verbose-detail"><strong>Tool:</strong> ${this.escapeHtml(block.name)}</div>`;
-            }
-          }
-        }
-        break;
-      }
-
-      case 'thinking': {
-        title = 'AI thinking';
-        stepClass = 'verbose-step-thinking';
-        const thinkingContent = data.thinking || data.content || '';
-        if (thinkingContent) {
-          details = `<div class="verbose-detail verbose-thinking">${this.escapeHtml(thinkingContent.substring(0, 500))}${thinkingContent.length > 500 ? '...' : ''}</div>`;
-        }
-        break;
-      }
-
-      case 'tool_use': {
-        const toolName = data.name || data.tool || 'Unknown tool';
-        title = `Tool: ${toolName}`;
-        stepClass = 'verbose-step-tool';
-
-        // Show tool-specific summary
-        const input = data.input || {};
-        if (toolName === 'Read' && input.file_path) {
-          details = `<div class="verbose-detail">Reading: <code>${this.escapeHtml(input.file_path)}</code></div>`;
-        } else if (toolName === 'Write' && input.file_path) {
-          details = `<div class="verbose-detail">Writing: <code>${this.escapeHtml(input.file_path)}</code></div>`;
-          if (input.content) {
-            const lines = input.content.split('\n').length;
-            details += `<div class="verbose-detail">${lines} lines</div>`;
-          }
-        } else if (toolName === 'Edit' && input.file_path) {
-          details = `<div class="verbose-detail">Editing: <code>${this.escapeHtml(input.file_path)}</code></div>`;
-          if (input.old_string) {
-            details += `<div class="verbose-detail verbose-diff-old">- ${this.escapeHtml(input.old_string.substring(0, 100))}${input.old_string.length > 100 ? '...' : ''}</div>`;
-          }
-          if (input.new_string) {
-            details += `<div class="verbose-detail verbose-diff-new">+ ${this.escapeHtml(input.new_string.substring(0, 100))}${input.new_string.length > 100 ? '...' : ''}</div>`;
-          }
-        } else if (toolName === 'Bash' && input.command) {
-          details = `<div class="verbose-detail"><code>${this.escapeHtml(input.command.substring(0, 200))}${input.command.length > 200 ? '...' : ''}</code></div>`;
-          if (input.description) {
-            details += `<div class="verbose-detail">${this.escapeHtml(input.description)}</div>`;
-          }
-        } else if (toolName === 'Grep' && input.pattern) {
-          details = `<div class="verbose-detail">Pattern: <code>${this.escapeHtml(input.pattern)}</code></div>`;
-          if (input.path) {
-            details += `<div class="verbose-detail">In: <code>${this.escapeHtml(input.path)}</code></div>`;
-          }
-        } else if (toolName === 'Glob' && input.pattern) {
-          details = `<div class="verbose-detail">Pattern: <code>${this.escapeHtml(input.pattern)}</code></div>`;
-        } else if (toolName === 'Task') {
-          if (input.description) {
-            details = `<div class="verbose-detail">${this.escapeHtml(input.description)}</div>`;
-          }
-          if (input.subagent_type) {
-            details += `<div class="verbose-detail">Agent: <code>${this.escapeHtml(input.subagent_type)}</code></div>`;
-          }
-        } else if (toolName === 'TodoWrite' && input.todos) {
-          details = `<div class="verbose-detail">${input.todos.length} todo items</div>`;
-          for (const todo of input.todos.slice(0, 3)) {
-            const statusEmoji = todo.status === 'completed' ? '✅' : todo.status === 'in_progress' ? '🔄' : '⬜';
-            details += `<div class="verbose-detail">${statusEmoji} ${this.escapeHtml(todo.content)}</div>`;
-          }
-          if (input.todos.length > 3) {
-            details += `<div class="verbose-detail">...and ${input.todos.length - 3} more</div>`;
-          }
-        } else {
-          // Generic input display for other tools
-          const inputStr = JSON.stringify(input);
-          if (inputStr.length > 2) { // Not empty object
-            details = `<div class="verbose-detail"><pre class="verbose-json">${this.escapeHtml(inputStr.substring(0, 200))}${inputStr.length > 200 ? '...' : ''}</pre></div>`;
-          }
-        }
-        break;
-      }
-
-      case 'tool_result': {
-        title = 'Tool result';
-        stepClass = 'verbose-step-tool-result';
-        const resultContent = data.content || data.tool_use_result;
-        if (data.is_error) {
-          stepClass = 'verbose-step-error';
-          title = 'Tool error';
-        }
-        if (resultContent) {
-          const resultStr = typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent);
-          details = `<div class="verbose-detail"><pre class="verbose-json">${this.escapeHtml(resultStr.substring(0, 300))}${resultStr.length > 300 ? '...' : ''}</pre></div>`;
-        }
-        break;
-      }
-
-      case 'title_generation': {
-        const status = data.status || 'unknown';
-        const method = data.method || '';
-        if (status === 'trying') {
-          title = `Generating title (${method})...`;
-        } else if (status === 'success') {
-          title = `Title: "${data.title || 'Untitled'}"`;
-        } else if (status === 'failed') {
-          title = `Title generation failed (${method})`;
-        } else {
-          title = `Title generation: ${status}`;
-        }
-        stepClass = 'verbose-step-status';
-        if (data.branch_name) {
-          details = `<div class="verbose-detail">Branch: <code>${this.escapeHtml(data.branch_name)}</code></div>`;
-        }
-        break;
-      }
-
-      case 'result': {
-        title = 'Execution completed';
-        stepClass = 'verbose-step-completed';
-        if (data.total_cost_usd) {
-          details = `<div class="verbose-detail">Cost: $${data.total_cost_usd.toFixed(4)}</div>`;
-        }
-        if (data.duration_ms) {
-          details += `<div class="verbose-detail">Duration: ${(data.duration_ms / 1000).toFixed(1)}s</div>`;
-        }
-        break;
-      }
-
-      case 'completed':
-        title = 'Session completed';
-        stepClass = 'verbose-step-completed';
-        if (data.branch) {
-          details = `<div class="verbose-detail">Branch: <code>${this.escapeHtml(data.branch)}</code></div>`;
-        }
-        break;
-
-      case 'error':
-        title = 'Error occurred';
-        stepClass = 'verbose-step-error';
-        details = `<div class="verbose-detail verbose-error">${this.escapeHtml(data.message || data.error || 'Unknown error')}</div>`;
-        break;
-
-      case 'heartbeat':
-        title = 'Heartbeat';
-        stepClass = 'verbose-step-heartbeat';
-        break;
-
-      case 'system':
-        title = 'System message';
-        stepClass = 'verbose-step-system';
-        if (data.message) {
-          details = `<div class="verbose-detail">${this.escapeHtml(data.message)}</div>`;
-        }
-        break;
-
-      case 'env_manager_log':
-        title = 'Environment manager';
-        stepClass = 'verbose-step-system';
-        if (data.message) {
-          details = `<div class="verbose-detail">${this.escapeHtml(data.message)}</div>`;
-        }
-        break;
-
-      case 'resuming':
-        title = 'Resuming session';
-        stepClass = 'verbose-step-connection';
-        break;
-
-      case 'submission_preview':
-        title = 'Follow-up message queued';
-        stepClass = 'verbose-step-user';
-        if (data.preview || data.data?.preview) {
-          const preview = data.preview || data.data?.preview;
-          details = `<div class="verbose-detail verbose-content">${this.escapeHtml(preview)}</div>`;
-        }
-        break;
-
-      default:
-        title = event.type;
-        stepClass = 'verbose-step-default';
-        // Show raw data for unknown event types
-        const dataStr = JSON.stringify(data);
-        if (dataStr.length > 2) {
-          details = `<div class="verbose-detail"><pre class="verbose-json">${this.escapeHtml(dataStr.substring(0, 300))}${dataStr.length > 300 ? '...' : ''}</pre></div>`;
-        }
-    }
-
-    return `
-      <div class="verbose-event ${stepClass}" data-event-type="${event.type}">
-        <div class="verbose-timeline">
-          <div class="verbose-step-number">${index + 1}</div>
-          <div class="verbose-line"></div>
-        </div>
-        <div class="verbose-content-wrapper">
-          <div class="verbose-header">
-            <span class="verbose-emoji">${emoji}</span>
-            <span class="verbose-title">${this.escapeHtml(title)}</span>
-            <span class="verbose-time">${time}</span>
-            <span class="verbose-type">${event.type}</span>
-          </div>
-          ${details ? `<div class="verbose-details">${details}</div>` : ''}
-        </div>
       </div>
     `;
   }
@@ -1773,8 +1501,11 @@ export class ChatPage extends Page<ChatPageOptions> {
     const codeBlocks: string[] = [];
     let formatted = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
       const idx = codeBlocks.length;
-      const languageLabel = lang ? `<span class="code-lang">${lang}</span>` : '';
-      codeBlocks.push(`<div class="code-block">${languageLabel}<pre><code>${code.trim()}</code></pre></div>`);
+      const trimmedCode = code.trim();
+      const highlightedCode = highlightCode(trimmedCode, lang || undefined);
+      const languageLabel = lang ? `<span class="code-lang">${getLanguageDisplayName(lang)}</span>` : '';
+      const langClass = lang ? ` language-${lang.toLowerCase()}` : '';
+      codeBlocks.push(`<div class="code-block">${languageLabel}<pre><code class="hljs${langClass}">${highlightedCode}</code></pre></div>`);
       return `__CODE_BLOCK_${idx}__`;
     });
 
