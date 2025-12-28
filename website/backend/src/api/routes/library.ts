@@ -55,27 +55,25 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
-    const libraryItems = await db
-      .select()
+    // Use SQL aggregation for efficient stats computation
+    const [stats] = await db
+      .select({
+        totalGames: sql<number>`COUNT(*)::int`,
+        installedGames: sql<number>`COUNT(*) FILTER (WHERE ${userLibrary.installStatus} = 'installed')::int`,
+        favoriteGames: sql<number>`COUNT(*) FILTER (WHERE ${userLibrary.favorite} = true)::int`,
+        totalPlaytimeMinutes: sql<number>`COALESCE(SUM(${userLibrary.playtimeMinutes}), 0)::int`,
+      })
       .from(userLibrary)
       .where(eq(userLibrary.userId, authReq.user!.id));
 
-    const totalGames = libraryItems.length;
-    const installedGames = libraryItems.filter(
-      (item) => item.installStatus === 'installed'
-    ).length;
-    const favoriteGames = libraryItems.filter((item) => item.favorite).length;
-    const totalPlaytimeMinutes = libraryItems.reduce(
-      (sum, item) => sum + item.playtimeMinutes,
-      0
-    );
+    const totalPlaytimeMinutes = stats?.totalPlaytimeMinutes ?? 0;
 
     res.json({
       success: true,
       data: {
-        totalGames,
-        installedGames,
-        favoriteGames,
+        totalGames: stats?.totalGames ?? 0,
+        installedGames: stats?.installedGames ?? 0,
+        favoriteGames: stats?.favoriteGames ?? 0,
         totalPlaytimeMinutes,
         totalPlaytimeHours: Math.round(totalPlaytimeMinutes / 60),
       },

@@ -20,31 +20,27 @@ router.get('/stats/summary', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
-    const allPurchases = await db
-      .select()
+    // Use SQL aggregation for efficient stats computation
+    const [stats] = await db
+      .select({
+        totalPurchases: sql<number>`COUNT(*)::int`,
+        completedPurchases: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
+        refundedPurchases: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'refunded')::int`,
+        totalSpentCents: sql<number>`COALESCE(SUM(${purchases.amount}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
+        totalRefundedCents: sql<number>`COALESCE(SUM(${purchases.amount}) FILTER (WHERE ${purchases.status} = 'refunded'), 0)::int`,
+      })
       .from(purchases)
       .where(eq(purchases.userId, authReq.user!.id));
 
-    const completedPurchases = allPurchases.filter(
-      (p) => p.status === 'completed'
-    );
-    const refundedPurchases = allPurchases.filter((p) => p.status === 'refunded');
-
-    const totalSpent = completedPurchases.reduce(
-      (sum, p) => sum + p.amount,
-      0
-    );
-    const totalRefunded = refundedPurchases.reduce(
-      (sum, p) => sum + p.amount,
-      0
-    );
+    const totalSpent = stats?.totalSpentCents ?? 0;
+    const totalRefunded = stats?.totalRefundedCents ?? 0;
 
     res.json({
       success: true,
       data: {
-        totalPurchases: allPurchases.length,
-        completedPurchases: completedPurchases.length,
-        refundedPurchases: refundedPurchases.length,
+        totalPurchases: stats?.totalPurchases ?? 0,
+        completedPurchases: stats?.completedPurchases ?? 0,
+        refundedPurchases: stats?.refundedPurchases ?? 0,
         totalSpentCents: totalSpent,
         totalRefundedCents: totalRefunded,
         netSpentCents: totalSpent - totalRefunded,
