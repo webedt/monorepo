@@ -51,6 +51,10 @@ export class FilterDropdown extends Component<HTMLDivElement> {
   private rangeValue: RangeValue = {};
   private checkboxValue = false;
 
+  // Track option click handlers for cleanup
+  private optionClickHandlers: Array<{ element: HTMLElement; handler: EventListener }> = [];
+  private dropdownId: string;
+
   constructor(options: FilterDropdownOptions) {
     super('div', {
       className: 'filter-dropdown',
@@ -70,6 +74,9 @@ export class FilterDropdown extends Component<HTMLDivElement> {
     // Initialize values based on type
     this.initializeValue();
 
+    // Generate unique ID for ARIA attributes
+    this.dropdownId = `filter-dropdown-${Math.random().toString(36).substring(2, 9)}`;
+
     // Create elements
     this.triggerElement = document.createElement('button');
     this.triggerElement.type = 'button';
@@ -77,9 +84,18 @@ export class FilterDropdown extends Component<HTMLDivElement> {
 
     this.dropdownElement = document.createElement('div');
     this.dropdownElement.className = 'filter-dropdown__dropdown';
+    this.dropdownElement.id = `${this.dropdownId}-listbox`;
 
     this.optionsContainer = document.createElement('div');
     this.optionsContainer.className = 'filter-dropdown__options';
+    this.optionsContainer.setAttribute('role', 'listbox');
+
+    // Set up ARIA attributes on trigger
+    if (this.options.type !== 'checkbox') {
+      this.triggerElement.setAttribute('aria-haspopup', 'listbox');
+      this.triggerElement.setAttribute('aria-expanded', 'false');
+      this.triggerElement.setAttribute('aria-controls', `${this.dropdownId}-listbox`);
+    }
 
     this.buildStructure();
     this.setupEventListeners();
@@ -359,8 +375,23 @@ export class FilterDropdown extends Component<HTMLDivElement> {
     this.renderOptions();
   }
 
+  private cleanupOptionListeners(): void {
+    for (const { element, handler } of this.optionClickHandlers) {
+      element.removeEventListener('click', handler);
+    }
+    this.optionClickHandlers = [];
+  }
+
+  private addOptionClickHandler(element: HTMLElement, handler: EventListener): void {
+    element.addEventListener('click', handler);
+    this.optionClickHandlers.push({ element, handler });
+  }
+
   private renderOptions(): void {
     const { type, showCounts, clearable } = this.options;
+
+    // Clean up existing listeners before re-rendering
+    this.cleanupOptionListeners();
     this.optionsContainer.innerHTML = '';
 
     // Add "All" option for single select if clearable
@@ -368,18 +399,23 @@ export class FilterDropdown extends Component<HTMLDivElement> {
       const allOption = document.createElement('button');
       allOption.type = 'button';
       allOption.className = 'filter-dropdown__option';
+      allOption.setAttribute('role', 'option');
+      allOption.setAttribute('aria-selected', (!this.selectedValue).toString());
       if (!this.selectedValue) {
         allOption.classList.add('filter-dropdown__option--selected');
       }
       allOption.textContent = 'All';
-      allOption.addEventListener('click', (e) => {
+
+      const allHandler = ((e: Event) => {
         e.preventDefault();
         e.stopPropagation();
         this.selectedValue = '';
         this.updateTrigger();
         this.close();
         this.options.onChange?.('');
-      });
+      }) as EventListener;
+
+      this.addOptionClickHandler(allOption, allHandler);
       this.optionsContainer.appendChild(allOption);
     }
 
@@ -396,16 +432,22 @@ export class FilterDropdown extends Component<HTMLDivElement> {
       optionEl.type = 'button';
       optionEl.className = 'filter-dropdown__option';
       optionEl.dataset.value = opt.value;
+      optionEl.setAttribute('role', 'option');
+
+      const isSelected =
+        (type === 'select' && this.selectedValue === opt.value) ||
+        (type === 'multi-select' && this.selectedValues.has(opt.value));
+
+      optionEl.setAttribute('aria-selected', isSelected.toString());
 
       if (opt.disabled) {
         optionEl.classList.add('filter-dropdown__option--disabled');
         optionEl.disabled = true;
+        optionEl.setAttribute('aria-disabled', 'true');
       }
 
       // Check selected state based on type
-      if (type === 'select' && this.selectedValue === opt.value) {
-        optionEl.classList.add('filter-dropdown__option--selected');
-      } else if (type === 'multi-select' && this.selectedValues.has(opt.value)) {
+      if (isSelected) {
         optionEl.classList.add('filter-dropdown__option--selected');
       }
 
@@ -437,14 +479,15 @@ export class FilterDropdown extends Component<HTMLDivElement> {
         optionEl.appendChild(countSpan);
       }
 
-      optionEl.addEventListener('click', (e) => {
+      const optHandler = ((e: Event) => {
         e.preventDefault();
         e.stopPropagation();
         if (!opt.disabled) {
           this.selectOption(opt);
         }
-      });
+      }) as EventListener;
 
+      this.addOptionClickHandler(optionEl, optHandler);
       this.optionsContainer.appendChild(optionEl);
     });
   }
@@ -602,6 +645,7 @@ export class FilterDropdown extends Component<HTMLDivElement> {
 
     this.isOpen = true;
     this.element.classList.add('filter-dropdown--open');
+    this.triggerElement.setAttribute('aria-expanded', 'true');
     this.focusedIndex = -1;
 
     if (this.searchInput) {
@@ -618,6 +662,7 @@ export class FilterDropdown extends Component<HTMLDivElement> {
 
     this.isOpen = false;
     this.element.classList.remove('filter-dropdown--open');
+    this.triggerElement.setAttribute('aria-expanded', 'false');
     this.focusedIndex = -1;
 
     return this;
@@ -702,6 +747,7 @@ export class FilterDropdown extends Component<HTMLDivElement> {
   }
 
   protected onUnmount(): void {
+    this.cleanupOptionListeners();
     FilterDropdown.instances.delete(this);
   }
 }

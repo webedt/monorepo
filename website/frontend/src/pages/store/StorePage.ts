@@ -252,9 +252,14 @@ export class StorePage extends Page {
           this.filterBar?.setValue('price', {});
         }
         break;
-      case 'sort':
-        this.sortBy = (value as string) as typeof this.sortBy || 'releaseDate';
+      case 'sort': {
+        const sortValue = value as string;
+        const validSortValues = ['releaseDate', 'title', 'price', 'rating'] as const;
+        this.sortBy = validSortValues.includes(sortValue as typeof this.sortBy)
+          ? (sortValue as typeof this.sortBy)
+          : 'releaseDate';
         break;
+      }
     }
 
     this.offset = 0;

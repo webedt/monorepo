@@ -132,6 +132,10 @@ export class FilterBar extends Component<HTMLDivElement> {
   }
 
   private buildFilters(): void {
+    // Unmount existing dropdowns to prevent memory leaks
+    for (const dropdown of this.filterDropdowns.values()) {
+      dropdown.unmount();
+    }
     this.filtersContainer.innerHTML = '';
     this.filterDropdowns.clear();
 
@@ -260,5 +264,17 @@ export class FilterBar extends Component<HTMLDivElement> {
 
   hasActiveFilters(): boolean {
     return this.getActiveFilterCount() > 0;
+  }
+
+  protected onUnmount(): void {
+    // Clear debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+    // Unmount all filter dropdowns
+    for (const dropdown of this.filterDropdowns.values()) {
+      dropdown.unmount();
+    }
+    this.filterDropdowns.clear();
   }
 }
