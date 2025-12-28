@@ -9,6 +9,7 @@ import { Button, Spinner, toast, OfflineIndicator } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { SpriteRenderer } from '../../lib/sprite';
 import type { Session } from '../../types';
 import './scene.css';
 
@@ -40,6 +41,9 @@ interface SceneObject {
   fontSize?: number;
   fontFamily?: string;
   spriteUrl?: string;
+  // Sprite dimensions (auto-populated when image loads)
+  spriteWidth?: number;
+  spriteHeight?: number;
 }
 
 interface ScenePageOptions extends PageOptions {
@@ -72,6 +76,9 @@ export class ScenePage extends Page<ScenePageOptions> {
   private showGrid = true;
   private gridSize = 32;
   private snapToGrid = true;
+
+  // Sprite renderer for displaying images
+  private spriteRenderer: SpriteRenderer = new SpriteRenderer();
 
   protected render(): string {
     return `
@@ -419,8 +426,8 @@ export class ScenePage extends Page<ScenePageOptions> {
 
     switch (obj.type) {
       case 'sprite':
-        width = 100;
-        height = 100;
+        width = obj.spriteWidth ?? 100;
+        height = obj.spriteHeight ?? 100;
         break;
       case 'shape':
         if (obj.shapeType === 'rectangle') {
@@ -449,24 +456,209 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private addSprite(): void {
-    const obj: SceneObject = {
-      id: `sprite-${Date.now()}`,
-      name: `Sprite ${this.objects.length + 1}`,
-      type: 'sprite',
-      visible: true,
-      locked: false,
-      transform: { x: 100, y: 100, rotation: 0, scaleX: 1, scaleY: 1 },
-      zIndex: this.objects.length,
-      opacity: 1,
-      color: '#4a90d9',
+    // Show dialog to get sprite URL
+    this.showSpriteDialog();
+  }
+
+  private showSpriteDialog(): void {
+    // Create dialog overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'sprite-dialog-overlay';
+    overlay.innerHTML = `
+      <div class="sprite-dialog">
+        <div class="sprite-dialog-header">
+          <h3>Add Sprite</h3>
+          <button class="sprite-dialog-close">&times;</button>
+        </div>
+        <div class="sprite-dialog-content">
+          <div class="sprite-dialog-tabs">
+            <button class="sprite-tab active" data-tab="url">URL</button>
+            <button class="sprite-tab" data-tab="file">File</button>
+          </div>
+          <div class="sprite-tab-content" data-content="url">
+            <label for="sprite-url">Image URL</label>
+            <input type="url" id="sprite-url" class="sprite-dialog-input" placeholder="https://example.com/image.png">
+            <p class="sprite-dialog-hint">Enter a URL to an image (PNG, JPG, GIF, WebP, SVG)</p>
+          </div>
+          <div class="sprite-tab-content" data-content="file" style="display: none;">
+            <label for="sprite-file">Select Image</label>
+            <input type="file" id="sprite-file" class="sprite-dialog-file" accept="image/*">
+            <div class="sprite-drop-zone">
+              <p>Drop image here or click to browse</p>
+            </div>
+          </div>
+          <div class="sprite-preview-container" style="display: none;">
+            <label>Preview</label>
+            <div class="sprite-preview"></div>
+          </div>
+        </div>
+        <div class="sprite-dialog-footer">
+          <button class="sprite-dialog-btn sprite-dialog-cancel">Cancel</button>
+          <button class="sprite-dialog-btn sprite-dialog-add" disabled>Add Sprite</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Get elements
+    const closeBtn = overlay.querySelector('.sprite-dialog-close') as HTMLButtonElement;
+    const cancelBtn = overlay.querySelector('.sprite-dialog-cancel') as HTMLButtonElement;
+    const addBtn = overlay.querySelector('.sprite-dialog-add') as HTMLButtonElement;
+    const urlInput = overlay.querySelector('#sprite-url') as HTMLInputElement;
+    const fileInput = overlay.querySelector('#sprite-file') as HTMLInputElement;
+    const dropZone = overlay.querySelector('.sprite-drop-zone') as HTMLElement;
+    const previewContainer = overlay.querySelector('.sprite-preview-container') as HTMLElement;
+    const preview = overlay.querySelector('.sprite-preview') as HTMLElement;
+    const tabs = overlay.querySelectorAll('.sprite-tab');
+    const tabContents = overlay.querySelectorAll('.sprite-tab-content');
+
+    let selectedUrl = '';
+    let selectedFile: File | null = null;
+
+    // Close dialog handlers
+    const closeDialog = () => {
+      document.body.removeChild(overlay);
     };
-    this.objects.push(obj);
-    this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
-    this.updateHierarchy();
-    this.updatePropertiesPanel();
-    this.updateStatusBar();
-    this.renderScene();
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeDialog();
+    });
+    closeBtn.addEventListener('click', closeDialog);
+    cancelBtn.addEventListener('click', closeDialog);
+
+    // Tab switching
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = (tab as HTMLElement).dataset.tab;
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        tabContents.forEach(content => {
+          (content as HTMLElement).style.display =
+            (content as HTMLElement).dataset.content === tabName ? 'block' : 'none';
+        });
+      });
+    });
+
+    // Update preview
+    const updatePreview = (url: string) => {
+      if (url) {
+        previewContainer.style.display = 'block';
+        preview.innerHTML = `<img src="${url}" alt="Preview" style="max-width: 200px; max-height: 150px;">`;
+        addBtn.disabled = false;
+      } else {
+        previewContainer.style.display = 'none';
+        preview.innerHTML = '';
+        addBtn.disabled = true;
+      }
+    };
+
+    // URL input handler
+    urlInput.addEventListener('input', () => {
+      selectedUrl = urlInput.value.trim();
+      selectedFile = null;
+      if (selectedUrl && (selectedUrl.startsWith('http://') || selectedUrl.startsWith('https://') || selectedUrl.startsWith('data:'))) {
+        updatePreview(selectedUrl);
+      } else {
+        updatePreview('');
+      }
+    });
+
+    // File input handler
+    const handleFile = (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please select an image file');
+        return;
+      }
+      selectedFile = file;
+      selectedUrl = '';
+      const reader = new FileReader();
+      reader.onload = () => {
+        updatePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    };
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files && fileInput.files[0]) {
+        handleFile(fileInput.files[0]);
+      }
+    });
+
+    // Drop zone handlers
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('drag-over');
+    });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      if (e.dataTransfer?.files && e.dataTransfer.files[0]) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    // Add sprite handler
+    addBtn.addEventListener('click', async () => {
+      const id = `sprite-${Date.now()}`;
+      let url = selectedUrl;
+
+      // If file selected, convert to data URL
+      if (selectedFile) {
+        url = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(selectedFile!);
+        });
+      }
+
+      if (!url) {
+        toast.error('Please provide an image URL or file');
+        return;
+      }
+
+      closeDialog();
+
+      // Load the sprite
+      try {
+        await this.spriteRenderer.load(id, url);
+        const info = this.spriteRenderer.getInfo(id);
+
+        const obj: SceneObject = {
+          id,
+          name: `Sprite ${this.objects.length + 1}`,
+          type: 'sprite',
+          visible: true,
+          locked: false,
+          transform: { x: 100, y: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+          zIndex: this.objects.length,
+          opacity: 1,
+          spriteUrl: url,
+          spriteWidth: info?.width ?? 100,
+          spriteHeight: info?.height ?? 100,
+        };
+
+        this.objects.push(obj);
+        this.selectedObjectId = obj.id;
+        this.hasUnsavedChanges = true;
+        this.updateHierarchy();
+        this.updatePropertiesPanel();
+        this.updateStatusBar();
+        this.renderScene();
+
+        toast.success('Sprite added successfully');
+      } catch (error) {
+        console.error('Failed to load sprite:', error);
+        toast.error('Failed to load sprite image');
+      }
+    });
+
+    // Focus URL input
+    urlInput.focus();
   }
 
   private addShape(shapeType: ShapeType): void {
@@ -599,14 +791,62 @@ export class ScenePage extends Page<ScenePageOptions> {
 
       switch (obj.type) {
         case 'sprite':
-          this.ctx.fillStyle = obj.color || '#4a90d9';
-          this.ctx.fillRect(0, 0, 100, 100);
-          // Sprite icon
-          this.ctx.fillStyle = 'white';
-          this.ctx.font = '40px Arial';
-          this.ctx.textAlign = 'center';
-          this.ctx.textBaseline = 'middle';
-          this.ctx.fillText('🖼', 50, 50);
+          // Restore context for SpriteRenderer (it handles its own transforms)
+          this.ctx.restore();
+
+          // Use SpriteRenderer if image is loaded
+          if (obj.spriteUrl && this.spriteRenderer.isLoaded(obj.id)) {
+            this.spriteRenderer.draw(
+              this.ctx,
+              obj.id,
+              {
+                x: obj.transform.x,
+                y: obj.transform.y,
+                rotation: obj.transform.rotation,
+                scaleX: obj.transform.scaleX,
+                scaleY: obj.transform.scaleY,
+                opacity: obj.opacity,
+                anchorX: 0,
+                anchorY: 0,
+              }
+            );
+          } else {
+            // Fallback placeholder for sprites without loaded images
+            this.ctx.save();
+            this.ctx.globalAlpha = obj.opacity;
+            this.ctx.translate(obj.transform.x, obj.transform.y);
+            this.ctx.rotate((obj.transform.rotation * Math.PI) / 180);
+            this.ctx.scale(obj.transform.scaleX, obj.transform.scaleY);
+
+            const w = obj.spriteWidth ?? 100;
+            const h = obj.spriteHeight ?? 100;
+
+            // Draw checkerboard pattern for transparency
+            const checkSize = 10;
+            for (let cy = 0; cy < h; cy += checkSize) {
+              for (let cx = 0; cx < w; cx += checkSize) {
+                this.ctx.fillStyle = ((cx + cy) / checkSize) % 2 === 0 ? '#ccc' : '#fff';
+                this.ctx.fillRect(cx, cy, checkSize, checkSize);
+              }
+            }
+
+            // Draw border
+            this.ctx.strokeStyle = '#999';
+            this.ctx.lineWidth = 1;
+            this.ctx.strokeRect(0, 0, w, h);
+
+            // Draw sprite icon
+            this.ctx.fillStyle = '#666';
+            this.ctx.font = `${Math.min(w, h) * 0.4}px Arial`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText('🖼', w / 2, h / 2);
+
+            this.ctx.restore();
+          }
+
+          // Re-save context since we restored it
+          this.ctx.save();
           break;
 
         case 'shape':
@@ -633,10 +873,45 @@ export class ScenePage extends Page<ScenePageOptions> {
 
       // Draw selection outline
       if (obj.id === this.selectedObjectId) {
+        // Calculate actual dimensions based on object type
+        let selWidth = 100;
+        let selHeight = 100;
+
+        switch (obj.type) {
+          case 'sprite':
+            selWidth = obj.spriteWidth ?? 100;
+            selHeight = obj.spriteHeight ?? 100;
+            break;
+          case 'shape':
+            if (obj.shapeType === 'rectangle') {
+              selWidth = 100;
+              selHeight = 80;
+            } else if (obj.shapeType === 'circle') {
+              selWidth = 100;
+              selHeight = 100;
+            }
+            break;
+          case 'text':
+            const fontSize = obj.fontSize || 24;
+            const textLength = (obj.text || 'Text').length;
+            selWidth = textLength * fontSize * 0.6;
+            selHeight = fontSize * 1.2;
+            break;
+        }
+
+        // Apply scale to selection outline
+        selWidth *= obj.transform.scaleX;
+        selHeight *= obj.transform.scaleY;
+
         this.ctx.strokeStyle = '#0066ff';
         this.ctx.lineWidth = 2;
         this.ctx.setLineDash([5, 5]);
-        this.ctx.strokeRect(obj.transform.x - 2, obj.transform.y - 2, 104, 104);
+        this.ctx.strokeRect(
+          obj.transform.x - 2,
+          obj.transform.y - 2,
+          selWidth + 4,
+          selHeight + 4
+        );
         this.ctx.setLineDash([]);
       }
     }
