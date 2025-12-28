@@ -656,3 +656,102 @@ export interface AnimationPlaybackState {
   speed: number;
   loop: boolean;
 }
+
+// Snippet types
+export const SNIPPET_LANGUAGES = [
+  'javascript', 'typescript', 'python', 'java', 'csharp', 'cpp', 'c',
+  'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'scala', 'html',
+  'css', 'scss', 'sql', 'bash', 'powershell', 'yaml', 'json', 'xml',
+  'markdown', 'dockerfile', 'terraform', 'graphql', 'other'
+] as const;
+
+export type SnippetLanguage = typeof SNIPPET_LANGUAGES[number];
+
+export const SNIPPET_CATEGORIES = [
+  'function', 'class', 'component', 'hook', 'utility', 'api',
+  'database', 'testing', 'config', 'boilerplate', 'algorithm',
+  'pattern', 'snippet', 'template', 'other'
+] as const;
+
+export type SnippetCategory = typeof SNIPPET_CATEGORIES[number];
+
+export interface SnippetVariable {
+  description?: string;
+  defaultValue?: string;
+  placeholder?: string;
+}
+
+export interface Snippet {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  code: string;
+  language: SnippetLanguage;
+  category: SnippetCategory;
+  tags: string[];
+  variables?: Record<string, SnippetVariable>;
+  usageCount: number;
+  isFavorite: boolean;
+  isPublic: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string;
+  collections?: SnippetCollectionSummary[];
+}
+
+export interface SnippetCollectionSummary {
+  id: string;
+  name: string;
+  color?: string;
+  icon?: string;
+}
+
+export interface SnippetCollection {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  sortOrder: number;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  snippetCount?: number;
+}
+
+export interface CreateSnippetRequest {
+  title: string;
+  description?: string;
+  code: string;
+  language?: SnippetLanguage;
+  category?: SnippetCategory;
+  tags?: string[];
+  variables?: Record<string, SnippetVariable>;
+  isFavorite?: boolean;
+  isPublic?: boolean;
+  collectionIds?: string[];
+}
+
+export interface UpdateSnippetRequest {
+  title?: string;
+  description?: string;
+  code?: string;
+  language?: SnippetLanguage;
+  category?: SnippetCategory;
+  tags?: string[];
+  variables?: Record<string, SnippetVariable>;
+  isFavorite?: boolean;
+  isPublic?: boolean;
+}
+
+export interface SnippetListFilters {
+  language?: SnippetLanguage;
+  category?: SnippetCategory;
+  search?: string;
+  favorite?: boolean;
+  collectionId?: string;
+  sortBy?: 'title' | 'usageCount' | 'lastUsedAt' | 'createdAt' | 'updatedAt';
+  order?: 'asc' | 'desc';
+}

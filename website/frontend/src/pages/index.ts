@@ -31,3 +31,6 @@ export { PricingPage } from './pricing';
 
 // Admin pages
 export { AdminPage } from './admin';
+
+// Snippets
+export { SnippetsPage } from './snippets/SnippetsPage';

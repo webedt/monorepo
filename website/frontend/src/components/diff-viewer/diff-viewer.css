@@ -1,0 +1,346 @@
+/**
+ * DiffViewer Component Styles
+ * Unified diff visualization with syntax highlighting
+ */
+
+.diff-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Header with stats */
+.diff-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.diff-viewer-title {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.diff-viewer-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.diff-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.diff-stat-additions {
+  color: var(--color-success, #22c55e);
+}
+
+.diff-stat-deletions {
+  color: var(--color-error, #ef4444);
+}
+
+.diff-stat-files {
+  color: var(--color-text-secondary);
+}
+
+/* File list */
+.diff-file-list {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--color-border);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.diff-file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.diff-file-item:last-child {
+  border-bottom: none;
+}
+
+.diff-file-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.diff-file-item.active {
+  background: var(--color-primary);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.diff-file-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.diff-file-status.added {
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--color-success, #22c55e);
+}
+
+.diff-file-status.deleted {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--color-error, #ef4444);
+}
+
+.diff-file-status.modified {
+  background: rgba(234, 179, 8, 0.2);
+  color: var(--color-warning, #eab308);
+}
+
+.diff-file-status.renamed {
+  background: rgba(168, 85, 247, 0.2);
+  color: var(--color-purple, #a855f7);
+}
+
+.diff-file-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-file-changes {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+}
+
+.diff-file-additions {
+  color: var(--color-success, #22c55e);
+}
+
+.diff-file-deletions {
+  color: var(--color-error, #ef4444);
+}
+
+/* Content area */
+.diff-content {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.diff-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.diff-empty svg {
+  margin-bottom: var(--spacing-md);
+  opacity: 0.5;
+}
+
+/* Hunk */
+.diff-hunk {
+  margin-bottom: var(--spacing-md);
+}
+
+.diff-hunk-header {
+  display: flex;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--color-primary);
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Lines */
+.diff-line {
+  display: flex;
+  min-height: 20px;
+}
+
+.diff-line-numbers {
+  display: flex;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.diff-line-number {
+  width: 50px;
+  padding: 0 var(--spacing-sm);
+  text-align: right;
+  color: var(--color-text-muted);
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+}
+
+.diff-line-number.old {
+  border-right: none;
+}
+
+.diff-line-marker {
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.diff-line-content {
+  flex: 1;
+  padding: 0 var(--spacing-sm);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* Line types */
+.diff-line.addition {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.diff-line.addition .diff-line-marker {
+  color: var(--color-success, #22c55e);
+}
+
+.diff-line.addition .diff-line-content {
+  color: var(--color-success, #22c55e);
+}
+
+.diff-line.deletion {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.diff-line.deletion .diff-line-marker {
+  color: var(--color-error, #ef4444);
+}
+
+.diff-line.deletion .diff-line-content {
+  color: var(--color-error, #ef4444);
+}
+
+.diff-line.context {
+  background: transparent;
+}
+
+.diff-line.context .diff-line-marker,
+.diff-line.context .diff-line-content {
+  color: var(--color-text-secondary);
+}
+
+/* Binary file indicator */
+.diff-binary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-lg);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Loading state */
+.diff-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl);
+}
+
+/* View mode toggle */
+.diff-view-toggle {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.diff-view-toggle button {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.diff-view-toggle button:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.diff-view-toggle button:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.diff-view-toggle button.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.diff-view-toggle button:hover:not(.active) {
+  background: var(--color-bg-hover);
+}
+
+/* No changes message */
+.diff-no-changes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl);
+  color: var(--color-text-muted);
+  text-align: center;
+  gap: var(--spacing-sm);
+}
+
+.diff-no-changes svg {
+  opacity: 0.5;
+}
+
+/* File header in unified view */
+.diff-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.diff-file-path {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
