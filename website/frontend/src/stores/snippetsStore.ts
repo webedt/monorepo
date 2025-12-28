@@ -86,16 +86,28 @@ class SnippetsStore extends Store<SnippetsState> {
 
   /**
    * Initialize store - load both snippets and collections
+   * Uses Promise.allSettled to ensure both requests complete even if one fails
    */
   async initialize(): Promise<void> {
     if (this.getState().isInitialized) {
       return;
     }
 
-    await Promise.all([
+    this.setState({ isLoading: true });
+
+    const results = await Promise.allSettled([
       this.loadSnippets(),
       this.loadCollections(),
     ]);
+
+    // Log any errors but don't fail initialization
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        console.error('Failed to load snippets data:', result.reason);
+      }
+    }
+
+    this.setState({ isLoading: false, isInitialized: true });
   }
 
   /**

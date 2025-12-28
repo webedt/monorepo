@@ -18,6 +18,7 @@ export class SnippetsPage extends Page {
   private loading = true;
   private showCreateModal = false;
   private showEditModal = false;
+  private showCreateCollectionModal = false;
   private editingSnippet: Snippet | null = null;
   private selectedCollectionId: string | null = null;
   private searchQuery = '';
@@ -140,6 +141,7 @@ export class SnippetsPage extends Page {
 
         ${this.showCreateModal ? this.renderCreateModal() : ''}
         ${this.showEditModal && this.editingSnippet ? this.renderEditModal(this.editingSnippet) : ''}
+        ${this.showCreateCollectionModal ? this.renderCreateCollectionModal() : ''}
       </div>
     `;
   }
@@ -347,6 +349,40 @@ export class SnippetsPage extends Page {
     `;
   }
 
+  private renderCreateCollectionModal(): string {
+    return `
+      <div class="modal-overlay" id="create-collection-modal">
+        <div class="modal">
+          <header class="modal-header">
+            <h2>Create Collection</h2>
+            <button class="modal-close" id="close-create-collection-modal">&times;</button>
+          </header>
+          <form id="create-collection-form" class="modal-body">
+            <div class="form-group">
+              <label for="collection-name">Name *</label>
+              <input type="text" id="collection-name" name="name" required maxlength="50" placeholder="e.g., React Hooks" />
+            </div>
+
+            <div class="form-group">
+              <label for="collection-description">Description</label>
+              <textarea id="collection-description" name="description" rows="2" maxlength="200" placeholder="Brief description of this collection..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="collection-color">Color</label>
+              <input type="color" id="collection-color" name="color" value="#6366f1" />
+            </div>
+
+            <footer class="modal-footer">
+              <button type="button" class="btn btn-ghost" id="cancel-create-collection">Cancel</button>
+              <button type="submit" class="btn btn-primary">Create Collection</button>
+            </footer>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
   private getCollectionIcon(icon?: string): string {
     const icons: Record<string, string> = {
       folder: '*',
@@ -451,6 +487,22 @@ export class SnippetsPage extends Page {
 
     // Delete button
     this.on('#delete-snippet-btn', 'click', () => this.handleDelete());
+
+    // Create collection button and modal
+    this.on('#create-collection-btn', 'click', () => this.openCreateCollectionModal());
+    this.on('#close-create-collection-modal', 'click', () => this.closeCreateCollectionModal());
+    this.on('#cancel-create-collection', 'click', () => this.closeCreateCollectionModal());
+
+    const createCollectionForm = this.$('#create-collection-form') as HTMLFormElement;
+    if (createCollectionForm) {
+      createCollectionForm.addEventListener('submit', (e) => this.handleCreateCollectionSubmit(e));
+    }
+
+    this.on('#create-collection-modal', 'click', (e) => {
+      if ((e.target as HTMLElement).id === 'create-collection-modal') {
+        this.closeCreateCollectionModal();
+      }
+    });
 
     // Search
     const searchInput = this.$('#search-input') as HTMLInputElement;
@@ -576,6 +628,40 @@ export class SnippetsPage extends Page {
     this.editingSnippet = null;
     snippetsStore.clearSelectedSnippet();
     this.refresh();
+  }
+
+  private openCreateCollectionModal(): void {
+    this.showCreateCollectionModal = true;
+    this.refresh();
+  }
+
+  private closeCreateCollectionModal(): void {
+    this.showCreateCollectionModal = false;
+    this.refresh();
+  }
+
+  private async handleCreateCollectionSubmit(e: Event): Promise<void> {
+    e.preventDefault();
+
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+
+    const name = formData.get('name') as string;
+    const description = formData.get('description') as string;
+    const color = formData.get('color') as string;
+
+    const result = await snippetsStore.createCollection({
+      name,
+      description: description || undefined,
+      color: color || undefined,
+    });
+
+    if (result) {
+      toast.success('Collection created');
+      this.closeCreateCollectionModal();
+    } else {
+      toast.error(snippetsStore.getState().error || 'Failed to create collection');
+    }
   }
 
   private async handleCreateSubmit(e: Event): Promise<void> {

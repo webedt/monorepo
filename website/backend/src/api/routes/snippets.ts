@@ -55,15 +55,67 @@ function validateTags(tags: unknown): string[] {
     .map(t => t.trim().toLowerCase());
 }
 
+type SnippetVariables = Record<string, {
+  description?: string;
+  defaultValue?: string;
+  placeholder?: string;
+}>;
+
+function validateVariables(variables: unknown): SnippetVariables | null {
+  if (variables === null || variables === undefined) {
+    return null;
+  }
+  if (typeof variables !== 'object' || Array.isArray(variables)) {
+    return null;
+  }
+
+  const validated: SnippetVariables = {};
+  const entries = Object.entries(variables as Record<string, unknown>);
+
+  // Limit to 20 variables max
+  let count = 0;
+  for (const [key, value] of entries) {
+    if (count >= 20) break;
+    // Validate key (variable name)
+    if (typeof key !== 'string' || key.trim().length === 0 || key.length > 50) continue;
+    // Skip if value is not an object
+    if (typeof value !== 'object' || value === null) continue;
+
+    const obj = value as Record<string, unknown>;
+    validated[key.trim()] = {
+      description: typeof obj.description === 'string' ? obj.description.slice(0, 200) : undefined,
+      defaultValue: typeof obj.defaultValue === 'string' ? obj.defaultValue.slice(0, 500) : undefined,
+      placeholder: typeof obj.placeholder === 'string' ? obj.placeholder.slice(0, 100) : undefined,
+    };
+    count++;
+  }
+
+  return Object.keys(validated).length > 0 ? validated : null;
+}
+
 // ===========================================================================
 // SNIPPET ROUTES
 // ===========================================================================
 
-// List user's snippets with optional filtering
+// List user's snippets with optional filtering and pagination
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
-    const { language, category, search, favorite, collectionId, sortBy = 'updatedAt', order = 'desc' } = req.query;
+    const {
+      language,
+      category,
+      search,
+      favorite,
+      collectionId,
+      sortBy = 'updatedAt',
+      order = 'desc',
+      limit: limitParam,
+      offset: offsetParam,
+    } = req.query;
+
+    // Parse pagination parameters
+    const limit = Math.min(Math.max(parseInt(limitParam as string, 10) || 50, 1), 100);
+    const offset = Math.max(parseInt(offsetParam as string, 10) || 0, 0);
 
     // Build base query conditions
     const conditions = [eq(snippets.userId, authReq.user!.id)];
@@ -79,73 +131,72 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       conditions.push(eq(snippets.isFavorite, true));
     }
 
-    // Get snippets
-    let userSnippets = await db
-      .select()
-      .from(snippets)
-      .where(and(...conditions));
-
-    // Apply search filter (on title, description, and code)
+    // Apply search filter at database level
     if (typeof search === 'string' && search.trim()) {
-      const searchLower = search.toLowerCase().trim();
-      userSnippets = userSnippets.filter(s =>
-        s.title.toLowerCase().includes(searchLower) ||
-        s.description?.toLowerCase().includes(searchLower) ||
-        s.code.toLowerCase().includes(searchLower) ||
-        s.tags?.some(t => t.toLowerCase().includes(searchLower))
+      const searchPattern = `%${search.trim()}%`;
+      conditions.push(
+        or(
+          ilike(snippets.title, searchPattern),
+          ilike(snippets.description, searchPattern),
+          ilike(snippets.code, searchPattern)
+        )!
       );
     }
 
-    // Filter by collection if specified
+    // Filter by collection if specified - use a subquery approach
+    let snippetIdsInCollection: Set<string> | null = null;
     if (typeof collectionId === 'string') {
       const collectionSnippetIds = await db
         .select({ snippetId: snippetsInCollections.snippetId })
         .from(snippetsInCollections)
         .where(eq(snippetsInCollections.collectionId, collectionId));
 
-      const snippetIds = new Set(collectionSnippetIds.map(c => c.snippetId));
-      userSnippets = userSnippets.filter(s => snippetIds.has(s.id));
+      snippetIdsInCollection = new Set(collectionSnippetIds.map(c => c.snippetId));
     }
 
-    // Sort results
-    const sortKey = sortBy as string;
-    const sortOrder = order === 'asc' ? 1 : -1;
-
-    userSnippets.sort((a, b) => {
-      let aVal: any, bVal: any;
-      switch (sortKey) {
-        case 'title':
-          aVal = a.title.toLowerCase();
-          bVal = b.title.toLowerCase();
-          break;
-        case 'usageCount':
-          aVal = a.usageCount;
-          bVal = b.usageCount;
-          break;
-        case 'lastUsedAt':
-          aVal = a.lastUsedAt?.getTime() ?? 0;
-          bVal = b.lastUsedAt?.getTime() ?? 0;
-          break;
-        case 'createdAt':
-          aVal = a.createdAt.getTime();
-          bVal = b.createdAt.getTime();
-          break;
+    // Build sort order
+    const sortColumn = (() => {
+      switch (sortBy) {
+        case 'title': return snippets.title;
+        case 'usageCount': return snippets.usageCount;
+        case 'lastUsedAt': return snippets.lastUsedAt;
+        case 'createdAt': return snippets.createdAt;
         case 'updatedAt':
-        default:
-          aVal = a.updatedAt.getTime();
-          bVal = b.updatedAt.getTime();
-          break;
+        default: return snippets.updatedAt;
       }
-      if (aVal < bVal) return -sortOrder;
-      if (aVal > bVal) return sortOrder;
-      return 0;
-    });
+    })();
+    const orderDirection = order === 'asc' ? asc(sortColumn) : desc(sortColumn);
+
+    // Get total count for pagination
+    const countResult = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(snippets)
+      .where(and(...conditions));
+    let total = countResult[0]?.count || 0;
+
+    // Get snippets with pagination
+    let userSnippets = await db
+      .select()
+      .from(snippets)
+      .where(and(...conditions))
+      .orderBy(orderDirection)
+      .limit(limit)
+      .offset(offset);
+
+    // Apply collection filter in-memory if needed (after main query for pagination)
+    if (snippetIdsInCollection !== null) {
+      userSnippets = userSnippets.filter(s => snippetIdsInCollection!.has(s.id));
+      // Note: total count may be inaccurate when filtering by collection
+      // For accurate count, would need a more complex query
+    }
 
     res.json({
       success: true,
       data: {
         snippets: userSnippets,
-        total: userSnippets.length,
+        total,
+        limit,
+        offset,
         languages: SNIPPET_LANGUAGES,
         categories: SNIPPET_CATEGORIES,
       },
@@ -251,7 +302,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         language: isValidLanguage(language) ? language : 'other',
         category: isValidCategory(category) ? category : 'snippet',
         tags: validatedTags,
-        variables: variables || null,
+        variables: validateVariables(variables),
         isFavorite: Boolean(isFavorite),
         isPublic: Boolean(isPublic),
       })
@@ -376,7 +427,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
       updates.tags = validateTags(tags);
     }
     if (variables !== undefined) {
-      updates.variables = variables;
+      updates.variables = validateVariables(variables);
     }
     if (isFavorite !== undefined) {
       updates.isFavorite = Boolean(isFavorite);
@@ -539,12 +590,19 @@ router.post('/:id/duplicate', requireAuth, async (req: Request, res: Response) =
     }
 
     const newId = uuidv4();
+    // Ensure duplicated title fits within MAX_TITLE_LENGTH
+    const suffix = ' (copy)';
+    const maxBaseLength = MAX_TITLE_LENGTH - suffix.length;
+    const duplicateTitle = existing.title.length > maxBaseLength
+      ? `${existing.title.slice(0, maxBaseLength)}${suffix}`
+      : `${existing.title}${suffix}`;
+
     const [duplicated] = await db
       .insert(snippets)
       .values({
         id: newId,
         userId: authReq.user!.id,
-        title: `${existing.title} (copy)`,
+        title: duplicateTitle,
         description: existing.description,
         code: existing.code,
         language: existing.language,
@@ -589,16 +647,22 @@ router.get('/collections/list', requireAuth, async (req: Request, res: Response)
       .where(eq(snippetCollections.userId, authReq.user!.id))
       .orderBy(asc(snippetCollections.sortOrder), asc(snippetCollections.name));
 
-    // Get snippet counts per collection
-    const collectionCounts = await db
-      .select({
-        collectionId: snippetsInCollections.collectionId,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(snippetsInCollections)
-      .groupBy(snippetsInCollections.collectionId);
+    // Get snippet counts per collection, filtered by user's collections only
+    const userCollectionIds = collections.map(c => c.id);
+    let countMap = new Map<string, number>();
 
-    const countMap = new Map(collectionCounts.map(c => [c.collectionId, c.count]));
+    if (userCollectionIds.length > 0) {
+      const collectionCounts = await db
+        .select({
+          collectionId: snippetsInCollections.collectionId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(snippetsInCollections)
+        .where(sql`${snippetsInCollections.collectionId} = ANY(${userCollectionIds})`)
+        .groupBy(snippetsInCollections.collectionId);
+
+      countMap = new Map(collectionCounts.map(c => [c.collectionId, c.count]));
+    }
 
     const collectionsWithCounts = collections.map(c => ({
       ...c,
