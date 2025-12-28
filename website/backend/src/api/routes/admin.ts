@@ -4,7 +4,8 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
@@ -73,9 +74,8 @@ router.post('/users', requireAdmin, async (req, res) => {
     }
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role && !ROLE_HIERARCHY.includes(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -129,22 +129,21 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     const { email, displayName, isAdmin, role, password } = req.body;
 
     // Validate role if provided
-    const validRoles = ['user', 'editor', 'developer', 'admin'];
-    if (role !== undefined && !validRoles.includes(role)) {
-      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    if (role !== undefined && !ROLE_HIERARCHY.includes(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
-    // Prevent user from removing their own admin status or demoting themselves
-    if (authReq.user?.id === id) {
-      if (isAdmin === false) {
-        res.status(400).json({ success: false, error: 'Cannot remove your own admin status' });
-        return;
-      }
-      if (role !== undefined && role !== 'admin') {
-        res.status(400).json({ success: false, error: 'Cannot demote your own role' });
-        return;
-      }
+    // Prevent user from removing their own admin status
+    if (authReq.user?.id === id && isAdmin === false) {
+      res.status(400).json({ success: false, error: 'Cannot remove your own admin status' });
+      return;
+    }
+
+    // Prevent user from demoting their own role
+    if (authReq.user?.id === id && role && ROLE_HIERARCHY.indexOf(role) < ROLE_HIERARCHY.indexOf(authReq.user.role)) {
+      res.status(400).json({ success: false, error: 'Cannot demote your own role' });
+      return;
     }
 
     const updateData: Record<string, unknown> = {};
