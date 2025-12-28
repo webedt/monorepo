@@ -795,9 +795,10 @@ export class ScenePage extends Page<ScenePageOptions> {
    * Convert a File to a data URL
    */
   private fileToDataUrl(file: File): Promise<string> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
       reader.readAsDataURL(file);
     });
   }
@@ -989,6 +990,12 @@ export class ScenePage extends Page<ScenePageOptions> {
   private deleteSelected(): void {
     if (!this.selectedObjectId) return;
     if (!confirm('Delete selected object?')) return;
+
+    // Clean up sprite from renderer cache if it's a sprite object
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (obj?.type === 'sprite') {
+      this.spriteRenderer.unload(obj.id);
+    }
 
     this.objects = this.objects.filter(o => o.id !== this.selectedObjectId);
     this.selectedObjectId = null;
