@@ -26,6 +26,8 @@ import {
   GameDetailPage,
   LibraryPage,
   CommunityPage,
+  ChannelsPage,
+  AnnouncementsPage,
   PricingPage,
   AdminPage,
 } from './pages';
@@ -44,6 +46,7 @@ function getNavIcon(name: string): string {
     'store': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
     'library': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
     'community': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    'channels': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
   };
   return icons[name] || '';
 }
@@ -285,6 +288,7 @@ function updateHeader(): void {
   // Nav links for all users (store is public)
   const publicNavLinks = [
     { path: '/store', text: 'Store', icon: 'store' },
+    { path: '/channels', text: 'Channels', icon: 'channels' },
     { path: '/community', text: 'Community', icon: 'community' },
   ];
 
@@ -329,6 +333,13 @@ function updateHeader(): void {
 
       nav.appendChild(a);
     }
+
+    // Trash icon
+    const trashBtn = new IconButton('trash', {
+      label: 'Trash',
+      onClick: () => router.navigate('/trash'),
+    });
+    actions.appendChild(trashBtn.getElement());
 
     // Settings icon
     const settingsBtn = new IconButton('settings', {
@@ -875,6 +886,38 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Community | WebEDT',
+      },
+      {
+        path: '/channels',
+        component: () => {
+          mountPage(ChannelsPage);
+          return document.createElement('div');
+        },
+        title: 'Channels | WebEDT',
+      },
+      {
+        path: '/channels/:slug',
+        component: (params) => {
+          mountPage(ChannelsPage, params);
+          return document.createElement('div');
+        },
+        title: 'Channels | WebEDT',
+      },
+      {
+        path: '/announcements',
+        component: () => {
+          mountPage(AnnouncementsPage);
+          return document.createElement('div');
+        },
+        title: 'Announcements | WebEDT',
+      },
+      {
+        path: '/announcements/:id',
+        component: (params) => {
+          mountPage(AnnouncementsPage, params);
+          return document.createElement('div');
+        },
+        title: 'Announcement | WebEDT',
       },
       {
         path: '/pricing',

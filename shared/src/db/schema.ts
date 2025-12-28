@@ -765,3 +765,119 @@ export type TaxonomyTerm = typeof taxonomyTerms.$inferSelect;
 export type NewTaxonomyTerm = typeof taxonomyTerms.$inferInsert;
 export type ItemTaxonomy = typeof itemTaxonomies.$inferSelect;
 export type NewItemTaxonomy = typeof itemTaxonomies.$inferInsert;
+
+// ============================================================================
+// ANNOUNCEMENTS - Official platform updates
+// ============================================================================
+
+// Announcements - Official platform announcements from admins
+export const announcements = pgTable('announcements', {
+  id: text('id').primaryKey(), // UUID
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  type: text('type').notNull().default('general'), // 'maintenance' | 'feature' | 'alert' | 'general'
+  priority: text('priority').notNull().default('normal'), // 'low' | 'normal' | 'high' | 'critical'
+  status: text('status').notNull().default('draft'), // 'draft' | 'published' | 'archived'
+  authorId: text('author_id')
+    .references(() => users.id, { onDelete: 'set null' }), // Nullable to allow onDelete: set null
+  publishedAt: timestamp('published_at'),
+  expiresAt: timestamp('expires_at'), // Optional expiration date
+  pinned: boolean('pinned').default(false).notNull(), // Pinned announcements appear at top
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Type exports for Announcements
+export type Announcement = typeof announcements.$inferSelect;
+export type NewAnnouncement = typeof announcements.$inferInsert;
+
+// ============================================================================
+// CLOUD SAVES - Synced game saves across devices
+// ============================================================================
+
+// Cloud Saves - User game saves synced across devices
+export const cloudSaves = pgTable('cloud_saves', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  slotNumber: integer('slot_number').notNull(), // Save slot 1-N
+  slotName: text('slot_name'), // User-given save name (e.g., "Before Boss Fight")
+  saveData: text('save_data').notNull(), // Base64 or JSON encoded save content
+  fileSize: integer('file_size').notNull(), // Size in bytes
+  checksum: text('checksum'), // SHA-256 hash for integrity verification
+  platformData: json('platform_data').$type<{
+    deviceName?: string;
+    platform?: string; // 'web' | 'desktop' | 'mobile'
+    gameVersion?: string;
+    browserInfo?: string;
+  }>(),
+  screenshotUrl: text('screenshot_url'), // Optional save screenshot
+  playTimeSeconds: integer('play_time_seconds').default(0), // Playtime at save
+  gameProgress: json('game_progress').$type<{
+    level?: number;
+    chapter?: string;
+    percentage?: number;
+    customData?: Record<string, unknown>;
+  }>(), // Game-specific progress metadata
+  lastPlayedAt: timestamp('last_played_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: a user can only have one save per slot per game
+  uniqueIndex('cloud_saves_user_game_slot_unique_idx').on(table.userId, table.gameId, table.slotNumber),
+]);
+
+// Cloud Save Versions - Historical versions of saves for recovery
+export const cloudSaveVersions = pgTable('cloud_save_versions', {
+  id: text('id').primaryKey(), // UUID
+  cloudSaveId: text('cloud_save_id')
+    .notNull()
+    .references(() => cloudSaves.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  saveData: text('save_data').notNull(),
+  fileSize: integer('file_size').notNull(),
+  checksum: text('checksum'),
+  platformData: json('platform_data').$type<{
+    deviceName?: string;
+    platform?: string;
+    gameVersion?: string;
+    browserInfo?: string;
+  }>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: version number must be unique per save
+  uniqueIndex('cloud_save_versions_save_version_unique_idx').on(table.cloudSaveId, table.version),
+]);
+
+// Cloud Save Sync Log - Tracks sync operations for debugging
+export const cloudSaveSyncLog = pgTable('cloud_save_sync_log', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  cloudSaveId: text('cloud_save_id')
+    .references(() => cloudSaves.id, { onDelete: 'set null' }),
+  operation: text('operation').notNull(), // 'upload' | 'download' | 'delete' | 'conflict_resolved'
+  deviceInfo: json('device_info').$type<{
+    deviceName?: string;
+    platform?: string;
+    browserInfo?: string;
+    ipAddress?: string;
+  }>(),
+  status: text('status').notNull().default('success'), // 'success' | 'failed' | 'conflict'
+  errorMessage: text('error_message'),
+  bytesTransferred: integer('bytes_transferred'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Type exports for Cloud Saves
+export type CloudSave = typeof cloudSaves.$inferSelect;
+export type NewCloudSave = typeof cloudSaves.$inferInsert;
+export type CloudSaveVersion = typeof cloudSaveVersions.$inferSelect;
+export type NewCloudSaveVersion = typeof cloudSaveVersions.$inferInsert;
+export type CloudSaveSyncLog = typeof cloudSaveSyncLog.$inferSelect;
+export type NewCloudSaveSyncLog = typeof cloudSaveSyncLog.$inferInsert;
