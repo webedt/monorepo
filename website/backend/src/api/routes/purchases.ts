@@ -167,9 +167,12 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
           return;
         }
 
-        // Build checkout URLs
+        // Build checkout URLs (provider-specific placeholders)
         const baseUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.FRONTEND_PORT || 3000}`;
-        const successUrl = `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}`;
+        // Stripe replaces {CHECKOUT_SESSION_ID}; PayPal appends its own token/PayerID params
+        const successUrl = provider === 'stripe'
+          ? `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}&provider=stripe`
+          : `${baseUrl}/store/purchase-success?game_id=${gameId}&provider=paypal`;
         const cancelUrl = `${baseUrl}/store/games/${gameId}`;
 
         const session = await paymentService.createCheckout({

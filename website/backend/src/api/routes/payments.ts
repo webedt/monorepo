@@ -320,18 +320,21 @@ router.post('/webhooks/paypal', async (req: Request, res: Response) => {
     // PayPal sends webhook headers with signature info
     const transmissionId = req.headers['paypal-transmission-id'] as string;
     const timestamp = req.headers['paypal-transmission-time'] as string;
-    const crc32 = req.headers['paypal-transmission-sig'] as string;
+    const transmissionSig = req.headers['paypal-transmission-sig'] as string;
     const algo = req.headers['paypal-auth-algo'] as string;
     const certUrl = req.headers['paypal-cert-url'] as string;
 
-    if (!transmissionId || !timestamp || !crc32) {
+    if (!transmissionId || !timestamp || !transmissionSig) {
       res.status(400).json({ success: false, error: 'Missing PayPal headers' });
       return;
     }
 
-    // Construct signature string for verification
-    const signature = `${transmissionId}|${timestamp}|${crc32}|${algo}|${certUrl}`;
-    const rawBody = JSON.stringify(req.body);
+    // Get raw body - prefer rawBody from middleware, fall back to JSON.stringify for compatibility
+    // Note: For production, configure express.raw() middleware to preserve raw body
+    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+
+    // Construct signature string for verification (pipe-delimited format expected by paypalProvider)
+    const signature = `${transmissionId}|${timestamp}|${transmissionSig}|${algo}|${certUrl}`;
 
     const paymentService = getPaymentService();
     const result = await paymentService.processWebhook('paypal', rawBody, signature);

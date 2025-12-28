@@ -453,53 +453,56 @@ export class PaymentService {
     provider: PaymentProvider
   ): Promise<{ purchaseId: string }> {
     const purchaseId = uuidv4();
-
-    // Create purchase record
-    await db.insert(purchases).values({
-      id: purchaseId,
-      userId,
-      gameId,
-      amount,
-      currency,
-      status: 'completed',
-      paymentMethod: provider === 'stripe' ? 'credit_card' : 'paypal',
-      paymentDetails: { transactionId },
-      completedAt: new Date(),
-    });
-
-    // Link transaction to purchase
-    await db
-      .update(paymentTransactions)
-      .set({ purchaseId })
-      .where(eq(paymentTransactions.id, transactionId));
-
-    // Add to user library
     const libraryItemId = uuidv4();
-    await db.insert(userLibrary).values({
-      id: libraryItemId,
-      userId,
-      gameId,
-      purchaseId,
+
+    // Use transaction to ensure atomicity of all related database operations
+    await db.transaction(async (tx) => {
+      // Create purchase record
+      await tx.insert(purchases).values({
+        id: purchaseId,
+        userId,
+        gameId,
+        amount,
+        currency,
+        status: 'completed',
+        paymentMethod: provider === 'stripe' ? 'credit_card' : 'paypal',
+        paymentDetails: { transactionId },
+        completedAt: new Date(),
+      });
+
+      // Link transaction to purchase
+      await tx
+        .update(paymentTransactions)
+        .set({ purchaseId })
+        .where(eq(paymentTransactions.id, transactionId));
+
+      // Add to user library
+      await tx.insert(userLibrary).values({
+        id: libraryItemId,
+        userId,
+        gameId,
+        purchaseId,
+      });
+
+      // Remove from wishlist if present (only the specific game, not all wishlisted items)
+      await tx
+        .delete(wishlists)
+        .where(and(eq(wishlists.userId, userId), eq(wishlists.gameId, gameId)));
+
+      // Increment purchase count (more semantically accurate than download count)
+      const [game] = await tx
+        .select()
+        .from(games)
+        .where(eq(games.id, gameId))
+        .limit(1);
+
+      if (game) {
+        await tx
+          .update(games)
+          .set({ downloadCount: game.downloadCount + 1 })
+          .where(eq(games.id, gameId));
+      }
     });
-
-    // Remove from wishlist if present (only the specific game, not all wishlisted items)
-    await db
-      .delete(wishlists)
-      .where(and(eq(wishlists.userId, userId), eq(wishlists.gameId, gameId)));
-
-    // Increment download count
-    const [game] = await db
-      .select()
-      .from(games)
-      .where(eq(games.id, gameId))
-      .limit(1);
-
-    if (game) {
-      await db
-        .update(games)
-        .set({ downloadCount: game.downloadCount + 1 })
-        .where(eq(games.id, gameId));
-    }
 
     logger.info('Purchase completed via webhook', {
       component: 'PaymentService',

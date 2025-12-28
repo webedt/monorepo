@@ -21,6 +21,16 @@ import type { WebhookEvent } from './types.js';
 import type { WebhookEventType } from './types.js';
 import type { WebhookVerification } from './types.js';
 
+const VALID_CURRENCY_CODES: CurrencyCode[] = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
+
+/**
+ * Validates and returns a currency code, defaulting to USD if invalid
+ */
+function toCurrencyCode(currency: string): CurrencyCode {
+  const upper = currency.toUpperCase() as CurrencyCode;
+  return VALID_CURRENCY_CODES.includes(upper) ? upper : 'USD';
+}
+
 export interface PayPalConfig {
   clientId: string;
   clientSecret: string;
@@ -358,7 +368,7 @@ export class PayPalProvider extends APaymentProvider {
           amount: purchaseUnit
             ? Math.round(parseFloat(purchaseUnit.amount.value) * 100)
             : 0,
-          currency: (purchaseUnit?.amount.currency_code || 'USD') as CurrencyCode,
+          currency: toCurrencyCode(purchaseUnit?.amount.currency_code || 'USD'),
         },
         metadata,
         createdAt: new Date(),
@@ -440,7 +450,7 @@ export class PayPalProvider extends APaymentProvider {
         paymentIntentId: request.paymentIntentId,
         amount: {
           amount: Math.round(parseFloat(refund.amount.value) * 100),
-          currency: refund.amount.currency_code as CurrencyCode,
+          currency: toCurrencyCode(refund.amount.currency_code),
         },
         status: refund.status === 'COMPLETED' ? 'succeeded' : 'pending',
         reason: request.reason,
@@ -568,7 +578,7 @@ export class PayPalProvider extends APaymentProvider {
           amount: captureDetails
             ? Math.round(parseFloat(captureDetails.amount.value) * 100)
             : 0,
-          currency: (captureDetails?.amount.currency_code || 'USD') as CurrencyCode,
+          currency: toCurrencyCode(captureDetails?.amount.currency_code || 'USD'),
         },
         metadata,
         createdAt: new Date(),
@@ -620,7 +630,7 @@ export class PayPalProvider extends APaymentProvider {
         amount: resource.amount
           ? {
               amount: Math.round(parseFloat(resource.amount.value) * 100),
-              currency: resource.amount.currency_code as CurrencyCode,
+              currency: toCurrencyCode(resource.amount.currency_code),
             }
           : undefined,
       },

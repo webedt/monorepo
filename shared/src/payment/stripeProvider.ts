@@ -10,6 +10,7 @@ import { logger } from '../utils/logging/logger.js';
 import type { CheckoutSession } from './types.js';
 import type { CreateCheckoutRequest } from './types.js';
 import type { CreatePaymentIntentRequest } from './types.js';
+import type { CurrencyCode } from './types.js';
 import type { PaymentIntent } from './types.js';
 import type { PaymentMetadata } from './types.js';
 import type { PaymentProvider } from './types.js';
@@ -20,6 +21,16 @@ import type { RefundResult } from './types.js';
 import type { WebhookEvent } from './types.js';
 import type { WebhookEventType } from './types.js';
 import type { WebhookVerification } from './types.js';
+
+const VALID_CURRENCY_CODES: CurrencyCode[] = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
+
+/**
+ * Validates and returns a currency code, defaulting to USD if invalid
+ */
+function toCurrencyCode(currency: string): CurrencyCode {
+  const upper = currency.toUpperCase() as CurrencyCode;
+  return VALID_CURRENCY_CODES.includes(upper) ? upper : 'USD';
+}
 
 export interface StripeConfig {
   secretKey: string;
@@ -201,7 +212,7 @@ export class StripeProvider extends APaymentProvider {
         status: mapStripeStatus(intent.status),
         amount: {
           amount: intent.amount,
-          currency: intent.currency.toUpperCase() as 'USD',
+          currency: toCurrencyCode(intent.currency),
         },
         metadata: request.metadata,
         createdAt: new Date(intent.created * 1000),
@@ -225,7 +236,7 @@ export class StripeProvider extends APaymentProvider {
         status: mapStripeStatus(intent.status),
         amount: {
           amount: intent.amount,
-          currency: intent.currency.toUpperCase() as 'USD',
+          currency: toCurrencyCode(intent.currency),
         },
         metadata: (intent.metadata as PaymentMetadata) || {},
         createdAt: new Date(intent.created * 1000),
@@ -254,7 +265,7 @@ export class StripeProvider extends APaymentProvider {
         status: mapStripeStatus(intent.status),
         amount: {
           amount: intent.amount,
-          currency: intent.currency.toUpperCase() as 'USD',
+          currency: toCurrencyCode(intent.currency),
         },
         metadata: (intent.metadata as PaymentMetadata) || {},
         createdAt: new Date(intent.created * 1000),
@@ -297,7 +308,7 @@ export class StripeProvider extends APaymentProvider {
         paymentIntentId: request.paymentIntentId,
         amount: {
           amount: refund.amount || 0,
-          currency: (refund.currency?.toUpperCase() || 'USD') as 'USD',
+          currency: toCurrencyCode(refund.currency || 'USD'),
         },
         status: refund.status === 'succeeded' ? 'succeeded' : 'pending',
         reason: request.reason,
@@ -415,7 +426,7 @@ export class StripeProvider extends APaymentProvider {
         amount: session.amount_total
           ? {
               amount: session.amount_total,
-              currency: (session.currency?.toUpperCase() || 'USD') as 'USD',
+              currency: toCurrencyCode(session.currency || 'USD'),
             }
           : undefined,
       };
@@ -427,7 +438,7 @@ export class StripeProvider extends APaymentProvider {
         metadata: (intent.metadata as PaymentMetadata) || {},
         amount: {
           amount: intent.amount,
-          currency: intent.currency.toUpperCase() as 'USD',
+          currency: toCurrencyCode(intent.currency),
         },
         failureReason: intent.last_payment_error?.message,
       };
@@ -439,7 +450,7 @@ export class StripeProvider extends APaymentProvider {
         metadata: (charge.metadata as PaymentMetadata) || {},
         amount: {
           amount: charge.amount,
-          currency: charge.currency.toUpperCase() as 'USD',
+          currency: toCurrencyCode(charge.currency),
         },
       };
     }
