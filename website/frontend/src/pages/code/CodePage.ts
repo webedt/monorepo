@@ -5,11 +5,11 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, CollaborativeCursors } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
-import { undoRedoStore } from '../../stores';
+import { undoRedoStore, presenceStore } from '../../stores';
 import type { Session } from '../../types';
 import type { UndoRedoState } from '../../stores/undoRedoStore';
 import type { TabContentState } from '../../stores/undoRedoStore';
@@ -58,6 +58,8 @@ export class CodePage extends Page<CodePageOptions> {
     futureLength: 0,
   };
   private unsubscribeUndoRedo: (() => void) | null = null;
+  private collaborativeCursors: CollaborativeCursors | null = null;
+  private unsubscribePresence: (() => void) | null = null;
 
   protected render(): string {
     return `
@@ -73,6 +75,10 @@ export class CodePage extends Page<CodePageOptions> {
             </div>
           </div>
           <div class="code-header-right">
+            <div class="active-users-badge" style="display: none;">
+              <div class="active-users-avatars"></div>
+              <span class="active-users-count"></span>
+            </div>
             <div class="offline-status-badge" style="display: none;">
               <span class="offline-badge">Offline Mode</span>
             </div>
@@ -116,6 +122,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <p>Select a file to view or edit</p>
               </div>
               <div class="editor-wrapper" style="display: none;">
+                <div class="collaborative-cursors-container"></div>
                 <textarea class="code-editor" spellcheck="false"></textarea>
               </div>
               <div class="preview-wrapper" style="display: none;">
@@ -169,7 +176,24 @@ export class CodePage extends Page<CodePageOptions> {
     if (editor) {
       editor.addEventListener('input', () => this.handleEditorChange());
       editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e));
+      // Track cursor position for collaborative cursors
+      editor.addEventListener('click', () => this.handleCursorChange());
+      editor.addEventListener('keyup', () => this.handleCursorChange());
+      editor.addEventListener('select', () => this.handleCursorChange());
     }
+
+    // Setup collaborative cursors
+    const cursorsContainer = this.$('.collaborative-cursors-container') as HTMLElement;
+    if (cursorsContainer && editor) {
+      this.collaborativeCursors = new CollaborativeCursors();
+      this.collaborativeCursors.setEditorElement(editor);
+      this.collaborativeCursors.mount(cursorsContainer);
+    }
+
+    // Subscribe to presence updates for the active users badge
+    this.unsubscribePresence = presenceStore.subscribe(() => {
+      this.updateActiveUsersBadge();
+    });
 
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
@@ -234,6 +258,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.updateHeader();
       await this.loadFiles();
+
+      // Connect to presence for collaborative cursors
+      this.connectToPresence();
     } catch (error) {
       // Try offline cache if network fails
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
@@ -908,6 +935,94 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  /**
+   * Connect to presence service for collaborative cursors
+   */
+  private connectToPresence(): void {
+    if (!this.session) return;
+
+    const owner = this.session.repositoryOwner;
+    const repo = this.session.repositoryName;
+    const branch = this.session.branch;
+
+    if (owner && repo && branch) {
+      presenceStore.connect(owner, repo, branch).catch(error => {
+        console.error('Failed to connect to presence:', error);
+      });
+    }
+  }
+
+  /**
+   * Handle cursor position changes
+   */
+  private handleCursorChange(): void {
+    const editor = this.$('.code-editor') as HTMLTextAreaElement;
+    if (!editor) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Calculate line and column from cursor position
+    const text = editor.value.substring(0, editor.selectionStart);
+    const lines = text.split('\n');
+    const line = lines.length - 1;
+    const col = lines[lines.length - 1].length;
+
+    // Calculate selection if any
+    const hasSelection = editor.selectionStart !== editor.selectionEnd;
+    if (hasSelection) {
+      const endText = editor.value.substring(0, editor.selectionEnd);
+      const endLines = endText.split('\n');
+      const endLine = endLines.length - 1;
+      const endCol = endLines[endLines.length - 1].length;
+
+      presenceStore.updateSelection(tab.path, line, endLine, col, endCol);
+    } else {
+      presenceStore.updateCursor(tab.path, line, col);
+    }
+
+    // Update the collaborative cursors component with the current file
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.setFilePath(tab.path);
+    }
+  }
+
+  /**
+   * Update the active users badge in the header
+   */
+  private updateActiveUsersBadge(): void {
+    const badge = this.$('.active-users-badge') as HTMLElement;
+    const avatarsContainer = this.$('.active-users-avatars') as HTMLElement;
+    const countEl = this.$('.active-users-count') as HTMLElement;
+
+    if (!badge || !avatarsContainer || !countEl) return;
+
+    const users = presenceStore.getOtherUsersWithColors();
+
+    if (users.length === 0) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    badge.style.display = 'flex';
+
+    // Show up to 3 user avatars
+    const displayUsers = users.slice(0, 3);
+    const remainingCount = users.length - displayUsers.length;
+
+    avatarsContainer.innerHTML = displayUsers.map(user => {
+      const initial = (user.displayName || 'U').charAt(0).toUpperCase();
+      return `<div class="active-user-avatar" style="background-color: ${user.color}" title="${this.escapeHtml(user.displayName)}">${initial}</div>`;
+    }).join('');
+
+    if (remainingCount > 0) {
+      countEl.textContent = `+${remainingCount} more`;
+      countEl.style.display = 'inline';
+    } else {
+      countEl.style.display = 'none';
+    }
+  }
+
   protected onUnmount(): void {
     // Check for unsaved changes
     const hasUnsaved = this.tabs.some(t => t.isDirty);
@@ -937,6 +1052,21 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup presence subscription
+    if (this.unsubscribePresence) {
+      this.unsubscribePresence();
+      this.unsubscribePresence = null;
+    }
+
+    // Disconnect from presence
+    presenceStore.disconnect();
+
+    // Cleanup collaborative cursors
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.unmount();
+      this.collaborativeCursors = null;
     }
   }
 }
