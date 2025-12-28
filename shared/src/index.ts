@@ -71,11 +71,17 @@ export * from './llm/index.js';
 // Organizations/Studios - Group accounts with multi-user support
 export * from './organizations/index.js';
 
+// Discovery - Task discovery and scanning
+export * from './discovery/index.js';
+
 // Code Analysis - AI-powered code analysis using ClaudeWebClient
 export * from './codeAnalysis/index.js';
 
 // Storage - User storage quota management
 export * from './storage/index.js';
+
+// Payment - Stripe and PayPal payment providers
+export * from './payment/index.js';
 
 // =============================================================================
 // SERVICES - Dependency injection and service registry

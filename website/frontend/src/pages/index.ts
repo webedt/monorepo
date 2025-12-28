@@ -22,3 +22,9 @@ export { StorePage } from './store';
 export { GameDetailPage } from './game-detail';
 export { LibraryPage } from './library';
 export { CommunityPage } from './community';
+
+// Billing/Pricing
+export { PricingPage } from './pricing';
+
+// Admin pages
+export { AdminPage } from './admin';
