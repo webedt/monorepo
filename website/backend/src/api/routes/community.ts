@@ -43,6 +43,27 @@ router.get('/posts', async (req: Request, res: Response) => {
       conditions.push(eq(communityPosts.gameId, gameId as string));
     }
 
+    // Determine sort column based on sort parameter
+    let orderByClause;
+    switch (sort) {
+      case 'upvotes':
+        orderByClause = order === 'asc'
+          ? asc(communityPosts.upvotes)
+          : desc(communityPosts.upvotes);
+        break;
+      case 'comments':
+        orderByClause = order === 'asc'
+          ? asc(communityPosts.commentCount)
+          : desc(communityPosts.commentCount);
+        break;
+      case 'createdAt':
+      default:
+        orderByClause = order === 'asc'
+          ? asc(communityPosts.createdAt)
+          : desc(communityPosts.createdAt);
+        break;
+    }
+
     // Get posts with author info
     const posts = await db
       .select({
@@ -58,19 +79,17 @@ router.get('/posts', async (req: Request, res: Response) => {
       .innerJoin(users, eq(communityPosts.userId, users.id))
       .leftJoin(games, eq(communityPosts.gameId, games.id))
       .where(and(...conditions))
-      .orderBy(
-        order === 'asc' ? asc(communityPosts.createdAt) : desc(communityPosts.createdAt)
-      )
+      .orderBy(orderByClause)
       .limit(limit)
       .offset(offset);
 
-    // Get total count
-    const allPosts = await db
-      .select({ id: communityPosts.id })
+    // Get total count using SQL COUNT for efficiency
+    const countResult = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
       .from(communityPosts)
       .where(and(...conditions));
 
-    const total = allPosts.length;
+    const total = countResult[0]?.count ?? 0;
 
     res.json({
       success: true,

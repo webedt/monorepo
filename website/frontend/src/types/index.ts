@@ -302,10 +302,12 @@ export interface Purchase {
   gameId: string;
   amount: number;
   currency: string;
-  status: 'pending' | 'completed' | 'refunded' | 'failed';
+  status: 'pending' | 'completed' | 'pending_refund' | 'refunded' | 'failed';
   paymentMethod?: string;
+  refundReason?: string;
   createdAt: string;
   completedAt?: string;
+  refundedAt?: string;
   game?: Game;
 }
 

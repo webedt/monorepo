@@ -1,4 +1,5 @@
-import { pgTable, serial, text, timestamp, boolean, integer, json, unique } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, json, unique, check } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -408,7 +409,7 @@ export const communityPosts = pgTable('community_posts', {
 });
 
 // Community Comments - Replies to posts
-export const communityComments = pgTable('community_comments', {
+export const communityComments: ReturnType<typeof pgTable> = pgTable('community_comments', {
   id: text('id').primaryKey(), // UUID
   postId: text('post_id')
     .notNull()
@@ -416,7 +417,8 @@ export const communityComments = pgTable('community_comments', {
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  parentId: text('parent_id'), // For nested replies - self-reference
+  parentId: text('parent_id')
+    .references((): ReturnType<typeof text> => communityComments.id, { onDelete: 'cascade' }), // Self-referencing FK for nested replies
   content: text('content').notNull(),
   upvotes: integer('upvotes').default(0).notNull(),
   downvotes: integer('downvotes').default(0).notNull(),
@@ -442,6 +444,8 @@ export const communityVotes = pgTable('community_votes', {
   unique('community_votes_user_post_unique').on(table.userId, table.postId),
   // Unique constraint: a user can only vote once per comment
   unique('community_votes_user_comment_unique').on(table.userId, table.commentId),
+  // Check constraint: vote must reference either a post or a comment (not neither)
+  check('vote_target_check', sql`${table.postId} IS NOT NULL OR ${table.commentId} IS NOT NULL`),
 ]);
 
 // Wishlists - Games users want to buy

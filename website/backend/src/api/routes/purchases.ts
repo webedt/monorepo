@@ -363,4 +363,142 @@ router.post('/:purchaseId/refund', async (req: Request, res: Response) => {
   }
 });
 
+// Admin: Get pending refund requests
+router.get('/admin/pending-refunds', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+
+    if (!authReq.user!.isAdmin) {
+      res.status(403).json({ success: false, error: 'Admin access required' });
+      return;
+    }
+
+    const pendingRefunds = await db
+      .select({
+        purchase: purchases,
+        game: games,
+      })
+      .from(purchases)
+      .innerJoin(games, eq(purchases.gameId, games.id))
+      .where(eq(purchases.status, 'pending_refund'))
+      .orderBy(desc(purchases.createdAt));
+
+    res.json({
+      success: true,
+      data: {
+        refunds: pendingRefunds.map((item) => ({
+          ...item.purchase,
+          game: item.game,
+        })),
+        total: pendingRefunds.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Get pending refunds error', error as Error, { component: 'Purchases' });
+    res.status(500).json({ success: false, error: 'Failed to fetch pending refunds' });
+  }
+});
+
+// Admin: Approve or deny a refund
+router.post('/admin/:purchaseId/refund-decision', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const purchaseId = req.params.purchaseId;
+    const { approved, adminNote } = req.body;
+
+    if (!authReq.user!.isAdmin) {
+      res.status(403).json({ success: false, error: 'Admin access required' });
+      return;
+    }
+
+    if (typeof approved !== 'boolean') {
+      res.status(400).json({ success: false, error: 'Approved status (boolean) is required' });
+      return;
+    }
+
+    const [purchase] = await db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .limit(1);
+
+    if (!purchase) {
+      res.status(404).json({ success: false, error: 'Purchase not found' });
+      return;
+    }
+
+    if (purchase.status !== 'pending_refund') {
+      res.status(400).json({ success: false, error: 'Purchase is not pending refund' });
+      return;
+    }
+
+    if (approved) {
+      // Approve refund: update status and remove from library
+      const [refundedPurchase] = await db
+        .update(purchases)
+        .set({
+          status: 'refunded',
+          refundedAt: new Date(),
+        })
+        .where(eq(purchases.id, purchaseId))
+        .returning();
+
+      // Remove game from user's library
+      await db
+        .delete(userLibrary)
+        .where(
+          and(
+            eq(userLibrary.userId, purchase.userId),
+            eq(userLibrary.gameId, purchase.gameId)
+          )
+        );
+
+      logger.info(`Refund approved for purchase ${purchaseId}`, {
+        component: 'Purchases',
+        adminId: authReq.user!.id,
+        userId: purchase.userId,
+        gameId: purchase.gameId,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          purchase: refundedPurchase,
+          message: 'Refund approved and processed',
+        },
+      });
+    } else {
+      // Deny refund: reset status to completed
+      const [deniedPurchase] = await db
+        .update(purchases)
+        .set({
+          status: 'completed',
+          refundReason: adminNote
+            ? `${purchase.refundReason} [DENIED: ${adminNote}]`
+            : `${purchase.refundReason} [DENIED]`,
+        })
+        .where(eq(purchases.id, purchaseId))
+        .returning();
+
+      logger.info(`Refund denied for purchase ${purchaseId}`, {
+        component: 'Purchases',
+        adminId: authReq.user!.id,
+        userId: purchase.userId,
+        reason: adminNote,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          purchase: deniedPurchase,
+          message: 'Refund request denied',
+        },
+      });
+    }
+  } catch (error) {
+    logger.error('Refund decision error', error as Error, { component: 'Purchases' });
+    res.status(500).json({ success: false, error: 'Failed to process refund decision' });
+  }
+});
+
 export default router;

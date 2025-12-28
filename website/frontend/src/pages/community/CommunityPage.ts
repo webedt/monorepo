@@ -6,7 +6,7 @@
 import { Page } from '../base/Page';
 import { communityApi } from '../../lib/api';
 import { authStore } from '../../stores/authStore';
-import type { CommunityPost } from '../../types';
+import type { CommunityPost, CommunityComment } from '../../types';
 import './community.css';
 
 export class CommunityPage extends Page {
@@ -15,6 +15,8 @@ export class CommunityPage extends Page {
   protected requiresAuth = false;
 
   private posts: CommunityPost[] = [];
+  private singlePost: CommunityPost | null = null;
+  private postComments: CommunityComment[] = [];
   private loading = true;
   private activeTab: 'discussion' | 'review' | 'guide' | 'artwork' | 'all' = 'all';
   private total = 0;
@@ -31,6 +33,11 @@ export class CommunityPage extends Page {
           </div>
         </div>
       `;
+    }
+
+    // Single post view
+    if (this.singlePost) {
+      return this.renderSinglePost();
     }
 
     return `
@@ -166,7 +173,16 @@ export class CommunityPage extends Page {
 
   async load(): Promise<void> {
     this.loading = true;
+    this.singlePost = null;
+    this.postComments = [];
     this.element.innerHTML = this.render();
+
+    // Check if viewing a single post
+    const postId = this.getParams().postId;
+    if (postId) {
+      await this.loadSinglePost(postId);
+      return;
+    }
 
     // Check for query params
     const type = this.getQuery().get('type');
@@ -361,5 +377,179 @@ export class CommunityPage extends Page {
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString();
+  }
+
+  private renderSinglePost(): string {
+    const post = this.singlePost!;
+    const typeLabels: Record<string, string> = {
+      discussion: 'Discussion',
+      review: 'Review',
+      guide: 'Guide',
+      artwork: 'Artwork',
+      announcement: 'Announcement',
+    };
+
+    return `
+      <div class="community-page single-post-view">
+        <header class="community-header">
+          <a href="#/community" class="back-link">← Back to Community</a>
+        </header>
+
+        <article class="post-detail">
+          <div class="post-header">
+            <span class="post-type post-type--${post.type}">${typeLabels[post.type] || post.type}</span>
+            ${post.pinned ? '<span class="post-pinned">📌 Pinned</span>' : ''}
+            ${post.game ? `<a href="#/game/${post.game.id}" class="post-game">${this.escapeHtml(post.game.title)}</a>` : ''}
+          </div>
+          <h1 class="post-title">${this.escapeHtml(post.title)}</h1>
+          <div class="post-meta">
+            <span class="post-author">${post.author?.displayName || 'Anonymous'}</span>
+            <span class="post-date">${this.formatDate(post.createdAt)}</span>
+            ${post.type === 'review' && post.rating ? `
+              <span class="post-rating">${'★'.repeat(post.rating)}${'☆'.repeat(5 - post.rating)}</span>
+            ` : ''}
+          </div>
+          <div class="post-content">
+            ${this.escapeHtml(post.content).replace(/\n/g, '<br>')}
+          </div>
+          <div class="post-footer">
+            <div class="post-stats">
+              <span class="votes">
+                <button class="vote-btn" data-vote="1" data-post-id="${post.id}">👍</button>
+                <span class="vote-count">${post.upvotes - post.downvotes}</span>
+                <button class="vote-btn" data-vote="-1" data-post-id="${post.id}">👎</button>
+              </span>
+              <span class="comments">💬 ${post.commentCount} comments</span>
+            </div>
+          </div>
+        </article>
+
+        <section class="comments-section">
+          <h2>Comments (${this.postComments.length})</h2>
+          ${authStore.isAuthenticated() ? `
+            <form id="add-comment-form" class="add-comment-form">
+              <textarea id="comment-content" placeholder="Write a comment..." rows="3" required></textarea>
+              <button type="submit" class="btn btn-primary">Post Comment</button>
+            </form>
+          ` : `
+            <p class="login-prompt"><a href="#/login">Login</a> to leave a comment</p>
+          `}
+
+          <div class="comments-list">
+            ${this.postComments.length === 0 ? `
+              <p class="no-comments">No comments yet. Be the first to comment!</p>
+            ` : this.postComments.map((comment) => this.renderComment(comment)).join('')}
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  private renderComment(comment: CommunityComment): string {
+    return `
+      <div class="comment" data-comment-id="${comment.id}">
+        <div class="comment-meta">
+          <span class="comment-author">${comment.author?.displayName || 'Anonymous'}</span>
+          <span class="comment-date">${this.formatDate(comment.createdAt)}</span>
+        </div>
+        <div class="comment-content">${this.escapeHtml(comment.content).replace(/\n/g, '<br>')}</div>
+        <div class="comment-actions">
+          <button class="vote-btn" data-vote="1" data-comment-id="${comment.id}">👍</button>
+          <span class="vote-count">${comment.upvotes - comment.downvotes}</span>
+          <button class="vote-btn" data-vote="-1" data-comment-id="${comment.id}">👎</button>
+        </div>
+      </div>
+    `;
+  }
+
+  private async loadSinglePost(postId: string): Promise<void> {
+    try {
+      const result = await communityApi.getPost(postId);
+      this.singlePost = result.post;
+      this.postComments = result.comments || [];
+
+      this.loading = false;
+      this.element.innerHTML = this.render();
+      this.setupSinglePostEventListeners();
+    } catch (error) {
+      console.error('Failed to load post:', error);
+      this.loading = false;
+      this.element.innerHTML = `
+        <div class="community-page">
+          <div class="error-state">
+            <h2>Post not found</h2>
+            <p>The post you're looking for doesn't exist or has been removed.</p>
+            <a href="#/community" class="btn btn-primary">Back to Community</a>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  private setupSinglePostEventListeners(): void {
+    // Vote buttons
+    const voteButtons = this.$$('.vote-btn');
+    voteButtons.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const vote = parseInt((btn as HTMLElement).dataset.vote || '0') as 1 | -1;
+        const postId = (btn as HTMLElement).dataset.postId;
+        const commentId = (btn as HTMLElement).dataset.commentId;
+        if (postId) {
+          this.handleVote(postId, vote);
+        } else if (commentId) {
+          this.handleCommentVote(commentId, vote);
+        }
+      });
+    });
+
+    // Add comment form
+    const commentForm = this.$('#add-comment-form') as HTMLFormElement;
+    if (commentForm) {
+      commentForm.addEventListener('submit', (e) => this.handleAddComment(e));
+    }
+  }
+
+  private async handleAddComment(e: Event): Promise<void> {
+    e.preventDefault();
+
+    if (!this.singlePost) return;
+
+    const contentEl = this.$('#comment-content') as HTMLTextAreaElement;
+    const content = contentEl.value.trim();
+
+    if (!content) return;
+
+    try {
+      await communityApi.addComment(this.singlePost.id, { content });
+      contentEl.value = '';
+      // Reload the post to get updated comments
+      await this.loadSinglePost(this.singlePost.id);
+    } catch (error) {
+      console.error('Failed to add comment:', error);
+      alert('Failed to add comment. Please try again.');
+    }
+  }
+
+  private async handleCommentVote(commentId: string, vote: 1 | -1): Promise<void> {
+    if (!authStore.isAuthenticated()) {
+      this.navigate('/login');
+      return;
+    }
+
+    try {
+      const result = await communityApi.voteComment(commentId, vote);
+
+      // Update the vote count in the UI
+      const commentEl = this.$(`.comment[data-comment-id="${commentId}"]`);
+      if (commentEl) {
+        const voteCount = commentEl.querySelector('.vote-count');
+        if (voteCount) {
+          voteCount.textContent = String(result.upvotes - result.downvotes);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to vote on comment:', error);
+    }
   }
 }

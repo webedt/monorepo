@@ -850,6 +850,14 @@ async function init(): Promise<void> {
         },
         title: 'Community | WebEDT',
       },
+      {
+        path: '/community/post/:postId',
+        component: (params) => {
+          mountPage(CommunityPage, params);
+          return document.createElement('div');
+        },
+        title: 'Post | WebEDT',
+      },
     ])
     .start();
 
