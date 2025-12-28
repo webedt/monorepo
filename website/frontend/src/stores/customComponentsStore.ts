@@ -42,16 +42,15 @@ class CustomComponentsStore extends Store<CustomComponentsState> {
       error: null,
     });
 
-    // Initialize with localStorage persistence
+    // Initialize with localStorage persistence (loads synchronously)
     persist(this, 'webedt:custom-components', {
       include: ['components', 'categories'],
     });
 
-    // Mark as initialized after persistence loads
-    setTimeout(() => {
-      this.setState({ isInitialized: true });
-      this.updateCategories();
-    }, 0);
+    // Update categories from loaded data and mark as initialized
+    // Note: persist() loads synchronously from localStorage, so data is already available
+    this.updateCategories();
+    this.setState({ isInitialized: true });
   }
 
   /**

@@ -93,6 +93,23 @@ export class ScenePage extends Page<ScenePageOptions> {
   // Custom components panel state
   private showComponentsLibrary = false;
   private unsubscribeComponents: (() => void) | null = null;
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Escape HTML entities to prevent XSS attacks
+   */
+  private escapeHtml(str: string): string {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  /**
+   * Generate unique ID with randomness to prevent collisions
+   */
+  private generateUniqueId(prefix: string): string {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  }
 
   protected render(): string {
     return `
@@ -399,10 +416,17 @@ export class ScenePage extends Page<ScenePageOptions> {
       saveAsComponentBtn.addEventListener('click', () => this.saveSelectionAsComponent());
     }
 
-    // Components search
+    // Components search with debounce
     const searchInput = this.$('.components-search-input') as HTMLInputElement;
     if (searchInput) {
-      searchInput.addEventListener('input', () => this.updateComponentsLibrary(searchInput.value));
+      searchInput.addEventListener('input', () => {
+        if (this.searchDebounceTimer) {
+          clearTimeout(this.searchDebounceTimer);
+        }
+        this.searchDebounceTimer = setTimeout(() => {
+          this.updateComponentsLibrary(searchInput.value);
+        }, 250);
+      });
     }
 
     // Category buttons
@@ -799,7 +823,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   private addCustomComponent(definition: CustomComponentDefinition): void {
     const offset = this.objects.length * 20;
     const obj: SceneObject = {
-      id: `custom-${Date.now()}`,
+      id: this.generateUniqueId('custom'),
       name: definition.name,
       type: 'custom',
       visible: true,
@@ -859,6 +883,28 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
   }
 
+  /**
+   * Render a single component item's HTML with proper escaping
+   */
+  private renderComponentItemHtml(comp: CustomComponentDefinition): string {
+    const escapedName = this.escapeHtml(comp.name);
+    const escapedDesc = comp.description ? this.escapeHtml(comp.description) : '';
+    const title = escapedName + (escapedDesc ? ': ' + escapedDesc : '');
+    // Icon is limited to emoji, but escape just in case
+    const icon = this.escapeHtml(comp.icon || '📦');
+
+    return `
+      <div class="component-item" data-component-id="${comp.id}" title="${title}">
+        <div class="component-icon">${icon}</div>
+        <div class="component-name">${escapedName}</div>
+        <div class="component-actions">
+          <button class="component-action-btn" data-action="add" title="Add to scene">+</button>
+          <button class="component-action-btn" data-action="delete" title="Delete">×</button>
+        </div>
+      </div>
+    `;
+  }
+
   private updateComponentsLibrary(searchQuery?: string): void {
     const grid = this.$('.components-grid') as HTMLElement;
     if (!grid) return;
@@ -877,55 +923,9 @@ export class ScenePage extends Page<ScenePageOptions> {
       return;
     }
 
-    const items = components.map(comp => `
-      <div class="component-item" data-component-id="${comp.id}" title="${comp.name}${comp.description ? ': ' + comp.description : ''}">
-        <div class="component-icon">${comp.icon || '📦'}</div>
-        <div class="component-name">${comp.name}</div>
-        <div class="component-actions">
-          <button class="component-action-btn" data-action="add" title="Add to scene">+</button>
-          <button class="component-action-btn" data-action="delete" title="Delete">×</button>
-        </div>
-      </div>
-    `).join('');
-
+    const items = components.map(comp => this.renderComponentItemHtml(comp)).join('');
     grid.innerHTML = items;
-
-    // Add click handlers
-    grid.querySelectorAll('.component-item').forEach(item => {
-      const id = (item as HTMLElement).dataset.componentId;
-      if (!id) return;
-
-      // Add to scene on click
-      item.addEventListener('click', (e) => {
-        if ((e.target as HTMLElement).closest('.component-action-btn')) return;
-        const definition = customComponentsStore.getComponent(id);
-        if (definition) {
-          this.addCustomComponent(definition);
-        }
-      });
-
-      // Add button
-      const addBtn = item.querySelector('[data-action="add"]');
-      if (addBtn) {
-        addBtn.addEventListener('click', () => {
-          const definition = customComponentsStore.getComponent(id);
-          if (definition) {
-            this.addCustomComponent(definition);
-          }
-        });
-      }
-
-      // Delete button
-      const deleteBtn = item.querySelector('[data-action="delete"]');
-      if (deleteBtn) {
-        deleteBtn.addEventListener('click', () => {
-          if (confirm('Delete this component? This cannot be undone.')) {
-            customComponentsStore.deleteComponent(id);
-            toast.success('Component deleted');
-          }
-        });
-      }
-    });
+    this.bindComponentItemHandlers(grid);
   }
 
   private filterComponentsByCategory(category: string): void {
@@ -950,20 +950,8 @@ export class ScenePage extends Page<ScenePageOptions> {
       return;
     }
 
-    const items = components.map(comp => `
-      <div class="component-item" data-component-id="${comp.id}" title="${comp.name}${comp.description ? ': ' + comp.description : ''}">
-        <div class="component-icon">${comp.icon || '📦'}</div>
-        <div class="component-name">${comp.name}</div>
-        <div class="component-actions">
-          <button class="component-action-btn" data-action="add" title="Add to scene">+</button>
-          <button class="component-action-btn" data-action="delete" title="Delete">×</button>
-        </div>
-      </div>
-    `).join('');
-
+    const items = components.map(comp => this.renderComponentItemHtml(comp)).join('');
     grid.innerHTML = items;
-
-    // Re-bind event handlers
     this.bindComponentItemHandlers(grid);
   }
 
@@ -1890,6 +1878,12 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.boundHandleMouseMove = null;
     this.boundHandleMouseUp = null;
     this.boundHandleWheel = null;
+
+    // Clear search debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
 
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
