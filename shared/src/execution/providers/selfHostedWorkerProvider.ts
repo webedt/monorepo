@@ -9,6 +9,11 @@
  * 1. Accept execution requests via HTTP POST
  * 2. Stream events back via SSE
  * 3. Use the Claude Agent SDK for actual LLM execution
+ *
+ * SECURITY NOTE: This provider transmits Claude authentication credentials
+ * (accessToken, refreshToken) to the external worker service. Ensure the
+ * worker URL uses HTTPS in production and that AI_WORKER_SECRET is configured
+ * to authenticate requests to the worker.
  */
 
 import { logger } from '../../utils/logging/logger.js';
@@ -53,19 +58,6 @@ interface WorkerExecuteRequest {
     expiresAt?: number;
   };
   environmentId?: string;
-}
-
-/**
- * Extract text from prompt (handles both string and content blocks)
- */
-function extractTextFromPrompt(prompt: string | ContentBlock[]): string {
-  if (typeof prompt === 'string') {
-    return prompt;
-  }
-  return prompt
-    .filter((block): block is { type: 'text'; text: string } => block.type === 'text' && 'text' in block)
-    .map(block => block.text)
-    .join('\n');
 }
 
 /**
@@ -258,9 +250,9 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
-    // Combine with external abort signal
+    // Combine with external abort signal (use { once: true } to prevent memory leak)
     if (abortSignal) {
-      abortSignal.addEventListener('abort', () => controller.abort());
+      abortSignal.addEventListener('abort', () => controller.abort(), { once: true });
     }
 
     try {
@@ -377,7 +369,9 @@ export class SelfHostedWorkerProvider implements ExecutionProvider {
           if (line.startsWith('event:')) {
             currentEventType = line.slice(6).trim();
           } else if (line.startsWith('data:')) {
-            currentData = line.slice(5).trim();
+            // Per SSE spec, multiple data: lines should be concatenated with newlines
+            const dataContent = line.slice(5).trim();
+            currentData = currentData ? `${currentData}\n${dataContent}` : dataContent;
           } else if (line === '' && currentData) {
             // End of message, process it
             try {
