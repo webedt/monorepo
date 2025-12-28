@@ -597,6 +597,11 @@
   gap: 2px;
 }
 
+/* View mode indicator in normal mode */
+.chat-page.normal-mode .messages-list {
+  /* Subtle visual indicator that this is summarized view */
+}
+
 .toggle-btn {
   display: flex;
   align-items: center;

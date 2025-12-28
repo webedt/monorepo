@@ -11,6 +11,9 @@ import { workerStore } from '../../stores/workerStore';
 import type { Session } from '../../types';
 import './chat.css';
 
+// View mode determines the level of detail shown
+type ViewMode = 'normal' | 'detailed';
+
 interface ChatMessage {
   id: string;
   type: string; // Event type from raw JSON (e.g., 'user', 'assistant', 'message', 'tool_use', 'error')
@@ -58,7 +61,7 @@ const EVENT_EMOJIS: Record<string, string> = {
   thinking: '🧠',
 };
 
-// Default event filters
+// Default event filters (for detailed mode)
 const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   user: true,
   user_message: true,
@@ -84,6 +87,20 @@ const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
   thinking: true,
 };
 
+// Events shown in Normal Mode - high-level progress without micro-steps
+// Normal mode provides a summarized view suitable for most users
+const NORMAL_MODE_EVENTS: Set<string> = new Set([
+  'user',           // User messages
+  'user_message',   // User follow-up messages
+  'assistant',      // Assistant responses
+  'assistant_message', // Assistant follow-up responses
+  'error',          // Errors are always important
+  'result',         // Final completion stats
+  'completed',      // Session completed
+  'session_created', // Session started
+  'session-created', // Session started (alt format)
+]);
+
 interface ChatPageOptions extends PageOptions {
   params?: {
     sessionId?: string;
@@ -108,6 +125,7 @@ export class ChatPage extends Page<ChatPageOptions> {
   private shownOptimisticUserMessage: string | null = null; // Track optimistic user message to avoid duplicates
 
   // View settings (persisted to localStorage)
+  private viewMode: ViewMode = 'normal'; // Default to normal mode for most users
   private showRawJson = false;
   private showTimestamps = false;
   private widescreen = false;
@@ -137,9 +155,13 @@ export class ChatPage extends Page<ChatPageOptions> {
         <div class="chat-toolbar">
           <div class="toolbar-left">
             <div class="view-toggle">
-              <button class="toggle-btn" data-view="formatted" title="Formatted View">
+              <button class="toggle-btn" data-view="normal" title="Normal View - Summarized progress">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                Chat
+                Normal
+              </button>
+              <button class="toggle-btn" data-view="detailed" title="Detailed View - All events and steps">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                Detailed
               </button>
               <button class="toggle-btn" data-view="raw" title="Raw JSON View">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
@@ -255,10 +277,21 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private loadSettings(): void {
     try {
-      // Load view mode
-      const savedRawJson = localStorage.getItem('chat_showRawJson');
-      if (savedRawJson !== null) {
-        this.showRawJson = savedRawJson === 'true';
+      // Load view mode (normal, detailed, or raw)
+      const savedViewMode = localStorage.getItem('chat_viewMode');
+      if (savedViewMode === 'normal' || savedViewMode === 'detailed') {
+        this.viewMode = savedViewMode;
+        this.showRawJson = false;
+      } else if (savedViewMode === 'raw') {
+        this.viewMode = 'detailed'; // Raw view uses detailed mode data
+        this.showRawJson = true;
+      } else {
+        // Legacy: check old showRawJson setting
+        const savedRawJson = localStorage.getItem('chat_showRawJson');
+        if (savedRawJson === 'true') {
+          this.showRawJson = true;
+          this.viewMode = 'detailed';
+        }
       }
 
       // Load timestamps setting
@@ -273,7 +306,7 @@ export class ChatPage extends Page<ChatPageOptions> {
         this.widescreen = savedWidescreen === 'true';
       }
 
-      // Load event filters
+      // Load event filters (only used in detailed mode)
       const savedFilters = localStorage.getItem('chat_eventFilters');
       if (savedFilters) {
         const parsed = JSON.parse(savedFilters);
@@ -286,7 +319,10 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private saveSettings(): void {
     try {
-      localStorage.setItem('chat_showRawJson', String(this.showRawJson));
+      // Save view mode as: normal, detailed, or raw
+      const viewModeToSave = this.showRawJson ? 'raw' : this.viewMode;
+      localStorage.setItem('chat_viewMode', viewModeToSave);
+      localStorage.setItem('chat_showRawJson', String(this.showRawJson)); // Keep for legacy
       localStorage.setItem('chat_showTimestamps', String(this.showTimestamps));
       localStorage.setItem('chat_widescreen', String(this.widescreen));
       localStorage.setItem('chat_eventFilters', JSON.stringify(this.eventFilters));
@@ -297,10 +333,20 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private setupToolbar(): void {
     // View toggle buttons
-    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
+    const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
+    const detailedBtn = this.$('[data-view="detailed"]') as HTMLButtonElement;
     const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
 
-    formattedBtn?.addEventListener('click', () => {
+    normalBtn?.addEventListener('click', () => {
+      this.viewMode = 'normal';
+      this.showRawJson = false;
+      this.saveSettings();
+      this.updateToolbarState();
+      this.renderContent();
+    });
+
+    detailedBtn?.addEventListener('click', () => {
+      this.viewMode = 'detailed';
       this.showRawJson = false;
       this.saveSettings();
       this.updateToolbarState();
@@ -308,6 +354,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     });
 
     rawBtn?.addEventListener('click', () => {
+      this.viewMode = 'detailed'; // Raw uses detailed mode data
       this.showRawJson = true;
       this.saveSettings();
       this.updateToolbarState();
@@ -357,11 +404,20 @@ export class ChatPage extends Page<ChatPageOptions> {
 
   private updateToolbarState(): void {
     // Update view toggle
-    const formattedBtn = this.$('[data-view="formatted"]') as HTMLButtonElement;
+    const normalBtn = this.$('[data-view="normal"]') as HTMLButtonElement;
+    const detailedBtn = this.$('[data-view="detailed"]') as HTMLButtonElement;
     const rawBtn = this.$('[data-view="raw"]') as HTMLButtonElement;
 
-    formattedBtn?.classList.toggle('active', !this.showRawJson);
+    normalBtn?.classList.toggle('active', this.viewMode === 'normal' && !this.showRawJson);
+    detailedBtn?.classList.toggle('active', this.viewMode === 'detailed' && !this.showRawJson);
     rawBtn?.classList.toggle('active', this.showRawJson);
+
+    // Show/hide filters button based on view mode (only useful in detailed/raw mode)
+    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    const filterDropdown = this.$('.filter-dropdown') as HTMLElement;
+    if (filterDropdown) {
+      filterDropdown.style.display = this.viewMode === 'normal' && !this.showRawJson ? 'none' : '';
+    }
 
     // Update timestamps button
     const timestampsBtn = this.$('[data-action="toggle-timestamps"]') as HTMLButtonElement;
@@ -373,8 +429,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     const chatPage = this.$('.chat-page') as HTMLElement;
     chatPage?.classList.toggle('widescreen', this.widescreen);
 
-    // Update filters button to show if any filters are active
-    const filtersBtn = this.$('[data-action="toggle-filters"]') as HTMLButtonElement;
+    // Update filters button to show if any filters are active (only relevant in detailed mode)
     const hasActiveFilters = Object.values(this.eventFilters).some(v => !v);
     filtersBtn?.classList.toggle('has-filters', hasActiveFilters);
   }
@@ -1226,13 +1281,22 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Hide events list in formatted mode
     eventsList?.style.setProperty('display', 'none');
 
-    // Filter messages based on event filters
-    // Always show user and assistant messages regardless of filter settings
-    const alwaysShowTypes = ['user', 'assistant'];
-    const filteredMessages = this.messages.filter(msg => {
-      if (alwaysShowTypes.includes(msg.type)) return true;
-      return this.eventFilters[msg.type] !== false;
-    });
+    // Filter messages based on view mode
+    let filteredMessages: ChatMessage[];
+
+    if (this.viewMode === 'normal') {
+      // Normal Mode: Show only high-level events for a summarized view
+      // This hides micro-steps like individual tool_use, thinking, message events
+      filteredMessages = this.messages.filter(msg => NORMAL_MODE_EVENTS.has(msg.type));
+    } else {
+      // Detailed Mode: Use event filters
+      // Always show user and assistant messages regardless of filter settings
+      const alwaysShowTypes = ['user', 'assistant'];
+      filteredMessages = this.messages.filter(msg => {
+        if (alwaysShowTypes.includes(msg.type)) return true;
+        return this.eventFilters[msg.type] !== false;
+      });
+    }
 
     if (filteredMessages.length === 0) {
       empty?.style.setProperty('display', 'flex');
