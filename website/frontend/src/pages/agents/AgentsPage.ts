@@ -9,7 +9,7 @@ import { sessionsApi, githubApi, collectionsApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
 
-type FilterMode = 'all' | 'favorites';
+type FilterMode = 'all' | 'active' | 'favorites';
 
 export class AgentsPage extends Page<PageOptions> {
   readonly route = '/agents';
@@ -62,6 +62,14 @@ export class AgentsPage extends Page<PageOptions> {
           <div class="agents-header-right">
             <div class="filter-buttons">
               <button class="filter-btn filter-btn--active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="active">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polygon points="10 8 16 12 10 16 10 8"></polygon>
+                </svg>
+                Active
+                <span class="filter-btn-count active-count hidden">0</span>
+              </button>
               <button class="filter-btn" data-filter="favorites">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
@@ -553,6 +561,23 @@ export class AgentsPage extends Page<PageOptions> {
       empty?.style.setProperty('display', 'flex');
       list?.style.setProperty('display', 'none');
 
+      // Update empty state message based on filter mode
+      const emptyTitle = this.$('.empty-title') as HTMLElement;
+      const emptyDesc = this.$('.empty-description') as HTMLElement;
+      if (this.filterMode === 'active') {
+        if (emptyTitle) emptyTitle.textContent = 'No active sessions';
+        if (emptyDesc) emptyDesc.textContent = 'No sessions are currently running';
+      } else if (this.filterMode === 'favorites') {
+        if (emptyTitle) emptyTitle.textContent = 'No favorite sessions';
+        if (emptyDesc) emptyDesc.textContent = 'Star sessions to add them to your favorites';
+      } else if (this.searchQuery) {
+        if (emptyTitle) emptyTitle.textContent = 'No matching sessions';
+        if (emptyDesc) emptyDesc.textContent = 'Try a different search term';
+      } else {
+        if (emptyTitle) emptyTitle.textContent = 'No agent sessions yet';
+        if (emptyDesc) emptyDesc.textContent = 'Start a new session to begin coding with AI';
+      }
+
       // Add empty icon
       const emptyIconContainer = this.$('.empty-icon') as HTMLElement;
       if (emptyIconContainer && !emptyIconContainer.hasChildNodes()) {
@@ -711,6 +736,11 @@ export class AgentsPage extends Page<PageOptions> {
       result = result.filter(session => this.collectionSessionIds.has(session.id));
     }
 
+    // Apply active filter (running sessions only)
+    if (this.filterMode === 'active') {
+      result = result.filter(session => session.status === 'running');
+    }
+
     // Apply favorites filter
     if (this.filterMode === 'favorites') {
       result = result.filter(session => session.favorite === true);
@@ -731,6 +761,21 @@ export class AgentsPage extends Page<PageOptions> {
     }
 
     this.filteredSessions = result;
+
+    // Update active count badge
+    this.updateActiveCount();
+  }
+
+  private updateActiveCount(): void {
+    const activeCount = this.sessions.reduce(
+      (count, s) => s.status === 'running' ? count + 1 : count,
+      0
+    );
+    const countBadge = this.$('.active-count') as HTMLElement;
+    if (countBadge) {
+      countBadge.textContent = activeCount.toString();
+      countBadge.classList.toggle('hidden', activeCount === 0);
+    }
   }
 
   private handleSearch(query: string): void {
