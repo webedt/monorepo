@@ -4,7 +4,8 @@
  */
 
 import { Router } from 'express';
-import { db, users, sessions, eq, sql } from '@webedt/shared';
+import { db, users, sessions, eq, sql, ROLE_HIERARCHY } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import { AuthRequest, requireAdmin } from '../middleware/auth.js';
 import { lucia } from '@webedt/shared';
 import bcrypt from 'bcrypt';
@@ -20,6 +21,7 @@ router.get('/users', requireAdmin, async (req, res) => {
       displayName: users.displayName,
       githubId: users.githubId,
       isAdmin: users.isAdmin,
+      role: users.role,
       createdAt: users.createdAt,
     }).from(users).orderBy(users.createdAt);
 
@@ -45,6 +47,7 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
       imageResizeMaxDimension: users.imageResizeMaxDimension,
       voiceCommandKeywords: users.voiceCommandKeywords,
       isAdmin: users.isAdmin,
+      role: users.role,
       createdAt: users.createdAt,
     }).from(users).where(eq(users.id, id)).limit(1);
 
@@ -63,10 +66,16 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
 // POST /api/admin/users - Create a new user
 router.post('/users', requireAdmin, async (req, res) => {
   try {
-    const { email, displayName, password, isAdmin } = req.body;
+    const { email, displayName, password, isAdmin, role } = req.body;
 
     if (!email || !password) {
       res.status(400).json({ success: false, error: 'Email and password are required' });
+      return;
+    }
+
+    // Validate role if provided
+    if (role && !ROLE_HIERARCHY.includes(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -90,11 +99,13 @@ router.post('/users', requireAdmin, async (req, res) => {
       displayName: displayName || null,
       passwordHash,
       isAdmin: isAdmin || false,
+      role: (role as UserRole) || 'user',
     }).returning({
       id: users.id,
       email: users.email,
       displayName: users.displayName,
       isAdmin: users.isAdmin,
+      role: users.role,
       createdAt: users.createdAt,
     });
 
@@ -110,11 +121,23 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
   try {
     const authReq = req as AuthRequest;
     const { id } = req.params;
-    const { email, displayName, isAdmin, password } = req.body;
+    const { email, displayName, isAdmin, password, role } = req.body;
 
     // Prevent user from removing their own admin status
     if (authReq.user?.id === id && isAdmin === false) {
       res.status(400).json({ success: false, error: 'Cannot remove your own admin status' });
+      return;
+    }
+
+    // Prevent user from demoting their own role
+    if (authReq.user?.id === id && role && ROLE_HIERARCHY.indexOf(role) < ROLE_HIERARCHY.indexOf(authReq.user.role)) {
+      res.status(400).json({ success: false, error: 'Cannot demote your own role' });
+      return;
+    }
+
+    // Validate role if provided
+    if (role && !ROLE_HIERARCHY.includes(role)) {
+      res.status(400).json({ success: false, error: `Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}` });
       return;
     }
 
@@ -123,6 +146,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
     if (email !== undefined) updateData.email = email;
     if (displayName !== undefined) updateData.displayName = displayName;
     if (isAdmin !== undefined) updateData.isAdmin = isAdmin;
+    if (role !== undefined) updateData.role = role;
     if (password) {
       updateData.passwordHash = await bcrypt.hash(password, 10);
     }
@@ -140,6 +164,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
         email: users.email,
         displayName: users.displayName,
         isAdmin: users.isAdmin,
+        role: users.role,
         createdAt: users.createdAt,
       });
 

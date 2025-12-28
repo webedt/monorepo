@@ -4,7 +4,8 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { lucia } from '@webedt/shared';
+import { lucia, hasRolePermission } from '@webedt/shared';
+import type { UserRole } from '@webedt/shared';
 import type { User, Session } from 'lucia';
 
 // Extend Express Request type to include auth properties
@@ -83,3 +84,23 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 
   next();
 }
+
+export function requireRole(requiredRole: UserRole) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user || !req.authSession) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const userRole = req.user.role || 'user';
+    if (!hasRolePermission(userRole, requiredRole)) {
+      res.status(403).json({ success: false, error: `Forbidden: ${requiredRole} access required` });
+      return;
+    }
+
+    next();
+  };
+}
+
+export const requireEditor = requireRole('editor');
+export const requireDeveloper = requireRole('developer');

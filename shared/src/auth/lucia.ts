@@ -11,6 +11,7 @@ import { NodePostgresAdapter } from '@lucia-auth/adapter-postgresql';
 import { pool } from '../db/index.js';
 import type { ClaudeAuth } from './claudeAuth.js';
 import type { CodexAuth } from './codexAuth.js';
+import type { UserRole } from '../db/schema.js';
 
 /**
  * Gemini authentication - OAuth only (from ~/.gemini/oauth_creds.json)
@@ -65,6 +66,7 @@ export const lucia = new Lucia(adapter, {
       preferredProvider: attributes.preferred_provider || 'claude',
       preferredModel: attributes.preferred_model,
       isAdmin: attributes.is_admin,
+      role: attributes.role || 'user',
     };
   },
 });
@@ -83,6 +85,7 @@ declare module 'lucia' {
       preferred_provider: string;
       preferred_model: string | null;
       is_admin: boolean;
+      role: UserRole;
     };
   }
 
@@ -98,5 +101,6 @@ declare module 'lucia' {
     preferredProvider: string;
     preferredModel: string | null;
     isAdmin: boolean;
+    role: UserRole;
   }
 }

@@ -417,6 +417,7 @@ export async function closeDatabase(): Promise<void> {
 export type {
   User,
   NewUser,
+  UserRole,
   Session,
   NewSession,
   ChatSession,
@@ -462,6 +463,9 @@ export type {
   WishlistItem,
   NewWishlistItem,
 } from './schema.js';
+
+// Re-export role constants and utilities from schema
+export { ROLE_HIERARCHY, hasRolePermission } from './schema.js';
 
 // Re-export table definitions from schema
 export {

@@ -26,6 +26,7 @@ export interface User {
   autocompleteEnabled?: boolean;
   autocompleteModel?: string;
   isAdmin: boolean;
+  role: UserRole;
   createdAt: string;
 }
 
@@ -56,6 +57,7 @@ export type Provider = 'claude' | 'codex' | 'copilot' | 'gemini';
 export type LandingPage = 'dashboard' | 'store' | 'library' | 'community' | 'sessions';
 export type VerbosityLevel = 'minimal' | 'normal' | 'verbose';
 export type ImageAiProvider = 'openrouter' | 'cometapi' | 'google';
+export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
 
 // Session types
 export interface Session {
