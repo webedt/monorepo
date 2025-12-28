@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, users, chatSessions, communityPosts, eq, and, desc, sql } from '@webedt/shared';
+import { db, games, users, chatSessions, communityPosts, eq, and, or, desc, sql, ilike } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 
@@ -25,6 +25,210 @@ interface SearchResponse {
   items: SearchResultItem[];
   total: number;
   query: string;
+}
+
+/**
+ * Search games using database-level ILIKE filtering
+ */
+async function searchGames(searchTerm: string): Promise<SearchResultItem[]> {
+  const results: SearchResultItem[] = [];
+  const searchPattern = `%${searchTerm}%`;
+
+  // Use database-level filtering with ILIKE for better performance
+  const matchedGames = await db
+    .select()
+    .from(games)
+    .where(
+      and(
+        eq(games.status, 'published'),
+        or(
+          ilike(games.title, searchPattern),
+          ilike(games.description, searchPattern),
+          ilike(games.developer, searchPattern),
+          ilike(games.publisher, searchPattern)
+        )
+      )
+    )
+    .limit(50);
+
+  for (const game of matchedGames) {
+    const matchedFields: string[] = [];
+    const lowerSearchTerm = searchTerm.toLowerCase();
+
+    // Determine which fields matched (for display purposes)
+    if (game.title.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('title');
+    }
+    if (game.description?.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('description');
+    }
+    if (game.developer?.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('developer');
+    }
+    if (game.publisher?.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('publisher');
+    }
+    if (game.tags?.some(tag => tag.toLowerCase().includes(lowerSearchTerm))) {
+      matchedFields.push('tags');
+    }
+    if (game.genres?.some(genre => genre.toLowerCase().includes(lowerSearchTerm))) {
+      matchedFields.push('genres');
+    }
+
+    if (matchedFields.length > 0) {
+      results.push({
+        id: game.id,
+        type: 'game',
+        title: game.title,
+        subtitle: game.developer || game.publisher,
+        description: game.shortDescription || game.description?.substring(0, 100),
+        image: game.coverImage,
+        tags: game.tags?.slice(0, 5),
+        matchedFields,
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Search users using database-level ILIKE filtering
+ * Note: Only searches by displayName to protect privacy
+ */
+async function searchUsers(searchTerm: string): Promise<SearchResultItem[]> {
+  const results: SearchResultItem[] = [];
+  const searchPattern = `%${searchTerm}%`;
+
+  // Only search by displayName to protect email privacy
+  const matchedUsers = await db
+    .select({
+      id: users.id,
+      displayName: users.displayName,
+    })
+    .from(users)
+    .where(ilike(users.displayName, searchPattern))
+    .limit(20);
+
+  for (const user of matchedUsers) {
+    if (user.displayName) {
+      results.push({
+        id: user.id,
+        type: 'user',
+        title: user.displayName,
+        matchedFields: ['displayName'],
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Search sessions for authenticated user using database-level ILIKE filtering
+ */
+async function searchSessions(searchTerm: string, userId: string): Promise<SearchResultItem[]> {
+  const results: SearchResultItem[] = [];
+  const searchPattern = `%${searchTerm}%`;
+
+  const matchedSessions = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.userId, userId),
+        sql`${chatSessions.deletedAt} IS NULL`,
+        or(
+          ilike(chatSessions.title, searchPattern),
+          ilike(chatSessions.userRequest, searchPattern),
+          ilike(chatSessions.repositoryName, searchPattern),
+          ilike(chatSessions.branch, searchPattern)
+        )
+      )
+    )
+    .orderBy(desc(chatSessions.createdAt))
+    .limit(30);
+
+  const lowerSearchTerm = searchTerm.toLowerCase();
+
+  for (const session of matchedSessions) {
+    const matchedFields: string[] = [];
+
+    if (session.title?.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('title');
+    }
+    if (session.userRequest?.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('request');
+    }
+    if (session.repositoryName?.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('repository');
+    }
+    if (session.branch?.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('branch');
+    }
+
+    if (matchedFields.length > 0) {
+      results.push({
+        id: session.id,
+        type: 'session',
+        title: session.title || session.userRequest?.substring(0, 50) || 'Untitled Session',
+        subtitle: session.repositoryName ? `${session.repositoryOwner}/${session.repositoryName}` : undefined,
+        description: session.userRequest?.substring(0, 100),
+        matchedFields,
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Search community posts using database-level ILIKE filtering
+ */
+async function searchPosts(searchTerm: string): Promise<SearchResultItem[]> {
+  const results: SearchResultItem[] = [];
+  const searchPattern = `%${searchTerm}%`;
+
+  const matchedPosts = await db
+    .select()
+    .from(communityPosts)
+    .where(
+      and(
+        eq(communityPosts.status, 'published'),
+        or(
+          ilike(communityPosts.title, searchPattern),
+          ilike(communityPosts.content, searchPattern)
+        )
+      )
+    )
+    .orderBy(desc(communityPosts.createdAt))
+    .limit(30);
+
+  const lowerSearchTerm = searchTerm.toLowerCase();
+
+  for (const post of matchedPosts) {
+    const matchedFields: string[] = [];
+
+    if (post.title.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('title');
+    }
+    if (post.content.toLowerCase().includes(lowerSearchTerm)) {
+      matchedFields.push('content');
+    }
+
+    if (matchedFields.length > 0) {
+      results.push({
+        id: post.id,
+        type: 'post',
+        title: post.title,
+        subtitle: post.type.charAt(0).toUpperCase() + post.type.slice(1),
+        description: post.content.substring(0, 100),
+        matchedFields,
+      });
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -50,160 +254,35 @@ router.get('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const searchTerm = query.toLowerCase();
-    const results: SearchResultItem[] = [];
+    // Build array of search promises based on requested types
+    const searchPromises: Promise<SearchResultItem[]>[] = [];
+    const searchTypes: string[] = [];
 
-    // Search games
     if (types.includes('game')) {
-      const allGames = await db
-        .select()
-        .from(games)
-        .where(eq(games.status, 'published'));
-
-      for (const game of allGames) {
-        const matchedFields: string[] = [];
-
-        if (game.title.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('title');
-        }
-        if (game.description?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('description');
-        }
-        if (game.developer?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('developer');
-        }
-        if (game.publisher?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('publisher');
-        }
-        if (game.tags?.some(tag => tag.toLowerCase().includes(searchTerm))) {
-          matchedFields.push('tags');
-        }
-        if (game.genres?.some(genre => genre.toLowerCase().includes(searchTerm))) {
-          matchedFields.push('genres');
-        }
-
-        if (matchedFields.length > 0) {
-          results.push({
-            id: game.id,
-            type: 'game',
-            title: game.title,
-            subtitle: game.developer || game.publisher,
-            description: game.shortDescription || game.description?.substring(0, 100),
-            image: game.coverImage,
-            tags: game.tags?.slice(0, 5),
-            matchedFields,
-          });
-        }
-      }
+      searchPromises.push(searchGames(query));
+      searchTypes.push('game');
     }
 
-    // Search users (public profiles only)
     if (types.includes('user')) {
-      const allUsers = await db
-        .select({
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        })
-        .from(users);
-
-      for (const user of allUsers) {
-        const matchedFields: string[] = [];
-
-        if (user.displayName?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('displayName');
-        }
-        // Only match email for the current user's own account
-        if (authReq.user?.id === user.id && user.email.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('email');
-        }
-
-        if (matchedFields.length > 0) {
-          results.push({
-            id: user.id,
-            type: 'user',
-            title: user.displayName || 'User',
-            subtitle: user.displayName ? undefined : user.email.split('@')[0],
-            matchedFields,
-          });
-        }
-      }
+      searchPromises.push(searchUsers(query));
+      searchTypes.push('user');
     }
 
-    // Search sessions (user's own sessions only if authenticated)
     if (types.includes('session') && authReq.user) {
-      const userSessions = await db
-        .select()
-        .from(chatSessions)
-        .where(
-          and(
-            eq(chatSessions.userId, authReq.user.id),
-            sql`${chatSessions.deletedAt} IS NULL`
-          )
-        )
-        .orderBy(desc(chatSessions.createdAt))
-        .limit(50);
-
-      for (const session of userSessions) {
-        const matchedFields: string[] = [];
-
-        if (session.title?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('title');
-        }
-        if (session.userRequest?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('request');
-        }
-        if (session.repositoryName?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('repository');
-        }
-        if (session.branch?.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('branch');
-        }
-
-        if (matchedFields.length > 0) {
-          results.push({
-            id: session.id,
-            type: 'session',
-            title: session.title || session.userRequest?.substring(0, 50) || 'Untitled Session',
-            subtitle: session.repositoryName ? `${session.repositoryOwner}/${session.repositoryName}` : undefined,
-            description: session.userRequest?.substring(0, 100),
-            matchedFields,
-          });
-        }
-      }
+      searchPromises.push(searchSessions(query, authReq.user.id));
+      searchTypes.push('session');
     }
 
-    // Search community posts
     if (types.includes('post')) {
-      const allPosts = await db
-        .select()
-        .from(communityPosts)
-        .where(eq(communityPosts.status, 'published'))
-        .orderBy(desc(communityPosts.createdAt))
-        .limit(100);
-
-      for (const post of allPosts) {
-        const matchedFields: string[] = [];
-
-        if (post.title.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('title');
-        }
-        if (post.content.toLowerCase().includes(searchTerm)) {
-          matchedFields.push('content');
-        }
-
-        if (matchedFields.length > 0) {
-          results.push({
-            id: post.id,
-            type: 'post',
-            title: post.title,
-            subtitle: post.type.charAt(0).toUpperCase() + post.type.slice(1),
-            description: post.content.substring(0, 100),
-            matchedFields,
-          });
-        }
-      }
+      searchPromises.push(searchPosts(query));
+      searchTypes.push('post');
     }
+
+    // Execute all searches in parallel
+    const searchResults = await Promise.all(searchPromises);
+
+    // Combine all results
+    const results: SearchResultItem[] = searchResults.flat();
 
     // Sort by relevance (more matched fields = higher relevance)
     results.sort((a, b) => {
@@ -235,14 +314,14 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 /**
- * Get search suggestions based on popular/recent searches
+ * Get search suggestions based on game titles
  */
 router.get('/suggestions', async (req: Request, res: Response) => {
   try {
-    const query = (req.query.q as string || '').trim().toLowerCase();
+    const query = (req.query.q as string || '').trim();
     const limit = Math.min(parseInt(req.query.limit as string) || 5, 10);
 
-    if (!query) {
+    if (!query || query.length < 1) {
       res.json({
         success: true,
         data: {
@@ -252,16 +331,21 @@ router.get('/suggestions', async (req: Request, res: Response) => {
       return;
     }
 
-    // Get game titles that match the query prefix
-    const allGames = await db
+    // Use database-level ILIKE for prefix matching
+    const searchPattern = `${query}%`;
+
+    const matchedGames = await db
       .select({ title: games.title })
       .from(games)
-      .where(eq(games.status, 'published'));
+      .where(
+        and(
+          eq(games.status, 'published'),
+          ilike(games.title, searchPattern)
+        )
+      )
+      .limit(limit);
 
-    const suggestions = allGames
-      .filter(g => g.title.toLowerCase().startsWith(query))
-      .map(g => g.title)
-      .slice(0, limit);
+    const suggestions = matchedGames.map(g => g.title);
 
     res.json({
       success: true,

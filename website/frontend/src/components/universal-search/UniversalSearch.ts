@@ -211,6 +211,58 @@ export class UniversalSearch extends Component<HTMLDivElement> {
         this.close();
       }
     }) as EventListener);
+
+    // Delegated click handler for dynamically created elements in resultsContainer
+    this.on(this.resultsContainer, 'click', ((e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+
+      // Handle clear recent searches button
+      const clearBtn = target.closest('.universal-search-recent-clear');
+      if (clearBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.clearRecentSearches();
+        return;
+      }
+
+      // Handle recent search item click
+      const recentItem = target.closest('.universal-search-recent-item') as HTMLElement | null;
+      if (recentItem && recentItem.dataset.search) {
+        e.preventDefault();
+        e.stopPropagation();
+        const search = recentItem.dataset.search;
+        this.inputElement.value = search;
+        this.currentQuery = search;
+        this.clearButton.style.display = 'flex';
+        this.handleInput();
+        return;
+      }
+
+      // Handle result item click
+      const resultItem = target.closest('.universal-search-result') as HTMLElement | null;
+      if (resultItem && resultItem.dataset.index) {
+        e.preventDefault();
+        e.stopPropagation();
+        const index = parseInt(resultItem.dataset.index, 10);
+        if (index >= 0 && index < this.currentResults.length) {
+          this.selectResult(this.currentResults[index]);
+        }
+        return;
+      }
+    }) as EventListener);
+
+    // Delegated mouseenter handler for result items
+    this.on(this.resultsContainer, 'mouseenter', ((e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const resultItem = target.closest('.universal-search-result') as HTMLElement | null;
+      if (resultItem && resultItem.dataset.index) {
+        const index = parseInt(resultItem.dataset.index, 10);
+        if (index >= 0 && index < this.currentResults.length) {
+          this.focusedIndex = index;
+          this.updateFocusedState();
+        }
+      }
+    }) as EventListener, { capture: true });
   }
 
   private handleInput(): void {
@@ -365,21 +417,13 @@ export class UniversalSearch extends Component<HTMLDivElement> {
       <button type="button" class="universal-search-recent-clear">Clear</button>
     `;
 
-    const clearBtn = headerEl.querySelector('.universal-search-recent-clear');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.clearRecentSearches();
-      });
-    }
-
     this.resultsContainer.appendChild(headerEl);
 
     for (const search of this.recentSearches) {
       const itemEl = document.createElement('button');
       itemEl.type = 'button';
       itemEl.className = 'universal-search-recent-item';
+      itemEl.dataset.search = search;
       itemEl.innerHTML = `
         <span class="universal-search-recent-icon">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
@@ -388,15 +432,6 @@ export class UniversalSearch extends Component<HTMLDivElement> {
         </span>
         <span class="universal-search-recent-text">${this.escapeHtml(search)}</span>
       `;
-
-      itemEl.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.inputElement.value = search;
-        this.currentQuery = search;
-        this.clearButton.style.display = 'flex';
-        this.handleInput();
-      });
 
       this.resultsContainer.appendChild(itemEl);
     }
@@ -429,6 +464,8 @@ export class UniversalSearch extends Component<HTMLDivElement> {
     itemEl.dataset.type = item.type;
 
     const index = this.currentResults.indexOf(item);
+    itemEl.dataset.index = String(index);
+
     if (index === this.focusedIndex) {
       itemEl.classList.add('universal-search-result--focused');
     }
@@ -474,17 +511,6 @@ export class UniversalSearch extends Component<HTMLDivElement> {
       </div>
       <span class="universal-search-result-type">${this.getTypeLabel(item.type)}</span>
     `;
-
-    itemEl.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.selectResult(item);
-    });
-
-    itemEl.addEventListener('mouseenter', () => {
-      this.focusedIndex = index;
-      this.updateFocusedState();
-    });
 
     return itemEl;
   }
