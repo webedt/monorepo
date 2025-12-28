@@ -246,4 +246,69 @@ export interface IGitHelperDocumentation {
    * ```
    */
   pull(branch?: string): Promise<void>;
+
+  /**
+   * Get diff comparing current HEAD against a base branch.
+   *
+   * Uses git diff base...HEAD to show what changes would be
+   * introduced by merging current branch into base.
+   *
+   * @param baseBranch - Name of the base branch to compare against
+   * @returns Unified diff output string
+   * @throws Error if diff fails
+   *
+   * @example
+   * ```typescript
+   * const diff = await git.getDiffAgainstBranch('main');
+   * console.log(diff);
+   * ```
+   */
+  getDiffAgainstBranch(baseBranch: string): Promise<string>;
+
+  /**
+   * Get diff for a specific file comparing current HEAD against a base branch.
+   *
+   * @param baseBranch - Name of the base branch to compare against
+   * @param filePath - Path to the file to diff
+   * @returns Unified diff output string for the file
+   * @throws Error if diff fails
+   *
+   * @example
+   * ```typescript
+   * const diff = await git.getFileDiffAgainstBranch('main', 'src/app.ts');
+   * console.log(diff);
+   * ```
+   */
+  getFileDiffAgainstBranch(baseBranch: string, filePath: string): Promise<string>;
+
+  /**
+   * Get list of files that differ between current HEAD and base branch.
+   *
+   * @param baseBranch - Name of the base branch to compare against
+   * @returns Array of file paths that have changes
+   * @throws Error if diff fails
+   *
+   * @example
+   * ```typescript
+   * const files = await git.getChangedFilesAgainstBranch('main');
+   * console.log('Changed files:', files);
+   * // ['src/app.ts', 'package.json']
+   * ```
+   */
+  getChangedFilesAgainstBranch(baseBranch: string): Promise<string[]>;
+
+  /**
+   * Get statistics for the diff against a base branch.
+   *
+   * @param baseBranch - Name of the base branch to compare against
+   * @returns Object with additions, deletions, and filesChanged counts
+   * @throws Error if diff fails
+   *
+   * @example
+   * ```typescript
+   * const stats = await git.getDiffStats('main');
+   * console.log(`${stats.filesChanged} files, +${stats.additions}, -${stats.deletions}`);
+   * ```
+   */
+  getDiffStats(baseBranch: string): Promise<{ additions: number; deletions: number; filesChanged: number }>;
 }

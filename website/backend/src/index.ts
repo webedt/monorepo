@@ -55,6 +55,8 @@ import taxonomiesRoutes from './api/routes/taxonomies.js';
 import announcementsRoutes from './api/routes/announcements.js';
 import cloudSavesRoutes from './api/routes/cloudSaves.js';
 import autocompleteRoutes from './api/routes/autocomplete.js';
+import snippetsRoutes from './api/routes/snippets.js';
+import diffsRoutes from './api/routes/diffs.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
@@ -340,6 +342,8 @@ app.use('/api/taxonomies', taxonomiesRoutes);  // Admin-configurable taxonomy sy
 app.use('/api/announcements', announcementsRoutes);  // Official platform announcements
 app.use('/api/cloud-saves', cloudSavesRoutes);  // Cloud save synchronization
 app.use('/api/autocomplete', autocompleteRoutes);  // AI-powered code completion
+app.use('/api/snippets', snippetsRoutes);  // User code snippets and templates
+app.use('/api/diffs', diffsRoutes);  // Diff visualization comparing branches
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');
