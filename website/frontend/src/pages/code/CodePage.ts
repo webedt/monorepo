@@ -5,7 +5,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, LintingPanel, CollaborativeCursors, CommitDialog } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox } from '../../components';
 import type { ChangedFile } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
@@ -57,6 +57,7 @@ export class CodePage extends Page<CodePageOptions> {
   private pendingCommitFiles: Map<string, ChangedFile> = new Map();
   private commitDialog: CommitDialog | null = null;
   private commitBtn: Button | null = null;
+  private aiInputBox: AIInputBox | null = null;
   private undoRedoState: UndoRedoState<TabContentState> = {
     canUndo: false,
     canRedo: false,
@@ -142,6 +143,7 @@ export class CodePage extends Page<CodePageOptions> {
               </div>
               <div class="linting-panel-container"></div>
             </div>
+            <div class="ai-input-box-container"></div>
           </main>
         </div>
       </div>
@@ -267,6 +269,20 @@ export class CodePage extends Page<CodePageOptions> {
         this.syncPendingChanges();
       }
     });
+
+    // Setup AI Input Box
+    const aiInputContainer = this.$('.ai-input-box-container') as HTMLElement;
+    const sessionId = this.options.params?.sessionId;
+    if (aiInputContainer && sessionId) {
+      this.aiInputBox = new AIInputBox({
+        sessionId,
+        placeholder: 'Ask AI about this code...',
+        onNavigateToChat: () => {
+          this.navigate(`/session/${sessionId}/chat`);
+        },
+      });
+      this.aiInputBox.mount(aiInputContainer);
+    }
 
     // Load session data
     this.loadSession();
@@ -1304,6 +1320,12 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup AI Input Box
+    if (this.aiInputBox) {
+      this.aiInputBox.unmount();
+      this.aiInputBox = null;
     }
 
     // Cleanup linting panel
