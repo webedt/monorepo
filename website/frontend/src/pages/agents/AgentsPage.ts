@@ -65,7 +65,7 @@ export class AgentsPage extends Page<PageOptions> {
                   <polygon points="10 8 16 12 10 16 10 8"></polygon>
                 </svg>
                 Active
-                <span class="filter-btn-count active-count" style="display: none;">0</span>
+                <span class="filter-btn-count active-count hidden">0</span>
               </button>
               <button class="filter-btn" data-filter="favorites">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
@@ -729,11 +729,14 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private updateActiveCount(): void {
-    const activeCount = this.sessions.filter(s => s.status === 'running').length;
+    const activeCount = this.sessions.reduce(
+      (count, s) => s.status === 'running' ? count + 1 : count,
+      0
+    );
     const countBadge = this.$('.active-count') as HTMLElement;
     if (countBadge) {
       countBadge.textContent = activeCount.toString();
-      countBadge.style.display = activeCount > 0 ? 'inline-flex' : 'none';
+      countBadge.classList.toggle('hidden', activeCount === 0);
     }
   }
 

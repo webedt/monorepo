@@ -102,8 +102,12 @@
   margin-left: var(--spacing-xs);
 }
 
+.filter-btn-count.hidden {
+  display: none;
+}
+
 /* Pulse animation for active filter when there are running sessions */
-.filter-btn[data-filter="active"]:has(.active-count:not([style*="display: none"])) svg {
+.filter-btn[data-filter="active"]:has(.active-count:not(.hidden)) svg {
   animation: pulse-active 2s ease-in-out infinite;
 }
 
