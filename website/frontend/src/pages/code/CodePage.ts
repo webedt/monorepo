@@ -5,7 +5,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, UrlImportDialog, AIInputBox, AutocompleteDropdown } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, UrlImportDialog, AIInputBox, AutocompleteDropdown, SaveAsSnippetDialog } from '../../components';
 import type { ChangedFile, AutocompleteSuggestion } from '../../components';
 import { sessionsApi, storageWorkerApi, autocompleteApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
@@ -58,6 +58,7 @@ export class CodePage extends Page<CodePageOptions> {
   private commitDialog: CommitDialog | null = null;
   private commitBtn: Button | null = null;
   private urlImportDialog: UrlImportDialog | null = null;
+  private saveAsSnippetDialog: SaveAsSnippetDialog | null = null;
   private aiInputBox: AIInputBox | null = null;
   private diffModal: Modal | null = null;
   private diffViewer: DiffViewer | null = null;
@@ -99,6 +100,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10H11a5 5 0 0 0-5 5v2"></path><polyline points="21 10 17 6"></polyline><polyline points="21 10 17 14"></polyline></svg>
               </button>
             </div>
+            <div class="snippet-btn-container"></div>
             <div class="compare-btn-container"></div>
             <div class="format-btn-container"></div>
             <div class="commit-btn-container"></div>
@@ -188,6 +190,17 @@ export class CodePage extends Page<CodePageOptions> {
         onClick: () => this.showDiffViewer(),
       });
       compareBtn.mount(compareBtnContainer);
+    }
+
+    // Setup save as snippet button
+    const snippetBtnContainer = this.$('.snippet-btn-container') as HTMLElement;
+    if (snippetBtnContainer) {
+      const snippetBtn = new Button('Save as Snippet', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.openSaveAsSnippetDialog(),
+      });
+      snippetBtn.mount(snippetBtnContainer);
     }
 
     // Setup format button
@@ -1300,6 +1313,46 @@ export class CodePage extends Page<CodePageOptions> {
     this.urlImportDialog.open();
   }
 
+  private openSaveAsSnippetDialog(): void {
+    if (this.activeTabIndex < 0 || !this.multiCursorEditor) {
+      toast.error('No file is open');
+      return;
+    }
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) {
+      toast.error('No file is open');
+      return;
+    }
+
+    // Get selected text, or use entire file content if nothing is selected
+    const selectedText = this.multiCursorEditor.getSelectedText();
+    const code = selectedText || tab.content;
+
+    if (!code.trim()) {
+      toast.error('No code to save');
+      return;
+    }
+
+    // Detect language from file extension
+    const ext = tab.path.split('.').pop()?.toLowerCase() || '';
+
+    this.saveAsSnippetDialog = new SaveAsSnippetDialog({
+      code,
+      language: ext,
+      filename: tab.name,
+      onSuccess: () => {
+        // Show a toast about where to find snippets
+        toast.success('Snippet saved! View your snippets at /snippets');
+      },
+      onClose: () => {
+        this.saveAsSnippetDialog = null;
+      },
+    });
+
+    this.saveAsSnippetDialog.open();
+  }
+
   // =========================================================================
   // Autocomplete Methods
   // =========================================================================
@@ -1478,6 +1531,12 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.urlImportDialog) {
       this.urlImportDialog.close();
       this.urlImportDialog = null;
+    }
+
+    // Cleanup save as snippet dialog
+    if (this.saveAsSnippetDialog) {
+      this.saveAsSnippetDialog.close();
+      this.saveAsSnippetDialog = null;
     }
 
     // Cleanup MultiCursorEditor
