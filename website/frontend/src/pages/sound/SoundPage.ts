@@ -620,12 +620,14 @@ export class SoundPage extends Page<SoundPageOptions> {
 
   private toggleBeatGrid(): void {
     beatGridStore.toggleGridVisibility();
-    toast.info(this.beatGridSettings.gridVisible ? 'Beat grid hidden' : 'Beat grid visible');
+    // Use store getter for current value since local state updates asynchronously
+    toast.info(beatGridStore.isGridVisible() ? 'Beat grid visible' : 'Beat grid hidden');
   }
 
   private toggleSnapToBeat(): void {
     beatGridStore.toggleSnap();
-    toast.info(this.beatGridSettings.snapEnabled ? 'Snap disabled' : 'Snap enabled');
+    // Use store getter for current value since local state updates asynchronously
+    toast.info(beatGridStore.isSnapEnabled() ? 'Snap enabled' : 'Snap disabled');
   }
 
   private detectBpm(): void {
@@ -781,25 +783,21 @@ export class SoundPage extends Page<SoundPageOptions> {
 
   private drawBeatGrid(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     const beatPositions = beatGridStore.getBeatPositions(0, this.duration);
-    const { subdivisions } = this.beatGridSettings;
 
     for (const pos of beatPositions) {
       const x = (pos.time / this.duration) * width;
 
       // Determine line style based on beat type
-      const isMainBeat = pos.beatNumber % 1 === 0 && (pos.time - this.beatGridSettings.beatOffset) % beatGridStore.getBeatInterval() < 0.001;
-      const isMeasureStart = pos.isDownbeat;
-
-      if (isMeasureStart) {
+      if (pos.isDownbeat) {
         // Measure start - brightest and thickest
         ctx.strokeStyle = 'rgba(251, 191, 36, 0.6)'; // amber
         ctx.lineWidth = 2;
-      } else if (isMainBeat || subdivisions === 1) {
-        // Main beat - medium brightness
+      } else if (pos.isMainBeat) {
+        // Main beat (quarter note) - medium brightness
         ctx.strokeStyle = 'rgba(251, 191, 36, 0.35)';
         ctx.lineWidth = 1;
       } else {
-        // Subdivision - dimmest
+        // Subdivision (eighth/sixteenth note) - dimmest
         ctx.strokeStyle = 'rgba(251, 191, 36, 0.15)';
         ctx.lineWidth = 1;
       }
@@ -810,7 +808,7 @@ export class SoundPage extends Page<SoundPageOptions> {
       ctx.stroke();
 
       // Draw measure number at top for downbeats
-      if (isMeasureStart && width > 200) {
+      if (pos.isDownbeat && width > 200) {
         ctx.fillStyle = 'rgba(251, 191, 36, 0.8)';
         ctx.font = '10px sans-serif';
         ctx.fillText(`${pos.measureNumber + 1}`, x + 3, 12);

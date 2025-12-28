@@ -17,6 +17,7 @@ export interface BeatPosition {
   beatNumber: number;
   measureNumber: number;
   isDownbeat: boolean;
+  isMainBeat: boolean; // true when position falls on a quarter note (not a subdivision)
 }
 
 type BeatGridListener = (settings: BeatGridSettings) => void;
@@ -189,24 +190,30 @@ class BeatGridStore {
     const subdivisionInterval = this.getSubdivisionInterval();
     const { beatOffset, beatsPerMeasure, subdivisions } = this.settings;
 
-    // Start from the first beat/subdivision before or at startTime
-    const firstBeatTime = beatOffset + Math.floor((startTime - beatOffset) / subdivisionInterval) * subdivisionInterval;
+    // Calculate the first subdivision index at or before startTime
+    const firstSubdivisionIndex = Math.floor((startTime - beatOffset) / subdivisionInterval);
+    const firstBeatTime = beatOffset + firstSubdivisionIndex * subdivisionInterval;
 
-    for (let time = firstBeatTime; time <= endTime; time += subdivisionInterval) {
+    // Use index-based iteration to avoid floating-point accumulation errors
+    for (let i = 0; ; i++) {
+      const time = firstBeatTime + i * subdivisionInterval;
+      if (time > endTime) break;
       if (time < startTime) continue;
 
-      // Calculate beat number (accounting for subdivisions)
-      const totalSubdivisions = Math.round((time - beatOffset) / subdivisionInterval);
+      // Calculate beat information using integer arithmetic on subdivision index
+      const totalSubdivisions = firstSubdivisionIndex + i;
+      const isMainBeat = totalSubdivisions % subdivisions === 0;
       const beatNumber = Math.floor(totalSubdivisions / subdivisions);
       const measureNumber = Math.floor(beatNumber / beatsPerMeasure);
       const beatInMeasure = beatNumber % beatsPerMeasure;
-      const isDownbeat = beatInMeasure === 0 && (totalSubdivisions % subdivisions === 0);
+      const isDownbeat = beatInMeasure === 0 && isMainBeat;
 
       positions.push({
         time,
         beatNumber,
         measureNumber,
         isDownbeat,
+        isMainBeat,
       });
     }
 
@@ -324,25 +331,28 @@ class BeatGridStore {
       }
 
       // Cluster intervals to find the most common beat interval
+      // Use same BPM range as store validation (20-300)
+      const MIN_BPM = 20;
+      const MAX_BPM = 300;
       const bpmCounts: Map<number, number> = new Map();
 
       for (const interval of intervals) {
         // Convert to BPM and round to nearest integer
         const bpm = Math.round(60 / interval);
 
-        // Only consider reasonable BPM range
-        if (bpm >= 60 && bpm <= 200) {
+        // Only consider BPM within valid range
+        if (bpm >= MIN_BPM && bpm <= MAX_BPM) {
           const count = bpmCounts.get(bpm) || 0;
           bpmCounts.set(bpm, count + 1);
 
-          // Also count double and half time
+          // Also count double and half time for better detection
           const doubleBpm = bpm * 2;
           const halfBpm = Math.round(bpm / 2);
 
-          if (doubleBpm <= 200) {
+          if (doubleBpm <= MAX_BPM) {
             bpmCounts.set(doubleBpm, (bpmCounts.get(doubleBpm) || 0) + 0.5);
           }
-          if (halfBpm >= 60) {
+          if (halfBpm >= MIN_BPM) {
             bpmCounts.set(halfBpm, (bpmCounts.get(halfBpm) || 0) + 0.5);
           }
         }
