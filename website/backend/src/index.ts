@@ -41,6 +41,10 @@ import logsRoutes from './api/routes/logs.js';
 import liveChatRoutes from './api/routes/liveChat.js';
 import workspaceRoutes from './api/routes/workspace.js';
 import organizationsRoutes from './api/routes/organizations.js';
+import storeRoutes from './api/routes/store.js';
+import libraryRoutes from './api/routes/library.js';
+import purchasesRoutes from './api/routes/purchases.js';
+import communityRoutes from './api/routes/community.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
@@ -305,6 +309,10 @@ app.use('/api', logsRoutes);  // Debug logs endpoint
 app.use('/api/live-chat', liveChatRoutes);  // Live Chat for branch-based workspace
 app.use('/api/workspace', workspaceRoutes);  // Workspace presence and events
 app.use('/api/organizations', organizationsRoutes);  // Organizations/Studios management
+app.use('/api/store', storeRoutes);  // Game store browsing and wishlist
+app.use('/api/library', libraryRoutes);  // User's game library management
+app.use('/api/purchases', purchasesRoutes);  // Game purchases and refunds
+app.use('/api/community', communityRoutes);  // Community posts, reviews, and discussions
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');

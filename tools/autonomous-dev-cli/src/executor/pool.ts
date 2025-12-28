@@ -1632,7 +1632,7 @@ export class WorkerPool extends EventEmitter {
       }
     }
 
-    // Extract category from labels (type:bugfix, type:feature, etc.)
+    // Extract category from labels (type:feature, type:security, etc.)
     const typeLabel = issue.labels.find(l => l.startsWith('type:'));
     if (typeLabel) {
       const category = typeLabel.replace('type:', '') as TaskCategory;
