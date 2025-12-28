@@ -7,6 +7,17 @@ import { Request, Response, NextFunction } from 'express';
 import { StorageService, calculateBase64Size, calculateJsonSize } from '@webedt/shared';
 import type { AuthRequest } from './auth.js';
 
+/**
+ * Extend Express Request to include storageSize
+ */
+declare global {
+  namespace Express {
+    interface Request {
+      storageSize?: number;
+    }
+  }
+}
+
 export interface StorageQuotaOptions {
   // Calculate size from request body using this function
   calculateSize?: (body: unknown) => number;
@@ -14,6 +25,8 @@ export interface StorageQuotaOptions {
   skipForAdmins?: boolean;
   // Error message when quota exceeded
   errorMessage?: string;
+  // If true, block request on quota check errors (default: false for backwards compatibility)
+  blockOnError?: boolean;
 }
 
 /**
@@ -23,6 +36,7 @@ export function requireStorageQuota(options: StorageQuotaOptions = {}) {
   const {
     skipForAdmins = false,
     errorMessage = 'Storage quota exceeded. Please free up space or upgrade your plan.',
+    blockOnError = false,
   } = options;
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -72,13 +86,24 @@ export function requireStorageQuota(options: StorageQuotaOptions = {}) {
         return;
       }
 
-      // Attach size info to request for later use
-      (req as any).storageSize = size;
+      // Attach size info to request for later use (type-safe now)
+      req.storageSize = size;
 
       next();
     } catch (error) {
       console.error('Storage quota check error:', error);
-      // Don't block the request on quota check errors
+
+      if (blockOnError) {
+        // Block request when quota system is unavailable
+        res.status(503).json({
+          success: false,
+          error: 'Storage quota service temporarily unavailable. Please try again.',
+        });
+        return;
+      }
+
+      // Allow request to proceed but log the error
+      // Storage tracking may be inaccurate but we don't want to block users
       next();
     }
   };
@@ -179,9 +204,13 @@ export function trackStorageUsage() {
 
     res.send = function (body: any): Response {
       // Only track if request was successful and we have size info
-      if (res.statusCode >= 200 && res.statusCode < 300 && (req as any).storageSize > 0 && authReq.user) {
-        StorageService.addUsage(authReq.user.id, (req as any).storageSize).catch((error) => {
+      const size = req.storageSize;
+      if (res.statusCode >= 200 && res.statusCode < 300 && size && size > 0 && authReq.user) {
+        // Fire-and-forget but log errors for debugging
+        StorageService.addUsage(authReq.user.id, size).catch((error) => {
           console.error('Failed to track storage usage:', error);
+          // Storage usage tracking failed - the cached value may drift
+          // This will be corrected on next recalculateUsage call
         });
       }
       return originalSend(body);

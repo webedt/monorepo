@@ -4,11 +4,11 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, users, eq } from '@webedt/shared';
 import { StorageService, STORAGE_TIERS } from '@webedt/shared';
 import type { StorageTier } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/requireAdmin.js';
 
 const router = Router();
 
@@ -177,23 +177,17 @@ router.get('/tiers', requireAuth, async (_req: Request, res: Response) => {
 /**
  * Get storage stats for a specific user (admin only)
  */
-router.get('/admin/:userId', requireAuth, async (req: Request, res: Response) => {
+router.get('/admin/:userId', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
-    const authReq = req as AuthRequest;
+    const { userId } = req.params;
 
-    // Check if user is admin
-    const [currentUser] = await db
-      .select({ isAdmin: users.isAdmin })
-      .from(users)
-      .where(eq(users.id, authReq.user!.id))
-      .limit(1);
-
-    if (!currentUser?.isAdmin) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+    // Validate target user exists
+    const exists = await StorageService.userExists(userId);
+    if (!exists) {
+      res.status(404).json({ success: false, error: 'User not found' });
       return;
     }
 
-    const { userId } = req.params;
     const stats = await StorageService.getStorageStats(userId);
 
     res.json({
@@ -218,24 +212,17 @@ router.get('/admin/:userId', requireAuth, async (req: Request, res: Response) =>
 /**
  * Set storage quota for a user (admin only)
  */
-router.post('/admin/:userId/quota', requireAuth, async (req: Request, res: Response) => {
+router.post('/admin/:userId/quota', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
-    const authReq = req as AuthRequest;
-
-    // Check if user is admin
-    const [currentUser] = await db
-      .select({ isAdmin: users.isAdmin })
-      .from(users)
-      .where(eq(users.id, authReq.user!.id))
-      .limit(1);
-
-    if (!currentUser?.isAdmin) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
-      return;
-    }
-
     const { userId } = req.params;
     const { quotaBytes } = req.body;
+
+    // Validate target user exists
+    const exists = await StorageService.userExists(userId);
+    if (!exists) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
 
     if (!quotaBytes || typeof quotaBytes !== 'string') {
       res.status(400).json({
@@ -273,24 +260,17 @@ router.post('/admin/:userId/quota', requireAuth, async (req: Request, res: Respo
 /**
  * Set storage tier for a user (admin only)
  */
-router.post('/admin/:userId/tier', requireAuth, async (req: Request, res: Response) => {
+router.post('/admin/:userId/tier', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
-    const authReq = req as AuthRequest;
-
-    // Check if user is admin
-    const [currentUser] = await db
-      .select({ isAdmin: users.isAdmin })
-      .from(users)
-      .where(eq(users.id, authReq.user!.id))
-      .limit(1);
-
-    if (!currentUser?.isAdmin) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
-      return;
-    }
-
     const { userId } = req.params;
     const { tier } = req.body;
+
+    // Validate target user exists
+    const exists = await StorageService.userExists(userId);
+    if (!exists) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
 
     const validTiers = Object.keys(STORAGE_TIERS);
     if (!tier || !validTiers.includes(tier)) {
@@ -323,23 +303,17 @@ router.post('/admin/:userId/tier', requireAuth, async (req: Request, res: Respon
 /**
  * Recalculate storage usage for a user (admin only)
  */
-router.post('/admin/:userId/recalculate', requireAuth, async (req: Request, res: Response) => {
+router.post('/admin/:userId/recalculate', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
-    const authReq = req as AuthRequest;
+    const { userId } = req.params;
 
-    // Check if user is admin
-    const [currentUser] = await db
-      .select({ isAdmin: users.isAdmin })
-      .from(users)
-      .where(eq(users.id, authReq.user!.id))
-      .limit(1);
-
-    if (!currentUser?.isAdmin) {
-      res.status(403).json({ success: false, error: 'Admin access required' });
+    // Validate target user exists
+    const exists = await StorageService.userExists(userId);
+    if (!exists) {
+      res.status(404).json({ success: false, error: 'User not found' });
       return;
     }
 
-    const { userId } = req.params;
     const newTotal = await StorageService.recalculateUsage(userId);
 
     res.json({
