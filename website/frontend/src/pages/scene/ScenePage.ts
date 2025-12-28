@@ -1440,7 +1440,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     const value = obj.uiValue ?? 50;
     const minValue = obj.uiMinValue ?? 0;
     const maxValue = obj.uiMaxValue ?? 100;
-    const progress = (value - minValue) / (maxValue - minValue);
+    const progress = maxValue !== minValue ? (value - minValue) / (maxValue - minValue) : 0;
     const trackHeight = 6;
     const trackY = -height / 2 - trackHeight / 2;
 
@@ -1475,7 +1475,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     const value = obj.uiValue ?? 50;
     const minValue = obj.uiMinValue ?? 0;
     const maxValue = obj.uiMaxValue ?? 100;
-    const progress = (value - minValue) / (maxValue - minValue);
+    const progress = maxValue !== minValue ? (value - minValue) / (maxValue - minValue) : 0;
     const radius = obj.uiCornerRadius || 8;
 
     // Draw track background
