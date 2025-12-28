@@ -39,8 +39,7 @@
 
 /* Strings */
 .hljs-string,
-.hljs-regexp,
-.hljs-addition {
+.hljs-regexp {
   color: var(--hljs-string, #22863a);
 }
 

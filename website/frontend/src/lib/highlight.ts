@@ -126,6 +126,10 @@ const languageDisplayNames: Record<string, string> = {
   gql: 'GraphQL',
 };
 
+// Maximum size (in characters) for syntax highlighting
+// Larger files skip highlighting to prevent UI lag
+const MAX_HIGHLIGHT_SIZE = 100000; // 100KB
+
 /**
  * Highlight code with syntax highlighting
  * @param code The code to highlight
@@ -134,6 +138,11 @@ const languageDisplayNames: Record<string, string> = {
  */
 export function highlightCode(code: string, language?: string): string {
   if (!code) return '';
+
+  // Skip highlighting for very large content to prevent UI lag
+  if (code.length > MAX_HIGHLIGHT_SIZE) {
+    return escapeHtml(code);
+  }
 
   try {
     let result: HighlightResult;
@@ -188,25 +197,49 @@ export function getLanguageFromExtension(filename: string): string | undefined {
   if (!ext) return undefined;
 
   const extensionMap: Record<string, string> = {
+    // JavaScript/TypeScript
     js: 'javascript',
     jsx: 'javascript',
+    mjs: 'javascript',
+    cjs: 'javascript',
     ts: 'typescript',
     tsx: 'typescript',
+    mts: 'typescript',
+    cts: 'typescript',
+    // Python
     py: 'python',
+    pyw: 'python',
+    // Data formats
     json: 'json',
+    jsonc: 'json',
+    // Stylesheets
     css: 'css',
     scss: 'css',
+    less: 'css',
+    // Markup
     html: 'html',
     htm: 'html',
     xml: 'xml',
     svg: 'xml',
+    xhtml: 'xml',
+    // Shell
     sh: 'bash',
     bash: 'bash',
     zsh: 'bash',
+    fish: 'bash',
+    // Config files
     yaml: 'yaml',
     yml: 'yaml',
+    toml: 'yaml',
+    ini: 'bash',
+    conf: 'bash',
+    env: 'bash',
+    // Documentation
     md: 'markdown',
+    markdown: 'markdown',
+    // Database
     sql: 'sql',
+    // Systems languages
     go: 'go',
     rs: 'rust',
     java: 'java',
@@ -215,14 +248,21 @@ export function getLanguageFromExtension(filename: string): string | undefined {
     cpp: 'cpp',
     hpp: 'cpp',
     cc: 'cpp',
+    cxx: 'cpp',
+    hxx: 'cpp',
     cs: 'csharp',
+    // Scripting languages
     php: 'php',
     rb: 'ruby',
     swift: 'swift',
     kt: 'kotlin',
+    kts: 'kotlin',
     scala: 'scala',
+    // Container/DevOps
     graphql: 'graphql',
     gql: 'graphql',
+    // Lock files and other common formats
+    lock: 'json',
   };
 
   return extensionMap[ext];
