@@ -76,9 +76,7 @@ export function lerp(a: number, b: number, t: number): number {
  * Normalizes an angle to the range [-180, 180] for shortest path rotation
  */
 function normalizeAngle(angle: number): number {
-  while (angle > 180) angle -= 360;
-  while (angle < -180) angle += 360;
-  return angle;
+  return ((angle % 360) + 540) % 360 - 180;
 }
 
 /**
@@ -209,6 +207,7 @@ export function interpolateProperties<T extends Record<string, number | undefine
 
 /**
  * Finds the keyframe pair that surrounds the given time
+ * Note: Assumes keyframes are already sorted by time (via createTrack)
  */
 export function findKeyframePair<T>(
   keyframes: Keyframe<T>[],
@@ -216,24 +215,21 @@ export function findKeyframePair<T>(
 ): { from: Keyframe<T>; to: Keyframe<T>; index: number } | null {
   if (keyframes.length === 0) return null;
 
-  // Sort keyframes by time (defensive)
-  const sorted = [...keyframes].sort((a, b) => a.time - b.time);
-
   // Before first keyframe
-  if (time <= sorted[0].time) {
-    return { from: sorted[0], to: sorted[0], index: 0 };
+  if (time <= keyframes[0].time) {
+    return { from: keyframes[0], to: keyframes[0], index: 0 };
   }
 
   // After last keyframe
-  if (time >= sorted[sorted.length - 1].time) {
-    const lastIndex = sorted.length - 1;
-    return { from: sorted[lastIndex], to: sorted[lastIndex], index: lastIndex };
+  if (time >= keyframes[keyframes.length - 1].time) {
+    const lastIndex = keyframes.length - 1;
+    return { from: keyframes[lastIndex], to: keyframes[lastIndex], index: lastIndex };
   }
 
   // Find surrounding keyframes
-  for (let i = 0; i < sorted.length - 1; i++) {
-    if (time >= sorted[i].time && time < sorted[i + 1].time) {
-      return { from: sorted[i], to: sorted[i + 1], index: i };
+  for (let i = 0; i < keyframes.length - 1; i++) {
+    if (time >= keyframes[i].time && time < keyframes[i + 1].time) {
+      return { from: keyframes[i], to: keyframes[i + 1], index: i };
     }
   }
 

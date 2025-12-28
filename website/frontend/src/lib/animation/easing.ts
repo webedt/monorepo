@@ -20,21 +20,36 @@ export const easeInOutQuad: EasingFunction = (t) =>
 
 // Cubic easing functions
 export const easeInCubic: EasingFunction = (t) => t * t * t;
-export const easeOutCubic: EasingFunction = (t) => (--t) * t * t + 1;
+export const easeOutCubic: EasingFunction = (t) => {
+  const t1 = t - 1;
+  return t1 * t1 * t1 + 1;
+};
 export const easeInOutCubic: EasingFunction = (t) =>
   t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1;
 
 // Quartic easing functions
 export const easeInQuart: EasingFunction = (t) => t * t * t * t;
-export const easeOutQuart: EasingFunction = (t) => 1 - (--t) * t * t * t;
-export const easeInOutQuart: EasingFunction = (t) =>
-  t < 0.5 ? 8 * t * t * t * t : 1 - 8 * (--t) * t * t * t;
+export const easeOutQuart: EasingFunction = (t) => {
+  const t1 = t - 1;
+  return 1 - t1 * t1 * t1 * t1;
+};
+export const easeInOutQuart: EasingFunction = (t) => {
+  if (t < 0.5) return 8 * t * t * t * t;
+  const t1 = t - 1;
+  return 1 - 8 * t1 * t1 * t1 * t1;
+};
 
 // Quintic easing functions
 export const easeInQuint: EasingFunction = (t) => t * t * t * t * t;
-export const easeOutQuint: EasingFunction = (t) => 1 + (--t) * t * t * t * t;
-export const easeInOutQuint: EasingFunction = (t) =>
-  t < 0.5 ? 16 * t * t * t * t * t : 1 + 16 * (--t) * t * t * t * t;
+export const easeOutQuint: EasingFunction = (t) => {
+  const t1 = t - 1;
+  return 1 + t1 * t1 * t1 * t1 * t1;
+};
+export const easeInOutQuint: EasingFunction = (t) => {
+  if (t < 0.5) return 16 * t * t * t * t * t;
+  const t1 = t - 1;
+  return 1 + 16 * t1 * t1 * t1 * t1 * t1;
+};
 
 // Sinusoidal easing functions
 export const easeInSine: EasingFunction = (t) =>
@@ -59,8 +74,10 @@ export const easeInOutExpo: EasingFunction = (t) => {
 // Circular easing functions
 export const easeInCirc: EasingFunction = (t) =>
   1 - Math.sqrt(1 - t * t);
-export const easeOutCirc: EasingFunction = (t) =>
-  Math.sqrt(1 - (--t) * t);
+export const easeOutCirc: EasingFunction = (t) => {
+  const t1 = t - 1;
+  return Math.sqrt(1 - t1 * t1);
+};
 export const easeInOutCirc: EasingFunction = (t) =>
   t < 0.5
     ? (1 - Math.sqrt(1 - 4 * t * t)) / 2
@@ -146,18 +163,18 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): Eas
 
     // First try a few iterations of Newton's method -- fast and accurate
     for (let i = 0; i < 8; i++) {
-      const x2 = sampleCurveX(t2) - x;
-      if (Math.abs(x2) < epsilon) return t2;
+      const xError = sampleCurveX(t2) - x;
+      if (Math.abs(xError) < epsilon) return t2;
       const d2 = sampleCurveDerivativeX(t2);
       if (Math.abs(d2) < 1e-6) break;
-      t2 -= x2 / d2;
+      t2 -= xError / d2;
     }
 
     // Fall back to bisection method for reliability
     while (t0 < t1) {
-      const x2 = sampleCurveX(t2);
-      if (Math.abs(x2 - x) < epsilon) return t2;
-      if (x > x2) t0 = t2;
+      const xSample = sampleCurveX(t2);
+      if (Math.abs(xSample - x) < epsilon) return t2;
+      if (x > xSample) t0 = t2;
       else t1 = t2;
       t2 = (t1 - t0) * 0.5 + t0;
     }

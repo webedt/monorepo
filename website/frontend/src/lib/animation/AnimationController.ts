@@ -48,7 +48,8 @@ export class AnimationController {
   private currentIteration = 0;
   private rafId: number | null = null;
   private eventHandlers: Map<AnimationEvent['type'], Set<AnimationEventHandler>> = new Map();
-  private lastUpdateTime = 0;
+  private lastUpdateTime = -1;
+  private hasStartedFirstIteration = false;
 
   constructor(track: KeyframeTrack<TransformProperties>, options: AnimationOptions = {}) {
     this.track = track;
@@ -171,6 +172,8 @@ export class AnimationController {
     this.cancel();
     this.currentTime = 0;
     this.currentIteration = 0;
+    this.lastUpdateTime = -1;
+    this.hasStartedFirstIteration = false;
   }
 
   /**
@@ -195,9 +198,9 @@ export class AnimationController {
     this.currentTime = Math.max(0, Math.min(time, this.options.duration));
 
     if (this.state === 'paused') {
-      this.pausedAt = this.currentTime;
+      this.pausedAt = this.currentTime / this.options.playbackRate;
     } else if (this.state === 'playing') {
-      this.startTime = performance.now() - this.currentTime;
+      this.startTime = performance.now() - (this.currentTime / this.options.playbackRate);
     }
 
     this.emit('update');
@@ -211,9 +214,39 @@ export class AnimationController {
   }
 
   /**
-   * Gets the interpolated value at the current time
+   * Gets the interpolated value at the current time, respecting fill mode
    */
   getValue(): InterpolationResult<TransformProperties> {
+    const { fill, duration, direction } = this.options;
+
+    // Handle fill modes based on animation state
+    if (this.state === 'idle') {
+      // Before animation starts
+      if (fill === 'backwards' || fill === 'both') {
+        // Show first frame (considering direction)
+        const showFirst = direction === 'reverse' || direction === 'alternate-reverse';
+        return interpolateTrack(this.track, showFirst ? duration : 0);
+      }
+      // fill === 'none' or 'forwards': return empty/default
+      return { value: {}, currentKeyframeIndex: -1, isComplete: false, progress: 0 };
+    }
+
+    if (this.state === 'finished') {
+      // After animation ends
+      if (fill === 'forwards' || fill === 'both') {
+        // Show last frame (considering direction and final iteration)
+        const finalIteration = this.options.iterations - 1;
+        const isOddFinal = finalIteration % 2 === 1;
+        const endsReversed =
+          direction === 'reverse' ||
+          (direction === 'alternate' && isOddFinal) ||
+          (direction === 'alternate-reverse' && !isOddFinal);
+        return interpolateTrack(this.track, endsReversed ? 0 : duration);
+      }
+      // fill === 'none' or 'backwards': return empty/default
+      return { value: {}, currentKeyframeIndex: -1, isComplete: true, progress: 1 };
+    }
+
     return this.getValueAtTime(this.currentTime);
   }
 
@@ -326,9 +359,16 @@ export class AnimationController {
       return;
     }
 
-    // Check for iteration boundary
-    if (this.currentIteration > 0 && this.currentIteration !== Math.floor((this.lastUpdateTime - this.options.delay) / iterationDuration)) {
-      this.emit('iteration');
+    // Check for iteration boundary (skip on first frame)
+    if (this.hasStartedFirstIteration) {
+      const lastIteration = this.lastUpdateTime >= 0
+        ? Math.floor(this.lastUpdateTime / iterationDuration)
+        : -1;
+      if (this.currentIteration > lastIteration) {
+        this.emit('iteration');
+      }
+    } else {
+      this.hasStartedFirstIteration = true;
     }
 
     this.lastUpdateTime = timeAfterDelay;
