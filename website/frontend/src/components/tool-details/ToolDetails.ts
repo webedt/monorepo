@@ -6,6 +6,7 @@
  */
 
 import { Component, type ComponentOptions } from '../base';
+import { highlightCode, getLanguageFromExtension } from '../../lib/highlight';
 import './tool-details.css';
 
 export interface ToolResult {
@@ -373,6 +374,12 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
     const fileContent = result?.file?.content || this.result?.content || null;
     if (fileContent) {
       const content = typeof fileContent === 'string' ? fileContent : JSON.stringify(fileContent, null, 2);
+      const filePath = this.tool.input?.file_path || '';
+      const language = getLanguageFromExtension(filePath);
+      if (language) {
+        const highlighted = highlightCode(content, language);
+        return `<pre class="tool-output hljs language-${language}">${highlighted}</pre>`;
+      }
       return `<pre class="tool-output">${this.escapeHtml(content)}</pre>`;
     }
     return `<div class="tool-empty">File is empty or could not be read</div>`;
@@ -446,6 +453,12 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
   private renderWriteDetails(result: any): string {
     const fileContent = this.tool.input?.content || result?.content || null;
     if (fileContent) {
+      const filePath = this.tool.input?.file_path || '';
+      const language = getLanguageFromExtension(filePath);
+      if (language) {
+        const highlighted = highlightCode(fileContent, language);
+        return `<pre class="tool-output hljs language-${language}">${highlighted}</pre>`;
+      }
       return `<pre class="tool-output">${this.escapeHtml(fileContent)}</pre>`;
     }
     return `<div class="tool-empty">File written successfully</div>`;

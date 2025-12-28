@@ -5,12 +5,13 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, CollaborativeCursors, CommitDialog } from '../../components';
+import type { ChangedFile } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { formatByFilename, canFormat } from '../../lib/codeFormatter';
-import { undoRedoStore, editorSettingsStore } from '../../stores';
+import { undoRedoStore, editorSettingsStore, presenceStore } from '../../stores';
 import type { Session } from '../../types';
 import type { UndoRedoState } from '../../stores/undoRedoStore';
 import type { TabContentState } from '../../stores/undoRedoStore';
@@ -52,6 +53,9 @@ export class CodePage extends Page<CodePageOptions> {
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
+  private pendingCommitFiles: Map<string, ChangedFile> = new Map();
+  private commitDialog: CommitDialog | null = null;
+  private commitBtn: Button | null = null;
   private undoRedoState: UndoRedoState<TabContentState> = {
     canUndo: false,
     canRedo: false,
@@ -59,6 +63,8 @@ export class CodePage extends Page<CodePageOptions> {
     futureLength: 0,
   };
   private unsubscribeUndoRedo: (() => void) | null = null;
+  private collaborativeCursors: CollaborativeCursors | null = null;
+  private unsubscribePresence: (() => void) | null = null;
 
   protected render(): string {
     return `
@@ -74,6 +80,10 @@ export class CodePage extends Page<CodePageOptions> {
             </div>
           </div>
           <div class="code-header-right">
+            <div class="active-users-badge" style="display: none;">
+              <div class="active-users-avatars"></div>
+              <span class="active-users-count"></span>
+            </div>
             <div class="offline-status-badge" style="display: none;">
               <span class="offline-badge">Offline Mode</span>
             </div>
@@ -86,6 +96,7 @@ export class CodePage extends Page<CodePageOptions> {
               </button>
             </div>
             <div class="format-btn-container"></div>
+            <div class="commit-btn-container"></div>
             <div class="save-btn-container"></div>
           </div>
         </header>
@@ -118,6 +129,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <p>Select a file to view or edit</p>
               </div>
               <div class="editor-wrapper" style="display: none;">
+                <div class="collaborative-cursors-container"></div>
                 <textarea class="code-editor" spellcheck="false"></textarea>
               </div>
               <div class="preview-wrapper" style="display: none;">
@@ -156,6 +168,18 @@ export class CodePage extends Page<CodePageOptions> {
       formatBtn.mount(formatBtnContainer);
     }
 
+    // Setup commit button
+    const commitBtnContainer = this.$('.commit-btn-container') as HTMLElement;
+    if (commitBtnContainer) {
+      this.commitBtn = new Button('Commit Changes', {
+        variant: 'secondary',
+        size: 'sm',
+        disabled: true,
+        onClick: () => this.openCommitDialog(),
+      });
+      this.commitBtn.mount(commitBtnContainer);
+    }
+
     // Setup save button
     const saveBtnContainer = this.$('.save-btn-container') as HTMLElement;
     if (saveBtnContainer) {
@@ -182,7 +206,24 @@ export class CodePage extends Page<CodePageOptions> {
     if (editor) {
       editor.addEventListener('input', () => this.handleEditorChange());
       editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e));
+      // Track cursor position for collaborative cursors
+      editor.addEventListener('click', () => this.handleCursorChange());
+      editor.addEventListener('keyup', () => this.handleCursorChange());
+      editor.addEventListener('select', () => this.handleCursorChange());
     }
+
+    // Setup collaborative cursors
+    const cursorsContainer = this.$('.collaborative-cursors-container') as HTMLElement;
+    if (cursorsContainer && editor) {
+      this.collaborativeCursors = new CollaborativeCursors();
+      this.collaborativeCursors.setEditorElement(editor);
+      this.collaborativeCursors.mount(cursorsContainer);
+    }
+
+    // Subscribe to presence updates for the active users badge
+    this.unsubscribePresence = presenceStore.subscribe(() => {
+      this.updateActiveUsersBadge();
+    });
 
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
@@ -247,6 +288,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.updateHeader();
       await this.loadFiles();
+
+      // Connect to presence for collaborative cursors
+      this.connectToPresence();
     } catch (error) {
       // Try offline cache if network fails
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
@@ -974,6 +1018,8 @@ export class CodePage extends Page<CodePageOptions> {
         await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
         tab.isDirty = false;
         this.renderTabs();
+        // Track for commit
+        this.trackFileForCommit(tab.path, tab.content, 'modified');
         toast.success('File saved locally (will sync when online)');
       } else {
         try {
@@ -982,12 +1028,16 @@ export class CodePage extends Page<CodePageOptions> {
           await offlineStorage.cacheFile(sessionPath, filePath, tab.content, 'text');
           tab.isDirty = false;
           this.renderTabs();
+          // Track for commit
+          this.trackFileForCommit(tab.path, tab.content, 'modified');
           toast.success('File saved');
         } catch {
           // If save fails, save locally
           await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
           tab.isDirty = false;
           this.renderTabs();
+          // Track for commit
+          this.trackFileForCommit(tab.path, tab.content, 'modified');
           toast.info('Saved locally (will sync when online)');
         }
       }
@@ -999,11 +1049,160 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  /**
+   * Connect to presence service for collaborative cursors
+   */
+  private connectToPresence(): void {
+    if (!this.session) return;
+
+    const owner = this.session.repositoryOwner;
+    const repo = this.session.repositoryName;
+    const branch = this.session.branch;
+
+    if (owner && repo && branch) {
+      presenceStore.connect(owner, repo, branch).catch(error => {
+        console.error('Failed to connect to presence:', error);
+      });
+    }
+  }
+
+  /**
+   * Handle cursor position changes
+   */
+  private handleCursorChange(): void {
+    const editor = this.$('.code-editor') as HTMLTextAreaElement;
+    if (!editor) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Calculate line and column from cursor position
+    const text = editor.value.substring(0, editor.selectionStart);
+    const lines = text.split('\n');
+    const line = lines.length - 1;
+    const col = lines[lines.length - 1].length;
+
+    // Calculate selection if any
+    const hasSelection = editor.selectionStart !== editor.selectionEnd;
+    if (hasSelection) {
+      const endText = editor.value.substring(0, editor.selectionEnd);
+      const endLines = endText.split('\n');
+      const endLine = endLines.length - 1;
+      const endCol = endLines[endLines.length - 1].length;
+
+      presenceStore.updateSelection(tab.path, line, endLine, col, endCol);
+    } else {
+      presenceStore.updateCursor(tab.path, line, col);
+    }
+
+    // Update the collaborative cursors component with the current file
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.setFilePath(tab.path);
+    }
+  }
+
+  /**
+   * Update the active users badge in the header
+   */
+  private updateActiveUsersBadge(): void {
+    const badge = this.$('.active-users-badge') as HTMLElement;
+    const avatarsContainer = this.$('.active-users-avatars') as HTMLElement;
+    const countEl = this.$('.active-users-count') as HTMLElement;
+
+    if (!badge || !avatarsContainer || !countEl) return;
+
+    const users = presenceStore.getOtherUsersWithColors();
+
+    if (users.length === 0) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    badge.style.display = 'flex';
+
+    // Show up to 3 user avatars
+    const displayUsers = users.slice(0, 3);
+    const remainingCount = users.length - displayUsers.length;
+
+    avatarsContainer.innerHTML = displayUsers.map(user => {
+      const initial = (user.displayName || 'U').charAt(0).toUpperCase();
+      return `<div class="active-user-avatar" style="background-color: ${user.color}" title="${this.escapeHtml(user.displayName)}">${initial}</div>`;
+    }).join('');
+
+    if (remainingCount > 0) {
+      countEl.textContent = `+${remainingCount} more`;
+      countEl.style.display = 'inline';
+    } else {
+      countEl.style.display = 'none';
+    }
+  }
+
+  private trackFileForCommit(path: string, content: string, status: 'modified' | 'added' | 'deleted'): void {
+    this.pendingCommitFiles.set(path, { path, content, status });
+    this.updateCommitButton();
+  }
+
+  private updateCommitButton(): void {
+    if (!this.commitBtn) return;
+
+    const pendingCount = this.pendingCommitFiles.size;
+    const hasGitHub = !!(this.session?.repositoryOwner && this.session?.repositoryName);
+
+    if (pendingCount > 0 && hasGitHub) {
+      this.commitBtn.setDisabled(false);
+      this.commitBtn.setLabel(`Commit Changes (${pendingCount})`);
+    } else {
+      this.commitBtn.setDisabled(true);
+      this.commitBtn.setLabel('Commit Changes');
+    }
+  }
+
+  private openCommitDialog(): void {
+    if (!this.session?.repositoryOwner || !this.session?.repositoryName) {
+      toast.error('GitHub repository not connected');
+      return;
+    }
+
+    if (this.pendingCommitFiles.size === 0) {
+      toast.info('No changes to commit');
+      return;
+    }
+
+    this.commitDialog = new CommitDialog({
+      owner: this.session.repositoryOwner,
+      repo: this.session.repositoryName,
+      branch: this.session.branch || 'main',
+      onCommitSuccess: () => {
+        // Clear pending files after successful commit
+        // (CommitDialog already shows success toast)
+        this.pendingCommitFiles.clear();
+        this.updateCommitButton();
+      },
+      onClose: () => {
+        this.commitDialog = null;
+      },
+    });
+
+    this.commitDialog.setChangedFiles(Array.from(this.pendingCommitFiles.values()));
+    this.commitDialog.open();
+  }
+
   protected onUnmount(): void {
     // Check for unsaved changes
     const hasUnsaved = this.tabs.some(t => t.isDirty);
     if (hasUnsaved) {
       console.warn('Leaving with unsaved changes');
+    }
+
+    // Check for uncommitted changes
+    if (this.pendingCommitFiles.size > 0) {
+      console.warn('Leaving with uncommitted changes');
+    }
+
+    // Cleanup commit dialog
+    if (this.commitDialog) {
+      this.commitDialog.close();
+      this.commitDialog = null;
     }
 
     // Cleanup undo/redo subscription and flush any pending changes
@@ -1028,6 +1227,21 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup presence subscription
+    if (this.unsubscribePresence) {
+      this.unsubscribePresence();
+      this.unsubscribePresence = null;
+    }
+
+    // Disconnect from presence
+    presenceStore.disconnect();
+
+    // Cleanup collaborative cursors
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.unmount();
+      this.collaborativeCursors = null;
     }
   }
 }
