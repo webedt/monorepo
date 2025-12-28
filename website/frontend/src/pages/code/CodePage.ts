@@ -5,7 +5,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox } from '../../components';
 import type { ChangedFile } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
@@ -65,6 +65,8 @@ export class CodePage extends Page<CodePageOptions> {
     futureLength: 0,
   };
   private unsubscribeUndoRedo: (() => void) | null = null;
+  private diffModal: Modal | null = null;
+  private diffViewer: DiffViewer | null = null;
   private lintingService = new LintingService(300);
   private lintingPanel: LintingPanel | null = null;
   private collaborativeCursors: CollaborativeCursors | null = null;
@@ -99,6 +101,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10H11a5 5 0 0 0-5 5v2"></path><polyline points="21 10 17 6"></polyline><polyline points="21 10 17 14"></polyline></svg>
               </button>
             </div>
+            <div class="compare-btn-container"></div>
             <div class="format-btn-container"></div>
             <div class="commit-btn-container"></div>
             <div class="save-btn-container"></div>
@@ -163,6 +166,17 @@ export class CodePage extends Page<CodePageOptions> {
     const refreshBtn = this.$('[data-action="refresh"]') as HTMLButtonElement;
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => this.loadFiles());
+    }
+
+    // Setup compare button
+    const compareBtnContainer = this.$('.compare-btn-container') as HTMLElement;
+    if (compareBtnContainer) {
+      const compareBtn = new Button('Compare', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.showDiffViewer(),
+      });
+      compareBtn.mount(compareBtnContainer);
     }
 
     // Setup format button
@@ -1020,6 +1034,64 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  private showDiffViewer(): void {
+    if (!this.session) {
+      toast.error('No session loaded');
+      return;
+    }
+
+    const { repositoryOwner, repositoryName, branch, baseBranch } = this.session;
+
+    if (!repositoryOwner || !repositoryName) {
+      toast.error('Repository information not available');
+      return;
+    }
+
+    if (!branch) {
+      toast.error('Current branch not available');
+      return;
+    }
+
+    // Use main or master as default base branch if not specified
+    const base = baseBranch || 'main';
+
+    // Check if comparing the same branch
+    if (branch === base) {
+      toast.info('Current branch is the same as base branch');
+      return;
+    }
+
+    // Create and show the modal
+    this.diffModal = new Modal({
+      title: 'Branch Comparison',
+      size: 'xl',
+      onClose: () => {
+        // Clean up DiffViewer component when modal closes
+        if (this.diffViewer) {
+          this.diffViewer.unmount();
+          this.diffViewer = null;
+        }
+        this.diffModal = null;
+      },
+    });
+
+    this.diffViewer = new DiffViewer({
+      owner: repositoryOwner,
+      repo: repositoryName,
+      baseBranch: base,
+      headBranch: branch,
+    });
+
+    // Mount the modal first so body element exists
+    this.diffModal.mount(document.body);
+    // Get the modal body element and mount DiffViewer to it
+    const bodyElement = this.diffModal.getElement().querySelector('.modal-body');
+    if (bodyElement) {
+      this.diffViewer.mount(bodyElement as HTMLElement);
+    }
+    this.diffModal.open();
+  }
+
   private formatCurrentFile(): void {
     if (this.activeTabIndex < 0) return;
 
@@ -1320,6 +1392,17 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup diff viewer and modal
+    if (this.diffViewer) {
+      this.diffViewer.unmount();
+      this.diffViewer = null;
+    }
+    if (this.diffModal) {
+      this.diffModal.close();
+      this.diffModal.unmount();
+      this.diffModal = null;
     }
 
     // Cleanup AI Input Box

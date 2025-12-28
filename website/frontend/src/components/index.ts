@@ -146,6 +146,10 @@ export type { NewSessionModalOptions } from './new-session-modal';
 export { CollectionsPanel } from './collections-panel';
 export type { CollectionsPanelOptions } from './collections-panel';
 
+// DiffViewer
+export { DiffViewer } from './diff-viewer';
+export type { DiffViewerOptions } from './diff-viewer';
+
 // LintingPanel
 export { LintingPanel } from './linting-panel';
 export type { LintingPanelOptions } from './linting-panel';
