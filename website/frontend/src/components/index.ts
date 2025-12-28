@@ -68,3 +68,7 @@ export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-detail
 // GameCard
 export { GameCard } from './game-card';
 export type { GameCardOptions } from './game-card';
+
+// OfflineIndicator
+export { OfflineIndicator } from './offline-indicator';
+export type { OfflineIndicatorOptions } from './offline-indicator';
