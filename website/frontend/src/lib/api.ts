@@ -27,6 +27,13 @@ import type {
   AdminStats,
   Collection,
   SessionCollection,
+  Snippet,
+  SnippetCollection,
+  SnippetLanguage,
+  SnippetCategory,
+  CreateSnippetRequest,
+  UpdateSnippetRequest,
+  SnippetListFilters,
 } from '../types';
 
 // Cached API base URL - computed once on first access
@@ -1715,6 +1722,124 @@ export const cloudSavesApi = {
       method: 'POST',
       body: platformData ? { platformData } : undefined,
     }).then(r => r.data!),
+};
+
+// ============================================================================
+// Snippets API (User code snippets and templates)
+// ============================================================================
+export const snippetsApi = {
+  // List user's snippets with optional filtering
+  list: (filters?: SnippetListFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.language) params.append('language', filters.language);
+    if (filters?.category) params.append('category', filters.category);
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.favorite) params.append('favorite', 'true');
+    if (filters?.collectionId) params.append('collectionId', filters.collectionId);
+    if (filters?.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters?.order) params.append('order', filters.order);
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      snippets: Snippet[];
+      total: number;
+      languages: readonly SnippetLanguage[];
+      categories: readonly SnippetCategory[];
+    }>>(`/api/snippets${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Get a single snippet
+  get: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}`).then(r => r.data!),
+
+  // Create a new snippet
+  create: (data: CreateSnippetRequest) =>
+    fetchApi<ApiResponse<Snippet>>('/api/snippets', {
+      method: 'POST',
+      body: data as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  // Update a snippet
+  update: (id: string, data: UpdateSnippetRequest) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}`, {
+      method: 'PUT',
+      body: data as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  // Delete a snippet
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Record snippet usage
+  use: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/use`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // Toggle favorite status
+  toggleFavorite: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/favorite`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // Duplicate a snippet
+  duplicate: (id: string) =>
+    fetchApi<ApiResponse<Snippet>>(`/api/snippets/${id}/duplicate`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  // List snippet collections
+  listCollections: () =>
+    fetchApi<ApiResponse<{
+      collections: SnippetCollection[];
+      total: number;
+    }>>('/api/snippets/collections/list').then(r => r.data!),
+
+  // Create a snippet collection
+  createCollection: (data: {
+    name: string;
+    description?: string;
+    color?: string;
+    icon?: string;
+    isDefault?: boolean;
+  }) =>
+    fetchApi<ApiResponse<SnippetCollection>>('/api/snippets/collections', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Update a snippet collection
+  updateCollection: (id: string, data: {
+    name?: string;
+    description?: string;
+    color?: string;
+    icon?: string;
+    sortOrder?: number;
+    isDefault?: boolean;
+  }) =>
+    fetchApi<ApiResponse<SnippetCollection>>(`/api/snippets/collections/${id}`, {
+      method: 'PUT',
+      body: data,
+    }).then(r => r.data!),
+
+  // Delete a snippet collection
+  deleteCollection: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Add snippet to collection
+  addToCollection: (collectionId: string, snippetId: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${collectionId}/snippets/${snippetId}`, {
+      method: 'POST',
+    }),
+
+  // Remove snippet from collection
+  removeFromCollection: (collectionId: string, snippetId: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/snippets/collections/${collectionId}/snippets/${snippetId}`, {
+      method: 'DELETE',
+    }),
 };
 
 // ============================================================================
