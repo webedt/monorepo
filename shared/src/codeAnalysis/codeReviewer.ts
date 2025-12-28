@@ -365,9 +365,9 @@ ${diff}
       lines.push('### Issues Found');
       lines.push('');
 
-      const errors = result.issues.filter((i) => i.severity === 'error');
-      const warnings = result.issues.filter((i) => i.severity === 'warning');
-      const infos = result.issues.filter((i) => i.severity === 'info');
+      const errors = result.issues.filter((i: ReviewIssue) => i.severity === 'error');
+      const warnings = result.issues.filter((i: ReviewIssue) => i.severity === 'warning');
+      const infos = result.issues.filter((i: ReviewIssue) => i.severity === 'info');
 
       if (errors.length > 0) {
         lines.push(`**Errors (${errors.length})**: Must be fixed before merge`);

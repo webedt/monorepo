@@ -25,3 +25,6 @@ export { CommunityPage } from './community';
 
 // Billing/Pricing
 export { PricingPage } from './pricing';
+
+// Admin pages
+export { AdminPage } from './admin';

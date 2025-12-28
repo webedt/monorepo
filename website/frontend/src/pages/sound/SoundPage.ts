@@ -29,7 +29,6 @@ export class SoundPage extends Page<SoundPageOptions> {
   protected requiresAuth = true;
 
   private session: Session | null = null;
-  private isLoading = true;
   private isSaving = false;
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
@@ -1121,13 +1120,11 @@ export class SoundPage extends Page<SoundPageOptions> {
       return;
     }
 
-    this.isLoading = true;
-
     try {
       if (isOffline()) {
         const cachedSession = await offlineStorage.getCachedSession(sessionId);
         if (cachedSession) {
-          this.session = cachedSession as Session;
+          this.session = cachedSession as unknown as Session;
           this.updateHeader();
           this.showEmpty();
           await this.loadFiles();
@@ -1148,7 +1145,7 @@ export class SoundPage extends Page<SoundPageOptions> {
     } catch (error) {
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
       if (cachedSession) {
-        this.session = cachedSession as Session;
+        this.session = cachedSession as unknown as Session;
         this.isOfflineMode = true;
         this.updateHeader();
         this.updateOfflineUI();
