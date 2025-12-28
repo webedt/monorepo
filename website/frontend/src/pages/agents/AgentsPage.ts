@@ -31,6 +31,8 @@ export class AgentsPage extends Page<PageOptions> {
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isSearching = false;
   private serverSearchResults: Session[] | null = null;
+  private pendingSearchQuery: string | null = null;
+  private isMounted = false;
 
   // Inline form state
   private repos: Repository[] = [];
@@ -126,6 +128,7 @@ export class AgentsPage extends Page<PageOptions> {
 
   protected onMount(): void {
     super.onMount();
+    this.isMounted = true;
 
     // Create request textarea
     const textareaContainer = this.$('.request-textarea-container') as HTMLElement;
@@ -738,9 +741,14 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private async performServerSearch(query: string): Promise<void> {
-    if (this.isSearching) return;
+    // If a search is already in progress, queue this query to run after
+    if (this.isSearching) {
+      this.pendingSearchQuery = query;
+      return;
+    }
 
     this.isSearching = true;
+    this.pendingSearchQuery = null;
 
     try {
       const result = await sessionsApi.search({
@@ -749,8 +757,8 @@ export class AgentsPage extends Page<PageOptions> {
         favorite: this.filterMode === 'favorites' ? true : undefined,
       });
 
-      // Only update if the query hasn't changed
-      if (this.searchQuery.trim() === query) {
+      // Only update if component is still mounted and query hasn't changed
+      if (this.isMounted && this.searchQuery.trim() === query) {
         this.serverSearchResults = result.sessions;
         this.applyFilters();
         this.renderSessions();
@@ -760,10 +768,19 @@ export class AgentsPage extends Page<PageOptions> {
       // Keep using client-side filtering on error
     } finally {
       this.isSearching = false;
+
+      // If there's a pending query, execute it now
+      if (this.isMounted && this.pendingSearchQuery) {
+        const pendingQuery = this.pendingSearchQuery;
+        this.pendingSearchQuery = null;
+        await this.performServerSearch(pendingQuery);
+      }
     }
   }
 
   protected onUnmount(): void {
+    this.isMounted = false;
+
     this.requestTextArea?.unmount();
     this.searchInput?.unmount();
     this.createSessionBtn?.unmount();
@@ -778,6 +795,9 @@ export class AgentsPage extends Page<PageOptions> {
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
     }
+
+    // Clear pending search query
+    this.pendingSearchQuery = null;
 
     // Close session updates subscription
     if (this.sessionUpdatesEventSource) {

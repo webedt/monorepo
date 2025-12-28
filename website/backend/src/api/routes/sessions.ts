@@ -169,8 +169,22 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
     const query = (req.query.q as string) || '';
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
     const offset = parseInt(req.query.offset as string) || 0;
-    const status = req.query.status as string | undefined;
+    const statusParam = req.query.status as string | undefined;
     const favorite = req.query.favorite === 'true' ? true : req.query.favorite === 'false' ? false : undefined;
+
+    // Validate status parameter if provided
+    const validStatuses = ['pending', 'running', 'completed', 'error'];
+    let status: string | undefined;
+    if (statusParam) {
+      if (!validStatuses.includes(statusParam)) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+        });
+        return;
+      }
+      status = statusParam;
+    }
 
     // Require a query string
     if (!query.trim()) {

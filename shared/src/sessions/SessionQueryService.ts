@@ -112,8 +112,14 @@ export class SessionQueryService extends ASessionQueryService {
   async search(userId: string, options: SessionSearchOptions): Promise<PaginatedResult<ChatSession>> {
     const { query, limit = 50, offset = 0, status, favorite } = options;
 
-    // Build the search pattern for case-insensitive matching
-    const searchPattern = `%${query}%`;
+    // Require minimum query length for meaningful search
+    if (query.length < 2) {
+      return { items: [], total: 0, hasMore: false };
+    }
+
+    // Escape ILIKE special characters (%, _, \) to prevent wildcard injection
+    const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
+    const searchPattern = `%${escapedQuery}%`;
 
     // Build condition list
     const conditions = [
