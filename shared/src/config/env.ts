@@ -68,6 +68,14 @@ export const CLAUDE_SYNC_INTERVAL_MS = parseInt(process.env.CLAUDE_SYNC_INTERVAL
 export const CLAUDE_SYNC_INITIAL_DELAY_MS = parseInt(process.env.CLAUDE_SYNC_INITIAL_DELAY_MS || '5000', 10);  // 5 seconds after startup
 export const CLAUDE_SYNC_LIMIT = parseInt(process.env.CLAUDE_SYNC_LIMIT || '50', 10);  // Max sessions to fetch per sync
 
+// Trash cleanup configuration
+// Sessions never auto-expire - only deleted (trashed) sessions are cleaned up
+// Active sessions persist indefinitely until explicitly deleted by the user
+export const TRASH_CLEANUP_ENABLED = process.env.TRASH_CLEANUP_ENABLED !== 'false';  // Enabled by default
+export const TRASH_CLEANUP_INTERVAL_MS = parseInt(process.env.TRASH_CLEANUP_INTERVAL_MS || '3600000', 10);  // 1 hour
+export const TRASH_CLEANUP_INITIAL_DELAY_MS = parseInt(process.env.TRASH_CLEANUP_INITIAL_DELAY_MS || '60000', 10);  // 1 minute after startup
+export const TRASH_RETENTION_DAYS = parseInt(process.env.TRASH_RETENTION_DAYS || '30', 10);  // Keep trashed sessions for 30 days
+
 /**
  * Validate required environment variables
  */

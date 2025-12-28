@@ -292,6 +292,32 @@
   }
 }
 
+/* Agents content layout with sidebar */
+.agents-content {
+  display: flex;
+  gap: var(--spacing-xl);
+}
+
+.agents-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+}
+
+.agents-main {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .agents-content {
+    flex-direction: column;
+  }
+
+  .agents-sidebar {
+    width: 100%;
+  }
+}
+
 .sessions-container {
   min-height: 300px;
 }

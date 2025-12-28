@@ -405,6 +405,28 @@ export interface ChannelMessage {
   };
 }
 
+// Collections types
+export interface Collection {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  sortOrder: number;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  sessionCount?: number;
+}
+
+export interface SessionCollection {
+  id: string;
+  sessionId: string;
+  collectionId: string;
+  addedAt: string;
+}
+
 // Taxonomy types
 export interface Taxonomy {
   id: string;
@@ -448,4 +470,92 @@ export interface ItemTaxonomy {
 
 export interface TaxonomyWithTerms extends Taxonomy {
   terms: TaxonomyTerm[];
+}
+
+// Cloud Saves types
+export interface CloudSave {
+  id: string;
+  userId: string;
+  gameId: string;
+  slotNumber: number;
+  slotName?: string;
+  saveData?: string;
+  hasData?: boolean;
+  fileSize: number;
+  checksum?: string;
+  platformData?: CloudSavePlatformData;
+  screenshotUrl?: string;
+  playTimeSeconds: number;
+  gameProgress?: CloudSaveGameProgress;
+  lastPlayedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  game?: {
+    id: string;
+    title: string;
+    coverImage?: string;
+  };
+}
+
+export interface CloudSavePlatformData {
+  deviceName?: string;
+  platform?: string;
+  gameVersion?: string;
+  browserInfo?: string;
+}
+
+export interface CloudSaveGameProgress {
+  level?: number;
+  chapter?: string;
+  percentage?: number;
+  customData?: Record<string, unknown>;
+}
+
+export interface CloudSaveVersion {
+  id: string;
+  cloudSaveId: string;
+  version: number;
+  saveData?: string;
+  hasData?: boolean;
+  fileSize: number;
+  checksum?: string;
+  platformData?: CloudSavePlatformData;
+  createdAt: string;
+}
+
+export interface CloudSaveSyncLog {
+  id: string;
+  userId: string;
+  cloudSaveId?: string;
+  operation: 'upload' | 'download' | 'delete' | 'conflict_resolved';
+  deviceInfo?: {
+    deviceName?: string;
+    platform?: string;
+    browserInfo?: string;
+    ipAddress?: string;
+  };
+  status: 'success' | 'failed' | 'conflict';
+  errorMessage?: string;
+  bytesTransferred?: number;
+  createdAt: string;
+}
+
+export interface CloudSaveStats {
+  totalSaves: number;
+  totalSizeBytes: string;
+  gamesWithSaves: number;
+  lastSyncAt?: string;
+}
+
+export interface LocalSaveInfo {
+  gameId: string;
+  slotNumber: number;
+  checksum: string;
+  updatedAt: Date | string;
+}
+
+export interface CloudSaveSyncConflict {
+  localInfo: LocalSaveInfo;
+  remoteSave: CloudSave;
+  conflictType: 'newer_remote' | 'newer_local' | 'both_modified';
 }
