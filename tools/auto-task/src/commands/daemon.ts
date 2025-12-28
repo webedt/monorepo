@@ -15,6 +15,8 @@ import {
   ClaudeWebClient,
   getGitHubCredentials,
   getClaudeCredentials,
+  shouldRefreshClaudeToken,
+  DaemonTokenRefreshService,
 } from '@webedt/shared';
 
 import type { ClaudeAuth } from '@webedt/shared';
@@ -83,6 +85,9 @@ export const daemonCommand = new Command('daemon')
       ),
     };
 
+    // Initialize token refresh service
+    const tokenRefreshService = new DaemonTokenRefreshService();
+
     const context: DaemonContext = {
       rootDir,
       owner,
@@ -94,6 +99,10 @@ export const daemonCommand = new Command('daemon')
       githubToken: githubCreds.token,
       maxReady,
       maxInProgress,
+      tokenRefreshService,
+      pollInterval: pollInterval,
+      basePollInterval: pollInterval,
+      refreshFailureCount: 0,
     };
 
     // Main loop
@@ -111,6 +120,9 @@ export const daemonCommand = new Command('daemon')
 
     while (running) {
       try {
+        // Check and refresh token at start of each cycle
+        await refreshTokenIfNeeded(context);
+
         await runDaemonCycle(context);
       } catch (error) {
         console.error('Daemon cycle error:', error);
@@ -121,8 +133,8 @@ export const daemonCommand = new Command('daemon')
         break;
       }
 
-      console.log(`\nSleeping for ${pollInterval / 1000}s...`);
-      await sleep(pollInterval);
+      console.log(`\nSleeping for ${context.pollInterval / 1000}s...`);
+      await sleep(context.pollInterval);
     }
 
     console.log('\nDaemon stopped.');
@@ -143,6 +155,74 @@ interface DaemonContext {
   githubToken: string;
   maxReady: number;
   maxInProgress: number;
+  /** Service for refreshing Claude tokens */
+  tokenRefreshService: DaemonTokenRefreshService;
+  /** Current poll interval (may increase with backoff on refresh failures) */
+  pollInterval: number;
+  /** Base poll interval (the original value to restore after success) */
+  basePollInterval: number;
+  /** Count of consecutive token refresh failures */
+  refreshFailureCount: number;
+}
+
+/**
+ * Check if token needs refresh and refresh if needed.
+ * Implements exponential backoff on failures.
+ */
+async function refreshTokenIfNeeded(ctx: DaemonContext): Promise<void> {
+  if (!ctx.claudeAuth) {
+    return; // No credentials to refresh
+  }
+
+  // Check if token needs refresh
+  if (!shouldRefreshClaudeToken(ctx.claudeAuth)) {
+    // Token is still valid - reset backoff if we had failures
+    if (ctx.refreshFailureCount > 0) {
+      console.log('   Token valid, resetting poll interval');
+      ctx.pollInterval = ctx.basePollInterval;
+      ctx.refreshFailureCount = 0;
+    }
+    return;
+  }
+
+  console.log('\n--- Token Refresh ---');
+  console.log(`Token expires soon, attempting refresh...`);
+  console.log(`Source: ${ctx.claudeAuth.source || 'unknown'}`);
+
+  try {
+    const refreshedAuth = await ctx.tokenRefreshService.ensureValidToken(ctx.claudeAuth);
+
+    // Update context with new tokens
+    ctx.claudeAuth = refreshedAuth;
+
+    // Reset backoff on success
+    if (ctx.refreshFailureCount > 0) {
+      console.log('   Token refresh succeeded, resetting poll interval');
+      ctx.pollInterval = ctx.basePollInterval;
+      ctx.refreshFailureCount = 0;
+    }
+
+    const expiryDate = refreshedAuth.expiresAt ? new Date(refreshedAuth.expiresAt).toISOString() : 'unknown';
+    console.log(`   Token refreshed successfully, new expiry: ${expiryDate}`);
+  } catch (error) {
+    // Increment failure count and apply backoff
+    ctx.refreshFailureCount++;
+    const backoffMultiplier = Math.pow(2, Math.min(ctx.refreshFailureCount, 4)); // Cap at 16x
+    ctx.pollInterval = ctx.basePollInterval * backoffMultiplier;
+
+    console.warn(`   Token refresh failed (attempt ${ctx.refreshFailureCount})`);
+    console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`   Poll interval increased to ${ctx.pollInterval / 1000}s (${backoffMultiplier}x backoff)`);
+
+    // Log specific guidance based on source
+    if (ctx.claudeAuth.source === 'environment') {
+      console.warn('   Note: Tokens from environment variables cannot be auto-refreshed.');
+      console.warn('   Update CLAUDE_ACCESS_TOKEN and restart the daemon.');
+    } else if (ctx.claudeAuth.source === 'cli-option') {
+      console.warn('   Note: Tokens from CLI options cannot be auto-refreshed.');
+      console.warn('   Restart the daemon with a fresh --token value.');
+    }
+  }
 }
 
 async function runDaemonCycle(ctx: DaemonContext): Promise<void> {
