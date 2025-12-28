@@ -193,7 +193,7 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
       case 'Write': {
         const filePath = this.tool.input?.file_path || result?.filePath || 'unknown';
         const content = this.tool.input?.content || result?.content || '';
-        const lineCount = content ? content.split('\n').length : null;
+        const lineCount = typeof content === 'string' && content ? content.split('\n').length : null;
         const linesStr = lineCount ? `(${lineCount} lines)` : '';
         return `
           <span>${emoji} Write:</span>
@@ -446,7 +446,8 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
   private renderWriteDetails(result: any): string {
     const fileContent = this.tool.input?.content || result?.content || null;
     if (fileContent) {
-      return `<pre class="tool-output">${this.escapeHtml(fileContent)}</pre>`;
+      const content = typeof fileContent === 'string' ? fileContent : JSON.stringify(fileContent, null, 2);
+      return `<pre class="tool-output">${this.escapeHtml(content)}</pre>`;
     }
     return `<div class="tool-empty">File written successfully</div>`;
   }
