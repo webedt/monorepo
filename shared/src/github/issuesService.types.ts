@@ -64,4 +64,8 @@ export interface AutoTaskCommentInfo {
   prNumber?: number;
   type: 'started' | 'rework' | 'complete' | 'failed' | 'review' | 'conflict' | 'unknown';
   createdAt: string;
+  /** Count of failure/retry comments on this issue */
+  failureCount: number;
+  /** Total number of session start attempts */
+  attemptCount: number;
 }

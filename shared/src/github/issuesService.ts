@@ -276,8 +276,10 @@ export class GitHubIssuesService {
     let latestSessionUrl: string | undefined;
     let latestBranchName: string | undefined;
     let latestPrNumber: number | undefined;
+    let failureCount = 0;
+    let attemptCount = 0;
 
-    // First pass: get the most recent type and creation date
+    // First pass: get the most recent type and creation date, and count failures/attempts
     for (let i = comments.length - 1; i >= 0; i--) {
       const info = parseAutoTaskComment(comments[i]);
       if (info) {
@@ -295,6 +297,13 @@ export class GitHubIssuesService {
         if (info.prNumber && !latestPrNumber) {
           latestPrNumber = info.prNumber;
         }
+        // Count failures and attempts
+        if (info.type === 'failed') {
+          failureCount++;
+        }
+        if (info.type === 'started' || info.type === 'rework') {
+          attemptCount++;
+        }
       }
     }
 
@@ -310,6 +319,8 @@ export class GitHubIssuesService {
       if (latestPrNumber) {
         result.prNumber = latestPrNumber;
       }
+      result.failureCount = failureCount;
+      result.attemptCount = attemptCount;
     }
 
     return result;
@@ -330,6 +341,8 @@ function parseAutoTaskComment(comment: IssueComment): AutoTaskCommentInfo | unde
   const info: AutoTaskCommentInfo = {
     type: 'unknown',
     createdAt: comment.createdAt,
+    failureCount: 0,
+    attemptCount: 0,
   };
 
   // Determine comment type based on headers
