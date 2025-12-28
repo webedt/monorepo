@@ -45,6 +45,7 @@ import storeRoutes from './api/routes/store.js';
 import libraryRoutes from './api/routes/library.js';
 import purchasesRoutes from './api/routes/purchases.js';
 import communityRoutes from './api/routes/community.js';
+import storageRoutes from './api/routes/storage.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
@@ -320,6 +321,7 @@ app.use('/api/store', storeRoutes);  // Game store browsing and wishlist
 app.use('/api/library', libraryRoutes);  // User's game library management
 app.use('/api/purchases', purchasesRoutes);  // Game purchases and refunds
 app.use('/api/community', communityRoutes);  // Community posts, reviews, and discussions
+app.use('/api/storage', storageRoutes);  // User storage quota management
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');
