@@ -19,6 +19,7 @@ export class SceneTabs extends Component {
   private options: SceneTabsOptions;
   private unsubscribe: (() => void) | null = null;
   private renamingSceneId: string | null = null;
+  private boundDocumentClickHandler: ((e: Event) => void) | null = null;
 
   constructor(options: SceneTabsOptions = {}) {
     super('div', { className: 'scene-tabs' });
@@ -31,12 +32,27 @@ export class SceneTabs extends Component {
     this.unsubscribe = sceneStore.subscribe(() => {
       this.render();
     });
+
+    // Setup document click handler for closing dropdowns (only once)
+    this.boundDocumentClickHandler = () => {
+      const dropdown = this.element.querySelector('.scene-tabs-dropdown') as HTMLElement;
+      if (dropdown) {
+        dropdown.style.display = 'none';
+      }
+    };
+    document.addEventListener('click', this.boundDocumentClickHandler);
   }
 
   protected onUnmount(): void {
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;
+    }
+
+    // Remove document click handler
+    if (this.boundDocumentClickHandler) {
+      document.removeEventListener('click', this.boundDocumentClickHandler);
+      this.boundDocumentClickHandler = null;
     }
   }
 
@@ -196,10 +212,8 @@ export class SceneTabs extends Component {
         dropdown.style.display = isVisible ? 'none' : 'block';
       });
 
-      // Close dropdown on outside click
-      document.addEventListener('click', () => {
-        dropdown.style.display = 'none';
-      });
+      // Note: Document click handler for closing dropdown is set up in onMount() once
+      // to avoid memory leaks from adding listeners on every render
 
       // Dropdown item handlers
       const dropdownItems = dropdown.querySelectorAll('.scene-tabs-dropdown-item');

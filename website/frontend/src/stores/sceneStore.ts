@@ -188,7 +188,11 @@ export const sceneStore = createStore<SceneStoreState, {
 
     deleteScene(sceneId: string): void {
       const state = get();
-      const { [sceneId]: _, ...remainingScenes } = state.scenes;
+
+      // Filter out the deleted scene from scenes object
+      const remainingScenes = Object.fromEntries(
+        Object.entries(state.scenes).filter(([id]) => id !== sceneId)
+      );
       const newOpenSceneIds = state.openSceneIds.filter(id => id !== sceneId);
       const newSceneOrder = state.sceneOrder.filter(id => id !== sceneId);
 
@@ -228,6 +232,14 @@ export const sceneStore = createStore<SceneStoreState, {
 
     reorderScenes(fromIndex: number, toIndex: number): void {
       const state = get();
+      const length = state.sceneOrder.length;
+
+      // Validate bounds
+      if (length === 0) return;
+      if (fromIndex < 0 || fromIndex >= length) return;
+      if (toIndex < 0 || toIndex >= length) return;
+      if (fromIndex === toIndex) return;
+
       const newOrder = [...state.sceneOrder];
       const [removed] = newOrder.splice(fromIndex, 1);
       newOrder.splice(toIndex, 0, removed);

@@ -1344,6 +1344,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         if (cachedSession) {
           this.session = cachedSession as unknown as Session;
           this.updateHeader();
+          await this.loadSavedScenes();
           this.showCanvas();
           this.renderScene();
           toast.info('Loaded from offline cache');
@@ -1358,6 +1359,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.session = response.session;
       await offlineStorage.cacheSession(sessionId, response.session as unknown as Record<string, unknown>);
       this.updateHeader();
+      await this.loadSavedScenes();
       this.showCanvas();
       this.renderScene();
     } catch (error) {
@@ -1367,6 +1369,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         this.isOfflineMode = true;
         this.updateHeader();
         this.updateOfflineUI();
+        await this.loadSavedScenes();
         this.showCanvas();
         this.renderScene();
         toast.info('Loaded from offline cache');
@@ -1375,6 +1378,46 @@ export class ScenePage extends Page<ScenePageOptions> {
         console.error('Failed to load session:', error);
         this.navigate('/agents');
       }
+    }
+  }
+
+  private async loadSavedScenes(): Promise<void> {
+    const sessionPath = this.getSessionPath();
+    if (!sessionPath) return;
+
+    try {
+      const cachedFile = await offlineStorage.getCachedFile(sessionPath, 'scenes.json');
+      if (cachedFile && cachedFile.content) {
+        const scenesData = JSON.parse(cachedFile.content as string);
+
+        if (scenesData.scenes && Array.isArray(scenesData.scenes)) {
+          // Load scenes into store
+          const scenes = scenesData.scenes.map((sceneData: Record<string, unknown>) => ({
+            id: sceneData.id as string,
+            name: sceneData.name as string,
+            objects: sceneData.objects || [],
+            settings: sceneData.settings || { showGrid: true, gridSize: 32, snapToGrid: true },
+            isDirty: false,
+            createdAt: sceneData.createdAt as number || Date.now(),
+            updatedAt: sceneData.updatedAt as number || Date.now(),
+          }));
+
+          sceneStore.loadScenes(scenes);
+
+          // Open all loaded scenes and set active scene
+          for (const scene of scenes) {
+            sceneStore.openScene(scene.id);
+          }
+
+          // Restore active scene if saved
+          if (scenesData.activeSceneId) {
+            sceneStore.setActiveScene(scenesData.activeSceneId);
+          }
+        }
+      }
+    } catch (error) {
+      // No saved scenes or failed to parse - that's okay, start fresh
+      console.debug('No saved scenes found or failed to load:', error);
     }
   }
 
