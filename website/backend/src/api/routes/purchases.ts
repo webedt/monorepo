@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, purchases, wishlists, eq, and, desc } from '@webedt/shared';
+import { db, games, userLibrary, purchases, wishlists, eq, and, desc, sql } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -76,13 +76,13 @@ router.get('/history', async (req: Request, res: Response) => {
       .limit(limit)
       .offset(offset);
 
-    // Get total count
-    const allPurchases = await db
-      .select({ id: purchases.id })
+    // Get total count using SQL COUNT for efficiency
+    const [countResult] = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
       .from(purchases)
       .where(eq(purchases.userId, authReq.user!.id));
 
-    const total = allPurchases.length;
+    const total = countResult?.count ?? 0;
 
     res.json({
       success: true,

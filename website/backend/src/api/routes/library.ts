@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, eq, and, desc } from '@webedt/shared';
+import { db, games, userLibrary, eq, and, desc, asc, sql } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -100,67 +100,69 @@ router.get('/', async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
     const offset = parseInt(req.query.offset as string) || 0;
 
-    // Get library items with game details
-    let libraryItems = await db
+    // Build conditions for database-level filtering
+    const conditions = [
+      eq(userLibrary.userId, authReq.user!.id),
+      eq(userLibrary.hidden, false),
+    ];
+
+    // Apply filters at database level
+    if (favorite === 'true') {
+      conditions.push(eq(userLibrary.favorite, true));
+    }
+
+    if (installed === 'true') {
+      conditions.push(eq(userLibrary.installStatus, 'installed'));
+    }
+
+    // Determine sort order at database level
+    let orderByClause;
+    switch (sort) {
+      case 'title':
+        orderByClause = order === 'asc' ? asc(games.title) : desc(games.title);
+        break;
+      case 'lastPlayed':
+        orderByClause = order === 'asc'
+          ? asc(userLibrary.lastPlayedAt)
+          : desc(userLibrary.lastPlayedAt);
+        break;
+      case 'playtime':
+        orderByClause = order === 'asc'
+          ? asc(userLibrary.playtimeMinutes)
+          : desc(userLibrary.playtimeMinutes);
+        break;
+      case 'acquiredAt':
+      default:
+        orderByClause = order === 'asc'
+          ? asc(userLibrary.acquiredAt)
+          : desc(userLibrary.acquiredAt);
+    }
+
+    // Get library items with database-level filtering, sorting, and pagination
+    const libraryItems = await db
       .select({
         libraryItem: userLibrary,
         game: games,
       })
       .from(userLibrary)
       .innerJoin(games, eq(userLibrary.gameId, games.id))
-      .where(
-        and(
-          eq(userLibrary.userId, authReq.user!.id),
-          eq(userLibrary.hidden, false)
-        )
-      );
+      .where(and(...conditions))
+      .orderBy(orderByClause)
+      .limit(limit)
+      .offset(offset);
 
-    // Apply filters
-    if (favorite === 'true') {
-      libraryItems = libraryItems.filter((item) => item.libraryItem.favorite);
-    }
+    // Get total count using SQL COUNT for efficiency
+    const [countResult] = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(userLibrary)
+      .where(and(...conditions));
 
-    if (installed === 'true') {
-      libraryItems = libraryItems.filter(
-        (item) => item.libraryItem.installStatus === 'installed'
-      );
-    }
-
-    // Sort
-    const sortOrder = order === 'asc' ? 1 : -1;
-    libraryItems.sort((a, b) => {
-      switch (sort) {
-        case 'title':
-          return sortOrder * a.game.title.localeCompare(b.game.title);
-        case 'lastPlayed':
-          const playedA = a.libraryItem.lastPlayedAt
-            ? new Date(a.libraryItem.lastPlayedAt).getTime()
-            : 0;
-          const playedB = b.libraryItem.lastPlayedAt
-            ? new Date(b.libraryItem.lastPlayedAt).getTime()
-            : 0;
-          return sortOrder * (playedA - playedB);
-        case 'playtime':
-          return (
-            sortOrder *
-            (a.libraryItem.playtimeMinutes - b.libraryItem.playtimeMinutes)
-          );
-        case 'acquiredAt':
-        default:
-          const acqA = new Date(a.libraryItem.acquiredAt).getTime();
-          const acqB = new Date(b.libraryItem.acquiredAt).getTime();
-          return sortOrder * (acqA - acqB);
-      }
-    });
-
-    // Paginate
-    const total = libraryItems.length;
-    const paginatedItems = libraryItems.slice(offset, offset + limit);
+    const total = countResult?.count ?? 0;
 
     res.json({
       success: true,
       data: {
-        items: paginatedItems.map((item) => ({
+        items: libraryItems.map((item) => ({
           ...item.libraryItem,
           game: item.game,
         })),
