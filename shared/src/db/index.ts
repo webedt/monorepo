@@ -461,6 +461,11 @@ export type {
   NewCommunityVote,
   WishlistItem,
   NewWishlistItem,
+  // Community channels types
+  CommunityChannel,
+  NewCommunityChannel,
+  ChannelMessage,
+  NewChannelMessage,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -483,6 +488,9 @@ export {
   communityComments,
   communityVotes,
   wishlists,
+  // Community channels tables
+  communityChannels,
+  channelMessages,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

@@ -88,6 +88,7 @@ export {
   ActivityWidget,
   QuickActionsWidget,
   ChartWidget,
+  CommunityActivityWidget,
   WidgetContainer,
   WidgetCustomizer,
 } from './widget';
@@ -106,6 +107,7 @@ export type {
   QuickActionsWidgetOptions,
   ChartWidgetOptions,
   ChartType,
+  CommunityActivityWidgetOptions,
   WidgetContainerOptions,
   WidgetCustomizerOptions,
 } from './widget';
