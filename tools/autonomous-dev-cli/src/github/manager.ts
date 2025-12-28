@@ -15,6 +15,7 @@ import { createPRManager, type PRManager } from './pulls.js';
 import { createIssueManager, type IssueManager } from './issues.js';
 import { createBranchManager, type BranchManager } from './branches.js';
 import { createChecksManager, type ChecksManager } from './checks.js';
+import { createCodeReviewerManager, type CodeReviewerManager } from './codeReviewer.js';
 import { logger } from '../utils/logger.js';
 import {
   GitHubRateLimiter,
@@ -133,6 +134,7 @@ export class GitHubManager {
   public readonly issues: IssueManager;
   public readonly branches: BranchManager;
   public readonly checks: ChecksManager;
+  public readonly codeReviewer: CodeReviewerManager;
 
   private readonly config: GitHubManagerConfig;
   private readonly rateLimiter: GitHubRateLimiter;
@@ -177,6 +179,7 @@ export class GitHubManager {
     this.issues = createIssueManager(this.client);
     this.branches = createBranchManager(this.client);
     this.checks = createChecksManager(this.client);
+    this.codeReviewer = createCodeReviewerManager(this.client);
 
     this.log.debug('GitHubManager initialized', {
       owner: config.owner,
