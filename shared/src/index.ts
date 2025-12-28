@@ -80,6 +80,9 @@ export * from './storage/index.js';
 // Payment - Stripe and PayPal payment providers
 export * from './payment/index.js';
 
+// Games - Shared platform libraries for games
+export * from './games/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
