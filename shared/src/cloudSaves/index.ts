@@ -18,4 +18,5 @@ export type {
   CloudSaveWithGame,
   SyncConflict,
   CloudSaveStats,
+  LocalSaveInfo,
 } from './CloudSavesService.js';

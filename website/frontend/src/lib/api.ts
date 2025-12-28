@@ -1186,6 +1186,7 @@ import type {
   CloudSaveSyncConflict,
   CloudSavePlatformData,
   CloudSaveGameProgress,
+  LocalSaveInfo,
 } from '../types';
 
 export const taxonomyApi = {
@@ -1326,7 +1327,7 @@ export const cloudSavesApi = {
       .then(r => r.data!),
 
   // Check for sync conflicts
-  checkConflicts: (localSaves: Array<{ gameId: string; slotNumber: number; checksum: string; updatedAt: Date }>) =>
+  checkConflicts: (localSaves: LocalSaveInfo[]) =>
     fetchApi<ApiResponse<{ conflicts: CloudSaveSyncConflict[]; hasConflicts: boolean }>>('/api/cloud-saves/check-conflicts', {
       method: 'POST',
       body: { localSaves },

@@ -11,10 +11,18 @@
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 
-import { db, cloudSaves, cloudSaveVersions, cloudSaveSyncLog, games, users, eq, and, desc, sql } from '../db/index.js';
+import { db, cloudSaves, cloudSaveVersions, cloudSaveSyncLog, games, eq, and, desc, sql, inArray, or } from '../db/index.js';
 import { StorageService, calculateStringSize } from '../storage/StorageService.js';
 
 import type { CloudSave, NewCloudSave, CloudSaveVersion, CloudSaveSyncLog } from '../db/index.js';
+
+// Interface for local save info used in conflict checking
+export interface LocalSaveInfo {
+  gameId: string;
+  slotNumber: number;
+  checksum: string;
+  updatedAt: Date;
+}
 
 // Maximum number of versions to keep per save
 const MAX_VERSIONS_PER_SAVE = 5;
@@ -54,7 +62,7 @@ export interface CloudSaveWithGame extends CloudSave {
 }
 
 export interface SyncConflict {
-  localSave: CloudSave;
+  localInfo: LocalSaveInfo;
   remoteSave: CloudSave;
   conflictType: 'newer_remote' | 'newer_local' | 'both_modified';
 }
@@ -103,15 +111,6 @@ export class CloudSavesService {
     const fileSize = calculateStringSize(saveData);
     const checksum = this.calculateChecksum(saveData);
 
-    // Check storage quota
-    const quotaCheck = await StorageService.checkQuota(userId, fileSize);
-    if (!quotaCheck.allowed) {
-      throw new Error(
-        `Storage quota exceeded. Available: ${StorageService.formatBytes(quotaCheck.availableBytes)}, ` +
-        `Requested: ${StorageService.formatBytes(quotaCheck.requestedBytes)}`
-      );
-    }
-
     // Check if save already exists
     const [existingSave] = await db
       .select()
@@ -125,14 +124,25 @@ export class CloudSavesService {
       )
       .limit(1);
 
+    // Calculate size difference for storage tracking
+    const sizeDiff = existingSave ? fileSize - existingSave.fileSize : fileSize;
+
+    // Check storage quota only if we're adding storage (new save or larger update)
+    if (sizeDiff > 0) {
+      const quotaCheck = await StorageService.checkQuota(userId, sizeDiff);
+      if (!quotaCheck.allowed) {
+        throw new Error(
+          `Storage quota exceeded. Available: ${StorageService.formatBytes(quotaCheck.availableBytes)}, ` +
+          `Requested: ${StorageService.formatBytes(BigInt(sizeDiff))}`
+        );
+      }
+    }
+
     let save: CloudSave;
 
     if (existingSave) {
       // Create version history before updating
       await this.createVersion(existingSave);
-
-      // Calculate size difference for storage tracking
-      const sizeDiff = fileSize - existingSave.fileSize;
 
       // Update existing save
       const [updatedSave] = await db
@@ -240,11 +250,12 @@ export class CloudSavesService {
       .offset(MAX_VERSIONS_PER_SAVE);
 
     if (versionsToDelete.length > 0) {
-      let freedBytes = 0;
-      for (const version of versionsToDelete) {
-        freedBytes += version.fileSize;
-        await db.delete(cloudSaveVersions).where(eq(cloudSaveVersions.id, version.id));
-      }
+      // Calculate total bytes to free
+      const freedBytes = versionsToDelete.reduce((sum, v) => sum + v.fileSize, 0);
+      const versionIds = versionsToDelete.map((v) => v.id);
+
+      // Batch delete all versions at once
+      await db.delete(cloudSaveVersions).where(inArray(cloudSaveVersions.id, versionIds));
 
       // Update storage usage
       if (freedBytes > 0) {
@@ -365,6 +376,45 @@ export class CloudSavesService {
       .orderBy(desc(cloudSaveVersions.version));
 
     return versions;
+  }
+
+  /**
+   * Get a specific version by ID with ownership verification
+   */
+  static async getVersionById(
+    userId: string,
+    cloudSaveId: string,
+    versionId: string
+  ): Promise<CloudSaveVersion | null> {
+    // Verify ownership of the parent save
+    const [save] = await db
+      .select()
+      .from(cloudSaves)
+      .where(
+        and(
+          eq(cloudSaves.id, cloudSaveId),
+          eq(cloudSaves.userId, userId)
+        )
+      )
+      .limit(1);
+
+    if (!save) {
+      throw new Error('Save not found or access denied');
+    }
+
+    // Query the specific version directly
+    const [version] = await db
+      .select()
+      .from(cloudSaveVersions)
+      .where(
+        and(
+          eq(cloudSaveVersions.id, versionId),
+          eq(cloudSaveVersions.cloudSaveId, cloudSaveId)
+        )
+      )
+      .limit(1);
+
+    return version ?? null;
   }
 
   /**
@@ -522,25 +572,47 @@ export class CloudSavesService {
 
   /**
    * Check for sync conflicts between local and remote saves
+   * Uses batch query to avoid N+1 database calls
    */
   static async checkSyncConflicts(
     userId: string,
-    localSaves: Array<{ gameId: string; slotNumber: number; checksum: string; updatedAt: Date }>
+    localSaves: LocalSaveInfo[]
   ): Promise<SyncConflict[]> {
-    const conflicts: SyncConflict[] = [];
+    if (localSaves.length === 0) {
+      return [];
+    }
 
-    for (const local of localSaves) {
-      const [remote] = await db
-        .select()
-        .from(cloudSaves)
-        .where(
-          and(
-            eq(cloudSaves.userId, userId),
-            eq(cloudSaves.gameId, local.gameId),
-            eq(cloudSaves.slotNumber, local.slotNumber)
-          )
+    // Build a single query with OR conditions for all local saves
+    // This avoids N+1 queries by fetching all matching saves at once
+    const conditions = localSaves.map((local) =>
+      and(
+        eq(cloudSaves.gameId, local.gameId),
+        eq(cloudSaves.slotNumber, local.slotNumber)
+      )
+    );
+
+    const remoteSaves = await db
+      .select()
+      .from(cloudSaves)
+      .where(
+        and(
+          eq(cloudSaves.userId, userId),
+          or(...conditions)
         )
-        .limit(1);
+      );
+
+    // Create a map for quick lookup: "gameId:slotNumber" -> remote save
+    const remoteMap = new Map<string, CloudSave>();
+    for (const remote of remoteSaves) {
+      const key = `${remote.gameId}:${remote.slotNumber}`;
+      remoteMap.set(key, remote);
+    }
+
+    // Check for conflicts
+    const conflicts: SyncConflict[] = [];
+    for (const local of localSaves) {
+      const key = `${local.gameId}:${local.slotNumber}`;
+      const remote = remoteMap.get(key);
 
       if (remote && remote.checksum !== local.checksum) {
         // Determine conflict type
@@ -557,7 +629,7 @@ export class CloudSavesService {
         }
 
         conflicts.push({
-          localSave: { ...remote, checksum: local.checksum, updatedAt: local.updatedAt } as CloudSave,
+          localInfo: local,
           remoteSave: remote,
           conflictType,
         });

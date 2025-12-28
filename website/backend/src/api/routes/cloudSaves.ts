@@ -87,16 +87,49 @@ router.post('/check-conflicts', async (req: Request, res: Response) => {
       return;
     }
 
+    // Validate each element has required fields
+    for (let i = 0; i < localSaves.length; i++) {
+      const save = localSaves[i];
+      if (!save || typeof save !== 'object') {
+        res.status(400).json({ success: false, error: `localSaves[${i}] must be an object` });
+        return;
+      }
+      if (typeof save.gameId !== 'string' || !save.gameId) {
+        res.status(400).json({ success: false, error: `localSaves[${i}].gameId is required and must be a string` });
+        return;
+      }
+      if (typeof save.slotNumber !== 'number' || !Number.isInteger(save.slotNumber)) {
+        res.status(400).json({ success: false, error: `localSaves[${i}].slotNumber is required and must be an integer` });
+        return;
+      }
+      if (typeof save.checksum !== 'string' || !save.checksum) {
+        res.status(400).json({ success: false, error: `localSaves[${i}].checksum is required and must be a string` });
+        return;
+      }
+      // Parse updatedAt if it's a string
+      if (save.updatedAt) {
+        if (typeof save.updatedAt === 'string') {
+          save.updatedAt = new Date(save.updatedAt);
+        }
+        if (!(save.updatedAt instanceof Date) || isNaN(save.updatedAt.getTime())) {
+          res.status(400).json({ success: false, error: `localSaves[${i}].updatedAt must be a valid date` });
+          return;
+        }
+      } else {
+        res.status(400).json({ success: false, error: `localSaves[${i}].updatedAt is required` });
+        return;
+      }
+    }
+
     const conflicts = await CloudSavesService.checkSyncConflicts(authReq.user!.id, localSaves);
 
     res.json({
       success: true,
       data: {
         conflicts: conflicts.map((c) => ({
-          ...c,
-          // Don't include full save data
-          localSave: { ...c.localSave, saveData: undefined },
+          localInfo: c.localInfo,
           remoteSave: { ...c.remoteSave, saveData: undefined },
+          conflictType: c.conflictType,
         })),
         hasConflicts: conflicts.length > 0,
       },
@@ -290,8 +323,8 @@ router.get('/saves/:saveId/versions/:versionId', async (req: Request, res: Respo
     const authReq = req as AuthRequest;
     const { saveId, versionId } = req.params;
 
-    const versions = await CloudSavesService.getSaveVersions(authReq.user!.id, saveId);
-    const version = versions.find((v) => v.id === versionId);
+    // Use direct query instead of fetching all versions
+    const version = await CloudSavesService.getVersionById(authReq.user!.id, saveId, versionId);
 
     if (!version) {
       res.status(404).json({ success: false, error: 'Version not found' });

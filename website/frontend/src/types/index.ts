@@ -524,8 +524,15 @@ export interface CloudSaveStats {
   lastSyncAt?: string;
 }
 
+export interface LocalSaveInfo {
+  gameId: string;
+  slotNumber: number;
+  checksum: string;
+  updatedAt: Date | string;
+}
+
 export interface CloudSaveSyncConflict {
-  localSave: CloudSave;
+  localInfo: LocalSaveInfo;
   remoteSave: CloudSave;
   conflictType: 'newer_remote' | 'newer_local' | 'both_modified';
 }
