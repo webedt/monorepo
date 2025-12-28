@@ -111,3 +111,7 @@ export type {
   WidgetContainerOptions,
   WidgetCustomizerOptions,
 } from './widget';
+
+// TaxonomyManager
+export { TaxonomyManager } from './taxonomy-manager';
+export type { TaxonomyManagerOptions } from './taxonomy-manager';

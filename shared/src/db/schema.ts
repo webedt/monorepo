@@ -604,3 +604,68 @@ export type CommunityChannel = typeof communityChannels.$inferSelect;
 export type NewCommunityChannel = typeof communityChannels.$inferInsert;
 export type ChannelMessage = typeof channelMessages.$inferSelect;
 export type NewChannelMessage = typeof channelMessages.$inferInsert;
+
+// ============================================================================
+// TAXONOMY SYSTEM - Admin-configurable categories, tags, and genres
+// ============================================================================
+
+// Taxonomies - Defines taxonomy types (e.g., 'genre', 'category', 'tag', 'platform')
+export const taxonomies = pgTable('taxonomies', {
+  id: text('id').primaryKey(), // UUID
+  name: text('name').notNull().unique(), // Internal name (e.g., 'genre', 'category')
+  displayName: text('display_name').notNull(), // User-facing name (e.g., 'Genre', 'Category')
+  description: text('description'),
+  slug: text('slug').notNull().unique(), // URL-friendly identifier
+  allowMultiple: boolean('allow_multiple').default(true).notNull(), // Can items have multiple terms?
+  isRequired: boolean('is_required').default(false).notNull(), // Must items have at least one term?
+  itemTypes: json('item_types').$type<string[]>().default([]), // Which item types can use this taxonomy (e.g., ['game', 'post'])
+  sortOrder: integer('sort_order').default(0).notNull(), // For ordering taxonomies in UI
+  status: text('status').default('active').notNull(), // 'active' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Taxonomy Terms - Individual terms within a taxonomy (e.g., 'Action', 'RPG' for genre taxonomy)
+export const taxonomyTerms = pgTable('taxonomy_terms', {
+  id: text('id').primaryKey(), // UUID
+  taxonomyId: text('taxonomy_id')
+    .notNull()
+    .references(() => taxonomies.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(), // Display name (e.g., 'Action', 'Role-Playing Game')
+  slug: text('slug').notNull(), // URL-friendly identifier
+  description: text('description'),
+  parentId: text('parent_id'), // For hierarchical taxonomies (self-reference)
+  color: text('color'), // Optional color for UI display (e.g., '#FF5733')
+  icon: text('icon'), // Optional icon name or URL
+  metadata: json('metadata').$type<Record<string, unknown>>(), // Flexible additional data
+  sortOrder: integer('sort_order').default(0).notNull(), // For ordering terms
+  status: text('status').default('active').notNull(), // 'active' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: slug must be unique within a taxonomy
+  uniqueIndex('taxonomy_term_slug_unique_idx').on(table.taxonomyId, table.slug),
+]);
+
+// Item Taxonomies - Junction table linking items to taxonomy terms
+// Polymorphic design: itemType + itemId identifies any entity
+export const itemTaxonomies = pgTable('item_taxonomies', {
+  id: text('id').primaryKey(), // UUID
+  termId: text('term_id')
+    .notNull()
+    .references(() => taxonomyTerms.id, { onDelete: 'cascade' }),
+  itemType: text('item_type').notNull(), // e.g., 'game', 'post', 'session'
+  itemId: text('item_id').notNull(), // ID of the item
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  // Unique constraint: an item can only have each term once
+  uniqueIndex('item_taxonomy_unique_idx').on(table.termId, table.itemType, table.itemId),
+]);
+
+// Type exports for Taxonomy System
+export type Taxonomy = typeof taxonomies.$inferSelect;
+export type NewTaxonomy = typeof taxonomies.$inferInsert;
+export type TaxonomyTerm = typeof taxonomyTerms.$inferSelect;
+export type NewTaxonomyTerm = typeof taxonomyTerms.$inferInsert;
+export type ItemTaxonomy = typeof itemTaxonomies.$inferSelect;
+export type NewItemTaxonomy = typeof itemTaxonomies.$inferInsert;
