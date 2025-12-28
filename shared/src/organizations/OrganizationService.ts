@@ -97,11 +97,12 @@ export class OrganizationService extends AOrganizationService {
   }
 
   async delete(id: string): Promise<boolean> {
-    const result = await db
+    const deleted = await db
       .delete(organizations)
-      .where(eq(organizations.id, id));
+      .where(eq(organizations.id, id))
+      .returning({ id: organizations.id });
 
-    return (result as any).rowCount > 0;
+    return deleted.length > 0;
   }
 
   async getMembers(organizationId: string): Promise<OrganizationMemberWithUser[]> {
@@ -182,16 +183,17 @@ export class OrganizationService extends AOrganizationService {
   }
 
   async removeMember(organizationId: string, userId: string): Promise<boolean> {
-    const result = await db
+    const deleted = await db
       .delete(organizationMembers)
       .where(
         and(
           eq(organizationMembers.organizationId, organizationId),
           eq(organizationMembers.userId, userId)
         )
-      );
+      )
+      .returning({ id: organizationMembers.id });
 
-    return (result as any).rowCount > 0;
+    return deleted.length > 0;
   }
 
   async getUserOrganizations(userId: string): Promise<UserOrganization[]> {
@@ -264,7 +266,7 @@ export class OrganizationService extends AOrganizationService {
     repositoryOwner: string,
     repositoryName: string
   ): Promise<boolean> {
-    const result = await db
+    const deleted = await db
       .delete(organizationRepositories)
       .where(
         and(
@@ -272,9 +274,10 @@ export class OrganizationService extends AOrganizationService {
           eq(organizationRepositories.repositoryOwner, repositoryOwner),
           eq(organizationRepositories.repositoryName, repositoryName)
         )
-      );
+      )
+      .returning({ id: organizationRepositories.id });
 
-    return (result as any).rowCount > 0;
+    return deleted.length > 0;
   }
 
   async setDefaultRepository(
@@ -287,7 +290,7 @@ export class OrganizationService extends AOrganizationService {
       .set({ isDefault: false })
       .where(eq(organizationRepositories.organizationId, organizationId));
 
-    const result = await db
+    const updated = await db
       .update(organizationRepositories)
       .set({ isDefault: true })
       .where(
@@ -296,9 +299,10 @@ export class OrganizationService extends AOrganizationService {
           eq(organizationRepositories.repositoryOwner, repositoryOwner),
           eq(organizationRepositories.repositoryName, repositoryName)
         )
-      );
+      )
+      .returning({ id: organizationRepositories.id });
 
-    return (result as any).rowCount > 0;
+    return updated.length > 0;
   }
 
   async createInvitation(params: InviteMemberParams): Promise<OrganizationInvitation> {
@@ -352,11 +356,12 @@ export class OrganizationService extends AOrganizationService {
   }
 
   async revokeInvitation(invitationId: string): Promise<boolean> {
-    const result = await db
+    const deleted = await db
       .delete(organizationInvitations)
-      .where(eq(organizationInvitations.id, invitationId));
+      .where(eq(organizationInvitations.id, invitationId))
+      .returning({ id: organizationInvitations.id });
 
-    return (result as any).rowCount > 0;
+    return deleted.length > 0;
   }
 
   async getPendingInvitations(organizationId: string): Promise<OrganizationInvitation[]> {

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, boolean, integer, json } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, json, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -213,7 +213,9 @@ export const organizationMembers = pgTable('organization_members', {
   joinedAt: timestamp('joined_at').defaultNow().notNull(),
   invitedBy: text('invited_by')
     .references(() => users.id, { onDelete: 'set null' }),
-});
+}, (table) => [
+  uniqueIndex('org_member_unique_idx').on(table.organizationId, table.userId),
+]);
 
 // Organization repositories - tracks repos owned/managed by organizations
 export const organizationRepositories = pgTable('organization_repositories', {
@@ -227,7 +229,9 @@ export const organizationRepositories = pgTable('organization_repositories', {
   addedBy: text('added_by')
     .references(() => users.id, { onDelete: 'set null' }),
   addedAt: timestamp('added_at').defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex('org_repo_unique_idx').on(table.organizationId, table.repositoryOwner, table.repositoryName),
+]);
 
 // Organization invitations - pending invitations
 export const organizationInvitations = pgTable('organization_invitations', {
@@ -243,7 +247,9 @@ export const organizationInvitations = pgTable('organization_invitations', {
   token: text('token').notNull().unique(), // Invitation token for acceptance
   expiresAt: timestamp('expires_at').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex('org_invitation_unique_idx').on(table.organizationId, table.email),
+]);
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

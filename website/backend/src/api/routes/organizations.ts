@@ -421,8 +421,13 @@ router.post('/:id/repositories', requireAuth, async (req: Request, res: Response
     });
 
     res.status(201).json({ success: true, data: repository });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error adding repository:', error);
+    // Handle unique constraint violation (duplicate repository)
+    if (error instanceof Error && error.message.includes('unique constraint')) {
+      res.status(409).json({ success: false, error: 'This repository is already added to the organization' });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to add repository' });
   }
 });
@@ -492,6 +497,12 @@ router.post('/:id/invitations', requireAuth, async (req: Request, res: Response)
       return;
     }
 
+    // Basic email validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ success: false, error: 'Invalid email format' });
+      return;
+    }
+
     if (role && !['admin', 'member'].includes(role)) {
       res.status(400).json({ success: false, error: 'Invalid role. Must be admin or member' });
       return;
@@ -511,8 +522,13 @@ router.post('/:id/invitations', requireAuth, async (req: Request, res: Response)
     });
 
     res.status(201).json({ success: true, data: invitation });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error creating invitation:', error);
+    // Handle unique constraint violation (duplicate invitation)
+    if (error instanceof Error && error.message.includes('unique constraint')) {
+      res.status(409).json({ success: false, error: 'An invitation for this email already exists' });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to create invitation' });
   }
 });
