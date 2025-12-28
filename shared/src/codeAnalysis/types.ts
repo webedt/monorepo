@@ -202,9 +202,9 @@ export type ReviewIssueSeverity = 'critical' | 'error' | 'warning' | 'info';
  */
 export interface ReviewIssue {
   severity: ReviewIssueSeverity;
-  message: string;
   file?: string;
   line?: number;
+  message: string;
   suggestion?: string;
 }
 

@@ -1,0 +1,251 @@
+/**
+ * TaxonomyManager Styles
+ */
+
+.taxonomy-manager {
+  width: 100%;
+  height: 100%;
+}
+
+.taxonomy-manager-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: var(--spacing-lg);
+  height: 100%;
+}
+
+@media (max-width: 768px) {
+  .taxonomy-manager-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Panel styles */
+.taxonomy-list-panel,
+.terms-panel {
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+
+.panel-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* Taxonomy list */
+.taxonomy-list,
+.terms-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+}
+
+.taxonomy-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.taxonomy-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.taxonomy-item.selected {
+  background: var(--color-primary-bg);
+  border: 1px solid var(--color-primary);
+}
+
+.taxonomy-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  flex: 1;
+  min-width: 0;
+}
+
+.taxonomy-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.taxonomy-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.taxonomy-actions,
+.term-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.taxonomy-item:hover .taxonomy-actions,
+.term-item:hover .term-actions {
+  opacity: 1;
+}
+
+/* Term list */
+.term-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.term-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.term-info {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex: 1;
+  min-width: 0;
+}
+
+.term-color {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.term-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.term-description {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Icon buttons */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.icon-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.icon-btn.delete-taxonomy-btn:hover,
+.icon-btn.delete-term-btn:hover {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* Empty states */
+.empty,
+.loading {
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--spacing-xl);
+  color: var(--color-text-muted);
+}
+
+/* Form styles */
+.taxonomy-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.form-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.form-value {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.form-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.checkbox-group {
+  flex-direction: row;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Modal actions */
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}

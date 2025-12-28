@@ -6,21 +6,13 @@
 
 import { Page, type PageOptions } from '../base/Page';
 import { Button, Spinner, toast, OfflineIndicator } from '../../components';
-import { sessionsApi, storageWorkerApi } from '../../lib/api';
+import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import type { Session } from '../../types';
 import './image.css';
 
 type Tool = 'select' | 'pencil' | 'brush' | 'eraser' | 'fill' | 'rectangle' | 'circle' | 'line';
-
-interface Layer {
-  id: string;
-  name: string;
-  visible: boolean;
-  opacity: number;
-  canvas: HTMLCanvasElement;
-}
 
 interface ImagePageOptions extends PageOptions {
   params?: {
@@ -34,7 +26,6 @@ export class ImagePage extends Page<ImagePageOptions> {
   protected requiresAuth = true;
 
   private session: Session | null = null;
-  private isLoading = true;
   private isSaving = false;
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
@@ -43,8 +34,6 @@ export class ImagePage extends Page<ImagePageOptions> {
   // Canvas state
   private mainCanvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
-  private layers: Layer[] = [];
-  private activeLayerIndex = 0;
   private currentTool: Tool = 'pencil';
   private primaryColor = '#000000';
   private secondaryColor = '#ffffff';
@@ -715,13 +704,11 @@ export class ImagePage extends Page<ImagePageOptions> {
       return;
     }
 
-    this.isLoading = true;
-
     try {
       if (isOffline()) {
         const cachedSession = await offlineStorage.getCachedSession(sessionId);
         if (cachedSession) {
-          this.session = cachedSession as Session;
+          this.session = cachedSession as unknown as Session;
           this.updateHeader();
           this.showEmpty();
           toast.info('Loaded from offline cache');
@@ -740,7 +727,7 @@ export class ImagePage extends Page<ImagePageOptions> {
     } catch (error) {
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
       if (cachedSession) {
-        this.session = cachedSession as Session;
+        this.session = cachedSession as unknown as Session;
         this.isOfflineMode = true;
         this.updateHeader();
         this.updateOfflineUI();

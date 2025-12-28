@@ -471,6 +471,13 @@ export type {
   NewPaymentTransaction,
   PaymentWebhook,
   NewPaymentWebhook,
+  // Taxonomy system types
+  Taxonomy,
+  NewTaxonomy,
+  TaxonomyTerm,
+  NewTaxonomyTerm,
+  ItemTaxonomy,
+  NewItemTaxonomy,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -499,6 +506,10 @@ export {
   // Payment tables
   paymentTransactions,
   paymentWebhooks,
+  // Taxonomy system tables
+  taxonomies,
+  taxonomyTerms,
+  itemTaxonomies,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

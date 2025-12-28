@@ -1049,6 +1049,49 @@ export const communityApi = {
 };
 
 // ============================================================================
+// Universal Search API
+// ============================================================================
+export interface SearchResultItem {
+  id: string;
+  type: 'game' | 'user' | 'session' | 'post';
+  title: string;
+  subtitle?: string;
+  description?: string;
+  image?: string;
+  tags?: string[];
+  matchedFields?: string[];
+}
+
+export interface SearchResults {
+  items: SearchResultItem[];
+  total: number;
+  query: string;
+}
+
+export const searchApi = {
+  search: (options: {
+    q: string;
+    types?: ('game' | 'user' | 'session' | 'post')[];
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    params.append('q', options.q);
+    if (options.types?.length) params.append('types', options.types.join(','));
+    if (options.limit) params.append('limit', String(options.limit));
+    const queryString = params.toString();
+    return fetchApi<SearchResults>(`/api/search${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getSuggestions: (q: string, limit?: number) => {
+    const params = new URLSearchParams();
+    params.append('q', q);
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ suggestions: string[] }>(`/api/search/suggestions${queryString ? `?${queryString}` : ''}`);
+  },
+};
+
+// ============================================================================
 // Channels API (Community Activity)
 // ============================================================================
 export const channelsApi = {
@@ -1126,4 +1169,123 @@ export const channelsApi = {
       method: 'PATCH',
       body: data,
     }),
+};
+
+// ============================================================================
+// Taxonomy API (Admin-configurable categories, tags, genres)
+// ============================================================================
+import type { Taxonomy, TaxonomyTerm, ItemTaxonomy, TaxonomyWithTerms } from '../types';
+
+export const taxonomyApi = {
+  // Taxonomy CRUD
+  list: () =>
+    fetchApi<ApiResponse<Taxonomy[]>>('/api/taxonomies').then(r => r.data || []),
+
+  get: (id: string) =>
+    fetchApi<ApiResponse<TaxonomyWithTerms>>(`/api/taxonomies/${id}`).then(r => r.data!),
+
+  getBySlug: (slug: string) =>
+    fetchApi<ApiResponse<TaxonomyWithTerms>>(`/api/taxonomies/by-slug/${slug}`).then(r => r.data!),
+
+  create: (data: {
+    name: string;
+    displayName: string;
+    description?: string;
+    allowMultiple?: boolean;
+    isRequired?: boolean;
+    itemTypes?: string[];
+    sortOrder?: number;
+  }) =>
+    fetchApi<ApiResponse<Taxonomy>>('/api/taxonomies', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  update: (id: string, data: {
+    name?: string;
+    displayName?: string;
+    description?: string;
+    allowMultiple?: boolean;
+    isRequired?: boolean;
+    itemTypes?: string[];
+    sortOrder?: number;
+    status?: 'active' | 'archived';
+  }) =>
+    fetchApi<ApiResponse<Taxonomy>>(`/api/taxonomies/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ id: string }>>(`/api/taxonomies/${id}`, { method: 'DELETE' }),
+
+  // Term CRUD
+  getTerms: (taxonomyId: string) =>
+    fetchApi<ApiResponse<TaxonomyTerm[]>>(`/api/taxonomies/${taxonomyId}/terms`).then(r => r.data || []),
+
+  getTerm: (termId: string) =>
+    fetchApi<ApiResponse<TaxonomyTerm>>(`/api/taxonomies/terms/${termId}`).then(r => r.data!),
+
+  createTerm: (taxonomyId: string, data: {
+    name: string;
+    description?: string;
+    parentId?: string;
+    color?: string;
+    icon?: string;
+    metadata?: Record<string, unknown>;
+    sortOrder?: number;
+  }) =>
+    fetchApi<ApiResponse<TaxonomyTerm>>(`/api/taxonomies/${taxonomyId}/terms`, {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  updateTerm: (termId: string, data: {
+    name?: string;
+    description?: string;
+    parentId?: string;
+    color?: string;
+    icon?: string;
+    metadata?: Record<string, unknown>;
+    sortOrder?: number;
+    status?: 'active' | 'archived';
+  }) =>
+    fetchApi<ApiResponse<TaxonomyTerm>>(`/api/taxonomies/terms/${termId}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  deleteTerm: (termId: string) =>
+    fetchApi<ApiResponse<{ id: string }>>(`/api/taxonomies/terms/${termId}`, { method: 'DELETE' }),
+
+  // Item taxonomy assignments
+  getItemTaxonomies: (itemType: string, itemId: string) =>
+    fetchApi<ApiResponse<Array<{ taxonomy: Taxonomy; terms: TaxonomyTerm[] }>>>(
+      `/api/taxonomies/items/${itemType}/${itemId}`
+    ).then(r => r.data || []),
+
+  assignTerm: (itemType: string, itemId: string, termId: string) =>
+    fetchApi<ApiResponse<ItemTaxonomy>>(`/api/taxonomies/items/${itemType}/${itemId}/terms/${termId}`, {
+      method: 'POST',
+    }).then(r => r.data!),
+
+  removeTerm: (itemType: string, itemId: string, termId: string) =>
+    fetchApi<ApiResponse<{ id: string }>>(`/api/taxonomies/items/${itemType}/${itemId}/terms/${termId}`, {
+      method: 'DELETE',
+    }),
+
+  bulkUpdateItemTerms: (itemType: string, itemId: string, termIds: string[]) =>
+    fetchApi<ApiResponse<ItemTaxonomy[]>>(`/api/taxonomies/items/${itemType}/${itemId}`, {
+      method: 'PUT',
+      body: { termIds },
+    }).then(r => r.data || []),
+
+  getItemsByTerm: (termId: string, itemType?: string) => {
+    const params = new URLSearchParams();
+    if (itemType) params.append('itemType', itemType);
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<ItemTaxonomy[]>>(
+      `/api/taxonomies/items/by-term/${termId}${queryString ? `?${queryString}` : ''}`
+    ).then(r => r.data || []);
+  },
 };

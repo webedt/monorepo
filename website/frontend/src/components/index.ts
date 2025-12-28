@@ -61,6 +61,15 @@ export type { StatusBadgeOptions, StatusType, StatusBadgeSize } from './status-b
 export { SearchableSelect } from './searchable-select';
 export type { SearchableSelectOptions, SearchableSelectOption } from './searchable-select';
 
+// UniversalSearch
+export { UniversalSearch } from './universal-search';
+export type {
+  UniversalSearchOptions,
+  UniversalSearchSize,
+  SearchResultItem,
+  SearchResults,
+} from './universal-search';
+
 // ToolDetails
 export { ToolDetails } from './tool-details';
 export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-details';
@@ -111,3 +120,20 @@ export type {
   WidgetContainerOptions,
   WidgetCustomizerOptions,
 } from './widget';
+
+// TaxonomyManager
+export { TaxonomyManager } from './taxonomy-manager';
+export type { TaxonomyManagerOptions } from './taxonomy-manager';
+
+// FilterDropdown
+export { FilterDropdown } from './filter-dropdown';
+export type {
+  FilterDropdownOptions,
+  FilterOption,
+  FilterType,
+  RangeValue,
+} from './filter-dropdown';
+
+// FilterBar
+export { FilterBar } from './filter-bar';
+export type { FilterBarOptions, FilterConfig, FilterValues } from './filter-bar';
