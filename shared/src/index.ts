@@ -93,6 +93,9 @@ export * from './cloudSaves/index.js';
 // Implements undo as forward operations (applying inverse changes)
 export * from './crdt/index.js';
 
+// Autocomplete - AI-powered code completion
+export * from './autocomplete/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================

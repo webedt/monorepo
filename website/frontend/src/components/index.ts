@@ -149,3 +149,7 @@ export type { CollectionsPanelOptions } from './collections-panel';
 // CommitDialog
 export { CommitDialog } from './commit-dialog';
 export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
+
+// AutocompleteDropdown
+export { AutocompleteDropdown } from './autocomplete-dropdown';
+export type { AutocompleteDropdownOptions, AutocompleteSuggestion } from './autocomplete-dropdown';

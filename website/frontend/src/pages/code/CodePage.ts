@@ -5,9 +5,9 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, CommitDialog } from '../../components';
-import type { ChangedFile } from '../../components';
-import { sessionsApi, storageWorkerApi } from '../../lib/api';
+import { Button, Spinner, toast, OfflineIndicator, CommitDialog, AutocompleteDropdown } from '../../components';
+import type { ChangedFile, AutocompleteSuggestion } from '../../components';
+import { sessionsApi, storageWorkerApi, autocompleteApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { undoRedoStore } from '../../stores';
@@ -62,6 +62,11 @@ export class CodePage extends Page<CodePageOptions> {
     futureLength: 0,
   };
   private unsubscribeUndoRedo: (() => void) | null = null;
+
+  // Autocomplete
+  private autocompleteDropdown: AutocompleteDropdown | null = null;
+  private autocompleteDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private isAutocompleteLoading = false;
 
   protected render(): string {
     return `
@@ -122,6 +127,7 @@ export class CodePage extends Page<CodePageOptions> {
               </div>
               <div class="editor-wrapper" style="display: none;">
                 <textarea class="code-editor" spellcheck="false"></textarea>
+                <div class="autocomplete-container"></div>
               </div>
               <div class="preview-wrapper" style="display: none;">
                 <img class="image-preview" alt="Preview">
@@ -186,6 +192,17 @@ export class CodePage extends Page<CodePageOptions> {
     if (editor) {
       editor.addEventListener('input', () => this.handleEditorChange());
       editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e));
+      editor.addEventListener('blur', () => this.hideAutocomplete());
+    }
+
+    // Setup autocomplete dropdown
+    const autocompleteContainer = this.$('.autocomplete-container') as HTMLElement;
+    if (autocompleteContainer) {
+      this.autocompleteDropdown = new AutocompleteDropdown({
+        onSelect: (suggestion) => this.acceptAutocompleteSuggestion(suggestion),
+        onDismiss: () => this.hideAutocomplete(),
+      });
+      this.autocompleteDropdown.mount(autocompleteContainer);
     }
 
     // Show loading spinner
@@ -846,6 +863,36 @@ export class CodePage extends Page<CodePageOptions> {
   }
 
   private handleEditorKeydown(e: KeyboardEvent): void {
+    // Handle autocomplete navigation when dropdown is visible
+    if (this.autocompleteDropdown?.getIsVisible()) {
+      switch (e.key) {
+        case 'Escape':
+          e.preventDefault();
+          this.hideAutocomplete();
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          this.autocompleteDropdown.selectPrevious();
+          return;
+        case 'ArrowDown':
+          e.preventDefault();
+          this.autocompleteDropdown.selectNext();
+          return;
+        case 'Tab':
+        case 'Enter':
+          e.preventDefault();
+          this.autocompleteDropdown.acceptSelected();
+          return;
+      }
+    }
+
+    // Cmd/Ctrl+Space to trigger autocomplete
+    if ((e.metaKey || e.ctrlKey) && e.key === ' ') {
+      e.preventDefault();
+      this.triggerAutocomplete();
+      return;
+    }
+
     // Cmd/Ctrl+S to save
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
@@ -867,7 +914,7 @@ export class CodePage extends Page<CodePageOptions> {
       return;
     }
 
-    // Tab key inserts spaces
+    // Tab key inserts spaces (when autocomplete is not open)
     if (e.key === 'Tab') {
       e.preventDefault();
       const editor = e.target as HTMLTextAreaElement;
@@ -981,6 +1028,200 @@ export class CodePage extends Page<CodePageOptions> {
     this.commitDialog.open();
   }
 
+  // =========================================================================
+  // Autocomplete Methods
+  // =========================================================================
+
+  private triggerAutocomplete(): void {
+    const editor = this.$('.code-editor') as HTMLTextAreaElement;
+    if (!editor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const cursorPos = editor.selectionStart;
+    const content = editor.value;
+    const prefix = content.slice(0, cursorPos);
+    const suffix = content.slice(cursorPos);
+
+    // Get language from file extension
+    const language = this.getLanguageFromPath(tab.path);
+
+    this.fetchAutocomplete(prefix, suffix, language, tab.path, editor);
+  }
+
+  private async fetchAutocomplete(
+    prefix: string,
+    suffix: string,
+    language: string,
+    filePath: string,
+    editor: HTMLTextAreaElement
+  ): Promise<void> {
+    if (this.isAutocompleteLoading || isOffline()) return;
+
+    this.isAutocompleteLoading = true;
+
+    try {
+      const response = await autocompleteApi.complete({
+        prefix,
+        suffix,
+        language,
+        filePath,
+        maxSuggestions: 5,
+      });
+
+      if (response.suggestions.length > 0) {
+        // Calculate position for dropdown
+        const position = this.getCaretPosition(editor);
+        this.showAutocomplete(position.x, position.y, response.suggestions);
+      } else {
+        this.hideAutocomplete();
+      }
+    } catch (error) {
+      console.error('Autocomplete failed:', error);
+      this.hideAutocomplete();
+    } finally {
+      this.isAutocompleteLoading = false;
+    }
+  }
+
+  private showAutocomplete(x: number, y: number, suggestions: AutocompleteSuggestion[]): void {
+    if (!this.autocompleteDropdown) return;
+    this.autocompleteDropdown.showAt(x, y, suggestions);
+  }
+
+  private hideAutocomplete(): void {
+    if (this.autocompleteDebounceTimer) {
+      clearTimeout(this.autocompleteDebounceTimer);
+      this.autocompleteDebounceTimer = null;
+    }
+    this.autocompleteDropdown?.hideDropdown();
+  }
+
+  private acceptAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
+    const editor = this.$('.code-editor') as HTMLTextAreaElement;
+    if (!editor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const cursorPos = editor.selectionStart;
+    const content = editor.value;
+
+    // Insert the suggestion at cursor position
+    const newContent = content.slice(0, cursorPos) + suggestion.text + content.slice(cursorPos);
+    editor.value = newContent;
+
+    // Move cursor to end of inserted text
+    const newCursorPos = cursorPos + suggestion.text.length;
+    editor.selectionStart = editor.selectionEnd = newCursorPos;
+
+    // Update tab content
+    tab.content = newContent;
+    tab.isDirty = true;
+    tab.isPreview = false;
+    this.renderTabs();
+
+    // Track change in undo/redo history
+    undoRedoStore.pushChange(tab.path, newContent, newCursorPos);
+
+    // Hide autocomplete
+    this.hideAutocomplete();
+
+    // Focus editor
+    editor.focus();
+  }
+
+  private getCaretPosition(editor: HTMLTextAreaElement): { x: number; y: number } {
+    // Create a temporary element to measure text dimensions
+    const mirror = document.createElement('div');
+    const computed = getComputedStyle(editor);
+
+    // Copy styles
+    mirror.style.cssText = `
+      position: absolute;
+      visibility: hidden;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow: hidden;
+      width: ${editor.clientWidth}px;
+      font: ${computed.font};
+      padding: ${computed.padding};
+      border: ${computed.border};
+      line-height: ${computed.lineHeight};
+      letter-spacing: ${computed.letterSpacing};
+    `;
+
+    // Copy text up to cursor
+    const textBeforeCursor = editor.value.substring(0, editor.selectionStart);
+    mirror.textContent = textBeforeCursor;
+
+    // Add a span at cursor position
+    const span = document.createElement('span');
+    span.textContent = '|';
+    mirror.appendChild(span);
+
+    document.body.appendChild(mirror);
+
+    const editorRect = editor.getBoundingClientRect();
+    const spanRect = span.getBoundingClientRect();
+
+    document.body.removeChild(mirror);
+
+    // Calculate position relative to viewport
+    const x = editorRect.left + (spanRect.left - mirror.getBoundingClientRect().left);
+    const y = editorRect.top + (spanRect.top - mirror.getBoundingClientRect().top) + parseInt(computed.lineHeight);
+
+    // Adjust for scroll
+    return {
+      x: x - editor.scrollLeft,
+      y: y - editor.scrollTop + 20, // Add offset below the cursor
+    };
+  }
+
+  private getLanguageFromPath(filePath: string): string {
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    const languageMap: Record<string, string> = {
+      'ts': 'typescript',
+      'tsx': 'typescript',
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'mjs': 'javascript',
+      'cjs': 'javascript',
+      'py': 'python',
+      'pyw': 'python',
+      'rs': 'rust',
+      'go': 'go',
+      'java': 'java',
+      'c': 'c',
+      'h': 'c',
+      'cpp': 'cpp',
+      'cc': 'cpp',
+      'cxx': 'cpp',
+      'hpp': 'cpp',
+      'hxx': 'cpp',
+      'cs': 'csharp',
+      'rb': 'ruby',
+      'php': 'php',
+      'html': 'html',
+      'htm': 'html',
+      'css': 'css',
+      'scss': 'scss',
+      'sass': 'scss',
+      'sql': 'sql',
+      'sh': 'shell',
+      'bash': 'shell',
+      'zsh': 'shell',
+      'yml': 'yaml',
+      'yaml': 'yaml',
+      'json': 'json',
+      'md': 'markdown',
+      'markdown': 'markdown',
+      'xml': 'xml',
+    };
+    return languageMap[ext] || 'text';
+  }
+
   protected onUnmount(): void {
     // Check for unsaved changes
     const hasUnsaved = this.tabs.some(t => t.isDirty);
@@ -1021,6 +1262,13 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup autocomplete
+    this.hideAutocomplete();
+    if (this.autocompleteDropdown) {
+      this.autocompleteDropdown.unmount();
+      this.autocompleteDropdown = null;
     }
   }
 }
