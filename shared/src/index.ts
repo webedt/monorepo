@@ -68,6 +68,9 @@ export * from './sessions/index.js';
 // LLM - One-off LLM requests
 export * from './llm/index.js';
 
+// Organizations/Studios - Group accounts with multi-user support
+export * from './organizations/index.js';
+
 // Code Analysis - AI-powered code analysis using ClaudeWebClient
 export * from './codeAnalysis/index.js';
 
