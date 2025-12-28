@@ -755,3 +755,131 @@ export interface SnippetListFilters {
   sortBy?: 'title' | 'usageCount' | 'lastUsedAt' | 'createdAt' | 'updatedAt';
   order?: 'asc' | 'desc';
 }
+
+// Custom Component types
+
+/**
+ * Property types that can be exposed on custom components
+ */
+export type CustomPropertyType = 'number' | 'string' | 'boolean' | 'color' | 'select';
+
+/**
+ * Definition of an exposed property on a custom component
+ */
+export interface CustomComponentProperty {
+  name: string;
+  type: CustomPropertyType;
+  label: string;
+  defaultValue: string | number | boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { label: string; value: string }[];
+}
+
+/**
+ * Transform data for custom component definition
+ */
+export interface CustomComponentTransform {
+  x: number;
+  y: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  pivotX: number;
+  pivotY: number;
+}
+
+/**
+ * Child object within a custom component definition
+ */
+export interface CustomComponentChild {
+  id: string;
+  name: string;
+  type: 'sprite' | 'shape' | 'text';
+  shapeType?: 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
+  transform: CustomComponentTransform;
+  opacity: number;
+  color?: string;
+  text?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  zIndex: number;
+}
+
+/**
+ * Complete definition of a user-defined custom component
+ */
+export interface CustomComponentDefinition {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children: CustomComponentChild[];
+  properties: CustomComponentProperty[];
+  defaultTransform: CustomComponentTransform;
+  thumbnail?: string;
+  isPublic: boolean;
+  usageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Simplified summary for component library listings
+ */
+export interface CustomComponentSummary {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  thumbnail?: string;
+  usageCount: number;
+}
+
+/**
+ * Request to create a new custom component
+ */
+export interface CreateCustomComponentRequest {
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children: CustomComponentChild[];
+  properties?: CustomComponentProperty[];
+  defaultTransform?: Partial<CustomComponentTransform>;
+  isPublic?: boolean;
+}
+
+/**
+ * Request to update a custom component
+ */
+export interface UpdateCustomComponentRequest {
+  name?: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children?: CustomComponentChild[];
+  properties?: CustomComponentProperty[];
+  defaultTransform?: Partial<CustomComponentTransform>;
+  isPublic?: boolean;
+}
+
+/**
+ * Property values for an instance of a custom component
+ */
+export type CustomComponentPropertyValues = Record<string, string | number | boolean>;
+
+/**
+ * Instance of a custom component in a scene
+ */
+export interface CustomComponentInstance {
+  definitionId: string;
+  propertyValues: CustomComponentPropertyValues;
+}
