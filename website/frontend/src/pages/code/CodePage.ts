@@ -5,7 +5,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox, AutocompleteDropdown } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, UrlImportDialog, AIInputBox, AutocompleteDropdown } from '../../components';
 import type { ChangedFile, AutocompleteSuggestion } from '../../components';
 import { sessionsApi, storageWorkerApi, autocompleteApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
@@ -57,6 +57,7 @@ export class CodePage extends Page<CodePageOptions> {
   private pendingCommitFiles: Map<string, ChangedFile> = new Map();
   private commitDialog: CommitDialog | null = null;
   private commitBtn: Button | null = null;
+  private urlImportDialog: UrlImportDialog | null = null;
   private aiInputBox: AIInputBox | null = null;
   private diffModal: Modal | null = null;
   private diffViewer: DiffViewer | null = null;
@@ -110,9 +111,14 @@ export class CodePage extends Page<CodePageOptions> {
           <aside class="file-explorer">
             <div class="explorer-header">
               <span class="explorer-title">Files</span>
-              <button class="explorer-btn" data-action="refresh" title="Refresh">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-              </button>
+              <div class="explorer-actions">
+                <button class="explorer-btn" data-action="import-url" title="Import from URL">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                </button>
+                <button class="explorer-btn" data-action="refresh" title="Refresh">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                </button>
+              </div>
             </div>
             <div class="file-tree-container">
               <div class="file-tree-loading">
@@ -165,6 +171,12 @@ export class CodePage extends Page<CodePageOptions> {
     const refreshBtn = this.$('[data-action="refresh"]') as HTMLButtonElement;
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => this.loadFiles());
+    }
+
+    // Setup import from URL button
+    const importBtn = this.$('[data-action="import-url"]') as HTMLButtonElement;
+    if (importBtn) {
+      importBtn.addEventListener('click', () => this.openUrlImportDialog());
     }
 
     // Setup compare button
@@ -1263,6 +1275,31 @@ export class CodePage extends Page<CodePageOptions> {
     this.commitDialog.open();
   }
 
+  private openUrlImportDialog(): void {
+    const sessionPath = this.getSessionPath();
+    if (!sessionPath) {
+      toast.error('No active session');
+      return;
+    }
+
+    this.urlImportDialog = new UrlImportDialog({
+      sessionPath,
+      onImportSuccess: (result) => {
+        // Refresh file tree after successful import
+        this.loadFiles();
+        // Optionally open the imported file (skip binary/image files)
+        if (result.filePath && result.contentType && !result.contentType.startsWith('image/')) {
+          this.openFile(result.filePath);
+        }
+      },
+      onClose: () => {
+        this.urlImportDialog = null;
+      },
+    });
+
+    this.urlImportDialog.open();
+  }
+
   // =========================================================================
   // Autocomplete Methods
   // =========================================================================
@@ -1435,6 +1472,12 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.commitDialog) {
       this.commitDialog.close();
       this.commitDialog = null;
+    }
+
+    // Cleanup URL import dialog
+    if (this.urlImportDialog) {
+      this.urlImportDialog.close();
+      this.urlImportDialog = null;
     }
 
     // Cleanup MultiCursorEditor
