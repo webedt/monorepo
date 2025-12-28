@@ -15,6 +15,7 @@
     "db:check": "tsx src/scripts/db-check.ts",
     "db:backup": "tsx src/scripts/db-backup.ts",
     "db:validate": "tsx src/scripts/db-validate.ts",
+    "db:seed-channels": "tsx src/scripts/seed-channels.ts",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
