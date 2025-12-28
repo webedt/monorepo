@@ -42,6 +42,9 @@ export class QuickAccessPage extends Page<PageOptions> {
 
   // SSE subscription
   private sessionUpdatesEventSource: EventSource | null = null;
+  private sseReconnectAttempts = 0;
+  private sseReconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private readonly MAX_SSE_RECONNECT_ATTEMPTS = 5;
 
   protected render(): string {
     const user = authStore.getUser();
@@ -175,10 +178,11 @@ export class QuickAccessPage extends Page<PageOptions> {
     // Setup quick actions
     this.setupQuickActions();
 
-    // Load data
+    // Load data - repos first so templates can use default_branch
     this.loadRecentSessions();
-    this.loadQuickStartTemplates();
-    this.loadRepos();
+    this.loadRepos().then(() => {
+      this.loadQuickStartTemplates();
+    });
 
     // Subscribe to session updates
     this.subscribeToSessionUpdates();
@@ -254,7 +258,7 @@ export class QuickAccessPage extends Page<PageOptions> {
 
     card.innerHTML = `
       <div class="quick-session-header">
-        <span class="quick-session-status ${statusClass}" title="${status}">${this.getStatusIcon(status)}</span>
+        <span class="quick-session-status ${statusClass}" title="${this.escapeHtml(status)}">${this.getStatusIcon(status)}</span>
         <span class="quick-session-time">${timeAgo}</span>
       </div>
       <h3 class="quick-session-title">${this.escapeHtml(title)}</h3>
@@ -324,24 +328,33 @@ export class QuickAccessPage extends Page<PageOptions> {
       // Load templates from localStorage
       const saved = localStorage.getItem('webedt_quick_start_templates');
       if (saved) {
-        this.quickStartTemplates = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Validate the parsed data structure
+        if (Array.isArray(parsed) && parsed.every(this.isValidTemplate)) {
+          this.quickStartTemplates = parsed;
+        }
       }
 
       // If no templates, create default from recent repos
       if (this.quickStartTemplates.length === 0) {
         const recentRepos = localStorage.getItem('webedt_recent_repos');
         if (recentRepos) {
-          const recent = JSON.parse(recentRepos) as string[];
-          this.quickStartTemplates = recent.slice(0, 3).map((repoStr, index) => {
-            const [owner, name] = repoStr.split('/');
-            return {
-              id: `template-${index}`,
-              name: name,
-              repositoryOwner: owner,
-              repositoryName: name,
-              defaultBranch: 'main',
-            };
-          });
+          const parsed = JSON.parse(recentRepos);
+          // Validate it's an array of strings
+          if (Array.isArray(parsed) && parsed.every((item): item is string => typeof item === 'string')) {
+            this.quickStartTemplates = parsed.slice(0, 3).map((repoStr, index) => {
+              const [owner, name] = repoStr.split('/');
+              // Try to find the repo in loaded repos to get actual default branch
+              const repo = this.repos.find(r => r.owner.login === owner && r.name === name);
+              return {
+                id: `template-${index}`,
+                name: name,
+                repositoryOwner: owner,
+                repositoryName: name,
+                defaultBranch: repo?.default_branch || 'main',
+              };
+            });
+          }
         }
       }
     } catch (error) {
@@ -350,6 +363,18 @@ export class QuickAccessPage extends Page<PageOptions> {
     } finally {
       this.renderQuickStartTemplates();
     }
+  }
+
+  private isValidTemplate(item: unknown): item is QuickStartTemplate {
+    return (
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as QuickStartTemplate).id === 'string' &&
+      typeof (item as QuickStartTemplate).name === 'string' &&
+      typeof (item as QuickStartTemplate).repositoryOwner === 'string' &&
+      typeof (item as QuickStartTemplate).repositoryName === 'string' &&
+      typeof (item as QuickStartTemplate).defaultBranch === 'string'
+    );
   }
 
   private renderQuickStartTemplates(): void {
@@ -630,9 +655,40 @@ export class QuickAccessPage extends Page<PageOptions> {
       }
     });
 
-    this.sessionUpdatesEventSource.onerror = (error) => {
-      console.error('[QuickAccessPage] Session updates SSE error:', error);
+    this.sessionUpdatesEventSource.onerror = () => {
+      console.error('[QuickAccessPage] Session updates SSE error, attempting reconnect...');
+      this.handleSSEReconnect();
     };
+
+    // Reset reconnect attempts on successful connection
+    this.sessionUpdatesEventSource.onopen = () => {
+      this.sseReconnectAttempts = 0;
+    };
+  }
+
+  private handleSSEReconnect(): void {
+    // Close existing connection
+    if (this.sessionUpdatesEventSource) {
+      this.sessionUpdatesEventSource.close();
+      this.sessionUpdatesEventSource = null;
+    }
+
+    // Check if we've exceeded max attempts
+    if (this.sseReconnectAttempts >= this.MAX_SSE_RECONNECT_ATTEMPTS) {
+      console.warn('[QuickAccessPage] Max SSE reconnect attempts reached');
+      toast.error('Lost connection to updates. Please refresh the page.');
+      return;
+    }
+
+    // Calculate backoff delay: 1s, 2s, 4s, 8s, 16s
+    const delay = Math.pow(2, this.sseReconnectAttempts) * 1000;
+    this.sseReconnectAttempts++;
+
+    console.log(`[QuickAccessPage] Reconnecting SSE in ${delay}ms (attempt ${this.sseReconnectAttempts})`);
+
+    this.sseReconnectTimeout = setTimeout(() => {
+      this.subscribeToSessionUpdates();
+    }, delay);
   }
 
   protected onUnmount(): void {
@@ -657,6 +713,12 @@ export class QuickAccessPage extends Page<PageOptions> {
     this.repoSelect = null;
     this.branchSelect?.unmount();
     this.branchSelect = null;
+
+    // Clear SSE reconnect timeout
+    if (this.sseReconnectTimeout) {
+      clearTimeout(this.sseReconnectTimeout);
+      this.sseReconnectTimeout = null;
+    }
 
     // Close SSE connection
     if (this.sessionUpdatesEventSource) {
