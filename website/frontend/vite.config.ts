@@ -33,6 +33,9 @@ export default defineConfig({
     },
   },
   build: {
+    // Primary development target: Chrome (latest stable)
+    // This enables modern JS features without unnecessary transpilation
+    target: 'chrome120',
     outDir: 'dist',
     sourcemap: true,
   },
