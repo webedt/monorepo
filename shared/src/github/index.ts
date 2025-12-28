@@ -33,3 +33,7 @@ export type {
   ProjectItem,
   AddItemResult,
 } from './projectsService.types.js';
+
+// Diff Parser
+export { parseDiff, formatDiffStats, getFileStatusLabel } from './diffParser.js';
+export type { DiffLine, DiffHunk, FileDiff, ParsedDiff } from './diffParser.js';
