@@ -1725,6 +1725,53 @@ export const cloudSavesApi = {
 };
 
 // ============================================================================
+// Autocomplete API (AI-powered code completion)
+// ============================================================================
+export interface AutocompleteRequest {
+  prefix: string;
+  suffix: string;
+  language: string;
+  filePath?: string;
+  maxSuggestions?: number;
+  additionalContext?: Array<{
+    filePath: string;
+    content: string;
+    language: string;
+  }>;
+}
+
+export interface AutocompleteSuggestion {
+  text: string;
+  label: string;
+  kind: 'function' | 'method' | 'variable' | 'class' | 'interface' | 'property' | 'keyword' | 'snippet' | 'text';
+  detail?: string;
+  confidence?: number;
+}
+
+export interface AutocompleteResponse {
+  suggestions: AutocompleteSuggestion[];
+  latencyMs: number;
+  cached?: boolean;
+}
+
+export const autocompleteApi = {
+  complete: (request: AutocompleteRequest) =>
+    fetchApi<ApiResponse<AutocompleteResponse>>('/api/autocomplete', {
+      method: 'POST',
+      body: request as unknown as Record<string, unknown>,
+    }).then(r => r.data!),
+
+  getLanguages: () =>
+    fetchApi<ApiResponse<{
+      languages: Array<{
+        id: string;
+        name: string;
+        extensions: string[];
+      }>;
+    }>>('/api/autocomplete/languages').then(r => r.data!),
+};
+
+// ============================================================================
 // Snippets API (User code snippets and templates)
 // ============================================================================
 export const snippetsApi = {
