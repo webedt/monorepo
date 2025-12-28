@@ -48,6 +48,10 @@ const DEFAULT_TRANSFORM: Transform = {
   scaleY: 1,
 };
 
+// SVG icon paths for link/unlink button
+const LINK_ICON = '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>';
+const UNLINK_ICON = '<path d="M18.84 12.25l1.72-1.71a5 5 0 0 0-7.07-7.07l-3 3a5 5 0 0 0 .54 7.54"/><path d="M5.16 11.75l-1.72 1.71a5 5 0 0 0 7.07 7.07l3-3a5 5 0 0 0-.54-7.54"/><line x1="2" y1="2" x2="22" y2="22"/>';
+
 export class TransformEditor extends Component<HTMLDivElement> {
   private transform: Transform;
   private linkScale: boolean;
@@ -78,7 +82,7 @@ export class TransformEditor extends Component<HTMLDivElement> {
     };
 
     this.transform = { ...DEFAULT_TRANSFORM, ...options.transform };
-    this.linkScale = this.options.linkScale ?? true;
+    this.linkScale = this.options.linkScale!;
 
     if (this.options.compact) {
       this.addClass('transform-editor--compact');
@@ -156,7 +160,6 @@ export class TransformEditor extends Component<HTMLDivElement> {
                 class="transform-input transform-input--scale-x"
                 value="${this.transform.scaleX}"
                 step="${this.options.scaleStep}"
-                min="0.01"
                 title="Scale X">
             </div>
             <button type="button"
@@ -164,10 +167,7 @@ export class TransformEditor extends Component<HTMLDivElement> {
               title="Link scale values"
               aria-pressed="${this.linkScale}">
               <svg class="transform-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                ${this.linkScale
-                  ? '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
-                  : '<path d="M18.84 12.25l1.72-1.71a5 5 0 0 0-7.07-7.07l-3 3a5 5 0 0 0 .54 7.54"/><path d="M5.16 11.75l-1.72 1.71a5 5 0 0 0 7.07 7.07l3-3a5 5 0 0 0-.54-7.54"/><line x1="2" y1="2" x2="22" y2="22"/>'
-                }
+                ${this.linkScale ? LINK_ICON : UNLINK_ICON}
               </svg>
             </button>
             <div class="transform-field">
@@ -176,7 +176,6 @@ export class TransformEditor extends Component<HTMLDivElement> {
                 class="transform-input transform-input--scale-y"
                 value="${this.transform.scaleY}"
                 step="${this.options.scaleStep}"
-                min="0.01"
                 title="Scale Y">
             </div>
           </div>
@@ -228,30 +227,25 @@ export class TransformEditor extends Component<HTMLDivElement> {
     this.scaleYInput = this.element.querySelector('.transform-input--scale-y');
     this.linkButton = this.element.querySelector('.transform-link-btn');
 
-    // Position inputs
+    // Position inputs - use 'input' for real-time updates
     if (this.xInput) {
       this.on(this.xInput, 'input', () => this.handlePositionChange('x'));
-      this.on(this.xInput, 'change', () => this.handlePositionChange('x'));
     }
     if (this.yInput) {
       this.on(this.yInput, 'input', () => this.handlePositionChange('y'));
-      this.on(this.yInput, 'change', () => this.handlePositionChange('y'));
     }
 
     // Rotation input
     if (this.rotationInput) {
       this.on(this.rotationInput, 'input', () => this.handleRotationChange());
-      this.on(this.rotationInput, 'change', () => this.handleRotationChange());
     }
 
     // Scale inputs
     if (this.scaleXInput) {
       this.on(this.scaleXInput, 'input', () => this.handleScaleChange('x'));
-      this.on(this.scaleXInput, 'change', () => this.handleScaleChange('x'));
     }
     if (this.scaleYInput) {
       this.on(this.scaleYInput, 'input', () => this.handleScaleChange('y'));
-      this.on(this.scaleYInput, 'change', () => this.handleScaleChange('y'));
     }
 
     // Link button
@@ -298,7 +292,8 @@ export class TransformEditor extends Component<HTMLDivElement> {
     if (!input) return;
 
     const value = parseFloat(input.value);
-    if (!isNaN(value) && value > 0) {
+    // Allow negative values for flipping, but prevent zero to avoid rendering issues
+    if (!isNaN(value) && value !== 0) {
       if (axis === 'x') {
         this.transform.scaleX = value;
         if (this.linkScale && otherInput) {
@@ -325,9 +320,7 @@ export class TransformEditor extends Component<HTMLDivElement> {
       // Update icon
       const svg = this.linkButton.querySelector('.transform-link-icon');
       if (svg) {
-        svg.innerHTML = this.linkScale
-          ? '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
-          : '<path d="M18.84 12.25l1.72-1.71a5 5 0 0 0-7.07-7.07l-3 3a5 5 0 0 0 .54 7.54"/><path d="M5.16 11.75l-1.72 1.71a5 5 0 0 0 7.07 7.07l3-3a5 5 0 0 0-.54-7.54"/><line x1="2" y1="2" x2="22" y2="22"/>';
+        svg.innerHTML = this.linkScale ? LINK_ICON : UNLINK_ICON;
       }
     }
 
@@ -406,6 +399,15 @@ export class TransformEditor extends Component<HTMLDivElement> {
     this.transform = { ...this.transform, ...transform };
     this.updateInputs();
     this.notifyChange();
+  }
+
+  /**
+   * Update transform values without triggering onChange callback.
+   * Useful when syncing from external state to avoid feedback loops.
+   */
+  updateTransformSilently(transform: Partial<Transform>): void {
+    this.transform = { ...this.transform, ...transform };
+    this.updateInputs();
   }
 
   setPosition(x: number, y: number): void {

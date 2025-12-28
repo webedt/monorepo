@@ -708,27 +708,26 @@ export class ScenePage extends Page<ScenePageOptions> {
     const container = this.$('.transform-editor-container') as HTMLElement;
     if (!container) return;
 
-    // Remove existing editor if it exists
+    // Reuse existing editor if it exists, otherwise create a new one
     if (this.transformEditor) {
-      this.transformEditor.unmount();
-      this.transformEditor = null;
+      // Update existing editor without triggering onChange callback
+      this.transformEditor.updateTransformSilently(obj.transform);
+    } else {
+      // Create new transform editor
+      this.transformEditor = new TransformEditor({
+        transform: obj.transform,
+        linkScale: true,
+        showPosition: true,
+        showRotation: true,
+        showScale: true,
+        compact: true,
+        showLabels: false,
+        onChange: (transform: Transform) => {
+          this.handleTransformChange(transform);
+        },
+      });
+      this.transformEditor.mount(container);
     }
-
-    // Create new transform editor with current object's transform
-    this.transformEditor = new TransformEditor({
-      transform: obj.transform,
-      linkScale: true,
-      showPosition: true,
-      showRotation: true,
-      showScale: true,
-      compact: true,
-      showLabels: false,
-      onChange: (transform: Transform) => {
-        this.handleTransformChange(transform);
-      },
-    });
-
-    this.transformEditor.mount(container);
   }
 
   private handleTransformChange(transform: Transform): void {
