@@ -59,7 +59,8 @@ export class CodeReviewerService {
     owner: string,
     repo: string,
     prNumber: number,
-    options?: ReviewOptions
+    options?: ReviewOptions,
+    sessionId?: string
   ): Promise<ReviewResult> {
     logger.info('Starting PR review', {
       component: 'CodeReviewerService',
@@ -105,25 +106,113 @@ ${diff}
     try {
       let reviewOutput = '';
 
-      await this.client.execute(
-        {
-          prompt,
-          gitUrl,
-          branchPrefix: `review/${prNumber}`,
-        },
-        (event) => {
-          if (event.type === 'assistant' && event.message?.content) {
-            const content = event.message.content;
-            if (Array.isArray(content)) {
-              for (const block of content) {
-                if (block.type === 'text') {
-                  reviewOutput += block.text;
+      // If sessionId provided, try to resume the session instead of creating new one
+      if (sessionId) {
+        try {
+          const session = await this.client.getSession(sessionId);
+
+          if (!['archived', 'failed', 'completed'].includes(session.session_status)) {
+            // Session can be resumed
+            logger.info('Resuming session for review', {
+              component: 'CodeReviewerService',
+              sessionId,
+              sessionStatus: session.session_status,
+            });
+
+            await this.client.resume(
+              sessionId,
+              prompt,
+              (event) => {
+                if (event.type === 'assistant' && event.message?.content) {
+                  const content = event.message.content;
+                  if (Array.isArray(content)) {
+                    for (const block of content) {
+                      if (block.type === 'text') {
+                        reviewOutput += block.text;
+                      }
+                    }
+                  }
+                }
+              }
+            );
+          } else {
+            // Session cannot be resumed, fall back to creating new session
+            logger.warn('Session cannot be resumed, creating new review session', {
+              component: 'CodeReviewerService',
+              sessionId,
+              sessionStatus: session.session_status,
+            });
+
+            await this.client.execute(
+              {
+                prompt,
+                gitUrl,
+                branchPrefix: `review/${prNumber}`,
+              },
+              (event) => {
+                if (event.type === 'assistant' && event.message?.content) {
+                  const content = event.message.content;
+                  if (Array.isArray(content)) {
+                    for (const block of content) {
+                      if (block.type === 'text') {
+                        reviewOutput += block.text;
+                      }
+                    }
+                  }
+                }
+              }
+            );
+          }
+        } catch (error) {
+          // Error checking session or resuming, fall back to new session
+          logger.warn('Failed to resume session, creating new review session', {
+            component: 'CodeReviewerService',
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+
+          await this.client.execute(
+            {
+              prompt,
+              gitUrl,
+              branchPrefix: `review/${prNumber}`,
+            },
+            (event) => {
+              if (event.type === 'assistant' && event.message?.content) {
+                const content = event.message.content;
+                if (Array.isArray(content)) {
+                  for (const block of content) {
+                    if (block.type === 'text') {
+                      reviewOutput += block.text;
+                    }
+                  }
+                }
+              }
+            }
+          );
+        }
+      } else {
+        // No sessionId provided, create new session (backward compatible)
+        await this.client.execute(
+          {
+            prompt,
+            gitUrl,
+            branchPrefix: `review/${prNumber}`,
+          },
+          (event) => {
+            if (event.type === 'assistant' && event.message?.content) {
+              const content = event.message.content;
+              if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (block.type === 'text') {
+                    reviewOutput += block.text;
+                  }
                 }
               }
             }
           }
-        }
-      );
+        );
+      }
 
       const result = this.parseReviewOutput(reviewOutput);
 

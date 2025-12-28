@@ -872,100 +872,153 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
     githubToken
   );
 
-  for (const item of inReview) {
-    if (!item.number) continue;
+  // Review all tasks in parallel
+  await Promise.all(
+    inReview.map(async (item) => {
+      if (!item.number) return;
 
-    // Get task info from GitHub comments to find PR number
-    const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
-    if (!taskInfo?.prNumber) {
-      console.log(`   #${item.number}: No PR found in comments, skipping review`);
-      continue;
-    }
+      // Get task info from GitHub comments to find PR number
+      const taskInfo = await issuesService.getLatestAutoTaskInfo(owner, repo, item.number);
+      if (!taskInfo?.prNumber) {
+        console.log(`   #${item.number}: No PR found in comments, skipping review`);
+        return;
+      }
 
-    try {
-      console.log(`   Reviewing PR #${taskInfo.prNumber} for issue #${item.number}...`);
+      try {
+        console.log(`   Reviewing PR #${taskInfo.prNumber} for issue #${item.number}...`);
 
-      // Run code review
-      const result = await reviewer.reviewPR(owner, repo, taskInfo.prNumber, {
-        autoApprove: true,
-        strict: false,
-      });
+        // Check if we can resume the implementation session for review
+        let sessionIdForReview: string | undefined;
 
-      console.log(`   Review result: ${result.approved ? 'Approved' : 'Changes Requested'}`);
-      console.log(`   Issues found: ${result.issues.length}`);
+        if (taskInfo.sessionId) {
+          const claudeClient = new ClaudeWebClient({
+            accessToken: claudeAuth.accessToken,
+            environmentId,
+          });
 
-      // Submit the review to GitHub
-      await reviewer.submitReview(owner, repo, taskInfo.prNumber, result);
-      console.log(`   Review submitted to GitHub`);
+          try {
+            const session = await claudeClient.getSession(taskInfo.sessionId);
+            if (!['archived', 'failed', 'completed'].includes(session.session_status)) {
+              sessionIdForReview = taskInfo.sessionId;
+              console.log(`   Resuming session ${taskInfo.sessionId} for review`);
+            } else {
+              console.log(`   Session ${session.session_status}, creating new review session`);
+            }
+          } catch (error) {
+            console.log(`   Session check failed, creating new review session`);
+          }
+        }
 
-      if (result.approved) {
-        // Check if PR is mergeable
-        const mergeResult = await checkAndMergePR(
+        // Run code review
+        const result = await reviewer.reviewPR(
           owner,
           repo,
           taskInfo.prNumber,
-          taskInfo.branchName,
-          githubToken,
-          claudeAuth,
-          process.env.CLAUDE_ENVIRONMENT_ID || ''
+          {
+            autoApprove: true,
+            strict: false,
+          },
+          sessionIdForReview
         );
 
-        if (mergeResult.merged) {
-          // Successfully merged - move to Done
-          console.log(`   PR merged successfully`);
+        console.log(`   Review result: ${result.approved ? 'Approved' : 'Changes Requested'}`);
+        console.log(`   Issues found: ${result.issues.length}`);
 
-          if (doneId) {
-            await projectsService.updateItemStatus(
-              projectCache.projectId,
-              item.id,
-              projectCache.statusFieldId,
-              doneId
-            );
-          }
+        // Submit the review to GitHub
+        await reviewer.submitReview(owner, repo, taskInfo.prNumber, result);
+        console.log(`   Review submitted to GitHub`);
 
-          // Close the issue (should auto-close from PR, but ensure it)
-          await issuesService.closeIssue(owner, repo, item.number);
-          console.log(`   Moved to Done, issue closed`);
-
-          // Archive the Claude session now that work is complete
-          if (taskInfo.sessionId) {
-            try {
-              const claudeClient = new ClaudeWebClient({
-                accessToken: claudeAuth.accessToken,
-                environmentId: process.env.CLAUDE_ENVIRONMENT_ID || '',
-              });
-              await claudeClient.archiveSession(taskInfo.sessionId);
-              console.log(`   Session archived: ${taskInfo.sessionId}`);
-            } catch (archiveError) {
-              console.log(`   Warning: Failed to archive session: ${archiveError}`);
-            }
-          }
-
-          // Add completion comment
-          await issuesService.addComment(
+        if (result.approved) {
+          // Check if PR is mergeable
+          const mergeResult = await checkAndMergePR(
             owner,
             repo,
-            item.number,
-            `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.\n\nThis issue is now closed.`
+            taskInfo.prNumber,
+            taskInfo.branchName,
+            githubToken,
+            claudeAuth,
+            process.env.CLAUDE_ENVIRONMENT_ID || '',
+            taskInfo
           );
-        } else if (mergeResult.hasConflicts) {
-          // Has merge conflicts - needs resolution
-          console.log(`   PR has merge conflicts: ${mergeResult.reason}`);
 
-          if (mergeResult.conflictResolutionStarted) {
-            // Claude is fixing conflicts - add comment with new session
-            console.log(`   Conflict resolution session started`);
+          if (mergeResult.merged) {
+            // Successfully merged - move to Done
+            console.log(`   PR merged successfully`);
 
+            if (doneId) {
+              await projectsService.updateItemStatus(
+                projectCache.projectId,
+                item.id,
+                projectCache.statusFieldId,
+                doneId
+              );
+            }
+
+            // Close the issue (should auto-close from PR, but ensure it)
+            await issuesService.closeIssue(owner, repo, item.number);
+            console.log(`   Moved to Done, issue closed`);
+
+            // Archive the Claude session now that work is complete
+            if (taskInfo.sessionId) {
+              try {
+                const claudeClient = new ClaudeWebClient({
+                  accessToken: claudeAuth.accessToken,
+                  environmentId: process.env.CLAUDE_ENVIRONMENT_ID || '',
+                });
+                await claudeClient.archiveSession(taskInfo.sessionId);
+                console.log(`   Session archived: ${taskInfo.sessionId}`);
+              } catch (archiveError) {
+                console.log(`   Warning: Failed to archive session: ${archiveError}`);
+              }
+            }
+
+            // Add completion comment
             await issuesService.addComment(
               owner,
               repo,
               item.number,
-              `### 🔧 Resolving Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts. Claude is working on resolving them.\n\n**Session:** [View in Claude](https://claude.ai/code/${mergeResult.sessionId})\n**Branch:** \`${taskInfo.branchName}\`\n**PR:** #${taskInfo.prNumber}`
+              `### 🎉 Task Complete\n\nPR #${taskInfo.prNumber} has been reviewed, approved, and merged.\n\nThis issue is now closed.`
             );
-          } else {
-            // Failed to start conflict resolution - move back to ready
-            console.log(`   Moving back to Ready for manual conflict resolution`);
+          } else if (mergeResult.hasConflicts) {
+            // Has merge conflicts - needs resolution
+            console.log(`   PR has merge conflicts: ${mergeResult.reason}`);
 
+            if (mergeResult.conflictResolutionStarted) {
+              // Claude is fixing conflicts - add comment with new session
+              console.log(`   Conflict resolution session started`);
+
+              await issuesService.addComment(
+                owner,
+                repo,
+                item.number,
+                `### 🔧 Resolving Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts. Claude is working on resolving them.\n\n**Session:** [View in Claude](https://claude.ai/code/${mergeResult.sessionId})\n**Branch:** \`${taskInfo.branchName}\`\n**PR:** #${taskInfo.prNumber}`
+              );
+            } else {
+              // Failed to start conflict resolution - move back to ready
+              console.log(`   Moving back to Ready for manual conflict resolution`);
+
+              if (readyId) {
+                await projectsService.updateItemStatus(
+                  projectCache.projectId,
+                  item.id,
+                  projectCache.statusFieldId,
+                  readyId
+                );
+              }
+
+              await issuesService.addComment(
+                owner,
+                repo,
+                item.number,
+                `### ⚠️ Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+              );
+            }
+          } else {
+            // Other merge failure (status checks blocked, merge API failed, etc.)
+            console.log(`   Merge failed: ${mergeResult.reason}`);
+            console.log(`   Moving back to Ready for re-work`);
+
+            // Move back to Ready so it gets picked up again
             if (readyId) {
               await projectsService.updateItemStatus(
                 projectCache.projectId,
@@ -975,46 +1028,43 @@ async function reviewCompletedTasks(ctx: DaemonContext, inReview: ProjectItem[])
               );
             }
 
+            // Add comment explaining the merge failure
             await issuesService.addComment(
               owner,
               repo,
               item.number,
-              `### ⚠️ Merge Conflicts\n\nPR #${taskInfo.prNumber} has merge conflicts that could not be automatically resolved.\n\nMoving back to Ready for re-work.`
+              `### ⚠️ Merge Failed\n\nPR #${taskInfo.prNumber} could not be merged.\n\n**Reason:** ${mergeResult.reason}\n\nMoving back to Ready for re-work. The issue will be picked up in the next cycle to resolve the problem.`
             );
           }
         } else {
-          // Other merge failure
-          console.log(`   Merge failed: ${mergeResult.reason}`);
-          // Keep in review for manual intervention
-        }
-      } else {
-        // Review rejected - move back to Ready for re-work
-        console.log(`   Review rejected, moving back to Ready for re-work`);
+          // Review rejected - move back to Ready for re-work
+          console.log(`   Review rejected, moving back to Ready for re-work`);
 
-        if (readyId) {
-          await projectsService.updateItemStatus(
-            projectCache.projectId,
-            item.id,
-            projectCache.statusFieldId,
-            readyId
+          if (readyId) {
+            await projectsService.updateItemStatus(
+              projectCache.projectId,
+              item.id,
+              projectCache.statusFieldId,
+              readyId
+            );
+          }
+
+          // Format review issues for comment (will be visible to Claude on re-work via PR comments)
+          const issuesText = formatReviewIssuesForComment(result.issues);
+
+          // Add comment about review rejection WITH the actual issues
+          await issuesService.addComment(
+            owner,
+            repo,
+            item.number,
+            `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${taskInfo.prNumber} is being sent back for re-work.`
           );
         }
-
-        // Format review issues for comment (will be visible to Claude on re-work via PR comments)
-        const issuesText = formatReviewIssuesForComment(result.issues);
-
-        // Add comment about review rejection WITH the actual issues
-        await issuesService.addComment(
-          owner,
-          repo,
-          item.number,
-          `### 🔄 Review Feedback\n\nCode review found ${result.issues.length} issue(s) that need to be addressed:\n\n${issuesText}\n\nPR #${taskInfo.prNumber} is being sent back for re-work.`
-        );
+      } catch (error) {
+        console.error(`   Error reviewing task: ${error}`);
       }
-    } catch (error) {
-      console.error(`   Error reviewing task: ${error}`);
-    }
-  }
+    })
+  );
 }
 
 interface MergeResult {
@@ -1032,7 +1082,8 @@ async function checkAndMergePR(
   branchName: string | undefined,
   token: string,
   claudeAuth: ClaudeAuth,
-  environmentId: string
+  environmentId: string,
+  taskInfo?: AutoTaskCommentInfo
 ): Promise<MergeResult> {
   try {
     const { Octokit } = await import('@octokit/rest');
@@ -1080,18 +1131,48 @@ Be careful to understand both sides of the conflicts before resolving them.`;
             environmentId,
           });
 
-          const { sessionId } = await claudeClient.createSession({
-            prompt: conflictPrompt,
-            gitUrl,
-            branchPrefix: branchName, // Use existing branch
-            title: `Resolve conflicts: PR #${prNumber}`,
-          });
+          let conflictSessionId: string;
+
+          if (taskInfo?.sessionId) {
+            // Try to resume existing session for conflict resolution
+            try {
+              const session = await claudeClient.getSession(taskInfo.sessionId);
+
+              if (!['archived', 'failed', 'completed'].includes(session.session_status)) {
+                // Session can be resumed
+                console.log(`   Resuming session ${taskInfo.sessionId} for conflict resolution`);
+                await claudeClient.sendMessage(taskInfo.sessionId, conflictPrompt);
+                conflictSessionId = taskInfo.sessionId;
+              } else {
+                throw new Error(`Session is ${session.session_status}`);
+              }
+            } catch (error) {
+              // Fall back to new session
+              console.log(`   Cannot resume session: ${error}, creating new session`);
+              const { sessionId } = await claudeClient.createSession({
+                prompt: conflictPrompt,
+                gitUrl,
+                branchPrefix: branchName,
+                title: `Resolve conflicts: PR #${prNumber}`,
+              });
+              conflictSessionId = sessionId;
+            }
+          } else {
+            // No session ID - create new (shouldn't happen in normal flow)
+            const { sessionId } = await claudeClient.createSession({
+              prompt: conflictPrompt,
+              gitUrl,
+              branchPrefix: branchName,
+              title: `Resolve conflicts: PR #${prNumber}`,
+            });
+            conflictSessionId = sessionId;
+          }
 
           return {
             merged: false,
             hasConflicts: true,
             conflictResolutionStarted: true,
-            sessionId,
+            sessionId: conflictSessionId,
             reason: 'Merge conflicts detected',
           };
         } catch (error) {
