@@ -209,6 +209,10 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
 
   // Event handlers (for cleanup)
   private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+  private mouseDownHandler: ((e: MouseEvent) => void) | null = null;
+  private mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+  private mouseUpHandler: (() => void) | null = null;
+  private wheelHandler: ((e: WheelEvent) => void) | null = null;
 
   protected render(): string {
     return `
@@ -443,12 +447,17 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
       // Center the view
       this.viewOffset = { x: this.canvasWidth / 2, y: this.canvasHeight / 2 };
 
-      // Mouse events
-      this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-      this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-      this.canvas.addEventListener('mouseup', () => this.handleMouseUp());
-      this.canvas.addEventListener('mouseleave', () => this.handleMouseUp());
-      this.canvas.addEventListener('wheel', (e) => this.handleWheel(e));
+      // Mouse events (store references for cleanup)
+      this.mouseDownHandler = (e: MouseEvent) => this.handleMouseDown(e);
+      this.mouseMoveHandler = (e: MouseEvent) => this.handleMouseMove(e);
+      this.mouseUpHandler = () => this.handleMouseUp();
+      this.wheelHandler = (e: WheelEvent) => this.handleWheel(e);
+
+      this.canvas.addEventListener('mousedown', this.mouseDownHandler);
+      this.canvas.addEventListener('mousemove', this.mouseMoveHandler);
+      this.canvas.addEventListener('mouseup', this.mouseUpHandler);
+      this.canvas.addEventListener('mouseleave', this.mouseUpHandler);
+      this.canvas.addEventListener('wheel', this.wheelHandler);
     }
   }
 
@@ -1602,6 +1611,27 @@ export class BoneAnimationPage extends Page<BoneAnimationPageOptions> {
     if (this.keydownHandler) {
       document.removeEventListener('keydown', this.keydownHandler);
       this.keydownHandler = null;
+    }
+
+    // Clean up canvas event listeners
+    if (this.canvas) {
+      if (this.mouseDownHandler) {
+        this.canvas.removeEventListener('mousedown', this.mouseDownHandler);
+        this.mouseDownHandler = null;
+      }
+      if (this.mouseMoveHandler) {
+        this.canvas.removeEventListener('mousemove', this.mouseMoveHandler);
+        this.mouseMoveHandler = null;
+      }
+      if (this.mouseUpHandler) {
+        this.canvas.removeEventListener('mouseup', this.mouseUpHandler);
+        this.canvas.removeEventListener('mouseleave', this.mouseUpHandler);
+        this.mouseUpHandler = null;
+      }
+      if (this.wheelHandler) {
+        this.canvas.removeEventListener('wheel', this.wheelHandler);
+        this.wheelHandler = null;
+      }
     }
   }
 }
