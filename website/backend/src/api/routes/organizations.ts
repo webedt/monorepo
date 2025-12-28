@@ -16,6 +16,21 @@ function isValidSlug(slug: string): boolean {
   return /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug) && slug.length >= 3 && slug.length <= 50;
 }
 
+// Helper to check if an error is a PostgreSQL unique constraint violation
+function isUniqueConstraintError(error: unknown): boolean {
+  if (error instanceof Error) {
+    // PostgreSQL unique violation error code is '23505'
+    const pgError = error as Error & { code?: string };
+    if (pgError.code === '23505') {
+      return true;
+    }
+    // Fallback: check error message for 'unique constraint' or 'duplicate key'
+    const message = error.message.toLowerCase();
+    return message.includes('unique constraint') || message.includes('duplicate key');
+  }
+  return false;
+}
+
 // GET /api/organizations - List user's organizations
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -50,6 +65,18 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
+    // Validate name length
+    if (name.length < 2 || name.length > 100) {
+      res.status(400).json({ success: false, error: 'Name must be between 2 and 100 characters' });
+      return;
+    }
+
+    // Validate displayName length if provided
+    if (displayName && (displayName.length < 2 || displayName.length > 100)) {
+      res.status(400).json({ success: false, error: 'Display name must be between 2 and 100 characters' });
+      return;
+    }
+
     if (!isValidSlug(slug)) {
       res.status(400).json({
         success: false,
@@ -73,6 +100,103 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error creating organization:', error);
     res.status(500).json({ success: false, error: 'Failed to create organization' });
+  }
+});
+
+// NOTE: Static path routes must come BEFORE /:id routes to avoid matching issues
+
+// GET /api/organizations/slug-available/:slug - Check if slug is available
+router.get('/slug-available/:slug', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { slug } = req.params;
+
+    if (!isValidSlug(slug)) {
+      res.json({ success: true, data: { available: false, reason: 'invalid' } });
+      return;
+    }
+
+    const available = await organizationService.isSlugAvailable(slug);
+    res.json({ success: true, data: { available, reason: available ? null : 'taken' } });
+  } catch (error) {
+    console.error('Error checking slug availability:', error);
+    res.status(500).json({ success: false, error: 'Failed to check slug availability' });
+  }
+});
+
+// GET /api/organizations/slug/:slug - Get organization by slug
+router.get('/slug/:slug', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const userId = authReq.user.id;
+    const { slug } = req.params;
+
+    const organization = await organizationService.getBySlug(slug);
+    if (!organization) {
+      res.status(404).json({ success: false, error: 'Organization not found' });
+      return;
+    }
+
+    const member = await organizationService.getMember(organization.id, userId);
+    if (!member) {
+      res.status(403).json({ success: false, error: 'Not a member of this organization' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...organization,
+        role: member.role,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching organization:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch organization' });
+  }
+});
+
+// POST /api/organizations/invitations/:token/accept - Accept invitation
+router.post('/invitations/:token/accept', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const userId = authReq.user.id;
+    const userEmail = authReq.user.email;
+    const { token } = req.params;
+
+    // First, verify the invitation exists and email matches
+    const invitation = await organizationService.getInvitationByToken(token);
+    if (!invitation) {
+      res.status(404).json({ success: false, error: 'Invitation not found or expired' });
+      return;
+    }
+
+    // Verify the invitation email matches the user's email
+    if (invitation.email.toLowerCase() !== userEmail.toLowerCase()) {
+      res.status(403).json({
+        success: false,
+        error: 'This invitation was sent to a different email address',
+      });
+      return;
+    }
+
+    const member = await organizationService.acceptInvitation(token, userId);
+    if (!member) {
+      res.status(404).json({ success: false, error: 'Invitation not found or expired' });
+      return;
+    }
+
+    const organization = await organizationService.getById(member.organizationId);
+
+    res.json({
+      success: true,
+      data: {
+        member,
+        organization,
+      },
+    });
+  } catch (error) {
+    console.error('Error accepting invitation:', error);
+    res.status(500).json({ success: false, error: 'Failed to accept invitation' });
   }
 });
 
@@ -113,38 +237,6 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/organizations/slug/:slug - Get organization by slug
-router.get('/slug/:slug', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const userId = authReq.user.id;
-    const { slug } = req.params;
-
-    const organization = await organizationService.getBySlug(slug);
-    if (!organization) {
-      res.status(404).json({ success: false, error: 'Organization not found' });
-      return;
-    }
-
-    const member = await organizationService.getMember(organization.id, userId);
-    if (!member) {
-      res.status(403).json({ success: false, error: 'Not a member of this organization' });
-      return;
-    }
-
-    res.json({
-      success: true,
-      data: {
-        ...organization,
-        role: member.role,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching organization:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch organization' });
-  }
-});
-
 // PATCH /api/organizations/:id - Update organization
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -152,6 +244,18 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const userId = authReq.user.id;
     const { id } = req.params;
     const { name, displayName, description, avatarUrl, websiteUrl, githubOrg } = req.body;
+
+    // Validate name length if provided
+    if (name !== undefined && (name.length < 2 || name.length > 100)) {
+      res.status(400).json({ success: false, error: 'Name must be between 2 and 100 characters' });
+      return;
+    }
+
+    // Validate displayName length if provided
+    if (displayName !== undefined && displayName !== null && (displayName.length < 2 || displayName.length > 100)) {
+      res.status(400).json({ success: false, error: 'Display name must be between 2 and 100 characters' });
+      return;
+    }
 
     const hasPermission = await organizationService.hasPermission(id, userId, 'admin');
     if (!hasPermission) {
@@ -423,8 +527,7 @@ router.post('/:id/repositories', requireAuth, async (req: Request, res: Response
     res.status(201).json({ success: true, data: repository });
   } catch (error: unknown) {
     console.error('Error adding repository:', error);
-    // Handle unique constraint violation (duplicate repository)
-    if (error instanceof Error && error.message.includes('unique constraint')) {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'This repository is already added to the organization' });
       return;
     }
@@ -524,8 +627,7 @@ router.post('/:id/invitations', requireAuth, async (req: Request, res: Response)
     res.status(201).json({ success: true, data: invitation });
   } catch (error: unknown) {
     console.error('Error creating invitation:', error);
-    // Handle unique constraint violation (duplicate invitation)
-    if (error instanceof Error && error.message.includes('unique constraint')) {
+    if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'An invitation for this email already exists' });
       return;
     }
@@ -577,52 +679,6 @@ router.delete('/:id/invitations/:invitationId', requireAuth, async (req: Request
   } catch (error) {
     console.error('Error revoking invitation:', error);
     res.status(500).json({ success: false, error: 'Failed to revoke invitation' });
-  }
-});
-
-// POST /api/organizations/invitations/:token/accept - Accept invitation
-router.post('/invitations/:token/accept', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const userId = authReq.user.id;
-    const { token } = req.params;
-
-    const member = await organizationService.acceptInvitation(token, userId);
-    if (!member) {
-      res.status(404).json({ success: false, error: 'Invitation not found or expired' });
-      return;
-    }
-
-    const organization = await organizationService.getById(member.organizationId);
-
-    res.json({
-      success: true,
-      data: {
-        member,
-        organization,
-      },
-    });
-  } catch (error) {
-    console.error('Error accepting invitation:', error);
-    res.status(500).json({ success: false, error: 'Failed to accept invitation' });
-  }
-});
-
-// GET /api/organizations/slug-available/:slug - Check if slug is available
-router.get('/slug-available/:slug', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const { slug } = req.params;
-
-    if (!isValidSlug(slug)) {
-      res.json({ success: true, data: { available: false, reason: 'invalid' } });
-      return;
-    }
-
-    const available = await organizationService.isSlugAvailable(slug);
-    res.json({ success: true, data: { available, reason: available ? null : 'taken' } });
-  } catch (error) {
-    console.error('Error checking slug availability:', error);
-    res.status(500).json({ success: false, error: 'Failed to check slug availability' });
   }
 });
 
