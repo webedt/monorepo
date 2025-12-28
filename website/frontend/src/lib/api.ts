@@ -1284,7 +1284,20 @@ export const billingApi = {
 // ============================================================================
 // Taxonomy API (Admin-configurable categories, tags, genres)
 // ============================================================================
-import type { Taxonomy, TaxonomyTerm, ItemTaxonomy, TaxonomyWithTerms } from '../types';
+import type {
+  Taxonomy,
+  TaxonomyTerm,
+  ItemTaxonomy,
+  TaxonomyWithTerms,
+  CloudSave,
+  CloudSaveVersion,
+  CloudSaveSyncLog,
+  CloudSaveStats,
+  CloudSaveSyncConflict,
+  CloudSavePlatformData,
+  CloudSaveGameProgress,
+  LocalSaveInfo,
+} from '../types';
 
 export const taxonomyApi = {
   // Taxonomy CRUD
@@ -1398,4 +1411,86 @@ export const taxonomyApi = {
       `/api/taxonomies/items/by-term/${termId}${queryString ? `?${queryString}` : ''}`
     ).then(r => r.data || []);
   },
+};
+
+// ============================================================================
+// Cloud Saves API (Game save synchronization across devices)
+// ============================================================================
+export const cloudSavesApi = {
+  // Get cloud save statistics
+  getStats: () =>
+    fetchApi<ApiResponse<CloudSaveStats>>('/api/cloud-saves/stats').then(r => r.data!),
+
+  // Get sync history
+  getSyncHistory: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{ history: CloudSaveSyncLog[] }>>(
+      `/api/cloud-saves/sync-history${queryString ? `?${queryString}` : ''}`
+    ).then(r => r.data!);
+  },
+
+  // List all saves for the current user
+  listAll: () =>
+    fetchApi<ApiResponse<{ saves: CloudSave[]; total: number }>>('/api/cloud-saves/all')
+      .then(r => r.data!),
+
+  // Check for sync conflicts
+  checkConflicts: (localSaves: LocalSaveInfo[]) =>
+    fetchApi<ApiResponse<{ conflicts: CloudSaveSyncConflict[]; hasConflicts: boolean }>>('/api/cloud-saves/check-conflicts', {
+      method: 'POST',
+      body: { localSaves },
+    }).then(r => r.data!),
+
+  // List saves for a specific game
+  listByGame: (gameId: string) =>
+    fetchApi<ApiResponse<{ saves: CloudSave[]; total: number }>>(`/api/cloud-saves/games/${gameId}`)
+      .then(r => r.data!),
+
+  // Get a specific save slot (includes save data)
+  getSave: (gameId: string, slotNumber: number) =>
+    fetchApi<ApiResponse<{ save: CloudSave; game: { id: string; title: string } | null }>>(
+      `/api/cloud-saves/games/${gameId}/slots/${slotNumber}`
+    ).then(r => r.data!),
+
+  // Upload/update a save
+  uploadSave: (gameId: string, slotNumber: number, data: {
+    slotName?: string;
+    saveData: string;
+    platformData?: CloudSavePlatformData;
+    screenshotUrl?: string;
+    playTimeSeconds?: number;
+    gameProgress?: CloudSaveGameProgress;
+  }) =>
+    fetchApi<ApiResponse<{ save: CloudSave }>>(`/api/cloud-saves/games/${gameId}/slots/${slotNumber}`, {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Delete a save
+  deleteSave: (gameId: string, slotNumber: number, platformData?: CloudSavePlatformData) =>
+    fetchApi<ApiResponse<void>>(`/api/cloud-saves/games/${gameId}/slots/${slotNumber}`, {
+      method: 'DELETE',
+      body: platformData ? { platformData } : undefined,
+    }),
+
+  // Get save versions for recovery
+  getVersions: (saveId: string) =>
+    fetchApi<ApiResponse<{ versions: CloudSaveVersion[]; total: number }>>(
+      `/api/cloud-saves/saves/${saveId}/versions`
+    ).then(r => r.data!),
+
+  // Get a specific version (includes save data)
+  getVersion: (saveId: string, versionId: string) =>
+    fetchApi<ApiResponse<{ version: CloudSaveVersion }>>(
+      `/api/cloud-saves/saves/${saveId}/versions/${versionId}`
+    ).then(r => r.data!),
+
+  // Restore a save from a previous version
+  restoreVersion: (saveId: string, versionId: string, platformData?: CloudSavePlatformData) =>
+    fetchApi<ApiResponse<{ save: CloudSave }>>(`/api/cloud-saves/saves/${saveId}/versions/${versionId}/restore`, {
+      method: 'POST',
+      body: platformData ? { platformData } : undefined,
+    }).then(r => r.data!),
 };
