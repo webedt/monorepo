@@ -33,9 +33,9 @@ export default defineConfig({
     },
   },
   build: {
-    // Primary development target: Chrome (latest stable)
-    // This enables modern JS features without unnecessary transpilation
-    target: 'chrome120',
+    // Supported browsers: Chrome, Firefox, Safari, Edge, and Mobile
+    // Uses modern ES2022 features available in all target browsers
+    target: ['chrome120', 'firefox115', 'safari16', 'edge120'],
     outDir: 'dist',
     sourcemap: true,
   },

@@ -71,6 +71,18 @@ website/
 - **Database**: PostgreSQL with Drizzle ORM
 - **Auth**: Lucia
 
+## Scale & Capacity
+
+Current deployment is designed for small-scale usage:
+
+| Metric | Current | Short-term Target |
+|--------|---------|-------------------|
+| **Concurrent Users** | Up to 10 | 50+ |
+| **Storage per User** | Few GB | Few GB |
+| **Architecture** | Single instance | Horizontally scalable |
+
+The backend uses PostgreSQL connection pooling and is designed for horizontal scalability when demand increases.
+
 ## Deployment
 
 Deployed via GitHub Actions to Dokploy. Preview environments are created per branch at:
