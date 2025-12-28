@@ -10,7 +10,11 @@ import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { beatGridStore } from '../../stores/beatGridStore';
+import { audioSourceStore } from '../../stores/audioSourceStore';
 import type { BeatGridSettings } from '../../stores/beatGridStore';
+import type { AudioSourceSettings } from '../../stores/audioSourceStore';
+import type { WaveformType } from '../../lib/audio';
+import { AUDIO_PRESETS } from '../../lib/audio';
 import type { Session } from '../../types';
 import './sound.css';
 
@@ -75,6 +79,11 @@ export class SoundPage extends Page<SoundPageOptions> {
   // Beat grid state
   private beatGridSettings: BeatGridSettings = beatGridStore.getSettings();
   private unsubscribeBeatGrid: (() => void) | null = null;
+
+  // Audio source state
+  private audioSourceSettings: AudioSourceSettings = audioSourceStore.getSettings();
+  private unsubscribeAudioSource: (() => void) | null = null;
+  private synthPanelVisible = false;
 
   protected render(): string {
     return `
@@ -185,6 +194,95 @@ export class SoundPage extends Page<SoundPageOptions> {
             <button class="toolbar-btn ai-btn" data-action="ai-enhance" title="AI Enhance" disabled>
               AI Enhance
             </button>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
+          <div class="toolbar-group synth-group">
+            <button class="toolbar-btn synth-toggle-btn" data-action="toggle-synth" title="Toggle Synthesizer (T)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 18V5l12-2v13M9 18c0 1.1-1.3 2-3 2s-3-.9-3-2 1.3-2 3-2 3 .9 3 2zm12-3c0 1.1-1.3 2-3 2s-3-.9-3-2 1.3-2 3-2 3 .9 3 2z"/>
+              </svg>
+              Synth
+            </button>
+          </div>
+        </div>
+
+        <!-- Synthesizer Panel -->
+        <div class="synth-panel" style="display: none;">
+          <div class="synth-panel-header">
+            <span class="synth-panel-title">Audio Source</span>
+            <button class="synth-close-btn" data-action="close-synth" title="Close">×</button>
+          </div>
+          <div class="synth-panel-content">
+            <div class="synth-section">
+              <label class="synth-label">Waveform</label>
+              <div class="synth-waveform-buttons">
+                <button class="synth-wave-btn active" data-waveform="sine" title="Sine">∿</button>
+                <button class="synth-wave-btn" data-waveform="square" title="Square">⊓</button>
+                <button class="synth-wave-btn" data-waveform="sawtooth" title="Sawtooth">⊿</button>
+                <button class="synth-wave-btn" data-waveform="triangle" title="Triangle">△</button>
+              </div>
+            </div>
+            <div class="synth-section">
+              <label class="synth-label">Preset</label>
+              <select class="synth-preset-select">
+                ${AUDIO_PRESETS.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="synth-section">
+              <label class="synth-label">Frequency: <span class="synth-freq-value">440</span> Hz</label>
+              <input type="range" class="synth-freq-slider" min="20" max="2000" value="440" step="1">
+            </div>
+            <div class="synth-section">
+              <label class="synth-label">Volume: <span class="synth-vol-value">50</span>%</label>
+              <input type="range" class="synth-vol-slider" min="0" max="100" value="50" step="1">
+            </div>
+            <div class="synth-section synth-envelope">
+              <label class="synth-label">Envelope (ADSR)</label>
+              <div class="synth-envelope-controls">
+                <div class="synth-env-control">
+                  <label>A</label>
+                  <input type="range" class="synth-env-attack" min="0" max="1000" value="10" step="1">
+                </div>
+                <div class="synth-env-control">
+                  <label>D</label>
+                  <input type="range" class="synth-env-decay" min="0" max="1000" value="100" step="1">
+                </div>
+                <div class="synth-env-control">
+                  <label>S</label>
+                  <input type="range" class="synth-env-sustain" min="0" max="100" value="70" step="1">
+                </div>
+                <div class="synth-env-control">
+                  <label>R</label>
+                  <input type="range" class="synth-env-release" min="0" max="2000" value="200" step="1">
+                </div>
+              </div>
+            </div>
+            <div class="synth-section synth-keyboard">
+              <label class="synth-label">Keyboard (Press keys Z-M for notes)</label>
+              <div class="synth-piano">
+                <div class="piano-keys">
+                  <button class="piano-key white" data-note="C4">C</button>
+                  <button class="piano-key black" data-note="C#4">C#</button>
+                  <button class="piano-key white" data-note="D4">D</button>
+                  <button class="piano-key black" data-note="D#4">D#</button>
+                  <button class="piano-key white" data-note="E4">E</button>
+                  <button class="piano-key white" data-note="F4">F</button>
+                  <button class="piano-key black" data-note="F#4">F#</button>
+                  <button class="piano-key white" data-note="G4">G</button>
+                  <button class="piano-key black" data-note="G#4">G#</button>
+                  <button class="piano-key white" data-note="A4">A</button>
+                  <button class="piano-key black" data-note="A#4">A#</button>
+                  <button class="piano-key white" data-note="B4">B</button>
+                  <button class="piano-key white" data-note="C5">C</button>
+                </div>
+              </div>
+            </div>
+            <div class="synth-section synth-play-controls">
+              <button class="synth-play-btn" data-action="synth-play">▶ Play</button>
+              <button class="synth-stop-btn" data-action="synth-stop">◼ Stop</button>
+            </div>
           </div>
         </div>
 
@@ -357,6 +455,9 @@ export class SoundPage extends Page<SoundPageOptions> {
 
     // Setup beat grid
     this.setupBeatGrid();
+
+    // Setup audio source
+    this.setupAudioSource();
 
     // Load session data
     this.loadSession();
@@ -578,9 +679,43 @@ export class SoundPage extends Page<SoundPageOptions> {
         e.preventDefault();
         this.toggleSnapToBeat();
       }
+
+      // T - Toggle synth panel
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        this.toggleSynthPanel();
+      }
+
+      // Piano keyboard (when synth panel is visible)
+      if (this.synthPanelVisible) {
+        const keyToNote: Record<string, string> = {
+          'z': 'C4', 'x': 'D4', 'c': 'E4', 'v': 'F4',
+          'b': 'G4', 'n': 'A4', 'm': 'B4', ',': 'C5',
+          'a': 'C#4', 's': 'D#4', 'f': 'F#4', 'g': 'G#4', 'h': 'A#4',
+          'q': 'C5', 'w': 'D5', 'e': 'E5', 'r': 'F5',
+          't': 'G5', 'y': 'A5', 'u': 'B5',
+        };
+
+        const note = keyToNote[e.key.toLowerCase()];
+        if (note && e.type === 'keydown' && !e.repeat) {
+          e.preventDefault();
+          audioSourceStore.playNoteName(note);
+        }
+      }
+    };
+
+    // Handle key up for piano
+    const keyUpHandler = (e: KeyboardEvent) => {
+      if (this.synthPanelVisible && !e.repeat) {
+        const pianoKeys = ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', 'a', 's', 'f', 'g', 'h', 'q', 'w', 'e', 'r', 't', 'y', 'u'];
+        if (pianoKeys.includes(e.key.toLowerCase())) {
+          audioSourceStore.stop();
+        }
+      }
     };
 
     document.addEventListener('keydown', this.keyboardHandler);
+    document.addEventListener('keyup', keyUpHandler);
   }
 
   private setupBeatGrid(): void {
@@ -650,6 +785,220 @@ export class SoundPage extends Page<SoundPageOptions> {
       return time;
     }
     return beatGridStore.snapToGrid(time);
+  }
+
+  private setupAudioSource(): void {
+    // Initialize audio source with shared context
+    if (this.audioContext) {
+      audioSourceStore.init(this.audioContext);
+    }
+
+    // Subscribe to audio source settings changes
+    this.unsubscribeAudioSource = audioSourceStore.subscribe((settings) => {
+      this.audioSourceSettings = settings;
+      this.updateAudioSourceUI();
+    });
+
+    // Setup synth panel controls
+    this.setupSynthPanel();
+
+    // Initial UI update
+    this.updateAudioSourceUI();
+  }
+
+  private setupSynthPanel(): void {
+    // Toggle synth button
+    const toggleSynthBtn = this.$('[data-action="toggle-synth"]');
+    const closeSynthBtn = this.$('[data-action="close-synth"]');
+
+    if (toggleSynthBtn) {
+      toggleSynthBtn.addEventListener('click', () => this.toggleSynthPanel());
+    }
+
+    if (closeSynthBtn) {
+      closeSynthBtn.addEventListener('click', () => this.toggleSynthPanel(false));
+    }
+
+    // Waveform buttons
+    const waveformBtns = this.$$('.synth-wave-btn');
+    waveformBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const waveform = (btn as HTMLElement).dataset.waveform as WaveformType;
+        if (waveform) {
+          audioSourceStore.setWaveform(waveform);
+        }
+      });
+    });
+
+    // Preset selector
+    const presetSelect = this.$('.synth-preset-select') as HTMLSelectElement;
+    if (presetSelect) {
+      presetSelect.addEventListener('change', () => {
+        audioSourceStore.applyPresetByName(presetSelect.value);
+      });
+    }
+
+    // Frequency slider
+    const freqSlider = this.$('.synth-freq-slider') as HTMLInputElement;
+    const freqValue = this.$('.synth-freq-value') as HTMLElement;
+    if (freqSlider) {
+      freqSlider.addEventListener('input', () => {
+        const freq = parseInt(freqSlider.value);
+        audioSourceStore.setFrequency(freq);
+        if (freqValue) freqValue.textContent = String(freq);
+      });
+    }
+
+    // Volume slider
+    const volSlider = this.$('.synth-vol-slider') as HTMLInputElement;
+    const volValue = this.$('.synth-vol-value') as HTMLElement;
+    if (volSlider) {
+      volSlider.addEventListener('input', () => {
+        const vol = parseInt(volSlider.value);
+        audioSourceStore.setVolume(vol / 100);
+        if (volValue) volValue.textContent = String(vol);
+      });
+    }
+
+    // Envelope sliders
+    const attackSlider = this.$('.synth-env-attack') as HTMLInputElement;
+    const decaySlider = this.$('.synth-env-decay') as HTMLInputElement;
+    const sustainSlider = this.$('.synth-env-sustain') as HTMLInputElement;
+    const releaseSlider = this.$('.synth-env-release') as HTMLInputElement;
+
+    if (attackSlider) {
+      attackSlider.addEventListener('input', () => {
+        audioSourceStore.setEnvelope({ attack: parseInt(attackSlider.value) / 1000 });
+      });
+    }
+
+    if (decaySlider) {
+      decaySlider.addEventListener('input', () => {
+        audioSourceStore.setEnvelope({ decay: parseInt(decaySlider.value) / 1000 });
+      });
+    }
+
+    if (sustainSlider) {
+      sustainSlider.addEventListener('input', () => {
+        audioSourceStore.setEnvelope({ sustain: parseInt(sustainSlider.value) / 100 });
+      });
+    }
+
+    if (releaseSlider) {
+      releaseSlider.addEventListener('input', () => {
+        audioSourceStore.setEnvelope({ release: parseInt(releaseSlider.value) / 1000 });
+      });
+    }
+
+    // Piano keys
+    const pianoKeys = this.$$('.piano-key');
+    pianoKeys.forEach(key => {
+      key.addEventListener('mousedown', () => {
+        const note = (key as HTMLElement).dataset.note;
+        if (note) {
+          audioSourceStore.playNoteName(note);
+          key.classList.add('active');
+        }
+      });
+
+      key.addEventListener('mouseup', () => {
+        audioSourceStore.stop();
+        key.classList.remove('active');
+      });
+
+      key.addEventListener('mouseleave', () => {
+        key.classList.remove('active');
+      });
+    });
+
+    // Play/Stop buttons
+    const playBtn = this.$('[data-action="synth-play"]');
+    const stopBtn = this.$('[data-action="synth-stop"]');
+
+    if (playBtn) {
+      playBtn.addEventListener('click', () => {
+        audioSourceStore.play();
+      });
+    }
+
+    if (stopBtn) {
+      stopBtn.addEventListener('click', () => {
+        audioSourceStore.stop();
+      });
+    }
+  }
+
+  private toggleSynthPanel(show?: boolean): void {
+    const panel = this.$('.synth-panel') as HTMLElement;
+    const toggleBtn = this.$('[data-action="toggle-synth"]') as HTMLButtonElement;
+
+    if (show === undefined) {
+      this.synthPanelVisible = !this.synthPanelVisible;
+    } else {
+      this.synthPanelVisible = show;
+    }
+
+    if (panel) {
+      panel.style.display = this.synthPanelVisible ? 'block' : 'none';
+    }
+
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('active', this.synthPanelVisible);
+    }
+  }
+
+  private updateAudioSourceUI(): void {
+    // Update waveform buttons
+    const waveformBtns = this.$$('.synth-wave-btn');
+    waveformBtns.forEach(btn => {
+      const waveform = (btn as HTMLElement).dataset.waveform;
+      btn.classList.toggle('active', waveform === this.audioSourceSettings.waveform);
+    });
+
+    // Update preset select
+    const presetSelect = this.$('.synth-preset-select') as HTMLSelectElement;
+    if (presetSelect && presetSelect.value !== this.audioSourceSettings.presetName) {
+      presetSelect.value = this.audioSourceSettings.presetName;
+    }
+
+    // Update frequency slider
+    const freqSlider = this.$('.synth-freq-slider') as HTMLInputElement;
+    const freqValue = this.$('.synth-freq-value') as HTMLElement;
+    if (freqSlider) {
+      freqSlider.value = String(this.audioSourceSettings.frequency);
+    }
+    if (freqValue) {
+      freqValue.textContent = String(Math.round(this.audioSourceSettings.frequency));
+    }
+
+    // Update volume slider
+    const volSlider = this.$('.synth-vol-slider') as HTMLInputElement;
+    const volValue = this.$('.synth-vol-value') as HTMLElement;
+    if (volSlider) {
+      volSlider.value = String(Math.round(this.audioSourceSettings.volume * 100));
+    }
+    if (volValue) {
+      volValue.textContent = String(Math.round(this.audioSourceSettings.volume * 100));
+    }
+
+    // Update envelope sliders
+    const attackSlider = this.$('.synth-env-attack') as HTMLInputElement;
+    const decaySlider = this.$('.synth-env-decay') as HTMLInputElement;
+    const sustainSlider = this.$('.synth-env-sustain') as HTMLInputElement;
+    const releaseSlider = this.$('.synth-env-release') as HTMLInputElement;
+
+    if (attackSlider) {
+      attackSlider.value = String(this.audioSourceSettings.envelope.attack * 1000);
+    }
+    if (decaySlider) {
+      decaySlider.value = String(this.audioSourceSettings.envelope.decay * 1000);
+    }
+    if (sustainSlider) {
+      sustainSlider.value = String(this.audioSourceSettings.envelope.sustain * 100);
+    }
+    if (releaseSlider) {
+      releaseSlider.value = String(this.audioSourceSettings.envelope.release * 1000);
+    }
   }
 
   private handleWaveformMouseDown(e: MouseEvent): void {
@@ -1651,6 +2000,14 @@ export class SoundPage extends Page<SoundPageOptions> {
       this.unsubscribeBeatGrid();
       this.unsubscribeBeatGrid = null;
     }
+
+    if (this.unsubscribeAudioSource) {
+      this.unsubscribeAudioSource();
+      this.unsubscribeAudioSource = null;
+    }
+
+    // Dispose audio source store
+    audioSourceStore.dispose();
 
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
