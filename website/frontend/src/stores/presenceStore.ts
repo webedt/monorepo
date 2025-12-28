@@ -171,6 +171,10 @@ class PresenceStore extends Store<PresenceState> {
     });
 
     this.eventSource.onerror = () => {
+      // Guard: don't reconnect if we've already disconnected
+      if (!this.eventSource) {
+        return;
+      }
       console.error('[Presence] SSE error, attempting reconnect...');
       this.handleReconnect(owner, repo, branch);
     };
@@ -241,7 +245,7 @@ class PresenceStore extends Store<PresenceState> {
   private debounceTimer: number | null = null;
 
   /**
-   * Debounced presence update (50ms)
+   * Debounced presence update (150ms)
    */
   private debouncedPresenceUpdate(): void {
     if (this.debounceTimer) {
@@ -250,7 +254,7 @@ class PresenceStore extends Store<PresenceState> {
 
     this.debounceTimer = window.setTimeout(() => {
       this.sendPresenceUpdate().catch(console.error);
-    }, 50);
+    }, 150);
   }
 
   /**

@@ -29,6 +29,8 @@ export class CollaborativeCursors extends Component {
   private cursors: Map<string, HTMLElement> = new Map();
   private unsubscribe: (() => void) | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private scrollHandler: (() => void) | null = null;
+  private currentEditorElement: HTMLTextAreaElement | null = null;
 
   constructor(options: CollaborativeCursorsOptions = {}) {
     super('div', {
@@ -57,13 +59,20 @@ export class CollaborativeCursors extends Component {
    * Set the editor element reference
    */
   setEditorElement(editor: HTMLTextAreaElement): void {
+    // Clean up previous editor listeners if switching editors
+    if (this.currentEditorElement && this.scrollHandler) {
+      this.currentEditorElement.removeEventListener('scroll', this.scrollHandler);
+    }
+
     this.options.editorElement = editor;
+    this.currentEditorElement = editor;
 
     // Calculate character dimensions from the editor's font
     this.measureCharacterDimensions();
 
-    // Watch for scroll
-    editor.addEventListener('scroll', () => this.updateCursorPositions());
+    // Create and store scroll handler for cleanup
+    this.scrollHandler = () => this.updateCursorPositions();
+    editor.addEventListener('scroll', this.scrollHandler, { passive: true });
 
     // Watch for resize
     if (this.resizeObserver) {
@@ -125,6 +134,13 @@ export class CollaborativeCursors extends Component {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
+    }
+
+    // Clean up scroll handler
+    if (this.currentEditorElement && this.scrollHandler) {
+      this.currentEditorElement.removeEventListener('scroll', this.scrollHandler);
+      this.scrollHandler = null;
+      this.currentEditorElement = null;
     }
 
     // Clean up cursor elements
