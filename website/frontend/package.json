@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "type": "module",
   "browserslist": [
-    "Chrome >= 120"
+    "Chrome >= 120",
+    "Firefox >= 115",
+    "Safari >= 16",
+    "Edge >= 120",
+    "iOS >= 16",
+    "ChromeAndroid >= 120"
   ],
   "scripts": {
     "dev": "vite",
