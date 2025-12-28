@@ -1716,3 +1716,71 @@ export const cloudSavesApi = {
       body: platformData ? { platformData } : undefined,
     }).then(r => r.data!),
 };
+
+// ============================================================================
+// Workspace Presence API (Collaborative cursors and real-time presence)
+// ============================================================================
+export interface PresenceUser {
+  userId: string;
+  displayName: string;
+  page: string | null;
+  cursorX: number | null;
+  cursorY: number | null;
+  selection: {
+    filePath?: string;
+    startLine?: number;
+    endLine?: number;
+    startCol?: number;
+    endCol?: number;
+  } | null;
+  isCurrentUser: boolean;
+}
+
+export interface PresenceUpdate {
+  users: PresenceUser[];
+}
+
+export const workspacePresenceApi = {
+  // Update presence (heartbeat with cursor position)
+  updatePresence: (data: {
+    owner: string;
+    repo: string;
+    branch: string;
+    page?: string;
+    cursorX?: number;
+    cursorY?: number;
+    selection?: {
+      filePath?: string;
+      startLine?: number;
+      endLine?: number;
+      startCol?: number;
+      endCol?: number;
+    };
+  }) =>
+    fetchApi<{ success: boolean }>('/api/workspace/presence', {
+      method: 'PUT',
+      body: data,
+    }),
+
+  // Get active users on a branch
+  getPresence: (owner: string, repo: string, branch: string) =>
+    fetchApi<{
+      success: boolean;
+      data: {
+        users: PresenceUser[];
+        branch: string;
+        owner: string;
+        repo: string;
+      };
+    }>(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`),
+
+  // Remove presence (leaving workspace)
+  removePresence: (owner: string, repo: string, branch: string) =>
+    fetchApi<{ success: boolean }>(`/api/workspace/presence/${owner}/${repo}/${encodeURIComponent(branch)}`, {
+      method: 'DELETE',
+    }),
+
+  // Get SSE stream URL for presence updates
+  getStreamUrl: (owner: string, repo: string, branch: string) =>
+    `${getApiBaseUrl()}/api/workspace/events/${owner}/${repo}/${encodeURIComponent(branch)}/stream`,
+};

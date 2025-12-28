@@ -149,3 +149,19 @@ export type { CollectionsPanelOptions } from './collections-panel';
 // DiffViewer
 export { DiffViewer } from './diff-viewer';
 export type { DiffViewerOptions } from './diff-viewer';
+
+// LintingPanel
+export { LintingPanel } from './linting-panel';
+export type { LintingPanelOptions } from './linting-panel';
+
+// CollaborativeCursors
+export { CollaborativeCursors } from './collaborative-cursors';
+export type { CollaborativeCursorsOptions } from './collaborative-cursors';
+
+// CommitDialog
+export { CommitDialog } from './commit-dialog';
+export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
+
+// AIInputBox
+export { AIInputBox } from './ai-input-box';
+export type { AIInputBoxOptions } from './ai-input-box';
