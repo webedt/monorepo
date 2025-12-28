@@ -12,27 +12,6 @@ import type { AutocompleteResponse } from './types.js';
 import type { AutocompleteSuggestion } from './types.js';
 import type { SuggestionKind } from './types.js';
 
-const LANGUAGE_COMMENTS: Record<string, { line: string; blockStart: string; blockEnd: string }> = {
-  typescript: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  javascript: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  python: { line: '#', blockStart: '"""', blockEnd: '"""' },
-  rust: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  go: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  java: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  c: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  cpp: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  csharp: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  ruby: { line: '#', blockStart: '=begin', blockEnd: '=end' },
-  php: { line: '//', blockStart: '/*', blockEnd: '*/' },
-  html: { line: '', blockStart: '<!--', blockEnd: '-->' },
-  css: { line: '', blockStart: '/*', blockEnd: '*/' },
-  sql: { line: '--', blockStart: '/*', blockEnd: '*/' },
-  shell: { line: '#', blockStart: '', blockEnd: '' },
-  yaml: { line: '#', blockStart: '', blockEnd: '' },
-  json: { line: '', blockStart: '', blockEnd: '' },
-  markdown: { line: '', blockStart: '<!--', blockEnd: '-->' },
-};
-
 export class AutocompleteService extends AAutocompleteService {
   async complete(request: AutocompleteRequest): Promise<AutocompleteResponse> {
     const startTime = Date.now();

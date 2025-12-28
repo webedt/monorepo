@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import { AutocompleteService } from '@webedt/shared';
 
 import type { AutocompleteRequest } from '@webedt/shared';
@@ -27,7 +27,6 @@ function getAutocompleteService(): AutocompleteService {
  */
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const authReq = req as AuthRequest;
     const {
       prefix,
       suffix,

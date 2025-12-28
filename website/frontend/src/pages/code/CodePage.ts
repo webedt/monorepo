@@ -65,7 +65,6 @@ export class CodePage extends Page<CodePageOptions> {
 
   // Autocomplete
   private autocompleteDropdown: AutocompleteDropdown | null = null;
-  private autocompleteDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isAutocompleteLoading = false;
 
   protected render(): string {
@@ -1091,10 +1090,6 @@ export class CodePage extends Page<CodePageOptions> {
   }
 
   private hideAutocomplete(): void {
-    if (this.autocompleteDebounceTimer) {
-      clearTimeout(this.autocompleteDebounceTimer);
-      this.autocompleteDebounceTimer = null;
-    }
     this.autocompleteDropdown?.hideDropdown();
   }
 
@@ -1165,12 +1160,13 @@ export class CodePage extends Page<CodePageOptions> {
 
     const editorRect = editor.getBoundingClientRect();
     const spanRect = span.getBoundingClientRect();
+    const mirrorRect = mirror.getBoundingClientRect();
 
     document.body.removeChild(mirror);
 
     // Calculate position relative to viewport
-    const x = editorRect.left + (spanRect.left - mirror.getBoundingClientRect().left);
-    const y = editorRect.top + (spanRect.top - mirror.getBoundingClientRect().top) + parseInt(computed.lineHeight);
+    const x = editorRect.left + (spanRect.left - mirrorRect.left);
+    const y = editorRect.top + (spanRect.top - mirrorRect.top) + parseInt(computed.lineHeight);
 
     // Adjust for scroll
     return {
