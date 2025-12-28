@@ -381,3 +381,41 @@ export interface CommunityComment {
     displayName?: string;
   };
 }
+
+// Community Channels types
+export interface CommunityChannel {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  gameId?: string;
+  isDefault: boolean;
+  isReadOnly: boolean;
+  sortOrder: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  game?: Game;
+}
+
+export interface ChannelMessage {
+  id: string;
+  channelId: string;
+  userId: string;
+  content: string;
+  replyToId?: string;
+  images?: string[];
+  edited: boolean;
+  status: 'published' | 'removed';
+  createdAt: string;
+  updatedAt: string;
+  author?: {
+    id: string;
+    displayName?: string;
+  };
+  channel?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+}

@@ -589,3 +589,47 @@ export type CommunityVote = typeof communityVotes.$inferSelect;
 export type NewCommunityVote = typeof communityVotes.$inferInsert;
 export type WishlistItem = typeof wishlists.$inferSelect;
 export type NewWishlistItem = typeof wishlists.$inferInsert;
+
+// ============================================================================
+// COMMUNITY CHANNELS - Real-time community activity and messaging
+// ============================================================================
+
+// Community Channels - Chat channels for community discussions
+export const communityChannels = pgTable('community_channels', {
+  id: text('id').primaryKey(), // UUID
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(), // URL-friendly identifier (e.g., "general", "help", "showcase")
+  description: text('description'),
+  gameId: text('game_id')
+    .references(() => games.id, { onDelete: 'cascade' }), // Optional - can be game-specific channel
+  isDefault: boolean('is_default').default(false).notNull(), // Default channel for new users
+  isReadOnly: boolean('is_read_only').default(false).notNull(), // Only admins can post
+  sortOrder: integer('sort_order').default(0).notNull(), // For ordering channels
+  status: text('status').default('active').notNull(), // 'active' | 'archived'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Channel Messages - Messages in community channels
+export const channelMessages = pgTable('channel_messages', {
+  id: text('id').primaryKey(), // UUID
+  channelId: text('channel_id')
+    .notNull()
+    .references(() => communityChannels.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  replyToId: text('reply_to_id'), // For threaded replies
+  images: json('images').$type<string[]>().default([]), // Attached images
+  edited: boolean('edited').default(false).notNull(),
+  status: text('status').default('published').notNull(), // 'published' | 'removed'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Type exports for Community Channels
+export type CommunityChannel = typeof communityChannels.$inferSelect;
+export type NewCommunityChannel = typeof communityChannels.$inferInsert;
+export type ChannelMessage = typeof channelMessages.$inferSelect;
+export type NewChannelMessage = typeof channelMessages.$inferInsert;

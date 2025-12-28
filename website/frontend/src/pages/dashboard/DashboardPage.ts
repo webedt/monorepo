@@ -3,7 +3,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Card, Button, Icon, GameCard } from '../../components';
+import { Card, Button, Icon, GameCard, CommunityActivityWidget } from '../../components';
 import { authStore } from '../../stores/authStore';
 import { libraryApi } from '../../lib/api';
 import type { LibraryItem } from '../../types';
@@ -18,6 +18,7 @@ export class DashboardPage extends Page<PageOptions> {
   private buttons: Button[] = [];
   private recentlyPlayed: LibraryItem[] = [];
   private loadingRecentlyPlayed = true;
+  private communityActivityWidget: CommunityActivityWidget | null = null;
 
   protected render(): string {
     const user = authStore.getUser();
@@ -37,10 +38,16 @@ export class DashboardPage extends Page<PageOptions> {
 
         ${this.renderRecentlyPlayed()}
 
-        <section class="dashboard-section">
-          <h2 class="section-title">Quick Actions</h2>
-          <div class="quick-actions"></div>
-        </section>
+        <div class="dashboard-two-column">
+          <section class="dashboard-section">
+            <h2 class="section-title">Quick Actions</h2>
+            <div class="quick-actions"></div>
+          </section>
+
+          <section class="dashboard-section community-activity-section">
+            <div id="community-activity-container"></div>
+          </section>
+        </div>
       </div>
     `;
   }
@@ -197,6 +204,24 @@ export class DashboardPage extends Page<PageOptions> {
         this.buttons.push(btn);
       }
     }
+
+    // Create Community Activity Widget
+    const activityContainer = this.$('#community-activity-container') as HTMLElement;
+    if (activityContainer) {
+      this.communityActivityWidget = new CommunityActivityWidget({
+        config: {
+          id: 'community-activity',
+          type: 'activity',
+          title: 'Community Activity',
+          size: 'md',
+          order: 0,
+          visible: true,
+        },
+        maxItems: 8,
+        refreshInterval: 60000, // Refresh every minute
+      });
+      this.communityActivityWidget.mount(activityContainer);
+    }
   }
 
   private createActionCard(
@@ -237,6 +262,10 @@ export class DashboardPage extends Page<PageOptions> {
     }
     for (const btn of this.buttons) {
       btn.unmount();
+    }
+    if (this.communityActivityWidget) {
+      this.communityActivityWidget.unmount();
+      this.communityActivityWidget = null;
     }
     this.cards = [];
     this.buttons = [];
