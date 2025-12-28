@@ -286,6 +286,11 @@
   background: var(--color-bg-primary);
 }
 
+/* AI Input Box Container */
+.ai-input-box-container {
+  flex-shrink: 0;
+}
+
 /* Tabs */
 .tabs-bar {
   display: flex;
