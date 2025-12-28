@@ -1,0 +1,247 @@
+/**
+ * Linting Panel Styles
+ */
+
+.linting-panel {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.linting-panel--empty {
+  display: none;
+}
+
+/* Panel header */
+.linting-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-bg-tertiary);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.linting-panel-header:hover {
+  background: var(--color-bg-hover);
+}
+
+.linting-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.linting-panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.linting-panel-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.linting-panel-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.linting-panel--error .linting-panel-icon {
+  color: var(--color-error, #ef4444);
+}
+
+.linting-panel--warning .linting-panel-icon {
+  color: var(--color-warning, #f59e0b);
+}
+
+.linting-panel--info .linting-panel-icon {
+  color: var(--color-info, #3b82f6);
+}
+
+.linting-panel-title {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.linting-panel-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
+}
+
+.lint-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.lint-count--error {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-error, #ef4444);
+}
+
+.lint-count--warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--color-warning, #f59e0b);
+}
+
+.lint-count--info {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--color-info, #3b82f6);
+}
+
+.linting-panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.linting-panel-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.linting-panel-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Panel content */
+.linting-panel-content {
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border);
+}
+
+.linting-panel--collapsed .linting-panel-content {
+  display: none;
+}
+
+.linting-panel-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Lint item */
+.lint-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.lint-item:last-child {
+  border-bottom: none;
+}
+
+.lint-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.lint-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.lint-item-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.lint-item--error .lint-item-icon {
+  color: var(--color-error, #ef4444);
+}
+
+.lint-item--warning .lint-item-icon {
+  color: var(--color-warning, #f59e0b);
+}
+
+.lint-item--info .lint-item-icon {
+  color: var(--color-info, #3b82f6);
+}
+
+.lint-item-location {
+  flex-shrink: 0;
+  width: 48px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.lint-item-message {
+  flex: 1;
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+.lint-item-rule {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  border-radius: var(--radius-sm);
+}
+
+/* Scrollbar styling */
+.linting-panel-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.linting-panel-content::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+.linting-panel-content::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+.linting-panel-content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Animation for new items */
+@keyframes lint-item-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lint-item {
+  animation: lint-item-appear 0.15s ease-out;
+}

@@ -146,6 +146,10 @@ export type { NewSessionModalOptions } from './new-session-modal';
 export { CollectionsPanel } from './collections-panel';
 export type { CollectionsPanelOptions } from './collections-panel';
 
+// LintingPanel
+export { LintingPanel } from './linting-panel';
+export type { LintingPanelOptions } from './linting-panel';
+
 // CollaborativeCursors
 export { CollaborativeCursors } from './collaborative-cursors';
 export type { CollaborativeCursorsOptions } from './collaborative-cursors';
