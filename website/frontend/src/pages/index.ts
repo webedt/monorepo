@@ -23,6 +23,7 @@ export { GameDetailPage } from './game-detail';
 export { LibraryPage } from './library';
 export { CommunityPage } from './community';
 export { ChannelsPage } from './channels';
+export { AnnouncementsPage } from './announcements';
 
 // Billing/Pricing
 export { PricingPage } from './pricing';

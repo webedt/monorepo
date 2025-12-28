@@ -27,6 +27,7 @@ import {
   LibraryPage,
   CommunityPage,
   ChannelsPage,
+  AnnouncementsPage,
   PricingPage,
   AdminPage,
 } from './pages';
@@ -332,6 +333,13 @@ function updateHeader(): void {
 
       nav.appendChild(a);
     }
+
+    // Trash icon
+    const trashBtn = new IconButton('trash', {
+      label: 'Trash',
+      onClick: () => router.navigate('/trash'),
+    });
+    actions.appendChild(trashBtn.getElement());
 
     // Settings icon
     const settingsBtn = new IconButton('settings', {
@@ -894,6 +902,22 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Channels | WebEDT',
+      },
+      {
+        path: '/announcements',
+        component: () => {
+          mountPage(AnnouncementsPage);
+          return document.createElement('div');
+        },
+        title: 'Announcements | WebEDT',
+      },
+      {
+        path: '/announcements/:id',
+        component: (params) => {
+          mountPage(AnnouncementsPage, params);
+          return document.createElement('div');
+        },
+        title: 'Announcement | WebEDT',
       },
       {
         path: '/pricing',

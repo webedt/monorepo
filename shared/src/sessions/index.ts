@@ -22,6 +22,10 @@ export { ASessionListBroadcaster, type SessionUpdateType, type SessionListEvent 
 export { ASessionCleanupService, type CleanupResult } from './ASessionCleanupService.js';
 export { SessionCleanupService, sessionCleanupService } from './SessionCleanupService.js';
 
+// Trash cleanup service (automatic cleanup of old deleted sessions)
+export { ATrashCleanupService, type TrashCleanupResult, type TrashCleanupSession } from './ATrashCleanupService.js';
+export { TrashCleanupService, trashCleanupService } from './TrashCleanupService.js';
+
 // Event storage service
 export { AEventStorageService, type StoredEvent, type StoreEventResult } from './AEventStorageService.js';
 export { EventStorageService, eventStorageService } from './EventStorageService.js';
