@@ -145,3 +145,7 @@ export type { NewSessionModalOptions } from './new-session-modal';
 // CollectionsPanel
 export { CollectionsPanel } from './collections-panel';
 export type { CollectionsPanelOptions } from './collections-panel';
+
+// MultiCursorEditor
+export { MultiCursorEditor } from './multi-cursor-editor';
+export type { MultiCursorEditorOptions } from './multi-cursor-editor';

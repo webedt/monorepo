@@ -377,28 +377,21 @@
   font-size: var(--font-size-sm);
 }
 
+.editor-empty .editor-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-sm);
+}
+
 .editor-wrapper {
   height: 100%;
   overflow: hidden;
 }
 
-.code-editor {
+/* Multi-cursor editor container */
+.multi-cursor-editor-container {
   width: 100%;
   height: 100%;
-  border: none;
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
-  padding: var(--spacing-md);
-  resize: none;
-  outline: none;
-  tab-size: 2;
-}
-
-.code-editor::placeholder {
-  color: var(--color-text-muted);
 }
 
 /* Preview */

@@ -5,15 +5,13 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
-import { undoRedoStore } from '../../stores';
 import type { Session } from '../../types';
-import type { UndoRedoState } from '../../stores/undoRedoStore';
-import type { TabContentState } from '../../stores/undoRedoStore';
 import './code.css';
+import '../../components/multi-cursor-editor/multi-cursor-editor.css';
 
 interface FileNode {
   name: string;
@@ -51,13 +49,7 @@ export class CodePage extends Page<CodePageOptions> {
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
-  private undoRedoState: UndoRedoState<TabContentState> = {
-    canUndo: false,
-    canRedo: false,
-    historyLength: 0,
-    futureLength: 0,
-  };
-  private unsubscribeUndoRedo: (() => void) | null = null;
+  private multiCursorEditor: MultiCursorEditor | null = null;
 
   protected render(): string {
     return `
@@ -114,9 +106,10 @@ export class CodePage extends Page<CodePageOptions> {
               <div class="editor-empty">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
                 <p>Select a file to view or edit</p>
+                <p class="editor-hint">Multi-cursor: Alt+Click, Ctrl/Cmd+D (next), Ctrl/Cmd+Shift+L (all)</p>
               </div>
               <div class="editor-wrapper" style="display: none;">
-                <textarea class="code-editor" spellcheck="false"></textarea>
+                <div class="multi-cursor-editor-container"></div>
               </div>
               <div class="preview-wrapper" style="display: none;">
                 <img class="image-preview" alt="Preview">
@@ -154,7 +147,7 @@ export class CodePage extends Page<CodePageOptions> {
       saveBtn.mount(saveBtnContainer);
     }
 
-    // Setup undo/redo buttons
+    // Setup undo/redo buttons (CodeMirror handles undo/redo internally)
     const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
     const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
     if (undoBtn) {
@@ -164,12 +157,8 @@ export class CodePage extends Page<CodePageOptions> {
       redoBtn.addEventListener('click', () => this.handleRedo());
     }
 
-    // Setup editor
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (editor) {
-      editor.addEventListener('input', () => this.handleEditorChange());
-      editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e));
-    }
+    // Initialize MultiCursorEditor
+    this.initializeMultiCursorEditor();
 
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
@@ -570,16 +559,9 @@ export class CodePage extends Page<CodePageOptions> {
         isPreview: true,
       };
 
-      // Initialize undo/redo history for this tab
-      undoRedoStore.initialize(path, content);
-
       // Replace preview tab or add new
       const previewIndex = this.tabs.findIndex(t => t.isPreview);
       if (previewIndex >= 0) {
-        // Clean up undo/redo for the previous preview tab
-        if (this.tabs[previewIndex]) {
-          undoRedoStore.removeTab(this.tabs[previewIndex].path);
-        }
         this.tabs[previewIndex] = tab;
         this.setActiveTab(previewIndex);
       } else {
@@ -617,7 +599,7 @@ export class CodePage extends Page<CodePageOptions> {
     this.activeTabIndex = index;
     this.renderTabs();
     this.updateEditorContent();
-    this.subscribeToUndoRedo();
+    this.updateUndoRedoButtons();
   }
 
   private renderTabs(): void {
@@ -671,17 +653,11 @@ export class CodePage extends Page<CodePageOptions> {
       }
     }
 
-    // Clean up undo/redo history for the closed tab
-    if (tab) {
-      undoRedoStore.removeTab(tab.path);
-    }
-
     this.tabs.splice(index, 1);
 
     if (this.tabs.length === 0) {
       this.activeTabIndex = -1;
       this.showEmpty();
-      this.subscribeToUndoRedo();
     } else if (this.activeTabIndex >= this.tabs.length) {
       this.activeTabIndex = this.tabs.length - 1;
     } else if (this.activeTabIndex > index) {
@@ -690,18 +666,24 @@ export class CodePage extends Page<CodePageOptions> {
 
     this.renderTabs();
     this.updateEditorContent();
-    this.subscribeToUndoRedo();
+    this.updateUndoRedoButtons();
   }
 
   private updateEditorContent(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor) return;
+    if (!this.multiCursorEditor) return;
 
     if (this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex]) {
-      editor.value = this.tabs[this.activeTabIndex].content;
+      const tab = this.tabs[this.activeTabIndex];
+      this.multiCursorEditor.setContent(tab.content);
+
+      // Set language based on file extension
+      const ext = tab.path.split('.').pop()?.toLowerCase() || 'text';
+      this.multiCursorEditor.setLanguage(ext);
+
       this.showEditor();
+      this.multiCursorEditor.focus();
     } else {
-      editor.value = '';
+      this.multiCursorEditor.setContent('');
       this.showEmpty();
     }
   }
@@ -724,142 +706,79 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'flex');
   }
 
-  private handleEditorChange(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor || this.activeTabIndex < 0) return;
+  /**
+   * Initialize the MultiCursorEditor component
+   */
+  private initializeMultiCursorEditor(): void {
+    const container = this.$('.multi-cursor-editor-container') as HTMLElement;
+    if (!container) return;
+
+    this.multiCursorEditor = new MultiCursorEditor({
+      content: '',
+      language: 'text',
+      readOnly: false,
+      lineNumbers: true,
+      onChange: (content: string) => {
+        this.handleEditorChange(content);
+      },
+      onSave: () => {
+        this.saveCurrentFile();
+      },
+    });
+
+    this.multiCursorEditor.mount(container);
+  }
+
+  /**
+   * Handle editor content changes from the MultiCursorEditor
+   */
+  private handleEditorChange(content: string): void {
+    if (this.activeTabIndex < 0) return;
 
     const tab = this.tabs[this.activeTabIndex];
-    if (tab) {
-      const newContent = editor.value;
-      if (newContent !== tab.content) {
-        tab.content = newContent;
-        tab.isDirty = true;
-        tab.isPreview = false;
-        this.renderTabs();
-
-        // Track change in undo/redo history
-        undoRedoStore.pushChange(tab.path, newContent, editor.selectionStart);
-      }
+    if (tab && content !== tab.content) {
+      tab.content = content;
+      tab.isDirty = true;
+      tab.isPreview = false;
+      this.renderTabs();
+      this.updateUndoRedoButtons();
     }
   }
 
+  /**
+   * Trigger undo in the editor
+   */
   private handleUndo(): void {
-    if (this.activeTabIndex < 0) return;
-
-    const tab = this.tabs[this.activeTabIndex];
-    if (!tab) return;
-
-    const previousState = undoRedoStore.undo(tab.path);
-    if (previousState) {
-      tab.content = previousState.content;
-      tab.isDirty = true;
-      this.updateEditorContent();
-      this.renderTabs();
-
-      // Restore cursor position if available
-      if (previousState.cursorPosition !== undefined) {
-        const editor = this.$('.code-editor') as HTMLTextAreaElement;
-        if (editor) {
-          editor.selectionStart = editor.selectionEnd = previousState.cursorPosition;
-        }
-      }
-    }
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+    this.multiCursorEditor.undoChange();
+    this.updateUndoRedoButtons();
   }
 
+  /**
+   * Trigger redo in the editor
+   */
   private handleRedo(): void {
-    if (this.activeTabIndex < 0) return;
-
-    const tab = this.tabs[this.activeTabIndex];
-    if (!tab) return;
-
-    const nextState = undoRedoStore.redo(tab.path);
-    if (nextState) {
-      tab.content = nextState.content;
-      tab.isDirty = true;
-      this.updateEditorContent();
-      this.renderTabs();
-
-      // Restore cursor position if available
-      if (nextState.cursorPosition !== undefined) {
-        const editor = this.$('.code-editor') as HTMLTextAreaElement;
-        if (editor) {
-          editor.selectionStart = editor.selectionEnd = nextState.cursorPosition;
-        }
-      }
-    }
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+    this.multiCursorEditor.redoChange();
+    this.updateUndoRedoButtons();
   }
 
+  /**
+   * Update the undo/redo button states
+   * Note: With CodeMirror, buttons are always enabled as CodeMirror manages its own history
+   */
   private updateUndoRedoButtons(): void {
     const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
     const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
 
+    // Enable buttons when there's an active file
+    const hasActiveFile = this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex];
+
     if (undoBtn) {
-      undoBtn.disabled = !this.undoRedoState.canUndo;
+      undoBtn.disabled = !hasActiveFile;
     }
     if (redoBtn) {
-      redoBtn.disabled = !this.undoRedoState.canRedo;
-    }
-  }
-
-  private subscribeToUndoRedo(): void {
-    // Unsubscribe from previous tab
-    if (this.unsubscribeUndoRedo) {
-      this.unsubscribeUndoRedo();
-      this.unsubscribeUndoRedo = null;
-    }
-
-    if (this.activeTabIndex < 0) {
-      this.undoRedoState = {
-        canUndo: false,
-        canRedo: false,
-        historyLength: 0,
-        futureLength: 0,
-      };
-      this.updateUndoRedoButtons();
-      return;
-    }
-
-    const tab = this.tabs[this.activeTabIndex];
-    if (!tab) return;
-
-    this.unsubscribeUndoRedo = undoRedoStore.subscribe(tab.path, (state) => {
-      this.undoRedoState = state;
-      this.updateUndoRedoButtons();
-    });
-  }
-
-  private handleEditorKeydown(e: KeyboardEvent): void {
-    // Cmd/Ctrl+S to save
-    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-      e.preventDefault();
-      this.saveCurrentFile();
-      return;
-    }
-
-    // Cmd/Ctrl+Z to undo
-    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-      e.preventDefault();
-      this.handleUndo();
-      return;
-    }
-
-    // Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y to redo
-    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' && e.shiftKey || e.key === 'y')) {
-      e.preventDefault();
-      this.handleRedo();
-      return;
-    }
-
-    // Tab key inserts spaces
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const editor = e.target as HTMLTextAreaElement;
-      const start = editor.selectionStart;
-      const end = editor.selectionEnd;
-      const spaces = '  ';
-      editor.value = editor.value.substring(0, start) + spaces + editor.value.substring(end);
-      editor.selectionStart = editor.selectionEnd = start + spaces.length;
-      this.handleEditorChange();
+      redoBtn.disabled = !hasActiveFile;
     }
   }
 
@@ -915,16 +834,10 @@ export class CodePage extends Page<CodePageOptions> {
       console.warn('Leaving with unsaved changes');
     }
 
-    // Cleanup undo/redo subscription and flush any pending changes
-    if (this.unsubscribeUndoRedo) {
-      this.unsubscribeUndoRedo();
-      this.unsubscribeUndoRedo = null;
-    }
-    undoRedoStore.flushAll();
-
-    // Clean up undo/redo history for all open tabs
-    for (const tab of this.tabs) {
-      undoRedoStore.removeTab(tab.path);
+    // Cleanup MultiCursorEditor
+    if (this.multiCursorEditor) {
+      this.multiCursorEditor.unmount();
+      this.multiCursorEditor = null;
     }
 
     // Cleanup offline subscription
