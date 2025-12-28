@@ -75,6 +75,7 @@ export class SoundPage extends Page<SoundPageOptions> {
 
   // Event handlers for cleanup
   private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+  private keyUpHandler: ((e: KeyboardEvent) => void) | null = null;
 
   // Beat grid state
   private beatGridSettings: BeatGridSettings = beatGridStore.getSettings();
@@ -680,10 +681,11 @@ export class SoundPage extends Page<SoundPageOptions> {
         this.toggleSnapToBeat();
       }
 
-      // T - Toggle synth panel
+      // T - Toggle synth panel (must return to prevent conflict with piano 'T' key)
       if (e.key === 't' || e.key === 'T') {
         e.preventDefault();
         this.toggleSynthPanel();
+        return;
       }
 
       // Piano keyboard (when synth panel is visible)
@@ -693,7 +695,7 @@ export class SoundPage extends Page<SoundPageOptions> {
           'b': 'G4', 'n': 'A4', 'm': 'B4', ',': 'C5',
           'a': 'C#4', 's': 'D#4', 'f': 'F#4', 'g': 'G#4', 'h': 'A#4',
           'q': 'C5', 'w': 'D5', 'e': 'E5', 'r': 'F5',
-          't': 'G5', 'y': 'A5', 'u': 'B5',
+          'y': 'A5', 'u': 'B5',
         };
 
         const note = keyToNote[e.key.toLowerCase()];
@@ -705,9 +707,9 @@ export class SoundPage extends Page<SoundPageOptions> {
     };
 
     // Handle key up for piano
-    const keyUpHandler = (e: KeyboardEvent) => {
+    this.keyUpHandler = (e: KeyboardEvent) => {
       if (this.synthPanelVisible && !e.repeat) {
-        const pianoKeys = ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', 'a', 's', 'f', 'g', 'h', 'q', 'w', 'e', 'r', 't', 'y', 'u'];
+        const pianoKeys = ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', 'a', 's', 'f', 'g', 'h', 'q', 'w', 'e', 'r', 'y', 'u'];
         if (pianoKeys.includes(e.key.toLowerCase())) {
           audioSourceStore.stop();
         }
@@ -715,7 +717,7 @@ export class SoundPage extends Page<SoundPageOptions> {
     };
 
     document.addEventListener('keydown', this.keyboardHandler);
-    document.addEventListener('keyup', keyUpHandler);
+    document.addEventListener('keyup', this.keyUpHandler);
   }
 
   private setupBeatGrid(): void {
@@ -907,7 +909,10 @@ export class SoundPage extends Page<SoundPageOptions> {
       });
 
       key.addEventListener('mouseleave', () => {
-        key.classList.remove('active');
+        if (key.classList.contains('active')) {
+          audioSourceStore.stop();
+          key.classList.remove('active');
+        }
       });
     });
 
@@ -1980,6 +1985,11 @@ export class SoundPage extends Page<SoundPageOptions> {
     if (this.keyboardHandler) {
       document.removeEventListener('keydown', this.keyboardHandler);
       this.keyboardHandler = null;
+    }
+
+    if (this.keyUpHandler) {
+      document.removeEventListener('keyup', this.keyUpHandler);
+      this.keyUpHandler = null;
     }
 
     if (this.sourceNode) {

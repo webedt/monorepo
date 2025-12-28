@@ -285,8 +285,8 @@ export class AudioSource {
       this.masterGain = null;
     }
     this.audioContext = null;
-    this.listeners.clear();
     this.emit({ type: 'dispose' });
+    this.listeners.clear();
   }
 
   /**
