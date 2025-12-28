@@ -38,8 +38,8 @@ export const daemonCommand = new Command('daemon')
   .action(async (options) => {
     const rootDir = path.resolve(options.root);
     const pollInterval = options.pollInterval || POLL_INTERVAL_MS;
-    const maxReady = options.maxReady || 3;
-    const maxInProgress = options.maxInProgress || 3;
+    const maxReady = options.maxReady || 6;
+    const maxInProgress = options.maxInProgress || 6;
 
     console.log('\nAuto-Task Daemon Starting');
     console.log('='.repeat(60));
