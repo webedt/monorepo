@@ -83,6 +83,9 @@ export * from './storage/index.js';
 // Payment - Stripe and PayPal payment providers
 export * from './payment/index.js';
 
+// Cloud Saves - Game save synchronization across devices
+export * from './cloudSaves/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
