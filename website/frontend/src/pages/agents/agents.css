@@ -257,6 +257,10 @@
   margin: 0;
 }
 
+.new-session-empty-btn {
+  margin-top: var(--spacing-lg);
+}
+
 .sessions-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

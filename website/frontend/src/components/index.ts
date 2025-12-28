@@ -137,3 +137,7 @@ export type {
 // FilterBar
 export { FilterBar } from './filter-bar';
 export type { FilterBarOptions, FilterConfig, FilterValues } from './filter-bar';
+
+// NewSessionModal
+export { NewSessionModal } from './new-session-modal';
+export type { NewSessionModalOptions } from './new-session-modal';
