@@ -1,7 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, liveChatMessages, users, eq, and, desc } from '@webedt/shared';
+import { db, liveChatMessages, users, eq, and, desc, StorageService } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
+import {
+  requireStorageQuota,
+  calculateLiveChatMessageSize,
+  trackStorageUsage,
+} from '../middleware/storageQuota.js';
 import {
   logger,
   ServiceProvider,
@@ -115,46 +120,51 @@ router.get('/:owner/:repo/:branch/messages', async (req: Request, res: Response)
  * POST /api/live-chat/:owner/:repo/:branch/messages
  * Add a message to a branch-based live chat
  */
-router.post('/:owner/:repo/:branch/messages', async (req: Request, res: Response) => {
-  try {
-    const { owner, repo, branch } = req.params;
-    const { role, content, images } = req.body;
-    const userId = req.user?.id;
+router.post(
+  '/:owner/:repo/:branch/messages',
+  requireStorageQuota({ calculateSize: calculateLiveChatMessageSize }),
+  trackStorageUsage(),
+  async (req: Request, res: Response) => {
+    try {
+      const { owner, repo, branch } = req.params;
+      const { role, content, images } = req.body;
+      const userId = req.user?.id;
 
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      if (!role || !content) {
+        return res.status(400).json({ error: 'Missing required fields: role, content' });
+      }
+
+      // Decode branch name
+      const decodedBranch = decodeURIComponent(branch);
+
+      const message = {
+        id: uuidv4(),
+        userId,
+        owner,
+        repo,
+        branch: decodedBranch,
+        role,
+        content,
+        images: images || null,
+        createdAt: new Date(),
+      };
+
+      await db.insert(liveChatMessages).values(message);
+
+      res.json({
+        success: true,
+        data: message,
+      });
+    } catch (error) {
+      logger.error('liveChat', 'Failed to add live chat message', { error });
+      res.status(500).json({ error: 'Failed to add message' });
     }
-
-    if (!role || !content) {
-      return res.status(400).json({ error: 'Missing required fields: role, content' });
-    }
-
-    // Decode branch name
-    const decodedBranch = decodeURIComponent(branch);
-
-    const message = {
-      id: uuidv4(),
-      userId,
-      owner,
-      repo,
-      branch: decodedBranch,
-      role,
-      content,
-      images: images || null,
-      createdAt: new Date(),
-    };
-
-    await db.insert(liveChatMessages).values(message);
-
-    res.json({
-      success: true,
-      data: message,
-    });
-  } catch (error) {
-    logger.error('liveChat', 'Failed to add live chat message', { error });
-    res.status(500).json({ error: 'Failed to add message' });
   }
-});
+);
 
 /**
  * DELETE /api/live-chat/:owner/:repo/:branch/messages
@@ -182,6 +192,9 @@ router.delete('/:owner/:repo/:branch/messages', async (req: Request, res: Respon
           eq(liveChatMessages.userId, userId)
         )
       );
+
+    // Recalculate storage after deletion to ensure accuracy
+    await StorageService.recalculateUsage(userId);
 
     res.json({
       success: true,
