@@ -957,6 +957,9 @@ export class CodePage extends Page<CodePageOptions> {
           editor.value = result.content;
         }
         undoRedoStore.pushChange(tab.path, result.content, editor?.selectionStart || 0);
+      } else if (!result.success) {
+        // Warn user that formatting failed but continue with save
+        toast.warning(`Could not format: ${result.error || 'Unknown error'}`);
       }
     }
 

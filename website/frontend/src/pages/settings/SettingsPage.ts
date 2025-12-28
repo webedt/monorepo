@@ -280,7 +280,7 @@ export class SettingsPage extends Page<PageOptions> {
           <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd> - Format document
         </div>
         <div class="shortcut-item">
-          <kbd>Ctrl</kbd> + <kbd>S</kbd> - Save file
+          <kbd>${navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'}</kbd> + <kbd>S</kbd> - Save file
         </div>
       </div>
     `;

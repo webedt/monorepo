@@ -1,6 +1,13 @@
 /**
  * Code Formatter Utility
  * Provides code formatting for common file types
+ *
+ * Known Limitations:
+ * - JavaScript/TypeScript: String detection doesn't handle escaped quotes (e.g., 'it\'s')
+ * - JavaScript/TypeScript: Template literal detection is simplified and may not handle
+ *   escaped backticks or complex nested expressions correctly
+ * - HTML: Self-closing tag detection may not work with all XML-style tags
+ * - These formatters provide basic indentation normalization, not full code reformatting
  */
 
 export type FormatLanguage = 'javascript' | 'typescript' | 'json' | 'css' | 'html' | 'markdown' | 'unknown';
@@ -49,8 +56,7 @@ function formatJavaScript(content: string, options: FormatOptions): FormatResult
   let inTemplateLiteral = false;
 
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    const trimmedLine = line.trim();
+    const trimmedLine = lines[i].trim();
 
     // Skip empty lines but preserve them
     if (trimmedLine === '') {
@@ -209,8 +215,8 @@ function formatHTML(content: string, options: FormatOptions): FormatResult {
 
     formattedLines.push(indent.repeat(indentLevel) + trimmedLine);
 
-    // Count opening and closing tags
-    const openingTags = trimmedLine.match(/<([a-zA-Z][a-zA-Z0-9-]*)[^>]*(?<!\/|\/)>/g) || [];
+    // Count opening and closing tags (exclude self-closing tags ending with />)
+    const openingTags = trimmedLine.match(/<([a-zA-Z][a-zA-Z0-9-]*)[^>]*(?<!\/)>/g) || [];
     const closingTags = trimmedLine.match(/<\/([a-zA-Z][a-zA-Z0-9-]*)>/g) || [];
 
     // Adjust for self-closing and void elements
