@@ -23,6 +23,7 @@ import { json } from '@codemirror/lang-json';
 import { css } from '@codemirror/lang-css';
 import { html } from '@codemirror/lang-html';
 import { markdown } from '@codemirror/lang-markdown';
+import { theme as themeManager } from '../../lib/theme';
 
 import type { Extension } from '@codemirror/state';
 import type { KeyBinding } from '@codemirror/view';
@@ -48,6 +49,10 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
   private languageCompartment: Compartment;
   private readOnlyCompartment: Compartment;
   private themeCompartment: Compartment;
+  private unsubscribeTheme: (() => void) | null = null;
+
+  /** Dark theme names that should trigger dark mode in the editor */
+  private static readonly DARK_THEMES = ['dark', 'synthwave', 'cyberpunk', 'dracula', 'nord', 'coffee', 'forest', 'sunset'];
 
   constructor(options: MultiCursorEditorOptions = {}) {
     super('div', { className: 'multi-cursor-editor' });
@@ -61,6 +66,14 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
     this.languageCompartment = new Compartment();
     this.readOnlyCompartment = new Compartment();
     this.themeCompartment = new Compartment();
+  }
+
+  /**
+   * Check if the current theme is a dark theme
+   */
+  private isDarkTheme(): boolean {
+    const resolved = themeManager.getResolvedTheme();
+    return MultiCursorEditor.DARK_THEMES.includes(resolved);
   }
 
   /**
@@ -157,7 +170,7 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
       '.cm-panel.cm-search button:hover': {
         backgroundColor: 'var(--color-bg-hover)',
       },
-    }, { dark: false });
+    }, { dark: this.isDarkTheme() });
   }
 
   /**
@@ -242,9 +255,34 @@ export class MultiCursorEditor extends Component<HTMLDivElement> {
 
   protected onMount(): void {
     this.initializeEditor();
+
+    // Subscribe to theme changes and update editor theme accordingly
+    this.unsubscribeTheme = themeManager.onChange(() => {
+      this.updateEditorTheme();
+    });
+  }
+
+  /**
+   * Update the editor theme when the application theme changes
+   */
+  private updateEditorTheme(): void {
+    if (!this.view) return;
+
+    this.view.dispatch({
+      effects: this.themeCompartment.reconfigure([
+        this.createCustomTheme(),
+        syntaxHighlighting(defaultHighlightStyle),
+      ]),
+    });
   }
 
   protected onUnmount(): void {
+    // Unsubscribe from theme changes
+    if (this.unsubscribeTheme) {
+      this.unsubscribeTheme();
+      this.unsubscribeTheme = null;
+    }
+
     if (this.view) {
       this.view.destroy();
       this.view = null;
