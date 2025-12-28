@@ -14,6 +14,7 @@ import {
   and,
   desc,
   asc,
+  sql,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -85,6 +86,58 @@ router.get('/by-slug/:slug', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Get channel by slug error', error as Error, { component: 'Channels' });
     res.status(500).json({ success: false, error: 'Failed to fetch channel' });
+  }
+});
+
+// Get recent messages across all channels (for activity feed)
+// NOTE: This route MUST be defined before /:id to avoid being caught by the param route
+router.get('/activity/recent', async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+
+    // Get recent messages with author and channel info
+    const messages = await db
+      .select({
+        message: channelMessages,
+        author: {
+          id: users.id,
+          displayName: users.displayName,
+          email: users.email,
+        },
+        channel: {
+          id: communityChannels.id,
+          name: communityChannels.name,
+          slug: communityChannels.slug,
+        },
+      })
+      .from(channelMessages)
+      .innerJoin(users, eq(channelMessages.userId, users.id))
+      .innerJoin(communityChannels, eq(channelMessages.channelId, communityChannels.id))
+      .where(
+        and(
+          eq(channelMessages.status, 'published'),
+          eq(communityChannels.status, 'active')
+        )
+      )
+      .orderBy(desc(channelMessages.createdAt))
+      .limit(limit);
+
+    res.json({
+      success: true,
+      data: {
+        messages: messages.map((m) => ({
+          ...m.message,
+          author: {
+            id: m.author.id,
+            displayName: m.author.displayName || m.author.email?.split('@')[0],
+          },
+          channel: m.channel,
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error('Get recent activity error', error as Error, { component: 'Channels' });
+    res.status(500).json({ success: false, error: 'Failed to fetch recent activity' });
   }
 });
 
@@ -162,9 +215,9 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
       .limit(limit)
       .offset(offset);
 
-    // Get total count
-    const allMessages = await db
-      .select({ id: channelMessages.id })
+    // Get total count using efficient SQL COUNT
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
       .from(channelMessages)
       .where(
         and(
@@ -173,7 +226,7 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
         )
       );
 
-    const total = allMessages.length;
+    const total = count;
 
     // Reverse to get chronological order for display
     const sortedMessages = messages.reverse();
@@ -200,57 +253,6 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
   }
 });
 
-// Get recent messages across all channels (for activity feed)
-router.get('/activity/recent', async (req: Request, res: Response) => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
-
-    // Get recent messages with author and channel info
-    const messages = await db
-      .select({
-        message: channelMessages,
-        author: {
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        },
-        channel: {
-          id: communityChannels.id,
-          name: communityChannels.name,
-          slug: communityChannels.slug,
-        },
-      })
-      .from(channelMessages)
-      .innerJoin(users, eq(channelMessages.userId, users.id))
-      .innerJoin(communityChannels, eq(channelMessages.channelId, communityChannels.id))
-      .where(
-        and(
-          eq(channelMessages.status, 'published'),
-          eq(communityChannels.status, 'active')
-        )
-      )
-      .orderBy(desc(channelMessages.createdAt))
-      .limit(limit);
-
-    res.json({
-      success: true,
-      data: {
-        messages: messages.map((m) => ({
-          ...m.message,
-          author: {
-            id: m.author.id,
-            displayName: m.author.displayName || m.author.email?.split('@')[0],
-          },
-          channel: m.channel,
-        })),
-      },
-    });
-  } catch (error) {
-    logger.error('Get recent activity error', error as Error, { component: 'Channels' });
-    res.status(500).json({ success: false, error: 'Failed to fetch recent activity' });
-  }
-});
-
 // Post a message to a channel (requires auth)
 router.post('/:id/messages', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -260,6 +262,16 @@ router.post('/:id/messages', requireAuth, async (req: Request, res: Response) =>
 
     if (!content || content.trim().length === 0) {
       res.status(400).json({ success: false, error: 'Message content is required' });
+      return;
+    }
+
+    // Validate content length (max 4000 characters)
+    const MAX_MESSAGE_LENGTH = 4000;
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      res.status(400).json({
+        success: false,
+        error: `Message content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters`,
+      });
       return;
     }
 
@@ -356,6 +368,16 @@ router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) =
 
     if (!content || content.trim().length === 0) {
       res.status(400).json({ success: false, error: 'Message content is required' });
+      return;
+    }
+
+    // Validate content length (max 4000 characters)
+    const MAX_MESSAGE_LENGTH = 4000;
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      res.status(400).json({
+        success: false,
+        error: `Message content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters`,
+      });
       return;
     }
 
