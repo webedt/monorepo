@@ -138,6 +138,10 @@ export type {
 export { FilterBar } from './filter-bar';
 export type { FilterBarOptions, FilterConfig, FilterValues } from './filter-bar';
 
+// NewSessionModal
+export { NewSessionModal } from './new-session-modal';
+export type { NewSessionModalOptions } from './new-session-modal';
+
 // CollectionsPanel
 export { CollectionsPanel } from './collections-panel';
 export type { CollectionsPanelOptions } from './collections-panel';
