@@ -24,5 +24,8 @@ export { LibraryPage } from './library';
 export { CommunityPage } from './community';
 export { AnnouncementsPage } from './announcements';
 
+// Billing/Pricing
+export { PricingPage } from './pricing';
+
 // Admin pages
 export { AdminPage } from './admin';

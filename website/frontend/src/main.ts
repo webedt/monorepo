@@ -27,6 +27,7 @@ import {
   LibraryPage,
   CommunityPage,
   AnnouncementsPage,
+  PricingPage,
   AdminPage,
 } from './pages';
 
@@ -891,6 +892,14 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Announcement | WebEDT',
+      },
+      {
+        path: '/pricing',
+        component: () => {
+          mountPage(PricingPage);
+          return document.createElement('div');
+        },
+        title: 'Pricing | WebEDT',
       },
       // Admin routes
       {
