@@ -6,91 +6,23 @@
 import { Page } from '../base/Page';
 import { Card, Button, toast } from '../../components';
 import { billingApi } from '../../lib/api';
+import type { PricingTier as ApiPricingTier } from '../../lib/api';
 import { authStore } from '../../stores/authStore';
 import { router } from '../../lib/router';
 import './pricing.css';
 
-interface PricingTier {
-  id: string;
-  name: string;
-  price: number;
-  priceLabel: string;
-  storage: string;
-  storageBytes: string;
-  features: string[];
+// UI-specific tier metadata (not duplicating backend data)
+const TIER_UI_CONFIG: Record<string, { highlighted?: boolean; cta: string }> = {
+  FREE: { cta: 'Get Started' },
+  BASIC: { highlighted: true, cta: 'Upgrade Now' },
+  PRO: { cta: 'Go Pro' },
+  ENTERPRISE: { cta: 'Contact Sales' },
+};
+
+interface DisplayTier extends ApiPricingTier {
   highlighted?: boolean;
   cta: string;
 }
-
-const PRICING_TIERS: PricingTier[] = [
-  {
-    id: 'FREE',
-    name: 'Free',
-    price: 0,
-    priceLabel: 'Free',
-    storage: '1 GB',
-    storageBytes: '1073741824',
-    features: [
-      '1 GB storage',
-      'Basic agent access',
-      'Community support',
-      'Standard processing',
-    ],
-    cta: 'Get Started',
-  },
-  {
-    id: 'BASIC',
-    name: 'Basic',
-    price: 9.99,
-    priceLabel: '$9.99/mo',
-    storage: '5 GB',
-    storageBytes: '5368709120',
-    features: [
-      '5 GB storage',
-      'Full agent access',
-      'Email support',
-      'Priority processing',
-      'Session history',
-    ],
-    highlighted: true,
-    cta: 'Upgrade Now',
-  },
-  {
-    id: 'PRO',
-    name: 'Pro',
-    price: 29.99,
-    priceLabel: '$29.99/mo',
-    storage: '25 GB',
-    storageBytes: '26843545600',
-    features: [
-      '25 GB storage',
-      'Unlimited agent access',
-      'Priority support',
-      'Fastest processing',
-      'Advanced analytics',
-      'API access',
-    ],
-    cta: 'Go Pro',
-  },
-  {
-    id: 'ENTERPRISE',
-    name: 'Enterprise',
-    price: 99.99,
-    priceLabel: '$99.99/mo',
-    storage: '100 GB',
-    storageBytes: '107374182400',
-    features: [
-      '100 GB storage',
-      'Unlimited everything',
-      'Dedicated support',
-      'SLA guarantee',
-      'Custom integrations',
-      'Team management',
-      'Audit logs',
-    ],
-    cta: 'Contact Sales',
-  },
-];
 
 export class PricingPage extends Page {
   readonly route = '/pricing';
@@ -100,6 +32,7 @@ export class PricingPage extends Page {
   private cards: Card[] = [];
   private buttons: Button[] = [];
   private currentTier: string | null = null;
+  private tiers: DisplayTier[] = [];
   private loading = true;
 
   protected render(): string {
@@ -146,6 +79,13 @@ export class PricingPage extends Page {
 
   async load(): Promise<void> {
     try {
+      // Fetch tiers from backend API (single source of truth)
+      const tiersData = await billingApi.getTiers();
+      this.tiers = (tiersData?.tiers || []).map(tier => ({
+        ...tier,
+        ...TIER_UI_CONFIG[tier.id] || { cta: 'Select' },
+      }));
+
       // Check if user is authenticated and get their current tier
       if (authStore.isAuthenticated()) {
         try {
@@ -156,7 +96,8 @@ export class PricingPage extends Page {
         }
       }
     } catch (error) {
-      console.error('Failed to load billing info:', error);
+      console.error('Failed to load pricing data:', error);
+      this.tiers = [];
     } finally {
       this.loading = false;
       this.update({});
@@ -174,13 +115,18 @@ export class PricingPage extends Page {
 
     grid.innerHTML = '';
 
-    for (const tier of PRICING_TIERS) {
+    if (this.tiers.length === 0 && !this.loading) {
+      grid.innerHTML = '<p class="pricing-error">Failed to load pricing plans. Please try again later.</p>';
+      return;
+    }
+
+    for (const tier of this.tiers) {
       const tierCard = this.createTierCard(tier);
       grid.appendChild(tierCard);
     }
   }
 
-  private createTierCard(tier: PricingTier): HTMLElement {
+  private createTierCard(tier: DisplayTier): HTMLElement {
     const isCurrentPlan = this.currentTier === tier.id;
     const isAuthenticated = authStore.isAuthenticated();
 
@@ -206,7 +152,7 @@ export class PricingPage extends Page {
     header.innerHTML = `
       <h3 class="tier-name">${tier.name}</h3>
       <div class="tier-price">${tier.priceLabel}</div>
-      <div class="tier-storage">${tier.storage} storage</div>
+      <div class="tier-storage">${tier.formatted} storage</div>
     `;
     container.appendChild(header);
 
@@ -247,7 +193,7 @@ export class PricingPage extends Page {
     return container;
   }
 
-  private async handleSelectPlan(tier: PricingTier): Promise<void> {
+  private async handleSelectPlan(tier: DisplayTier): Promise<void> {
     if (!authStore.isAuthenticated()) {
       // Redirect to login with return URL
       router.navigate(`/login?return=/pricing`);
@@ -264,10 +210,10 @@ export class PricingPage extends Page {
       return;
     }
 
-    // For free tier downgrade
+    // For free tier downgrade, show confirmation
     if (tier.id === 'FREE' && this.currentTier !== 'FREE') {
-      const confirmed = confirm('Are you sure you want to downgrade to the Free plan? Your storage quota will be reduced.');
-      if (!confirmed) return;
+      toast.warning('Downgrading will reduce your storage quota. Please ensure your data fits within 1 GB.');
+      // Proceed with the change - the backend will validate
     }
 
     try {

@@ -49,6 +49,13 @@
   color: var(--color-text-secondary);
 }
 
+.pricing-error {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: var(--spacing-2xl);
+  color: var(--color-text-secondary);
+}
+
 /* Pricing Card */
 .pricing-card {
   position: relative;

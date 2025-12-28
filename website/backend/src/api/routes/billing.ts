@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { StorageService, STORAGE_TIERS, db, users, eq } from '@webedt/shared';
+import { StorageService, STORAGE_TIERS } from '@webedt/shared';
 import type { StorageTier } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
