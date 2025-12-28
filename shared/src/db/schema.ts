@@ -13,7 +13,7 @@ export type UserRole = 'user' | 'editor' | 'developer' | 'admin';
  * Role hierarchy for permission checks
  * Higher index = more permissions
  */
-export const ROLE_HIERARCHY: UserRole[] = ['user', 'editor', 'developer', 'admin'];
+export const ROLE_HIERARCHY = ['user', 'editor', 'developer', 'admin'] as const;
 
 /**
  * Check if a role has at least the required permission level

@@ -56,7 +56,7 @@ const EXPECTED_TABLES = [
     requiredColumns: [
       'id', 'email', 'display_name', 'password_hash', 'github_id',
       'github_access_token', 'claude_auth', 'codex_auth', 'gemini_auth',
-      'preferred_provider', 'created_at'
+      'preferred_provider', 'is_admin', 'role', 'created_at'
     ]
   },
   {
@@ -486,6 +486,7 @@ async function createInitialSchema(pool: pg.Pool): Promise<void> {
       preferred_model TEXT,
       chat_verbosity_level TEXT NOT NULL DEFAULT 'verbose',
       is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+      role TEXT NOT NULL DEFAULT 'user',
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
 
@@ -699,6 +700,7 @@ const COLUMN_DEFINITIONS: Record<string, string> = {
   'users.image_ai_provider': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_provider TEXT DEFAULT \'openrouter\'',
   'users.image_ai_model': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS image_ai_model TEXT DEFAULT \'google/gemini-2.5-flash-image\'',
   'users.is_admin': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE',
+  'users.role': 'ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT \'user\'',
 };
 
 /**
