@@ -149,3 +149,7 @@ export type { CollectionsPanelOptions } from './collections-panel';
 // LintingPanel
 export { LintingPanel } from './linting-panel';
 export type { LintingPanelOptions } from './linting-panel';
+
+// CommitDialog
+export { CommitDialog } from './commit-dialog';
+export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
