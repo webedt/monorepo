@@ -74,6 +74,9 @@ export * from './organizations/index.js';
 // Code Analysis - AI-powered code analysis using ClaudeWebClient
 export * from './codeAnalysis/index.js';
 
+// Storage - User storage quota management
+export * from './storage/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================
