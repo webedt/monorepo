@@ -503,10 +503,12 @@ export class TaxonomyManager extends Component {
             </div>
             <div class="terms-list">
               ${this.terms.length === 0 ? '<div class="empty">No terms yet</div>' : ''}
-              ${this.terms.map(term => `
+              ${this.terms.map(term => {
+                const safeColor = this.safeColorStyle(term.color);
+                return `
                 <div class="term-item" data-id="${term.id}">
                   <div class="term-info">
-                    ${term.color ? `<span class="term-color" style="background-color: ${term.color}"></span>` : ''}
+                    ${safeColor ? `<span class="term-color" style="background-color: ${safeColor}"></span>` : ''}
                     <span class="term-name">${this.escapeHtml(term.name)}</span>
                     ${term.description ? `<span class="term-description">${this.escapeHtml(term.description)}</span>` : ''}
                   </div>
@@ -525,7 +527,7 @@ export class TaxonomyManager extends Component {
                     </button>
                   </div>
                 </div>
-              `).join('')}
+              `}).join('')}
             </div>
           ` : `
             <div class="empty-state">
@@ -623,6 +625,17 @@ export class TaxonomyManager extends Component {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // Validate hex color to prevent CSS injection
+  private isValidHexColor(color: string): boolean {
+    return /^#[0-9A-Fa-f]{6}$/.test(color);
+  }
+
+  // Safely get color style or empty string
+  private safeColorStyle(color: string | null | undefined): string {
+    if (!color) return '';
+    return this.isValidHexColor(color) ? color : '';
   }
 
   protected onUnmount(): void {

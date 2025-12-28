@@ -13,6 +13,7 @@ import {
   and,
   asc,
   desc,
+  inArray,
 } from '@webedt/shared';
 import type {
   Taxonomy,
@@ -31,6 +32,19 @@ function generateSlug(name: string): string {
     .replace(/^-|-$/g, '');
 }
 
+// Valid status values
+const VALID_STATUSES = ['active', 'archived'] as const;
+
+// Helper to validate status field
+function isValidStatus(status: string): boolean {
+  return VALID_STATUSES.includes(status as typeof VALID_STATUSES[number]);
+}
+
+// Helper to validate hex color (prevents CSS injection)
+function isValidHexColor(color: string): boolean {
+  return /^#[0-9A-Fa-f]{6}$/.test(color);
+}
+
 // ============================================================================
 // TAXONOMY CRUD (Admin only)
 // ============================================================================
@@ -47,6 +61,37 @@ router.get('/', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error fetching taxonomies:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch taxonomies' });
+  }
+});
+
+// GET /api/taxonomies/by-slug/:slug - Get taxonomy by slug
+// NOTE: This route MUST be defined BEFORE /:id to avoid being caught by the parameterized route
+router.get('/by-slug/:slug', requireAuth, async (req, res) => {
+  try {
+    const { slug } = req.params;
+
+    const [taxonomy] = await db
+      .select()
+      .from(taxonomies)
+      .where(eq(taxonomies.slug, slug))
+      .limit(1);
+
+    if (!taxonomy) {
+      res.status(404).json({ success: false, error: 'Taxonomy not found' });
+      return;
+    }
+
+    // Get all terms for this taxonomy
+    const terms = await db
+      .select()
+      .from(taxonomyTerms)
+      .where(eq(taxonomyTerms.taxonomyId, taxonomy.id))
+      .orderBy(asc(taxonomyTerms.sortOrder), asc(taxonomyTerms.name));
+
+    res.json({ success: true, data: { ...taxonomy, terms } });
+  } catch (error) {
+    console.error('Error fetching taxonomy by slug:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch taxonomy' });
   }
 });
 
@@ -76,36 +121,6 @@ router.get('/:id', requireAuth, async (req, res) => {
     res.json({ success: true, data: { ...taxonomy, terms } });
   } catch (error) {
     console.error('Error fetching taxonomy:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch taxonomy' });
-  }
-});
-
-// GET /api/taxonomies/by-slug/:slug - Get taxonomy by slug
-router.get('/by-slug/:slug', requireAuth, async (req, res) => {
-  try {
-    const { slug } = req.params;
-
-    const [taxonomy] = await db
-      .select()
-      .from(taxonomies)
-      .where(eq(taxonomies.slug, slug))
-      .limit(1);
-
-    if (!taxonomy) {
-      res.status(404).json({ success: false, error: 'Taxonomy not found' });
-      return;
-    }
-
-    // Get all terms for this taxonomy
-    const terms = await db
-      .select()
-      .from(taxonomyTerms)
-      .where(eq(taxonomyTerms.taxonomyId, taxonomy.id))
-      .orderBy(asc(taxonomyTerms.sortOrder), asc(taxonomyTerms.name));
-
-    res.json({ success: true, data: { ...taxonomy, terms } });
-  } catch (error) {
-    console.error('Error fetching taxonomy by slug:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch taxonomy' });
   }
 });
@@ -162,6 +177,12 @@ router.patch('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, displayName, description, allowMultiple, isRequired, itemTypes, sortOrder, status } = req.body;
+
+    // Validate status if provided
+    if (status !== undefined && !isValidStatus(status)) {
+      res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` });
+      return;
+    }
 
     const updateData: Partial<Taxonomy> = { updatedAt: new Date() };
 
@@ -221,6 +242,104 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 // TAXONOMY TERMS CRUD (Admin only)
 // ============================================================================
 
+// NOTE: Static routes (/terms/:termId) MUST be defined BEFORE parameterized routes (/:taxonomyId/terms)
+// to avoid being incorrectly matched
+
+// GET /api/taxonomies/terms/:termId - Get term details
+router.get('/terms/:termId', requireAuth, async (req, res) => {
+  try {
+    const { termId } = req.params;
+
+    const [term] = await db
+      .select()
+      .from(taxonomyTerms)
+      .where(eq(taxonomyTerms.id, termId))
+      .limit(1);
+
+    if (!term) {
+      res.status(404).json({ success: false, error: 'Term not found' });
+      return;
+    }
+
+    res.json({ success: true, data: term });
+  } catch (error) {
+    console.error('Error fetching term:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch term' });
+  }
+});
+
+// PATCH /api/taxonomies/terms/:termId - Update term
+router.patch('/terms/:termId', requireAdmin, async (req, res) => {
+  try {
+    const { termId } = req.params;
+    const { name, description, parentId, color, icon, metadata, sortOrder, status } = req.body;
+
+    // Validate status if provided
+    if (status !== undefined && !isValidStatus(status)) {
+      res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` });
+      return;
+    }
+
+    // Validate color if provided
+    if (color !== undefined && color !== null && color !== '' && !isValidHexColor(color)) {
+      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color (e.g., #FF5733)' });
+      return;
+    }
+
+    const updateData: Partial<TaxonomyTerm> = { updatedAt: new Date() };
+
+    if (name !== undefined) {
+      updateData.name = name;
+      updateData.slug = generateSlug(name);
+    }
+    if (description !== undefined) updateData.description = description;
+    if (parentId !== undefined) updateData.parentId = parentId;
+    if (color !== undefined) updateData.color = color || null;
+    if (icon !== undefined) updateData.icon = icon;
+    if (metadata !== undefined) updateData.metadata = metadata;
+    if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
+    if (status !== undefined) updateData.status = status;
+
+    const [updated] = await db
+      .update(taxonomyTerms)
+      .set(updateData)
+      .where(eq(taxonomyTerms.id, termId))
+      .returning();
+
+    if (!updated) {
+      res.status(404).json({ success: false, error: 'Term not found' });
+      return;
+    }
+
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Error updating term:', error);
+    res.status(500).json({ success: false, error: 'Failed to update term' });
+  }
+});
+
+// DELETE /api/taxonomies/terms/:termId - Delete term
+router.delete('/terms/:termId', requireAdmin, async (req, res) => {
+  try {
+    const { termId } = req.params;
+
+    const [deleted] = await db
+      .delete(taxonomyTerms)
+      .where(eq(taxonomyTerms.id, termId))
+      .returning({ id: taxonomyTerms.id });
+
+    if (!deleted) {
+      res.status(404).json({ success: false, error: 'Term not found' });
+      return;
+    }
+
+    res.json({ success: true, data: { id: deleted.id } });
+  } catch (error) {
+    console.error('Error deleting term:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete term' });
+  }
+});
+
 // GET /api/taxonomies/:taxonomyId/terms - List terms for a taxonomy
 router.get('/:taxonomyId/terms', requireAuth, async (req, res) => {
   try {
@@ -247,6 +366,12 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
 
     if (!name) {
       res.status(400).json({ success: false, error: 'Name is required' });
+      return;
+    }
+
+    // Validate color if provided
+    if (color && !isValidHexColor(color)) {
+      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color (e.g., #FF5733)' });
       return;
     }
 
@@ -300,92 +425,39 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
   }
 });
 
-// GET /api/taxonomies/terms/:termId - Get term details
-router.get('/terms/:termId', requireAuth, async (req, res) => {
-  try {
-    const { termId } = req.params;
-
-    const [term] = await db
-      .select()
-      .from(taxonomyTerms)
-      .where(eq(taxonomyTerms.id, termId))
-      .limit(1);
-
-    if (!term) {
-      res.status(404).json({ success: false, error: 'Term not found' });
-      return;
-    }
-
-    res.json({ success: true, data: term });
-  } catch (error) {
-    console.error('Error fetching term:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch term' });
-  }
-});
-
-// PATCH /api/taxonomies/terms/:termId - Update term
-router.patch('/terms/:termId', requireAdmin, async (req, res) => {
-  try {
-    const { termId } = req.params;
-    const { name, description, parentId, color, icon, metadata, sortOrder, status } = req.body;
-
-    const updateData: Partial<TaxonomyTerm> = { updatedAt: new Date() };
-
-    if (name !== undefined) {
-      updateData.name = name;
-      updateData.slug = generateSlug(name);
-    }
-    if (description !== undefined) updateData.description = description;
-    if (parentId !== undefined) updateData.parentId = parentId;
-    if (color !== undefined) updateData.color = color;
-    if (icon !== undefined) updateData.icon = icon;
-    if (metadata !== undefined) updateData.metadata = metadata;
-    if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
-    if (status !== undefined) updateData.status = status;
-
-    const [updated] = await db
-      .update(taxonomyTerms)
-      .set(updateData)
-      .where(eq(taxonomyTerms.id, termId))
-      .returning();
-
-    if (!updated) {
-      res.status(404).json({ success: false, error: 'Term not found' });
-      return;
-    }
-
-    res.json({ success: true, data: updated });
-  } catch (error) {
-    console.error('Error updating term:', error);
-    res.status(500).json({ success: false, error: 'Failed to update term' });
-  }
-});
-
-// DELETE /api/taxonomies/terms/:termId - Delete term
-router.delete('/terms/:termId', requireAdmin, async (req, res) => {
-  try {
-    const { termId } = req.params;
-
-    const [deleted] = await db
-      .delete(taxonomyTerms)
-      .where(eq(taxonomyTerms.id, termId))
-      .returning({ id: taxonomyTerms.id });
-
-    if (!deleted) {
-      res.status(404).json({ success: false, error: 'Term not found' });
-      return;
-    }
-
-    res.json({ success: true, data: { id: deleted.id } });
-  } catch (error) {
-    console.error('Error deleting term:', error);
-    res.status(500).json({ success: false, error: 'Failed to delete term' });
-  }
-});
-
 // ============================================================================
 // ITEM TAXONOMY ASSIGNMENTS (Auth required, Admin for write)
 // ============================================================================
+
+// NOTE: Static routes (/items/by-term/:termId) MUST be defined BEFORE parameterized routes (/items/:itemType/:itemId)
+// to avoid being incorrectly matched
+
+// GET /api/taxonomies/items/by-term/:termId - Get all items with a specific term
+router.get('/items/by-term/:termId', requireAuth, async (req, res) => {
+  try {
+    const { termId } = req.params;
+    const { itemType } = req.query;
+
+    let query = db
+      .select()
+      .from(itemTaxonomies)
+      .where(eq(itemTaxonomies.termId, termId));
+
+    if (itemType) {
+      query = db
+        .select()
+        .from(itemTaxonomies)
+        .where(and(eq(itemTaxonomies.termId, termId), eq(itemTaxonomies.itemType, itemType as string)));
+    }
+
+    const items = await query;
+
+    res.json({ success: true, data: items });
+  } catch (error) {
+    console.error('Error fetching items by term:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch items' });
+  }
+});
 
 // GET /api/taxonomies/items/:itemType/:itemId - Get terms assigned to an item
 router.get('/items/:itemType/:itemId', requireAuth, async (req, res) => {
@@ -455,7 +527,7 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
       return;
     }
 
-    // If not allowMultiple, remove existing assignments for this taxonomy
+    // If not allowMultiple, remove existing assignments for this taxonomy using a single query
     if (!taxonomy.allowMultiple) {
       // Get all term IDs from this taxonomy
       const taxonomyTermIds = await db
@@ -463,15 +535,15 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
         .from(taxonomyTerms)
         .where(eq(taxonomyTerms.taxonomyId, taxonomy.id));
 
-      const termIds = taxonomyTermIds.map((t) => t.id);
+      const termIdsToRemove = taxonomyTermIds.map((t) => t.id);
 
-      // Remove existing assignments
-      for (const tid of termIds) {
+      // Remove existing assignments in a single query using inArray
+      if (termIdsToRemove.length > 0) {
         await db
           .delete(itemTaxonomies)
           .where(
             and(
-              eq(itemTaxonomies.termId, tid),
+              inArray(itemTaxonomies.termId, termIdsToRemove),
               eq(itemTaxonomies.itemType, itemType),
               eq(itemTaxonomies.itemId, itemId)
             )
@@ -553,6 +625,22 @@ router.put('/items/:itemType/:itemId', requireAdmin, async (req, res) => {
       return;
     }
 
+    // Validate that all termIds exist before making changes
+    if (termIds.length > 0) {
+      const existingTerms = await db
+        .select({ id: taxonomyTerms.id })
+        .from(taxonomyTerms)
+        .where(inArray(taxonomyTerms.id, termIds));
+
+      const existingIds = new Set(existingTerms.map((t) => t.id));
+      const invalidIds = termIds.filter((id) => !existingIds.has(id));
+
+      if (invalidIds.length > 0) {
+        res.status(400).json({ success: false, error: `Invalid term IDs: ${invalidIds.join(', ')}` });
+        return;
+      }
+    }
+
     // Remove all existing assignments for this item
     await db
       .delete(itemTaxonomies)
@@ -577,33 +665,6 @@ router.put('/items/:itemType/:itemId', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error bulk updating item terms:', error);
     res.status(500).json({ success: false, error: 'Failed to update item terms' });
-  }
-});
-
-// GET /api/taxonomies/items/by-term/:termId - Get all items with a specific term
-router.get('/items/by-term/:termId', requireAuth, async (req, res) => {
-  try {
-    const { termId } = req.params;
-    const { itemType } = req.query;
-
-    let query = db
-      .select()
-      .from(itemTaxonomies)
-      .where(eq(itemTaxonomies.termId, termId));
-
-    if (itemType) {
-      query = db
-        .select()
-        .from(itemTaxonomies)
-        .where(and(eq(itemTaxonomies.termId, termId), eq(itemTaxonomies.itemType, itemType as string)));
-    }
-
-    const items = await query;
-
-    res.json({ success: true, data: items });
-  } catch (error) {
-    console.error('Error fetching items by term:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch items' });
   }
 });
 
