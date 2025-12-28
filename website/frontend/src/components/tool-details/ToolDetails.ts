@@ -651,11 +651,11 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
     `;
 
     if (allowedDomains.length > 0) {
-      html += `<div class="tool-meta">Allowed domains: ${allowedDomains.join(', ')}</div>`;
+      html += `<div class="tool-meta">Allowed domains: ${allowedDomains.map((d: string) => this.escapeHtml(d)).join(', ')}</div>`;
     }
 
     if (blockedDomains.length > 0) {
-      html += `<div class="tool-meta">Blocked domains: ${blockedDomains.join(', ')}</div>`;
+      html += `<div class="tool-meta">Blocked domains: ${blockedDomains.map((d: string) => this.escapeHtml(d)).join(', ')}</div>`;
     }
 
     if (resultContent) {
