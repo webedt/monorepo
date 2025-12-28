@@ -651,6 +651,50 @@ export interface BoneAnimation {
 }
 
 /**
+ * A single frame in a frame-based animation
+ */
+export interface AnimationFrame {
+  /** Frame duration in seconds (or use animation's default if not specified) */
+  duration?: number;
+  /** Image source - can be a URL, data URL, or canvas reference ID */
+  source: string;
+  /** Optional offset for the frame */
+  offset?: Vector2;
+  /** Optional pivot point for rotation/scaling */
+  pivot?: Vector2;
+}
+
+/**
+ * Complete frame-based animation data (sprite sheet / flipbook style)
+ */
+export interface FrameAnimation {
+  name: string;
+  type: 'frame';
+  fps: number;
+  frames: AnimationFrame[];
+  loop: boolean;
+  /** Optional ping-pong mode: play forward then backward */
+  pingPong?: boolean;
+}
+
+/**
+ * Union type for all animation types
+ */
+export type Animation = BoneAnimation | FrameAnimation;
+
+/**
+ * Animation clip reference for use in Animator
+ */
+export interface AnimationClip {
+  name: string;
+  animation: Animation;
+  /** Speed multiplier for this clip */
+  speed?: number;
+  /** Override loop setting for this clip */
+  loop?: boolean;
+}
+
+/**
  * Skeleton instance with current pose
  */
 export interface Skeleton {
