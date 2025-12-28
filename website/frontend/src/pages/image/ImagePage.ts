@@ -1,14 +1,15 @@
 /**
  * Image Editor Page
- * Canvas-based image editor with offline support
+ * Canvas-based image editor with offline support and multi-layer editing
  * AI features require connectivity
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, LayersPanel } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { imageLayersStore } from '../../stores/imageLayersStore';
 import type { Session } from '../../types';
 import './image.css';
 
@@ -32,8 +33,7 @@ export class ImagePage extends Page<ImagePageOptions> {
   private isOfflineMode = false;
 
   // Canvas state
-  private mainCanvas: HTMLCanvasElement | null = null;
-  private ctx: CanvasRenderingContext2D | null = null;
+  private displayCanvas: HTMLCanvasElement | null = null; // The visible canvas that shows composited layers
   private currentTool: Tool = 'pencil';
   private primaryColor = '#000000';
   private secondaryColor = '#ffffff';
@@ -42,8 +42,8 @@ export class ImagePage extends Page<ImagePageOptions> {
   private lastX = 0;
   private lastY = 0;
 
-  // History for undo/redo
-  private history: ImageData[] = [];
+  // Layer history for undo/redo (stores layer state snapshots)
+  private history: Array<{ layerId: string; data: ImageData }[]> = [];
   private historyIndex = -1;
   private maxHistory = 50;
 
@@ -53,6 +53,10 @@ export class ImagePage extends Page<ImagePageOptions> {
 
   // Event handlers for cleanup
   private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
+  // Layers panel component
+  private layersPanel: LayersPanel | null = null;
+  private unsubscribeLayers: (() => void) | null = null;
 
   protected render(): string {
     return `
@@ -178,19 +182,8 @@ export class ImagePage extends Page<ImagePageOptions> {
             </div>
           </main>
 
-          <!-- Layers Panel -->
-          <aside class="layers-panel">
-            <div class="layers-header">
-              <span class="layers-title">Layers</span>
-              <button class="add-layer-btn" title="Add Layer">+</button>
-            </div>
-            <div class="layers-list">
-              <div class="layer-item active" data-layer="0">
-                <span class="layer-visibility">👁</span>
-                <span class="layer-name">Background</span>
-              </div>
-            </div>
-          </aside>
+          <!-- Layers Panel Container - populated by LayersPanel component -->
+          <div class="layers-panel-container"></div>
         </div>
 
         <!-- Status Bar -->
@@ -272,6 +265,9 @@ export class ImagePage extends Page<ImagePageOptions> {
     // Setup canvas
     this.setupCanvas();
 
+    // Setup layers panel
+    this.setupLayersPanel();
+
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
 
@@ -348,31 +344,35 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private setupCanvas(): void {
-    this.mainCanvas = this.$('.main-canvas') as HTMLCanvasElement;
-    if (this.mainCanvas) {
-      this.ctx = this.mainCanvas.getContext('2d');
-      if (this.ctx) {
-        // Set white background
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.fillRect(0, 0, this.mainCanvas.width, this.mainCanvas.height);
-        this.saveToHistory();
-      }
+    this.displayCanvas = this.$('.main-canvas') as HTMLCanvasElement;
+    if (this.displayCanvas) {
+      // Initialize the layers store with default canvas size
+      imageLayersStore.initialize(this.displayCanvas.width, this.displayCanvas.height);
+
+      // Subscribe to layer changes to update display
+      this.unsubscribeLayers = imageLayersStore.subscribe(() => {
+        this.compositeAndRender();
+      });
+
+      // Initial render
+      this.compositeAndRender();
+      this.saveToHistory();
 
       // Mouse events
-      this.mainCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-      this.mainCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-      this.mainCanvas.addEventListener('mouseup', () => this.handleMouseUp());
-      this.mainCanvas.addEventListener('mouseleave', () => this.handleMouseUp());
+      this.displayCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+      this.displayCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+      this.displayCanvas.addEventListener('mouseup', () => this.handleMouseUp());
+      this.displayCanvas.addEventListener('mouseleave', () => this.handleMouseUp());
 
       // Touch events for mobile support
-      this.mainCanvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
-      this.mainCanvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
-      this.mainCanvas.addEventListener('touchend', () => this.handleMouseUp());
-      this.mainCanvas.addEventListener('touchcancel', () => this.handleMouseUp());
+      this.displayCanvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+      this.displayCanvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+      this.displayCanvas.addEventListener('touchend', () => this.handleMouseUp());
+      this.displayCanvas.addEventListener('touchcancel', () => this.handleMouseUp());
 
       // Update cursor position in status bar
-      this.mainCanvas.addEventListener('mousemove', (e) => {
-        const rect = this.mainCanvas!.getBoundingClientRect();
+      this.displayCanvas.addEventListener('mousemove', (e) => {
+        const rect = this.displayCanvas!.getBoundingClientRect();
         const x = Math.round(e.clientX - rect.left);
         const y = Math.round(e.clientY - rect.top);
         const cursorStatus = this.$('.status-cursor') as HTMLElement;
@@ -392,6 +392,32 @@ export class ImagePage extends Page<ImagePageOptions> {
     const openImageBtn = this.$('.btn-open-image') as HTMLButtonElement;
     if (openImageBtn) {
       openImageBtn.addEventListener('click', () => this.openImage());
+    }
+  }
+
+  private setupLayersPanel(): void {
+    const container = this.$('.layers-panel-container') as HTMLElement;
+    if (container) {
+      this.layersPanel = new LayersPanel({
+        onLayerChange: () => {
+          this.compositeAndRender();
+          this.updateLayerCount();
+        },
+      });
+      this.layersPanel.mount(container);
+    }
+  }
+
+  private compositeAndRender(): void {
+    if (!this.displayCanvas) return;
+    imageLayersStore.compositeToCanvas(this.displayCanvas);
+  }
+
+  private updateLayerCount(): void {
+    const statusMode = this.$('.status-mode') as HTMLElement;
+    if (statusMode) {
+      const activeLayer = imageLayersStore.getActiveLayer();
+      statusMode.textContent = activeLayer ? `Layer: ${activeLayer.name}` : 'No Layer';
     }
   }
 
@@ -444,61 +470,77 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private handleMouseDown(e: MouseEvent): void {
-    if (!this.mainCanvas || !this.ctx) return;
+    if (!this.displayCanvas) return;
+    const ctx = imageLayersStore.getActiveContext();
+    if (!ctx) return;
 
-    const rect = this.mainCanvas.getBoundingClientRect();
+    const activeLayer = imageLayersStore.getActiveLayer();
+    if (activeLayer?.locked) {
+      toast.warning('Layer is locked');
+      return;
+    }
+
+    const rect = this.displayCanvas.getBoundingClientRect();
     this.lastX = e.clientX - rect.left;
     this.lastY = e.clientY - rect.top;
     this.isDrawing = true;
 
     // Start drawing immediately for pencil/brush
     if (this.currentTool === 'pencil' || this.currentTool === 'brush') {
-      this.ctx.beginPath();
-      this.ctx.moveTo(this.lastX, this.lastY);
+      ctx.beginPath();
+      ctx.moveTo(this.lastX, this.lastY);
     }
   }
 
   private handleMouseMove(e: MouseEvent): void {
-    if (!this.isDrawing || !this.mainCanvas || !this.ctx) return;
+    if (!this.isDrawing || !this.displayCanvas) return;
+    const ctx = imageLayersStore.getActiveContext();
+    if (!ctx) return;
 
-    const rect = this.mainCanvas.getBoundingClientRect();
+    const rect = this.displayCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
     switch (this.currentTool) {
       case 'pencil':
-        this.ctx.strokeStyle = this.primaryColor;
-        this.ctx.lineWidth = 1;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, y);
+        ctx.strokeStyle = this.primaryColor;
+        ctx.lineWidth = 1;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
         break;
 
       case 'brush':
-        this.ctx.strokeStyle = this.primaryColor;
-        this.ctx.lineWidth = this.brushSize;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, y);
+        ctx.strokeStyle = this.primaryColor;
+        ctx.lineWidth = this.brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
         break;
 
       case 'eraser':
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = this.brushSize;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, y);
+        // Eraser clears pixels (transparent) instead of drawing white
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.lineWidth = this.brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.globalCompositeOperation = 'source-over';
         break;
     }
+
+    // Update the display after drawing
+    this.compositeAndRender();
 
     this.lastX = x;
     this.lastY = y;
@@ -513,79 +555,101 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private handleTouchStart(e: TouchEvent): void {
-    if (!this.mainCanvas || !this.ctx) return;
+    if (!this.displayCanvas) return;
+    const ctx = imageLayersStore.getActiveContext();
+    if (!ctx) return;
+
+    const activeLayer = imageLayersStore.getActiveLayer();
+    if (activeLayer?.locked) {
+      toast.warning('Layer is locked');
+      return;
+    }
+
     e.preventDefault();
 
     const touch = e.touches[0];
-    const rect = this.mainCanvas.getBoundingClientRect();
+    const rect = this.displayCanvas.getBoundingClientRect();
     this.lastX = touch.clientX - rect.left;
     this.lastY = touch.clientY - rect.top;
     this.isDrawing = true;
 
     // Start drawing immediately for pencil/brush
     if (this.currentTool === 'pencil' || this.currentTool === 'brush') {
-      this.ctx.beginPath();
-      this.ctx.moveTo(this.lastX, this.lastY);
+      ctx.beginPath();
+      ctx.moveTo(this.lastX, this.lastY);
     }
   }
 
   private handleTouchMove(e: TouchEvent): void {
-    if (!this.isDrawing || !this.mainCanvas || !this.ctx) return;
+    if (!this.isDrawing || !this.displayCanvas) return;
+    const ctx = imageLayersStore.getActiveContext();
+    if (!ctx) return;
+
     e.preventDefault();
 
     const touch = e.touches[0];
-    const rect = this.mainCanvas.getBoundingClientRect();
+    const rect = this.displayCanvas.getBoundingClientRect();
     const x = touch.clientX - rect.left;
     const y = touch.clientY - rect.top;
 
     switch (this.currentTool) {
       case 'pencil':
-        this.ctx.strokeStyle = this.primaryColor;
-        this.ctx.lineWidth = 1;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, y);
+        ctx.strokeStyle = this.primaryColor;
+        ctx.lineWidth = 1;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
         break;
 
       case 'brush':
-        this.ctx.strokeStyle = this.primaryColor;
-        this.ctx.lineWidth = this.brushSize;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, y);
+        ctx.strokeStyle = this.primaryColor;
+        ctx.lineWidth = this.brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
         break;
 
       case 'eraser':
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = this.brushSize;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, y);
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.lineWidth = this.brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.globalCompositeOperation = 'source-over';
         break;
     }
+
+    // Update the display after drawing
+    this.compositeAndRender();
 
     this.lastX = x;
     this.lastY = y;
   }
 
   private saveToHistory(): void {
-    if (!this.mainCanvas || !this.ctx) return;
+    const state = imageLayersStore.getState();
+    if (state.layers.length === 0) return;
 
     // Remove any redo history
     this.history = this.history.slice(0, this.historyIndex + 1);
 
-    // Save current state
-    const imageData = this.ctx.getImageData(0, 0, this.mainCanvas.width, this.mainCanvas.height);
-    this.history.push(imageData);
+    // Save current state of all layers
+    const snapshot = state.layers.map((layer) => {
+      const ctx = layer.canvas.getContext('2d');
+      const data = ctx?.getImageData(0, 0, layer.canvas.width, layer.canvas.height);
+      return { layerId: layer.id, data: data! };
+    });
+    this.history.push(snapshot);
 
     // Limit history size
     if (this.history.length > this.maxHistory) {
@@ -596,27 +660,54 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private undo(): void {
-    if (this.historyIndex > 0 && this.ctx && this.mainCanvas) {
+    if (this.historyIndex > 0) {
       this.historyIndex--;
-      this.ctx.putImageData(this.history[this.historyIndex], 0, 0);
+      this.restoreFromHistory(this.history[this.historyIndex]);
       this.hasUnsavedChanges = true;
     }
   }
 
   private redo(): void {
-    if (this.historyIndex < this.history.length - 1 && this.ctx && this.mainCanvas) {
+    if (this.historyIndex < this.history.length - 1) {
       this.historyIndex++;
-      this.ctx.putImageData(this.history[this.historyIndex], 0, 0);
+      this.restoreFromHistory(this.history[this.historyIndex]);
       this.hasUnsavedChanges = true;
     }
   }
 
-  private clearCanvas(): void {
-    if (!this.ctx || !this.mainCanvas) return;
-    if (!confirm('Clear the entire canvas?')) return;
+  private restoreFromHistory(snapshot: Array<{ layerId: string; data: ImageData }>): void {
+    const state = imageLayersStore.getState();
 
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillRect(0, 0, this.mainCanvas.width, this.mainCanvas.height);
+    for (const item of snapshot) {
+      const layer = state.layers.find((l) => l.id === item.layerId);
+      if (layer && item.data) {
+        const ctx = layer.canvas.getContext('2d');
+        if (ctx) {
+          ctx.putImageData(item.data, 0, 0);
+        }
+      }
+    }
+
+    this.compositeAndRender();
+  }
+
+  private clearCanvas(): void {
+    const activeLayer = imageLayersStore.getActiveLayer();
+    if (!activeLayer) return;
+
+    if (activeLayer.locked) {
+      toast.warning('Layer is locked');
+      return;
+    }
+
+    if (!confirm('Clear the current layer?')) return;
+
+    const ctx = activeLayer.canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, activeLayer.canvas.width, activeLayer.canvas.height);
+    }
+
+    this.compositeAndRender();
     this.hasUnsavedChanges = true;
     this.saveToHistory();
   }
@@ -625,11 +716,17 @@ export class ImagePage extends Page<ImagePageOptions> {
     const width = prompt('Enter width:', '800');
     const height = prompt('Enter height:', '600');
 
-    if (width && height && this.mainCanvas && this.ctx) {
-      this.mainCanvas.width = parseInt(width);
-      this.mainCanvas.height = parseInt(height);
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.fillRect(0, 0, this.mainCanvas.width, this.mainCanvas.height);
+    if (width && height && this.displayCanvas) {
+      const w = parseInt(width);
+      const h = parseInt(height);
+
+      this.displayCanvas.width = w;
+      this.displayCanvas.height = h;
+
+      // Clear and re-initialize layers
+      imageLayersStore.clear();
+      imageLayersStore.initialize(w, h);
+
       this.history = [];
       this.historyIndex = -1;
       this.saveToHistory();
@@ -642,6 +739,7 @@ export class ImagePage extends Page<ImagePageOptions> {
       }
 
       this.showCanvas();
+      this.updateLayerCount();
     }
   }
 
@@ -651,14 +749,22 @@ export class ImagePage extends Page<ImagePageOptions> {
     input.accept = 'image/*';
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
-      if (file && this.mainCanvas && this.ctx) {
+      if (file && this.displayCanvas) {
         const img = new Image();
         img.onload = () => {
-          this.mainCanvas!.width = img.width;
-          this.mainCanvas!.height = img.height;
-          this.ctx!.drawImage(img, 0, 0);
+          this.displayCanvas!.width = img.width;
+          this.displayCanvas!.height = img.height;
+
+          // Clear and re-initialize layers with image dimensions
+          imageLayersStore.clear();
+          imageLayersStore.initialize(img.width, img.height);
+
+          // Load image into the background layer
+          imageLayersStore.loadImageToActiveLayer(img);
+
           this.history = [];
           this.historyIndex = -1;
+          this.compositeAndRender();
           this.saveToHistory();
           this.hasUnsavedChanges = false;
 
@@ -669,6 +775,7 @@ export class ImagePage extends Page<ImagePageOptions> {
           }
 
           this.showCanvas();
+          this.updateLayerCount();
         };
         img.src = URL.createObjectURL(file);
       }
@@ -784,15 +891,13 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private async saveImage(): Promise<void> {
-    if (!this.mainCanvas || this.isSaving) return;
+    if (!this.displayCanvas || this.isSaving) return;
 
     this.isSaving = true;
 
     try {
-      // Convert canvas to blob
-      const blob = await new Promise<Blob | null>((resolve) => {
-        this.mainCanvas!.toBlob(resolve, 'image/png');
-      });
+      // Get composite image from all layers
+      const blob = await imageLayersStore.getCompositeBlob('image/png');
 
       if (!blob) {
         throw new Error('Failed to create image');
@@ -874,9 +979,22 @@ export class ImagePage extends Page<ImagePageOptions> {
       this.unsubscribeOffline = null;
     }
 
+    if (this.unsubscribeLayers) {
+      this.unsubscribeLayers();
+      this.unsubscribeLayers = null;
+    }
+
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
     }
+
+    if (this.layersPanel) {
+      this.layersPanel.unmount();
+      this.layersPanel = null;
+    }
+
+    // Clear layers store
+    imageLayersStore.clear();
   }
 }

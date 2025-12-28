@@ -149,3 +149,7 @@ export type { CollectionsPanelOptions } from './collections-panel';
 // CommitDialog
 export { CommitDialog } from './commit-dialog';
 export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
+
+// LayersPanel
+export { LayersPanel, LayerItem } from './layers-panel';
+export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
