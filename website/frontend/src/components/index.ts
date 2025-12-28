@@ -69,6 +69,10 @@ export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-detail
 export { GameCard } from './game-card';
 export type { GameCardOptions } from './game-card';
 
+// TrailerPreview
+export { TrailerPreview } from './trailer-preview';
+export type { TrailerPreviewOptions } from './trailer-preview';
+
 // StoreHighlights
 export { StoreHighlights } from './store-highlights';
 export type { StoreHighlightsOptions } from './store-highlights';

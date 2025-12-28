@@ -1,0 +1,108 @@
+.trailer-preview {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--color-surface-dark);
+  opacity: 0;
+  transition: opacity var(--transition-base, 200ms) ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.trailer-preview--active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.trailer-preview__video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--transition-base, 200ms) ease;
+}
+
+.trailer-preview--playing .trailer-preview__video {
+  opacity: 1;
+}
+
+/* Play button overlay */
+.trailer-preview__play-button {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  color: white;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast, 150ms) ease;
+}
+
+.trailer-preview--active:not(.trailer-preview--playing):not(.trailer-preview--loading) .trailer-preview__play-button {
+  opacity: 1;
+}
+
+.trailer-preview__play-button:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.trailer-preview__play-button svg {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* Loading spinner */
+.trailer-preview__loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity var(--transition-fast, 150ms) ease;
+  pointer-events: none;
+}
+
+.trailer-preview--loading .trailer-preview__loading {
+  opacity: 1;
+}
+
+.trailer-preview__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: trailer-spinner 0.8s linear infinite;
+}
+
+@keyframes trailer-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error state */
+.trailer-preview--error {
+  display: none;
+}
+
+/* Mute indicator - shown when video is playing */
+.trailer-preview__mute-indicator {
+  position: absolute;
+  bottom: var(--spacing-xs, 4px);
+  right: var(--spacing-xs, 4px);
+  padding: var(--spacing-2xs, 2px) var(--spacing-xs, 4px);
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-sm, 4px);
+  color: white;
+  font-size: var(--font-size-xs, 12px);
+  opacity: 0;
+  transition: opacity var(--transition-fast, 150ms) ease;
+}
+
+.trailer-preview--playing .trailer-preview__mute-indicator {
+  opacity: 1;
+}

@@ -1,4 +1,6 @@
-import { Component, ComponentOptions } from '../base';
+import { Component } from '../base';
+import type { ComponentOptions } from '../base';
+import { TrailerPreview } from '../trailer-preview';
 import type { Game } from '../../types';
 import './game-card.css';
 
@@ -8,11 +10,15 @@ export interface GameCardOptions extends ComponentOptions {
   showPrice?: boolean;
   showRating?: boolean;
   compact?: boolean;
+  enableTrailerPreview?: boolean;
+  trailerHoverDelay?: number;
 }
 
 export class GameCard extends Component<HTMLDivElement> {
   private game: Game;
   private options: GameCardOptions;
+  private trailerPreview: TrailerPreview | null = null;
+  private coverWrapper: HTMLDivElement | null = null;
 
   constructor(options: GameCardOptions) {
     super('div', {
@@ -21,13 +27,18 @@ export class GameCard extends Component<HTMLDivElement> {
     });
 
     this.game = options.game;
-    this.options = options;
+    this.options = {
+      enableTrailerPreview: true,
+      trailerHoverDelay: 500,
+      ...options,
+    };
 
     if (options.compact) {
       this.addClass('game-card--compact');
     }
 
     this.buildContent();
+    this.setupTrailerPreview();
 
     if (options.onClick) {
       this.addClass('game-card--interactive');
@@ -49,6 +60,7 @@ export class GameCard extends Component<HTMLDivElement> {
     // Cover image
     const coverWrapper = document.createElement('div');
     coverWrapper.className = 'game-card__cover';
+    this.coverWrapper = coverWrapper;
 
     if (game.coverImage) {
       const img = document.createElement('img');
@@ -69,6 +81,19 @@ export class GameCard extends Component<HTMLDivElement> {
       badge.className = 'game-card__badge game-card__badge--featured';
       badge.textContent = 'Featured';
       coverWrapper.appendChild(badge);
+    }
+
+    // Trailer indicator badge
+    if (game.trailerUrl && options.enableTrailerPreview !== false) {
+      const trailerBadge = document.createElement('span');
+      trailerBadge.className = 'game-card__badge game-card__badge--trailer';
+      trailerBadge.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+        Trailer
+      `;
+      coverWrapper.appendChild(trailerBadge);
     }
 
     this.element.appendChild(coverWrapper);
@@ -139,6 +164,69 @@ export class GameCard extends Component<HTMLDivElement> {
       style: 'currency',
       currency: currency || 'USD',
     }).format(amount);
+  }
+
+  private setupTrailerPreview(): void {
+    const { game, options } = this;
+
+    if (!game.trailerUrl || !this.coverWrapper || options.enableTrailerPreview === false) {
+      return;
+    }
+
+    // Don't enable trailer preview in compact mode
+    if (options.compact) {
+      return;
+    }
+
+    this.addClass('game-card--has-trailer');
+
+    // Create trailer preview component
+    this.trailerPreview = new TrailerPreview({
+      src: game.trailerUrl,
+      hoverDelay: options.trailerHoverDelay,
+      muted: true,
+      loop: true,
+    });
+
+    // Add to cover wrapper
+    this.coverWrapper.appendChild(this.trailerPreview.getElement());
+
+    // Setup hover events on the card
+    this.on('mouseenter', () => {
+      if (this.trailerPreview) {
+        this.trailerPreview.addClass('trailer-preview--active');
+        this.trailerPreview.startHoverPreview();
+      }
+    });
+
+    this.on('mouseleave', () => {
+      if (this.trailerPreview) {
+        this.trailerPreview.stopHoverPreview();
+        this.trailerPreview.removeClass('trailer-preview--active');
+      }
+    });
+
+    // Also handle focus for keyboard accessibility
+    this.on('focus', () => {
+      if (this.trailerPreview) {
+        this.trailerPreview.addClass('trailer-preview--active');
+        this.trailerPreview.startHoverPreview();
+      }
+    });
+
+    this.on('blur', () => {
+      if (this.trailerPreview) {
+        this.trailerPreview.stopHoverPreview();
+        this.trailerPreview.removeClass('trailer-preview--active');
+      }
+    });
+  }
+
+  protected override onUnmount(): void {
+    if (this.trailerPreview) {
+      this.trailerPreview.unmount();
+      this.trailerPreview = null;
+    }
   }
 
   getGame(): Game {
