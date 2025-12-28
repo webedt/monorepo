@@ -13,6 +13,7 @@ export { CodePage } from './code/CodePage';
 export { ImagePage } from './image/ImagePage';
 export { ScenePage } from './scene/ScenePage';
 export { SoundPage } from './sound/SoundPage';
+export { BoneAnimationPage } from './bone/BoneAnimationPage';
 export { TrashPage } from './trash/TrashPage';
 export { QuickAccessPage } from './quick-access/QuickAccessPage';
 export { WidgetsPage } from './widgets';

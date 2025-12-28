@@ -10,3 +10,4 @@ export * from './monitoring/index.js';
 export * from './helpers/index.js';
 export * from './formatters/index.js';
 export * from './http/index.js';
+export * from './math/index.js';

@@ -181,3 +181,7 @@ export type { AIInputBoxOptions } from './ai-input-box';
 // TransformEditor
 export { TransformEditor } from './transform-editor';
 export type { TransformEditorOptions, Transform } from './transform-editor';
+
+// LayersPanel
+export { LayersPanel, LayerItem } from './layers-panel';
+export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
