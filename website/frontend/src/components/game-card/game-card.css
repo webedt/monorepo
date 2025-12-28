@@ -87,6 +87,27 @@
   color: var(--color-warning-contrast, #000);
 }
 
+.game-card__badge--trailer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  top: auto;
+  bottom: var(--spacing-xs);
+  left: var(--spacing-xs);
+  transition: opacity var(--transition-fast, 150ms) ease;
+}
+
+.game-card__badge--trailer svg {
+  flex-shrink: 0;
+}
+
+/* Hide trailer badge when trailer is playing */
+.game-card--has-trailer:hover .game-card__badge--trailer {
+  opacity: 0;
+}
+
 /* Info */
 .game-card__info {
   padding: var(--spacing-sm) var(--spacing-md);

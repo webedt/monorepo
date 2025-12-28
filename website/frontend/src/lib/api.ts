@@ -767,6 +767,8 @@ import type {
   WishlistItem,
   CommunityPost,
   CommunityComment,
+  CommunityChannel,
+  ChannelMessage,
 } from '../types';
 
 export const storeApi = {
@@ -1087,4 +1089,84 @@ export const searchApi = {
     const queryString = params.toString();
     return fetchApi<{ suggestions: string[] }>(`/api/search/suggestions${queryString ? `?${queryString}` : ''}`);
   },
+};
+
+// ============================================================================
+// Channels API (Community Activity)
+// ============================================================================
+export const channelsApi = {
+  getChannels: () =>
+    fetchApi<{ channels: CommunityChannel[] }>('/api/channels'),
+
+  getChannel: (id: string) =>
+    fetchApi<CommunityChannel>(`/api/channels/${id}`),
+
+  getChannelBySlug: (slug: string) =>
+    fetchApi<CommunityChannel>(`/api/channels/by-slug/${slug}`),
+
+  getMessages: (channelId: string, options?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<{
+      messages: ChannelMessage[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>(`/api/channels/${channelId}/messages${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getRecentActivity: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ messages: ChannelMessage[] }>(
+      `/api/channels/activity/recent${queryString ? `?${queryString}` : ''}`
+    );
+  },
+
+  postMessage: (channelId: string, data: { content: string; replyToId?: string; images?: string[] }) =>
+    fetchApi<{ message: ChannelMessage }>(`/api/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: data,
+    }),
+
+  editMessage: (messageId: string, content: string) =>
+    fetchApi<{ message: ChannelMessage }>(`/api/channels/messages/${messageId}`, {
+      method: 'PATCH',
+      body: { content },
+    }),
+
+  deleteMessage: (messageId: string) =>
+    fetchApi(`/api/channels/messages/${messageId}`, { method: 'DELETE' }),
+
+  // Admin operations
+  createChannel: (data: {
+    name: string;
+    slug: string;
+    description?: string;
+    gameId?: string;
+    isDefault?: boolean;
+    isReadOnly?: boolean;
+    sortOrder?: number;
+  }) =>
+    fetchApi<{ channel: CommunityChannel }>('/api/channels', {
+      method: 'POST',
+      body: data,
+    }),
+
+  updateChannel: (id: string, data: {
+    name?: string;
+    description?: string;
+    isDefault?: boolean;
+    isReadOnly?: boolean;
+    sortOrder?: number;
+    status?: 'active' | 'archived';
+  }) =>
+    fetchApi<{ channel: CommunityChannel }>(`/api/channels/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }),
 };
