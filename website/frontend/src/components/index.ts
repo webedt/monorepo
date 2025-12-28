@@ -145,3 +145,7 @@ export type { NewSessionModalOptions } from './new-session-modal';
 // CollectionsPanel
 export { CollectionsPanel } from './collections-panel';
 export type { CollectionsPanelOptions } from './collections-panel';
+
+// DiffViewer
+export { DiffViewer } from './diff-viewer';
+export type { DiffViewerOptions } from './diff-viewer';
