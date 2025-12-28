@@ -177,3 +177,7 @@ export type { AutocompleteDropdownOptions, AutocompleteSuggestion } from './auto
 // AIInputBox
 export { AIInputBox } from './ai-input-box';
 export type { AIInputBoxOptions } from './ai-input-box';
+
+// LayersPanel
+export { LayersPanel, LayerItem } from './layers-panel';
+export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
