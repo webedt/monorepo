@@ -44,11 +44,20 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
     settings: { metric: 'tasks' },
   },
   {
+    id: 'session-activity',
+    type: 'session-activity',
+    title: 'Session Activity',
+    size: 'md',
+    order: 3,
+    visible: true,
+    settings: { maxItems: 6 },
+  },
+  {
     id: 'activity',
     type: 'activity',
     title: 'Recent Activity',
     size: 'lg',
-    order: 3,
+    order: 4,
     visible: true,
   },
   {
@@ -56,7 +65,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
     type: 'quick-actions',
     title: 'Quick Actions',
     size: 'md',
-    order: 4,
+    order: 5,
     visible: true,
   },
   {
@@ -64,7 +73,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
     type: 'favorites',
     title: 'Favorites',
     size: 'md',
-    order: 5,
+    order: 6,
     visible: true,
     settings: { maxItems: 6 },
   },
@@ -73,7 +82,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
     type: 'chart',
     title: 'Usage Overview',
     size: 'lg',
-    order: 6,
+    order: 7,
     visible: true,
     settings: { chartType: 'bar' },
   },
@@ -283,6 +292,7 @@ class WidgetStore extends Store<WidgetState> {
   getAvailableWidgetTypes(): { type: WidgetType; label: string; description: string }[] {
     return [
       { type: 'stats', label: 'Statistics', description: 'Display a key metric with optional trend' },
+      { type: 'session-activity', label: 'Session Activity', description: 'View active and recent editor sessions' },
       { type: 'activity', label: 'Activity Feed', description: 'Show recent activity and events' },
       { type: 'quick-actions', label: 'Quick Actions', description: 'Shortcuts to common actions' },
       { type: 'favorites', label: 'Favorites', description: 'Quick access to your favorite games' },

@@ -231,13 +231,14 @@ export class WidgetCustomizer extends Component<HTMLDivElement> {
     this.buttons.push(resetBtn, doneBtn);
   }
 
-  private getIconForType(type: WidgetType): 'code' | 'folder' | 'settings' | 'info' | 'plus' | 'star' {
-    const iconMap: Record<WidgetType, 'code' | 'folder' | 'settings' | 'info' | 'plus' | 'star'> = {
+  private getIconForType(type: WidgetType): 'code' | 'folder' | 'settings' | 'info' | 'plus' | 'star' | 'terminal' {
+    const iconMap: Record<WidgetType, 'code' | 'folder' | 'settings' | 'info' | 'plus' | 'star' | 'terminal'> = {
       stats: 'info',
       activity: 'folder',
       'quick-actions': 'plus',
       favorites: 'star',
       chart: 'code',
+      'session-activity': 'terminal',
       custom: 'settings',
     };
     return iconMap[type] || 'settings';
