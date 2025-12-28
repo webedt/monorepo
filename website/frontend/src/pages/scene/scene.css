@@ -115,6 +115,31 @@
   height: 18px;
 }
 
+.toolbar-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: var(--spacing-xs);
+}
+
+.ui-group {
+  background: var(--color-bg-tertiary);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.ui-group .toolbar-btn {
+  background: var(--color-bg-secondary);
+}
+
+.ui-group .toolbar-btn:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: white;
+}
+
 .ai-group .toolbar-btn {
   background: var(--color-bg-tertiary);
   border: 1px dashed var(--color-border);
@@ -994,6 +1019,36 @@
 .sprite-dialog-add:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* UI Properties Panel */
+.ui-properties-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.ui-prop-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.ui-prop-row label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  min-width: 48px;
+}
+
+.ui-prop-row .property-input {
+  width: 60px;
+}
+
+.ui-value-display {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  min-width: 30px;
+  text-align: right;
 }
 
 /* Custom Components Library Panel */

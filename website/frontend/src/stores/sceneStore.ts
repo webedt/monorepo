@@ -8,8 +8,13 @@ import { createStore } from '../lib/store';
 import type { Transform } from '../components';
 import type { CustomComponentPropertyValues } from '../types';
 
-export type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'custom';
+export type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'custom' | 'ui-button' | 'ui-panel' | 'ui-text' | 'ui-image' | 'ui-slider' | 'ui-progress-bar' | 'ui-checkbox';
 export type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
+
+// UI Component specific types
+export type UIButtonStyle = 'primary' | 'secondary' | 'outline' | 'ghost';
+export type UIPanelStyle = 'solid' | 'bordered' | 'glass';
+export type UITextStyle = 'heading' | 'body' | 'caption' | 'label';
 
 export interface SceneObject {
   id: string;
@@ -34,6 +39,25 @@ export interface SceneObject {
   // Custom component properties
   customComponentId?: string;
   customPropertyValues?: CustomComponentPropertyValues;
+  // UI Component properties
+  uiButtonStyle?: UIButtonStyle;
+  uiPanelStyle?: UIPanelStyle;
+  uiTextStyle?: UITextStyle;
+  uiWidth?: number;
+  uiHeight?: number;
+  uiCornerRadius?: number;
+  uiBackgroundColor?: string;
+  uiBorderColor?: string;
+  uiBorderWidth?: number;
+  uiTextColor?: string;
+  uiDisabled?: boolean;
+  uiValue?: number;       // For sliders and progress bars (0-100)
+  uiMinValue?: number;
+  uiMaxValue?: number;
+  uiChecked?: boolean;    // For checkboxes
+  uiPlaceholder?: string; // For input fields
+  uiImageUrl?: string;    // For UI images
+  uiPadding?: number;
 }
 
 export interface SceneSettings {
