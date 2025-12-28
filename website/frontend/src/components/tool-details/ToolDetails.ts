@@ -60,6 +60,7 @@ const TOOL_EMOJIS: Record<string, string> = {
   Read: '📖',
   Bash: '💻',
   Edit: '📝',
+  MultiEdit: '📝',
   Write: '✏️',
   Grep: '🔍',
   Glob: '📂',
@@ -192,7 +193,7 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
       case 'Write': {
         const filePath = this.tool.input?.file_path || result?.filePath || 'unknown';
         const content = this.tool.input?.content || result?.content || '';
-        const lineCount = content ? content.split('\n').length : null;
+        const lineCount = typeof content === 'string' && content ? content.split('\n').length : null;
         const linesStr = lineCount ? `(${lineCount} lines)` : '';
         return `
           <span>${emoji} Write:</span>
@@ -256,6 +257,47 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
         `;
       }
 
+      case 'WebFetch': {
+        const url = this.tool.input?.url || '';
+        const displayUrl = url.length > 60 ? url.substring(0, 60) + '...' : url;
+        return `
+          <span>${emoji} WebFetch:</span>
+          <span class="tool-param tool-url">${this.escapeHtml(displayUrl)}</span>
+          ${durationStr ? `<span class="tool-duration">${durationStr}</span>` : ''}
+        `;
+      }
+
+      case 'WebSearch': {
+        const query = this.tool.input?.query || '';
+        const displayQuery = query.length > 60 ? query.substring(0, 60) + '...' : query;
+        return `
+          <span>${emoji} WebSearch:</span>
+          <span class="tool-param tool-query">${this.escapeHtml(displayQuery)}</span>
+          ${durationStr ? `<span class="tool-duration">${durationStr}</span>` : ''}
+        `;
+      }
+
+      case 'MultiEdit': {
+        const edits = this.tool.input?.edits || [];
+        const filePaths = [...new Set(edits.map((e: { file_path?: string }) => e.file_path).filter(Boolean))];
+        const displayPath = filePaths.length === 1 ? filePaths[0] : `${filePaths.length} files`;
+        return `
+          <span>${emoji} MultiEdit:</span>
+          <span class="tool-param tool-file-edit">${this.escapeHtml(displayPath as string)}</span>
+          <span class="tool-meta">(${edits.length} edits)</span>
+          ${durationStr ? `<span class="tool-duration">${durationStr}</span>` : ''}
+        `;
+      }
+
+      case 'AskUserQuestion': {
+        const question = this.tool.input?.question || '';
+        const displayQuestion = question.length > 50 ? question.substring(0, 50) + '...' : question;
+        return `
+          <span>${emoji} AskUserQuestion:</span>
+          <span class="tool-param tool-question">${this.escapeHtml(displayQuestion)}</span>
+        `;
+      }
+
       default:
         return `<span>${emoji} ${this.tool.name}</span>`;
     }
@@ -285,6 +327,14 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
         return this.renderTodoWriteDetails(result);
       case 'Task':
         return this.renderTaskDetails(result);
+      case 'WebFetch':
+        return this.renderWebFetchDetails(result);
+      case 'WebSearch':
+        return this.renderWebSearchDetails(result);
+      case 'MultiEdit':
+        return this.renderMultiEditDetails(result);
+      case 'AskUserQuestion':
+        return this.renderAskUserQuestionDetails(result);
       default:
         return this.renderDefaultDetails();
     }
@@ -310,6 +360,10 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
       case 'Glob': return 'Searching files...';
       case 'TodoWrite': return 'Updating todos...';
       case 'Task': return 'Agent working...';
+      case 'WebFetch': return 'Fetching URL...';
+      case 'WebSearch': return 'Searching web...';
+      case 'MultiEdit': return 'Editing files...';
+      case 'AskUserQuestion': return 'Waiting for user...';
       default: return 'Running...';
     }
   }
@@ -392,7 +446,8 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
   private renderWriteDetails(result: any): string {
     const fileContent = this.tool.input?.content || result?.content || null;
     if (fileContent) {
-      return `<pre class="tool-output">${this.escapeHtml(fileContent)}</pre>`;
+      const content = typeof fileContent === 'string' ? fileContent : JSON.stringify(fileContent, null, 2);
+      return `<pre class="tool-output">${this.escapeHtml(content)}</pre>`;
     }
     return `<div class="tool-empty">File written successfully</div>`;
   }
@@ -542,6 +597,143 @@ export class ToolDetails extends Component<HTMLDetailsElement> {
     }
 
     return html || `<div class="tool-empty">Task completed</div>`;
+  }
+
+  private renderWebFetchDetails(_result: any): string {
+    const url = this.tool.input?.url || '';
+    const prompt = this.tool.input?.prompt || '';
+    const resultContent = this.result?.content;
+
+    let html = '';
+
+    html += `
+      <div class="tool-section">
+        <div class="tool-section-label">URL:</div>
+        <pre class="tool-output tool-url-full">${this.escapeHtml(url)}</pre>
+      </div>
+    `;
+
+    if (prompt) {
+      html += `
+        <div class="tool-section">
+          <div class="tool-section-label">Prompt:</div>
+          <pre class="tool-output">${this.escapeHtml(prompt)}</pre>
+        </div>
+      `;
+    }
+
+    if (resultContent) {
+      const content = typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent, null, 2);
+      html += `
+        <div class="tool-section tool-section-bordered">
+          <div class="tool-section-label">Result:</div>
+          <pre class="tool-output">${this.escapeHtml(content)}</pre>
+        </div>
+      `;
+    }
+
+    return html || `<div class="tool-empty">Fetching URL...</div>`;
+  }
+
+  private renderWebSearchDetails(_result: any): string {
+    const query = this.tool.input?.query || '';
+    const allowedDomains = this.tool.input?.allowed_domains || [];
+    const blockedDomains = this.tool.input?.blocked_domains || [];
+    const resultContent = this.result?.content;
+
+    let html = '';
+
+    html += `
+      <div class="tool-section">
+        <div class="tool-section-label">Query:</div>
+        <pre class="tool-output">${this.escapeHtml(query)}</pre>
+      </div>
+    `;
+
+    if (allowedDomains.length > 0) {
+      html += `<div class="tool-meta">Allowed domains: ${allowedDomains.join(', ')}</div>`;
+    }
+
+    if (blockedDomains.length > 0) {
+      html += `<div class="tool-meta">Blocked domains: ${blockedDomains.join(', ')}</div>`;
+    }
+
+    if (resultContent) {
+      const content = typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent, null, 2);
+      html += `
+        <div class="tool-section tool-section-bordered">
+          <div class="tool-section-label">Results:</div>
+          <pre class="tool-output">${this.escapeHtml(content)}</pre>
+        </div>
+      `;
+    }
+
+    return html || `<div class="tool-empty">Searching...</div>`;
+  }
+
+  private renderMultiEditDetails(result: any): string {
+    const edits = this.tool.input?.edits || [];
+    const structuredPatch = result?.structuredPatch;
+
+    if (structuredPatch && structuredPatch.length > 0) {
+      const lines = structuredPatch.flatMap((hunk: any) =>
+        (hunk.lines || []).map((line: string) => {
+          const isRemoval = line.startsWith('-');
+          const isAddition = line.startsWith('+');
+          const className = isRemoval ? 'diff-removal' : isAddition ? 'diff-addition' : '';
+          return `<span class="${className}">${this.escapeHtml(line)}</span>`;
+        })
+      ).join('\n');
+      return `<pre class="tool-output tool-diff">${lines}</pre>`;
+    }
+
+    if (edits.length > 0) {
+      return `
+        <div class="tool-multi-edit">
+          ${edits.map((edit: { file_path?: string; old_string?: string; new_string?: string }, idx: number) => `
+            <div class="tool-edit-item">
+              <div class="tool-edit-file">${this.escapeHtml(edit.file_path || `Edit ${idx + 1}`)}</div>
+              <div class="tool-diff-simple">
+                <div class="diff-removal-block">
+                  <span class="diff-prefix">- </span>${this.escapeHtml(edit.old_string || '')}
+                </div>
+                <div class="diff-addition-block">
+                  <span class="diff-prefix">+ </span>${this.escapeHtml(edit.new_string || '')}
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    return `<div class="tool-empty">MultiEdit completed</div>`;
+  }
+
+  private renderAskUserQuestionDetails(_result: any): string {
+    const question = this.tool.input?.question || '';
+    const resultContent = this.result?.content;
+
+    let html = '';
+
+    html += `
+      <div class="tool-section">
+        <div class="tool-section-label">Question:</div>
+        <pre class="tool-output tool-question-full">${this.escapeHtml(question)}</pre>
+      </div>
+    `;
+
+    if (resultContent) {
+      const content = typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent, null, 2);
+      html += `
+        <div class="tool-section tool-section-bordered">
+          <div class="tool-section-label">Answer:</div>
+          <pre class="tool-output">${this.escapeHtml(content)}</pre>
+        </div>
+      `;
+    }
+
+    return html || `<div class="tool-empty">Waiting for user response...</div>`;
   }
 
   private renderDefaultDetails(): string {
