@@ -10,6 +10,7 @@ import type { RaycastResult } from './colliders.doc.js';
 
 export type {
   ColliderBounds,
+  ColliderType,
   CollisionResult,
   IBoxCollider,
   ICircleCollider,
@@ -251,6 +252,129 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function polygonPolygonVertices(
+  aVertices: readonly Point2D[],
+  bVertices: readonly Point2D[],
+  centerA: Point2D,
+  centerB: Point2D
+): CollisionResult {
+  let minDepth = Infinity;
+  let minNormal: Point2D = { x: 0, y: 0 };
+
+  const checkAxis = (vertices: readonly Point2D[], isA: boolean): boolean => {
+    const n = vertices.length;
+    for (let i = 0; i < n; i++) {
+      const v1 = vertices[i];
+      const v2 = vertices[(i + 1) % n];
+
+      const edge = subtract(v2, v1);
+      const axis = normalize({ x: -edge.y, y: edge.x });
+
+      let minAProj = Infinity,
+        maxAProj = -Infinity;
+      for (const v of aVertices) {
+        const proj = dot(v, axis);
+        if (proj < minAProj) minAProj = proj;
+        if (proj > maxAProj) maxAProj = proj;
+      }
+
+      let minBProj = Infinity,
+        maxBProj = -Infinity;
+      for (const v of bVertices) {
+        const proj = dot(v, axis);
+        if (proj < minBProj) minBProj = proj;
+        if (proj > maxBProj) maxBProj = proj;
+      }
+
+      const overlap = Math.min(maxAProj - minBProj, maxBProj - minAProj);
+      if (overlap <= 0) {
+        return false;
+      }
+
+      if (overlap < minDepth) {
+        minDepth = overlap;
+        minNormal = isA ? axis : { x: -axis.x, y: -axis.y };
+      }
+    }
+    return true;
+  };
+
+  if (!checkAxis(aVertices, true)) return NO_COLLISION;
+  if (!checkAxis(bVertices, false)) return NO_COLLISION;
+
+  const d = subtract(centerB, centerA);
+  if (dot(d, minNormal) < 0) {
+    minNormal = { x: -minNormal.x, y: -minNormal.y };
+  }
+
+  return {
+    colliding: true,
+    depth: minDepth,
+    normal: minNormal,
+    contacts: [],
+  };
+}
+
+/**
+ * Checks if polygon vertices are in counter-clockwise order.
+ * Uses the signed area formula.
+ */
+export function isCounterClockwise(vertices: readonly Point2D[]): boolean {
+  if (vertices.length < 3) return false;
+  let signedArea = 0;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const v1 = vertices[i];
+    const v2 = vertices[(i + 1) % n];
+    signedArea += (v2.x - v1.x) * (v2.y + v1.y);
+  }
+  return signedArea < 0; // Negative means CCW in standard math coords
+}
+
+/**
+ * Checks if a polygon is convex.
+ * SAT collision detection only works correctly for convex polygons.
+ */
+export function isConvex(vertices: readonly Point2D[]): boolean {
+  if (vertices.length < 3) return false;
+  const n = vertices.length;
+  let sign = 0;
+
+  for (let i = 0; i < n; i++) {
+    const v0 = vertices[i];
+    const v1 = vertices[(i + 1) % n];
+    const v2 = vertices[(i + 2) % n];
+
+    const cross = (v1.x - v0.x) * (v2.y - v1.y) - (v1.y - v0.y) * (v2.x - v1.x);
+
+    if (Math.abs(cross) > EPSILON) {
+      if (sign === 0) {
+        sign = cross > 0 ? 1 : -1;
+      } else if ((cross > 0 ? 1 : -1) !== sign) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Calculates the signed area of a polygon.
+ * Positive for CCW, negative for CW winding.
+ */
+export function polygonArea(vertices: readonly Point2D[]): number {
+  if (vertices.length < 3) return 0;
+  let area = 0;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const v1 = vertices[i];
+    const v2 = vertices[(i + 1) % n];
+    area += v1.x * v2.y - v2.x * v1.y;
+  }
+  return area / 2;
+}
+
 export const Collider = {
   circle(center: Point2D, radius: number): CircleCollider {
     return new CircleCollider(center, radius);
@@ -271,6 +395,15 @@ export const Collider = {
   line(start: Point2D, end: Point2D): LineCollider {
     return new LineCollider(start, end);
   },
+
+  /** Check if vertices are in counter-clockwise order */
+  isCounterClockwise,
+
+  /** Check if a polygon is convex (required for SAT collision) */
+  isConvex,
+
+  /** Calculate signed area (positive for CCW, negative for CW) */
+  polygonArea,
 };
 
 export const Collision = {
@@ -318,9 +451,44 @@ export const Collision = {
       };
     }
 
-    if (!Collision.boundsOverlap(a.getBounds(), b.getBounds())) {
-      return NO_COLLISION;
+    // Line collisions
+    if (a.type === 'line' && b.type === 'line') {
+      return Collision.lineLine(a as ILineCollider, b as ILineCollider);
     }
+    if (a.type === 'line' && b.type === 'circle') {
+      return Collision.lineCircle(a as ILineCollider, b as ICircleCollider);
+    }
+    if (a.type === 'circle' && b.type === 'line') {
+      const result = Collision.lineCircle(b as ILineCollider, a as ICircleCollider);
+      if (!result.colliding) return result;
+      return {
+        ...result,
+        normal: { x: -result.normal.x, y: -result.normal.y },
+      };
+    }
+    if (a.type === 'line' && b.type === 'box') {
+      return Collision.lineBox(a as ILineCollider, b as IBoxCollider);
+    }
+    if (a.type === 'box' && b.type === 'line') {
+      const result = Collision.lineBox(b as ILineCollider, a as IBoxCollider);
+      if (!result.colliding) return result;
+      return {
+        ...result,
+        normal: { x: -result.normal.x, y: -result.normal.y },
+      };
+    }
+    if (a.type === 'line' && b.type === 'polygon') {
+      return Collision.linePolygon(a as ILineCollider, b as IPolygonCollider);
+    }
+    if (a.type === 'polygon' && b.type === 'line') {
+      const result = Collision.linePolygon(b as ILineCollider, a as IPolygonCollider);
+      if (!result.colliding) return result;
+      return {
+        ...result,
+        normal: { x: -result.normal.x, y: -result.normal.y },
+      };
+    }
+
     return NO_COLLISION;
   },
 
@@ -408,11 +576,7 @@ export const Collision = {
     }
 
     if (distSq < EPSILON) {
-      const halfWidth = box.width / 2;
-      const halfHeight = box.height / 2;
-      const centerX = (box.min.x + box.max.x) / 2;
-      const centerY = (box.min.y + box.max.y) / 2;
-
+      // Circle center is inside the box - find closest edge
       const distToLeft = circle.center.x - box.min.x;
       const distToRight = box.max.x - circle.center.x;
       const distToBottom = circle.center.y - box.min.y;
@@ -566,13 +730,195 @@ export const Collision = {
   },
 
   boxPolygon(box: IBoxCollider, polygon: IPolygonCollider): CollisionResult {
-    const boxPoly = new PolygonCollider([
+    // Optimized: use box vertices directly instead of creating a PolygonCollider
+    const boxVertices: readonly Point2D[] = [
       { x: box.min.x, y: box.min.y },
       { x: box.max.x, y: box.min.y },
       { x: box.max.x, y: box.max.y },
       { x: box.min.x, y: box.max.y },
-    ]);
-    return Collision.polygonPolygon(boxPoly, polygon);
+    ];
+    return polygonPolygonVertices(boxVertices, polygon.vertices, box.getCenter(), polygon.getCenter());
+  },
+
+  lineLine(a: ILineCollider, b: ILineCollider): CollisionResult {
+    const d1 = subtract(a.end, a.start);
+    const d2 = subtract(b.end, b.start);
+    const cross = d1.x * d2.y - d1.y * d2.x;
+
+    if (Math.abs(cross) < EPSILON) {
+      // Parallel lines - check for overlap
+      return NO_COLLISION;
+    }
+
+    const d = subtract(b.start, a.start);
+    const t = (d.x * d2.y - d.y * d2.x) / cross;
+    const u = (d.x * d1.y - d.y * d1.x) / cross;
+
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+      const contact = {
+        x: a.start.x + d1.x * t,
+        y: a.start.y + d1.y * t,
+      };
+      const normal = normalize({ x: -d2.y, y: d2.x });
+
+      return {
+        colliding: true,
+        depth: 0, // Lines have no depth at intersection
+        normal,
+        contacts: [contact],
+      };
+    }
+
+    return NO_COLLISION;
+  },
+
+  lineCircle(line: ILineCollider, circle: ICircleCollider): CollisionResult {
+    const edge = subtract(line.end, line.start);
+    const toCircle = subtract(circle.center, line.start);
+    const edgeLenSq = dot(edge, edge);
+
+    let t = 0;
+    if (edgeLenSq > EPSILON) {
+      t = clamp(dot(toCircle, edge) / edgeLenSq, 0, 1);
+    }
+
+    const closest = {
+      x: line.start.x + edge.x * t,
+      y: line.start.y + edge.y * t,
+    };
+
+    const dist = distance(circle.center, closest);
+    if (dist > circle.radius) {
+      return NO_COLLISION;
+    }
+
+    const diff = subtract(circle.center, closest);
+    const normal = dist < EPSILON ? { x: -edge.y, y: edge.x } : normalize(diff);
+
+    return {
+      colliding: true,
+      depth: circle.radius - dist,
+      normal: normalize(normal),
+      contacts: [closest],
+    };
+  },
+
+  lineBox(line: ILineCollider, box: IBoxCollider): CollisionResult {
+    // Check if line intersects or is inside box
+    const startInside = box.containsPoint(line.start);
+    const endInside = box.containsPoint(line.end);
+
+    if (startInside && endInside) {
+      // Line is fully inside box
+      const center = line.getCenter();
+      const distToLeft = center.x - box.min.x;
+      const distToRight = box.max.x - center.x;
+      const distToBottom = center.y - box.min.y;
+      const distToTop = box.max.y - center.y;
+      const minDist = Math.min(distToLeft, distToRight, distToBottom, distToTop);
+
+      let normal: Point2D;
+      if (minDist === distToLeft) normal = { x: -1, y: 0 };
+      else if (minDist === distToRight) normal = { x: 1, y: 0 };
+      else if (minDist === distToBottom) normal = { x: 0, y: -1 };
+      else normal = { x: 0, y: 1 };
+
+      return {
+        colliding: true,
+        depth: minDist,
+        normal,
+        contacts: [center],
+      };
+    }
+
+    // Check intersection with box edges
+    const boxEdges: [Point2D, Point2D][] = [
+      [{ x: box.min.x, y: box.min.y }, { x: box.max.x, y: box.min.y }],
+      [{ x: box.max.x, y: box.min.y }, { x: box.max.x, y: box.max.y }],
+      [{ x: box.max.x, y: box.max.y }, { x: box.min.x, y: box.max.y }],
+      [{ x: box.min.x, y: box.max.y }, { x: box.min.x, y: box.min.y }],
+    ];
+    const normals: Point2D[] = [
+      { x: 0, y: -1 },
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+    ];
+
+    const d1 = subtract(line.end, line.start);
+    for (let i = 0; i < 4; i++) {
+      const [e1, e2] = boxEdges[i];
+      const d2 = subtract(e2, e1);
+      const cross = d1.x * d2.y - d1.y * d2.x;
+
+      if (Math.abs(cross) < EPSILON) continue;
+
+      const d = subtract(e1, line.start);
+      const t = (d.x * d2.y - d.y * d2.x) / cross;
+      const u = (d.x * d1.y - d.y * d1.x) / cross;
+
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        const contact = {
+          x: line.start.x + d1.x * t,
+          y: line.start.y + d1.y * t,
+        };
+
+        return {
+          colliding: true,
+          depth: 0,
+          normal: normals[i],
+          contacts: [contact],
+        };
+      }
+    }
+
+    return NO_COLLISION;
+  },
+
+  linePolygon(line: ILineCollider, polygon: IPolygonCollider): CollisionResult {
+    // Check if line intersects any polygon edge
+    const d1 = subtract(line.end, line.start);
+    const n = polygon.vertexCount;
+
+    for (let i = 0; i < n; i++) {
+      const v1 = polygon.vertices[i];
+      const v2 = polygon.vertices[(i + 1) % n];
+      const d2 = subtract(v2, v1);
+      const cross = d1.x * d2.y - d1.y * d2.x;
+
+      if (Math.abs(cross) < EPSILON) continue;
+
+      const d = subtract(v1, line.start);
+      const t = (d.x * d2.y - d.y * d2.x) / cross;
+      const u = (d.x * d1.y - d.y * d1.x) / cross;
+
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        const contact = {
+          x: line.start.x + d1.x * t,
+          y: line.start.y + d1.y * t,
+        };
+        const normal = normalize({ x: -d2.y, y: d2.x });
+
+        return {
+          colliding: true,
+          depth: 0,
+          normal: dot(normal, d1) > 0 ? { x: -normal.x, y: -normal.y } : normal,
+          contacts: [contact],
+        };
+      }
+    }
+
+    // Check if line is fully inside polygon
+    if (polygon.containsPoint(line.start) && polygon.containsPoint(line.end)) {
+      return {
+        colliding: true,
+        depth: 0,
+        normal: { x: 0, y: 1 },
+        contacts: [line.getCenter()],
+      };
+    }
+
+    return NO_COLLISION;
   },
 
   raycast(

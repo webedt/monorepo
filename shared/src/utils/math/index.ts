@@ -30,11 +30,15 @@ export {
   CircleCollider,
   Collider,
   Collision,
+  isConvex,
+  isCounterClockwise,
   LineCollider,
   PolygonCollider,
+  polygonArea,
 } from './colliders.js';
 export type {
   ColliderBounds,
+  ColliderType,
   CollisionResult,
   IBoxCollider,
   ICircleCollider,
