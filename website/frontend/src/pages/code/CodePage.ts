@@ -5,9 +5,9 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox } from '../../components';
-import type { ChangedFile } from '../../components';
-import { sessionsApi, storageWorkerApi } from '../../lib/api';
+import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox, AutocompleteDropdown } from '../../components';
+import type { ChangedFile, AutocompleteSuggestion } from '../../components';
+import { sessionsApi, storageWorkerApi, autocompleteApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { formatByFilename, canFormat } from '../../lib/codeFormatter';
@@ -64,6 +64,10 @@ export class CodePage extends Page<CodePageOptions> {
   private lintingPanel: LintingPanel | null = null;
   private collaborativeCursors: CollaborativeCursors | null = null;
   private unsubscribePresence: (() => void) | null = null;
+
+  // Autocomplete
+  private autocompleteDropdown: AutocompleteDropdown | null = null;
+  private isAutocompleteLoading = false;
 
   protected render(): string {
     return `
@@ -133,6 +137,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <div class="editor-wrapper" style="display: none;">
                   <div class="collaborative-cursors-container"></div>
                   <div class="multi-cursor-editor-container"></div>
+                  <div class="autocomplete-container"></div>
                 </div>
                 <div class="preview-wrapper" style="display: none;">
                   <img class="image-preview" alt="Preview">
@@ -219,6 +224,16 @@ export class CodePage extends Page<CodePageOptions> {
 
     // Initialize MultiCursorEditor
     this.initializeMultiCursorEditor();
+
+    // Setup autocomplete dropdown
+    const autocompleteContainer = this.$('.autocomplete-container') as HTMLElement;
+    if (autocompleteContainer) {
+      this.autocompleteDropdown = new AutocompleteDropdown({
+        onSelect: (suggestion) => this.acceptAutocompleteSuggestion(suggestion),
+        onDismiss: () => this.hideAutocomplete(),
+      });
+      this.autocompleteDropdown.mount(autocompleteContainer);
+    }
 
     // Setup collaborative cursors container
     // Note: CollaborativeCursors is designed for textarea. For CodeMirror integration,
@@ -840,6 +855,9 @@ export class CodePage extends Page<CodePageOptions> {
     });
 
     this.multiCursorEditor.mount(container);
+
+    // Add keyboard listener for autocomplete (Ctrl/Cmd+Space and dropdown navigation)
+    container.addEventListener('keydown', (e) => this.handleAutocompleteKeydown(e), true);
   }
 
   /**
@@ -925,6 +943,47 @@ export class CodePage extends Page<CodePageOptions> {
     }
     if (redoBtn) {
       redoBtn.disabled = !hasActiveFile || !this.multiCursorEditor?.canRedo();
+    }
+  }
+
+  /**
+   * Handle keyboard events for autocomplete navigation
+   * Called from the editor container to handle autocomplete when visible
+   */
+  private handleAutocompleteKeydown(e: KeyboardEvent): void {
+    // Handle autocomplete navigation when dropdown is visible
+    if (this.autocompleteDropdown?.getIsVisible()) {
+      switch (e.key) {
+        case 'Escape':
+          e.preventDefault();
+          e.stopPropagation();
+          this.hideAutocomplete();
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          e.stopPropagation();
+          this.autocompleteDropdown.selectPrevious();
+          return;
+        case 'ArrowDown':
+          e.preventDefault();
+          e.stopPropagation();
+          this.autocompleteDropdown.selectNext();
+          return;
+        case 'Tab':
+        case 'Enter':
+          e.preventDefault();
+          e.stopPropagation();
+          this.autocompleteDropdown.acceptSelected();
+          return;
+      }
+    }
+
+    // Cmd/Ctrl+Space to trigger autocomplete
+    if ((e.metaKey || e.ctrlKey) && e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      this.triggerAutocomplete();
+      return;
     }
   }
 
@@ -1204,6 +1263,162 @@ export class CodePage extends Page<CodePageOptions> {
     this.commitDialog.open();
   }
 
+  // =========================================================================
+  // Autocomplete Methods
+  // =========================================================================
+
+  private triggerAutocomplete(): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const cursorPos = this.multiCursorEditor.getCursorPosition();
+    const content = this.multiCursorEditor.getContent();
+    const prefix = content.slice(0, cursorPos);
+    const suffix = content.slice(cursorPos);
+
+    // Get language from file extension
+    const language = this.getLanguageFromPath(tab.path);
+
+    this.fetchAutocomplete(prefix, suffix, language, tab.path);
+  }
+
+  private async fetchAutocomplete(
+    prefix: string,
+    suffix: string,
+    language: string,
+    filePath: string
+  ): Promise<void> {
+    if (this.isAutocompleteLoading || isOffline()) return;
+
+    this.isAutocompleteLoading = true;
+
+    try {
+      const response = await autocompleteApi.complete({
+        prefix,
+        suffix,
+        language,
+        filePath,
+        maxSuggestions: 5,
+      });
+
+      if (response.suggestions.length > 0) {
+        // Calculate position for dropdown based on editor cursor
+        const position = this.getCaretPositionFromEditor();
+        this.showAutocomplete(position.x, position.y, response.suggestions);
+      } else {
+        this.hideAutocomplete();
+      }
+    } catch (error) {
+      console.error('Autocomplete failed:', error);
+      this.hideAutocomplete();
+    } finally {
+      this.isAutocompleteLoading = false;
+    }
+  }
+
+  private showAutocomplete(x: number, y: number, suggestions: AutocompleteSuggestion[]): void {
+    if (!this.autocompleteDropdown) return;
+    this.autocompleteDropdown.showAt(x, y, suggestions);
+  }
+
+  private hideAutocomplete(): void {
+    this.autocompleteDropdown?.hideDropdown();
+  }
+
+  private acceptAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Insert the suggestion at cursor position using MultiCursorEditor
+    this.multiCursorEditor.insertText(suggestion.text);
+
+    // Update tab content (the onChange callback will handle this, but update manually for safety)
+    tab.content = this.multiCursorEditor.getContent();
+    tab.isDirty = true;
+    tab.isPreview = false;
+    this.renderTabs();
+
+    // Hide autocomplete
+    this.hideAutocomplete();
+
+    // Focus editor
+    this.multiCursorEditor.focus();
+  }
+
+  /**
+   * Get caret position from the CodeMirror-based MultiCursorEditor
+   */
+  private getCaretPositionFromEditor(): { x: number; y: number } {
+    const editorContainer = this.$('.multi-cursor-editor-container') as HTMLElement;
+    if (!editorContainer || !this.multiCursorEditor) {
+      return { x: 0, y: 0 };
+    }
+
+    // Find the CodeMirror cursor element
+    const cursor = editorContainer.querySelector('.cm-cursor-primary, .cm-cursor') as HTMLElement;
+    if (cursor) {
+      const cursorRect = cursor.getBoundingClientRect();
+      return {
+        x: cursorRect.left,
+        y: cursorRect.bottom + 4, // Position below the cursor with a small offset
+      };
+    }
+
+    // Fallback: use editor container position
+    const containerRect = editorContainer.getBoundingClientRect();
+    return {
+      x: containerRect.left + 20,
+      y: containerRect.top + 40,
+    };
+  }
+
+  private getLanguageFromPath(filePath: string): string {
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    const languageMap: Record<string, string> = {
+      'ts': 'typescript',
+      'tsx': 'typescript',
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'mjs': 'javascript',
+      'cjs': 'javascript',
+      'py': 'python',
+      'pyw': 'python',
+      'rs': 'rust',
+      'go': 'go',
+      'java': 'java',
+      'c': 'c',
+      'h': 'c',
+      'cpp': 'cpp',
+      'cc': 'cpp',
+      'cxx': 'cpp',
+      'hpp': 'cpp',
+      'hxx': 'cpp',
+      'cs': 'csharp',
+      'rb': 'ruby',
+      'php': 'php',
+      'html': 'html',
+      'htm': 'html',
+      'css': 'css',
+      'scss': 'scss',
+      'sass': 'scss',
+      'sql': 'sql',
+      'sh': 'shell',
+      'bash': 'shell',
+      'zsh': 'shell',
+      'yml': 'yaml',
+      'yaml': 'yaml',
+      'json': 'json',
+      'md': 'markdown',
+      'markdown': 'markdown',
+      'xml': 'xml',
+    };
+    return languageMap[ext] || 'text';
+  }
+
   protected onUnmount(): void {
     // Check for unsaved changes
     const hasUnsaved = this.tabs.some(t => t.isDirty);
@@ -1238,6 +1453,13 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup autocomplete
+    this.hideAutocomplete();
+    if (this.autocompleteDropdown) {
+      this.autocompleteDropdown.unmount();
+      this.autocompleteDropdown = null;
     }
 
     // Cleanup diff viewer and modal

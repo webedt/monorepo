@@ -54,6 +54,7 @@ import paymentsRoutes from './api/routes/payments.js';
 import taxonomiesRoutes from './api/routes/taxonomies.js';
 import announcementsRoutes from './api/routes/announcements.js';
 import cloudSavesRoutes from './api/routes/cloudSaves.js';
+import autocompleteRoutes from './api/routes/autocomplete.js';
 import snippetsRoutes from './api/routes/snippets.js';
 import diffsRoutes from './api/routes/diffs.js';
 
@@ -340,6 +341,7 @@ app.use('/api/payments', paymentsRoutes);  // Stripe and PayPal payment processi
 app.use('/api/taxonomies', taxonomiesRoutes);  // Admin-configurable taxonomy system
 app.use('/api/announcements', announcementsRoutes);  // Official platform announcements
 app.use('/api/cloud-saves', cloudSavesRoutes);  // Cloud save synchronization
+app.use('/api/autocomplete', autocompleteRoutes);  // AI-powered code completion
 app.use('/api/snippets', snippetsRoutes);  // User code snippets and templates
 app.use('/api/diffs', diffsRoutes);  // Diff visualization comparing branches
 
