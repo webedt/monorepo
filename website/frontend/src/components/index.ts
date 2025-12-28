@@ -166,6 +166,10 @@ export type { CollaborativeCursorsOptions } from './collaborative-cursors';
 export { CommitDialog } from './commit-dialog';
 export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
 
+// UrlImportDialog
+export { UrlImportDialog } from './url-import-dialog';
+export type { UrlImportDialogOptions } from './url-import-dialog';
+
 // AutocompleteDropdown
 export { AutocompleteDropdown } from './autocomplete-dropdown';
 export type { AutocompleteDropdownOptions, AutocompleteSuggestion } from './autocomplete-dropdown';
