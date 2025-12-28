@@ -43,6 +43,9 @@ export class ImagePage extends Page<ImagePageOptions> {
   private lastY = 0;
 
   // Layer history for undo/redo (stores layer state snapshots)
+  // NOTE: History only tracks layer CONTENT changes, not structure changes.
+  // Adding, deleting, reordering, or merging layers are not undoable operations.
+  // This is a design choice to keep memory usage manageable.
   private history: Array<{ layerId: string; data: ImageData }[]> = [];
   private historyIndex = -1;
   private maxHistory = 50;

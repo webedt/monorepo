@@ -25,11 +25,49 @@ export interface LayerItemOptions {
 export class LayerItem extends Component {
   private options: LayerItemOptions;
   private isEditing = false;
+  private thumbnailCanvas: HTMLCanvasElement | null = null;
+  private static readonly THUMBNAIL_SIZE = 32;
 
   constructor(options: LayerItemOptions) {
     super('div', { className: 'layer-item' });
     this.options = options;
     this.render();
+  }
+
+  /**
+   * Update the thumbnail canvas with current layer content.
+   * Reuses the existing canvas element to avoid DOM recreation.
+   */
+  private updateThumbnail(): void {
+    const { layer } = this.options;
+    const size = LayerItem.THUMBNAIL_SIZE;
+
+    // Create thumbnail canvas only once
+    if (!this.thumbnailCanvas) {
+      this.thumbnailCanvas = document.createElement('canvas');
+      this.thumbnailCanvas.width = size;
+      this.thumbnailCanvas.height = size;
+      this.thumbnailCanvas.className = 'layer-thumbnail';
+    }
+
+    const ctx = this.thumbnailCanvas.getContext('2d');
+    if (ctx && layer.canvas) {
+      // Clear and draw checkerboard pattern for transparency
+      const tileSize = 4;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#cccccc';
+      for (let y = 0; y < size; y += tileSize) {
+        for (let x = 0; x < size; x += tileSize) {
+          if ((x / tileSize + y / tileSize) % 2 === 0) {
+            ctx.fillRect(x, y, tileSize, tileSize);
+          }
+        }
+      }
+
+      // Draw scaled layer content
+      ctx.drawImage(layer.canvas, 0, 0, layer.canvas.width, layer.canvas.height, 0, 0, size, size);
+    }
   }
 
   render(): this {
@@ -38,31 +76,8 @@ export class LayerItem extends Component {
     this.element.className = `layer-item ${isActive ? 'active' : ''} ${layer.locked ? 'locked' : ''}`;
     this.element.setAttribute('data-layer-id', layer.id);
 
-    // Create thumbnail canvas
-    const thumbnailSize = 32;
-    const thumbnailCanvas = document.createElement('canvas');
-    thumbnailCanvas.width = thumbnailSize;
-    thumbnailCanvas.height = thumbnailSize;
-    thumbnailCanvas.className = 'layer-thumbnail';
-
-    const ctx = thumbnailCanvas.getContext('2d');
-    if (ctx && layer.canvas) {
-      // Draw checkerboard pattern for transparency
-      const tileSize = 4;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, thumbnailSize, thumbnailSize);
-      ctx.fillStyle = '#cccccc';
-      for (let y = 0; y < thumbnailSize; y += tileSize) {
-        for (let x = 0; x < thumbnailSize; x += tileSize) {
-          if ((x / tileSize + y / tileSize) % 2 === 0) {
-            ctx.fillRect(x, y, tileSize, tileSize);
-          }
-        }
-      }
-
-      // Draw scaled layer content
-      ctx.drawImage(layer.canvas, 0, 0, layer.canvas.width, layer.canvas.height, 0, 0, thumbnailSize, thumbnailSize);
-    }
+    // Update thumbnail content (reuses cached canvas)
+    this.updateThumbnail();
 
     this.element.innerHTML = `
       <button class="layer-visibility-btn" title="${layer.visible ? 'Hide layer' : 'Show layer'}">
@@ -86,10 +101,10 @@ export class LayerItem extends Component {
       nameEl.title = layer.name;
     }
 
-    // Insert thumbnail canvas
+    // Insert cached thumbnail canvas
     const thumbnailContainer = this.element.querySelector('.layer-thumbnail-container');
-    if (thumbnailContainer) {
-      thumbnailContainer.appendChild(thumbnailCanvas);
+    if (thumbnailContainer && this.thumbnailCanvas) {
+      thumbnailContainer.appendChild(this.thumbnailCanvas);
     }
 
     this.setupEventListeners();
