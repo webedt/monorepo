@@ -5,11 +5,14 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, CommitDialog } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, LintingPanel, CollaborativeCursors, CommitDialog } from '../../components';
 import type { ChangedFile } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { formatByFilename, canFormat } from '../../lib/codeFormatter';
+import { LintingService } from '../../lib/linting';
+import { editorSettingsStore, presenceStore } from '../../stores';
 import type { Session } from '../../types';
 import './code.css';
 import '../../components/multi-cursor-editor/multi-cursor-editor.css';
@@ -54,6 +57,10 @@ export class CodePage extends Page<CodePageOptions> {
   private pendingCommitFiles: Map<string, ChangedFile> = new Map();
   private commitDialog: CommitDialog | null = null;
   private commitBtn: Button | null = null;
+  private lintingService = new LintingService(300);
+  private lintingPanel: LintingPanel | null = null;
+  private collaborativeCursors: CollaborativeCursors | null = null;
+  private unsubscribePresence: (() => void) | null = null;
 
   protected render(): string {
     return `
@@ -69,6 +76,10 @@ export class CodePage extends Page<CodePageOptions> {
             </div>
           </div>
           <div class="code-header-right">
+            <div class="active-users-badge" style="display: none;">
+              <div class="active-users-avatars"></div>
+              <span class="active-users-count"></span>
+            </div>
             <div class="offline-status-badge" style="display: none;">
               <span class="offline-badge">Offline Mode</span>
             </div>
@@ -80,6 +91,7 @@ export class CodePage extends Page<CodePageOptions> {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10H11a5 5 0 0 0-5 5v2"></path><polyline points="21 10 17 6"></polyline><polyline points="21 10 17 14"></polyline></svg>
               </button>
             </div>
+            <div class="format-btn-container"></div>
             <div class="commit-btn-container"></div>
             <div class="save-btn-container"></div>
           </div>
@@ -107,18 +119,22 @@ export class CodePage extends Page<CodePageOptions> {
 
           <main class="editor-panel">
             <div class="tabs-bar"></div>
-            <div class="editor-content">
-              <div class="editor-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                <p>Select a file to view or edit</p>
-                <p class="editor-hint">Multi-cursor: Alt+Click, Ctrl/Cmd+D (next), Ctrl/Cmd+Shift+L (all)</p>
+            <div class="editor-area">
+              <div class="editor-content">
+                <div class="editor-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                  <p>Select a file to view or edit</p>
+                  <p class="editor-hint">Multi-cursor: Alt+Click, Ctrl/Cmd+D (next), Ctrl/Cmd+Shift+L (all)</p>
+                </div>
+                <div class="editor-wrapper" style="display: none;">
+                  <div class="collaborative-cursors-container"></div>
+                  <div class="multi-cursor-editor-container"></div>
+                </div>
+                <div class="preview-wrapper" style="display: none;">
+                  <img class="image-preview" alt="Preview">
+                </div>
               </div>
-              <div class="editor-wrapper" style="display: none;">
-                <div class="multi-cursor-editor-container"></div>
-              </div>
-              <div class="preview-wrapper" style="display: none;">
-                <img class="image-preview" alt="Preview">
-              </div>
+              <div class="linting-panel-container"></div>
             </div>
           </main>
         </div>
@@ -139,6 +155,17 @@ export class CodePage extends Page<CodePageOptions> {
     const refreshBtn = this.$('[data-action="refresh"]') as HTMLButtonElement;
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => this.loadFiles());
+    }
+
+    // Setup format button
+    const formatBtnContainer = this.$('.format-btn-container') as HTMLElement;
+    if (formatBtnContainer) {
+      const formatBtn = new Button('Format', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.formatCurrentFile(),
+      });
+      formatBtn.mount(formatBtnContainer);
     }
 
     // Setup commit button
@@ -177,6 +204,20 @@ export class CodePage extends Page<CodePageOptions> {
     // Initialize MultiCursorEditor
     this.initializeMultiCursorEditor();
 
+    // Setup collaborative cursors container
+    // Note: CollaborativeCursors is designed for textarea. For CodeMirror integration,
+    // we just mount the container but skip setting the editor element for now.
+    const cursorsContainer = this.$('.collaborative-cursors-container') as HTMLElement;
+    if (cursorsContainer) {
+      this.collaborativeCursors = new CollaborativeCursors();
+      this.collaborativeCursors.mount(cursorsContainer);
+    }
+
+    // Subscribe to presence updates for the active users badge
+    this.unsubscribePresence = presenceStore.subscribe(() => {
+      this.updateActiveUsersBadge();
+    });
+
     // Show loading spinner
     const spinnerContainer = this.$('.spinner-container') as HTMLElement;
     if (spinnerContainer) {
@@ -189,6 +230,18 @@ export class CodePage extends Page<CodePageOptions> {
     if (offlineContainer) {
       this.offlineIndicator = new OfflineIndicator({ position: 'bottom-right' });
       this.offlineIndicator.mount(offlineContainer);
+    }
+
+    // Setup linting panel
+    const lintingContainer = this.$('.linting-panel-container') as HTMLElement;
+    if (lintingContainer) {
+      this.lintingPanel = new LintingPanel({
+        collapsible: true,
+        defaultCollapsed: false,
+        maxHeight: 150,
+        onDiagnosticClick: (diagnostic) => this.navigateToLine(diagnostic.line, diagnostic.column),
+      });
+      this.lintingPanel.mount(lintingContainer);
     }
 
     // Subscribe to offline status changes
@@ -240,6 +293,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.updateHeader();
       await this.loadFiles();
+
+      // Connect to presence for collaborative cursors
+      this.connectToPresence();
     } catch (error) {
       // Try offline cache if network fails
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
@@ -588,6 +644,9 @@ export class CodePage extends Page<CodePageOptions> {
 
       this.renderTabs();
       this.showEditor();
+
+      // Run initial linting
+      this.lintCurrentFile();
     } catch (error) {
       console.error('Failed to open file:', error);
       toast.error('Failed to open file');
@@ -617,6 +676,9 @@ export class CodePage extends Page<CodePageOptions> {
     this.renderTabs();
     this.updateEditorContent();
     this.updateUndoRedoButtons();
+
+    // Update linting for the new active tab
+    this.lintCurrentFile();
   }
 
   private renderTabs(): void {
@@ -709,6 +771,8 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'flex');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
+    // Clear linting panel when no file is open
+    this.lintingPanel?.clear();
   }
 
   private showEditor(): void {
@@ -721,6 +785,8 @@ export class CodePage extends Page<CodePageOptions> {
     (this.$('.editor-empty') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.editor-wrapper') as HTMLElement)?.style.setProperty('display', 'none');
     (this.$('.preview-wrapper') as HTMLElement)?.style.setProperty('display', 'flex');
+    // Clear linting panel for non-text files
+    this.lintingPanel?.clear();
   }
 
   /**
@@ -759,7 +825,42 @@ export class CodePage extends Page<CodePageOptions> {
       tab.isPreview = false;
       this.renderTabs();
       this.updateUndoRedoButtons();
+
+      // Trigger linting
+      this.lintCurrentFile();
     }
+  }
+
+  private lintCurrentFile(): void {
+    if (this.activeTabIndex < 0) {
+      this.lintingPanel?.clear();
+      return;
+    }
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) {
+      this.lintingPanel?.clear();
+      return;
+    }
+
+    this.lintingService.lint(tab.content, tab.name, (result) => {
+      this.lintingPanel?.update(result, tab.name);
+    });
+  }
+
+  private navigateToLine(line: number, column: number): void {
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Use MultiCursorEditor's scrollToLine method
+    this.multiCursorEditor.scrollToLine(line);
+
+    // Set cursor position at the line/column
+    const position = this.multiCursorEditor.getPositionFromLineColumn(line, column);
+    this.multiCursorEditor.setCursorPosition(position);
+    this.multiCursorEditor.focus();
   }
 
   /**
@@ -797,6 +898,52 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  private formatCurrentFile(): void {
+    if (this.activeTabIndex < 0 || !this.multiCursorEditor) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    // Check if this file type can be formatted
+    if (!canFormat(tab.name)) {
+      toast.info('Formatting not supported for this file type');
+      return;
+    }
+
+    const settings = editorSettingsStore.getSettings();
+    const result = formatByFilename(tab.content, tab.name, {
+      tabSize: settings.tabSize,
+      useTabs: settings.useTabs,
+    });
+
+    if (!result.success) {
+      toast.error(result.error || 'Failed to format file');
+      return;
+    }
+
+    // Only update if content actually changed
+    if (result.content !== tab.content) {
+      const cursorPosition = this.multiCursorEditor.getCursorPosition();
+
+      tab.content = result.content;
+      tab.isDirty = true;
+      tab.isPreview = false;
+
+      // Update editor content using setContent (adds to undo history)
+      this.multiCursorEditor.setContent(result.content);
+
+      // Try to restore cursor position, clamped to new content length
+      const newPosition = Math.min(cursorPosition, result.content.length);
+      this.multiCursorEditor.setCursorPosition(newPosition);
+
+      this.renderTabs();
+      this.updateUndoRedoButtons();
+      toast.success('File formatted');
+    } else {
+      toast.info('File already formatted');
+    }
+  }
+
   private async saveCurrentFile(): Promise<void> {
     if (this.activeTabIndex < 0 || this.isSaving) return;
 
@@ -804,6 +951,24 @@ export class CodePage extends Page<CodePageOptions> {
     if (!tab || !tab.isDirty) {
       toast.info('No changes to save');
       return;
+    }
+
+    // Format on save if enabled
+    if (editorSettingsStore.getFormatOnSave() && canFormat(tab.name) && this.multiCursorEditor) {
+      const settings = editorSettingsStore.getSettings();
+      const result = formatByFilename(tab.content, tab.name, {
+        tabSize: settings.tabSize,
+        useTabs: settings.useTabs,
+      });
+
+      if (result.success && result.content !== tab.content) {
+        tab.content = result.content;
+        this.multiCursorEditor.setContent(result.content);
+        this.updateUndoRedoButtons();
+      } else if (!result.success) {
+        // Warn user that formatting failed but continue with save
+        toast.warning(`Could not format: ${result.error || 'Unknown error'}`);
+      }
     }
 
     this.isSaving = true;
@@ -845,6 +1010,59 @@ export class CodePage extends Page<CodePageOptions> {
       toast.error('Failed to save file');
     } finally {
       this.isSaving = false;
+    }
+  }
+
+  /**
+   * Connect to presence service for collaborative cursors
+   */
+  private connectToPresence(): void {
+    if (!this.session) return;
+
+    const owner = this.session.repositoryOwner;
+    const repo = this.session.repositoryName;
+    const branch = this.session.branch;
+
+    if (owner && repo && branch) {
+      presenceStore.connect(owner, repo, branch).catch(error => {
+        console.error('Failed to connect to presence:', error);
+      });
+    }
+  }
+
+  /**
+   * Update the active users badge in the header
+   */
+  private updateActiveUsersBadge(): void {
+    const badge = this.$('.active-users-badge') as HTMLElement;
+    const avatarsContainer = this.$('.active-users-avatars') as HTMLElement;
+    const countEl = this.$('.active-users-count') as HTMLElement;
+
+    if (!badge || !avatarsContainer || !countEl) return;
+
+    const users = presenceStore.getOtherUsersWithColors();
+
+    if (users.length === 0) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    badge.style.display = 'flex';
+
+    // Show up to 3 user avatars
+    const displayUsers = users.slice(0, 3);
+    const remainingCount = users.length - displayUsers.length;
+
+    avatarsContainer.innerHTML = displayUsers.map(user => {
+      const initial = (user.displayName || 'U').charAt(0).toUpperCase();
+      return `<div class="active-user-avatar" style="background-color: ${user.color}" title="${this.escapeHtml(user.displayName)}">${initial}</div>`;
+    }).join('');
+
+    if (remainingCount > 0) {
+      countEl.textContent = `+${remainingCount} more`;
+      countEl.style.display = 'inline';
+    } else {
+      countEl.style.display = 'none';
     }
   }
 
@@ -932,6 +1150,28 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
+    }
+
+    // Cleanup linting panel
+    if (this.lintingPanel) {
+      this.lintingPanel.unmount();
+      this.lintingPanel = null;
+    }
+    this.lintingService.clear();
+
+    // Cleanup presence subscription
+    if (this.unsubscribePresence) {
+      this.unsubscribePresence();
+      this.unsubscribePresence = null;
+    }
+
+    // Disconnect from presence
+    presenceStore.disconnect();
+
+    // Cleanup collaborative cursors
+    if (this.collaborativeCursors) {
+      this.collaborativeCursors.unmount();
+      this.collaborativeCursors = null;
     }
   }
 }

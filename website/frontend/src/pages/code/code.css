@@ -286,6 +286,14 @@
   background: var(--color-bg-primary);
 }
 
+/* Editor Area (contains editor content + linting panel) */
+.editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* Tabs */
 .tabs-bar {
   display: flex;
@@ -357,6 +365,12 @@
   flex: 1;
   overflow: hidden;
   position: relative;
+  min-height: 0; /* Allow flex shrinking */
+}
+
+/* Linting Panel Container */
+.linting-panel-container {
+  flex-shrink: 0;
 }
 
 .editor-empty {
@@ -384,12 +398,28 @@
 }
 
 .editor-wrapper {
+  position: relative;
   height: 100%;
   overflow: hidden;
 }
 
 /* Multi-cursor editor container */
 .multi-cursor-editor-container {
+  width: 100%;
+  height: 100%;
+}
+
+.collaborative-cursors-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.code-editor {
   width: 100%;
   height: 100%;
 }

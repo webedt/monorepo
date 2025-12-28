@@ -27,6 +27,7 @@ import scala from 'highlight.js/lib/languages/scala';
 import diff from 'highlight.js/lib/languages/diff';
 import dockerfile from 'highlight.js/lib/languages/dockerfile';
 import graphql from 'highlight.js/lib/languages/graphql';
+import lua from 'highlight.js/lib/languages/lua';
 
 // Register languages
 hljs.registerLanguage('javascript', javascript);
@@ -75,6 +76,8 @@ hljs.registerLanguage('dockerfile', dockerfile);
 hljs.registerLanguage('docker', dockerfile);
 hljs.registerLanguage('graphql', graphql);
 hljs.registerLanguage('gql', graphql);
+hljs.registerLanguage('lua', lua);
+hljs.registerLanguage('love2d', lua);
 
 // Language name normalization for display
 const languageDisplayNames: Record<string, string> = {
@@ -124,6 +127,8 @@ const languageDisplayNames: Record<string, string> = {
   docker: 'Dockerfile',
   graphql: 'GraphQL',
   gql: 'GraphQL',
+  lua: 'Lua',
+  love2d: 'Love2D',
 };
 
 // Maximum size (in characters) for syntax highlighting
@@ -258,6 +263,8 @@ export function getLanguageFromExtension(filename: string): string | undefined {
     kt: 'kotlin',
     kts: 'kotlin',
     scala: 'scala',
+    // Lua/Love2D
+    lua: 'lua',
     // Container/DevOps
     graphql: 'graphql',
     gql: 'graphql',
