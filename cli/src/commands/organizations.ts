@@ -406,12 +406,17 @@ organizationsCommand
         process.exit(1);
       }
 
+      if (!options.addedBy) {
+        console.error('--added-by <userId> is required to track who added the repository');
+        process.exit(1);
+      }
+
       await organizationService.addRepository({
         organizationId: orgId,
         repositoryOwner: owner,
         repositoryName: repo,
         isDefault: options.default ?? false,
-        addedBy: options.addedBy || 'cli',
+        addedBy: options.addedBy,
       });
 
       console.log(`Added ${owner}/${repo} to ${org.name}.`);

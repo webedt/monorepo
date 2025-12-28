@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, gt } from 'drizzle-orm';
 import { AOrganizationService } from './AOrganizationService.js';
 import {
   db,
@@ -334,6 +334,16 @@ export class OrganizationService extends AOrganizationService {
     return invitation || null;
   }
 
+  async getInvitationById(invitationId: string): Promise<OrganizationInvitation | null> {
+    const [invitation] = await db
+      .select()
+      .from(organizationInvitations)
+      .where(eq(organizationInvitations.id, invitationId))
+      .limit(1);
+
+    return invitation || null;
+  }
+
   async acceptInvitation(token: string, userId: string): Promise<OrganizationMember | null> {
     const invitation = await this.getInvitationByToken(token);
     if (!invitation) return null;
@@ -368,7 +378,12 @@ export class OrganizationService extends AOrganizationService {
     return db
       .select()
       .from(organizationInvitations)
-      .where(eq(organizationInvitations.organizationId, organizationId));
+      .where(
+        and(
+          eq(organizationInvitations.organizationId, organizationId),
+          gt(organizationInvitations.expiresAt, new Date())
+        )
+      );
   }
 }
 

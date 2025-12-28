@@ -153,6 +153,10 @@ export abstract class AOrganizationService extends AService {
     token: string
   ): Promise<OrganizationInvitation | null>;
 
+  abstract getInvitationById(
+    invitationId: string
+  ): Promise<OrganizationInvitation | null>;
+
   abstract acceptInvitation(
     token: string,
     userId: string

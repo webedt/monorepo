@@ -97,8 +97,13 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     );
 
     res.status(201).json({ success: true, data: organization });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error creating organization:', error);
+    // Handle race condition where slug was taken between check and create
+    if (isUniqueConstraintError(error)) {
+      res.status(409).json({ success: false, error: 'Slug is already taken' });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to create organization' });
   }
 });
@@ -669,11 +674,14 @@ router.delete('/:id/invitations/:invitationId', requireAuth, async (req: Request
       return;
     }
 
-    const revoked = await organizationService.revokeInvitation(invitationId);
-    if (!revoked) {
+    // Verify the invitation belongs to this organization
+    const invitation = await organizationService.getInvitationById(invitationId);
+    if (!invitation || invitation.organizationId !== id) {
       res.status(404).json({ success: false, error: 'Invitation not found' });
       return;
     }
+
+    await organizationService.revokeInvitation(invitationId);
 
     res.json({ success: true, data: { invitationId } });
   } catch (error) {
