@@ -191,3 +191,37 @@ export interface CodeAnalyzerConfig {
    */
   maxCodeSizeBytes?: number;
 }
+
+/**
+ * Issue severity for code review findings.
+ */
+export type ReviewIssueSeverity = 'error' | 'warning' | 'info';
+
+/**
+ * A single issue found during code review.
+ */
+export interface ReviewIssue {
+  severity: ReviewIssueSeverity;
+  file?: string;
+  line?: number;
+  message: string;
+  suggestion?: string;
+}
+
+/**
+ * Options for code review.
+ */
+export interface ReviewOptions {
+  focusAreas?: string[];
+  strict?: boolean;
+  autoApprove?: boolean;
+}
+
+/**
+ * Result of a code review.
+ */
+export interface ReviewResult {
+  approved: boolean;
+  issues: ReviewIssue[];
+  summary: string;
+}

@@ -54,7 +54,6 @@ export class ScenePage extends Page<ScenePageOptions> {
   protected requiresAuth = true;
 
   private session: Session | null = null;
-  private isLoading = true;
   private isSaving = false;
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
@@ -763,13 +762,11 @@ export class ScenePage extends Page<ScenePageOptions> {
       return;
     }
 
-    this.isLoading = true;
-
     try {
       if (isOffline()) {
         const cachedSession = await offlineStorage.getCachedSession(sessionId);
         if (cachedSession) {
-          this.session = cachedSession as Session;
+          this.session = cachedSession as unknown as Session;
           this.updateHeader();
           this.showCanvas();
           this.renderScene();
@@ -790,7 +787,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     } catch (error) {
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
       if (cachedSession) {
-        this.session = cachedSession as Session;
+        this.session = cachedSession as unknown as Session;
         this.isOfflineMode = true;
         this.updateHeader();
         this.updateOfflineUI();

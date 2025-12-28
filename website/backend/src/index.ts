@@ -46,6 +46,7 @@ import libraryRoutes from './api/routes/library.js';
 import purchasesRoutes from './api/routes/purchases.js';
 import communityRoutes from './api/routes/community.js';
 import storageRoutes from './api/routes/storage.js';
+import searchRoutes from './api/routes/search.js';
 import channelsRoutes from './api/routes/channels.js';
 import taxonomiesRoutes from './api/routes/taxonomies.js';
 
@@ -324,6 +325,7 @@ app.use('/api/library', libraryRoutes);  // User's game library management
 app.use('/api/purchases', purchasesRoutes);  // Game purchases and refunds
 app.use('/api/community', communityRoutes);  // Community posts, reviews, and discussions
 app.use('/api/storage', storageRoutes);  // User storage quota management
+app.use('/api/search', searchRoutes);  // Universal search across all fields
 app.use('/api/channels', channelsRoutes);  // Community channels and real-time messaging
 app.use('/api/taxonomies', taxonomiesRoutes);  // Admin-configurable taxonomy system
 
