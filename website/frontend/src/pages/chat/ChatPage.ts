@@ -125,6 +125,7 @@ export class ChatPage extends Page<ChatPageOptions> {
   private messagesContainer: HTMLElement | null = null;
   private inputElement: HTMLTextAreaElement | null = null;
   private shownOptimisticUserMessage: string | null = null; // Track optimistic user message to avoid duplicates
+  private attachedImages: Array<{ id: string; data: string; mediaType: string }> = []; // Images pasted from clipboard
 
   // View settings (persisted to localStorage)
   private viewMode: ViewMode = 'normal'; // Default to normal mode for most users
@@ -200,6 +201,7 @@ export class ChatPage extends Page<ChatPageOptions> {
         </div>
 
         <div class="chat-input-container">
+          <div class="image-preview-container" style="display: none;"></div>
           <div class="chat-input-wrapper">
             <textarea
               class="chat-input"
@@ -211,7 +213,7 @@ export class ChatPage extends Page<ChatPageOptions> {
               <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
             </button>
           </div>
-          <p class="chat-input-hint">Press Enter to send, Shift+Enter for new line</p>
+          <p class="chat-input-hint">Press Enter to send, Shift+Enter for new line. Paste images with Ctrl+V</p>
         </div>
       </div>
     `;
@@ -258,6 +260,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     if (this.inputElement) {
       this.inputElement.addEventListener('input', () => this.handleInputChange());
       this.inputElement.addEventListener('keydown', (e) => this.handleKeyDown(e));
+      this.inputElement.addEventListener('paste', (e) => this.handlePaste(e));
     }
 
     // Get messages container
@@ -1617,22 +1620,169 @@ export class ChatPage extends Page<ChatPageOptions> {
     }
   }
 
+  /**
+   * Handle paste events to detect and attach images from clipboard
+   */
+  private async handlePaste(e: ClipboardEvent): Promise<void> {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    // Check for image files in the clipboard
+    const items = clipboardData.items;
+    const imageItems: DataTransferItem[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        imageItems.push(item);
+      }
+    }
+
+    // If there are images, handle them
+    if (imageItems.length > 0) {
+      e.preventDefault(); // Prevent default paste behavior for images
+
+      for (const item of imageItems) {
+        const file = item.getAsFile();
+        if (file) {
+          await this.addImageFromFile(file);
+        }
+      }
+    }
+  }
+
+  /**
+   * Convert a file to base64 and add to attached images
+   */
+  private async addImageFromFile(file: File): Promise<void> {
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Only image files are supported');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error('Image too large. Maximum size is 10MB');
+      return;
+    }
+
+    try {
+      const base64 = await this.fileToBase64(file);
+      const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+      this.attachedImages.push({
+        id: imageId,
+        data: base64,
+        mediaType: file.type,
+      });
+
+      this.renderImagePreviews();
+      this.updateSendButton();
+      toast.success('Image attached');
+    } catch (error) {
+      console.error('Failed to process image:', error);
+      toast.error('Failed to process image');
+    }
+  }
+
+  /**
+   * Convert a file to base64 data URL (without the data: prefix)
+   */
+  private fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Extract base64 data without the data:image/xxx;base64, prefix
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * Render image previews in the preview container
+   */
+  private renderImagePreviews(): void {
+    const container = this.$('.image-preview-container') as HTMLElement;
+    if (!container) return;
+
+    if (this.attachedImages.length === 0) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    container.style.display = 'flex';
+    container.innerHTML = this.attachedImages.map(img => `
+      <div class="image-preview-item" data-image-id="${img.id}">
+        <img src="data:${img.mediaType};base64,${img.data}" alt="Attached image" />
+        <button class="image-preview-remove" data-action="remove-image" data-image-id="${img.id}" title="Remove image">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    `).join('');
+
+    // Add click handlers for remove buttons
+    container.querySelectorAll('[data-action="remove-image"]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const imageId = (btn as HTMLElement).dataset.imageId;
+        if (imageId) {
+          this.removeImage(imageId);
+        }
+      });
+    });
+  }
+
+  /**
+   * Remove an attached image by ID
+   */
+  private removeImage(imageId: string): void {
+    this.attachedImages = this.attachedImages.filter(img => img.id !== imageId);
+    this.renderImagePreviews();
+    this.updateSendButton();
+  }
+
   private async handleSend(): Promise<void> {
-    if (!this.inputValue.trim() || this.isSending || !this.session) return;
+    const hasText = this.inputValue.trim().length > 0;
+    const hasImages = this.attachedImages.length > 0;
+
+    // Need at least text or images to send
+    if ((!hasText && !hasImages) || this.isSending || !this.session) return;
 
     const content = this.inputValue.trim();
+    const imagesToSend = [...this.attachedImages]; // Copy images before clearing
+
+    // Clear input and images
     this.inputValue = '';
+    this.attachedImages = [];
     if (this.inputElement) {
       this.inputElement.value = '';
       this.inputElement.style.height = 'auto';
     }
+    this.renderImagePreviews();
+
+    // Build display content for optimistic message
+    const displayContent = hasImages && hasText
+      ? `${content}\n\n[${imagesToSend.length} image${imagesToSend.length > 1 ? 's' : ''} attached]`
+      : hasImages
+        ? `[${imagesToSend.length} image${imagesToSend.length > 1 ? 's' : ''} attached]`
+        : content;
 
     // Add user message optimistically and track it to avoid duplicates
-    this.shownOptimisticUserMessage = content;
+    this.shownOptimisticUserMessage = displayContent;
     this.addMessage({
       id: `user-${Date.now()}`,
       type: 'user',
-      content,
+      content: displayContent,
       timestamp: new Date(),
     });
 
@@ -1640,8 +1790,18 @@ export class ChatPage extends Page<ChatPageOptions> {
     this.updateSendButton();
 
     try {
-      // Send message to execute endpoint
-      const response = await sessionsApi.sendMessage(this.session.id, content);
+      // Format images for API (remove the id field, keep only data and mediaType)
+      const imagesForApi = imagesToSend.map(img => ({
+        data: img.data,
+        mediaType: img.mediaType,
+      }));
+
+      // Send message to execute endpoint with images
+      const response = await sessionsApi.sendMessage(
+        this.session.id,
+        content,
+        imagesForApi.length > 0 ? imagesForApi : undefined
+      );
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to send message');
@@ -1720,9 +1880,11 @@ export class ChatPage extends Page<ChatPageOptions> {
     const stopIcon = sendBtn.querySelector('.stop-icon') as SVGElement;
     const isRunning = this.isSessionRunning();
     const hasInput = !!this.inputValue.trim();
+    const hasImages = this.attachedImages.length > 0;
+    const hasContent = hasInput || hasImages;
 
-    // Show stop button when running and no input, otherwise show send
-    const showStop = isRunning && !hasInput;
+    // Show stop button when running and no content, otherwise show send
+    const showStop = isRunning && !hasContent;
 
     if (sendIcon) sendIcon.style.display = showStop ? 'none' : '';
     if (stopIcon) stopIcon.style.display = showStop ? '' : 'none';
@@ -1730,8 +1892,8 @@ export class ChatPage extends Page<ChatPageOptions> {
     // Update button styling
     sendBtn.classList.toggle('stop-mode', showStop);
 
-    // Enable button if we can stop OR if we have input to send (and not already sending)
-    sendBtn.disabled = showStop ? false : (!hasInput || this.isSending);
+    // Enable button if we can stop OR if we have content to send (and not already sending)
+    sendBtn.disabled = showStop ? false : (!hasContent || this.isSending);
     sendBtn.classList.toggle('loading', this.isSending);
   }
 

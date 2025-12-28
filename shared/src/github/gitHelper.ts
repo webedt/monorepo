@@ -312,4 +312,129 @@ New files: ${status.not_added.join(', ') || 'none'}
       throw error;
     }
   }
+
+  async getDiffAgainstBranch(baseBranch: string): Promise<string> {
+    try {
+      await this.ensureSafeDirectory();
+
+      // Get diff comparing current HEAD against the base branch
+      // This shows what changes would be introduced by merging current branch into base
+      const diff = await this.git.diff([`${baseBranch}...HEAD`]);
+
+      logger.info('Git getDiffAgainstBranch() result', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        baseBranch,
+        diffLength: diff.length,
+        hasChanges: diff.length > 0
+      });
+
+      return diff || '';
+    } catch (error) {
+      logger.error('Failed to get diff against branch', error, {
+        component: 'GitHelper',
+        baseBranch
+      });
+      throw error;
+    }
+  }
+
+  async getFileDiffAgainstBranch(baseBranch: string, filePath: string): Promise<string> {
+    try {
+      await this.ensureSafeDirectory();
+
+      // Get diff for a specific file comparing current HEAD against the base branch
+      const diff = await this.git.diff([`${baseBranch}...HEAD`, '--', filePath]);
+
+      logger.info('Git getFileDiffAgainstBranch() result', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        baseBranch,
+        filePath,
+        diffLength: diff.length,
+        hasChanges: diff.length > 0
+      });
+
+      return diff || '';
+    } catch (error) {
+      logger.error('Failed to get file diff against branch', error, {
+        component: 'GitHelper',
+        baseBranch,
+        filePath
+      });
+      throw error;
+    }
+  }
+
+  async getChangedFilesAgainstBranch(baseBranch: string): Promise<string[]> {
+    try {
+      await this.ensureSafeDirectory();
+
+      // Get list of files that differ between current HEAD and base branch
+      const result = await this.git.diff([`${baseBranch}...HEAD`, '--name-only']);
+
+      const files = result
+        .split('\n')
+        .map(f => f.trim())
+        .filter(f => f.length > 0);
+
+      logger.info('Git getChangedFilesAgainstBranch() result', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        baseBranch,
+        fileCount: files.length,
+        files
+      });
+
+      return files;
+    } catch (error) {
+      logger.error('Failed to get changed files against branch', error, {
+        component: 'GitHelper',
+        baseBranch
+      });
+      throw error;
+    }
+  }
+
+  async getDiffStats(baseBranch: string): Promise<{ additions: number; deletions: number; filesChanged: number }> {
+    try {
+      await this.ensureSafeDirectory();
+
+      // Get diff stats using --stat
+      const result = await this.git.diff([`${baseBranch}...HEAD`, '--numstat']);
+
+      let additions = 0;
+      let deletions = 0;
+      let filesChanged = 0;
+
+      const lines = result.split('\n').filter(l => l.trim().length > 0);
+      for (const line of lines) {
+        const parts = line.split('\t');
+        if (parts.length >= 2) {
+          const add = parseInt(parts[0], 10);
+          const del = parseInt(parts[1], 10);
+          if (!isNaN(add)) additions += add;
+          if (!isNaN(del)) deletions += del;
+          filesChanged++;
+        }
+      }
+
+      logger.info('Git getDiffStats() result', {
+        component: 'GitHelper',
+        workspacePath: this.workspacePath,
+        baseBranch,
+        additions,
+        deletions,
+        filesChanged
+      });
+
+      return { additions, deletions, filesChanged };
+    } catch (error) {
+      logger.error('Failed to get diff stats', error, {
+        component: 'GitHelper',
+        baseBranch
+      });
+      throw error;
+    }
+  }
 }

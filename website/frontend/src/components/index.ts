@@ -150,6 +150,10 @@ export type { CollectionsPanelOptions } from './collections-panel';
 export { MultiCursorEditor } from './multi-cursor-editor';
 export type { MultiCursorEditorOptions } from './multi-cursor-editor';
 
+// DiffViewer
+export { DiffViewer } from './diff-viewer';
+export type { DiffViewerOptions } from './diff-viewer';
+
 // LintingPanel
 export { LintingPanel } from './linting-panel';
 export type { LintingPanelOptions } from './linting-panel';
@@ -161,3 +165,7 @@ export type { CollaborativeCursorsOptions } from './collaborative-cursors';
 // CommitDialog
 export { CommitDialog } from './commit-dialog';
 export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
+
+// AIInputBox
+export { AIInputBox } from './ai-input-box';
+export type { AIInputBoxOptions } from './ai-input-box';

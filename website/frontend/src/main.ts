@@ -30,6 +30,7 @@ import {
   AnnouncementsPage,
   PricingPage,
   AdminPage,
+  SnippetsPage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -47,6 +48,7 @@ function getNavIcon(name: string): string {
     'library': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
     'community': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     'channels': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+    'code': `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
   };
   return icons[name] || '';
 }
@@ -313,6 +315,7 @@ function updateHeader(): void {
       { path: '/library', text: 'Library', icon: 'library' },
       { path: '/quick-access', text: 'Quick', icon: 'zap' },
       { path: '/agents', text: 'Agents', icon: 'cpu' },
+      { path: '/snippets', text: 'Snippets', icon: 'code' },
       { path: '/widgets', text: 'Widgets', icon: 'widgets' },
       { path: '/dashboard', text: 'Dashboard', icon: 'layout-dashboard' },
     ];
@@ -939,6 +942,16 @@ async function init(): Promise<void> {
           const user = authStore.getUser();
           return authStore.isAuthenticated() && !!user?.isAdmin;
         },
+      },
+      // Snippets route
+      {
+        path: '/snippets',
+        component: () => {
+          mountPage(SnippetsPage);
+          return document.createElement('div');
+        },
+        title: 'Snippets | WebEDT',
+        guard: () => authStore.isAuthenticated(),
       },
     ])
     .start();
