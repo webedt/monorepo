@@ -99,6 +99,12 @@ export interface DetailedHealthStatus {
     rssMb: number;
     externalMb: number;
   };
+  /** Scale and capacity information */
+  scale?: {
+    currentCapacity: string;
+    shortTermTarget: string;
+    architecture: string;
+  };
   /** ISO timestamp */
   timestamp: string;
 }
@@ -220,6 +226,7 @@ export interface IHealthMonitorDocumentation {
     service?: string;
     containerId?: string;
     build?: { commitSha: string; timestamp: string; imageTag: string };
+    scale?: { currentCapacity: string; shortTermTarget: string; architecture: string };
   }): Promise<DetailedHealthStatus>;
 
   /**
