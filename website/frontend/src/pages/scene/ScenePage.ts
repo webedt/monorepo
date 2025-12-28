@@ -418,9 +418,10 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.isDragging = false;
   }
 
-  private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
-    // Simple bounding box check (would be more complex for rotated objects)
-    // Use object-specific dimensions based on type
+  /**
+   * Get the base dimensions of an object (before scale transform)
+   */
+  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
     let width = 100;
     let height = 100;
 
@@ -447,9 +448,23 @@ export class ScenePage extends Page<ScenePageOptions> {
         break;
     }
 
-    // Apply scale transforms
-    width *= obj.transform.scaleX;
-    height *= obj.transform.scaleY;
+    return { width, height };
+  }
+
+  /**
+   * Get the scaled dimensions of an object
+   */
+  private getScaledDimensions(obj: SceneObject): { width: number; height: number } {
+    const { width, height } = this.getObjectDimensions(obj);
+    return {
+      width: width * obj.transform.scaleX,
+      height: height * obj.transform.scaleY,
+    };
+  }
+
+  private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
+    // Simple bounding box check (would be more complex for rotated objects)
+    const { width, height } = this.getScaledDimensions(obj);
 
     return x >= obj.transform.x && x <= obj.transform.x + width &&
            y >= obj.transform.y && y <= obj.transform.y + height;
@@ -460,11 +475,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.showSpriteDialog();
   }
 
-  private showSpriteDialog(): void {
-    // Create dialog overlay
-    const overlay = document.createElement('div');
-    overlay.className = 'sprite-dialog-overlay';
-    overlay.innerHTML = `
+  /**
+   * Create the HTML content for the sprite dialog
+   */
+  private createSpriteDialogHTML(): string {
+    return `
       <div class="sprite-dialog">
         <div class="sprite-dialog-header">
           <h3>Add Sprite</h3>
@@ -498,7 +513,92 @@ export class ScenePage extends Page<ScenePageOptions> {
         </div>
       </div>
     `;
+  }
 
+  /**
+   * Update the preview element with an image URL (safe, no XSS)
+   */
+  private updateSpritePreview(
+    preview: HTMLElement,
+    previewContainer: HTMLElement,
+    addBtn: HTMLButtonElement,
+    url: string
+  ): void {
+    if (url) {
+      previewContainer.style.display = 'block';
+      while (preview.firstChild) {
+        preview.removeChild(preview.firstChild);
+      }
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = 'Preview';
+      img.style.maxWidth = '200px';
+      img.style.maxHeight = '150px';
+      preview.appendChild(img);
+      addBtn.disabled = false;
+    } else {
+      previewContainer.style.display = 'none';
+      while (preview.firstChild) {
+        preview.removeChild(preview.firstChild);
+      }
+      addBtn.disabled = true;
+    }
+  }
+
+  /**
+   * Create a sprite object from a loaded image URL
+   */
+  private async createSpriteFromUrl(url: string): Promise<void> {
+    const id = `sprite-${Date.now()}`;
+
+    try {
+      await this.spriteRenderer.load(id, url);
+      const info = this.spriteRenderer.getInfo(id);
+
+      const obj: SceneObject = {
+        id,
+        name: `Sprite ${this.objects.length + 1}`,
+        type: 'sprite',
+        visible: true,
+        locked: false,
+        transform: { x: 100, y: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        zIndex: this.objects.length,
+        opacity: 1,
+        spriteUrl: url,
+        spriteWidth: info?.width ?? 100,
+        spriteHeight: info?.height ?? 100,
+      };
+
+      this.objects.push(obj);
+      this.selectedObjectId = obj.id;
+      this.hasUnsavedChanges = true;
+      this.updateHierarchy();
+      this.updatePropertiesPanel();
+      this.updateStatusBar();
+      this.renderScene();
+
+      toast.success('Sprite added successfully');
+    } catch (error) {
+      console.error('Failed to load sprite:', error);
+      toast.error('Failed to load sprite image');
+    }
+  }
+
+  /**
+   * Convert a File to a data URL
+   */
+  private fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  private showSpriteDialog(): void {
+    const overlay = document.createElement('div');
+    overlay.className = 'sprite-dialog-overlay';
+    overlay.innerHTML = this.createSpriteDialogHTML();
     document.body.appendChild(overlay);
 
     // Get elements
@@ -516,11 +616,23 @@ export class ScenePage extends Page<ScenePageOptions> {
     let selectedUrl = '';
     let selectedFile: File | null = null;
 
-    // Close dialog handlers
-    const closeDialog = () => {
-      document.body.removeChild(overlay);
+    const closeDialog = () => document.body.removeChild(overlay);
+
+    const updatePreview = (url: string) => {
+      this.updateSpritePreview(preview, previewContainer, addBtn, url);
     };
 
+    const handleFile = (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please select an image file');
+        return;
+      }
+      selectedFile = file;
+      selectedUrl = '';
+      this.fileToDataUrl(file).then(updatePreview);
+    };
+
+    // Close handlers
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) closeDialog();
     });
@@ -540,49 +652,21 @@ export class ScenePage extends Page<ScenePageOptions> {
       });
     });
 
-    // Update preview
-    const updatePreview = (url: string) => {
-      if (url) {
-        previewContainer.style.display = 'block';
-        preview.innerHTML = `<img src="${url}" alt="Preview" style="max-width: 200px; max-height: 150px;">`;
-        addBtn.disabled = false;
-      } else {
-        previewContainer.style.display = 'none';
-        preview.innerHTML = '';
-        addBtn.disabled = true;
-      }
-    };
-
     // URL input handler
     urlInput.addEventListener('input', () => {
       selectedUrl = urlInput.value.trim();
       selectedFile = null;
-      if (selectedUrl && (selectedUrl.startsWith('http://') || selectedUrl.startsWith('https://') || selectedUrl.startsWith('data:'))) {
-        updatePreview(selectedUrl);
-      } else {
-        updatePreview('');
-      }
+      const isValidUrl = selectedUrl && (
+        selectedUrl.startsWith('http://') ||
+        selectedUrl.startsWith('https://') ||
+        selectedUrl.startsWith('data:')
+      );
+      updatePreview(isValidUrl ? selectedUrl : '');
     });
 
     // File input handler
-    const handleFile = (file: File) => {
-      if (!file.type.startsWith('image/')) {
-        toast.error('Please select an image file');
-        return;
-      }
-      selectedFile = file;
-      selectedUrl = '';
-      const reader = new FileReader();
-      reader.onload = () => {
-        updatePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    };
-
     fileInput.addEventListener('change', () => {
-      if (fileInput.files && fileInput.files[0]) {
-        handleFile(fileInput.files[0]);
-      }
+      if (fileInput.files?.[0]) handleFile(fileInput.files[0]);
     });
 
     // Drop zone handlers
@@ -591,73 +675,27 @@ export class ScenePage extends Page<ScenePageOptions> {
       e.preventDefault();
       dropZone.classList.add('drag-over');
     });
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('drag-over');
-    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('drag-over');
-      if (e.dataTransfer?.files && e.dataTransfer.files[0]) {
-        handleFile(e.dataTransfer.files[0]);
-      }
+      if (e.dataTransfer?.files?.[0]) handleFile(e.dataTransfer.files[0]);
     });
 
     // Add sprite handler
     addBtn.addEventListener('click', async () => {
-      const id = `sprite-${Date.now()}`;
       let url = selectedUrl;
-
-      // If file selected, convert to data URL
       if (selectedFile) {
-        url = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(selectedFile!);
-        });
+        url = await this.fileToDataUrl(selectedFile);
       }
-
       if (!url) {
         toast.error('Please provide an image URL or file');
         return;
       }
-
       closeDialog();
-
-      // Load the sprite
-      try {
-        await this.spriteRenderer.load(id, url);
-        const info = this.spriteRenderer.getInfo(id);
-
-        const obj: SceneObject = {
-          id,
-          name: `Sprite ${this.objects.length + 1}`,
-          type: 'sprite',
-          visible: true,
-          locked: false,
-          transform: { x: 100, y: 100, rotation: 0, scaleX: 1, scaleY: 1 },
-          zIndex: this.objects.length,
-          opacity: 1,
-          spriteUrl: url,
-          spriteWidth: info?.width ?? 100,
-          spriteHeight: info?.height ?? 100,
-        };
-
-        this.objects.push(obj);
-        this.selectedObjectId = obj.id;
-        this.hasUnsavedChanges = true;
-        this.updateHierarchy();
-        this.updatePropertiesPanel();
-        this.updateStatusBar();
-        this.renderScene();
-
-        toast.success('Sprite added successfully');
-      } catch (error) {
-        console.error('Failed to load sprite:', error);
-        toast.error('Failed to load sprite image');
-      }
+      await this.createSpriteFromUrl(url);
     });
 
-    // Focus URL input
     urlInput.focus();
   }
 
@@ -873,35 +911,7 @@ export class ScenePage extends Page<ScenePageOptions> {
 
       // Draw selection outline
       if (obj.id === this.selectedObjectId) {
-        // Calculate actual dimensions based on object type
-        let selWidth = 100;
-        let selHeight = 100;
-
-        switch (obj.type) {
-          case 'sprite':
-            selWidth = obj.spriteWidth ?? 100;
-            selHeight = obj.spriteHeight ?? 100;
-            break;
-          case 'shape':
-            if (obj.shapeType === 'rectangle') {
-              selWidth = 100;
-              selHeight = 80;
-            } else if (obj.shapeType === 'circle') {
-              selWidth = 100;
-              selHeight = 100;
-            }
-            break;
-          case 'text':
-            const fontSize = obj.fontSize || 24;
-            const textLength = (obj.text || 'Text').length;
-            selWidth = textLength * fontSize * 0.6;
-            selHeight = fontSize * 1.2;
-            break;
-        }
-
-        // Apply scale to selection outline
-        selWidth *= obj.transform.scaleX;
-        selHeight *= obj.transform.scaleY;
+        const { width: selWidth, height: selHeight } = this.getScaledDimensions(obj);
 
         this.ctx.strokeStyle = '#0066ff';
         this.ctx.lineWidth = 2;

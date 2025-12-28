@@ -3,13 +3,6 @@
  * Handles loading, caching, and rendering of image sprites
  */
 
-export interface SpriteSource {
-  /** Image URL, data URL, or blob URL */
-  url: string;
-  /** Optional source rectangle for sprite sheets */
-  sourceRect?: SpriteRect;
-}
-
 export interface SpriteRect {
   x: number;
   y: number;
@@ -99,6 +92,9 @@ export class SpriteRenderer {
   private cache: Map<string, CachedSprite> = new Map();
   private sheets: Map<string, SpriteSheetConfig> = new Map();
   private loadPromises: Map<string, Promise<HTMLImageElement>> = new Map();
+  // Cached tint canvas for performance - reused across draw calls
+  private tintCanvas: HTMLCanvasElement | null = null;
+  private tintCtx: CanvasRenderingContext2D | null = null;
 
   /**
    * Load a sprite image
@@ -242,7 +238,10 @@ export class SpriteRenderer {
     const canvas = document.createElement('canvas');
     canvas.width = imageData.width;
     canvas.height = imageData.height;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to get 2D canvas context');
+    }
     ctx.putImageData(imageData, 0, 0);
     const dataUrl = canvas.toDataURL();
     return this.load(id, dataUrl);
@@ -357,25 +356,39 @@ export class SpriteRenderer {
 
     // Apply tint if specified
     if (options?.tint) {
-      // Draw to offscreen canvas for tinting
-      const tintCanvas = document.createElement('canvas');
-      tintCanvas.width = sw;
-      tintCanvas.height = sh;
-      const tintCtx = tintCanvas.getContext('2d')!;
+      // Reuse cached tint canvas for performance, resize if needed
+      if (!this.tintCanvas || !this.tintCtx) {
+        this.tintCanvas = document.createElement('canvas');
+        this.tintCtx = this.tintCanvas.getContext('2d');
+        if (!this.tintCtx) {
+          // Fallback to non-tinted draw if context fails
+          ctx.drawImage(image, sx, sy, sw, sh, drawX, drawY, dw, dh);
+          ctx.restore();
+          return true;
+        }
+      }
 
-      // Draw the sprite
-      tintCtx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+      // Resize canvas if needed
+      if (this.tintCanvas.width !== sw || this.tintCanvas.height !== sh) {
+        this.tintCanvas.width = sw;
+        this.tintCanvas.height = sh;
+      }
+
+      // Clear and draw the sprite
+      this.tintCtx.clearRect(0, 0, sw, sh);
+      this.tintCtx.globalCompositeOperation = 'source-over';
+      this.tintCtx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
 
       // Apply tint using multiply blend
-      tintCtx.globalCompositeOperation = 'multiply';
-      tintCtx.fillStyle = options.tint;
-      tintCtx.fillRect(0, 0, sw, sh);
+      this.tintCtx.globalCompositeOperation = 'multiply';
+      this.tintCtx.fillStyle = options.tint;
+      this.tintCtx.fillRect(0, 0, sw, sh);
 
       // Restore alpha from original
-      tintCtx.globalCompositeOperation = 'destination-in';
-      tintCtx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+      this.tintCtx.globalCompositeOperation = 'destination-in';
+      this.tintCtx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
 
-      ctx.drawImage(tintCanvas, drawX, drawY, dw, dh);
+      ctx.drawImage(this.tintCanvas, drawX, drawY, dw, dh);
     } else {
       ctx.drawImage(image, sx, sy, sw, sh, drawX, drawY, dw, dh);
     }
@@ -491,8 +504,9 @@ export class SpriteRenderer {
     ctx.clip();
 
     // Calculate starting position considering offset
-    const startX = x - (offsetX % imgWidth);
-    const startY = y - (offsetY % imgHeight);
+    // Use proper modulo for negative numbers: ((n % d) + d) % d
+    const startX = x - (((offsetX % imgWidth) + imgWidth) % imgWidth);
+    const startY = y - (((offsetY % imgHeight) + imgHeight) % imgHeight);
 
     // Draw tiles
     for (let ty = startY; ty < y + height; ty += imgHeight) {

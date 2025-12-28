@@ -38,7 +38,6 @@
 
 export {
   // Types
-  type SpriteSource,
   type SpriteRect,
   type SpriteSheetConfig,
   type SpriteTransform,
