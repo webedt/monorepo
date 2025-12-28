@@ -70,7 +70,7 @@ export class LayerItem extends Component {
       </button>
       <div class="layer-thumbnail-container"></div>
       <div class="layer-info">
-        <span class="layer-name" title="${layer.name}">${layer.name}</span>
+        <span class="layer-name"></span>
         <span class="layer-opacity-badge">${Math.round(layer.opacity * 100)}%</span>
       </div>
       <button class="layer-lock-btn" title="${layer.locked ? 'Unlock layer' : 'Lock layer'}">
@@ -78,6 +78,13 @@ export class LayerItem extends Component {
       </button>
       <button class="layer-menu-btn" title="Layer options">⋮</button>
     `;
+
+    // Set layer name using textContent to prevent XSS
+    const nameEl = this.element.querySelector('.layer-name') as HTMLElement;
+    if (nameEl) {
+      nameEl.textContent = layer.name;
+      nameEl.title = layer.name;
+    }
 
     // Insert thumbnail canvas
     const thumbnailContainer = this.element.querySelector('.layer-thumbnail-container');
@@ -303,16 +310,17 @@ export class LayerItem extends Component {
 
     // Close menu on outside click
     const closeMenu = (evt: MouseEvent) => {
-      if (!menu.contains(evt.target as Node)) {
+      // Check if menu still exists in DOM before removing
+      if (menu.parentNode && !menu.contains(evt.target as Node)) {
         menu.remove();
         document.removeEventListener('click', closeMenu);
       }
     };
 
     // Delay adding click listener to prevent immediate close
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       document.addEventListener('click', closeMenu);
-    }, 0);
+    });
   }
 
   update(options: Partial<LayerItemOptions>): void {

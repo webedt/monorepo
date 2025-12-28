@@ -290,17 +290,27 @@ function createImageLayersStore() {
 
     /**
      * Set active layer
+     * Note: Locked layers can be selected (for viewing), but drawing operations
+     * should check isActiveLayerLocked() before modifying
      */
     setActiveLayer(layerId: string): void {
       const state = store.getState();
       const layer = state.layers.find((l) => l.id === layerId);
 
-      if (layer && !layer.locked) {
+      if (layer) {
         store.setState({
           activeLayerId: layerId,
           selectedLayerIds: new Set([layerId]),
         });
       }
+    },
+
+    /**
+     * Check if the active layer is locked
+     */
+    isActiveLayerLocked(): boolean {
+      const activeLayer = this.getActiveLayer();
+      return activeLayer?.locked ?? false;
     },
 
     /**

@@ -58,6 +58,9 @@ export class ImagePage extends Page<ImagePageOptions> {
   private layersPanel: LayersPanel | null = null;
   private unsubscribeLayers: (() => void) | null = null;
 
+  // Render optimization - batch compositing with requestAnimationFrame
+  private renderPending = false;
+
   protected render(): string {
     return `
       <div class="image-page">
@@ -400,7 +403,7 @@ export class ImagePage extends Page<ImagePageOptions> {
     if (container) {
       this.layersPanel = new LayersPanel({
         onLayerChange: () => {
-          this.compositeAndRender();
+          // Only update status bar - compositing is handled by the store subscription
           this.updateLayerCount();
         },
       });
@@ -411,6 +414,19 @@ export class ImagePage extends Page<ImagePageOptions> {
   private compositeAndRender(): void {
     if (!this.displayCanvas) return;
     imageLayersStore.compositeToCanvas(this.displayCanvas);
+  }
+
+  /**
+   * Schedule a render on the next animation frame.
+   * This batches multiple draw operations to improve performance during rapid drawing.
+   */
+  private scheduleRender(): void {
+    if (this.renderPending) return;
+    this.renderPending = true;
+    requestAnimationFrame(() => {
+      this.renderPending = false;
+      this.compositeAndRender();
+    });
   }
 
   private updateLayerCount(): void {
@@ -539,8 +555,8 @@ export class ImagePage extends Page<ImagePageOptions> {
         break;
     }
 
-    // Update the display after drawing
-    this.compositeAndRender();
+    // Schedule display update (batched with requestAnimationFrame for performance)
+    this.scheduleRender();
 
     this.lastX = x;
     this.lastY = y;
@@ -629,8 +645,8 @@ export class ImagePage extends Page<ImagePageOptions> {
         break;
     }
 
-    // Update the display after drawing
-    this.compositeAndRender();
+    // Schedule display update (batched with requestAnimationFrame for performance)
+    this.scheduleRender();
 
     this.lastX = x;
     this.lastY = y;
@@ -643,12 +659,24 @@ export class ImagePage extends Page<ImagePageOptions> {
     // Remove any redo history
     this.history = this.history.slice(0, this.historyIndex + 1);
 
-    // Save current state of all layers
-    const snapshot = state.layers.map((layer) => {
+    // Save current state of all layers, filtering out any failed captures
+    const snapshot: Array<{ layerId: string; data: ImageData }> = [];
+    for (const layer of state.layers) {
       const ctx = layer.canvas.getContext('2d');
-      const data = ctx?.getImageData(0, 0, layer.canvas.width, layer.canvas.height);
-      return { layerId: layer.id, data: data! };
-    });
+      if (ctx) {
+        try {
+          const data = ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height);
+          snapshot.push({ layerId: layer.id, data });
+        } catch {
+          // Skip layers that fail to capture (e.g., tainted canvas)
+          console.warn(`Failed to capture layer ${layer.name} for history`);
+        }
+      }
+    }
+
+    // Only save if we captured at least one layer
+    if (snapshot.length === 0) return;
+
     this.history.push(snapshot);
 
     // Limit history size
