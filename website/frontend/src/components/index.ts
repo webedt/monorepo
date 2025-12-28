@@ -178,6 +178,10 @@ export type { AutocompleteDropdownOptions, AutocompleteSuggestion } from './auto
 export { AIInputBox } from './ai-input-box';
 export type { AIInputBoxOptions } from './ai-input-box';
 
+// TransformEditor
+export { TransformEditor } from './transform-editor';
+export type { TransformEditorOptions, Transform } from './transform-editor';
+
 // LayersPanel
 export { LayersPanel, LayerItem } from './layers-panel';
 export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
