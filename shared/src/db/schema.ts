@@ -767,6 +767,127 @@ export type ItemTaxonomy = typeof itemTaxonomies.$inferSelect;
 export type NewItemTaxonomy = typeof itemTaxonomies.$inferInsert;
 
 // ============================================================================
+// GAME PLATFORM LIBRARIES - Platforms, installations, achievements, cloud saves
+// ============================================================================
+
+// Game Platforms - Supported platforms (Windows, Mac, Linux, etc.)
+export const gamePlatforms = pgTable('game_platforms', {
+  id: text('id').primaryKey(), // UUID
+  os: text('os').notNull(), // 'windows' | 'macos' | 'linux'
+  architecture: text('architecture').notNull(), // 'x64' | 'x86' | 'arm64'
+  displayName: text('display_name').notNull(),
+  iconUrl: text('icon_url'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_platform_os_arch_idx').on(table.os, table.architecture),
+]);
+
+// Game System Requirements - Minimum/recommended specs per platform
+export const gameSystemRequirements = pgTable('game_system_requirements', {
+  id: text('id').primaryKey(), // UUID
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  platformId: text('platform_id')
+    .notNull()
+    .references(() => gamePlatforms.id, { onDelete: 'cascade' }),
+  level: text('level').notNull(), // 'minimum' | 'recommended'
+  osVersion: text('os_version'),
+  processor: text('processor'),
+  memory: integer('memory'), // RAM in MB
+  graphics: text('graphics'),
+  graphicsMemory: integer('graphics_memory'), // VRAM in MB
+  graphicsApi: text('graphics_api'), // 'directx11' | 'directx12' | 'vulkan' | 'metal' | 'opengl'
+  storage: integer('storage'), // Required disk space in MB
+  additionalNotes: text('additional_notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_system_req_unique_idx').on(table.gameId, table.platformId, table.level),
+]);
+
+// Game Builds - Version/build information per platform
+export const gameBuilds = pgTable('game_builds', {
+  id: text('id').primaryKey(), // UUID
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  platformId: text('platform_id')
+    .notNull()
+    .references(() => gamePlatforms.id, { onDelete: 'cascade' }),
+  version: text('version').notNull(),
+  buildNumber: integer('build_number'),
+  sizeBytes: text('size_bytes').notNull(), // Stored as string for bigint precision
+  checksum: text('checksum'),
+  checksumType: text('checksum_type'), // 'md5' | 'sha256'
+  releaseNotes: text('release_notes'),
+  isMandatory: boolean('is_mandatory').default(false).notNull(),
+  isPrerelease: boolean('is_prerelease').default(false).notNull(),
+  downloadUrl: text('download_url'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_build_version_idx').on(table.gameId, table.platformId, table.version),
+]);
+
+// Game Installations - User installation records
+export const gameInstallations = pgTable('game_installations', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  platformId: text('platform_id')
+    .notNull()
+    .references(() => gamePlatforms.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('not_installed'), // 'not_installed' | 'queued' | 'downloading' | 'installing' | 'installed' | 'updating' | 'paused' | 'error'
+  installPath: text('install_path'),
+  version: text('version'),
+  installedSizeBytes: text('installed_size_bytes'), // Stored as string for bigint precision
+  downloadProgress: json('download_progress').$type<{
+    totalBytes: number;
+    downloadedBytes: number;
+    bytesPerSecond: number;
+    estimatedSecondsRemaining: number;
+    currentFile?: string;
+    filesTotal?: number;
+    filesCompleted?: number;
+  }>(),
+  lastPlayedAt: timestamp('last_played_at'),
+  playtimeMinutes: integer('playtime_minutes').default(0).notNull(),
+  autoUpdate: boolean('auto_update').default(true).notNull(),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('game_installation_user_game_idx').on(table.userId, table.gameId),
+]);
+
+// Game Achievements - Achievement definitions
+export const gameAchievements = pgTable('game_achievements', {
+  id: text('id').primaryKey(), // UUID
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  hiddenDescription: text('hidden_description'), // Shown after unlock for hidden achievements
+  iconUrl: text('icon_url'),
+  iconLockedUrl: text('icon_locked_url'),
+  points: integer('points').default(10).notNull(),
+  rarity: text('rarity').default('common').notNull(), // 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+  type: text('type').default('standard').notNull(), // 'standard' | 'hidden' | 'progressive'
+  maxProgress: integer('max_progress'), // For progressive achievements
+  sortOrder: integer('sort_order').default(0).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ============================================================================
 // ANNOUNCEMENTS - Official platform updates
 // ============================================================================
 
@@ -790,6 +911,82 @@ export const announcements = pgTable('announcements', {
 // Type exports for Announcements
 export type Announcement = typeof announcements.$inferSelect;
 export type NewAnnouncement = typeof announcements.$inferInsert;
+
+// User Achievements - User progress on achievements
+export const userAchievements = pgTable('user_achievements', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  achievementId: text('achievement_id')
+    .notNull()
+    .references(() => gameAchievements.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  unlocked: boolean('unlocked').default(false).notNull(),
+  unlockedAt: timestamp('unlocked_at'),
+  progress: integer('progress'), // For progressive achievements
+  notified: boolean('notified').default(false).notNull(), // User has been notified of unlock
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('user_achievement_unique_idx').on(table.userId, table.achievementId),
+]);
+
+// Game Cloud Saves - Cloud save synchronization
+export const gameCloudSaves = pgTable('game_cloud_saves', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  slotNumber: integer('slot_number').notNull(),
+  slotType: text('slot_type').notNull(), // 'auto' | 'manual' | 'quicksave' | 'checkpoint'
+  name: text('name'),
+  description: text('description'),
+  thumbnailUrl: text('thumbnail_url'),
+  sizeBytes: text('size_bytes').notNull(), // Stored as string for bigint precision
+  checksum: text('checksum').notNull(),
+  checksumType: text('checksum_type').notNull(), // 'md5' | 'sha256'
+  gameVersion: text('game_version'),
+  playtimeMinutes: integer('playtime_minutes'),
+  gameProgress: json('game_progress').$type<Record<string, unknown>>(), // Game-specific metadata
+  syncStatus: text('sync_status').default('synced').notNull(), // 'synced' | 'uploading' | 'downloading' | 'conflict' | 'error'
+  cloudUrl: text('cloud_url'),
+  localPath: text('local_path'),
+  conflictData: json('conflict_data').$type<{
+    localChecksum: string;
+    cloudChecksum: string;
+    localModifiedAt: string;
+    cloudModifiedAt: string;
+    localSizeBytes: number;
+    cloudSizeBytes: number;
+  }>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  syncedAt: timestamp('synced_at'),
+}, (table) => [
+  uniqueIndex('game_cloud_save_slot_idx').on(table.userId, table.gameId, table.slotNumber),
+]);
+
+// Type exports for Game Platform Libraries
+export type GamePlatform = typeof gamePlatforms.$inferSelect;
+export type NewGamePlatform = typeof gamePlatforms.$inferInsert;
+export type GameSystemRequirement = typeof gameSystemRequirements.$inferSelect;
+export type NewGameSystemRequirement = typeof gameSystemRequirements.$inferInsert;
+export type GameBuild = typeof gameBuilds.$inferSelect;
+export type NewGameBuild = typeof gameBuilds.$inferInsert;
+export type GameInstallation = typeof gameInstallations.$inferSelect;
+export type NewGameInstallation = typeof gameInstallations.$inferInsert;
+export type GameAchievement = typeof gameAchievements.$inferSelect;
+export type NewGameAchievement = typeof gameAchievements.$inferInsert;
+export type UserAchievement = typeof userAchievements.$inferSelect;
+export type NewUserAchievement = typeof userAchievements.$inferInsert;
+export type GameCloudSave = typeof gameCloudSaves.$inferSelect;
+export type NewGameCloudSave = typeof gameCloudSaves.$inferInsert;
 
 // ============================================================================
 // CLOUD SAVES - Synced game saves across devices
