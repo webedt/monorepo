@@ -600,6 +600,79 @@ export interface CloudSaveSyncConflict {
   conflictType: 'newer_remote' | 'newer_local' | 'both_modified';
 }
 
+// Bone Animation types
+
+/**
+ * 2D Vector for positions and scales
+ */
+export interface Vector2 {
+  x: number;
+  y: number;
+}
+
+/**
+ * Transform data for a bone at a specific keyframe
+ */
+export interface BoneTransform {
+  position: Vector2;
+  rotation: number; // degrees
+  scale: Vector2;
+}
+
+/**
+ * Bone definition in a skeleton hierarchy
+ */
+export interface Bone {
+  name: string;
+  parent: string | null;
+  length: number;
+  localTransform: BoneTransform;
+}
+
+/**
+ * Keyframe containing transforms for all bones at a specific time
+ */
+export interface BoneKeyframe {
+  time: number; // seconds
+  transforms: Record<string, BoneTransform>;
+}
+
+/**
+ * Complete bone animation data
+ */
+export interface BoneAnimation {
+  name: string;
+  type: 'bone';
+  fps: number;
+  duration: number; // seconds
+  bones: Bone[];
+  keyframes: BoneKeyframe[];
+  loop: boolean;
+}
+
+/**
+ * Skeleton instance with current pose
+ */
+export interface Skeleton {
+  bones: Bone[];
+  pose: Record<string, BoneTransform>;
+}
+
+/**
+ * Easing function types for interpolation
+ */
+export type EasingType = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+
+/**
+ * Animation playback state
+ */
+export interface AnimationPlaybackState {
+  isPlaying: boolean;
+  currentTime: number;
+  speed: number;
+  loop: boolean;
+}
+
 // Snippet types
 export const SNIPPET_LANGUAGES = [
   'javascript', 'typescript', 'python', 'java', 'csharp', 'cpp', 'c',
