@@ -23,6 +23,8 @@ const DEFAULT_CONFIG: CoordinateSystemConfig = {
   scaleY: 1,
 };
 
+const MIN_SCALE = 1e-10;
+
 export class CoordinateSystem2D implements ICoordinateSystem2D {
   readonly config: Readonly<CoordinateSystemConfig>;
 
@@ -30,7 +32,14 @@ export class CoordinateSystem2D implements ICoordinateSystem2D {
   private readonly ySign: number;
 
   constructor(config: Partial<CoordinateSystemConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    const merged = { ...DEFAULT_CONFIG, ...config };
+    if (Math.abs(merged.scaleX) < MIN_SCALE) {
+      throw new Error('scaleX must be non-zero');
+    }
+    if (Math.abs(merged.scaleY) < MIN_SCALE) {
+      throw new Error('scaleY must be non-zero');
+    }
+    this.config = merged;
     this.xSign = this.config.xDirection === 'positive' ? 1 : -1;
     this.ySign = this.config.yDirection === 'positive' ? 1 : -1;
   }
@@ -75,6 +84,12 @@ export class CoordinateSystem2D implements ICoordinateSystem2D {
     worldWidth: number,
     worldHeight: number
   ): CoordinateSystem2D {
+    if (Math.abs(worldWidth) < MIN_SCALE) {
+      throw new Error('worldWidth must be non-zero');
+    }
+    if (Math.abs(worldHeight) < MIN_SCALE) {
+      throw new Error('worldHeight must be non-zero');
+    }
     return new CoordinateSystem2D({
       origin: { x: 0, y: canvasHeight },
       xDirection: 'positive',
@@ -245,6 +260,9 @@ export class CoordinateSystem2D implements ICoordinateSystem2D {
   }
 
   snapToGrid(point: Point2D, gridSize: number): Point2D {
+    if (Math.abs(gridSize) < MIN_SCALE) {
+      return { x: point.x, y: point.y };
+    }
     return {
       x: Math.round(point.x / gridSize) * gridSize,
       y: Math.round(point.y / gridSize) * gridSize,

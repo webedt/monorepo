@@ -3,6 +3,8 @@ import type { IVec2 } from './vec2.doc.js';
 
 export type { Point2D, IVec2 } from './vec2.doc.js';
 
+const EPSILON = 1e-10;
+
 export class Vec2 implements IVec2 {
   readonly x: number;
   readonly y: number;
@@ -85,7 +87,7 @@ export class Vec2 implements IVec2 {
 
   normalized(): Vec2 {
     const mag = this.magnitude();
-    if (mag === 0) {
+    if (mag < EPSILON) {
       return Vec2.zero();
     }
     return new Vec2(this.x / mag, this.y / mag);
@@ -106,7 +108,7 @@ export class Vec2 implements IVec2 {
   angleTo(other: Point2D): number {
     const dot = this.x * other.x + this.y * other.y;
     const magProduct = this.magnitude() * Math.sqrt(other.x * other.x + other.y * other.y);
-    if (magProduct === 0) {
+    if (magProduct < EPSILON) {
       return 0;
     }
     const cos = Math.max(-1, Math.min(1, dot / magProduct));
@@ -165,7 +167,7 @@ export class Vec2 implements IVec2 {
 
   projectOnto(onto: Point2D): Vec2 {
     const ontoMagSq = onto.x * onto.x + onto.y * onto.y;
-    if (ontoMagSq === 0) {
+    if (ontoMagSq < EPSILON * EPSILON) {
       return Vec2.zero();
     }
     const scalar = this.dot(onto) / ontoMagSq;
@@ -183,7 +185,7 @@ export class Vec2 implements IVec2 {
       const mag = Math.sqrt(magSq);
       return new Vec2((this.x / mag) * maxMagnitude, (this.y / mag) * maxMagnitude);
     }
-    return this;
+    return new Vec2(this.x, this.y);
   }
 
   clamp(min: number, max: number): Vec2 {
