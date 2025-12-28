@@ -4,7 +4,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect, CollectionsPanel } from '../../components';
+import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect, NewSessionModal, CollectionsPanel } from '../../components';
 import { sessionsApi, githubApi, collectionsApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
@@ -20,6 +20,9 @@ export class AgentsPage extends Page<PageOptions> {
   private filteredSessions: Session[] = [];
   private searchInput: Input | null = null;
   private createSessionBtn: Button | null = null;
+  private newSessionHeaderBtn: Button | null = null;
+  private newSessionEmptyBtn: Button | null = null;
+  private newSessionModal: NewSessionModal | null = null;
   private spinner: Spinner | null = null;
   private emptyIcon: Icon | null = null;
   private repoSelect: SearchableSelect | null = null;
@@ -67,6 +70,7 @@ export class AgentsPage extends Page<PageOptions> {
               </button>
             </div>
             <div class="search-container"></div>
+            <div class="new-session-header-btn"></div>
             <a href="#/trash" class="trash-link" title="View deleted sessions">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
@@ -112,6 +116,7 @@ export class AgentsPage extends Page<PageOptions> {
                 <div class="empty-icon"></div>
                 <h3 class="empty-title">No agent sessions yet</h3>
                 <p class="empty-description">Start a new session to begin coding with AI</p>
+                <div class="new-session-empty-btn"></div>
               </div>
               <div class="sessions-list" style="display: none;"></div>
             </div>
@@ -123,6 +128,24 @@ export class AgentsPage extends Page<PageOptions> {
 
   protected onMount(): void {
     super.onMount();
+
+    // Create new session modal
+    this.newSessionModal = new NewSessionModal({
+      onSessionCreated: (session) => {
+        this.navigate(`/session/${session.id}/chat`);
+      },
+    });
+
+    // Create "New Session" button in header
+    const newSessionHeaderContainer = this.$('.new-session-header-btn') as HTMLElement;
+    if (newSessionHeaderContainer) {
+      this.newSessionHeaderBtn = new Button('New Session', {
+        variant: 'primary',
+        size: 'sm',
+        onClick: () => this.openNewSessionModal(),
+      });
+      this.newSessionHeaderBtn.mount(newSessionHeaderContainer);
+    }
 
     // Create request textarea
     const textareaContainer = this.$('.request-textarea-container') as HTMLElement;
@@ -370,6 +393,11 @@ export class AgentsPage extends Page<PageOptions> {
     }
   }
 
+  private openNewSessionModal(): void {
+    this.newSessionModal?.reset();
+    this.newSessionModal?.open();
+  }
+
   private async handleCreateSession(): Promise<void> {
     if (!this.selectedRepo || !this.selectedBranch) {
       toast.error('Please select a repository and branch');
@@ -530,6 +558,16 @@ export class AgentsPage extends Page<PageOptions> {
       if (emptyIconContainer && !emptyIconContainer.hasChildNodes()) {
         this.emptyIcon = new Icon('folder', { size: 'xl' });
         this.emptyIcon.mount(emptyIconContainer);
+      }
+
+      // Add "New Session" button in empty state
+      const emptyBtnContainer = this.$('.new-session-empty-btn') as HTMLElement;
+      if (emptyBtnContainer && !emptyBtnContainer.hasChildNodes()) {
+        this.newSessionEmptyBtn = new Button('Create New Session', {
+          variant: 'primary',
+          onClick: () => this.openNewSessionModal(),
+        });
+        this.newSessionEmptyBtn.mount(emptyBtnContainer);
       }
     } else {
       empty?.style.setProperty('display', 'none');
@@ -705,6 +743,9 @@ export class AgentsPage extends Page<PageOptions> {
     this.requestTextArea?.unmount();
     this.searchInput?.unmount();
     this.createSessionBtn?.unmount();
+    this.newSessionHeaderBtn?.unmount();
+    this.newSessionEmptyBtn?.unmount();
+    this.newSessionModal?.unmount();
     this.spinner?.unmount();
     this.emptyIcon?.unmount();
     this.repoSelect?.unmount();

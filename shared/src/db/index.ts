@@ -485,6 +485,9 @@ export type {
   NewTaxonomyTerm,
   ItemTaxonomy,
   NewItemTaxonomy,
+  // Announcements types
+  Announcement,
+  NewAnnouncement,
   // Cloud saves types
   CloudSave,
   NewCloudSave,
@@ -530,6 +533,8 @@ export {
   taxonomies,
   taxonomyTerms,
   itemTaxonomies,
+  // Announcements tables
+  announcements,
   // Cloud saves tables
   cloudSaves,
   cloudSaveVersions,

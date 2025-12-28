@@ -488,6 +488,30 @@ export interface TaxonomyWithTerms extends Taxonomy {
   terms: TaxonomyTerm[];
 }
 
+// Announcements types
+export type AnnouncementType = 'maintenance' | 'feature' | 'alert' | 'general';
+export type AnnouncementPriority = 'low' | 'normal' | 'high' | 'critical';
+export type AnnouncementStatus = 'draft' | 'published' | 'archived';
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  type: AnnouncementType;
+  priority: AnnouncementPriority;
+  status: AnnouncementStatus;
+  authorId: string | null; // Nullable - set to null if author is deleted
+  publishedAt?: string;
+  expiresAt?: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  author?: {
+    id: string;
+    displayName?: string;
+  };
+}
+
 // Cloud Saves types
 export interface CloudSave {
   id: string;
