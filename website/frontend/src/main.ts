@@ -30,6 +30,7 @@ import {
   AnnouncementsPage,
   PricingPage,
   AdminPage,
+  BoneAnimationPage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -851,6 +852,15 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Code | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/session/:sessionId/bone-animation',
+        component: (params) => {
+          mountPage(BoneAnimationPage, params);
+          return document.createElement('div');
+        },
+        title: 'Bone Animation | WebEDT',
         guard: () => authStore.isAuthenticated(),
       },
       // Players feature routes
