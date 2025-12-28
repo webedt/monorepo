@@ -330,6 +330,13 @@ function updateHeader(): void {
       nav.appendChild(a);
     }
 
+    // Trash icon
+    const trashBtn = new IconButton('trash', {
+      label: 'Trash',
+      onClick: () => router.navigate('/trash'),
+    });
+    actions.appendChild(trashBtn.getElement());
+
     // Settings icon
     const settingsBtn = new IconButton('settings', {
       label: 'Settings',
