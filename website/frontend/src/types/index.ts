@@ -335,6 +335,12 @@ export interface WishlistItem {
   game?: Game;
 }
 
+export interface StoreHighlights {
+  featured: Game[];
+  new: Game[];
+  hasHighlights: boolean;
+}
+
 export interface CommunityPost {
   id: string;
   userId: string;

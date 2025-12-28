@@ -826,6 +826,25 @@ export const storeApi = {
 
   removeFromWishlist: (gameId: string) =>
     fetchApi(`/api/store/wishlist/${gameId}`, { method: 'DELETE' }),
+
+  getNew: (options?: { limit?: number; days?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.days) params.append('days', String(options.days));
+    const queryString = params.toString();
+    return fetchApi<{ games: Game[] }>(`/api/store/new${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getHighlights: (options?: { featuredLimit?: number; newLimit?: number; days?: number }) => {
+    const params = new URLSearchParams();
+    if (options?.featuredLimit) params.append('featuredLimit', String(options.featuredLimit));
+    if (options?.newLimit) params.append('newLimit', String(options.newLimit));
+    if (options?.days) params.append('days', String(options.days));
+    const queryString = params.toString();
+    return fetchApi<{ featured: Game[]; new: Game[]; hasHighlights: boolean }>(
+      `/api/store/highlights${queryString ? `?${queryString}` : ''}`
+    );
+  },
 };
 
 // ============================================================================

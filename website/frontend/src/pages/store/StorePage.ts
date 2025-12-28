@@ -5,8 +5,8 @@
 
 import { Page } from '../base/Page';
 import { storeApi } from '../../lib/api';
-import { GameCard } from '../../components';
-import type { Game } from '../../types';
+import { GameCard, StoreHighlights } from '../../components';
+import type { Game, StoreHighlights as StoreHighlightsData } from '../../types';
 import './store.css';
 
 export class StorePage extends Page {
@@ -15,7 +15,7 @@ export class StorePage extends Page {
   protected requiresAuth = false;
 
   private games: Game[] = [];
-  private featuredGames: Game[] = [];
+  private highlights: StoreHighlightsData | null = null;
   private genres: string[] = [];
   private loading = true;
   private searchQuery = '';
@@ -25,6 +25,7 @@ export class StorePage extends Page {
   private total = 0;
   private offset = 0;
   private limit = 20;
+  private highlightsComponent: StoreHighlights | null = null;
 
   protected render(): string {
     if (this.loading) {
@@ -45,7 +46,7 @@ export class StorePage extends Page {
           <p class="store-subtitle">Browse and discover amazing games</p>
         </header>
 
-        ${this.renderFeatured()}
+        <div id="store-highlights-container"></div>
 
         <section class="store-browse">
           <div class="store-filters">
@@ -96,36 +97,26 @@ export class StorePage extends Page {
     `;
   }
 
-  private renderFeatured(): string {
-    if (this.featuredGames.length === 0) return '';
-
-    return `
-      <section class="store-featured">
-        <h2>Featured Games</h2>
-        <div class="featured-grid" id="featured-grid"></div>
-      </section>
-    `;
-  }
-
   async load(): Promise<void> {
     this.loading = true;
     this.element.innerHTML = this.render();
 
     try {
-      // Load featured games, genres, and initial browse results in parallel
-      const [featuredResult, genresResult, browseResult] = await Promise.all([
-        storeApi.getFeatured(6),
+      // Load highlights, genres, and initial browse results in parallel
+      const [highlightsResult, genresResult, browseResult] = await Promise.all([
+        storeApi.getHighlights({ featuredLimit: 6, newLimit: 6 }),
         storeApi.getGenres(),
         storeApi.browse({ limit: this.limit, sort: this.sortBy, order: 'desc' }),
       ]);
 
-      this.featuredGames = featuredResult.games || [];
+      this.highlights = highlightsResult || null;
       this.genres = genresResult.genres || [];
       this.games = browseResult.games || [];
       this.total = browseResult.total || 0;
 
       this.loading = false;
       this.element.innerHTML = this.render();
+      this.renderHighlights();
       this.renderGameCards();
       this.setupEventListeners();
     } catch (error) {
@@ -143,20 +134,23 @@ export class StorePage extends Page {
     }
   }
 
-  private renderGameCards(): void {
-    // Render featured games
-    const featuredGrid = this.$('#featured-grid');
-    if (featuredGrid && this.featuredGames.length > 0) {
-      featuredGrid.innerHTML = '';
-      for (const game of this.featuredGames) {
-        const card = new GameCard({
-          game,
-          onClick: (g) => this.navigate(`/game/${g.id}`),
-        });
-        featuredGrid.appendChild(card.getElement());
-      }
+  private renderHighlights(): void {
+    const container = this.$('#store-highlights-container');
+    if (!container || !this.highlights || !this.highlights.hasHighlights) {
+      return;
     }
 
+    this.highlightsComponent = new StoreHighlights({
+      highlights: this.highlights,
+      onGameClick: (game) => this.navigate(`/game/${game.id}`),
+      featuredTitle: 'Featured Games',
+      newTitle: 'New Releases',
+    });
+
+    container.appendChild(this.highlightsComponent.getElement());
+  }
+
+  private renderGameCards(): void {
     // Render browse games
     const gamesGrid = this.$('#games-grid');
     if (gamesGrid && this.games.length > 0) {
