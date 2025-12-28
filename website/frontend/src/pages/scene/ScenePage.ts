@@ -10,6 +10,7 @@ import type { Transform } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { SpriteRenderer } from '../../lib/sprite';
 import { Viewport } from '../../lib/viewport';
 import { customComponentsStore } from '../../stores';
 import type {
@@ -40,6 +41,9 @@ interface SceneObject {
   fontSize?: number;
   fontFamily?: string;
   spriteUrl?: string;
+  // Sprite dimensions (auto-populated when image loads)
+  spriteWidth?: number;
+  spriteHeight?: number;
   // Custom component properties
   customComponentId?: string;
   customPropertyValues?: CustomComponentPropertyValues;
@@ -77,6 +81,9 @@ export class ScenePage extends Page<ScenePageOptions> {
   private gridSize = 32;
   private snapToGrid = true;
 
+  // Sprite renderer for displaying images
+  private spriteRenderer: SpriteRenderer = new SpriteRenderer();
+
   // Viewport with center-origin coordinate system
   private viewport: Viewport | null = null;
   private isPanning = false;
@@ -94,15 +101,6 @@ export class ScenePage extends Page<ScenePageOptions> {
   private showComponentsLibrary = false;
   private unsubscribeComponents: (() => void) | null = null;
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /**
-   * Escape HTML entities to prevent XSS attacks
-   */
-  private escapeHtml(str: string): string {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
 
   /**
    * Generate unique ID with randomness to prevent collisions
@@ -698,6 +696,50 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
   }
 
+  /**
+   * Get the base dimensions of an object (before scale transform)
+   */
+  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
+    let width = 100;
+    let height = 100;
+
+    switch (obj.type) {
+      case 'sprite':
+        width = obj.spriteWidth ?? 100;
+        height = obj.spriteHeight ?? 100;
+        break;
+      case 'shape':
+        if (obj.shapeType === 'rectangle') {
+          width = 100;
+          height = 80;
+        } else if (obj.shapeType === 'circle') {
+          width = 100;
+          height = 100;
+        }
+        break;
+      case 'text':
+        // Estimate text dimensions based on fontSize
+        const fontSize = obj.fontSize || 24;
+        const textLength = (obj.text || 'Text').length;
+        width = textLength * fontSize * 0.6; // Approximate character width
+        height = fontSize * 1.2;
+        break;
+      case 'custom':
+        // Calculate bounding box of all children in the custom component
+        if (obj.customComponentId) {
+          const definition = customComponentsStore.getComponent(obj.customComponentId);
+          if (definition && definition.children.length > 0) {
+            const bounds = this.getCustomComponentBounds(definition.children);
+            width = bounds.width;
+            height = bounds.height;
+          }
+        }
+        break;
+    }
+
+    return { width, height };
+  }
+
   private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
     // Get object dimensions
     const dims = this.getObjectDimensions(obj);
@@ -740,26 +782,235 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private addSprite(): void {
-    // Place new objects near origin (0, 0) in center-origin coordinates
-    const offset = this.objects.length * 20; // Offset each new object slightly
-    const obj: SceneObject = {
-      id: `sprite-${Date.now()}`,
-      name: `Sprite ${this.objects.length + 1}`,
-      type: 'sprite',
-      visible: true,
-      locked: false,
-      transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
-      zIndex: this.objects.length,
-      opacity: 1,
-      color: '#4a90d9',
+    // Show dialog to get sprite URL
+    this.showSpriteDialog();
+  }
+
+  /**
+   * Create the HTML content for the sprite dialog
+   */
+  private createSpriteDialogHTML(): string {
+    return `
+      <div class="sprite-dialog">
+        <div class="sprite-dialog-header">
+          <h3>Add Sprite</h3>
+          <button class="sprite-dialog-close">&times;</button>
+        </div>
+        <div class="sprite-dialog-content">
+          <div class="sprite-dialog-tabs">
+            <button class="sprite-tab active" data-tab="url">URL</button>
+            <button class="sprite-tab" data-tab="file">File</button>
+          </div>
+          <div class="sprite-tab-content" data-content="url">
+            <label for="sprite-url">Image URL</label>
+            <input type="url" id="sprite-url" class="sprite-dialog-input" placeholder="https://example.com/image.png">
+            <p class="sprite-dialog-hint">Enter a URL to an image (PNG, JPG, GIF, WebP, SVG)</p>
+          </div>
+          <div class="sprite-tab-content" data-content="file" style="display: none;">
+            <label for="sprite-file">Select Image</label>
+            <input type="file" id="sprite-file" class="sprite-dialog-file" accept="image/*">
+            <div class="sprite-drop-zone">
+              <p>Drop image here or click to browse</p>
+            </div>
+          </div>
+          <div class="sprite-preview-container" style="display: none;">
+            <label>Preview</label>
+            <div class="sprite-preview"></div>
+          </div>
+        </div>
+        <div class="sprite-dialog-footer">
+          <button class="sprite-dialog-btn sprite-dialog-cancel">Cancel</button>
+          <button class="sprite-dialog-btn sprite-dialog-add" disabled>Add Sprite</button>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Update the preview element with an image URL (safe, no XSS)
+   */
+  private updateSpritePreview(
+    preview: HTMLElement,
+    previewContainer: HTMLElement,
+    addBtn: HTMLButtonElement,
+    url: string
+  ): void {
+    if (url) {
+      previewContainer.style.display = 'block';
+      while (preview.firstChild) {
+        preview.removeChild(preview.firstChild);
+      }
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = 'Preview';
+      img.style.maxWidth = '200px';
+      img.style.maxHeight = '150px';
+      preview.appendChild(img);
+      addBtn.disabled = false;
+    } else {
+      previewContainer.style.display = 'none';
+      while (preview.firstChild) {
+        preview.removeChild(preview.firstChild);
+      }
+      addBtn.disabled = true;
+    }
+  }
+
+  /**
+   * Create a sprite object from a loaded image URL
+   */
+  private async createSpriteFromUrl(url: string): Promise<void> {
+    const id = `sprite-${Date.now()}`;
+
+    try {
+      await this.spriteRenderer.load(id, url);
+      const info = this.spriteRenderer.getInfo(id);
+
+      // Place new objects near origin (0, 0) in center-origin coordinates
+      const offset = this.objects.length * 20;
+      const obj: SceneObject = {
+        id,
+        name: `Sprite ${this.objects.length + 1}`,
+        type: 'sprite',
+        visible: true,
+        locked: false,
+        transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+        zIndex: this.objects.length,
+        opacity: 1,
+        spriteUrl: url,
+        spriteWidth: info?.width ?? 100,
+        spriteHeight: info?.height ?? 100,
+      };
+
+      this.objects.push(obj);
+      this.selectedObjectId = obj.id;
+      this.hasUnsavedChanges = true;
+      this.updateHierarchy();
+      this.updatePropertiesPanel();
+      this.updateStatusBar();
+      this.renderScene();
+
+      toast.success('Sprite added successfully');
+    } catch (error) {
+      console.error('Failed to load sprite:', error);
+      toast.error('Failed to load sprite image');
+    }
+  }
+
+  /**
+   * Convert a File to a data URL
+   */
+  private fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  private showSpriteDialog(): void {
+    const overlay = document.createElement('div');
+    overlay.className = 'sprite-dialog-overlay';
+    overlay.innerHTML = this.createSpriteDialogHTML();
+    document.body.appendChild(overlay);
+
+    // Get elements
+    const closeBtn = overlay.querySelector('.sprite-dialog-close') as HTMLButtonElement;
+    const cancelBtn = overlay.querySelector('.sprite-dialog-cancel') as HTMLButtonElement;
+    const addBtn = overlay.querySelector('.sprite-dialog-add') as HTMLButtonElement;
+    const urlInput = overlay.querySelector('#sprite-url') as HTMLInputElement;
+    const fileInput = overlay.querySelector('#sprite-file') as HTMLInputElement;
+    const dropZone = overlay.querySelector('.sprite-drop-zone') as HTMLElement;
+    const previewContainer = overlay.querySelector('.sprite-preview-container') as HTMLElement;
+    const preview = overlay.querySelector('.sprite-preview') as HTMLElement;
+    const tabs = overlay.querySelectorAll('.sprite-tab');
+    const tabContents = overlay.querySelectorAll('.sprite-tab-content');
+
+    let selectedUrl = '';
+    let selectedFile: File | null = null;
+
+    const closeDialog = () => document.body.removeChild(overlay);
+
+    const updatePreview = (url: string) => {
+      this.updateSpritePreview(preview, previewContainer, addBtn, url);
     };
-    this.objects.push(obj);
-    this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
-    this.updateHierarchy();
-    this.updatePropertiesPanel();
-    this.updateStatusBar();
-    this.renderScene();
+
+    const handleFile = (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please select an image file');
+        return;
+      }
+      selectedFile = file;
+      selectedUrl = '';
+      this.fileToDataUrl(file).then(updatePreview);
+    };
+
+    // Close handlers
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeDialog();
+    });
+    closeBtn.addEventListener('click', closeDialog);
+    cancelBtn.addEventListener('click', closeDialog);
+
+    // Tab switching
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = (tab as HTMLElement).dataset.tab;
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        tabContents.forEach(content => {
+          (content as HTMLElement).style.display =
+            (content as HTMLElement).dataset.content === tabName ? 'block' : 'none';
+        });
+      });
+    });
+
+    // URL input handler
+    urlInput.addEventListener('input', () => {
+      selectedUrl = urlInput.value.trim();
+      selectedFile = null;
+      const isValidUrl = selectedUrl && (
+        selectedUrl.startsWith('http://') ||
+        selectedUrl.startsWith('https://') ||
+        selectedUrl.startsWith('data:')
+      );
+      updatePreview(isValidUrl ? selectedUrl : '');
+    });
+
+    // File input handler
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files?.[0]) handleFile(fileInput.files[0]);
+    });
+
+    // Drop zone handlers
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      if (e.dataTransfer?.files?.[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    // Add sprite handler
+    addBtn.addEventListener('click', async () => {
+      let url = selectedUrl;
+      if (selectedFile) {
+        url = await this.fileToDataUrl(selectedFile);
+      }
+      if (!url) {
+        toast.error('Please provide an image URL or file');
+        return;
+      }
+      closeDialog();
+      await this.createSpriteFromUrl(url);
+    });
+
+    urlInput.focus();
   }
 
   private addShape(shapeType: ShapeType): void {
@@ -1079,6 +1330,12 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (!this.selectedObjectId) return;
     if (!confirm('Delete selected object?')) return;
 
+    // Clean up sprite from renderer cache if it's a sprite object
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (obj?.type === 'sprite') {
+      this.spriteRenderer.unload(obj.id);
+    }
+
     this.objects = this.objects.filter(o => o.id !== this.selectedObjectId);
     this.selectedObjectId = null;
     this.hasUnsavedChanges = true;
@@ -1086,35 +1343,6 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.updatePropertiesPanel();
     this.updateStatusBar();
     this.renderScene();
-  }
-
-  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
-    switch (obj.type) {
-      case 'sprite':
-        return { width: 100, height: 100 };
-      case 'shape':
-        if (obj.shapeType === 'rectangle') {
-          return { width: 100, height: 80 };
-        } else if (obj.shapeType === 'circle') {
-          return { width: 100, height: 100 };
-        }
-        return { width: 100, height: 100 };
-      case 'text':
-        const fontSize = obj.fontSize || 24;
-        const textLength = (obj.text || 'Text').length;
-        return { width: textLength * fontSize * 0.6, height: fontSize * 1.2 };
-      case 'custom':
-        // Calculate bounding box of all children in the custom component
-        if (obj.customComponentId) {
-          const definition = customComponentsStore.getComponent(obj.customComponentId);
-          if (definition && definition.children.length > 0) {
-            return this.getCustomComponentBounds(definition.children);
-          }
-        }
-        return { width: 100, height: 100 };
-      default:
-        return { width: 100, height: 100 };
-    }
   }
 
   private getCustomComponentBounds(children: CustomComponentChild[]): { width: number; height: number } {
@@ -1209,14 +1437,45 @@ export class ScenePage extends Page<ScenePageOptions> {
 
       switch (obj.type) {
         case 'sprite':
-          this.ctx.fillStyle = obj.color || '#4a90d9';
-          this.ctx.fillRect(0, -100, 100, 100);
-          // Sprite icon
-          this.ctx.fillStyle = 'white';
-          this.ctx.font = '40px Arial';
-          this.ctx.textAlign = 'center';
-          this.ctx.textBaseline = 'middle';
-          this.ctx.fillText('🖼', 50, -50);
+          // Use SpriteRenderer if image is loaded
+          if (obj.spriteUrl && this.spriteRenderer.isLoaded(obj.id)) {
+            const spriteInfo = this.spriteRenderer.getInfo(obj.id);
+            if (spriteInfo?.image) {
+              const w = obj.spriteWidth ?? spriteInfo.width;
+              const h = obj.spriteHeight ?? spriteInfo.height;
+              // Draw image at (0, -h) to account for Y-flip
+              this.ctx.drawImage(spriteInfo.image, 0, -h, w, h);
+            }
+          } else {
+            // Fallback placeholder for sprites without loaded images
+            const w = obj.spriteWidth ?? 100;
+            const h = obj.spriteHeight ?? 100;
+
+            // Draw checkerboard pattern for transparency (accounting for Y-flip)
+            const checkSize = 10;
+            for (let cy = 0; cy < h; cy += checkSize) {
+              for (let cx = 0; cx < w; cx += checkSize) {
+                this.ctx.fillStyle = ((cx + cy) / checkSize) % 2 === 0 ? '#ccc' : '#fff';
+                this.ctx.fillRect(cx, -h + cy, checkSize, checkSize);
+              }
+            }
+
+            // Draw border
+            this.ctx.strokeStyle = '#999';
+            this.ctx.lineWidth = 1;
+            this.ctx.strokeRect(0, -h, w, h);
+
+            // Draw sprite icon (flip text to render correctly)
+            this.ctx.save();
+            this.ctx.translate(w / 2, -h / 2);
+            this.ctx.scale(1, -1); // Flip text back
+            this.ctx.fillStyle = '#666';
+            this.ctx.font = `${Math.min(w, h) * 0.4}px Arial`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText('🖼', 0, 0);
+            this.ctx.restore();
+          }
           break;
 
         case 'shape':

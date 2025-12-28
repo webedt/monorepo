@@ -635,6 +635,50 @@ export interface BoneAnimation {
 }
 
 /**
+ * A single frame in a frame-based animation
+ */
+export interface AnimationFrame {
+  /** Frame duration in seconds (or use animation's default if not specified) */
+  duration?: number;
+  /** Image source - can be a URL, data URL, or canvas reference ID */
+  source: string;
+  /** Optional offset for the frame */
+  offset?: Vector2;
+  /** Optional pivot point for rotation/scaling */
+  pivot?: Vector2;
+}
+
+/**
+ * Complete frame-based animation data (sprite sheet / flipbook style)
+ */
+export interface FrameAnimation {
+  name: string;
+  type: 'frame';
+  fps: number;
+  frames: AnimationFrame[];
+  loop: boolean;
+  /** Optional ping-pong mode: play forward then backward */
+  pingPong?: boolean;
+}
+
+/**
+ * Union type for all animation types
+ */
+export type Animation = BoneAnimation | FrameAnimation;
+
+/**
+ * Animation clip reference for use in Animator
+ */
+export interface AnimationClip {
+  name: string;
+  animation: Animation;
+  /** Speed multiplier for this clip */
+  speed?: number;
+  /** Override loop setting for this clip */
+  loop?: boolean;
+}
+
+/**
  * Skeleton instance with current pose
  */
 export interface Skeleton {
@@ -882,4 +926,53 @@ export type CustomComponentPropertyValues = Record<string, string | number | boo
 export interface CustomComponentInstance {
   definitionId: string;
   propertyValues: CustomComponentPropertyValues;
+}
+
+// Audio Source types
+
+/**
+ * Oscillator waveform types for audio generation
+ */
+export type WaveformType = 'sine' | 'square' | 'sawtooth' | 'triangle';
+
+/**
+ * ADSR Envelope configuration for audio sources
+ */
+export interface EnvelopeConfig {
+  /** Attack time in seconds */
+  attack: number;
+  /** Decay time in seconds */
+  decay: number;
+  /** Sustain level (0-1) */
+  sustain: number;
+  /** Release time in seconds */
+  release: number;
+}
+
+/**
+ * Audio source configuration
+ */
+export interface AudioSourceConfig {
+  /** Oscillator waveform type */
+  waveform: WaveformType;
+  /** Base frequency in Hz */
+  frequency: number;
+  /** Volume level (0-1) */
+  volume: number;
+  /** Detune in cents */
+  detune: number;
+  /** ADSR envelope */
+  envelope: EnvelopeConfig;
+}
+
+/**
+ * Audio source playback state
+ */
+export interface AudioSourceState {
+  /** Whether audio is currently playing */
+  isPlaying: boolean;
+  /** Current frequency being played */
+  currentFrequency: number;
+  /** Current volume level */
+  currentVolume: number;
 }

@@ -155,3 +155,20 @@ export {
   // Utility
   animate,
 } from './AnimationController.js';
+
+// Animator (unified frame and bone animation playback)
+export {
+  // Types
+  type AnimatorState,
+  type AnimatorEvent,
+  type AnimatorEventHandler,
+  type FrameResult,
+  type BoneResult,
+  type AnimatorResult,
+
+  // Class
+  Animator,
+
+  // Utility
+  createAnimator,
+} from './Animator.js';
