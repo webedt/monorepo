@@ -419,3 +419,48 @@ export interface ChannelMessage {
     slug: string;
   };
 }
+
+// Taxonomy types
+export interface Taxonomy {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  slug: string;
+  allowMultiple: boolean;
+  isRequired: boolean;
+  itemTypes: string[];
+  sortOrder: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  terms?: TaxonomyTerm[];
+}
+
+export interface TaxonomyTerm {
+  id: string;
+  taxonomyId: string;
+  name: string;
+  slug: string;
+  description?: string;
+  parentId?: string;
+  color?: string;
+  icon?: string;
+  metadata?: Record<string, unknown>;
+  sortOrder: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ItemTaxonomy {
+  id: string;
+  termId: string;
+  itemType: string;
+  itemId: string;
+  createdAt: string;
+}
+
+export interface TaxonomyWithTerms extends Taxonomy {
+  terms: TaxonomyTerm[];
+}

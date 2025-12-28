@@ -121,6 +121,10 @@ export type {
   WidgetCustomizerOptions,
 } from './widget';
 
+// TaxonomyManager
+export { TaxonomyManager } from './taxonomy-manager';
+export type { TaxonomyManagerOptions } from './taxonomy-manager';
+
 // FilterDropdown
 export { FilterDropdown } from './filter-dropdown';
 export type {

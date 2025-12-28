@@ -1,0 +1,28 @@
+{
+  "name": "@webedt/auto-task",
+  "version": "1.0.0",
+  "description": "Automated task discovery and GitHub Projects management",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "auto-task": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx --env-file=../../.env src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@octokit/graphql": "^8.2.1",
+    "@octokit/rest": "^21.1.1",
+    "@webedt/shared": "file:../../shared",
+    "commander": "^14.0.2",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

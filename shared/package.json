@@ -32,15 +32,16 @@
     "lucia": "^3.2.2",
     "pg": "^8.13.1",
     "simple-git": "^3.19.1",
+    "stripe": "^20.1.0",
     "uuid": "^13.0.0",
     "ws": "^8.18.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
-    "@types/ws": "^8.5.13",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
+    "@types/ws": "^8.5.13",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }

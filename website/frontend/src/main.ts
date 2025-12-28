@@ -26,6 +26,7 @@ import {
   GameDetailPage,
   LibraryPage,
   CommunityPage,
+  AdminPage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -873,6 +874,19 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Community | WebEDT',
+      },
+      // Admin routes
+      {
+        path: '/admin',
+        component: () => {
+          mountPage(AdminPage);
+          return document.createElement('div');
+        },
+        title: 'Admin | WebEDT',
+        guard: () => {
+          const user = authStore.getUser();
+          return authStore.isAuthenticated() && !!user?.isAdmin;
+        },
       },
     ])
     .start();

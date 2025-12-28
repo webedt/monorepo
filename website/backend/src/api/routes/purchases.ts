@@ -4,11 +4,13 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, games, userLibrary, purchases, wishlists, eq, and, desc } from '@webedt/shared';
+import { db, games, userLibrary, purchases, wishlists, eq, and, desc, getPaymentService } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
+
+import type { PaymentProvider } from '@webedt/shared';
 
 const router = Router();
 
@@ -103,12 +105,12 @@ router.get('/history', async (req: Request, res: Response) => {
   }
 });
 
-// Purchase a game
+// Purchase a game (free games only - paid games use /api/payments/checkout)
 router.post('/buy/:gameId', async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
     const gameId = req.params.gameId;
-    const { paymentMethod = 'free' } = req.body;
+    const { provider } = req.body;
 
     // Get game details
     const [game] = await db
@@ -139,49 +141,89 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
       return;
     }
 
-    // For free games, we can proceed directly
-    // For paid games, require valid payment method and details
+    // For paid games, redirect to payment checkout
     if (game.price > 0) {
-      const { paymentDetails } = req.body;
-      const validPaymentMethods = ['credit_card', 'wallet', 'paypal'];
+      const paymentService = getPaymentService();
+      const availableProviders = paymentService.getAvailableProviders();
 
-      if (!validPaymentMethods.includes(paymentMethod)) {
-        res.status(400).json({
-          success: false,
-          error: 'Valid payment method required for paid games',
-          validMethods: validPaymentMethods,
-          price: game.price,
+      // If a provider is specified, create a checkout session
+      if (provider) {
+        const validProviders: PaymentProvider[] = ['stripe', 'paypal'];
+        if (!validProviders.includes(provider)) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid payment provider',
+            validProviders,
+          });
+          return;
+        }
+
+        if (!paymentService.isProviderAvailable(provider)) {
+          res.status(400).json({
+            success: false,
+            error: `Payment provider ${provider} is not available`,
+            availableProviders,
+          });
+          return;
+        }
+
+        // Build checkout URLs (provider-specific placeholders)
+        const baseUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.FRONTEND_PORT || 3000}`;
+        // Stripe replaces {CHECKOUT_SESSION_ID}; PayPal appends its own token/PayerID params
+        const successUrl = provider === 'stripe'
+          ? `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}&provider=stripe`
+          : `${baseUrl}/store/purchase-success?game_id=${gameId}&provider=paypal`;
+        const cancelUrl = `${baseUrl}/store/games/${gameId}`;
+
+        const session = await paymentService.createCheckout({
+          userId: authReq.user!.id,
+          userEmail: authReq.user!.email,
+          gameId,
+          gameName: game.title,
+          amount: game.price,
           currency: game.currency,
+          provider,
+          successUrl,
+          cancelUrl,
+        });
+
+        res.json({
+          success: true,
+          data: {
+            requiresPayment: true,
+            checkoutUrl: session.url,
+            sessionId: session.id,
+            provider: session.provider,
+          },
         });
         return;
       }
 
-      // Validate payment details are provided for paid purchases
-      if (!paymentDetails || !paymentDetails.transactionId) {
-        res.status(400).json({
-          success: false,
-          error: 'Payment details with transaction ID required',
-          price: game.price,
-          currency: game.currency,
-        });
-        return;
-      }
+      // No provider specified - return payment required response
+      res.status(402).json({
+        success: false,
+        error: 'Payment required',
+        requiresPayment: true,
+        price: game.price,
+        currency: game.currency,
+        availableProviders,
+        checkoutEndpoint: '/api/payments/checkout',
+      });
+      return;
     }
 
-    // Create purchase record
+    // Free game - complete purchase directly
     const purchaseId = uuidv4();
-    const { paymentDetails } = req.body;
     const [purchase] = await db
       .insert(purchases)
       .values({
         id: purchaseId,
         userId: authReq.user!.id,
         gameId,
-        amount: game.price,
+        amount: 0,
         currency: game.currency,
         status: 'completed',
-        paymentMethod: game.price === 0 ? 'free' : paymentMethod,
-        paymentDetails: game.price > 0 ? paymentDetails : null,
+        paymentMethod: 'free',
         completedAt: new Date(),
       })
       .returning();
@@ -214,10 +256,9 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
       .set({ downloadCount: game.downloadCount + 1 })
       .where(eq(games.id, gameId));
 
-    logger.info(`User ${authReq.user!.id} purchased game ${gameId}`, {
+    logger.info(`User ${authReq.user!.id} acquired free game ${gameId}`, {
       component: 'Purchases',
       purchaseId,
-      amount: game.price,
     });
 
     res.json({
@@ -225,7 +266,7 @@ router.post('/buy/:gameId', async (req: Request, res: Response) => {
       data: {
         purchase,
         libraryItem,
-        message: game.price === 0 ? 'Game added to library' : 'Purchase complete',
+        message: 'Game added to library',
       },
     });
   } catch (error) {

@@ -468,6 +468,18 @@ export type {
   NewCommunityChannel,
   ChannelMessage,
   NewChannelMessage,
+  // Payment types
+  PaymentTransaction,
+  NewPaymentTransaction,
+  PaymentWebhook,
+  NewPaymentWebhook,
+  // Taxonomy system types
+  Taxonomy,
+  NewTaxonomy,
+  TaxonomyTerm,
+  NewTaxonomyTerm,
+  ItemTaxonomy,
+  NewItemTaxonomy,
 } from './schema.js';
 
 // Re-export role constants and utilities from schema
@@ -496,6 +508,13 @@ export {
   // Community channels tables
   communityChannels,
   channelMessages,
+  // Payment tables
+  paymentTransactions,
+  paymentWebhooks,
+  // Taxonomy system tables
+  taxonomies,
+  taxonomyTerms,
+  itemTaxonomies,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
