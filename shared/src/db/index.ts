@@ -485,6 +485,21 @@ export type {
   NewTaxonomyTerm,
   ItemTaxonomy,
   NewItemTaxonomy,
+  // Game platform library types
+  GamePlatform,
+  NewGamePlatform,
+  GameSystemRequirement,
+  NewGameSystemRequirement,
+  GameBuild,
+  NewGameBuild,
+  GameInstallation,
+  NewGameInstallation,
+  GameAchievement,
+  NewGameAchievement,
+  UserAchievement,
+  NewUserAchievement,
+  GameCloudSave,
+  NewGameCloudSave,
   // Announcements types
   Announcement,
   NewAnnouncement,
@@ -533,6 +548,14 @@ export {
   taxonomies,
   taxonomyTerms,
   itemTaxonomies,
+  // Game platform library tables
+  gamePlatforms,
+  gameSystemRequirements,
+  gameBuilds,
+  gameInstallations,
+  gameAchievements,
+  userAchievements,
+  gameCloudSaves,
   // Announcements tables
   announcements,
   // Cloud saves tables
