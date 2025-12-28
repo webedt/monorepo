@@ -815,3 +815,52 @@ export interface SnippetListFilters {
   sortBy?: 'title' | 'usageCount' | 'lastUsedAt' | 'createdAt' | 'updatedAt';
   order?: 'asc' | 'desc';
 }
+
+// Audio Source types
+
+/**
+ * Oscillator waveform types for audio generation
+ */
+export type WaveformType = 'sine' | 'square' | 'sawtooth' | 'triangle';
+
+/**
+ * ADSR Envelope configuration for audio sources
+ */
+export interface EnvelopeConfig {
+  /** Attack time in seconds */
+  attack: number;
+  /** Decay time in seconds */
+  decay: number;
+  /** Sustain level (0-1) */
+  sustain: number;
+  /** Release time in seconds */
+  release: number;
+}
+
+/**
+ * Audio source configuration
+ */
+export interface AudioSourceConfig {
+  /** Oscillator waveform type */
+  waveform: WaveformType;
+  /** Base frequency in Hz */
+  frequency: number;
+  /** Volume level (0-1) */
+  volume: number;
+  /** Detune in cents */
+  detune: number;
+  /** ADSR envelope */
+  envelope: EnvelopeConfig;
+}
+
+/**
+ * Audio source playback state
+ */
+export interface AudioSourceState {
+  /** Whether audio is currently playing */
+  isPlaying: boolean;
+  /** Current frequency being played */
+  currentFrequency: number;
+  /** Current volume level */
+  currentVolume: number;
+}
