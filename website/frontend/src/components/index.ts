@@ -185,3 +185,7 @@ export type { TransformEditorOptions, Transform } from './transform-editor';
 // LayersPanel
 export { LayersPanel, LayerItem } from './layers-panel';
 export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
+
+// SceneTabs
+export { SceneTabs } from './scene-tabs';
+export type { SceneTabsOptions } from './scene-tabs';
