@@ -1,2 +1,2 @@
 export { MultiCursorEditor } from './MultiCursorEditor';
-export type { MultiCursorEditorOptions, EditorStateSnapshot } from './MultiCursorEditor';
+export type { MultiCursorEditorOptions } from './MultiCursorEditor';
