@@ -466,6 +466,11 @@ export type {
   NewCommunityChannel,
   ChannelMessage,
   NewChannelMessage,
+  // Payment types
+  PaymentTransaction,
+  NewPaymentTransaction,
+  PaymentWebhook,
+  NewPaymentWebhook,
 } from './schema.js';
 
 // Re-export table definitions from schema
@@ -491,6 +496,9 @@ export {
   // Community channels tables
   communityChannels,
   channelMessages,
+  // Payment tables
+  paymentTransactions,
+  paymentWebhooks,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage

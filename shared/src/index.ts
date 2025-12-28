@@ -77,6 +77,9 @@ export * from './codeAnalysis/index.js';
 // Storage - User storage quota management
 export * from './storage/index.js';
 
+// Payment - Stripe and PayPal payment providers
+export * from './payment/index.js';
+
 // =============================================================================
 // SERVICES - Dependency injection and service registry
 // =============================================================================

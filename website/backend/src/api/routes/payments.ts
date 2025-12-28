@@ -1,0 +1,479 @@
+/**
+ * Payment Routes
+ * Handles Stripe and PayPal payment processing
+ */
+
+import { Router, Request, Response } from 'express';
+import { db, games, paymentTransactions, eq, and, desc, getPaymentService } from '@webedt/shared';
+import type { AuthRequest } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
+import { logger } from '@webedt/shared';
+
+import type { PaymentProvider } from '@webedt/shared';
+
+const router = Router();
+
+/**
+ * Get available payment providers
+ * GET /api/payments/providers
+ */
+router.get('/providers', (req: Request, res: Response) => {
+  try {
+    const paymentService = getPaymentService();
+    const providers = paymentService.getAvailableProviders();
+
+    res.json({
+      success: true,
+      data: {
+        providers,
+        stripe: paymentService.isProviderAvailable('stripe'),
+        paypal: paymentService.isProviderAvailable('paypal'),
+      },
+    });
+  } catch (error) {
+    logger.error('Get providers error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Failed to get providers' });
+  }
+});
+
+/**
+ * Create a checkout session
+ * POST /api/payments/checkout
+ */
+router.post('/checkout', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { gameId, provider = 'stripe' } = req.body;
+
+    if (!gameId) {
+      res.status(400).json({ success: false, error: 'Game ID is required' });
+      return;
+    }
+
+    // Validate provider
+    const validProviders: PaymentProvider[] = ['stripe', 'paypal'];
+    if (!validProviders.includes(provider)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid payment provider',
+        validProviders,
+      });
+      return;
+    }
+
+    // Get game details
+    const [game] = await db
+      .select()
+      .from(games)
+      .where(and(eq(games.id, gameId), eq(games.status, 'published')))
+      .limit(1);
+
+    if (!game) {
+      res.status(404).json({ success: false, error: 'Game not found' });
+      return;
+    }
+
+    if (game.price === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'This game is free. Use the purchase endpoint instead.',
+      });
+      return;
+    }
+
+    const paymentService = getPaymentService();
+
+    if (!paymentService.isProviderAvailable(provider)) {
+      res.status(400).json({
+        success: false,
+        error: `Payment provider ${provider} is not available`,
+        availableProviders: paymentService.getAvailableProviders(),
+      });
+      return;
+    }
+
+    // Build success and cancel URLs
+    const baseUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.FRONTEND_PORT || 3000}`;
+    const successUrl = `${baseUrl}/store/purchase-success?session_id={CHECKOUT_SESSION_ID}&game_id=${gameId}`;
+    const cancelUrl = `${baseUrl}/store/games/${gameId}`;
+
+    const session = await paymentService.createCheckout({
+      userId: authReq.user!.id,
+      userEmail: authReq.user!.email,
+      gameId,
+      gameName: game.title,
+      amount: game.price,
+      currency: game.currency,
+      provider,
+      successUrl,
+      cancelUrl,
+    });
+
+    logger.info('Checkout session created', {
+      component: 'Payments',
+      userId: authReq.user!.id,
+      gameId,
+      provider,
+      sessionId: session.id,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        sessionId: session.id,
+        url: session.url,
+        provider: session.provider,
+      },
+    });
+  } catch (error) {
+    logger.error('Create checkout error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Failed to create checkout session' });
+  }
+});
+
+/**
+ * Get checkout session status
+ * GET /api/payments/checkout/:sessionId
+ */
+router.get('/checkout/:sessionId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { sessionId } = req.params;
+
+    // Find transaction
+    const [transaction] = await db
+      .select()
+      .from(paymentTransactions)
+      .where(
+        and(
+          eq(paymentTransactions.providerSessionId, sessionId),
+          eq(paymentTransactions.userId, authReq.user!.id)
+        )
+      )
+      .limit(1);
+
+    if (!transaction) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: transaction.id,
+        status: transaction.status,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        provider: transaction.provider,
+        purchaseId: transaction.purchaseId,
+        createdAt: transaction.createdAt,
+        completedAt: transaction.completedAt,
+      },
+    });
+  } catch (error) {
+    logger.error('Get checkout status error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Failed to get checkout status' });
+  }
+});
+
+/**
+ * Capture PayPal order after user approval
+ * POST /api/payments/paypal/capture
+ */
+router.post('/paypal/capture', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { orderId } = req.body;
+
+    if (!orderId) {
+      res.status(400).json({ success: false, error: 'Order ID is required' });
+      return;
+    }
+
+    // Verify the order belongs to this user
+    const [transaction] = await db
+      .select()
+      .from(paymentTransactions)
+      .where(
+        and(
+          eq(paymentTransactions.providerTransactionId, orderId),
+          eq(paymentTransactions.userId, authReq.user!.id),
+          eq(paymentTransactions.provider, 'paypal')
+        )
+      )
+      .limit(1);
+
+    if (!transaction) {
+      res.status(404).json({ success: false, error: 'Order not found' });
+      return;
+    }
+
+    const paymentService = getPaymentService();
+    const result = await paymentService.capturePayPalOrder(orderId);
+
+    if (!result.success) {
+      res.status(400).json({ success: false, error: result.error });
+      return;
+    }
+
+    logger.info('PayPal order captured', {
+      component: 'Payments',
+      userId: authReq.user!.id,
+      orderId,
+      purchaseId: result.purchaseId,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        transactionId: result.transactionId,
+        purchaseId: result.purchaseId,
+      },
+    });
+  } catch (error) {
+    logger.error('PayPal capture error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Failed to capture PayPal order' });
+  }
+});
+
+/**
+ * Stripe webhook handler
+ * POST /api/payments/webhooks/stripe
+ */
+router.post(
+  '/webhooks/stripe',
+  // Raw body needed for webhook signature verification
+  async (req: Request, res: Response) => {
+    try {
+      const signature = req.headers['stripe-signature'] as string;
+      if (!signature) {
+        res.status(400).json({ success: false, error: 'Missing signature' });
+        return;
+      }
+
+      // Get raw body - Express body-parser must be configured to preserve raw body
+      const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+
+      const paymentService = getPaymentService();
+      const result = await paymentService.processWebhook('stripe', rawBody, signature);
+
+      if (!result.success) {
+        logger.warn('Stripe webhook processing failed', {
+          component: 'Payments',
+          error: result.error,
+        });
+        res.status(400).json({ success: false, error: result.error });
+        return;
+      }
+
+      logger.info('Stripe webhook processed', {
+        component: 'Payments',
+        transactionId: result.transactionId,
+        purchaseId: result.purchaseId,
+      });
+
+      res.json({ success: true, received: true });
+    } catch (error) {
+      logger.error('Stripe webhook error', error as Error, { component: 'Payments' });
+      res.status(500).json({ success: false, error: 'Webhook processing failed' });
+    }
+  }
+);
+
+/**
+ * PayPal webhook handler
+ * POST /api/payments/webhooks/paypal
+ */
+router.post('/webhooks/paypal', async (req: Request, res: Response) => {
+  try {
+    // PayPal sends webhook headers with signature info
+    const transmissionId = req.headers['paypal-transmission-id'] as string;
+    const timestamp = req.headers['paypal-transmission-time'] as string;
+    const crc32 = req.headers['paypal-transmission-sig'] as string;
+    const algo = req.headers['paypal-auth-algo'] as string;
+    const certUrl = req.headers['paypal-cert-url'] as string;
+
+    if (!transmissionId || !timestamp || !crc32) {
+      res.status(400).json({ success: false, error: 'Missing PayPal headers' });
+      return;
+    }
+
+    // Construct signature string for verification
+    const signature = `${transmissionId}|${timestamp}|${crc32}|${algo}|${certUrl}`;
+    const rawBody = JSON.stringify(req.body);
+
+    const paymentService = getPaymentService();
+    const result = await paymentService.processWebhook('paypal', rawBody, signature);
+
+    if (!result.success) {
+      logger.warn('PayPal webhook processing failed', {
+        component: 'Payments',
+        error: result.error,
+      });
+      res.status(400).json({ success: false, error: result.error });
+      return;
+    }
+
+    logger.info('PayPal webhook processed', {
+      component: 'Payments',
+      transactionId: result.transactionId,
+      purchaseId: result.purchaseId,
+    });
+
+    res.json({ success: true, received: true });
+  } catch (error) {
+    logger.error('PayPal webhook error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Webhook processing failed' });
+  }
+});
+
+/**
+ * Get user's payment transaction history
+ * GET /api/payments/transactions
+ */
+router.get('/transactions', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    const transactions = await db
+      .select()
+      .from(paymentTransactions)
+      .where(eq(paymentTransactions.userId, authReq.user!.id))
+      .orderBy(desc(paymentTransactions.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const allTransactions = await db
+      .select({ id: paymentTransactions.id })
+      .from(paymentTransactions)
+      .where(eq(paymentTransactions.userId, authReq.user!.id));
+
+    res.json({
+      success: true,
+      data: {
+        transactions,
+        total: allTransactions.length,
+        limit,
+        offset,
+        hasMore: offset + limit < allTransactions.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Get transactions error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Failed to get transactions' });
+  }
+});
+
+/**
+ * Request refund for a transaction (admin approval required)
+ * POST /api/payments/transactions/:transactionId/refund
+ */
+router.post('/transactions/:transactionId/refund', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { transactionId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || reason.trim().length < 10) {
+      res.status(400).json({
+        success: false,
+        error: 'Refund reason is required (minimum 10 characters)',
+      });
+      return;
+    }
+
+    // Find transaction
+    const [transaction] = await db
+      .select()
+      .from(paymentTransactions)
+      .where(
+        and(
+          eq(paymentTransactions.id, transactionId),
+          eq(paymentTransactions.userId, authReq.user!.id)
+        )
+      )
+      .limit(1);
+
+    if (!transaction) {
+      res.status(404).json({ success: false, error: 'Transaction not found' });
+      return;
+    }
+
+    if (transaction.status !== 'succeeded') {
+      res.status(400).json({ success: false, error: 'Transaction not eligible for refund' });
+      return;
+    }
+
+    // Check refund eligibility (within 14 days)
+    const daysSincePayment = Math.floor(
+      (Date.now() - new Date(transaction.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (daysSincePayment > 14) {
+      res.status(400).json({
+        success: false,
+        error: 'Refund period expired (14 days)',
+      });
+      return;
+    }
+
+    // For now, we update the status to pending_refund
+    // Admin would then approve and trigger actual refund
+    await db
+      .update(paymentTransactions)
+      .set({
+        status: 'pending' as any, // Will be changed to pending_refund
+        metadata: {
+          ...transaction.metadata,
+          refundReason: reason.trim(),
+          refundRequestedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(paymentTransactions.id, transactionId));
+
+    logger.info('Refund requested', {
+      component: 'Payments',
+      transactionId,
+      userId: authReq.user!.id,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Refund request submitted. An administrator will review your request.',
+      },
+    });
+  } catch (error) {
+    logger.error('Request refund error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Failed to request refund' });
+  }
+});
+
+/**
+ * Payment provider health check
+ * GET /api/payments/health
+ */
+router.get('/health', async (req: Request, res: Response) => {
+  try {
+    const paymentService = getPaymentService();
+    const healthStatus = await paymentService.healthCheck();
+
+    const allHealthy = healthStatus.every((s) => s.healthy);
+
+    res.json({
+      success: true,
+      data: {
+        healthy: allHealthy,
+        providers: healthStatus,
+      },
+    });
+  } catch (error) {
+    logger.error('Payment health check error', error as Error, { component: 'Payments' });
+    res.status(500).json({ success: false, error: 'Health check failed' });
+  }
+});
+
+export default router;
