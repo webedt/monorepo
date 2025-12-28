@@ -262,6 +262,8 @@ export class LibraryPage extends Page {
       this.infiniteScroll?.updateSentinelState();
     } catch (error) {
       console.error('Failed to load more items:', error);
+      // Roll back offset on error so retry works correctly
+      this.offset -= this.limit;
     } finally {
       this.loadingMore = false;
     }

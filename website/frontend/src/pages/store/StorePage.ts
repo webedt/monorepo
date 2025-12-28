@@ -389,6 +389,10 @@ export class StorePage extends Page {
       this.infiniteScroll?.updateSentinelState();
     } catch (error) {
       console.error('Failed to browse games:', error);
+      // Roll back offset on error so retry works correctly
+      if (append) {
+        this.offset -= this.limit;
+      }
     } finally {
       this.loadingMore = false;
     }

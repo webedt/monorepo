@@ -207,7 +207,10 @@ export class CommunityPage extends Page {
       this.total = result.total || 0;
     } catch (error) {
       console.error('Failed to load posts:', error);
-      if (!append) {
+      if (append) {
+        // Roll back offset on error so retry works correctly
+        this.offset -= this.limit;
+      } else {
         this.loading = false;
         this.element.innerHTML = `
           <div class="community-page">

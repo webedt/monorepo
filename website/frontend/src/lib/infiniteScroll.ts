@@ -226,17 +226,3 @@ export class InfiniteScroll {
     document.head.appendChild(style);
   }
 }
-
-/**
- * Helper function to create and setup infinite scroll on a container
- */
-export function setupInfiniteScroll(
-  container: HTMLElement,
-  options: InfiniteScrollOptions
-): InfiniteScroll {
-  const infiniteScroll = new InfiniteScroll(options);
-  const sentinel = infiniteScroll.createSentinel();
-  container.appendChild(sentinel);
-  infiniteScroll.attach(sentinel);
-  return infiniteScroll;
-}
