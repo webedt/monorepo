@@ -72,6 +72,8 @@ export class ImagePage extends Page<ImagePageOptions> {
   private unsubscribeOnionSkinning: (() => void) | null = null;
   private onionCanvas: HTMLCanvasElement | null = null;
   private onionCtx: CanvasRenderingContext2D | null = null;
+  private tempCanvas: HTMLCanvasElement | null = null;
+  private tempCtx: CanvasRenderingContext2D | null = null;
 
   protected render(): string {
     return `
@@ -252,7 +254,6 @@ export class ImagePage extends Page<ImagePageOptions> {
           <div class="timeline-controls">
             <button class="timeline-btn" data-action="first-frame" title="First Frame">⏮</button>
             <button class="timeline-btn" data-action="prev-frame" title="Previous Frame (,)">◀</button>
-            <button class="timeline-btn" data-action="play-pause" title="Play/Pause (Space)">▶</button>
             <button class="timeline-btn" data-action="next-frame" title="Next Frame (.)">▶</button>
             <button class="timeline-btn" data-action="last-frame" title="Last Frame">⏭</button>
             <span class="timeline-separator"></span>
@@ -623,26 +624,33 @@ export class ImagePage extends Page<ImagePageOptions> {
   private drawOnionFrame(imageData: ImageData, opacity: number, tintColor: string | null): void {
     if (!this.onionCtx || !this.onionCanvas) return;
 
-    // Create temporary canvas for the frame
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = imageData.width;
-    tempCanvas.height = imageData.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
+    // Reuse or create temporary canvas for the frame
+    if (!this.tempCanvas || !this.tempCtx) {
+      this.tempCanvas = document.createElement('canvas');
+      this.tempCtx = this.tempCanvas.getContext('2d');
+      if (!this.tempCtx) return;
+    }
 
-    // Put the image data on temp canvas
-    tempCtx.putImageData(imageData, 0, 0);
+    // Resize temp canvas if needed
+    if (this.tempCanvas.width !== imageData.width || this.tempCanvas.height !== imageData.height) {
+      this.tempCanvas.width = imageData.width;
+      this.tempCanvas.height = imageData.height;
+    }
+
+    // Clear and put the image data on temp canvas
+    this.tempCtx.globalCompositeOperation = 'source-over';
+    this.tempCtx.putImageData(imageData, 0, 0);
 
     // Apply tint color if specified
     if (tintColor) {
-      tempCtx.globalCompositeOperation = 'source-atop';
-      tempCtx.fillStyle = tintColor;
-      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      this.tempCtx.globalCompositeOperation = 'source-atop';
+      this.tempCtx.fillStyle = tintColor;
+      this.tempCtx.fillRect(0, 0, this.tempCanvas.width, this.tempCanvas.height);
     }
 
     // Draw to onion canvas with opacity
     this.onionCtx.globalAlpha = opacity;
-    this.onionCtx.drawImage(tempCanvas, 0, 0);
+    this.onionCtx.drawImage(this.tempCanvas, 0, 0);
     this.onionCtx.globalAlpha = 1;
   }
 
@@ -672,15 +680,15 @@ export class ImagePage extends Page<ImagePageOptions> {
     newCanvas.width = this.mainCanvas.width;
     newCanvas.height = this.mainCanvas.height;
     const newCtx = newCanvas.getContext('2d');
-    if (newCtx) {
-      newCtx.fillStyle = '#ffffff';
-      newCtx.fillRect(0, 0, newCanvas.width, newCanvas.height);
-    }
+    if (!newCtx) return;
+
+    newCtx.fillStyle = '#ffffff';
+    newCtx.fillRect(0, 0, newCanvas.width, newCanvas.height);
 
     const newFrame: Frame = {
       id: `frame-${Date.now()}`,
       name: `Frame ${this.frames.length + 1}`,
-      imageData: newCtx!.getImageData(0, 0, newCanvas.width, newCanvas.height),
+      imageData: newCtx.getImageData(0, 0, newCanvas.width, newCanvas.height),
       duration: 100,
     };
 
@@ -798,10 +806,16 @@ export class ImagePage extends Page<ImagePageOptions> {
         </div>
       `).join('');
 
+      // Ensure temp canvas exists for thumbnail rendering
+      if (!this.tempCanvas || !this.tempCtx) {
+        this.tempCanvas = document.createElement('canvas');
+        this.tempCtx = this.tempCanvas.getContext('2d');
+      }
+
       // Render thumbnails
       container.querySelectorAll('.frame-thumb').forEach((thumb, index) => {
         const preview = thumb.querySelector('.frame-preview') as HTMLCanvasElement;
-        if (preview && this.frames[index]) {
+        if (preview && this.frames[index] && this.tempCanvas && this.tempCtx) {
           const previewCtx = preview.getContext('2d');
           if (previewCtx) {
             // Scale down the frame to fit preview
@@ -810,15 +824,15 @@ export class ImagePage extends Page<ImagePageOptions> {
             previewCtx.fillStyle = '#ffffff';
             previewCtx.fillRect(0, 0, 60, 45);
 
-            // Create temp canvas to hold full frame
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = frame.imageData.width;
-            tempCanvas.height = frame.imageData.height;
-            const tempCtx = tempCanvas.getContext('2d');
-            if (tempCtx) {
-              tempCtx.putImageData(frame.imageData, 0, 0);
-              previewCtx.drawImage(tempCanvas, 0, 0, frame.imageData.width * scale, frame.imageData.height * scale);
+            // Resize temp canvas if needed
+            if (this.tempCanvas.width !== frame.imageData.width || this.tempCanvas.height !== frame.imageData.height) {
+              this.tempCanvas.width = frame.imageData.width;
+              this.tempCanvas.height = frame.imageData.height;
             }
+
+            // Use cached temp canvas to hold full frame
+            this.tempCtx.putImageData(frame.imageData, 0, 0);
+            previewCtx.drawImage(this.tempCanvas, 0, 0, frame.imageData.width * scale, frame.imageData.height * scale);
           }
         }
 
