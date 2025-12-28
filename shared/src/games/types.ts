@@ -248,7 +248,7 @@ export interface CreateAchievementRequest {
  */
 export interface UserAchievement {
   id: string;
-  usedId: string;
+  userId: string;
   achievementId: string;
   gameId: string;
   unlocked: boolean;

@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, eq, sum } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { gameCloudSaves } from '../db/schema.js';
 import { AGameSaveService } from './AGameSaveService.js';

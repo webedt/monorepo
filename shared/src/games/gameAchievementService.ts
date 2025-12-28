@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, count, eq, sql } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { gameAchievements, userAchievements } from '../db/schema.js';
 import { AGameAchievementService } from './AGameAchievementService.js';
@@ -501,7 +501,7 @@ export class GameAchievementService extends AGameAchievementService {
   ): UserAchievement {
     return {
       id: row.id,
-      usedId: row.userId,
+      userId: row.userId,
       achievementId: row.achievementId,
       gameId: row.gameId,
       unlocked: row.unlocked,

@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { gamePlatforms, gameSystemRequirements } from '../db/schema.js';
 import { AGamePlatformService } from './AGamePlatformService.js';
@@ -227,11 +227,12 @@ export class GamePlatformService extends AGamePlatformService {
       return [];
     }
 
-    const platforms = await Promise.all(
-      platformIds.map((id) => this.getPlatform(id))
-    );
+    const results = await db
+      .select()
+      .from(gamePlatforms)
+      .where(inArray(gamePlatforms.id, platformIds));
 
-    return platforms.filter((p): p is Platform => p !== null);
+    return results.map((r) => this.mapPlatform(r));
   }
 
   async isGameAvailableOnPlatform(
