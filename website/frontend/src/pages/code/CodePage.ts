@@ -5,18 +5,17 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox, AutocompleteDropdown } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, MultiCursorEditor, Modal, DiffViewer, LintingPanel, CollaborativeCursors, CommitDialog, AIInputBox, AutocompleteDropdown } from '../../components';
 import type { ChangedFile, AutocompleteSuggestion } from '../../components';
 import { sessionsApi, storageWorkerApi, autocompleteApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { formatByFilename, canFormat } from '../../lib/codeFormatter';
 import { LintingService } from '../../lib/linting';
-import { undoRedoStore, editorSettingsStore, presenceStore } from '../../stores';
+import { editorSettingsStore, presenceStore } from '../../stores';
 import type { Session } from '../../types';
-import type { UndoRedoState } from '../../stores/undoRedoStore';
-import type { TabContentState } from '../../stores/undoRedoStore';
 import './code.css';
+import '../../components/multi-cursor-editor/multi-cursor-editor.css';
 
 interface FileNode {
   name: string;
@@ -54,17 +53,11 @@ export class CodePage extends Page<CodePageOptions> {
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
+  private multiCursorEditor: MultiCursorEditor | null = null;
   private pendingCommitFiles: Map<string, ChangedFile> = new Map();
   private commitDialog: CommitDialog | null = null;
   private commitBtn: Button | null = null;
   private aiInputBox: AIInputBox | null = null;
-  private undoRedoState: UndoRedoState<TabContentState> = {
-    canUndo: false,
-    canRedo: false,
-    historyLength: 0,
-    futureLength: 0,
-  };
-  private unsubscribeUndoRedo: (() => void) | null = null;
   private diffModal: Modal | null = null;
   private diffViewer: DiffViewer | null = null;
   private lintingService = new LintingService(300);
@@ -139,10 +132,11 @@ export class CodePage extends Page<CodePageOptions> {
                 <div class="editor-empty">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
                   <p>Select a file to view or edit</p>
+                  <p class="editor-hint">Multi-cursor: Alt+Click, Ctrl/Cmd+D (next), Ctrl/Cmd+Shift+L (all)</p>
                 </div>
                 <div class="editor-wrapper" style="display: none;">
                   <div class="collaborative-cursors-container"></div>
-                  <textarea class="code-editor" spellcheck="false"></textarea>
+                  <div class="multi-cursor-editor-container"></div>
                   <div class="autocomplete-container"></div>
                 </div>
                 <div class="preview-wrapper" style="display: none;">
@@ -218,7 +212,7 @@ export class CodePage extends Page<CodePageOptions> {
       saveBtn.mount(saveBtnContainer);
     }
 
-    // Setup undo/redo buttons
+    // Setup undo/redo buttons (CodeMirror handles undo/redo internally)
     const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
     const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
     if (undoBtn) {
@@ -228,17 +222,8 @@ export class CodePage extends Page<CodePageOptions> {
       redoBtn.addEventListener('click', () => this.handleRedo());
     }
 
-    // Setup editor
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (editor) {
-      editor.addEventListener('input', () => this.handleEditorChange());
-      editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e));
-      editor.addEventListener('blur', () => this.hideAutocomplete());
-      // Track cursor position for collaborative cursors
-      editor.addEventListener('click', () => this.handleCursorChange());
-      editor.addEventListener('keyup', () => this.handleCursorChange());
-      editor.addEventListener('select', () => this.handleCursorChange());
-    }
+    // Initialize MultiCursorEditor
+    this.initializeMultiCursorEditor();
 
     // Setup autocomplete dropdown
     const autocompleteContainer = this.$('.autocomplete-container') as HTMLElement;
@@ -250,11 +235,12 @@ export class CodePage extends Page<CodePageOptions> {
       this.autocompleteDropdown.mount(autocompleteContainer);
     }
 
-    // Setup collaborative cursors
+    // Setup collaborative cursors container
+    // Note: CollaborativeCursors is designed for textarea. For CodeMirror integration,
+    // we just mount the container but skip setting the editor element for now.
     const cursorsContainer = this.$('.collaborative-cursors-container') as HTMLElement;
-    if (cursorsContainer && editor) {
+    if (cursorsContainer) {
       this.collaborativeCursors = new CollaborativeCursors();
-      this.collaborativeCursors.setEditorElement(editor);
       this.collaborativeCursors.mount(cursorsContainer);
     }
 
@@ -691,16 +677,9 @@ export class CodePage extends Page<CodePageOptions> {
         isPreview: true,
       };
 
-      // Initialize undo/redo history for this tab
-      undoRedoStore.initialize(path, content);
-
       // Replace preview tab or add new
       const previewIndex = this.tabs.findIndex(t => t.isPreview);
       if (previewIndex >= 0) {
-        // Clean up undo/redo for the previous preview tab
-        if (this.tabs[previewIndex]) {
-          undoRedoStore.removeTab(this.tabs[previewIndex].path);
-        }
         this.tabs[previewIndex] = tab;
         this.setActiveTab(previewIndex);
       } else {
@@ -741,7 +720,7 @@ export class CodePage extends Page<CodePageOptions> {
     this.activeTabIndex = index;
     this.renderTabs();
     this.updateEditorContent();
-    this.subscribeToUndoRedo();
+    this.updateUndoRedoButtons();
 
     // Update linting for the new active tab
     this.lintCurrentFile();
@@ -798,17 +777,11 @@ export class CodePage extends Page<CodePageOptions> {
       }
     }
 
-    // Clean up undo/redo history for the closed tab
-    if (tab) {
-      undoRedoStore.removeTab(tab.path);
-    }
-
     this.tabs.splice(index, 1);
 
     if (this.tabs.length === 0) {
       this.activeTabIndex = -1;
       this.showEmpty();
-      this.subscribeToUndoRedo();
     } else if (this.activeTabIndex >= this.tabs.length) {
       this.activeTabIndex = this.tabs.length - 1;
     } else if (this.activeTabIndex > index) {
@@ -817,18 +790,24 @@ export class CodePage extends Page<CodePageOptions> {
 
     this.renderTabs();
     this.updateEditorContent();
-    this.subscribeToUndoRedo();
+    this.updateUndoRedoButtons();
   }
 
   private updateEditorContent(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor) return;
+    if (!this.multiCursorEditor) return;
 
     if (this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex]) {
-      editor.value = this.tabs[this.activeTabIndex].content;
+      const tab = this.tabs[this.activeTabIndex];
+
+      // Use loadContent to reset history when switching tabs
+      // This prevents undo history from being shared across tabs
+      const ext = tab.path.split('.').pop()?.toLowerCase() || 'text';
+      this.multiCursorEditor.loadContent(tab.content, ext);
+
       this.showEditor();
+      this.multiCursorEditor.focus();
     } else {
-      editor.value = '';
+      this.multiCursorEditor.loadContent('', 'text');
       this.showEmpty();
     }
   }
@@ -855,25 +834,48 @@ export class CodePage extends Page<CodePageOptions> {
     this.lintingPanel?.clear();
   }
 
-  private handleEditorChange(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor || this.activeTabIndex < 0) return;
+  /**
+   * Initialize the MultiCursorEditor component
+   */
+  private initializeMultiCursorEditor(): void {
+    const container = this.$('.multi-cursor-editor-container') as HTMLElement;
+    if (!container) return;
+
+    this.multiCursorEditor = new MultiCursorEditor({
+      content: '',
+      language: 'text',
+      readOnly: false,
+      lineNumbers: true,
+      onChange: (content: string) => {
+        this.handleEditorChange(content);
+      },
+      onSave: () => {
+        this.saveCurrentFile();
+      },
+    });
+
+    this.multiCursorEditor.mount(container);
+
+    // Add keyboard listener for autocomplete (Ctrl/Cmd+Space and dropdown navigation)
+    container.addEventListener('keydown', (e) => this.handleAutocompleteKeydown(e), true);
+  }
+
+  /**
+   * Handle editor content changes from the MultiCursorEditor
+   */
+  private handleEditorChange(content: string): void {
+    if (this.activeTabIndex < 0) return;
 
     const tab = this.tabs[this.activeTabIndex];
-    if (tab) {
-      const newContent = editor.value;
-      if (newContent !== tab.content) {
-        tab.content = newContent;
-        tab.isDirty = true;
-        tab.isPreview = false;
-        this.renderTabs();
+    if (tab && content !== tab.content) {
+      tab.content = content;
+      tab.isDirty = true;
+      tab.isPreview = false;
+      this.renderTabs();
+      this.updateUndoRedoButtons();
 
-        // Track change in undo/redo history
-        undoRedoStore.pushChange(tab.path, newContent, editor.selectionStart);
-
-        // Trigger linting
-        this.lintCurrentFile();
-      }
+      // Trigger linting
+      this.lintCurrentFile();
     }
   }
 
@@ -895,138 +897,82 @@ export class CodePage extends Page<CodePageOptions> {
   }
 
   private navigateToLine(line: number, column: number): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor || this.activeTabIndex < 0) return;
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
 
     const tab = this.tabs[this.activeTabIndex];
     if (!tab) return;
 
-    const lines = tab.content.split('\n');
-    let position = 0;
+    // Use MultiCursorEditor's scrollToLine method
+    this.multiCursorEditor.scrollToLine(line);
 
-    // Calculate position for the target line
-    for (let i = 0; i < line - 1 && i < lines.length; i++) {
-      position += lines[i].length + 1; // +1 for newline
-    }
-
-    // Add column offset (1-indexed to 0-indexed)
-    position += Math.min(column - 1, lines[line - 1]?.length || 0);
-
-    // Focus the editor and set cursor position
-    editor.focus();
-    editor.selectionStart = position;
-    editor.selectionEnd = position;
-
-    // Scroll to make the cursor visible
-    const lineHeight = 20; // Approximate line height
-    const targetScroll = (line - 5) * lineHeight; // Show some context above
-    editor.scrollTop = Math.max(0, targetScroll);
+    // Set cursor position at the line/column
+    const position = this.multiCursorEditor.getPositionFromLineColumn(line, column);
+    this.multiCursorEditor.setCursorPosition(position);
+    this.multiCursorEditor.focus();
   }
 
+  /**
+   * Trigger undo in the editor
+   */
   private handleUndo(): void {
-    if (this.activeTabIndex < 0) return;
-
-    const tab = this.tabs[this.activeTabIndex];
-    if (!tab) return;
-
-    const previousState = undoRedoStore.undo(tab.path);
-    if (previousState) {
-      tab.content = previousState.content;
-      tab.isDirty = true;
-      this.updateEditorContent();
-      this.renderTabs();
-
-      // Restore cursor position if available
-      if (previousState.cursorPosition !== undefined) {
-        const editor = this.$('.code-editor') as HTMLTextAreaElement;
-        if (editor) {
-          editor.selectionStart = editor.selectionEnd = previousState.cursorPosition;
-        }
-      }
-    }
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+    this.multiCursorEditor.undoChange();
+    this.updateUndoRedoButtons();
   }
 
+  /**
+   * Trigger redo in the editor
+   */
   private handleRedo(): void {
-    if (this.activeTabIndex < 0) return;
-
-    const tab = this.tabs[this.activeTabIndex];
-    if (!tab) return;
-
-    const nextState = undoRedoStore.redo(tab.path);
-    if (nextState) {
-      tab.content = nextState.content;
-      tab.isDirty = true;
-      this.updateEditorContent();
-      this.renderTabs();
-
-      // Restore cursor position if available
-      if (nextState.cursorPosition !== undefined) {
-        const editor = this.$('.code-editor') as HTMLTextAreaElement;
-        if (editor) {
-          editor.selectionStart = editor.selectionEnd = nextState.cursorPosition;
-        }
-      }
-    }
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
+    this.multiCursorEditor.redoChange();
+    this.updateUndoRedoButtons();
   }
 
+  /**
+   * Update the undo/redo button states based on editor history
+   */
   private updateUndoRedoButtons(): void {
     const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
     const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
 
+    const hasActiveFile = this.activeTabIndex >= 0 && this.tabs[this.activeTabIndex];
+
     if (undoBtn) {
-      undoBtn.disabled = !this.undoRedoState.canUndo;
+      undoBtn.disabled = !hasActiveFile || !this.multiCursorEditor?.canUndo();
     }
     if (redoBtn) {
-      redoBtn.disabled = !this.undoRedoState.canRedo;
+      redoBtn.disabled = !hasActiveFile || !this.multiCursorEditor?.canRedo();
     }
   }
 
-  private subscribeToUndoRedo(): void {
-    // Unsubscribe from previous tab
-    if (this.unsubscribeUndoRedo) {
-      this.unsubscribeUndoRedo();
-      this.unsubscribeUndoRedo = null;
-    }
-
-    if (this.activeTabIndex < 0) {
-      this.undoRedoState = {
-        canUndo: false,
-        canRedo: false,
-        historyLength: 0,
-        futureLength: 0,
-      };
-      this.updateUndoRedoButtons();
-      return;
-    }
-
-    const tab = this.tabs[this.activeTabIndex];
-    if (!tab) return;
-
-    this.unsubscribeUndoRedo = undoRedoStore.subscribe(tab.path, (state) => {
-      this.undoRedoState = state;
-      this.updateUndoRedoButtons();
-    });
-  }
-
-  private handleEditorKeydown(e: KeyboardEvent): void {
+  /**
+   * Handle keyboard events for autocomplete navigation
+   * Called from the editor container to handle autocomplete when visible
+   */
+  private handleAutocompleteKeydown(e: KeyboardEvent): void {
     // Handle autocomplete navigation when dropdown is visible
     if (this.autocompleteDropdown?.getIsVisible()) {
       switch (e.key) {
         case 'Escape':
           e.preventDefault();
+          e.stopPropagation();
           this.hideAutocomplete();
           return;
         case 'ArrowUp':
           e.preventDefault();
+          e.stopPropagation();
           this.autocompleteDropdown.selectPrevious();
           return;
         case 'ArrowDown':
           e.preventDefault();
+          e.stopPropagation();
           this.autocompleteDropdown.selectNext();
           return;
         case 'Tab':
         case 'Enter':
           e.preventDefault();
+          e.stopPropagation();
           this.autocompleteDropdown.acceptSelected();
           return;
       }
@@ -1035,48 +981,9 @@ export class CodePage extends Page<CodePageOptions> {
     // Cmd/Ctrl+Space to trigger autocomplete
     if ((e.metaKey || e.ctrlKey) && e.key === ' ') {
       e.preventDefault();
+      e.stopPropagation();
       this.triggerAutocomplete();
       return;
-    }
-
-    // Cmd/Ctrl+S to save
-    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-      e.preventDefault();
-      this.saveCurrentFile();
-      return;
-    }
-
-    // Shift+Alt+F to format
-    if (e.shiftKey && e.altKey && e.key === 'F') {
-      e.preventDefault();
-      this.formatCurrentFile();
-      return;
-    }
-
-    // Cmd/Ctrl+Z to undo
-    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-      e.preventDefault();
-      this.handleUndo();
-      return;
-    }
-
-    // Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y to redo
-    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' && e.shiftKey || e.key === 'y')) {
-      e.preventDefault();
-      this.handleRedo();
-      return;
-    }
-
-    // Tab key inserts spaces (when autocomplete is not open)
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const editor = e.target as HTMLTextAreaElement;
-      const start = editor.selectionStart;
-      const end = editor.selectionEnd;
-      const spaces = '  ';
-      editor.value = editor.value.substring(0, start) + spaces + editor.value.substring(end);
-      editor.selectionStart = editor.selectionEnd = start + spaces.length;
-      this.handleEditorChange();
     }
   }
 
@@ -1139,7 +1046,7 @@ export class CodePage extends Page<CodePageOptions> {
   }
 
   private formatCurrentFile(): void {
-    if (this.activeTabIndex < 0) return;
+    if (this.activeTabIndex < 0 || !this.multiCursorEditor) return;
 
     const tab = this.tabs[this.activeTabIndex];
     if (!tab) return;
@@ -1163,25 +1070,21 @@ export class CodePage extends Page<CodePageOptions> {
 
     // Only update if content actually changed
     if (result.content !== tab.content) {
-      const editor = this.$('.code-editor') as HTMLTextAreaElement;
-      const cursorPosition = editor?.selectionStart || 0;
+      const cursorPosition = this.multiCursorEditor.getCursorPosition();
 
       tab.content = result.content;
       tab.isDirty = true;
       tab.isPreview = false;
 
-      // Update editor content
-      if (editor) {
-        editor.value = result.content;
-        // Try to restore cursor position, clamped to new content length
-        const newPosition = Math.min(cursorPosition, result.content.length);
-        editor.selectionStart = editor.selectionEnd = newPosition;
-      }
+      // Update editor content using setContent (adds to undo history)
+      this.multiCursorEditor.setContent(result.content);
 
-      // Track change in undo/redo history
-      undoRedoStore.pushChange(tab.path, result.content, cursorPosition);
+      // Try to restore cursor position, clamped to new content length
+      const newPosition = Math.min(cursorPosition, result.content.length);
+      this.multiCursorEditor.setCursorPosition(newPosition);
 
       this.renderTabs();
+      this.updateUndoRedoButtons();
       toast.success('File formatted');
     } else {
       toast.info('File already formatted');
@@ -1198,7 +1101,7 @@ export class CodePage extends Page<CodePageOptions> {
     }
 
     // Format on save if enabled
-    if (editorSettingsStore.getFormatOnSave() && canFormat(tab.name)) {
+    if (editorSettingsStore.getFormatOnSave() && canFormat(tab.name) && this.multiCursorEditor) {
       const settings = editorSettingsStore.getSettings();
       const result = formatByFilename(tab.content, tab.name, {
         tabSize: settings.tabSize,
@@ -1206,12 +1109,9 @@ export class CodePage extends Page<CodePageOptions> {
       });
 
       if (result.success && result.content !== tab.content) {
-        const editor = this.$('.code-editor') as HTMLTextAreaElement;
         tab.content = result.content;
-        if (editor) {
-          editor.value = result.content;
-        }
-        undoRedoStore.pushChange(tab.path, result.content, editor?.selectionStart || 0);
+        this.multiCursorEditor.setContent(result.content);
+        this.updateUndoRedoButtons();
       } else if (!result.success) {
         // Warn user that formatting failed but continue with save
         toast.warning(`Could not format: ${result.error || 'Unknown error'}`);
@@ -1274,41 +1174,6 @@ export class CodePage extends Page<CodePageOptions> {
       presenceStore.connect(owner, repo, branch).catch(error => {
         console.error('Failed to connect to presence:', error);
       });
-    }
-  }
-
-  /**
-   * Handle cursor position changes
-   */
-  private handleCursorChange(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor) return;
-
-    const tab = this.tabs[this.activeTabIndex];
-    if (!tab) return;
-
-    // Calculate line and column from cursor position
-    const text = editor.value.substring(0, editor.selectionStart);
-    const lines = text.split('\n');
-    const line = lines.length - 1;
-    const col = lines[lines.length - 1].length;
-
-    // Calculate selection if any
-    const hasSelection = editor.selectionStart !== editor.selectionEnd;
-    if (hasSelection) {
-      const endText = editor.value.substring(0, editor.selectionEnd);
-      const endLines = endText.split('\n');
-      const endLine = endLines.length - 1;
-      const endCol = endLines[endLines.length - 1].length;
-
-      presenceStore.updateSelection(tab.path, line, endLine, col, endCol);
-    } else {
-      presenceStore.updateCursor(tab.path, line, col);
-    }
-
-    // Update the collaborative cursors component with the current file
-    if (this.collaborativeCursors) {
-      this.collaborativeCursors.setFilePath(tab.path);
     }
   }
 
@@ -1403,29 +1268,27 @@ export class CodePage extends Page<CodePageOptions> {
   // =========================================================================
 
   private triggerAutocomplete(): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor || this.activeTabIndex < 0) return;
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
 
     const tab = this.tabs[this.activeTabIndex];
     if (!tab) return;
 
-    const cursorPos = editor.selectionStart;
-    const content = editor.value;
+    const cursorPos = this.multiCursorEditor.getCursorPosition();
+    const content = this.multiCursorEditor.getContent();
     const prefix = content.slice(0, cursorPos);
     const suffix = content.slice(cursorPos);
 
     // Get language from file extension
     const language = this.getLanguageFromPath(tab.path);
 
-    this.fetchAutocomplete(prefix, suffix, language, tab.path, editor);
+    this.fetchAutocomplete(prefix, suffix, language, tab.path);
   }
 
   private async fetchAutocomplete(
     prefix: string,
     suffix: string,
     language: string,
-    filePath: string,
-    editor: HTMLTextAreaElement
+    filePath: string
   ): Promise<void> {
     if (this.isAutocompleteLoading || isOffline()) return;
 
@@ -1441,8 +1304,8 @@ export class CodePage extends Page<CodePageOptions> {
       });
 
       if (response.suggestions.length > 0) {
-        // Calculate position for dropdown
-        const position = this.getCaretPosition(editor);
+        // Calculate position for dropdown based on editor cursor
+        const position = this.getCaretPositionFromEditor();
         this.showAutocomplete(position.x, position.y, response.suggestions);
       } else {
         this.hideAutocomplete();
@@ -1465,84 +1328,51 @@ export class CodePage extends Page<CodePageOptions> {
   }
 
   private acceptAutocompleteSuggestion(suggestion: AutocompleteSuggestion): void {
-    const editor = this.$('.code-editor') as HTMLTextAreaElement;
-    if (!editor || this.activeTabIndex < 0) return;
+    if (!this.multiCursorEditor || this.activeTabIndex < 0) return;
 
     const tab = this.tabs[this.activeTabIndex];
     if (!tab) return;
 
-    const cursorPos = editor.selectionStart;
-    const content = editor.value;
+    // Insert the suggestion at cursor position using MultiCursorEditor
+    this.multiCursorEditor.insertText(suggestion.text);
 
-    // Insert the suggestion at cursor position
-    const newContent = content.slice(0, cursorPos) + suggestion.text + content.slice(cursorPos);
-    editor.value = newContent;
-
-    // Move cursor to end of inserted text
-    const newCursorPos = cursorPos + suggestion.text.length;
-    editor.selectionStart = editor.selectionEnd = newCursorPos;
-
-    // Update tab content
-    tab.content = newContent;
+    // Update tab content (the onChange callback will handle this, but update manually for safety)
+    tab.content = this.multiCursorEditor.getContent();
     tab.isDirty = true;
     tab.isPreview = false;
     this.renderTabs();
-
-    // Track change in undo/redo history
-    undoRedoStore.pushChange(tab.path, newContent, newCursorPos);
 
     // Hide autocomplete
     this.hideAutocomplete();
 
     // Focus editor
-    editor.focus();
+    this.multiCursorEditor.focus();
   }
 
-  private getCaretPosition(editor: HTMLTextAreaElement): { x: number; y: number } {
-    // Create a temporary element to measure text dimensions
-    const mirror = document.createElement('div');
-    const computed = getComputedStyle(editor);
+  /**
+   * Get caret position from the CodeMirror-based MultiCursorEditor
+   */
+  private getCaretPositionFromEditor(): { x: number; y: number } {
+    const editorContainer = this.$('.multi-cursor-editor-container') as HTMLElement;
+    if (!editorContainer || !this.multiCursorEditor) {
+      return { x: 0, y: 0 };
+    }
 
-    // Copy styles
-    mirror.style.cssText = `
-      position: absolute;
-      visibility: hidden;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      overflow: hidden;
-      width: ${editor.clientWidth}px;
-      font: ${computed.font};
-      padding: ${computed.padding};
-      border: ${computed.border};
-      line-height: ${computed.lineHeight};
-      letter-spacing: ${computed.letterSpacing};
-    `;
+    // Find the CodeMirror cursor element
+    const cursor = editorContainer.querySelector('.cm-cursor-primary, .cm-cursor') as HTMLElement;
+    if (cursor) {
+      const cursorRect = cursor.getBoundingClientRect();
+      return {
+        x: cursorRect.left,
+        y: cursorRect.bottom + 4, // Position below the cursor with a small offset
+      };
+    }
 
-    // Copy text up to cursor
-    const textBeforeCursor = editor.value.substring(0, editor.selectionStart);
-    mirror.textContent = textBeforeCursor;
-
-    // Add a span at cursor position
-    const span = document.createElement('span');
-    span.textContent = '|';
-    mirror.appendChild(span);
-
-    document.body.appendChild(mirror);
-
-    const editorRect = editor.getBoundingClientRect();
-    const spanRect = span.getBoundingClientRect();
-    const mirrorRect = mirror.getBoundingClientRect();
-
-    document.body.removeChild(mirror);
-
-    // Calculate position relative to viewport
-    const x = editorRect.left + (spanRect.left - mirrorRect.left);
-    const y = editorRect.top + (spanRect.top - mirrorRect.top) + parseInt(computed.lineHeight);
-
-    // Adjust for scroll
+    // Fallback: use editor container position
+    const containerRect = editorContainer.getBoundingClientRect();
     return {
-      x: x - editor.scrollLeft,
-      y: y - editor.scrollTop + 20, // Add offset below the cursor
+      x: containerRect.left + 20,
+      y: containerRect.top + 40,
     };
   }
 
@@ -1607,16 +1437,10 @@ export class CodePage extends Page<CodePageOptions> {
       this.commitDialog = null;
     }
 
-    // Cleanup undo/redo subscription and flush any pending changes
-    if (this.unsubscribeUndoRedo) {
-      this.unsubscribeUndoRedo();
-      this.unsubscribeUndoRedo = null;
-    }
-    undoRedoStore.flushAll();
-
-    // Clean up undo/redo history for all open tabs
-    for (const tab of this.tabs) {
-      undoRedoStore.removeTab(tab.path);
+    // Cleanup MultiCursorEditor
+    if (this.multiCursorEditor) {
+      this.multiCursorEditor.unmount();
+      this.multiCursorEditor = null;
     }
 
     // Cleanup offline subscription
