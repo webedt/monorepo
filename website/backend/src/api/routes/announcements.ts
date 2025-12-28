@@ -12,16 +12,20 @@ import {
   and,
   or,
   desc,
-  asc,
   gt,
   isNull,
+  sql,
 } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
+
+// Input validation constants
+const MAX_TITLE_LENGTH = 200;
+const MAX_CONTENT_LENGTH = 50000;
 
 // Get published announcements (public)
 router.get('/', async (req: Request, res: Response) => {
@@ -69,13 +73,13 @@ router.get('/', async (req: Request, res: Response) => {
       .limit(limit)
       .offset(offset);
 
-    // Get total count
-    const allAnnouncements = await db
-      .select({ id: announcements.id })
+    // Get total count using COUNT(*)
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)` })
       .from(announcements)
       .where(and(...conditions));
 
-    const total = allAnnouncements.length;
+    const total = Number(countResult?.count ?? 0);
 
     res.json({
       success: true,
@@ -95,6 +99,76 @@ router.get('/', async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Get announcements error', error as Error, { component: 'Announcements' });
+    res.status(500).json({ success: false, error: 'Failed to fetch announcements' });
+  }
+});
+
+// IMPORTANT: Admin routes must be defined BEFORE /:id to avoid route conflicts
+// List all announcements for admin (including drafts and archived)
+router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { type, priority, status } = req.query;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Build conditions
+    const conditions: ReturnType<typeof eq>[] = [];
+
+    if (type) {
+      conditions.push(eq(announcements.type, type as string));
+    }
+
+    if (priority) {
+      conditions.push(eq(announcements.priority, priority as string));
+    }
+
+    if (status) {
+      conditions.push(eq(announcements.status, status as string));
+    }
+
+    // Get all announcements with author info
+    const items = await db
+      .select({
+        announcement: announcements,
+        author: {
+          id: users.id,
+          displayName: users.displayName,
+          email: users.email,
+        },
+      })
+      .from(announcements)
+      .innerJoin(users, eq(announcements.authorId, users.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(announcements.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count using COUNT(*)
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(announcements)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+    const total = Number(countResult?.count ?? 0);
+
+    res.json({
+      success: true,
+      data: {
+        announcements: items.map((a) => ({
+          ...a.announcement,
+          author: {
+            id: a.author.id,
+            displayName: a.author.displayName || a.author.email?.split('@')[0],
+          },
+        })),
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      },
+    });
+  } catch (error) {
+    logger.error('Get admin announcements error', error as Error, { component: 'Announcements' });
     res.status(500).json({ success: false, error: 'Failed to fetch announcements' });
   }
 });
@@ -162,6 +236,23 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
       return;
     }
 
+    // Validate input lengths
+    if (typeof title !== 'string' || title.length > MAX_TITLE_LENGTH) {
+      res.status(400).json({
+        success: false,
+        error: `Title must be a string with maximum ${MAX_TITLE_LENGTH} characters`,
+      });
+      return;
+    }
+
+    if (typeof content !== 'string' || content.length > MAX_CONTENT_LENGTH) {
+      res.status(400).json({
+        success: false,
+        error: `Content must be a string with maximum ${MAX_CONTENT_LENGTH} characters`,
+      });
+      return;
+    }
+
     // Validate type
     const validTypes = ['maintenance', 'feature', 'alert', 'general'];
     if (type && !validTypes.includes(type)) {
@@ -191,8 +282,8 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
       .insert(announcements)
       .values({
         id: uuidv4(),
-        title,
-        content,
+        title: title.trim(),
+        content: content.trim(),
         type: type || 'general',
         priority: priority || 'normal',
         status: status || 'draft',
@@ -241,8 +332,26 @@ router.patch('/:id', requireAdmin, async (req: Request, res: Response) => {
     // Build update data
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
 
-    if (title !== undefined) updateData.title = title;
-    if (content !== undefined) updateData.content = content;
+    if (title !== undefined) {
+      if (typeof title !== 'string' || title.length > MAX_TITLE_LENGTH) {
+        res.status(400).json({
+          success: false,
+          error: `Title must be a string with maximum ${MAX_TITLE_LENGTH} characters`,
+        });
+        return;
+      }
+      updateData.title = title.trim();
+    }
+    if (content !== undefined) {
+      if (typeof content !== 'string' || content.length > MAX_CONTENT_LENGTH) {
+        res.status(400).json({
+          success: false,
+          error: `Content must be a string with maximum ${MAX_CONTENT_LENGTH} characters`,
+        });
+        return;
+      }
+      updateData.content = content.trim();
+    }
     if (type !== undefined) {
       const validTypes = ['maintenance', 'feature', 'alert', 'general'];
       if (!validTypes.includes(type)) {
@@ -328,75 +437,6 @@ router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Delete announcement error', error as Error, { component: 'Announcements' });
     res.status(500).json({ success: false, error: 'Failed to delete announcement' });
-  }
-});
-
-// List all announcements for admin (including drafts and archived)
-router.get('/admin/all', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const { type, priority, status } = req.query;
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-    const offset = parseInt(req.query.offset as string) || 0;
-
-    // Build conditions
-    const conditions: ReturnType<typeof eq>[] = [];
-
-    if (type) {
-      conditions.push(eq(announcements.type, type as string));
-    }
-
-    if (priority) {
-      conditions.push(eq(announcements.priority, priority as string));
-    }
-
-    if (status) {
-      conditions.push(eq(announcements.status, status as string));
-    }
-
-    // Get all announcements with author info
-    const items = await db
-      .select({
-        announcement: announcements,
-        author: {
-          id: users.id,
-          displayName: users.displayName,
-          email: users.email,
-        },
-      })
-      .from(announcements)
-      .innerJoin(users, eq(announcements.authorId, users.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(announcements.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    // Get total count
-    const allAnnouncements = await db
-      .select({ id: announcements.id })
-      .from(announcements)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
-
-    const total = allAnnouncements.length;
-
-    res.json({
-      success: true,
-      data: {
-        announcements: items.map((a) => ({
-          ...a.announcement,
-          author: {
-            id: a.author.id,
-            displayName: a.author.displayName || a.author.email?.split('@')[0],
-          },
-        })),
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
-    });
-  } catch (error) {
-    logger.error('Get admin announcements error', error as Error, { component: 'Announcements' });
-    res.status(500).json({ success: false, error: 'Failed to fetch announcements' });
   }
 });
 

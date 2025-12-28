@@ -1,6 +1,6 @@
 /**
  * Announcements Page
- * View official platform announcements
+ * View official platform announcements (list and detail views)
  */
 
 import { Page } from '../base/Page';
@@ -14,6 +14,8 @@ export class AnnouncementsPage extends Page {
   protected requiresAuth = false;
 
   private announcements: Announcement[] = [];
+  private singleAnnouncement: Announcement | null = null;
+  private isDetailView = false;
   private loading = true;
   private activeTab: AnnouncementType | 'all' = 'all';
   private total = 0;
@@ -26,12 +28,22 @@ export class AnnouncementsPage extends Page {
         <div class="announcements-page">
           <div class="loading-state">
             <div class="spinner"></div>
-            <p>Loading announcements...</p>
+            <p>Loading ${this.isDetailView ? 'announcement' : 'announcements'}...</p>
           </div>
         </div>
       `;
     }
 
+    // Detail view
+    if (this.isDetailView) {
+      return this.renderDetail();
+    }
+
+    // List view
+    return this.renderList();
+  }
+
+  private renderList(): string {
     return `
       <div class="announcements-page">
         <header class="announcements-header">
@@ -57,7 +69,7 @@ export class AnnouncementsPage extends Page {
             </div>
           ` : `
             <div class="announcements-list">
-              ${this.announcements.map((announcement) => this.renderAnnouncement(announcement)).join('')}
+              ${this.announcements.map((announcement) => this.renderAnnouncementCard(announcement)).join('')}
             </div>
           `}
 
@@ -73,7 +85,69 @@ export class AnnouncementsPage extends Page {
     `;
   }
 
-  private renderAnnouncement(announcement: Announcement): string {
+  private renderDetail(): string {
+    if (!this.singleAnnouncement) {
+      return `
+        <div class="announcements-page">
+          <div class="error-state">
+            <h2>Announcement not found</h2>
+            <p>This announcement may have been removed or is no longer available.</p>
+            <a href="#/announcements" class="btn btn-primary">Back to Announcements</a>
+          </div>
+        </div>
+      `;
+    }
+
+    const announcement = this.singleAnnouncement;
+    const typeLabels: Record<AnnouncementType, string> = {
+      maintenance: 'Maintenance',
+      feature: 'New Feature',
+      alert: 'Alert',
+      general: 'General',
+    };
+
+    const typeIcons: Record<AnnouncementType, string> = {
+      maintenance: '🔧',
+      feature: '✨',
+      alert: '⚠️',
+      general: '📢',
+    };
+
+    const priorityClass = announcement.priority === 'critical' ? 'priority-critical' :
+                         announcement.priority === 'high' ? 'priority-high' : '';
+
+    return `
+      <div class="announcements-page">
+        <div class="announcement-detail">
+          <a href="#/announcements" class="back-link">← Back to Announcements</a>
+
+          <article class="announcement-detail-card ${priorityClass}">
+            <div class="announcement-header">
+              <span class="announcement-type announcement-type--${announcement.type}">
+                ${typeIcons[announcement.type]} ${typeLabels[announcement.type]}
+              </span>
+              ${announcement.pinned ? '<span class="announcement-pinned">📌 Pinned</span>' : ''}
+              ${announcement.priority === 'critical' ? '<span class="announcement-priority-badge">Critical</span>' : ''}
+              ${announcement.priority === 'high' ? '<span class="announcement-priority-badge high">Important</span>' : ''}
+            </div>
+
+            <h1 class="announcement-detail-title">${this.escapeHtml(announcement.title)}</h1>
+
+            <div class="announcement-meta">
+              <span class="announcement-author">Posted by ${announcement.author?.displayName || 'Admin'}</span>
+              <span class="announcement-date">${this.formatFullDate(announcement.publishedAt || announcement.createdAt)}</span>
+            </div>
+
+            <div class="announcement-detail-content">
+              ${this.formatContent(announcement.content)}
+            </div>
+          </article>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderAnnouncementCard(announcement: Announcement): string {
     const typeLabels: Record<AnnouncementType, string> = {
       maintenance: 'Maintenance',
       feature: 'New Feature',
@@ -120,15 +194,36 @@ export class AnnouncementsPage extends Page {
 
   async load(): Promise<void> {
     this.loading = true;
+
+    // Check if we're viewing a specific announcement
+    const announcementId = this.getParams().id;
+    this.isDetailView = !!announcementId;
+
     this.element.innerHTML = this.render();
 
-    // Check for query params
-    const type = this.getQuery().get('type');
-    if (type && ['maintenance', 'feature', 'alert', 'general'].includes(type)) {
-      this.activeTab = type as AnnouncementType;
+    if (this.isDetailView && announcementId) {
+      await this.loadSingleAnnouncement(announcementId);
+    } else {
+      // Check for query params for list view
+      const type = this.getQuery().get('type');
+      if (type && ['maintenance', 'feature', 'alert', 'general'].includes(type)) {
+        this.activeTab = type as AnnouncementType;
+      }
+      await this.loadAnnouncements();
     }
+  }
 
-    await this.loadAnnouncements();
+  private async loadSingleAnnouncement(id: string): Promise<void> {
+    try {
+      this.singleAnnouncement = await announcementsApi.get(id);
+      this.loading = false;
+      this.element.innerHTML = this.render();
+    } catch (error) {
+      console.error('Failed to load announcement:', error);
+      this.singleAnnouncement = null;
+      this.loading = false;
+      this.element.innerHTML = this.render();
+    }
   }
 
   private async loadAnnouncements(append = false): Promise<void> {
@@ -201,5 +296,26 @@ export class AnnouncementsPage extends Page {
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString();
+  }
+
+  private formatFullDate(dateString: string): string {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
+
+  private formatContent(content: string): string {
+    // Convert newlines to paragraphs and escape HTML
+    const escaped = this.escapeHtml(content);
+    const paragraphs = escaped.split('\n\n').filter(p => p.trim());
+    if (paragraphs.length > 1) {
+      return paragraphs.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+    }
+    return `<p>${escaped.replace(/\n/g, '<br>')}</p>`;
   }
 }

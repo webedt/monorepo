@@ -461,7 +461,7 @@ export interface Announcement {
   type: AnnouncementType;
   priority: AnnouncementPriority;
   status: AnnouncementStatus;
-  authorId: string;
+  authorId: string | null; // Nullable - set to null if author is deleted
   publishedAt?: string;
   expiresAt?: string;
   pinned: boolean;

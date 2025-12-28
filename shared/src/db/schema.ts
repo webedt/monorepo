@@ -736,8 +736,7 @@ export const announcements = pgTable('announcements', {
   priority: text('priority').notNull().default('normal'), // 'low' | 'normal' | 'high' | 'critical'
   status: text('status').notNull().default('draft'), // 'draft' | 'published' | 'archived'
   authorId: text('author_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'set null' }),
+    .references(() => users.id, { onDelete: 'set null' }), // Nullable to allow onDelete: set null
   publishedAt: timestamp('published_at'),
   expiresAt: timestamp('expires_at'), // Optional expiration date
   pinned: boolean('pinned').default(false).notNull(), // Pinned announcements appear at top
