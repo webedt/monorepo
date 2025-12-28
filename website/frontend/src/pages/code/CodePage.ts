@@ -5,7 +5,8 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, CommitDialog } from '../../components';
+import type { ChangedFile } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
@@ -48,6 +49,9 @@ export class CodePage extends Page<CodePageOptions> {
   private offlineIndicator: OfflineIndicator | null = null;
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
+  private pendingCommitFiles: Map<string, ChangedFile> = new Map();
+  private commitDialog: CommitDialog | null = null;
+  private commitBtn: Button | null = null;
 
   protected render(): string {
     return `
@@ -66,6 +70,7 @@ export class CodePage extends Page<CodePageOptions> {
             <div class="offline-status-badge" style="display: none;">
               <span class="offline-badge">Offline Mode</span>
             </div>
+            <div class="commit-btn-container"></div>
             <div class="save-btn-container"></div>
           </div>
         </header>
@@ -123,6 +128,18 @@ export class CodePage extends Page<CodePageOptions> {
     const refreshBtn = this.$('[data-action="refresh"]') as HTMLButtonElement;
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => this.loadFiles());
+    }
+
+    // Setup commit button
+    const commitBtnContainer = this.$('.commit-btn-container') as HTMLElement;
+    if (commitBtnContainer) {
+      this.commitBtn = new Button('Commit Changes', {
+        variant: 'secondary',
+        size: 'sm',
+        disabled: true,
+        onClick: () => this.openCommitDialog(),
+      });
+      this.commitBtn.mount(commitBtnContainer);
     }
 
     // Setup save button
@@ -737,6 +754,8 @@ export class CodePage extends Page<CodePageOptions> {
         await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
         tab.isDirty = false;
         this.renderTabs();
+        // Track for commit
+        this.trackFileForCommit(tab.path, tab.content, 'modified');
         toast.success('File saved locally (will sync when online)');
       } else {
         try {
@@ -745,12 +764,16 @@ export class CodePage extends Page<CodePageOptions> {
           await offlineStorage.cacheFile(sessionPath, filePath, tab.content, 'text');
           tab.isDirty = false;
           this.renderTabs();
+          // Track for commit
+          this.trackFileForCommit(tab.path, tab.content, 'modified');
           toast.success('File saved');
         } catch {
           // If save fails, save locally
           await offlineStorage.saveFileLocally(sessionPath, filePath, tab.content, 'text');
           tab.isDirty = false;
           this.renderTabs();
+          // Track for commit
+          this.trackFileForCommit(tab.path, tab.content, 'modified');
           toast.info('Saved locally (will sync when online)');
         }
       }
@@ -762,11 +785,72 @@ export class CodePage extends Page<CodePageOptions> {
     }
   }
 
+  private trackFileForCommit(path: string, content: string, status: 'modified' | 'added' | 'deleted'): void {
+    this.pendingCommitFiles.set(path, { path, content, status });
+    this.updateCommitButton();
+  }
+
+  private updateCommitButton(): void {
+    if (!this.commitBtn) return;
+
+    const pendingCount = this.pendingCommitFiles.size;
+    const hasGitHub = !!(this.session?.repositoryOwner && this.session?.repositoryName);
+
+    if (pendingCount > 0 && hasGitHub) {
+      this.commitBtn.setDisabled(false);
+      this.commitBtn.setLabel(`Commit Changes (${pendingCount})`);
+    } else {
+      this.commitBtn.setDisabled(true);
+      this.commitBtn.setLabel('Commit Changes');
+    }
+  }
+
+  private openCommitDialog(): void {
+    if (!this.session?.repositoryOwner || !this.session?.repositoryName) {
+      toast.error('GitHub repository not connected');
+      return;
+    }
+
+    if (this.pendingCommitFiles.size === 0) {
+      toast.info('No changes to commit');
+      return;
+    }
+
+    this.commitDialog = new CommitDialog({
+      owner: this.session.repositoryOwner,
+      repo: this.session.repositoryName,
+      branch: this.session.branch || 'main',
+      onCommitSuccess: (result) => {
+        // Clear pending files after successful commit
+        this.pendingCommitFiles.clear();
+        this.updateCommitButton();
+        toast.success(`Committed: ${result.message}`);
+      },
+      onClose: () => {
+        this.commitDialog = null;
+      },
+    });
+
+    this.commitDialog.setChangedFiles(Array.from(this.pendingCommitFiles.values()));
+    this.commitDialog.open();
+  }
+
   protected onUnmount(): void {
     // Check for unsaved changes
     const hasUnsaved = this.tabs.some(t => t.isDirty);
     if (hasUnsaved) {
       console.warn('Leaving with unsaved changes');
+    }
+
+    // Check for uncommitted changes
+    if (this.pendingCommitFiles.size > 0) {
+      console.warn('Leaving with uncommitted changes');
+    }
+
+    // Cleanup commit dialog
+    if (this.commitDialog) {
+      this.commitDialog.close();
+      this.commitDialog = null;
     }
 
     // Cleanup offline subscription
