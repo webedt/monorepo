@@ -12,4 +12,7 @@
 /* Utility classes */
 @import './utilities.css';
 
+/* Syntax highlighting */
+@import './highlight.css';
+
 /* Component styles are imported where needed in TypeScript */

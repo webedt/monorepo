@@ -6,6 +6,7 @@
 import { Page, type PageOptions } from '../base/Page';
 import { Spinner, toast, ToolDetails, type ToolResult, type ToolUseBlock } from '../../components';
 import { sessionsApi, createSessionExecuteEventSource } from '../../lib/api';
+import { highlightCode, getLanguageDisplayName } from '../../lib/highlight';
 import { authStore } from '../../stores/authStore';
 import { workerStore } from '../../stores/workerStore';
 import type { Session } from '../../types';
@@ -1434,8 +1435,11 @@ export class ChatPage extends Page<ChatPageOptions> {
     const codeBlocks: string[] = [];
     let formatted = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
       const idx = codeBlocks.length;
-      const languageLabel = lang ? `<span class="code-lang">${lang}</span>` : '';
-      codeBlocks.push(`<div class="code-block">${languageLabel}<pre><code>${code.trim()}</code></pre></div>`);
+      const trimmedCode = code.trim();
+      const highlightedCode = highlightCode(trimmedCode, lang || undefined);
+      const languageLabel = lang ? `<span class="code-lang">${getLanguageDisplayName(lang)}</span>` : '';
+      const langClass = lang ? ` language-${lang.toLowerCase()}` : '';
+      codeBlocks.push(`<div class="code-block">${languageLabel}<pre><code class="hljs${langClass}">${highlightedCode}</code></pre></div>`);
       return `__CODE_BLOCK_${idx}__`;
     });
 
