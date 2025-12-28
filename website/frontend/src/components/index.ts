@@ -64,3 +64,7 @@ export type { SearchableSelectOptions, SearchableSelectOption } from './searchab
 // ToolDetails
 export { ToolDetails } from './tool-details';
 export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-details';
+
+// GameCard
+export { GameCard } from './game-card';
+export type { GameCardOptions } from './game-card';
