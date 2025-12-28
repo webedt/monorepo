@@ -354,41 +354,55 @@ class OfflineStorage {
     }
 
     const db = await this.getDb();
-    const transaction = db.transaction(['files', 'metadata'], 'readwrite');
-    const filesStore = transaction.objectStore('files');
-    const metaStore = transaction.objectStore('metadata');
-    const index = metaStore.index('lastAccess');
-
-    // Get all metadata sorted by last access (oldest first)
-    const cursor = index.openCursor();
-    let freedSpace = 0;
     const targetSpace = requiredSpace + (this.maxCacheSize * 0.1); // Free 10% extra
 
-    await new Promise<void>((resolve, reject) => {
-      cursor.onsuccess = async () => {
-        const result = cursor.result;
-        if (!result || freedSpace >= targetSpace) {
-          resolve();
-          return;
-        }
+    // First, collect all metadata sorted by last access in a read transaction
+    const readTransaction = db.transaction(['files', 'metadata'], 'readonly');
+    const metaStore = readTransaction.objectStore('metadata');
+    const filesStore = readTransaction.objectStore('files');
+    const index = metaStore.index('lastAccess');
 
-        const meta = result.value as CacheMetadata;
+    const allMetadata = await this.promisifyRequest<CacheMetadata[]>(index.getAll());
+    const allFiles = await this.promisifyRequest<CachedFile[]>(filesStore.getAll());
 
-        // Don't evict dirty files
-        const file = await this.promisifyRequest<CachedFile | undefined>(
-          filesStore.get(meta.key)
-        );
+    // Build a map for quick file lookup
+    const fileMap = new Map<string, CachedFile>();
+    for (const file of allFiles) {
+      fileMap.set(file.key, file);
+    }
 
-        if (file && !file.dirty) {
-          freedSpace += meta.size;
-          await this.promisifyRequest(filesStore.delete(meta.key));
-          await this.promisifyRequest(metaStore.delete(meta.key));
-        }
+    // Collect keys to delete (oldest first, skip dirty files)
+    const keysToDelete: string[] = [];
+    let freedSpace = 0;
 
-        result.continue();
-      };
-      cursor.onerror = () => reject(cursor.error);
-    });
+    for (const meta of allMetadata) {
+      if (freedSpace >= targetSpace) break;
+
+      const file = fileMap.get(meta.key);
+      // Don't evict dirty files
+      if (file && !file.dirty) {
+        keysToDelete.push(meta.key);
+        freedSpace += meta.size;
+      }
+    }
+
+    // Now delete in a write transaction
+    if (keysToDelete.length > 0) {
+      const writeTransaction = db.transaction(['files', 'metadata'], 'readwrite');
+      const writeFilesStore = writeTransaction.objectStore('files');
+      const writeMetaStore = writeTransaction.objectStore('metadata');
+
+      for (const key of keysToDelete) {
+        writeFilesStore.delete(key);
+        writeMetaStore.delete(key);
+      }
+
+      // Wait for transaction to complete
+      await new Promise<void>((resolve, reject) => {
+        writeTransaction.oncomplete = () => resolve();
+        writeTransaction.onerror = () => reject(writeTransaction.error);
+      });
+    }
   }
 
   /**

@@ -181,7 +181,7 @@ class OfflineManager {
    * Queue an operation to be executed when online
    */
   queueOperation(type: PendingOperation['type'], data: unknown): string {
-    const id = `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const id = `${type}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     this.pendingOperations.set(id, {
       id,
       type,

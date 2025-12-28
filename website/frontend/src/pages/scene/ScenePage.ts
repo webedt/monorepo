@@ -414,9 +414,39 @@ export class ScenePage extends Page<ScenePageOptions> {
 
   private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
     // Simple bounding box check (would be more complex for rotated objects)
-    const size = 100; // Default size
-    return x >= obj.transform.x && x <= obj.transform.x + size &&
-           y >= obj.transform.y && y <= obj.transform.y + size;
+    // Use object-specific dimensions based on type
+    let width = 100;
+    let height = 100;
+
+    switch (obj.type) {
+      case 'sprite':
+        width = 100;
+        height = 100;
+        break;
+      case 'shape':
+        if (obj.shapeType === 'rectangle') {
+          width = 100;
+          height = 80;
+        } else if (obj.shapeType === 'circle') {
+          width = 100;
+          height = 100;
+        }
+        break;
+      case 'text':
+        // Estimate text dimensions based on fontSize
+        const fontSize = obj.fontSize || 24;
+        const textLength = (obj.text || 'Text').length;
+        width = textLength * fontSize * 0.6; // Approximate character width
+        height = fontSize * 1.2;
+        break;
+    }
+
+    // Apply scale transforms
+    width *= obj.transform.scaleX;
+    height *= obj.transform.scaleY;
+
+    return x >= obj.transform.x && x <= obj.transform.x + width &&
+           y >= obj.transform.y && y <= obj.transform.y + height;
   }
 
   private addSprite(): void {

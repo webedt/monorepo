@@ -68,6 +68,9 @@ export class SoundPage extends Page<SoundPageOptions> {
   // Current file
   private currentFilePath: string | null = null;
 
+  // Event handlers for cleanup
+  private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
   protected render(): string {
     return `
       <div class="sound-page">
@@ -449,7 +452,7 @@ export class SoundPage extends Page<SoundPageOptions> {
   }
 
   private setupKeyboardShortcuts(): void {
-    document.addEventListener('keydown', (e) => {
+    this.keyboardHandler = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'SELECT') return;
 
       // Space - Play/Pause
@@ -492,7 +495,9 @@ export class SoundPage extends Page<SoundPageOptions> {
         this.updateSelectionUI();
         this.renderWaveform();
       }
-    });
+    };
+
+    document.addEventListener('keydown', this.keyboardHandler);
   }
 
   private handleWaveformMouseDown(e: MouseEvent): void {
@@ -1236,7 +1241,8 @@ export class SoundPage extends Page<SoundPageOptions> {
       // Cache for offline use
       await offlineStorage.cacheFile(sessionPath, filePath, arrayBuffer, 'binary');
 
-      this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+      // Use slice(0) to create a copy since decodeAudioData detaches the buffer
+      this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer.slice(0));
       this.setupLoadedAudio(filePath);
     } catch (error) {
       console.error('Failed to load audio:', error);
@@ -1425,6 +1431,11 @@ export class SoundPage extends Page<SoundPageOptions> {
 
   protected onUnmount(): void {
     this.stopAnimation();
+
+    if (this.keyboardHandler) {
+      document.removeEventListener('keydown', this.keyboardHandler);
+      this.keyboardHandler = null;
+    }
 
     if (this.sourceNode) {
       this.sourceNode.stop();

@@ -62,6 +62,9 @@ export class ImagePage extends Page<ImagePageOptions> {
   private currentFilePath: string | null = null;
   private hasUnsavedChanges = false;
 
+  // Event handlers for cleanup
+  private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
   protected render(): string {
     return `
       <div class="image-page">
@@ -372,6 +375,12 @@ export class ImagePage extends Page<ImagePageOptions> {
       this.mainCanvas.addEventListener('mouseup', () => this.handleMouseUp());
       this.mainCanvas.addEventListener('mouseleave', () => this.handleMouseUp());
 
+      // Touch events for mobile support
+      this.mainCanvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+      this.mainCanvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+      this.mainCanvas.addEventListener('touchend', () => this.handleMouseUp());
+      this.mainCanvas.addEventListener('touchcancel', () => this.handleMouseUp());
+
       // Update cursor position in status bar
       this.mainCanvas.addEventListener('mousemove', (e) => {
         const rect = this.mainCanvas!.getBoundingClientRect();
@@ -398,7 +407,7 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   private setupKeyboardShortcuts(): void {
-    document.addEventListener('keydown', (e) => {
+    this.keyboardHandler = (e: KeyboardEvent) => {
       // Don't trigger if typing in an input
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
 
@@ -440,7 +449,9 @@ export class ImagePage extends Page<ImagePageOptions> {
         if (primaryInput) primaryInput.value = this.primaryColor;
         if (secondaryInput) secondaryInput.value = this.secondaryColor;
       }
-    });
+    };
+
+    document.addEventListener('keydown', this.keyboardHandler);
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -510,6 +521,71 @@ export class ImagePage extends Page<ImagePageOptions> {
       this.hasUnsavedChanges = true;
       this.saveToHistory();
     }
+  }
+
+  private handleTouchStart(e: TouchEvent): void {
+    if (!this.mainCanvas || !this.ctx) return;
+    e.preventDefault();
+
+    const touch = e.touches[0];
+    const rect = this.mainCanvas.getBoundingClientRect();
+    this.lastX = touch.clientX - rect.left;
+    this.lastY = touch.clientY - rect.top;
+    this.isDrawing = true;
+
+    // Start drawing immediately for pencil/brush
+    if (this.currentTool === 'pencil' || this.currentTool === 'brush') {
+      this.ctx.beginPath();
+      this.ctx.moveTo(this.lastX, this.lastY);
+    }
+  }
+
+  private handleTouchMove(e: TouchEvent): void {
+    if (!this.isDrawing || !this.mainCanvas || !this.ctx) return;
+    e.preventDefault();
+
+    const touch = e.touches[0];
+    const rect = this.mainCanvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+
+    switch (this.currentTool) {
+      case 'pencil':
+        this.ctx.strokeStyle = this.primaryColor;
+        this.ctx.lineWidth = 1;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.lineTo(x, y);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(x, y);
+        break;
+
+      case 'brush':
+        this.ctx.strokeStyle = this.primaryColor;
+        this.ctx.lineWidth = this.brushSize;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.lineTo(x, y);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(x, y);
+        break;
+
+      case 'eraser':
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = this.brushSize;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.lineTo(x, y);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(x, y);
+        break;
+    }
+
+    this.lastX = x;
+    this.lastY = y;
   }
 
   private saveToHistory(): void {
@@ -801,6 +877,11 @@ export class ImagePage extends Page<ImagePageOptions> {
   }
 
   protected onUnmount(): void {
+    if (this.keyboardHandler) {
+      document.removeEventListener('keydown', this.keyboardHandler);
+      this.keyboardHandler = null;
+    }
+
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
       this.unsubscribeOffline = null;
