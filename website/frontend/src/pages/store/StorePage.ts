@@ -6,6 +6,7 @@
 import { Page } from '../base/Page';
 import { storeApi } from '../../lib/api';
 import { GameCard, StoreHighlights, FilterBar } from '../../components';
+import { InfiniteScroll } from '../../lib/infiniteScroll';
 import type { Game, StoreHighlights as StoreHighlightsData } from '../../types';
 import type { FilterConfig, RangeValue } from '../../components';
 import './store.css';
@@ -29,8 +30,10 @@ export class StorePage extends Page {
   private total = 0;
   private offset = 0;
   private limit = 20;
+  private loadingMore = false;
   private highlightsComponent: StoreHighlights | null = null;
   private filterBar: FilterBar | null = null;
+  private infiniteScroll: InfiniteScroll | null = null;
 
   protected render(): string {
     if (this.loading) {
@@ -66,13 +69,7 @@ export class StorePage extends Page {
               ` : ''}
             </div>
 
-            ${this.total > this.offset + this.limit ? `
-              <div class="load-more">
-                <button id="load-more-btn" class="btn btn-secondary">
-                  Load More (${this.total - this.offset - this.limit} remaining)
-                </button>
-              </div>
-            ` : ''}
+            <div id="infinite-scroll-container"></div>
           </div>
         </section>
       </div>
@@ -103,7 +100,7 @@ export class StorePage extends Page {
       this.renderHighlights();
       this.renderFilterBar();
       this.renderGameCards();
-      this.setupEventListeners();
+      this.setupInfiniteScroll();
     } catch (error) {
       console.error('Failed to load store:', error);
       this.loading = false;
@@ -281,18 +278,42 @@ export class StorePage extends Page {
     }
   }
 
-  private setupEventListeners(): void {
-    // Load more button
-    const loadMoreBtn = this.$('#load-more-btn');
-    if (loadMoreBtn) {
-      loadMoreBtn.addEventListener('click', () => {
+  private setupInfiniteScroll(): void {
+    // Clean up previous instance
+    if (this.infiniteScroll) {
+      this.infiniteScroll.destroy();
+      this.infiniteScroll = null;
+    }
+
+    const container = this.$('#infinite-scroll-container');
+    if (!container) return;
+
+    this.infiniteScroll = new InfiniteScroll({
+      onLoadMore: async () => {
         this.offset += this.limit;
-        this.browseGames(true);
-      });
+        await this.browseGames(true);
+      },
+      hasMore: () => this.total > this.offset + this.limit,
+      isLoading: () => this.loadingMore,
+    });
+
+    const sentinel = this.infiniteScroll.createSentinel();
+    container.appendChild(sentinel);
+    this.infiniteScroll.attach(sentinel);
+  }
+
+  protected onUnmount(): void {
+    if (this.infiniteScroll) {
+      this.infiniteScroll.destroy();
+      this.infiniteScroll = null;
     }
   }
 
   private async browseGames(append = false): Promise<void> {
+    if (append) {
+      this.loadingMore = true;
+    }
+
     try {
       // Build browse options
       const options: Parameters<typeof storeApi.browse>[0] = {
@@ -364,28 +385,16 @@ export class StorePage extends Page {
         }
       }
 
-      // Update load more button
-      const loadMoreSection = this.$('.load-more');
-      if (loadMoreSection) {
-        if (this.total > this.offset + this.limit) {
-          loadMoreSection.innerHTML = `
-            <button id="load-more-btn" class="btn btn-secondary">
-              Load More (${this.total - this.offset - this.limit} remaining)
-            </button>
-          `;
-          const newBtn = this.$('#load-more-btn');
-          if (newBtn) {
-            newBtn.addEventListener('click', () => {
-              this.offset += this.limit;
-              this.browseGames(true);
-            });
-          }
-        } else {
-          loadMoreSection.remove();
-        }
-      }
+      // Update infinite scroll state
+      this.infiniteScroll?.updateSentinelState();
     } catch (error) {
       console.error('Failed to browse games:', error);
+      // Roll back offset on error so retry works correctly
+      if (append) {
+        this.offset -= this.limit;
+      }
+    } finally {
+      this.loadingMore = false;
     }
   }
 }

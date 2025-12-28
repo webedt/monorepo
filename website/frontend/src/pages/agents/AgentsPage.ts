@@ -9,7 +9,7 @@ import { sessionsApi, githubApi, collectionsApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
 
-type FilterMode = 'all' | 'favorites';
+type FilterMode = 'all' | 'active' | 'favorites';
 
 export class AgentsPage extends Page<PageOptions> {
   readonly route = '/agents';
@@ -31,6 +31,11 @@ export class AgentsPage extends Page<PageOptions> {
   private isLoading = true;
   private filterMode: FilterMode = 'all';
   private searchQuery = '';
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private isSearching = false;
+  private serverSearchResults: Session[] | null = null;
+  private pendingSearchQuery: string | null = null;
+  private isMounted = false;
 
   // Inline form state
   private repos: Repository[] = [];
@@ -62,6 +67,14 @@ export class AgentsPage extends Page<PageOptions> {
           <div class="agents-header-right">
             <div class="filter-buttons">
               <button class="filter-btn filter-btn--active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="active">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polygon points="10 8 16 12 10 16 10 8"></polygon>
+                </svg>
+                Active
+                <span class="filter-btn-count active-count hidden">0</span>
+              </button>
               <button class="filter-btn" data-filter="favorites">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
@@ -128,6 +141,7 @@ export class AgentsPage extends Page<PageOptions> {
 
   protected onMount(): void {
     super.onMount();
+    this.isMounted = true;
 
     // Create new session modal
     this.newSessionModal = new NewSessionModal({
@@ -553,6 +567,23 @@ export class AgentsPage extends Page<PageOptions> {
       empty?.style.setProperty('display', 'flex');
       list?.style.setProperty('display', 'none');
 
+      // Update empty state message based on filter mode
+      const emptyTitle = this.$('.empty-title') as HTMLElement;
+      const emptyDesc = this.$('.empty-description') as HTMLElement;
+      if (this.filterMode === 'active') {
+        if (emptyTitle) emptyTitle.textContent = 'No active sessions';
+        if (emptyDesc) emptyDesc.textContent = 'No sessions are currently running';
+      } else if (this.filterMode === 'favorites') {
+        if (emptyTitle) emptyTitle.textContent = 'No favorite sessions';
+        if (emptyDesc) emptyDesc.textContent = 'Star sessions to add them to your favorites';
+      } else if (this.searchQuery) {
+        if (emptyTitle) emptyTitle.textContent = 'No matching sessions';
+        if (emptyDesc) emptyDesc.textContent = 'Try a different search term';
+      } else {
+        if (emptyTitle) emptyTitle.textContent = 'No agent sessions yet';
+        if (emptyDesc) emptyDesc.textContent = 'Start a new session to begin coding with AI';
+      }
+
       // Add empty icon
       const emptyIconContainer = this.$('.empty-icon') as HTMLElement;
       if (emptyIconContainer && !emptyIconContainer.hasChildNodes()) {
@@ -704,21 +735,29 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private applyFilters(): void {
-    let result = [...this.sessions];
+    // Use server search results if available, otherwise use local sessions
+    let result = this.serverSearchResults !== null
+      ? [...this.serverSearchResults]
+      : [...this.sessions];
 
     // Apply collection filter
     if (this.selectedCollectionId && this.collectionSessionIds.size > 0) {
       result = result.filter(session => this.collectionSessionIds.has(session.id));
     }
 
-    // Apply favorites filter
-    if (this.filterMode === 'favorites') {
+    // Apply active filter (running sessions only)
+    if (this.filterMode === 'active') {
+      result = result.filter(session => session.status === 'running');
+    }
+
+    // Apply favorites filter (only if not using server search with favorites filter)
+    if (this.filterMode === 'favorites' && this.serverSearchResults === null) {
       result = result.filter(session => session.favorite === true);
     }
 
-    // Apply search filter
+    // Apply client-side search filter when no server results
     const lowerQuery = this.searchQuery.toLowerCase().trim();
-    if (lowerQuery) {
+    if (lowerQuery && this.serverSearchResults === null) {
       result = result.filter(session => {
         const title = session.userRequest?.toLowerCase() || '';
         const repo = `${session.repositoryOwner || ''}/${session.repositoryName || ''}`.toLowerCase();
@@ -731,15 +770,100 @@ export class AgentsPage extends Page<PageOptions> {
     }
 
     this.filteredSessions = result;
+
+    // Update active count badge
+    this.updateActiveCount();
+  }
+
+  private updateActiveCount(): void {
+    const activeCount = this.sessions.reduce(
+      (count, s) => s.status === 'running' ? count + 1 : count,
+      0
+    );
+    const countBadge = this.$('.active-count') as HTMLElement;
+    if (countBadge) {
+      countBadge.textContent = activeCount.toString();
+      countBadge.classList.toggle('hidden', activeCount === 0);
+    }
   }
 
   private handleSearch(query: string): void {
     this.searchQuery = query;
+
+    // Clear any pending debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+
+    // If query is empty, clear server search results and use local filtering
+    if (!query.trim()) {
+      this.serverSearchResults = null;
+      this.isSearching = false;
+      this.applyFilters();
+      this.renderSessions();
+      return;
+    }
+
+    // For short queries (1-2 chars), use client-side filtering for responsiveness
+    if (query.trim().length < 3) {
+      this.serverSearchResults = null;
+      this.applyFilters();
+      this.renderSessions();
+      return;
+    }
+
+    // Debounce server-side search for longer queries
+    this.searchDebounceTimer = setTimeout(async () => {
+      await this.performServerSearch(query.trim());
+    }, 300);
+
+    // Meanwhile, show client-side filtered results
     this.applyFilters();
     this.renderSessions();
   }
 
+  private async performServerSearch(query: string): Promise<void> {
+    // If a search is already in progress, queue this query to run after
+    if (this.isSearching) {
+      this.pendingSearchQuery = query;
+      return;
+    }
+
+    this.isSearching = true;
+    this.pendingSearchQuery = null;
+
+    try {
+      const result = await sessionsApi.search({
+        q: query,
+        limit: 100,
+        favorite: this.filterMode === 'favorites' ? true : undefined,
+      });
+
+      // Only update if component is still mounted and query hasn't changed
+      if (this.isMounted && this.searchQuery.trim() === query) {
+        this.serverSearchResults = result.sessions;
+        this.applyFilters();
+        this.renderSessions();
+      }
+    } catch (error) {
+      console.error('Server search failed, falling back to client-side:', error);
+      // Keep using client-side filtering on error
+    } finally {
+      this.isSearching = false;
+
+      // If there's a pending query, execute it now
+      if (this.isMounted && this.pendingSearchQuery) {
+        const pendingQuery = this.pendingSearchQuery;
+        this.pendingSearchQuery = null;
+        await this.performServerSearch(pendingQuery);
+      }
+    }
+  }
+
   protected onUnmount(): void {
+    this.isMounted = false;
+
     this.requestTextArea?.unmount();
     this.searchInput?.unmount();
     this.createSessionBtn?.unmount();
@@ -751,6 +875,15 @@ export class AgentsPage extends Page<PageOptions> {
     this.repoSelect?.unmount();
     this.branchSelect?.unmount();
     this.collectionsPanel?.unmount();
+
+    // Clear search debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+
+    // Clear pending search query
+    this.pendingSearchQuery = null;
 
     // Close session updates subscription
     if (this.sessionUpdatesEventSource) {

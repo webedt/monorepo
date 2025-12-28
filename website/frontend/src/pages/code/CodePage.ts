@@ -10,7 +10,10 @@ import type { ChangedFile } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { undoRedoStore } from '../../stores';
 import type { Session } from '../../types';
+import type { UndoRedoState } from '../../stores/undoRedoStore';
+import type { TabContentState } from '../../stores/undoRedoStore';
 import './code.css';
 
 interface FileNode {
@@ -52,6 +55,13 @@ export class CodePage extends Page<CodePageOptions> {
   private pendingCommitFiles: Map<string, ChangedFile> = new Map();
   private commitDialog: CommitDialog | null = null;
   private commitBtn: Button | null = null;
+  private undoRedoState: UndoRedoState<TabContentState> = {
+    canUndo: false,
+    canRedo: false,
+    historyLength: 0,
+    futureLength: 0,
+  };
+  private unsubscribeUndoRedo: (() => void) | null = null;
 
   protected render(): string {
     return `
@@ -69,6 +79,14 @@ export class CodePage extends Page<CodePageOptions> {
           <div class="code-header-right">
             <div class="offline-status-badge" style="display: none;">
               <span class="offline-badge">Offline Mode</span>
+            </div>
+            <div class="undo-redo-controls">
+              <button class="undo-btn" data-action="undo" title="Undo (Ctrl+Z)" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M3 10h10a5 5 0 0 1 5 5v2"></path><polyline points="3 10 7 6"></polyline><polyline points="3 10 7 14"></polyline></svg>
+              </button>
+              <button class="redo-btn" data-action="redo" title="Redo (Ctrl+Shift+Z)" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10H11a5 5 0 0 0-5 5v2"></path><polyline points="21 10 17 6"></polyline><polyline points="21 10 17 14"></polyline></svg>
+              </button>
             </div>
             <div class="commit-btn-container"></div>
             <div class="save-btn-container"></div>
@@ -151,6 +169,16 @@ export class CodePage extends Page<CodePageOptions> {
         onClick: () => this.saveCurrentFile(),
       });
       saveBtn.mount(saveBtnContainer);
+    }
+
+    // Setup undo/redo buttons
+    const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
+    const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
+    if (undoBtn) {
+      undoBtn.addEventListener('click', () => this.handleUndo());
+    }
+    if (redoBtn) {
+      redoBtn.addEventListener('click', () => this.handleRedo());
     }
 
     // Setup editor
@@ -559,9 +587,16 @@ export class CodePage extends Page<CodePageOptions> {
         isPreview: true,
       };
 
+      // Initialize undo/redo history for this tab
+      undoRedoStore.initialize(path, content);
+
       // Replace preview tab or add new
       const previewIndex = this.tabs.findIndex(t => t.isPreview);
       if (previewIndex >= 0) {
+        // Clean up undo/redo for the previous preview tab
+        if (this.tabs[previewIndex]) {
+          undoRedoStore.removeTab(this.tabs[previewIndex].path);
+        }
         this.tabs[previewIndex] = tab;
         this.setActiveTab(previewIndex);
       } else {
@@ -599,6 +634,7 @@ export class CodePage extends Page<CodePageOptions> {
     this.activeTabIndex = index;
     this.renderTabs();
     this.updateEditorContent();
+    this.subscribeToUndoRedo();
   }
 
   private renderTabs(): void {
@@ -652,11 +688,17 @@ export class CodePage extends Page<CodePageOptions> {
       }
     }
 
+    // Clean up undo/redo history for the closed tab
+    if (tab) {
+      undoRedoStore.removeTab(tab.path);
+    }
+
     this.tabs.splice(index, 1);
 
     if (this.tabs.length === 0) {
       this.activeTabIndex = -1;
       this.showEmpty();
+      this.subscribeToUndoRedo();
     } else if (this.activeTabIndex >= this.tabs.length) {
       this.activeTabIndex = this.tabs.length - 1;
     } else if (this.activeTabIndex > index) {
@@ -665,6 +707,7 @@ export class CodePage extends Page<CodePageOptions> {
 
     this.renderTabs();
     this.updateEditorContent();
+    this.subscribeToUndoRedo();
   }
 
   private updateEditorContent(): void {
@@ -710,8 +753,96 @@ export class CodePage extends Page<CodePageOptions> {
         tab.isDirty = true;
         tab.isPreview = false;
         this.renderTabs();
+
+        // Track change in undo/redo history
+        undoRedoStore.pushChange(tab.path, newContent, editor.selectionStart);
       }
     }
+  }
+
+  private handleUndo(): void {
+    if (this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const previousState = undoRedoStore.undo(tab.path);
+    if (previousState) {
+      tab.content = previousState.content;
+      tab.isDirty = true;
+      this.updateEditorContent();
+      this.renderTabs();
+
+      // Restore cursor position if available
+      if (previousState.cursorPosition !== undefined) {
+        const editor = this.$('.code-editor') as HTMLTextAreaElement;
+        if (editor) {
+          editor.selectionStart = editor.selectionEnd = previousState.cursorPosition;
+        }
+      }
+    }
+  }
+
+  private handleRedo(): void {
+    if (this.activeTabIndex < 0) return;
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    const nextState = undoRedoStore.redo(tab.path);
+    if (nextState) {
+      tab.content = nextState.content;
+      tab.isDirty = true;
+      this.updateEditorContent();
+      this.renderTabs();
+
+      // Restore cursor position if available
+      if (nextState.cursorPosition !== undefined) {
+        const editor = this.$('.code-editor') as HTMLTextAreaElement;
+        if (editor) {
+          editor.selectionStart = editor.selectionEnd = nextState.cursorPosition;
+        }
+      }
+    }
+  }
+
+  private updateUndoRedoButtons(): void {
+    const undoBtn = this.$('[data-action="undo"]') as HTMLButtonElement;
+    const redoBtn = this.$('[data-action="redo"]') as HTMLButtonElement;
+
+    if (undoBtn) {
+      undoBtn.disabled = !this.undoRedoState.canUndo;
+    }
+    if (redoBtn) {
+      redoBtn.disabled = !this.undoRedoState.canRedo;
+    }
+  }
+
+  private subscribeToUndoRedo(): void {
+    // Unsubscribe from previous tab
+    if (this.unsubscribeUndoRedo) {
+      this.unsubscribeUndoRedo();
+      this.unsubscribeUndoRedo = null;
+    }
+
+    if (this.activeTabIndex < 0) {
+      this.undoRedoState = {
+        canUndo: false,
+        canRedo: false,
+        historyLength: 0,
+        futureLength: 0,
+      };
+      this.updateUndoRedoButtons();
+      return;
+    }
+
+    const tab = this.tabs[this.activeTabIndex];
+    if (!tab) return;
+
+    this.unsubscribeUndoRedo = undoRedoStore.subscribe(tab.path, (state) => {
+      this.undoRedoState = state;
+      this.updateUndoRedoButtons();
+    });
   }
 
   private handleEditorKeydown(e: KeyboardEvent): void {
@@ -719,6 +850,21 @@ export class CodePage extends Page<CodePageOptions> {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
       this.saveCurrentFile();
+      return;
+    }
+
+    // Cmd/Ctrl+Z to undo
+    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      this.handleUndo();
+      return;
+    }
+
+    // Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y to redo
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' && e.shiftKey || e.key === 'y')) {
+      e.preventDefault();
+      this.handleRedo();
+      return;
     }
 
     // Tab key inserts spaces
@@ -851,6 +997,18 @@ export class CodePage extends Page<CodePageOptions> {
     if (this.commitDialog) {
       this.commitDialog.close();
       this.commitDialog = null;
+    }
+
+    // Cleanup undo/redo subscription and flush any pending changes
+    if (this.unsubscribeUndoRedo) {
+      this.unsubscribeUndoRedo();
+      this.unsubscribeUndoRedo = null;
+    }
+    undoRedoStore.flushAll();
+
+    // Clean up undo/redo history for all open tabs
+    for (const tab of this.tabs) {
+      undoRedoStore.removeTab(tab.path);
     }
 
     // Cleanup offline subscription
