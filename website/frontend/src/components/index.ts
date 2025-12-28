@@ -61,6 +61,15 @@ export type { StatusBadgeOptions, StatusType, StatusBadgeSize } from './status-b
 export { SearchableSelect } from './searchable-select';
 export type { SearchableSelectOptions, SearchableSelectOption } from './searchable-select';
 
+// UniversalSearch
+export { UniversalSearch } from './universal-search';
+export type {
+  UniversalSearchOptions,
+  UniversalSearchSize,
+  SearchResultItem,
+  SearchResults,
+} from './universal-search';
+
 // ToolDetails
 export { ToolDetails } from './tool-details';
 export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-details';

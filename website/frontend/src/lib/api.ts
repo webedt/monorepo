@@ -1045,3 +1045,46 @@ export const communityApi = {
     return fetchApi<{ reviews: CommunityPost[] }>(`/api/community/games/${gameId}/reviews${queryString ? `?${queryString}` : ''}`);
   },
 };
+
+// ============================================================================
+// Universal Search API
+// ============================================================================
+export interface SearchResultItem {
+  id: string;
+  type: 'game' | 'user' | 'session' | 'post';
+  title: string;
+  subtitle?: string;
+  description?: string;
+  image?: string;
+  tags?: string[];
+  matchedFields?: string[];
+}
+
+export interface SearchResults {
+  items: SearchResultItem[];
+  total: number;
+  query: string;
+}
+
+export const searchApi = {
+  search: (options: {
+    q: string;
+    types?: ('game' | 'user' | 'session' | 'post')[];
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    params.append('q', options.q);
+    if (options.types?.length) params.append('types', options.types.join(','));
+    if (options.limit) params.append('limit', String(options.limit));
+    const queryString = params.toString();
+    return fetchApi<SearchResults>(`/api/search${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getSuggestions: (q: string, limit?: number) => {
+    const params = new URLSearchParams();
+    params.append('q', q);
+    if (limit) params.append('limit', String(limit));
+    const queryString = params.toString();
+    return fetchApi<{ suggestions: string[] }>(`/api/search/suggestions${queryString ? `?${queryString}` : ''}`);
+  },
+};
