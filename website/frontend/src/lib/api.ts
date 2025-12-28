@@ -1170,3 +1170,52 @@ export const channelsApi = {
       body: data,
     }),
 };
+
+// ============================================================================
+// Billing API
+// ============================================================================
+export interface BillingInfo {
+  tier: string;
+  tierLabel: string;
+  price: number;
+  priceLabel: string;
+  usedBytes: string;
+  quotaBytes: string;
+  availableBytes: string;
+  usagePercent: number;
+  usedFormatted: string;
+  quotaFormatted: string;
+  availableFormatted: string;
+}
+
+export interface PricingTier {
+  id: string;
+  name: string;
+  bytes: string;
+  formatted: string;
+  price: number;
+  priceLabel: string;
+  features: string[];
+}
+
+export const billingApi = {
+  getCurrentPlan: () =>
+    fetchApi<ApiResponse<BillingInfo>>('/api/billing/current').then(r => r.data),
+
+  getTiers: () =>
+    fetchApi<ApiResponse<{ tiers: PricingTier[] }>>('/api/billing/tiers').then(r => r.data),
+
+  changePlan: (tier: string) =>
+    fetchApi<ApiResponse<{
+      message: string;
+      tier: string;
+      tierLabel: string;
+      price: number;
+      priceLabel: string;
+      newQuotaBytes: string;
+      newQuotaFormatted: string;
+    }>>('/api/billing/change-plan', {
+      method: 'POST',
+      body: { tier },
+    }).then(r => r.data),
+};
