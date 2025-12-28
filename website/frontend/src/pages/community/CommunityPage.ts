@@ -465,7 +465,7 @@ export class CommunityPage extends Page {
   private async loadSinglePost(postId: string): Promise<void> {
     try {
       const result = await communityApi.getPost(postId);
-      this.singlePost = result.post;
+      this.singlePost = result;
       this.postComments = result.comments || [];
 
       this.loading = false;
