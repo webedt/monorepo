@@ -1,17 +1,19 @@
 /**
  * Scene Editor Page
  * 2D scene composition editor with offline support
+ * Multi-scene editing support (e.g., UI + game scene)
  * AI features require connectivity
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, TransformEditor } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, TransformEditor, SceneTabs } from '../../components';
 import type { Transform } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
 import { SpriteRenderer } from '../../lib/sprite';
 import { Viewport } from '../../lib/viewport';
+import { sceneStore } from '../../stores/sceneStore';
 import { customComponentsStore } from '../../stores';
 import type {
   Session,
@@ -19,59 +21,8 @@ import type {
   CustomComponentChild,
   CustomComponentPropertyValues,
 } from '../../types';
+import type { SceneObject, ShapeType, Scene } from '../../stores/sceneStore';
 import './scene.css';
-
-type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'custom' | 'ui-button' | 'ui-panel' | 'ui-text' | 'ui-image' | 'ui-slider' | 'ui-progress-bar' | 'ui-checkbox';
-type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
-
-// UI Component specific types
-type UIButtonStyle = 'primary' | 'secondary' | 'outline' | 'ghost';
-type UIPanelStyle = 'solid' | 'bordered' | 'glass';
-type UITextStyle = 'heading' | 'body' | 'caption' | 'label';
-
-interface SceneObject {
-  id: string;
-  name: string;
-  type: SceneObjectType;
-  visible: boolean;
-  locked: boolean;
-  transform: Transform;
-  zIndex: number;
-  opacity: number;
-  children?: SceneObject[];
-  // Type-specific properties
-  shapeType?: ShapeType;
-  color?: string;
-  text?: string;
-  fontSize?: number;
-  fontFamily?: string;
-  spriteUrl?: string;
-  // Sprite dimensions (auto-populated when image loads)
-  spriteWidth?: number;
-  spriteHeight?: number;
-  // Custom component properties
-  customComponentId?: string;
-  customPropertyValues?: CustomComponentPropertyValues;
-  // UI Component properties
-  uiButtonStyle?: UIButtonStyle;
-  uiPanelStyle?: UIPanelStyle;
-  uiTextStyle?: UITextStyle;
-  uiWidth?: number;
-  uiHeight?: number;
-  uiCornerRadius?: number;
-  uiBackgroundColor?: string;
-  uiBorderColor?: string;
-  uiBorderWidth?: number;
-  uiTextColor?: string;
-  uiDisabled?: boolean;
-  uiValue?: number;       // For sliders and progress bars (0-100)
-  uiMinValue?: number;
-  uiMaxValue?: number;
-  uiChecked?: boolean;    // For checkboxes
-  uiPlaceholder?: string; // For input fields
-  uiImageUrl?: string;    // For UI images
-  uiPadding?: number;
-}
 
 interface ScenePageOptions extends PageOptions {
   params?: {
@@ -90,20 +41,14 @@ export class ScenePage extends Page<ScenePageOptions> {
   private unsubscribeOffline: (() => void) | null = null;
   private isOfflineMode = false;
   private transformEditor: TransformEditor | null = null;
+  private sceneTabs: SceneTabs | null = null;
 
-  // Scene state
+  // Scene state - now using sceneStore for multi-scene support
   private sceneCanvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
-  private objects: SceneObject[] = [];
   private selectedObjectId: string | null = null;
   private isDragging = false;
   private dragStart = { x: 0, y: 0 };
-  private hasUnsavedChanges = false;
-
-  // Grid settings
-  private showGrid = true;
-  private gridSize = 32;
-  private snapToGrid = true;
 
   // Sprite renderer for displaying images
   private spriteRenderer: SpriteRenderer = new SpriteRenderer();
@@ -125,6 +70,42 @@ export class ScenePage extends Page<ScenePageOptions> {
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseUp: (() => void) | null = null;
   private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
+
+  // Store subscriptions
+  private unsubscribeStore: (() => void) | null = null;
+  private unsubscribeComponents: (() => void) | null = null;
+
+  // Helper methods to access active scene data
+  private get activeScene(): Scene | null {
+    return sceneStore.getActiveScene();
+  }
+
+  private get objects(): SceneObject[] {
+    return this.activeScene?.objects || [];
+  }
+
+  private get showGrid(): boolean {
+    return this.activeScene?.settings.showGrid ?? true;
+  }
+
+  private get gridSize(): number {
+    return this.activeScene?.settings.gridSize ?? 32;
+  }
+
+  private get snapToGrid(): boolean {
+    return this.activeScene?.settings.snapToGrid ?? true;
+  }
+
+  private get hasUnsavedChanges(): boolean {
+    return sceneStore.hasUnsavedScenes();
+  }
+
+  private markDirty(): void {
+    const scene = this.activeScene;
+    if (scene) {
+      sceneStore.markSceneDirty(scene.id);
+    }
+  }
 
   protected render(): string {
     return `
@@ -150,6 +131,9 @@ export class ScenePage extends Page<ScenePageOptions> {
           </div>
         </header>
         <div class="offline-indicator-container"></div>
+
+        <!-- Multi-scene tabs -->
+        <div class="scene-tabs-container-wrapper"></div>
 
         <div class="scene-toolbar">
           <div class="toolbar-group">
@@ -205,9 +189,9 @@ export class ScenePage extends Page<ScenePageOptions> {
           <div class="toolbar-separator"></div>
 
           <div class="toolbar-group">
-            <button class="toolbar-btn ${this.showGrid ? 'active' : ''}" data-action="toggle-grid" title="Toggle Grid">⊞</button>
-            <button class="toolbar-btn ${this.snapToGrid ? 'active' : ''}" data-action="toggle-snap" title="Toggle Snap">⊟</button>
-            <button class="toolbar-btn ${this.showOriginCrosshair ? 'active' : ''}" data-action="toggle-origin" title="Toggle Origin Crosshair">✛</button>
+            <button class="toolbar-btn" data-action="toggle-grid" title="Toggle Grid">⊞</button>
+            <button class="toolbar-btn" data-action="toggle-snap" title="Toggle Snap">⊟</button>
+            <button class="toolbar-btn" data-action="toggle-origin" title="Toggle Origin Crosshair">✛</button>
             <button class="toolbar-btn" data-action="reset-view" title="Reset View (Center on Origin)">⌂</button>
           </div>
 
@@ -376,10 +360,10 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Setup save button
     const saveBtnContainer = this.$('.save-btn-container') as HTMLElement;
     if (saveBtnContainer) {
-      const saveBtn = new Button('Save Scene', {
+      const saveBtn = new Button('Save All Scenes', {
         variant: 'primary',
         size: 'sm',
-        onClick: () => this.saveScene(),
+        onClick: () => this.saveAllScenes(),
       });
       saveBtn.mount(saveBtnContainer);
     }
@@ -397,6 +381,44 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.offlineIndicator = new OfflineIndicator({ position: 'bottom-right' });
       this.offlineIndicator.mount(offlineContainer);
     }
+
+    // Setup scene tabs for multi-scene editing
+    const sceneTabsContainer = this.$('.scene-tabs-container-wrapper') as HTMLElement;
+    if (sceneTabsContainer) {
+      this.sceneTabs = new SceneTabs({
+        onSceneSelect: () => {
+          this.selectedObjectId = null;
+          this.updateHierarchy();
+          this.updatePropertiesPanel();
+          this.updateStatusBar();
+          this.updateToolbarState();
+          this.renderScene();
+        },
+        onSceneClose: () => {
+          this.selectedObjectId = null;
+          this.updateHierarchy();
+          this.updatePropertiesPanel();
+          this.updateStatusBar();
+          this.renderScene();
+        },
+        onSceneCreate: () => {
+          this.selectedObjectId = null;
+          this.updateHierarchy();
+          this.updatePropertiesPanel();
+          this.updateStatusBar();
+          this.renderScene();
+        },
+      });
+      this.sceneTabs.mount(sceneTabsContainer);
+    }
+
+    // Subscribe to store changes
+    this.unsubscribeStore = sceneStore.subscribe(() => {
+      this.updateHierarchy();
+      this.updateStatusBar();
+      this.updateToolbarState();
+      this.renderScene();
+    });
 
     // Subscribe to offline status changes
     this.unsubscribeOffline = offlineManager.subscribe((status, wasOffline) => {
@@ -465,7 +487,9 @@ export class ScenePage extends Page<ScenePageOptions> {
 
     if (toggleGridBtn) {
       toggleGridBtn.addEventListener('click', () => {
-        this.showGrid = !this.showGrid;
+        const activeScene = this.activeScene;
+        if (!activeScene) return;
+        sceneStore.updateSceneSettings(activeScene.id, { showGrid: !this.showGrid });
         toggleGridBtn.classList.toggle('active', this.showGrid);
         this.renderScene();
       });
@@ -473,7 +497,9 @@ export class ScenePage extends Page<ScenePageOptions> {
 
     if (toggleSnapBtn) {
       toggleSnapBtn.addEventListener('click', () => {
-        this.snapToGrid = !this.snapToGrid;
+        const activeScene = this.activeScene;
+        if (!activeScene) return;
+        sceneStore.updateSceneSettings(activeScene.id, { snapToGrid: !this.snapToGrid });
         toggleSnapBtn.classList.toggle('active', this.snapToGrid);
       });
     }
@@ -576,15 +602,19 @@ export class ScenePage extends Page<ScenePageOptions> {
     const pivotPresets = this.$$('.pivot-preset');
     pivotPresets.forEach((btn) => {
       btn.addEventListener('click', () => {
+        const activeScene = this.activeScene;
         const pivotData = (btn as HTMLButtonElement).dataset.pivot;
-        if (!pivotData || !this.selectedObjectId) return;
+        if (!pivotData || !this.selectedObjectId || !activeScene) return;
 
         const [px, py] = pivotData.split(',').map(Number);
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
-          obj.transform.pivotX = px;
-          obj.transform.pivotY = py;
-          this.hasUnsavedChanges = true;
+          const updatedObjects = this.objects.map(o =>
+            o.id === this.selectedObjectId
+              ? { ...o, transform: { ...o.transform, pivotX: px, pivotY: py } }
+              : o
+          );
+          sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
           this.updatePropertiesPanel();
           this.renderScene();
         }
@@ -595,11 +625,17 @@ export class ScenePage extends Page<ScenePageOptions> {
     const pivotXInput = this.$('.pivot-x') as HTMLInputElement;
     if (pivotXInput) {
       pivotXInput.addEventListener('change', () => {
-        if (!this.selectedObjectId) return;
+        const activeScene = this.activeScene;
+        if (!this.selectedObjectId || !activeScene) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
-          obj.transform.pivotX = Math.max(0, Math.min(1, parseFloat(pivotXInput.value) || 0.5));
-          this.hasUnsavedChanges = true;
+          const pivotX = Math.max(0, Math.min(1, parseFloat(pivotXInput.value) || 0.5));
+          const updatedObjects = this.objects.map(o =>
+            o.id === this.selectedObjectId
+              ? { ...o, transform: { ...o.transform, pivotX } }
+              : o
+          );
+          sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
           this.renderScene();
         }
       });
@@ -609,11 +645,17 @@ export class ScenePage extends Page<ScenePageOptions> {
     const pivotYInput = this.$('.pivot-y') as HTMLInputElement;
     if (pivotYInput) {
       pivotYInput.addEventListener('change', () => {
-        if (!this.selectedObjectId) return;
+        const activeScene = this.activeScene;
+        if (!this.selectedObjectId || !activeScene) return;
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
-          obj.transform.pivotY = Math.max(0, Math.min(1, parseFloat(pivotYInput.value) || 0.5));
-          this.hasUnsavedChanges = true;
+          const pivotY = Math.max(0, Math.min(1, parseFloat(pivotYInput.value) || 0.5));
+          const updatedObjects = this.objects.map(o =>
+            o.id === this.selectedObjectId
+              ? { ...o, transform: { ...o.transform, pivotY } }
+              : o
+          );
+          sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
           this.renderScene();
         }
       });
@@ -632,7 +674,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
           obj.uiWidth = Math.max(10, parseInt(uiWidthInput.value) || 100);
-          this.hasUnsavedChanges = true;
+          this.markDirty();
           this.renderScene();
         }
       });
@@ -644,7 +686,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
           obj.uiHeight = Math.max(10, parseInt(uiHeightInput.value) || 40);
-          this.hasUnsavedChanges = true;
+          this.markDirty();
           this.renderScene();
         }
       });
@@ -658,7 +700,7 @@ export class ScenePage extends Page<ScenePageOptions> {
           obj.uiValue = parseInt(uiValueSlider.value) || 0;
           const display = this.$('.ui-value-display') as HTMLElement;
           if (display) display.textContent = String(obj.uiValue);
-          this.hasUnsavedChanges = true;
+          this.markDirty();
           this.renderScene();
         }
       });
@@ -670,7 +712,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
           obj.uiChecked = uiCheckedInput.checked;
-          this.hasUnsavedChanges = true;
+          this.markDirty();
           this.renderScene();
         }
       });
@@ -682,7 +724,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         const obj = this.objects.find(o => o.id === this.selectedObjectId);
         if (obj) {
           obj.text = uiTextInput.value;
-          this.hasUnsavedChanges = true;
+          this.markDirty();
           this.renderScene();
         }
       });
@@ -770,11 +812,17 @@ export class ScenePage extends Page<ScenePageOptions> {
       y = Math.round(y / this.gridSize) * this.gridSize;
     }
 
+    const activeScene = this.activeScene;
+    if (!activeScene) return;
+
     const obj = this.objects.find(o => o.id === this.selectedObjectId);
     if (obj) {
-      obj.transform.x = x;
-      obj.transform.y = y;
-      this.hasUnsavedChanges = true;
+      const updatedObjects = this.objects.map(o =>
+        o.id === this.selectedObjectId
+          ? { ...o, transform: { ...o.transform, x, y } }
+          : o
+      );
+      sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
       this.renderScene();
       this.updatePropertiesPanel();
     }
@@ -860,6 +908,11 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private addSprite(): void {
+    const activeScene = this.activeScene;
+    if (!activeScene) {
+      toast.error('Please create or open a scene first');
+      return;
+    }
     // Show dialog to get sprite URL
     this.showSpriteDialog();
   }
@@ -938,6 +991,12 @@ export class ScenePage extends Page<ScenePageOptions> {
    * Create a sprite object from a loaded image URL
    */
   private async createSpriteFromUrl(url: string): Promise<void> {
+    const activeScene = this.activeScene;
+    if (!activeScene) {
+      toast.error('Please create or open a scene first');
+      return;
+    }
+
     const id = `sprite-${Date.now()}`;
 
     try {
@@ -960,9 +1019,8 @@ export class ScenePage extends Page<ScenePageOptions> {
         spriteHeight: info?.height ?? 100,
       };
 
-      this.objects.push(obj);
+      sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
       this.selectedObjectId = obj.id;
-      this.hasUnsavedChanges = true;
       this.updateHierarchy();
       this.updatePropertiesPanel();
       this.updateStatusBar();
@@ -1092,6 +1150,12 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private addShape(shapeType: ShapeType): void {
+    const activeScene = this.activeScene;
+    if (!activeScene) {
+      toast.error('Please create or open a scene first');
+      return;
+    }
+
     const colors: Record<ShapeType, string> = {
       rectangle: '#e74c3c',
       circle: '#3498db',
@@ -1114,9 +1178,8 @@ export class ScenePage extends Page<ScenePageOptions> {
       opacity: 1,
       color: colors[shapeType],
     };
-    this.objects.push(obj);
+    sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1124,6 +1187,12 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private addText(): void {
+    const activeScene = this.activeScene;
+    if (!activeScene) {
+      toast.error('Please create or open a scene first');
+      return;
+    }
+
     // Place new objects near origin (0, 0) in center-origin coordinates
     const offset = this.objects.length * 20;
     const obj: SceneObject = {
@@ -1140,9 +1209,8 @@ export class ScenePage extends Page<ScenePageOptions> {
       fontFamily: 'Arial',
       color: '#333333',
     };
-    this.objects.push(obj);
+    sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1173,7 +1241,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1202,7 +1270,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1228,7 +1296,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1255,7 +1323,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1284,7 +1352,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1313,7 +1381,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1344,7 +1412,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1376,7 +1444,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     this.objects.push(obj);
     this.selectedObjectId = obj.id;
-    this.hasUnsavedChanges = true;
+    this.markDirty();
     customComponentsStore.recordUsage(definition.id);
     this.updateHierarchy();
     this.updatePropertiesPanel();
@@ -1510,29 +1578,36 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private moveSelectedUp(): void {
-    if (!this.selectedObjectId) return;
-    const idx = this.objects.findIndex(o => o.id === this.selectedObjectId);
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene) return;
+
+    const objects = [...this.objects];
+    const idx = objects.findIndex(o => o.id === this.selectedObjectId);
     if (idx > 0) {
-      [this.objects[idx - 1], this.objects[idx]] = [this.objects[idx], this.objects[idx - 1]];
-      this.hasUnsavedChanges = true;
+      [objects[idx - 1], objects[idx]] = [objects[idx], objects[idx - 1]];
+      sceneStore.updateSceneObjects(activeScene.id, objects);
       this.updateHierarchy();
       this.renderScene();
     }
   }
 
   private moveSelectedDown(): void {
-    if (!this.selectedObjectId) return;
-    const idx = this.objects.findIndex(o => o.id === this.selectedObjectId);
-    if (idx < this.objects.length - 1) {
-      [this.objects[idx], this.objects[idx + 1]] = [this.objects[idx + 1], this.objects[idx]];
-      this.hasUnsavedChanges = true;
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene) return;
+
+    const objects = [...this.objects];
+    const idx = objects.findIndex(o => o.id === this.selectedObjectId);
+    if (idx < objects.length - 1) {
+      [objects[idx], objects[idx + 1]] = [objects[idx + 1], objects[idx]];
+      sceneStore.updateSceneObjects(activeScene.id, objects);
       this.updateHierarchy();
       this.renderScene();
     }
   }
 
   private deleteSelected(): void {
-    if (!this.selectedObjectId) return;
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene) return;
     if (!confirm('Delete selected object?')) return;
 
     // Clean up sprite from renderer cache if it's a sprite object
@@ -1541,9 +1616,9 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.spriteRenderer.unload(obj.id);
     }
 
-    this.objects = this.objects.filter(o => o.id !== this.selectedObjectId);
+    const newObjects = this.objects.filter(o => o.id !== this.selectedObjectId);
+    sceneStore.updateSceneObjects(activeScene.id, newObjects);
     this.selectedObjectId = null;
-    this.hasUnsavedChanges = true;
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -2434,7 +2509,8 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private handleTransformChange(transform: Transform): void {
-    if (!this.selectedObjectId) return;
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene) return;
 
     const obj = this.objects.find(o => o.id === this.selectedObjectId);
     if (!obj) return;
@@ -2449,7 +2525,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     // Preserve pivot values when updating transform
-    obj.transform = {
+    const updatedTransform = {
       x,
       y,
       rotation: transform.rotation,
@@ -2459,13 +2535,19 @@ export class ScenePage extends Page<ScenePageOptions> {
       pivotY: obj.transform.pivotY ?? 0.5,
     };
 
-    this.hasUnsavedChanges = true;
+    const updatedObjects = this.objects.map(o =>
+      o.id === this.selectedObjectId
+        ? { ...o, transform: updatedTransform }
+        : o
+    );
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
     this.renderScene();
   }
 
   private updateStatusBar(): void {
     const objectsStatus = this.$('.status-objects') as HTMLElement;
     const selectionStatus = this.$('.status-selection') as HTMLElement;
+    const sceneInfo = this.$('.scene-subtitle') as HTMLElement;
 
     if (objectsStatus) {
       objectsStatus.textContent = `${this.objects.length} object${this.objects.length !== 1 ? 's' : ''}`;
@@ -2478,6 +2560,31 @@ export class ScenePage extends Page<ScenePageOptions> {
       } else {
         selectionStatus.textContent = 'No selection';
       }
+    }
+
+    // Update scene count in subtitle if scenes are open
+    const openScenes = sceneStore.getOpenScenes();
+    if (sceneInfo && openScenes.length > 0) {
+      const activeScene = this.activeScene;
+      const sceneLabel = activeScene ? `Scene: ${activeScene.name}` : '';
+      const countLabel = openScenes.length > 1 ? ` (${openScenes.length} scenes open)` : '';
+      sceneInfo.textContent = sceneLabel + countLabel;
+    }
+  }
+
+  private updateToolbarState(): void {
+    const toggleGridBtn = this.$('[data-action="toggle-grid"]');
+    const toggleSnapBtn = this.$('[data-action="toggle-snap"]');
+    const toggleOriginBtn = this.$('[data-action="toggle-origin"]');
+
+    if (toggleGridBtn) {
+      toggleGridBtn.classList.toggle('active', this.showGrid);
+    }
+    if (toggleSnapBtn) {
+      toggleSnapBtn.classList.toggle('active', this.snapToGrid);
+    }
+    if (toggleOriginBtn) {
+      toggleOriginBtn.classList.toggle('active', this.showOriginCrosshair);
     }
   }
 
@@ -2503,6 +2610,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         if (cachedSession) {
           this.session = cachedSession as unknown as Session;
           this.updateHeader();
+          await this.loadSavedScenes();
           this.showCanvas();
           this.renderScene();
           toast.info('Loaded from offline cache');
@@ -2517,6 +2625,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.session = response.session;
       await offlineStorage.cacheSession(sessionId, response.session as unknown as Record<string, unknown>);
       this.updateHeader();
+      await this.loadSavedScenes();
       this.showCanvas();
       this.renderScene();
     } catch (error) {
@@ -2526,6 +2635,7 @@ export class ScenePage extends Page<ScenePageOptions> {
         this.isOfflineMode = true;
         this.updateHeader();
         this.updateOfflineUI();
+        await this.loadSavedScenes();
         this.showCanvas();
         this.renderScene();
         toast.info('Loaded from offline cache');
@@ -2534,6 +2644,46 @@ export class ScenePage extends Page<ScenePageOptions> {
         console.error('Failed to load session:', error);
         this.navigate('/agents');
       }
+    }
+  }
+
+  private async loadSavedScenes(): Promise<void> {
+    const sessionPath = this.getSessionPath();
+    if (!sessionPath) return;
+
+    try {
+      const cachedFile = await offlineStorage.getCachedFile(sessionPath, 'scenes.json');
+      if (cachedFile && cachedFile.content) {
+        const scenesData = JSON.parse(cachedFile.content as string);
+
+        if (scenesData.scenes && Array.isArray(scenesData.scenes)) {
+          // Load scenes into store
+          const scenes = scenesData.scenes.map((sceneData: Record<string, unknown>) => ({
+            id: sceneData.id as string,
+            name: sceneData.name as string,
+            objects: sceneData.objects || [],
+            settings: sceneData.settings || { showGrid: true, gridSize: 32, snapToGrid: true },
+            isDirty: false,
+            createdAt: sceneData.createdAt as number || Date.now(),
+            updatedAt: sceneData.updatedAt as number || Date.now(),
+          }));
+
+          sceneStore.loadScenes(scenes);
+
+          // Open all loaded scenes and set active scene
+          for (const scene of scenes) {
+            sceneStore.openScene(scene.id);
+          }
+
+          // Restore active scene if saved
+          if (scenesData.activeSceneId) {
+            sceneStore.setActiveScene(scenesData.activeSceneId);
+          }
+        }
+      }
+    } catch (error) {
+      // No saved scenes or failed to parse - that's okay, start fresh
+      console.debug('No saved scenes found or failed to load:', error);
     }
   }
 
@@ -2576,37 +2726,44 @@ export class ScenePage extends Page<ScenePageOptions> {
     });
   }
 
-  private async saveScene(): Promise<void> {
+  private async saveAllScenes(): Promise<void> {
     if (this.isSaving) return;
 
     this.isSaving = true;
 
     try {
-      const sceneData = {
-        objects: this.objects,
-        settings: {
-          showGrid: this.showGrid,
-          gridSize: this.gridSize,
-          snapToGrid: this.snapToGrid,
-        },
+      const openScenes = sceneStore.getOpenScenes();
+      const sessionPath = this.getSessionPath();
+
+      // Save all scenes data
+      const scenesData = {
+        scenes: openScenes.map(scene => ({
+          id: scene.id,
+          name: scene.name,
+          objects: scene.objects,
+          settings: scene.settings,
+          createdAt: scene.createdAt,
+          updatedAt: scene.updatedAt,
+        })),
+        activeSceneId: sceneStore.getState().activeSceneId,
       };
 
-      const sessionPath = this.getSessionPath();
-      const filePath = 'scene.json';
-      const content = JSON.stringify(sceneData, null, 2);
+      const filePath = 'scenes.json';
+      const content = JSON.stringify(scenesData, null, 2);
 
       if (this.isOfflineMode || isOffline()) {
         await offlineStorage.saveFileLocally(sessionPath, filePath, content, 'text');
-        toast.success('Scene saved locally (will sync when online)');
+        toast.success(`${openScenes.length} scene(s) saved locally (will sync when online)`);
       } else {
         await offlineStorage.cacheFile(sessionPath, filePath, content, 'text');
-        toast.success('Scene saved');
+        toast.success(`${openScenes.length} scene(s) saved`);
       }
 
-      this.hasUnsavedChanges = false;
+      // Mark all scenes as saved
+      sceneStore.saveAllScenes();
     } catch (error) {
-      console.error('Failed to save scene:', error);
-      toast.error('Failed to save scene');
+      console.error('Failed to save scenes:', error);
+      toast.error('Failed to save scenes');
     } finally {
       this.isSaving = false;
     }
@@ -2670,6 +2827,16 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.unsubscribeOffline = null;
     }
 
+    if (this.unsubscribeStore) {
+      this.unsubscribeStore();
+      this.unsubscribeStore = null;
+    }
+
+    if (this.unsubscribeComponents) {
+      this.unsubscribeComponents();
+      this.unsubscribeComponents = null;
+    }
+
     if (this.offlineIndicator) {
       this.offlineIndicator.unmount();
       this.offlineIndicator = null;
@@ -2678,6 +2845,11 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.transformEditor) {
       this.transformEditor.unmount();
       this.transformEditor = null;
+    }
+
+    if (this.sceneTabs) {
+      this.sceneTabs.unmount();
+      this.sceneTabs = null;
     }
   }
 }

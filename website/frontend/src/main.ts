@@ -32,6 +32,7 @@ import {
   AdminPage,
   BoneAnimationPage,
   SnippetsPage,
+  ScenePage,
 } from './pages';
 
 import { Page, type PageOptions } from './pages/base/Page';
@@ -864,6 +865,15 @@ async function init(): Promise<void> {
           return document.createElement('div');
         },
         title: 'Bone Animation | WebEDT',
+        guard: () => authStore.isAuthenticated(),
+      },
+      {
+        path: '/session/:sessionId/scene',
+        component: (params) => {
+          mountPage(ScenePage, params);
+          return document.createElement('div');
+        },
+        title: 'Scene Editor | WebEDT',
         guard: () => authStore.isAuthenticated(),
       },
       // Players feature routes
