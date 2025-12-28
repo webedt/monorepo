@@ -1,10 +1,68 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { db, liveChatMessages, eq, and, desc } from '@webedt/shared';
+import { db, liveChatMessages, users, eq, and, desc, StorageService } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
-import { logger } from '@webedt/shared';
+import {
+  requireStorageQuota,
+  calculateLiveChatMessageSize,
+  trackStorageUsage,
+} from '../middleware/storageQuota.js';
+import {
+  logger,
+  ServiceProvider,
+  AClaudeWebClient,
+  ensureValidToken,
+  CLAUDE_ENVIRONMENT_ID,
+  CLAUDE_API_BASE_URL,
+  fetchEnvironmentIdFromSessions,
+} from '@webedt/shared';
+import type { ClaudeAuth, ClaudeWebClientConfig } from '@webedt/shared';
 
 const router = Router();
+
+/**
+ * Get and configure the Claude Web Client with the given credentials.
+ */
+function getClaudeClient(config: ClaudeWebClientConfig): AClaudeWebClient {
+  const client = ServiceProvider.get(AClaudeWebClient);
+  client.configure(config);
+  return client;
+}
+
+/**
+ * Build a prompt with conversation context for the Claude session.
+ * Includes recent messages as context so Claude understands the conversation.
+ */
+function buildPromptWithContext(
+  currentMessage: string,
+  history: Array<{ role: string; content: string }>,
+  owner: string,
+  repo: string,
+  branch: string
+): string {
+  const contextMessages = history.slice(-10); // Last 10 messages for context
+
+  let prompt = `You are helping with the codebase at https://github.com/${owner}/${repo} on branch "${branch}".
+
+`;
+
+  if (contextMessages.length > 1) {
+    prompt += `## Previous Conversation Context
+`;
+    for (const msg of contextMessages.slice(0, -1)) {
+      const role = msg.role === 'user' ? 'User' : 'Assistant';
+      prompt += `${role}: ${msg.content.slice(0, 500)}${msg.content.length > 500 ? '...' : ''}\n\n`;
+    }
+    prompt += `---
+
+`;
+  }
+
+  prompt += `## Current Request
+${currentMessage}`;
+
+  return prompt;
+}
 
 // All routes require authentication
 router.use(requireAuth);
@@ -62,46 +120,51 @@ router.get('/:owner/:repo/:branch/messages', async (req: Request, res: Response)
  * POST /api/live-chat/:owner/:repo/:branch/messages
  * Add a message to a branch-based live chat
  */
-router.post('/:owner/:repo/:branch/messages', async (req: Request, res: Response) => {
-  try {
-    const { owner, repo, branch } = req.params;
-    const { role, content, images } = req.body;
-    const userId = req.user?.id;
+router.post(
+  '/:owner/:repo/:branch/messages',
+  requireStorageQuota({ calculateSize: calculateLiveChatMessageSize }),
+  trackStorageUsage(),
+  async (req: Request, res: Response) => {
+    try {
+      const { owner, repo, branch } = req.params;
+      const { role, content, images } = req.body;
+      const userId = req.user?.id;
 
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      if (!role || !content) {
+        return res.status(400).json({ error: 'Missing required fields: role, content' });
+      }
+
+      // Decode branch name
+      const decodedBranch = decodeURIComponent(branch);
+
+      const message = {
+        id: uuidv4(),
+        userId,
+        owner,
+        repo,
+        branch: decodedBranch,
+        role,
+        content,
+        images: images || null,
+        createdAt: new Date(),
+      };
+
+      await db.insert(liveChatMessages).values(message);
+
+      res.json({
+        success: true,
+        data: message,
+      });
+    } catch (error) {
+      logger.error('liveChat', 'Failed to add live chat message', { error });
+      res.status(500).json({ error: 'Failed to add message' });
     }
-
-    if (!role || !content) {
-      return res.status(400).json({ error: 'Missing required fields: role, content' });
-    }
-
-    // Decode branch name
-    const decodedBranch = decodeURIComponent(branch);
-
-    const message = {
-      id: uuidv4(),
-      userId,
-      owner,
-      repo,
-      branch: decodedBranch,
-      role,
-      content,
-      images: images || null,
-      createdAt: new Date(),
-    };
-
-    await db.insert(liveChatMessages).values(message);
-
-    res.json({
-      success: true,
-      data: message,
-    });
-  } catch (error) {
-    logger.error('liveChat', 'Failed to add live chat message', { error });
-    res.status(500).json({ error: 'Failed to add message' });
   }
-});
+);
 
 /**
  * DELETE /api/live-chat/:owner/:repo/:branch/messages
@@ -130,6 +193,9 @@ router.delete('/:owner/:repo/:branch/messages', async (req: Request, res: Respon
         )
       );
 
+    // Recalculate storage after deletion to ensure accuracy
+    await StorageService.recalculateUsage(userId);
+
     res.json({
       success: true,
       message: 'Messages cleared',
@@ -143,7 +209,7 @@ router.delete('/:owner/:repo/:branch/messages', async (req: Request, res: Respon
 /**
  * POST /api/live-chat/:owner/:repo/:branch/execute
  * Execute LLM for live chat (streaming response)
- * This connects to the AI worker for execution
+ * Uses ClaudeWebClient for actual AI execution with full code context
  */
 router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response) => {
   try {
@@ -182,6 +248,11 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    const sendSSE = (event: string, data: unknown) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
 
     // Get message history for context
     const history = await db
@@ -200,49 +271,171 @@ router.post('/:owner/:repo/:branch/execute', async (req: Request, res: Response)
 
     history.reverse();
 
-    // For now, send a placeholder response indicating Live Chat is ready
-    // Full LLM execution will be implemented in Phase 5b
-    const sendSSE = (event: string, data: unknown) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    };
-
     sendSSE('connected', {
       workspace: { owner, repo, branch: decodedBranch },
       messageCount: history.length,
     });
 
-    // TODO: Connect to AI worker for actual LLM execution
-    // For now, send a placeholder assistant message
-    const assistantContent = `I'm ready to help you with the codebase at **${owner}/${repo}** on branch **${decodedBranch}**.
+    // Get Claude auth for the user
+    const [dbUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
 
-Live Chat is now active. I can help you:
-- Navigate and understand the code
-- Make file changes
-- Answer questions about the codebase
+    if (!dbUser?.claudeAuth) {
+      sendSSE('error', { error: 'Claude authentication not configured. Please connect your Claude account in settings.' });
+      res.end();
+      return;
+    }
 
-What would you like to work on?`;
+    // Parse Claude auth
+    let claudeAuth: ClaudeAuth;
+    try {
+      claudeAuth = typeof dbUser.claudeAuth === 'string'
+        ? JSON.parse(dbUser.claudeAuth)
+        : dbUser.claudeAuth as ClaudeAuth;
+    } catch {
+      sendSSE('error', { error: 'Invalid Claude authentication data' });
+      res.end();
+      return;
+    }
 
-    const assistantMessage = {
-      id: uuidv4(),
-      userId,
+    // Ensure we have a valid token
+    const validAuth = await ensureValidToken(claudeAuth);
+    if (!validAuth) {
+      sendSSE('error', { error: 'Claude token expired and could not be refreshed' });
+      res.end();
+      return;
+    }
+
+    // Get environment ID - from config or auto-detect
+    let environmentId = CLAUDE_ENVIRONMENT_ID;
+    if (!environmentId) {
+      const detectedEnvId = await fetchEnvironmentIdFromSessions(
+        validAuth.accessToken,
+        CLAUDE_API_BASE_URL
+      );
+      if (detectedEnvId) {
+        environmentId = detectedEnvId;
+      } else {
+        sendSSE('error', { error: 'Could not detect Claude environment ID. Please create a session at claude.ai/code first.' });
+        res.end();
+        return;
+      }
+    }
+
+    // Build prompt with conversation context
+    const prompt = buildPromptWithContext(
+      message,
+      history.map(m => ({ role: m.role, content: m.content })),
+      owner,
+      repo,
+      decodedBranch
+    );
+
+    // Build git URL for the repository
+    const gitUrl = `https://github.com/${owner}/${repo}`;
+
+    // Create Claude client
+    const client = getClaudeClient({
+      accessToken: validAuth.accessToken,
+      environmentId,
+      baseUrl: CLAUDE_API_BASE_URL,
+    });
+
+    logger.info('Starting Claude execution for live chat', {
+      component: 'LiveChat',
       owner,
       repo,
       branch: decodedBranch,
-      role: 'assistant',
-      content: assistantContent,
-      images: null,
-      createdAt: new Date(),
-    };
-
-    await db.insert(liveChatMessages).values(assistantMessage);
-
-    sendSSE('assistant_message', {
-      content: assistantContent,
+      messageLength: message.length,
     });
 
-    sendSSE('completed', {
-      messageId: assistantMessage.id,
-    });
+    // Collect assistant response text for storage
+    let assistantContent = '';
+
+    try {
+      // Execute with ClaudeWebClient
+      const result = await client.execute(
+        {
+          prompt,
+          gitUrl,
+          branchPrefix: `claude/chat-${Date.now()}`,
+          title: `Live Chat: ${message.slice(0, 50)}${message.length > 50 ? '...' : ''}`,
+        },
+        async (event) => {
+          // Extract text content from assistant events
+          const eventType = (event as { type?: string }).type;
+
+          if (eventType === 'assistant') {
+            const eventMessage = (event as { message?: { content?: unknown } }).message;
+            if (eventMessage?.content) {
+              // Content could be string or array of content blocks
+              if (typeof eventMessage.content === 'string') {
+                assistantContent += eventMessage.content;
+                sendSSE('assistant_message', { content: eventMessage.content, partial: true });
+              } else if (Array.isArray(eventMessage.content)) {
+                for (const block of eventMessage.content) {
+                  if (block && typeof block === 'object' && 'type' in block && block.type === 'text' && 'text' in block) {
+                    assistantContent += block.text;
+                    sendSSE('assistant_message', { content: block.text, partial: true });
+                  }
+                }
+              }
+            }
+          }
+
+          // Forward relevant events to client
+          if (eventType === 'tool_use' || eventType === 'tool_result') {
+            sendSSE('tool_event', event);
+          }
+        }
+      );
+
+      logger.info('Claude execution completed for live chat', {
+        component: 'LiveChat',
+        status: result.status,
+        branch: result.branch,
+        totalCost: result.totalCost,
+      });
+
+      // Use collected content or a summary from result
+      const finalContent = assistantContent || result.result || 'Task completed.';
+
+      // Save assistant message
+      const assistantMessage = {
+        id: uuidv4(),
+        userId,
+        owner,
+        repo,
+        branch: decodedBranch,
+        role: 'assistant',
+        content: finalContent,
+        images: null,
+        createdAt: new Date(),
+      };
+
+      await db.insert(liveChatMessages).values(assistantMessage);
+
+      sendSSE('completed', {
+        messageId: assistantMessage.id,
+        status: result.status,
+        branch: result.branch,
+        totalCost: result.totalCost,
+      });
+
+    } catch (execError) {
+      const errorMessage = execError instanceof Error ? execError.message : 'Execution failed';
+      logger.error('Claude execution failed for live chat', execError as Error, {
+        component: 'LiveChat',
+        owner,
+        repo,
+        branch: decodedBranch,
+      });
+
+      sendSSE('error', { error: errorMessage });
+    }
 
     res.end();
   } catch (error) {

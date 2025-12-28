@@ -7,15 +7,20 @@
  */
 
 import { ALlm } from './ALlm.js';
-import { OPENROUTER_API_KEY } from '../config/env.js';
+import { OPENROUTER_API_KEY, CLAUDE_ENVIRONMENT_ID, CLAUDE_DEFAULT_MODEL, LLM_FALLBACK_REPO_URL } from '../config/env.js';
+import { getClaudeCredentials } from '../auth/claudeAuth.js';
+import { ClaudeWebClient } from '../claudeWeb/claudeWebClient.js';
 import { logger } from '../utils/logging/logger.js';
 import type { LlmExecuteParams, LlmExecuteResult } from './types.js';
+import type { SessionEvent } from '../claudeWeb/types.js';
 
 const OPENROUTER_DEFAULT_MODEL = 'anthropic/claude-3.5-haiku';
 
 export class Llm extends ALlm {
   async execute(params: LlmExecuteParams): Promise<LlmExecuteResult> {
     const { prompt, model, maxTokens = 1024, temperature = 0.7, systemPrompt } = params;
+
+    const errors: string[] = [];
 
     // Try OpenRouter first
     if (OPENROUTER_API_KEY) {
@@ -27,16 +32,40 @@ export class Llm extends ALlm {
           systemPrompt,
         });
       } catch (error) {
+        const errorMsg = (error as Error).message;
+        errors.push(`OpenRouter: ${errorMsg}`);
         logger.warn('OpenRouter execution failed, trying fallback', {
           component: 'Llm',
-          error: (error as Error).message,
+          error: errorMsg,
         });
       }
     }
 
-    // TODO: Add Claude Web fallback (empty repo + archive)
-    // For now, throw if OpenRouter is not available
-    throw new Error('No LLM provider available. Set OPENROUTER_API_KEY in your environment.');
+    // Claude Web fallback (expensive, but works without API key)
+    try {
+      return await this.executeClaudeWeb(prompt, { systemPrompt });
+    } catch (error) {
+      const errorMsg = (error as Error).message;
+      errors.push(`Claude Web: ${errorMsg}`);
+      logger.warn('Claude Web fallback failed', {
+        component: 'Llm',
+        error: errorMsg,
+      });
+    }
+
+    // Build informative error message
+    const configHints: string[] = [];
+    if (!OPENROUTER_API_KEY) {
+      configHints.push('OPENROUTER_API_KEY not set');
+    }
+    if (!CLAUDE_ENVIRONMENT_ID) {
+      configHints.push('CLAUDE_ENVIRONMENT_ID not set');
+    }
+
+    const errorDetails = errors.length > 0 ? ` Errors: ${errors.join('; ')}` : '';
+    const configDetails = configHints.length > 0 ? ` Config: ${configHints.join(', ')}.` : '';
+
+    throw new Error(`No LLM provider available.${errorDetails}${configDetails}`);
   }
 
   private async executeOpenRouter(
@@ -100,6 +129,128 @@ export class Llm extends ALlm {
       provider: 'openrouter',
       model: data.model || model,
       cost,
+      inputTokens,
+      outputTokens,
+    };
+  }
+
+  private async executeClaudeWeb(
+    prompt: string,
+    options: { systemPrompt?: string } = {}
+  ): Promise<LlmExecuteResult> {
+    const { systemPrompt } = options;
+
+    // Note: Claude Web sessions use a fixed model and don't support maxTokens/temperature.
+    // These parameters are intentionally not passed through as the Claude Web API
+    // manages model selection and generation parameters internally.
+
+    // Get Claude credentials
+    const credentials = await getClaudeCredentials({ checkDatabase: true });
+    if (!credentials) {
+      throw new Error('Claude credentials not available');
+    }
+
+    if (!CLAUDE_ENVIRONMENT_ID) {
+      throw new Error('CLAUDE_ENVIRONMENT_ID not configured');
+    }
+
+    // Create client
+    const client = new ClaudeWebClient({
+      accessToken: credentials.accessToken,
+      environmentId: CLAUDE_ENVIRONMENT_ID,
+    });
+
+    // Build the full prompt with system prompt if provided
+    const fullPrompt = systemPrompt
+      ? `${systemPrompt}\n\n${prompt}`
+      : prompt;
+
+    // Collect response text from events
+    const responseBlocks: string[] = [];
+    let totalCost: number | undefined;
+    let usedModel: string | undefined;
+    let inputTokens: number | undefined;
+    let outputTokens: number | undefined;
+
+    const onEvent = (event: SessionEvent) => {
+      // Extract text from assistant messages
+      if (event.type === 'assistant' && event.message) {
+        const content = event.message.content;
+        if (typeof content === 'string') {
+          responseBlocks.push(content);
+        } else if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'text' && block.text) {
+              responseBlocks.push(block.text);
+            }
+          }
+        }
+        // Capture model from assistant message
+        if (event.message.model) {
+          usedModel = event.message.model;
+        }
+      }
+
+      // Capture cost and token usage from result event
+      if (event.type === 'result') {
+        if (event.total_cost_usd !== undefined) {
+          totalCost = event.total_cost_usd;
+        }
+        // Extract token counts if available
+        if (typeof event.input_tokens === 'number') {
+          inputTokens = event.input_tokens;
+        }
+        if (typeof event.output_tokens === 'number') {
+          outputTokens = event.output_tokens;
+        }
+      }
+    };
+
+    // Generate a descriptive title from the prompt (first 50 chars)
+    const sessionTitle = `LLM: ${prompt.slice(0, 50).replace(/\n/g, ' ')}${prompt.length > 50 ? '...' : ''}`;
+
+    logger.info('Executing Claude Web fallback', {
+      component: 'Llm',
+      repoUrl: LLM_FALLBACK_REPO_URL,
+    });
+
+    // Execute the session
+    const result = await client.execute(
+      {
+        prompt: fullPrompt,
+        gitUrl: LLM_FALLBACK_REPO_URL,
+        title: sessionTitle,
+      },
+      onEvent
+    );
+
+    // Archive the session to clean up
+    try {
+      await client.archiveSession(result.sessionId);
+      logger.debug('Archived Claude Web session', {
+        component: 'Llm',
+        sessionId: result.sessionId,
+      });
+    } catch (archiveError) {
+      logger.warn('Failed to archive Claude Web session', {
+        component: 'Llm',
+        sessionId: result.sessionId,
+        error: (archiveError as Error).message,
+      });
+    }
+
+    // Join response blocks - content blocks are typically continuous, so join without extra spacing
+    const responseText = responseBlocks.join('');
+
+    if (!responseText) {
+      throw new Error('No response received from Claude Web');
+    }
+
+    return {
+      content: responseText.trim(),
+      provider: 'claude-web',
+      model: usedModel || CLAUDE_DEFAULT_MODEL,
+      cost: totalCost,
       inputTokens,
       outputTokens,
     };

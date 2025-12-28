@@ -25,6 +25,18 @@ WebEDT is a web-based game development platform that combines a digital storefro
 - **Architecture:** Designed for horizontal scalability
 - **Storage:** Few GB per user
 
+#### Horizontal Scalability Design
+
+The platform is architected for horizontal scaling from the ground up:
+
+- **Stateless Services:** Backend services maintain no in-memory state; all sessions stored in PostgreSQL
+- **Database-Backed Sessions:** Authentication via Lucia with PostgreSQL adapter enables any instance to handle any request
+- **Connection Pooling:** Per-instance pools with health checks and automatic reconnection
+- **Health Probes:** Kubernetes-compatible endpoints (`/health`, `/ready`, `/live`, `/metrics`)
+- **Event Sourcing:** SSE events stored in database for replay from any instance
+
+See [ARCHITECTURE.md](../ARCHITECTURE.md) for detailed architecture documentation.
+
 ---
 
 ## 2. Dashboard (Homepage)

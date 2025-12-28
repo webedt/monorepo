@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull } from '@webedt/shared';
+import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc, isNull, isNotNull, StorageService } from '@webedt/shared';
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -1015,6 +1015,9 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
           eq(chatSessions.userId, authReq.user!.id)
         )
       );
+
+    // Recalculate storage usage after permanent deletion
+    await StorageService.recalculateUsage(authReq.user!.id);
 
     const archivedCount = archiveResults.filter(r => r.archived).length;
     const remoteCount = archiveResults.filter(r => r.remoteSessionId).length;
