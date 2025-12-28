@@ -20,6 +20,11 @@
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
+  "overrides": {
+    "drizzle-orm": "^0.44.2",
+    "typescript": "^5.9.3",
+    "commander": "^14.0.2"
+  },
   "engines": {
     "node": ">=20.0.0"
   }
