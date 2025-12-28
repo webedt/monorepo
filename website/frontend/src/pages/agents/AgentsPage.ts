@@ -434,7 +434,7 @@ export class AgentsPage extends Page<PageOptions> {
         const sessionId = data.session.id;
         // Remove the session from our list
         this.sessions = this.sessions.filter(s => s.id !== sessionId);
-        this.filteredSessions = this.filteredSessions.filter(s => s.id !== sessionId);
+        this.applyFilters();
         this.renderSessions();
         console.log('[AgentsPage] Session deleted:', sessionId);
       } catch (error) {
@@ -580,18 +580,32 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private async handleToggleFavorite(sessionId: string): Promise<void> {
+    // Find the session and store original value for rollback
+    const index = this.sessions.findIndex(s => s.id === sessionId);
+    if (index === -1) return;
+
+    const originalFavorite = this.sessions[index].favorite ?? false;
+    const newFavorite = !originalFavorite;
+
+    // Optimistic UI update
+    this.sessions[index] = { ...this.sessions[index], favorite: newFavorite };
+    this.applyFilters();
+    this.renderSessions();
+
     try {
       const result = await sessionsApi.toggleFavorite(sessionId);
-      if (result.success && result.session) {
-        // Update the session in our list
-        const index = this.sessions.findIndex(s => s.id === sessionId);
-        if (index !== -1) {
-          this.sessions[index] = { ...this.sessions[index], favorite: result.session.favorite };
-        }
+      if (!result.success) {
+        // Revert on failure
+        this.sessions[index] = { ...this.sessions[index], favorite: originalFavorite };
         this.applyFilters();
         this.renderSessions();
+        toast.error('Failed to update favorite status');
       }
     } catch (error) {
+      // Revert on error
+      this.sessions[index] = { ...this.sessions[index], favorite: originalFavorite };
+      this.applyFilters();
+      this.renderSessions();
       toast.error('Failed to update favorite status');
     }
   }
