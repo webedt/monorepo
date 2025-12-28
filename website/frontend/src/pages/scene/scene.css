@@ -771,3 +771,33 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* UI Properties Panel */
+.ui-properties-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.ui-prop-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.ui-prop-row label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  min-width: 48px;
+}
+
+.ui-prop-row .property-input {
+  width: 60px;
+}
+
+.ui-value-display {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  min-width: 30px;
+  text-align: right;
+}

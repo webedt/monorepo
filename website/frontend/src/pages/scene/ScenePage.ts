@@ -297,6 +297,31 @@ export class ScenePage extends Page<ScenePageOptions> {
                     </div>
                   </div>
                 </div>
+
+                <div class="property-section ui-properties" style="display: none;">
+                  <div class="property-label">UI Properties</div>
+                  <div class="ui-properties-grid">
+                    <div class="ui-prop-row ui-size-row">
+                      <label>Width</label>
+                      <input type="number" class="property-input ui-width" min="10" step="1">
+                      <label>Height</label>
+                      <input type="number" class="property-input ui-height" min="10" step="1">
+                    </div>
+                    <div class="ui-prop-row ui-value-row" style="display: none;">
+                      <label>Value</label>
+                      <input type="range" class="property-slider ui-value-slider" min="0" max="100" value="50">
+                      <span class="ui-value-display">50</span>
+                    </div>
+                    <div class="ui-prop-row ui-checked-row" style="display: none;">
+                      <label>Checked</label>
+                      <input type="checkbox" class="property-checkbox ui-checked">
+                    </div>
+                    <div class="ui-prop-row ui-text-row" style="display: none;">
+                      <label>Text</label>
+                      <input type="text" class="property-input ui-text" placeholder="Button text">
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </aside>
@@ -538,6 +563,75 @@ export class ScenePage extends Page<ScenePageOptions> {
         }
       });
     }
+
+    // UI Property handlers
+    const uiWidthInput = this.$('.ui-width') as HTMLInputElement;
+    const uiHeightInput = this.$('.ui-height') as HTMLInputElement;
+    const uiValueSlider = this.$('.ui-value-slider') as HTMLInputElement;
+    const uiCheckedInput = this.$('.ui-checked') as HTMLInputElement;
+    const uiTextInput = this.$('.ui-text') as HTMLInputElement;
+
+    if (uiWidthInput) {
+      uiWidthInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiWidth = Math.max(10, parseInt(uiWidthInput.value) || 100);
+          this.hasUnsavedChanges = true;
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiHeightInput) {
+      uiHeightInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiHeight = Math.max(10, parseInt(uiHeightInput.value) || 40);
+          this.hasUnsavedChanges = true;
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiValueSlider) {
+      uiValueSlider.addEventListener('input', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiValue = parseInt(uiValueSlider.value) || 0;
+          const display = this.$('.ui-value-display') as HTMLElement;
+          if (display) display.textContent = String(obj.uiValue);
+          this.hasUnsavedChanges = true;
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiCheckedInput) {
+      uiCheckedInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.uiChecked = uiCheckedInput.checked;
+          this.hasUnsavedChanges = true;
+          this.renderScene();
+        }
+      });
+    }
+
+    if (uiTextInput) {
+      uiTextInput.addEventListener('input', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.text = uiTextInput.value;
+          this.hasUnsavedChanges = true;
+          this.renderScene();
+        }
+      });
+    }
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -667,39 +761,6 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (coordsStatus) {
       coordsStatus.textContent = `X: ${Math.round(this.mouseWorldPos.x)}, Y: ${Math.round(this.mouseWorldPos.y)}`;
     }
-  }
-
-  /**
-   * Get the base dimensions of an object (before scale transform)
-   */
-  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
-    let width = 100;
-    let height = 100;
-
-    switch (obj.type) {
-      case 'sprite':
-        width = obj.spriteWidth ?? 100;
-        height = obj.spriteHeight ?? 100;
-        break;
-      case 'shape':
-        if (obj.shapeType === 'rectangle') {
-          width = 100;
-          height = 80;
-        } else if (obj.shapeType === 'circle') {
-          width = 100;
-          height = 100;
-        }
-        break;
-      case 'text':
-        // Estimate text dimensions based on fontSize
-        const fontSize = obj.fontSize || 24;
-        const textLength = (obj.text || 'Text').length;
-        width = textLength * fontSize * 0.6; // Approximate character width
-        height = fontSize * 1.2;
-        break;
-    }
-
-    return { width, height };
   }
 
   private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
@@ -1624,13 +1685,46 @@ export class ScenePage extends Page<ScenePageOptions> {
     const { width, height } = dims;
     const radius = obj.uiCornerRadius || 6;
 
+    // Get style-based colors
+    let bgColor = obj.uiBackgroundColor || '#3b82f6';
+    let textColor = obj.uiTextColor || '#ffffff';
+    let borderColor = '';
+    let borderWidth = 0;
+
+    switch (obj.uiButtonStyle) {
+      case 'secondary':
+        bgColor = obj.uiBackgroundColor || '#6b7280';
+        break;
+      case 'outline':
+        bgColor = 'transparent';
+        textColor = obj.uiTextColor || '#3b82f6';
+        borderColor = obj.uiBorderColor || '#3b82f6';
+        borderWidth = obj.uiBorderWidth || 2;
+        break;
+      case 'ghost':
+        bgColor = 'transparent';
+        textColor = obj.uiTextColor || '#3b82f6';
+        break;
+      // 'primary' uses defaults
+    }
+
     // Draw button background (Y-flipped for canvas coordinate system)
-    this.ctx.fillStyle = obj.uiBackgroundColor || '#3b82f6';
-    this.drawRoundedRect(0, -height, width, height, radius);
-    this.ctx.fill();
+    if (bgColor !== 'transparent') {
+      this.ctx.fillStyle = bgColor;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.fill();
+    }
+
+    // Draw border for outline style
+    if (borderWidth > 0) {
+      this.ctx.strokeStyle = borderColor;
+      this.ctx.lineWidth = borderWidth;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.stroke();
+    }
 
     // Draw button text
-    this.ctx.fillStyle = obj.uiTextColor || '#ffffff';
+    this.ctx.fillStyle = textColor;
     this.ctx.font = `${obj.fontSize || 14}px ${obj.fontFamily || 'Arial'}`;
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
@@ -1642,29 +1736,53 @@ export class ScenePage extends Page<ScenePageOptions> {
     const { width, height } = dims;
     const radius = obj.uiCornerRadius || 8;
 
+    // Get style-based appearance
+    let bgColor = obj.uiBackgroundColor || '#ffffff';
+    let borderColor = obj.uiBorderColor || '#e5e7eb';
+    let borderWidth = obj.uiBorderWidth || 1;
+    let bgOpacity = 1;
+    let showHeader = true;
+
+    switch (obj.uiPanelStyle) {
+      case 'bordered':
+        borderWidth = obj.uiBorderWidth || 2;
+        showHeader = false;
+        break;
+      case 'glass':
+        bgOpacity = 0.8;
+        borderColor = 'rgba(255, 255, 255, 0.3)';
+        borderWidth = 1;
+        break;
+      // 'solid' uses defaults
+    }
+
     // Draw panel background
-    this.ctx.fillStyle = obj.uiBackgroundColor || '#ffffff';
+    this.ctx.globalAlpha = bgOpacity * (obj.opacity ?? 1);
+    this.ctx.fillStyle = bgColor;
     this.drawRoundedRect(0, -height, width, height, radius);
     this.ctx.fill();
+    this.ctx.globalAlpha = obj.opacity ?? 1;
 
     // Draw panel border
-    if (obj.uiBorderWidth && obj.uiBorderWidth > 0) {
-      this.ctx.strokeStyle = obj.uiBorderColor || '#e5e7eb';
-      this.ctx.lineWidth = obj.uiBorderWidth;
+    if (borderWidth > 0) {
+      this.ctx.strokeStyle = borderColor;
+      this.ctx.lineWidth = borderWidth;
       this.drawRoundedRect(0, -height, width, height, radius);
       this.ctx.stroke();
     }
 
-    // Draw panel header bar
-    this.ctx.fillStyle = obj.uiBorderColor || '#e5e7eb';
-    this.ctx.fillRect(0, -height, width, 24);
+    // Draw panel header bar (for solid style)
+    if (showHeader) {
+      this.ctx.fillStyle = obj.uiBorderColor || '#e5e7eb';
+      this.ctx.fillRect(0, -height, width, 24);
 
-    // Draw header text
-    this.ctx.fillStyle = '#6b7280';
-    this.ctx.font = '12px Arial';
-    this.ctx.textAlign = 'left';
-    this.ctx.textBaseline = 'middle';
-    this.ctx.fillText(obj.name || 'Panel', 8, -height + 12);
+      // Draw header text
+      this.ctx.fillStyle = '#6b7280';
+      this.ctx.font = '12px Arial';
+      this.ctx.textAlign = 'left';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(obj.name || 'Panel', 8, -height + 12);
+    }
   }
 
   private renderUIText(obj: SceneObject, _dims: { width: number; height: number }): void {
@@ -1951,8 +2069,64 @@ export class ScenePage extends Page<ScenePageOptions> {
       btn.classList.toggle('active', isActive);
     });
 
+    // Update UI-specific properties
+    this.updateUIPropertiesPanel(obj);
+
     // Update or create TransformEditor
     this.updateTransformEditor(obj);
+  }
+
+  private updateUIPropertiesPanel(obj: SceneObject): void {
+    const uiPropsSection = this.$('.ui-properties') as HTMLElement;
+    const isUIComponent = obj.type.startsWith('ui-');
+
+    if (!uiPropsSection) return;
+
+    // Show/hide UI properties section based on object type
+    uiPropsSection.style.display = isUIComponent ? 'block' : 'none';
+
+    if (!isUIComponent) return;
+
+    // Update size fields
+    const uiWidthInput = this.$('.ui-width') as HTMLInputElement;
+    const uiHeightInput = this.$('.ui-height') as HTMLInputElement;
+    if (uiWidthInput) uiWidthInput.value = String(obj.uiWidth || 100);
+    if (uiHeightInput) uiHeightInput.value = String(obj.uiHeight || 40);
+
+    // Show/hide value slider for sliders and progress bars
+    const valueRow = this.$('.ui-value-row') as HTMLElement;
+    const hasValue = obj.type === 'ui-slider' || obj.type === 'ui-progress-bar';
+    if (valueRow) {
+      valueRow.style.display = hasValue ? 'flex' : 'none';
+      if (hasValue) {
+        const uiValueSlider = this.$('.ui-value-slider') as HTMLInputElement;
+        const uiValueDisplay = this.$('.ui-value-display') as HTMLElement;
+        if (uiValueSlider) uiValueSlider.value = String(obj.uiValue ?? 50);
+        if (uiValueDisplay) uiValueDisplay.textContent = String(obj.uiValue ?? 50);
+      }
+    }
+
+    // Show/hide checkbox field for checkboxes
+    const checkedRow = this.$('.ui-checked-row') as HTMLElement;
+    const hasChecked = obj.type === 'ui-checkbox';
+    if (checkedRow) {
+      checkedRow.style.display = hasChecked ? 'flex' : 'none';
+      if (hasChecked) {
+        const uiCheckedInput = this.$('.ui-checked') as HTMLInputElement;
+        if (uiCheckedInput) uiCheckedInput.checked = obj.uiChecked ?? false;
+      }
+    }
+
+    // Show/hide text field for buttons and text
+    const textRow = this.$('.ui-text-row') as HTMLElement;
+    const hasText = obj.type === 'ui-button' || obj.type === 'ui-text';
+    if (textRow) {
+      textRow.style.display = hasText ? 'flex' : 'none';
+      if (hasText) {
+        const uiTextInput = this.$('.ui-text') as HTMLInputElement;
+        if (uiTextInput) uiTextInput.value = obj.text || '';
+      }
+    }
   }
 
   private updateTransformEditor(obj: SceneObject): void {
