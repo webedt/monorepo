@@ -115,6 +115,31 @@
   height: 18px;
 }
 
+.toolbar-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: var(--spacing-xs);
+}
+
+.ui-group {
+  background: var(--color-bg-tertiary);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.ui-group .toolbar-btn {
+  background: var(--color-bg-secondary);
+}
+
+.ui-group .toolbar-btn:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: white;
+}
+
 .ai-group .toolbar-btn {
   background: var(--color-bg-tertiary);
   border: 1px dashed var(--color-border);

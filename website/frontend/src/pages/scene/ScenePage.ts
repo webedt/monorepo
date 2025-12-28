@@ -14,8 +14,13 @@ import { Viewport } from '../../lib/viewport';
 import type { Session } from '../../types';
 import './scene.css';
 
-type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty';
+type SceneObjectType = 'sprite' | 'shape' | 'text' | 'group' | 'empty' | 'ui-button' | 'ui-panel' | 'ui-text' | 'ui-image' | 'ui-slider' | 'ui-progress-bar' | 'ui-checkbox';
 type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
+
+// UI Component specific types
+type UIButtonStyle = 'primary' | 'secondary' | 'outline' | 'ghost';
+type UIPanelStyle = 'solid' | 'bordered' | 'glass';
+type UITextStyle = 'heading' | 'body' | 'caption' | 'label';
 
 interface SceneObject {
   id: string;
@@ -34,6 +39,25 @@ interface SceneObject {
   fontSize?: number;
   fontFamily?: string;
   spriteUrl?: string;
+  // UI Component properties
+  uiButtonStyle?: UIButtonStyle;
+  uiPanelStyle?: UIPanelStyle;
+  uiTextStyle?: UITextStyle;
+  uiWidth?: number;
+  uiHeight?: number;
+  uiCornerRadius?: number;
+  uiBackgroundColor?: string;
+  uiBorderColor?: string;
+  uiBorderWidth?: number;
+  uiTextColor?: string;
+  uiDisabled?: boolean;
+  uiValue?: number;       // For sliders and progress bars (0-100)
+  uiMinValue?: number;
+  uiMaxValue?: number;
+  uiChecked?: boolean;    // For checkboxes
+  uiPlaceholder?: string; // For input fields
+  uiImageUrl?: string;    // For UI images
+  uiPadding?: number;
 }
 
 interface ScenePageOptions extends PageOptions {
@@ -119,6 +143,33 @@ export class ScenePage extends Page<ScenePageOptions> {
             </button>
             <button class="toolbar-btn" data-action="add-text" title="Add Text">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+            </button>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
+          <div class="toolbar-group ui-group">
+            <span class="toolbar-label">UI:</span>
+            <button class="toolbar-btn" data-action="add-ui-button" title="Add UI Button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-panel" title="Add UI Panel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-text" title="Add UI Text">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-image" title="Add UI Image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-slider" title="Add UI Slider">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="12" x2="20" y2="12"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-progress" title="Add Progress Bar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="10" width="12" height="4" rx="1" fill="currentColor"/></svg>
+            </button>
+            <button class="toolbar-btn" data-action="add-ui-checkbox" title="Add UI Checkbox">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 11 12 14 16 10"/></svg>
             </button>
           </div>
 
@@ -335,6 +386,23 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (addRectBtn) addRectBtn.addEventListener('click', () => this.addShape('rectangle'));
     if (addCircleBtn) addCircleBtn.addEventListener('click', () => this.addShape('circle'));
     if (addTextBtn) addTextBtn.addEventListener('click', () => this.addText());
+
+    // UI Component buttons
+    const addUIButtonBtn = this.$('[data-action="add-ui-button"]');
+    const addUIPanelBtn = this.$('[data-action="add-ui-panel"]');
+    const addUITextBtn = this.$('[data-action="add-ui-text"]');
+    const addUIImageBtn = this.$('[data-action="add-ui-image"]');
+    const addUISliderBtn = this.$('[data-action="add-ui-slider"]');
+    const addUIProgressBtn = this.$('[data-action="add-ui-progress"]');
+    const addUICheckboxBtn = this.$('[data-action="add-ui-checkbox"]');
+
+    if (addUIButtonBtn) addUIButtonBtn.addEventListener('click', () => this.addUIButton());
+    if (addUIPanelBtn) addUIPanelBtn.addEventListener('click', () => this.addUIPanel());
+    if (addUITextBtn) addUITextBtn.addEventListener('click', () => this.addUIText());
+    if (addUIImageBtn) addUIImageBtn.addEventListener('click', () => this.addUIImage());
+    if (addUISliderBtn) addUISliderBtn.addEventListener('click', () => this.addUISlider());
+    if (addUIProgressBtn) addUIProgressBtn.addEventListener('click', () => this.addUIProgressBar());
+    if (addUICheckboxBtn) addUICheckboxBtn.addEventListener('click', () => this.addUICheckbox());
 
     // Object manipulation buttons
     const moveUpBtn = this.$('[data-action="move-up"]');
@@ -716,6 +784,208 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.renderScene();
   }
 
+  // UI Component factory methods
+  private addUIButton(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-button-${Date.now()}`,
+      name: `Button ${this.objects.length + 1}`,
+      type: 'ui-button',
+      visible: true,
+      locked: false,
+      transform: { x: -60 + offset, y: -20 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      text: 'Button',
+      uiButtonStyle: 'primary',
+      uiWidth: 120,
+      uiHeight: 40,
+      uiCornerRadius: 6,
+      uiBackgroundColor: '#3b82f6',
+      uiTextColor: '#ffffff',
+      fontSize: 14,
+      fontFamily: 'Arial',
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIPanel(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-panel-${Date.now()}`,
+      name: `Panel ${this.objects.length + 1}`,
+      type: 'ui-panel',
+      visible: true,
+      locked: false,
+      transform: { x: -100 + offset, y: -75 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiPanelStyle: 'solid',
+      uiWidth: 200,
+      uiHeight: 150,
+      uiCornerRadius: 8,
+      uiBackgroundColor: '#ffffff',
+      uiBorderColor: '#e5e7eb',
+      uiBorderWidth: 1,
+      uiPadding: 16,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIText(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-text-${Date.now()}`,
+      name: `UI Text ${this.objects.length + 1}`,
+      type: 'ui-text',
+      visible: true,
+      locked: false,
+      transform: { x: -50 + offset, y: offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      text: 'UI Text',
+      uiTextStyle: 'body',
+      uiTextColor: '#1f2937',
+      fontSize: 16,
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIImage(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-image-${Date.now()}`,
+      name: `Image ${this.objects.length + 1}`,
+      type: 'ui-image',
+      visible: true,
+      locked: false,
+      transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiWidth: 100,
+      uiHeight: 100,
+      uiCornerRadius: 4,
+      uiBackgroundColor: '#f3f4f6',
+      uiBorderColor: '#d1d5db',
+      uiBorderWidth: 1,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUISlider(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-slider-${Date.now()}`,
+      name: `Slider ${this.objects.length + 1}`,
+      type: 'ui-slider',
+      visible: true,
+      locked: false,
+      transform: { x: -80 + offset, y: -10 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiWidth: 160,
+      uiHeight: 20,
+      uiValue: 50,
+      uiMinValue: 0,
+      uiMaxValue: 100,
+      uiBackgroundColor: '#e5e7eb',
+      color: '#3b82f6',
+      uiCornerRadius: 10,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUIProgressBar(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-progress-${Date.now()}`,
+      name: `Progress ${this.objects.length + 1}`,
+      type: 'ui-progress-bar',
+      visible: true,
+      locked: false,
+      transform: { x: -80 + offset, y: -8 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      uiWidth: 160,
+      uiHeight: 16,
+      uiValue: 65,
+      uiMinValue: 0,
+      uiMaxValue: 100,
+      uiBackgroundColor: '#e5e7eb',
+      color: '#22c55e',
+      uiCornerRadius: 8,
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private addUICheckbox(): void {
+    const offset = this.objects.length * 20;
+    const obj: SceneObject = {
+      id: `ui-checkbox-${Date.now()}`,
+      name: `Checkbox ${this.objects.length + 1}`,
+      type: 'ui-checkbox',
+      visible: true,
+      locked: false,
+      transform: { x: -60 + offset, y: -10 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      zIndex: this.objects.length,
+      opacity: 1,
+      text: 'Checkbox label',
+      uiChecked: false,
+      uiWidth: 120,
+      uiHeight: 20,
+      uiBackgroundColor: '#ffffff',
+      uiBorderColor: '#d1d5db',
+      color: '#3b82f6',
+      uiTextColor: '#1f2937',
+      fontSize: 14,
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    };
+    this.objects.push(obj);
+    this.selectedObjectId = obj.id;
+    this.hasUnsavedChanges = true;
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
   private moveSelectedUp(): void {
     if (!this.selectedObjectId) return;
     const idx = this.objects.findIndex(o => o.id === this.selectedObjectId);
@@ -766,6 +1036,20 @@ export class ScenePage extends Page<ScenePageOptions> {
         const fontSize = obj.fontSize || 24;
         const textLength = (obj.text || 'Text').length;
         return { width: textLength * fontSize * 0.6, height: fontSize * 1.2 };
+      // UI Components use explicit dimensions
+      case 'ui-button':
+      case 'ui-panel':
+      case 'ui-image':
+      case 'ui-slider':
+      case 'ui-progress-bar':
+        return { width: obj.uiWidth || 100, height: obj.uiHeight || 40 };
+      case 'ui-text': {
+        const uiFontSize = obj.fontSize || 16;
+        const uiTextLength = (obj.text || 'Text').length;
+        return { width: Math.max(uiTextLength * uiFontSize * 0.6, obj.uiWidth || 0), height: uiFontSize * 1.4 };
+      }
+      case 'ui-checkbox':
+        return { width: obj.uiWidth || 120, height: obj.uiHeight || 20 };
       default:
         return { width: 100, height: 100 };
     }
@@ -848,6 +1132,35 @@ export class ScenePage extends Page<ScenePageOptions> {
           this.ctx.textAlign = 'left';
           this.ctx.textBaseline = 'bottom';
           this.ctx.fillText(obj.text || 'Text', 0, 0);
+          break;
+
+        // UI Components
+        case 'ui-button':
+          this.renderUIButton(obj, dims);
+          break;
+
+        case 'ui-panel':
+          this.renderUIPanel(obj, dims);
+          break;
+
+        case 'ui-text':
+          this.renderUIText(obj, dims);
+          break;
+
+        case 'ui-image':
+          this.renderUIImage(obj, dims);
+          break;
+
+        case 'ui-slider':
+          this.renderUISlider(obj, dims);
+          break;
+
+        case 'ui-progress-bar':
+          this.renderUIProgressBar(obj, dims);
+          break;
+
+        case 'ui-checkbox':
+          this.renderUICheckbox(obj, dims);
           break;
       }
 
@@ -1018,6 +1331,227 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.ctx.restore();
   }
 
+  // UI Component rendering methods
+  private renderUIButton(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const radius = obj.uiCornerRadius || 6;
+
+    // Draw button background (Y-flipped for canvas coordinate system)
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#3b82f6';
+    this.drawRoundedRect(0, -height, width, height, radius);
+    this.ctx.fill();
+
+    // Draw button text
+    this.ctx.fillStyle = obj.uiTextColor || '#ffffff';
+    this.ctx.font = `${obj.fontSize || 14}px ${obj.fontFamily || 'Arial'}`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(obj.text || 'Button', width / 2, -height / 2);
+  }
+
+  private renderUIPanel(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const radius = obj.uiCornerRadius || 8;
+
+    // Draw panel background
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#ffffff';
+    this.drawRoundedRect(0, -height, width, height, radius);
+    this.ctx.fill();
+
+    // Draw panel border
+    if (obj.uiBorderWidth && obj.uiBorderWidth > 0) {
+      this.ctx.strokeStyle = obj.uiBorderColor || '#e5e7eb';
+      this.ctx.lineWidth = obj.uiBorderWidth;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.stroke();
+    }
+
+    // Draw panel header bar
+    this.ctx.fillStyle = obj.uiBorderColor || '#e5e7eb';
+    this.ctx.fillRect(0, -height, width, 24);
+
+    // Draw header text
+    this.ctx.fillStyle = '#6b7280';
+    this.ctx.font = '12px Arial';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(obj.name || 'Panel', 8, -height + 12);
+  }
+
+  private renderUIText(obj: SceneObject, _dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+
+    // Apply text style
+    let fontWeight = 'normal';
+    let fontSize = obj.fontSize || 16;
+
+    switch (obj.uiTextStyle) {
+      case 'heading':
+        fontWeight = 'bold';
+        fontSize = obj.fontSize || 24;
+        break;
+      case 'caption':
+        fontSize = obj.fontSize || 12;
+        break;
+      case 'label':
+        fontWeight = '500';
+        fontSize = obj.fontSize || 14;
+        break;
+    }
+
+    this.ctx.fillStyle = obj.uiTextColor || '#1f2937';
+    this.ctx.font = `${fontWeight} ${fontSize}px ${obj.fontFamily || 'system-ui, sans-serif'}`;
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'bottom';
+    this.ctx.fillText(obj.text || 'Text', 0, 0);
+  }
+
+  private renderUIImage(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const radius = obj.uiCornerRadius || 4;
+
+    // Draw image placeholder background
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#f3f4f6';
+    this.drawRoundedRect(0, -height, width, height, radius);
+    this.ctx.fill();
+
+    // Draw border
+    if (obj.uiBorderWidth && obj.uiBorderWidth > 0) {
+      this.ctx.strokeStyle = obj.uiBorderColor || '#d1d5db';
+      this.ctx.lineWidth = obj.uiBorderWidth;
+      this.drawRoundedRect(0, -height, width, height, radius);
+      this.ctx.stroke();
+    }
+
+    // Draw placeholder icon
+    this.ctx.fillStyle = '#9ca3af';
+    this.ctx.font = `${Math.min(width, height) * 0.4}px Arial`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('🖼', width / 2, -height / 2);
+  }
+
+  private renderUISlider(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const value = obj.uiValue ?? 50;
+    const minValue = obj.uiMinValue ?? 0;
+    const maxValue = obj.uiMaxValue ?? 100;
+    const progress = (value - minValue) / (maxValue - minValue);
+    const trackHeight = 6;
+    const trackY = -height / 2 - trackHeight / 2;
+
+    // Draw track background
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#e5e7eb';
+    this.drawRoundedRect(0, trackY, width, trackHeight, trackHeight / 2);
+    this.ctx.fill();
+
+    // Draw filled portion
+    const filledWidth = width * progress;
+    if (filledWidth > 0) {
+      this.ctx.fillStyle = obj.color || '#3b82f6';
+      this.drawRoundedRect(0, trackY, filledWidth, trackHeight, trackHeight / 2);
+      this.ctx.fill();
+    }
+
+    // Draw thumb
+    const thumbRadius = 8;
+    const thumbX = filledWidth;
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.strokeStyle = obj.color || '#3b82f6';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(thumbX, -height / 2, thumbRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.stroke();
+  }
+
+  private renderUIProgressBar(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { width, height } = dims;
+    const value = obj.uiValue ?? 50;
+    const minValue = obj.uiMinValue ?? 0;
+    const maxValue = obj.uiMaxValue ?? 100;
+    const progress = (value - minValue) / (maxValue - minValue);
+    const radius = obj.uiCornerRadius || 8;
+
+    // Draw track background
+    this.ctx.fillStyle = obj.uiBackgroundColor || '#e5e7eb';
+    this.drawRoundedRect(0, -height, width, height, radius);
+    this.ctx.fill();
+
+    // Draw filled portion
+    const filledWidth = width * progress;
+    if (filledWidth > 0) {
+      this.ctx.fillStyle = obj.color || '#22c55e';
+      this.drawRoundedRect(0, -height, filledWidth, height, radius);
+      this.ctx.fill();
+    }
+
+    // Draw percentage text
+    this.ctx.fillStyle = progress > 0.5 ? '#ffffff' : '#374151';
+    this.ctx.font = `bold ${Math.min(height * 0.7, 12)}px Arial`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(`${Math.round(value)}%`, width / 2, -height / 2);
+  }
+
+  private renderUICheckbox(obj: SceneObject, dims: { width: number; height: number }): void {
+    if (!this.ctx) return;
+    const { height } = dims;
+    const boxSize = Math.min(height, 18);
+    const isChecked = obj.uiChecked ?? false;
+
+    // Draw checkbox box
+    const boxY = -height / 2 - boxSize / 2;
+    this.ctx.fillStyle = isChecked ? (obj.color || '#3b82f6') : (obj.uiBackgroundColor || '#ffffff');
+    this.ctx.strokeStyle = isChecked ? (obj.color || '#3b82f6') : (obj.uiBorderColor || '#d1d5db');
+    this.ctx.lineWidth = 1.5;
+    this.drawRoundedRect(0, boxY, boxSize, boxSize, 3);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Draw checkmark
+    if (isChecked) {
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.lineCap = 'round';
+      this.ctx.lineJoin = 'round';
+      this.ctx.beginPath();
+      this.ctx.moveTo(4, boxY + boxSize / 2);
+      this.ctx.lineTo(boxSize / 2 - 1, boxY + boxSize - 4);
+      this.ctx.lineTo(boxSize - 3, boxY + 4);
+      this.ctx.stroke();
+    }
+
+    // Draw label
+    this.ctx.fillStyle = obj.uiTextColor || '#1f2937';
+    this.ctx.font = `${obj.fontSize || 14}px ${obj.fontFamily || 'system-ui, sans-serif'}`;
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(obj.text || '', boxSize + 8, -height / 2);
+  }
+
+  // Helper method for drawing rounded rectangles
+  private drawRoundedRect(x: number, y: number, width: number, height: number, radius: number): void {
+    if (!this.ctx) return;
+    const r = Math.min(radius, width / 2, height / 2);
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + r, y);
+    this.ctx.lineTo(x + width - r, y);
+    this.ctx.arcTo(x + width, y, x + width, y + r, r);
+    this.ctx.lineTo(x + width, y + height - r);
+    this.ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
+    this.ctx.lineTo(x + r, y + height);
+    this.ctx.arcTo(x, y + height, x, y + height - r, r);
+    this.ctx.lineTo(x, y + r);
+    this.ctx.arcTo(x, y, x + r, y, r);
+    this.ctx.closePath();
+  }
+
   private updateHierarchy(): void {
     const treeContainer = this.$('.hierarchy-tree') as HTMLElement;
     if (!treeContainer) return;
@@ -1026,7 +1560,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       treeContainer.innerHTML = `
         <div class="hierarchy-empty">
           <p>No objects in scene</p>
-          <p class="hint">Add sprites, shapes, or text</p>
+          <p class="hint">Add sprites, shapes, text, or UI components</p>
         </div>
       `;
       return;
@@ -1066,6 +1600,14 @@ export class ScenePage extends Page<ScenePageOptions> {
         }
       case 'text': return '📝';
       case 'group': return '📁';
+      // UI Components
+      case 'ui-button': return '🔘';
+      case 'ui-panel': return '🪟';
+      case 'ui-text': return '🔤';
+      case 'ui-image': return '🖼️';
+      case 'ui-slider': return '🎚️';
+      case 'ui-progress-bar': return '📊';
+      case 'ui-checkbox': return '☑️';
       default: return '◻';
     }
   }
