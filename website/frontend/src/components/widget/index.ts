@@ -7,6 +7,8 @@ export { ActivityWidget } from './ActivityWidget';
 export { QuickActionsWidget } from './QuickActionsWidget';
 export { ChartWidget } from './ChartWidget';
 export { CommunityActivityWidget } from './CommunityActivityWidget';
+export { FavoritesWidget } from './FavoritesWidget';
+export { SessionActivityWidget } from './SessionActivityWidget';
 
 // Widget Container
 export { WidgetContainer } from './WidgetContainer';
@@ -32,5 +34,7 @@ export type { ActivityWidgetOptions } from './ActivityWidget';
 export type { QuickActionsWidgetOptions } from './QuickActionsWidget';
 export type { ChartWidgetOptions, ChartType } from './ChartWidget';
 export type { CommunityActivityWidgetOptions } from './CommunityActivityWidget';
+export type { FavoritesWidgetOptions } from './FavoritesWidget';
+export type { SessionActivityWidgetOptions } from './SessionActivityWidget';
 export type { WidgetContainerOptions } from './WidgetContainer';
 export type { WidgetCustomizerOptions } from './WidgetCustomizer';

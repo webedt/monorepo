@@ -34,6 +34,103 @@ router.get('/featured', async (req: Request, res: Response) => {
   }
 });
 
+// Get newly released games (released within the last 30 days)
+router.get('/new', async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const daysBack = Math.min(parseInt(req.query.days as string) || 30, 90);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
+    // Fetch all published games, then filter by release date
+    const allGames = await db
+      .select()
+      .from(games)
+      .where(eq(games.status, 'published'));
+
+    // Filter to games released within the specified period
+    const newGames = allGames
+      .filter((g) => {
+        if (!g.releaseDate) return false;
+        const releaseDate = new Date(g.releaseDate);
+        return releaseDate >= cutoffDate;
+      })
+      .sort((a, b) => {
+        const dateA = a.releaseDate ? new Date(a.releaseDate).getTime() : 0;
+        const dateB = b.releaseDate ? new Date(b.releaseDate).getTime() : 0;
+        return dateB - dateA; // Most recent first
+      })
+      .slice(0, limit);
+
+    res.json({
+      success: true,
+      data: { games: newGames },
+    });
+  } catch (error) {
+    logger.error('Get new games error', error as Error, { component: 'Store' });
+    res.status(500).json({ success: false, error: 'Failed to fetch new games' });
+  }
+});
+
+// Get store highlights (featured + new items combined)
+router.get('/highlights', async (req: Request, res: Response) => {
+  try {
+    const featuredLimit = Math.min(parseInt(req.query.featuredLimit as string) || 6, 20);
+    const newLimit = Math.min(parseInt(req.query.newLimit as string) || 6, 20);
+    const daysBack = Math.min(parseInt(req.query.days as string) || 30, 90);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
+    // Fetch all published games
+    const allGames = await db
+      .select()
+      .from(games)
+      .where(eq(games.status, 'published'));
+
+    // Get featured games
+    const featuredGames = allGames
+      .filter((g) => g.featured)
+      .sort((a, b) => {
+        const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, featuredLimit);
+
+    // Get featured game IDs to exclude from new releases
+    const featuredIds = new Set(featuredGames.map((g) => g.id));
+
+    // Get new releases (excluding featured games to avoid duplicates)
+    const newGames = allGames
+      .filter((g) => {
+        if (featuredIds.has(g.id)) return false;
+        if (!g.releaseDate) return false;
+        const releaseDate = new Date(g.releaseDate);
+        return releaseDate >= cutoffDate;
+      })
+      .sort((a, b) => {
+        const dateA = a.releaseDate ? new Date(a.releaseDate).getTime() : 0;
+        const dateB = b.releaseDate ? new Date(b.releaseDate).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, newLimit);
+
+    res.json({
+      success: true,
+      data: {
+        featured: featuredGames,
+        new: newGames,
+        hasHighlights: featuredGames.length > 0 || newGames.length > 0,
+      },
+    });
+  } catch (error) {
+    logger.error('Get store highlights error', error as Error, { component: 'Store' });
+    res.status(500).json({ success: false, error: 'Failed to fetch store highlights' });
+  }
+});
+
 // Search/browse games in the store
 router.get('/browse', async (req: Request, res: Response) => {
   try {

@@ -9,6 +9,8 @@ import { StatsWidget } from './StatsWidget';
 import { ActivityWidget } from './ActivityWidget';
 import { QuickActionsWidget } from './QuickActionsWidget';
 import { ChartWidget } from './ChartWidget';
+import { FavoritesWidget } from './FavoritesWidget';
+import { SessionActivityWidget } from './SessionActivityWidget';
 import { widgetStore } from '../../stores/widgetStore';
 
 import type { ComponentOptions } from '../base';
@@ -136,6 +138,18 @@ export class WidgetContainer extends Component<HTMLDivElement> {
           ...baseOptions,
           chartType: (config.settings?.chartType as 'bar' | 'line' | 'donut') || 'bar',
           data: this.getChartData(),
+        });
+
+      case 'favorites':
+        return new FavoritesWidget({
+          ...baseOptions,
+          maxItems: (config.settings?.maxItems as number) || 6,
+        });
+
+      case 'session-activity':
+        return new SessionActivityWidget({
+          ...baseOptions,
+          maxItems: (config.settings?.maxItems as number) || 8,
         });
 
       default:

@@ -5,7 +5,7 @@
 import type { ComponentOptions } from '../base';
 
 export type WidgetSize = 'sm' | 'md' | 'lg' | 'xl';
-export type WidgetType = 'stats' | 'activity' | 'quick-actions' | 'chart' | 'custom';
+export type WidgetType = 'stats' | 'activity' | 'quick-actions' | 'chart' | 'favorites' | 'session-activity' | 'custom';
 
 export interface WidgetConfig {
   id: string;
