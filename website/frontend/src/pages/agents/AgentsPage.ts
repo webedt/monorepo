@@ -28,6 +28,9 @@ export class AgentsPage extends Page<PageOptions> {
   private isLoading = true;
   private filterMode: FilterMode = 'all';
   private searchQuery = '';
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private isSearching = false;
+  private serverSearchResults: Session[] | null = null;
 
   // Inline form state
   private repos: Repository[] = [];
@@ -666,21 +669,24 @@ export class AgentsPage extends Page<PageOptions> {
   }
 
   private applyFilters(): void {
-    let result = [...this.sessions];
+    // Use server search results if available, otherwise use local sessions
+    let result = this.serverSearchResults !== null
+      ? [...this.serverSearchResults]
+      : [...this.sessions];
 
     // Apply collection filter
     if (this.selectedCollectionId && this.collectionSessionIds.size > 0) {
       result = result.filter(session => this.collectionSessionIds.has(session.id));
     }
 
-    // Apply favorites filter
-    if (this.filterMode === 'favorites') {
+    // Apply favorites filter (only if not using server search with favorites filter)
+    if (this.filterMode === 'favorites' && this.serverSearchResults === null) {
       result = result.filter(session => session.favorite === true);
     }
 
-    // Apply search filter
+    // Apply client-side search filter when no server results
     const lowerQuery = this.searchQuery.toLowerCase().trim();
-    if (lowerQuery) {
+    if (lowerQuery && this.serverSearchResults === null) {
       result = result.filter(session => {
         const title = session.userRequest?.toLowerCase() || '';
         const repo = `${session.repositoryOwner || ''}/${session.repositoryName || ''}`.toLowerCase();
@@ -697,8 +703,64 @@ export class AgentsPage extends Page<PageOptions> {
 
   private handleSearch(query: string): void {
     this.searchQuery = query;
+
+    // Clear any pending debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+
+    // If query is empty, clear server search results and use local filtering
+    if (!query.trim()) {
+      this.serverSearchResults = null;
+      this.isSearching = false;
+      this.applyFilters();
+      this.renderSessions();
+      return;
+    }
+
+    // For short queries (1-2 chars), use client-side filtering for responsiveness
+    if (query.trim().length < 3) {
+      this.serverSearchResults = null;
+      this.applyFilters();
+      this.renderSessions();
+      return;
+    }
+
+    // Debounce server-side search for longer queries
+    this.searchDebounceTimer = setTimeout(async () => {
+      await this.performServerSearch(query.trim());
+    }, 300);
+
+    // Meanwhile, show client-side filtered results
     this.applyFilters();
     this.renderSessions();
+  }
+
+  private async performServerSearch(query: string): Promise<void> {
+    if (this.isSearching) return;
+
+    this.isSearching = true;
+
+    try {
+      const result = await sessionsApi.search({
+        q: query,
+        limit: 100,
+        favorite: this.filterMode === 'favorites' ? true : undefined,
+      });
+
+      // Only update if the query hasn't changed
+      if (this.searchQuery.trim() === query) {
+        this.serverSearchResults = result.sessions;
+        this.applyFilters();
+        this.renderSessions();
+      }
+    } catch (error) {
+      console.error('Server search failed, falling back to client-side:', error);
+      // Keep using client-side filtering on error
+    } finally {
+      this.isSearching = false;
+    }
   }
 
   protected onUnmount(): void {
@@ -710,6 +772,12 @@ export class AgentsPage extends Page<PageOptions> {
     this.repoSelect?.unmount();
     this.branchSelect?.unmount();
     this.collectionsPanel?.unmount();
+
+    // Clear search debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
 
     // Close session updates subscription
     if (this.sessionUpdatesEventSource) {

@@ -1,11 +1,11 @@
-import { eq, and, isNull, isNotNull, inArray, desc, count } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, inArray, desc, count, or, ilike } from 'drizzle-orm';
 
 import { ASessionQueryService } from './ASessionQueryService.js';
 import { db, chatSessions } from '../db/index.js';
 import { getPreviewUrl } from '../utils/helpers/previewUrlHelper.js';
 
 import type { ChatSession } from '../db/schema.js';
-import type { SessionQueryOptions, PaginatedResult, SessionWithPreview } from './ASessionQueryService.js';
+import type { SessionQueryOptions, PaginatedResult, SessionWithPreview, SessionSearchOptions } from './ASessionQueryService.js';
 
 export class SessionQueryService extends ASessionQueryService {
   async getById(sessionId: string): Promise<ChatSession | null> {
@@ -107,6 +107,56 @@ export class SessionQueryService extends ASessionQueryService {
       .from(chatSessions)
       .where(and(eq(chatSessions.userId, userId), isNotNull(chatSessions.deletedAt)));
     return total;
+  }
+
+  async search(userId: string, options: SessionSearchOptions): Promise<PaginatedResult<ChatSession>> {
+    const { query, limit = 50, offset = 0, status, favorite } = options;
+
+    // Build the search pattern for case-insensitive matching
+    const searchPattern = `%${query}%`;
+
+    // Build condition list
+    const conditions = [
+      eq(chatSessions.userId, userId),
+      isNull(chatSessions.deletedAt),
+      or(
+        ilike(chatSessions.userRequest, searchPattern),
+        ilike(chatSessions.repositoryOwner, searchPattern),
+        ilike(chatSessions.repositoryName, searchPattern),
+        ilike(chatSessions.branch, searchPattern)
+      ),
+    ];
+
+    // Add optional filters
+    if (status) {
+      conditions.push(eq(chatSessions.status, status));
+    }
+
+    if (favorite !== undefined) {
+      conditions.push(eq(chatSessions.favorite, favorite));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [items, [{ total }]] = await Promise.all([
+      db
+        .select()
+        .from(chatSessions)
+        .where(whereClause)
+        .orderBy(desc(chatSessions.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ total: count() })
+        .from(chatSessions)
+        .where(whereClause),
+    ]);
+
+    return {
+      items,
+      total,
+      hasMore: offset + items.length < total,
+    };
   }
 }
 

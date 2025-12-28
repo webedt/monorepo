@@ -34,6 +34,7 @@ export { EventStorageService, eventStorageService } from './EventStorageService.
 export {
   ASessionQueryService,
   type SessionQueryOptions,
+  type SessionSearchOptions,
   type PaginatedResult,
   type SessionWithPreview,
 } from './ASessionQueryService.js';
