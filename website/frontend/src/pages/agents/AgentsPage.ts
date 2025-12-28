@@ -4,8 +4,8 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect } from '../../components';
-import { sessionsApi, githubApi } from '../../lib/api';
+import { Button, Input, TextArea, Icon, Spinner, toast, SearchableSelect, CollectionsPanel } from '../../components';
+import { sessionsApi, githubApi, collectionsApi } from '../../lib/api';
 import type { Session, Repository, Branch } from '../../types';
 import './agents.css';
 
@@ -42,6 +42,11 @@ export class AgentsPage extends Page<PageOptions> {
 
   // Session list updates subscription
   private sessionUpdatesEventSource: EventSource | null = null;
+
+  // Collections
+  private collectionsPanel: CollectionsPanel | null = null;
+  private selectedCollectionId: string | null = null;
+  private collectionSessionIds: Set<string> = new Set();
 
   protected render(): string {
     return `
@@ -94,16 +99,23 @@ export class AgentsPage extends Page<PageOptions> {
           </div>
         </div>
 
-        <div class="sessions-container">
-          <div class="sessions-loading">
-            <div class="spinner-container"></div>
-          </div>
-          <div class="sessions-empty" style="display: none;">
-            <div class="empty-icon"></div>
-            <h3 class="empty-title">No agent sessions yet</h3>
-            <p class="empty-description">Start a new session to begin coding with AI</p>
-          </div>
-          <div class="sessions-list" style="display: none;"></div>
+        <div class="agents-content">
+          <aside class="agents-sidebar">
+            <div class="collections-panel-container"></div>
+          </aside>
+          <main class="agents-main">
+            <div class="sessions-container">
+              <div class="sessions-loading">
+                <div class="spinner-container"></div>
+              </div>
+              <div class="sessions-empty" style="display: none;">
+                <div class="empty-icon"></div>
+                <h3 class="empty-title">No agent sessions yet</h3>
+                <p class="empty-description">Start a new session to begin coding with AI</p>
+              </div>
+              <div class="sessions-list" style="display: none;"></div>
+            </div>
+          </main>
         </div>
       </div>
     `;
@@ -191,6 +203,15 @@ export class AgentsPage extends Page<PageOptions> {
       this.spinner.mount(spinnerContainer);
     }
 
+    // Create collections panel
+    const collectionsPanelContainer = this.$('.collections-panel-container') as HTMLElement;
+    if (collectionsPanelContainer) {
+      this.collectionsPanel = new CollectionsPanel({
+        onCollectionSelect: (collectionId) => this.handleCollectionSelect(collectionId),
+      });
+      this.collectionsPanel.mount(collectionsPanelContainer);
+    }
+
     // Load sessions
     this.loadSessions();
 
@@ -202,6 +223,23 @@ export class AgentsPage extends Page<PageOptions> {
 
     // Load GitHub repos for inline form
     this.loadReposForInlineForm();
+  }
+
+  private async handleCollectionSelect(collectionId: string | null): Promise<void> {
+    this.selectedCollectionId = collectionId;
+    this.collectionSessionIds.clear();
+
+    if (collectionId) {
+      try {
+        const result = await collectionsApi.getSessions(collectionId);
+        this.collectionSessionIds = new Set(result.sessions.map((s: Session) => s.id));
+      } catch (error) {
+        console.error('Failed to load collection sessions:', error);
+      }
+    }
+
+    this.applyFilters();
+    this.renderSessions();
   }
 
   private async loadReposForInlineForm(): Promise<void> {
@@ -630,6 +668,11 @@ export class AgentsPage extends Page<PageOptions> {
   private applyFilters(): void {
     let result = [...this.sessions];
 
+    // Apply collection filter
+    if (this.selectedCollectionId && this.collectionSessionIds.size > 0) {
+      result = result.filter(session => this.collectionSessionIds.has(session.id));
+    }
+
     // Apply favorites filter
     if (this.filterMode === 'favorites') {
       result = result.filter(session => session.favorite === true);
@@ -666,6 +709,7 @@ export class AgentsPage extends Page<PageOptions> {
     this.emptyIcon?.unmount();
     this.repoSelect?.unmount();
     this.branchSelect?.unmount();
+    this.collectionsPanel?.unmount();
 
     // Close session updates subscription
     if (this.sessionUpdatesEventSource) {
