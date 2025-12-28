@@ -466,6 +466,11 @@ export type {
   NewCommunityChannel,
   ChannelMessage,
   NewChannelMessage,
+  // Collections types
+  Collection,
+  NewCollection,
+  SessionCollection,
+  NewSessionCollection,
   // Payment types
   PaymentTransaction,
   NewPaymentTransaction,
@@ -503,6 +508,9 @@ export {
   // Community channels tables
   communityChannels,
   channelMessages,
+  // Collections tables
+  collections,
+  sessionCollections,
   // Payment tables
   paymentTransactions,
   paymentWebhooks,

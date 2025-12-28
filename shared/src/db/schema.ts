@@ -607,6 +607,48 @@ export type ChannelMessage = typeof channelMessages.$inferSelect;
 export type NewChannelMessage = typeof channelMessages.$inferInsert;
 
 // ============================================================================
+// COLLECTIONS - User-created organizational folders for sessions
+// ============================================================================
+
+// Collections - User-created organizational folders
+export const collections = pgTable('collections', {
+  id: text('id').primaryKey(), // UUID
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  color: text('color'), // Optional color for visual distinction (e.g., '#FF5733')
+  icon: text('icon'), // Optional icon identifier (e.g., 'folder', 'star', 'code')
+  sortOrder: integer('sort_order').default(0).notNull(), // For custom ordering
+  isDefault: boolean('is_default').default(false).notNull(), // Default collection for new sessions
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('collection_user_name_idx').on(table.userId, table.name),
+]);
+
+// Session Collections - Junction table for sessions in collections (many-to-many)
+export const sessionCollections = pgTable('session_collections', {
+  id: text('id').primaryKey(), // UUID
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => chatSessions.id, { onDelete: 'cascade' }),
+  collectionId: text('collection_id')
+    .notNull()
+    .references(() => collections.id, { onDelete: 'cascade' }),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('session_collection_unique_idx').on(table.sessionId, table.collectionId),
+]);
+
+// Type exports for Collections
+export type Collection = typeof collections.$inferSelect;
+export type NewCollection = typeof collections.$inferInsert;
+export type SessionCollection = typeof sessionCollections.$inferSelect;
+export type NewSessionCollection = typeof sessionCollections.$inferInsert;
+
+// ============================================================================
 // PAYMENT TRANSACTIONS - Stripe and PayPal payment tracking
 // ============================================================================
 
