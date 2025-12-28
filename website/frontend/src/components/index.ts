@@ -149,3 +149,7 @@ export type { CollectionsPanelOptions } from './collections-panel';
 // MultiCursorEditor
 export { MultiCursorEditor } from './multi-cursor-editor';
 export type { MultiCursorEditorOptions } from './multi-cursor-editor';
+
+// CommitDialog
+export { CommitDialog } from './commit-dialog';
+export type { CommitDialogOptions, ChangedFile } from './commit-dialog';
