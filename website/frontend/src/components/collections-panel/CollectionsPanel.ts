@@ -125,7 +125,9 @@ export class CollectionsPanel extends Component<HTMLDivElement> {
     item.className = `collections-panel__item ${this.selectedCollectionId === collection.id ? 'collections-panel__item--selected' : ''}`;
     item.dataset.collectionId = collection.id;
 
-    const iconColor = collection.color || 'var(--color-text-secondary)';
+    // Validate color to prevent CSS injection - only allow hex colors or CSS variables
+    const rawColor = collection.color || 'var(--color-text-secondary)';
+    const iconColor = this.sanitizeColor(rawColor);
     const iconSvg = this.getIconSvg(collection.icon);
 
     item.innerHTML = `
@@ -500,6 +502,23 @@ export class CollectionsPanel extends Component<HTMLDivElement> {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  private sanitizeColor(color: string): string {
+    // Allow CSS variables
+    if (color.startsWith('var(--') && color.endsWith(')')) {
+      // Validate variable name contains only allowed characters
+      const varName = color.slice(4, -1);
+      if (/^--[a-zA-Z0-9-]+$/.test(varName)) {
+        return color;
+      }
+    }
+    // Allow valid hex colors only
+    if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      return color;
+    }
+    // Fallback to safe default
+    return 'var(--color-text-secondary)';
   }
 
   getSelectedCollectionId(): string | null {

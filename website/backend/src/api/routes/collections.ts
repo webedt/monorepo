@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { db, collections, sessionCollections, chatSessions, eq, and, desc, asc } from '@webedt/shared';
+import { db, collections, sessionCollections, chatSessions, eq, and, desc, asc, sql } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '@webedt/shared';
@@ -12,37 +12,231 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+// Validation constants
+const VALID_ICONS = ['folder', 'star', 'code', 'bookmark', 'archive'] as const;
+const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
+
+// Validation helpers
+function isValidHexColor(color: unknown): color is string {
+  return typeof color === 'string' && HEX_COLOR_REGEX.test(color);
+}
+
+function isValidIcon(icon: unknown): icon is string {
+  return typeof icon === 'string' && VALID_ICONS.includes(icon as (typeof VALID_ICONS)[number]);
+}
+
+// ===========================================================================
+// IMPORTANT: Routes with specific paths must be defined BEFORE parameterized
+// routes like /:id to prevent the parameter from matching literal path segments
+// ===========================================================================
+
+// Get collections for a specific session
+// NOTE: Must be before /:id to prevent 'session' from being matched as an id
+router.get('/session/:sessionId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { sessionId } = req.params;
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, authReq.user!.id)));
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    // Get collections this session belongs to
+    const sessionCols = await db
+      .select({
+        id: collections.id,
+        name: collections.name,
+        description: collections.description,
+        color: collections.color,
+        icon: collections.icon,
+        sortOrder: collections.sortOrder,
+        isDefault: collections.isDefault,
+        createdAt: collections.createdAt,
+        updatedAt: collections.updatedAt,
+        addedAt: sessionCollections.addedAt,
+      })
+      .from(sessionCollections)
+      .innerJoin(collections, eq(sessionCollections.collectionId, collections.id))
+      .where(eq(sessionCollections.sessionId, sessionId))
+      .orderBy(asc(collections.sortOrder), asc(collections.name));
+
+    res.json({
+      success: true,
+      data: {
+        collections: sessionCols,
+        total: sessionCols.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Get session collections error', error as Error, { component: 'Collections' });
+    res.status(500).json({ success: false, error: 'Failed to fetch session collections' });
+  }
+});
+
+// Bulk add session to multiple collections
+// NOTE: Must be before /:id to prevent 'session' from being matched as an id
+router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { sessionId } = req.params;
+    const { collectionIds } = req.body;
+
+    if (!Array.isArray(collectionIds) || collectionIds.length === 0) {
+      res.status(400).json({ success: false, error: 'collectionIds array is required' });
+      return;
+    }
+
+    // Verify session ownership
+    const [session] = await db
+      .select()
+      .from(chatSessions)
+      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, authReq.user!.id)));
+
+    if (!session) {
+      res.status(404).json({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    // Verify all collections belong to user
+    const userCollections = await db
+      .select({ id: collections.id })
+      .from(collections)
+      .where(eq(collections.userId, authReq.user!.id));
+
+    const userCollectionIds = new Set(userCollections.map((c) => c.id));
+    const validCollectionIds = collectionIds.filter((id: string) => userCollectionIds.has(id));
+
+    if (validCollectionIds.length === 0) {
+      res.status(400).json({ success: false, error: 'No valid collections found' });
+      return;
+    }
+
+    // Get existing memberships to avoid duplicates
+    const existingMemberships = await db
+      .select({ collectionId: sessionCollections.collectionId })
+      .from(sessionCollections)
+      .where(eq(sessionCollections.sessionId, sessionId));
+
+    const existingCollectionIds = new Set(existingMemberships.map((m) => m.collectionId));
+    const newCollectionIds = validCollectionIds.filter((id: string) => !existingCollectionIds.has(id));
+
+    if (newCollectionIds.length === 0) {
+      res.json({ success: true, data: { added: 0 }, message: 'Session already in all specified collections' });
+      return;
+    }
+
+    // Add to new collections
+    await db.insert(sessionCollections).values(
+      newCollectionIds.map((collectionId: string) => ({
+        id: uuidv4(),
+        sessionId,
+        collectionId,
+      }))
+    );
+
+    logger.info(`Bulk added session ${sessionId} to ${newCollectionIds.length} collections`, {
+      component: 'Collections',
+      sessionId,
+      collectionIds: newCollectionIds,
+      userId: authReq.user!.id,
+    });
+
+    res.json({ success: true, data: { added: newCollectionIds.length } });
+  } catch (error) {
+    logger.error('Bulk add session to collections error', error as Error, { component: 'Collections' });
+    res.status(500).json({ success: false, error: 'Failed to add session to collections' });
+  }
+});
+
+// Reorder collections
+// NOTE: Must be before /:id to prevent 'reorder' from being matched as an id
+router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const { orderedIds } = req.body;
+
+    if (!Array.isArray(orderedIds)) {
+      res.status(400).json({ success: false, error: 'orderedIds array is required' });
+      return;
+    }
+
+    // Verify all collections belong to user
+    const userCollections = await db
+      .select({ id: collections.id })
+      .from(collections)
+      .where(eq(collections.userId, authReq.user!.id));
+
+    const userCollectionIds = new Set(userCollections.map((c) => c.id));
+
+    // Update sort order for each collection
+    await Promise.all(
+      orderedIds.map(async (id: string, index: number) => {
+        if (userCollectionIds.has(id)) {
+          await db
+            .update(collections)
+            .set({ sortOrder: index, updatedAt: new Date() })
+            .where(eq(collections.id, id));
+        }
+      })
+    );
+
+    logger.info(`Reordered collections`, {
+      component: 'Collections',
+      userId: authReq.user!.id,
+      count: orderedIds.length,
+    });
+
+    res.json({ success: true, message: 'Collections reordered' });
+  } catch (error) {
+    logger.error('Reorder collections error', error as Error, { component: 'Collections' });
+    res.status(500).json({ success: false, error: 'Failed to reorder collections' });
+  }
+});
+
+// ===========================================================================
+// Standard CRUD routes with parameterized paths
+// ===========================================================================
+
 // Get all collections for the current user
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthRequest;
 
+    // Get collections with session counts using a subquery to avoid N+1 queries
     const userCollections = await db
-      .select()
+      .select({
+        id: collections.id,
+        userId: collections.userId,
+        name: collections.name,
+        description: collections.description,
+        color: collections.color,
+        icon: collections.icon,
+        sortOrder: collections.sortOrder,
+        isDefault: collections.isDefault,
+        createdAt: collections.createdAt,
+        updatedAt: collections.updatedAt,
+        sessionCount: sql<number>`(
+          SELECT COUNT(*)::int
+          FROM ${sessionCollections}
+          WHERE ${sessionCollections.collectionId} = ${collections.id}
+        )`,
+      })
       .from(collections)
       .where(eq(collections.userId, authReq.user!.id))
       .orderBy(asc(collections.sortOrder), asc(collections.name));
 
-    // Get session counts for each collection
-    const collectionsWithCounts = await Promise.all(
-      userCollections.map(async (collection) => {
-        const sessionCount = await db
-          .select({ count: sessionCollections.id })
-          .from(sessionCollections)
-          .where(eq(sessionCollections.collectionId, collection.id));
-
-        return {
-          ...collection,
-          sessionCount: sessionCount.length,
-        };
-      })
-    );
-
     res.json({
       success: true,
       data: {
-        collections: collectionsWithCounts,
-        total: collectionsWithCounts.length,
+        collections: userCollections,
+        total: userCollections.length,
       },
     });
   } catch (error) {
@@ -82,6 +276,21 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       res.status(400).json({ success: false, error: 'Collection name is required' });
+      return;
+    }
+
+    // Validate color format if provided
+    if (color !== undefined && color !== null && !isValidHexColor(color)) {
+      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color like #RRGGBB' });
+      return;
+    }
+
+    // Validate icon if provided
+    if (icon !== undefined && icon !== null && !isValidIcon(icon)) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid icon. Must be one of: ${VALID_ICONS.join(', ')}`,
+      });
       return;
     }
 
@@ -147,6 +356,21 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
     const { name, description, color, icon, sortOrder, isDefault } = req.body;
+
+    // Validate color format if provided
+    if (color !== undefined && color !== null && !isValidHexColor(color)) {
+      res.status(400).json({ success: false, error: 'Invalid color format. Must be a hex color like #RRGGBB' });
+      return;
+    }
+
+    // Validate icon if provided
+    if (icon !== undefined && icon !== null && !isValidIcon(icon)) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid icon. Must be one of: ${VALID_ICONS.join(', ')}`,
+      });
+      return;
+    }
 
     // Verify ownership
     const [existing] = await db
@@ -378,7 +602,7 @@ router.delete('/:id/sessions/:sessionId', requireAuth, async (req: Request, res:
     }
 
     // Remove session from collection
-    const result = await db
+    await db
       .delete(sessionCollections)
       .where(and(eq(sessionCollections.sessionId, sessionId), eq(sessionCollections.collectionId, id)));
 
@@ -393,173 +617,6 @@ router.delete('/:id/sessions/:sessionId', requireAuth, async (req: Request, res:
   } catch (error) {
     logger.error('Remove session from collection error', error as Error, { component: 'Collections' });
     res.status(500).json({ success: false, error: 'Failed to remove session from collection' });
-  }
-});
-
-// Get collections for a specific session
-router.get('/session/:sessionId', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const { sessionId } = req.params;
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, authReq.user!.id)));
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    // Get collections this session belongs to
-    const sessionCols = await db
-      .select({
-        id: collections.id,
-        name: collections.name,
-        description: collections.description,
-        color: collections.color,
-        icon: collections.icon,
-        sortOrder: collections.sortOrder,
-        isDefault: collections.isDefault,
-        createdAt: collections.createdAt,
-        updatedAt: collections.updatedAt,
-        addedAt: sessionCollections.addedAt,
-      })
-      .from(sessionCollections)
-      .innerJoin(collections, eq(sessionCollections.collectionId, collections.id))
-      .where(eq(sessionCollections.sessionId, sessionId))
-      .orderBy(asc(collections.sortOrder), asc(collections.name));
-
-    res.json({
-      success: true,
-      data: {
-        collections: sessionCols,
-        total: sessionCols.length,
-      },
-    });
-  } catch (error) {
-    logger.error('Get session collections error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to fetch session collections' });
-  }
-});
-
-// Bulk add session to multiple collections
-router.post('/session/:sessionId/bulk', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const { sessionId } = req.params;
-    const { collectionIds } = req.body;
-
-    if (!Array.isArray(collectionIds) || collectionIds.length === 0) {
-      res.status(400).json({ success: false, error: 'collectionIds array is required' });
-      return;
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, authReq.user!.id)));
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    // Verify all collections belong to user
-    const userCollections = await db
-      .select({ id: collections.id })
-      .from(collections)
-      .where(eq(collections.userId, authReq.user!.id));
-
-    const userCollectionIds = new Set(userCollections.map((c) => c.id));
-    const validCollectionIds = collectionIds.filter((id: string) => userCollectionIds.has(id));
-
-    if (validCollectionIds.length === 0) {
-      res.status(400).json({ success: false, error: 'No valid collections found' });
-      return;
-    }
-
-    // Get existing memberships to avoid duplicates
-    const existingMemberships = await db
-      .select({ collectionId: sessionCollections.collectionId })
-      .from(sessionCollections)
-      .where(eq(sessionCollections.sessionId, sessionId));
-
-    const existingCollectionIds = new Set(existingMemberships.map((m) => m.collectionId));
-    const newCollectionIds = validCollectionIds.filter((id: string) => !existingCollectionIds.has(id));
-
-    if (newCollectionIds.length === 0) {
-      res.json({ success: true, data: { added: 0 }, message: 'Session already in all specified collections' });
-      return;
-    }
-
-    // Add to new collections
-    await db.insert(sessionCollections).values(
-      newCollectionIds.map((collectionId: string) => ({
-        id: uuidv4(),
-        sessionId,
-        collectionId,
-      }))
-    );
-
-    logger.info(`Bulk added session ${sessionId} to ${newCollectionIds.length} collections`, {
-      component: 'Collections',
-      sessionId,
-      collectionIds: newCollectionIds,
-      userId: authReq.user!.id,
-    });
-
-    res.json({ success: true, data: { added: newCollectionIds.length } });
-  } catch (error) {
-    logger.error('Bulk add session to collections error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to add session to collections' });
-  }
-});
-
-// Reorder collections
-router.post('/reorder', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const { orderedIds } = req.body;
-
-    if (!Array.isArray(orderedIds)) {
-      res.status(400).json({ success: false, error: 'orderedIds array is required' });
-      return;
-    }
-
-    // Verify all collections belong to user
-    const userCollections = await db
-      .select({ id: collections.id })
-      .from(collections)
-      .where(eq(collections.userId, authReq.user!.id));
-
-    const userCollectionIds = new Set(userCollections.map((c) => c.id));
-
-    // Update sort order for each collection
-    await Promise.all(
-      orderedIds.map(async (id: string, index: number) => {
-        if (userCollectionIds.has(id)) {
-          await db
-            .update(collections)
-            .set({ sortOrder: index, updatedAt: new Date() })
-            .where(eq(collections.id, id));
-        }
-      })
-    );
-
-    logger.info(`Reordered collections`, {
-      component: 'Collections',
-      userId: authReq.user!.id,
-      count: orderedIds.length,
-    });
-
-    res.json({ success: true, message: 'Collections reordered' });
-  } catch (error) {
-    logger.error('Reorder collections error', error as Error, { component: 'Collections' });
-    res.status(500).json({ success: false, error: 'Failed to reorder collections' });
   }
 });
 
