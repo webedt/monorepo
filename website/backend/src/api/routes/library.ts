@@ -14,6 +14,49 @@ const router = Router();
 // All routes require authentication
 router.use(requireAuth);
 
+// Get recently played games (must be before /:gameId to avoid being treated as gameId)
+router.get('/recent', async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthRequest;
+    const limit = Math.min(parseInt(req.query.limit as string) || 6, 20);
+
+    // Get library items that have been played, sorted by most recent
+    const recentItems = await db
+      .select({
+        libraryItem: userLibrary,
+        game: games,
+      })
+      .from(userLibrary)
+      .innerJoin(games, eq(userLibrary.gameId, games.id))
+      .where(
+        and(
+          eq(userLibrary.userId, authReq.user!.id),
+          eq(userLibrary.hidden, false)
+        )
+      )
+      .orderBy(desc(userLibrary.lastPlayedAt));
+
+    // Filter to only items that have been played and limit
+    const playedItems = recentItems
+      .filter((item) => item.libraryItem.lastPlayedAt !== null)
+      .slice(0, limit);
+
+    res.json({
+      success: true,
+      data: {
+        items: playedItems.map((item) => ({
+          ...item.libraryItem,
+          game: item.game,
+        })),
+        total: playedItems.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Get recently played error', error as Error, { component: 'Library' });
+    res.status(500).json({ success: false, error: 'Failed to fetch recently played games' });
+  }
+});
+
 // Get hidden games (must be before /:gameId to avoid being treated as gameId)
 router.get('/hidden/all', async (req: Request, res: Response) => {
   try {

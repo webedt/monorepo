@@ -80,6 +80,9 @@ export const users = pgTable('users', {
   // 'admin' grants full administrative access
   role: text('role').$type<UserRole>().default('user').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  // Storage quota fields - "Few GB per user" default quota
+  storageQuotaBytes: text('storage_quota_bytes').default('5368709120').notNull(), // 5 GB default (stored as string for bigint precision)
+  storageUsedBytes: text('storage_used_bytes').default('0').notNull(), // Current usage (stored as string for bigint precision)
 });
 
 export const sessions = pgTable('sessions', {

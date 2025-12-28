@@ -68,3 +68,36 @@ export type { ToolDetailsOptions, ToolResult, ToolUseBlock } from './tool-detail
 // GameCard
 export { GameCard } from './game-card';
 export type { GameCardOptions } from './game-card';
+
+// OfflineIndicator
+export { OfflineIndicator } from './offline-indicator';
+export type { OfflineIndicatorOptions } from './offline-indicator';
+
+// Widget
+export {
+  Widget,
+  StatsWidget,
+  ActivityWidget,
+  QuickActionsWidget,
+  ChartWidget,
+  WidgetContainer,
+  WidgetCustomizer,
+} from './widget';
+export type {
+  WidgetSize,
+  WidgetType,
+  WidgetConfig,
+  WidgetOptions,
+  WidgetLayout,
+  StatsWidgetData,
+  ActivityItem,
+  QuickAction,
+  ChartDataPoint,
+  StatsWidgetOptions,
+  ActivityWidgetOptions,
+  QuickActionsWidgetOptions,
+  ChartWidgetOptions,
+  ChartType,
+  WidgetContainerOptions,
+  WidgetCustomizerOptions,
+} from './widget';

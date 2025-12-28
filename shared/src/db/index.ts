@@ -438,6 +438,7 @@ export type {
   NewOrchestratorCycle,
   OrchestratorTask,
   NewOrchestratorTask,
+  UserRole,
   Organization,
   NewOrganization,
   OrganizationMember,
