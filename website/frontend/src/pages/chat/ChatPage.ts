@@ -92,6 +92,7 @@ const DEFAULT_EVENT_FILTERS: Record<string, boolean> = {
 const NORMAL_MODE_EVENTS: Set<string> = new Set([
   'user',           // User messages
   'user_message',   // User follow-up messages
+  'input_preview',  // User input confirmation (shows what was submitted)
   'assistant',      // Assistant responses
   'assistant_message', // Assistant follow-up responses
   'error',          // Errors are always important
@@ -428,6 +429,7 @@ export class ChatPage extends Page<ChatPageOptions> {
     widescreenBtn?.classList.toggle('active', this.widescreen);
     const chatPage = this.$('.chat-page') as HTMLElement;
     chatPage?.classList.toggle('widescreen', this.widescreen);
+    chatPage?.classList.toggle('normal-mode', this.viewMode === 'normal' && !this.showRawJson);
 
     // Update filters button to show if any filters are active (only relevant in detailed mode)
     const hasActiveFilters = Object.values(this.eventFilters).some(v => !v);
