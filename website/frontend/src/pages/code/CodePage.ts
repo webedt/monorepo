@@ -187,7 +187,7 @@ export class CodePage extends Page<CodePageOptions> {
         // Try to load from cache
         const cachedSession = await offlineStorage.getCachedSession(sessionId);
         if (cachedSession) {
-          this.session = cachedSession as Session;
+          this.session = cachedSession as unknown as Session;
           this.updateHeader();
           await this.loadFilesOffline();
           toast.info('Loaded from offline cache');
@@ -210,7 +210,7 @@ export class CodePage extends Page<CodePageOptions> {
       // Try offline cache if network fails
       const cachedSession = await offlineStorage.getCachedSession(sessionId);
       if (cachedSession) {
-        this.session = cachedSession as Session;
+        this.session = cachedSession as unknown as Session;
         this.isOfflineMode = true;
         this.updateHeader();
         this.updateOfflineUI();
