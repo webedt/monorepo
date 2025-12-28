@@ -13,6 +13,8 @@ export interface Transform {
   rotation: number;
   scaleX: number;
   scaleY: number;
+  pivotX?: number; // 0 = left, 0.5 = center, 1 = right
+  pivotY?: number; // 0 = top, 0.5 = center, 1 = bottom
 }
 
 export interface TransformEditorOptions extends ComponentOptions {

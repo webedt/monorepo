@@ -197,6 +197,31 @@ export class ScenePage extends Page<ScenePageOptions> {
                 </div>
 
                 <div class="property-section">
+                  <div class="property-label">Pivot Point</div>
+                  <div class="pivot-section">
+                    <div class="pivot-grid-visual">
+                      <button class="pivot-preset" data-pivot="0,0" title="Top Left" aria-label="Top Left">◸</button>
+                      <button class="pivot-preset" data-pivot="0.5,0" title="Top Center" aria-label="Top Center">△</button>
+                      <button class="pivot-preset" data-pivot="1,0" title="Top Right" aria-label="Top Right">◹</button>
+                      <button class="pivot-preset" data-pivot="0,0.5" title="Middle Left" aria-label="Middle Left">◁</button>
+                      <button class="pivot-preset" data-pivot="0.5,0.5" title="Center" aria-label="Center">◇</button>
+                      <button class="pivot-preset" data-pivot="1,0.5" title="Middle Right" aria-label="Middle Right">▷</button>
+                      <button class="pivot-preset" data-pivot="0,1" title="Bottom Left" aria-label="Bottom Left">◺</button>
+                      <button class="pivot-preset" data-pivot="0.5,1" title="Bottom Center" aria-label="Bottom Center">▽</button>
+                      <button class="pivot-preset" data-pivot="1,1" title="Bottom Right" aria-label="Bottom Right">◿</button>
+                    </div>
+                    <div class="pivot-inputs">
+                      <div class="transform-row">
+                        <label>X</label>
+                        <input type="number" class="property-input pivot-x" value="0.5" min="0" max="1" step="0.1">
+                        <label>Y</label>
+                        <input type="number" class="property-input pivot-y" value="0.5" min="0" max="1" step="0.1">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="property-section">
                   <div class="property-label">Appearance</div>
                   <div class="appearance-grid">
                     <div class="appearance-row">
@@ -292,6 +317,9 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Setup canvas
     this.setupCanvas();
 
+    // Setup property panel event handlers
+    this.setupPropertyHandlers();
+
     // Load session data
     this.loadSession();
   }
@@ -385,6 +413,55 @@ export class ScenePage extends Page<ScenePageOptions> {
 
       // Wheel event for zooming
       this.sceneCanvas.addEventListener('wheel', this.boundHandleWheel);
+    }
+  }
+
+  private setupPropertyHandlers(): void {
+    // Pivot preset buttons
+    const pivotPresets = this.$$('.pivot-preset');
+    pivotPresets.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const pivotData = (btn as HTMLButtonElement).dataset.pivot;
+        if (!pivotData || !this.selectedObjectId) return;
+
+        const [px, py] = pivotData.split(',').map(Number);
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.transform.pivotX = px;
+          obj.transform.pivotY = py;
+          this.hasUnsavedChanges = true;
+          this.updatePropertiesPanel();
+          this.renderScene();
+        }
+      });
+    });
+
+    // Pivot X input
+    const pivotXInput = this.$('.pivot-x') as HTMLInputElement;
+    if (pivotXInput) {
+      pivotXInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.transform.pivotX = Math.max(0, Math.min(1, parseFloat(pivotXInput.value) || 0.5));
+          this.hasUnsavedChanges = true;
+          this.renderScene();
+        }
+      });
+    }
+
+    // Pivot Y input
+    const pivotYInput = this.$('.pivot-y') as HTMLInputElement;
+    if (pivotYInput) {
+      pivotYInput.addEventListener('change', () => {
+        if (!this.selectedObjectId) return;
+        const obj = this.objects.find(o => o.id === this.selectedObjectId);
+        if (obj) {
+          obj.transform.pivotY = Math.max(0, Math.min(1, parseFloat(pivotYInput.value) || 0.5));
+          this.hasUnsavedChanges = true;
+          this.renderScene();
+        }
+      });
     }
   }
 
@@ -518,42 +595,44 @@ export class ScenePage extends Page<ScenePageOptions> {
   }
 
   private isPointInObject(x: number, y: number, obj: SceneObject): boolean {
-    // Simple bounding box check in world coordinates (center-origin, Y+ up)
-    // Objects are positioned by their bottom-left corner
-    let width = 100;
-    let height = 100;
+    // Get object dimensions
+    const dims = this.getObjectDimensions(obj);
 
-    switch (obj.type) {
-      case 'sprite':
-        width = 100;
-        height = 100;
-        break;
-      case 'shape':
-        if (obj.shapeType === 'rectangle') {
-          width = 100;
-          height = 80;
-        } else if (obj.shapeType === 'circle') {
-          width = 100;
-          height = 100;
-        }
-        break;
-      case 'text':
-        // Estimate text dimensions based on fontSize
-        const fontSize = obj.fontSize || 24;
-        const textLength = (obj.text || 'Text').length;
-        width = textLength * fontSize * 0.6; // Approximate character width
-        height = fontSize * 1.2;
-        break;
-    }
+    // Get pivot offset
+    const pivotX = obj.transform.pivotX ?? 0.5;
+    const pivotY = obj.transform.pivotY ?? 0.5;
+    const pivotOffsetX = dims.width * pivotX;
+    const pivotOffsetY = dims.height * pivotY;
 
-    // Apply scale transforms
-    width *= obj.transform.scaleX;
-    height *= obj.transform.scaleY;
+    // Transform point into object's local coordinate space
+    // Reverse the transformation: translate -> rotate -> scale -> translate(-pivot)
 
-    // In center-origin coordinates (Y+ up), check bounds
-    // Object extends from (x, y) to (x + width, y + height)
-    return x >= obj.transform.x && x <= obj.transform.x + width &&
-           y >= obj.transform.y && y <= obj.transform.y + height;
+    // 1. Translate point relative to object position
+    let localX = x - obj.transform.x;
+    let localY = y - obj.transform.y;
+
+    // 2. Reverse rotation
+    const angle = -(obj.transform.rotation * Math.PI) / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const rotatedX = localX * cos - localY * sin;
+    const rotatedY = localX * sin + localY * cos;
+    localX = rotatedX;
+    localY = rotatedY;
+
+    // 3. Reverse scale (guard against division by zero)
+    const scaleX = obj.transform.scaleX || 0.001;
+    const scaleY = obj.transform.scaleY || 0.001;
+    localX /= scaleX;
+    localY /= scaleY;
+
+    // 4. Add pivot offset (reverse the -pivotOffset translation)
+    localX += pivotOffsetX;
+    localY += pivotOffsetY;
+
+    // Check if point is within local bounding box
+    return localX >= 0 && localX <= dims.width &&
+           localY >= 0 && localY <= dims.height;
   }
 
   private addSprite(): void {
@@ -565,7 +644,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       type: 'sprite',
       visible: true,
       locked: false,
-      transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1 },
+      transform: { x: -50 + offset, y: -50 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       color: '#4a90d9',
@@ -597,7 +676,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       shapeType,
       visible: true,
       locked: false,
-      transform: { x: -50 + offset, y: -40 + offset, rotation: 0, scaleX: 1, scaleY: 1 },
+      transform: { x: -50 + offset, y: -40 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       color: colors[shapeType],
@@ -620,7 +699,7 @@ export class ScenePage extends Page<ScenePageOptions> {
       type: 'text',
       visible: true,
       locked: false,
-      transform: { x: -50 + offset, y: offset, rotation: 0, scaleX: 1, scaleY: 1 },
+      transform: { x: -50 + offset, y: offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       text: 'Sample Text',
@@ -672,6 +751,26 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.renderScene();
   }
 
+  private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
+    switch (obj.type) {
+      case 'sprite':
+        return { width: 100, height: 100 };
+      case 'shape':
+        if (obj.shapeType === 'rectangle') {
+          return { width: 100, height: 80 };
+        } else if (obj.shapeType === 'circle') {
+          return { width: 100, height: 100 };
+        }
+        return { width: 100, height: 100 };
+      case 'text':
+        const fontSize = obj.fontSize || 24;
+        const textLength = (obj.text || 'Text').length;
+        return { width: textLength * fontSize * 0.6, height: fontSize * 1.2 };
+      default:
+        return { width: 100, height: 100 };
+    }
+  }
+
   private renderScene(): void {
     if (!this.ctx || !this.sceneCanvas || !this.viewport) return;
 
@@ -701,11 +800,24 @@ export class ScenePage extends Page<ScenePageOptions> {
     for (const obj of this.objects) {
       if (!obj.visible) continue;
 
+      const dims = this.getObjectDimensions(obj);
+      const pivotX = obj.transform.pivotX ?? 0.5;
+      const pivotY = obj.transform.pivotY ?? 0.5;
+      const pivotOffsetX = dims.width * pivotX;
+      const pivotOffsetY = dims.height * pivotY;
+
       this.ctx.save();
       this.ctx.globalAlpha = obj.opacity;
+
+      // Apply pivot-aware transformation:
+      // 1. Translate to object position
+      // 2. Move to pivot point
+      // 3. Apply rotation and scale around pivot
+      // 4. Translate back to draw from top-left
       this.ctx.translate(obj.transform.x, obj.transform.y);
       this.ctx.rotate((obj.transform.rotation * Math.PI) / 180);
       this.ctx.scale(obj.transform.scaleX, obj.transform.scaleY);
+      this.ctx.translate(-pivotOffsetX, -pivotOffsetY);
 
       switch (obj.type) {
         case 'sprite':
@@ -740,12 +852,14 @@ export class ScenePage extends Page<ScenePageOptions> {
       }
 
       this.ctx.restore();
+
+      // Draw selection outline and pivot indicator
+      if (obj.id === this.selectedObjectId) {
+        this.drawPivotSelectionOutline(obj, dims, pivotOffsetX, pivotOffsetY);
+      }
     }
 
     this.ctx.restore();
-
-    // Draw selection outline (in screen coordinates for crisp lines)
-    this.drawSelectionOutline();
   }
 
   private drawCenteredGrid(): void {
@@ -847,46 +961,61 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.ctx.fillText('+Y', origin.x, 15);
   }
 
-  private drawSelectionOutline(): void {
-    if (!this.selectedObjectId || !this.ctx || !this.viewport) return;
+  private drawPivotSelectionOutline(
+    obj: SceneObject,
+    dims: { width: number; height: number },
+    pivotOffsetX: number,
+    pivotOffsetY: number
+  ): void {
+    if (!this.ctx) return;
 
-    const obj = this.objects.find(o => o.id === this.selectedObjectId);
-    if (!obj) return;
+    this.ctx.save();
 
-    // Get object bounds in world coordinates
-    let width = 100;
-    let height = 100;
+    // Apply same transformation as object
+    this.ctx.translate(obj.transform.x, obj.transform.y);
+    this.ctx.rotate((obj.transform.rotation * Math.PI) / 180);
+    this.ctx.scale(obj.transform.scaleX, obj.transform.scaleY);
+    this.ctx.translate(-pivotOffsetX, -pivotOffsetY);
 
-    switch (obj.type) {
-      case 'shape':
-        if (obj.shapeType === 'rectangle') {
-          width = 100;
-          height = 80;
-        }
-        break;
-      case 'text':
-        const fontSize = obj.fontSize || 24;
-        const textLength = (obj.text || 'Text').length;
-        width = textLength * fontSize * 0.6;
-        height = fontSize * 1.2;
-        break;
-    }
+    // Calculate scale factor for UI elements (prevent division by zero)
+    const maxScale = Math.max(Math.abs(obj.transform.scaleX), Math.abs(obj.transform.scaleY), 0.001);
 
-    width *= obj.transform.scaleX;
-    height *= obj.transform.scaleY;
-
-    // Convert corners to screen coordinates
-    const topLeft = this.viewport.worldToScreen(obj.transform.x - 2, obj.transform.y + height + 2);
-    const bottomRight = this.viewport.worldToScreen(obj.transform.x + width + 2, obj.transform.y - 2);
-
-    const screenWidth = bottomRight.x - topLeft.x;
-    const screenHeight = bottomRight.y - topLeft.y;
-
+    // Draw selection rectangle
     this.ctx.strokeStyle = '#0066ff';
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = 2 / maxScale;
     this.ctx.setLineDash([5, 5]);
-    this.ctx.strokeRect(topLeft.x, topLeft.y, screenWidth, screenHeight);
+    this.ctx.strokeRect(-2, -2, dims.width + 4, dims.height + 4);
     this.ctx.setLineDash([]);
+
+    // Draw corner handles
+    const handleSize = 8 / maxScale;
+    this.ctx.fillStyle = '#0066ff';
+    this.ctx.fillRect(-handleSize / 2, -handleSize / 2, handleSize, handleSize);
+    this.ctx.fillRect(dims.width - handleSize / 2, -handleSize / 2, handleSize, handleSize);
+    this.ctx.fillRect(-handleSize / 2, dims.height - handleSize / 2, handleSize, handleSize);
+    this.ctx.fillRect(dims.width - handleSize / 2, dims.height - handleSize / 2, handleSize, handleSize);
+
+    // Draw pivot point indicator
+    this.ctx.translate(pivotOffsetX, pivotOffsetY);
+    const pivotSize = 6 / maxScale;
+
+    // Pivot crosshair
+    this.ctx.strokeStyle = '#ff6600';
+    this.ctx.lineWidth = 2 / maxScale;
+    this.ctx.beginPath();
+    this.ctx.moveTo(-pivotSize, 0);
+    this.ctx.lineTo(pivotSize, 0);
+    this.ctx.moveTo(0, -pivotSize);
+    this.ctx.lineTo(0, pivotSize);
+    this.ctx.stroke();
+
+    // Pivot center circle
+    this.ctx.fillStyle = '#ff6600';
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, pivotSize / 2, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    this.ctx.restore();
   }
 
   private updateHierarchy(): void {
@@ -970,6 +1099,29 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (visibleCheckbox) visibleCheckbox.checked = obj.visible;
     if (lockedCheckbox) lockedCheckbox.checked = obj.locked;
 
+    // Update pivot inputs
+    const pivotXInput = this.$('.pivot-x') as HTMLInputElement;
+    const pivotYInput = this.$('.pivot-y') as HTMLInputElement;
+    if (pivotXInput) pivotXInput.value = String(obj.transform.pivotX ?? 0.5);
+    if (pivotYInput) pivotYInput.value = String(obj.transform.pivotY ?? 0.5);
+
+    // Highlight active pivot preset (use approximate comparison for floating-point)
+    const pivotPresets = this.$$('.pivot-preset');
+    const currentPivotX = obj.transform.pivotX ?? 0.5;
+    const currentPivotY = obj.transform.pivotY ?? 0.5;
+    const EPSILON = 0.001;
+    pivotPresets.forEach((btn) => {
+      const pivotData = (btn as HTMLButtonElement).dataset.pivot;
+      if (!pivotData) {
+        btn.classList.remove('active');
+        return;
+      }
+      const [presetX, presetY] = pivotData.split(',').map(Number);
+      const isActive = Math.abs(presetX - currentPivotX) < EPSILON &&
+                       Math.abs(presetY - currentPivotY) < EPSILON;
+      btn.classList.toggle('active', isActive);
+    });
+
     // Update or create TransformEditor
     this.updateTransformEditor(obj);
   }
@@ -1015,12 +1167,15 @@ export class ScenePage extends Page<ScenePageOptions> {
       y = Math.round(y / this.gridSize) * this.gridSize;
     }
 
+    // Preserve pivot values when updating transform
     obj.transform = {
       x,
       y,
       rotation: transform.rotation,
       scaleX: transform.scaleX,
       scaleY: transform.scaleY,
+      pivotX: obj.transform.pivotX ?? 0.5,
+      pivotY: obj.transform.pivotY ?? 0.5,
     };
 
     this.hasUnsavedChanges = true;
