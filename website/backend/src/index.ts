@@ -48,6 +48,7 @@ import communityRoutes from './api/routes/community.js';
 import storageRoutes from './api/routes/storage.js';
 import searchRoutes from './api/routes/search.js';
 import channelsRoutes from './api/routes/channels.js';
+import billingRoutes from './api/routes/billing.js';
 import paymentsRoutes from './api/routes/payments.js';
 import taxonomiesRoutes from './api/routes/taxonomies.js';
 
@@ -328,6 +329,7 @@ app.use('/api/community', communityRoutes);  // Community posts, reviews, and di
 app.use('/api/storage', storageRoutes);  // User storage quota management
 app.use('/api/search', searchRoutes);  // Universal search across all fields
 app.use('/api/channels', channelsRoutes);  // Community channels and real-time messaging
+app.use('/api/billing', billingRoutes);  // Subscription billing and plan management
 app.use('/api/payments', paymentsRoutes);  // Stripe and PayPal payment processing
 app.use('/api/taxonomies', taxonomiesRoutes);  // Admin-configurable taxonomy system
 
