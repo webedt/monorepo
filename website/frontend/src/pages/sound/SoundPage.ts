@@ -9,6 +9,8 @@ import { Button, Spinner, toast, OfflineIndicator } from '../../components';
 import { sessionsApi, storageWorkerApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
 import { offlineStorage } from '../../lib/offlineStorage';
+import { beatGridStore } from '../../stores/beatGridStore';
+import type { BeatGridSettings } from '../../stores/beatGridStore';
 import type { Session } from '../../types';
 import './sound.css';
 
@@ -70,6 +72,10 @@ export class SoundPage extends Page<SoundPageOptions> {
   // Event handlers for cleanup
   private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
+  // Beat grid state
+  private beatGridSettings: BeatGridSettings = beatGridStore.getSettings();
+  private unsubscribeBeatGrid: (() => void) | null = null;
+
   protected render(): string {
     return `
       <div class="sound-page">
@@ -127,6 +133,40 @@ export class SoundPage extends Page<SoundPageOptions> {
             <button class="toolbar-btn" data-action="zoom-in" title="Zoom In">+</button>
             <button class="toolbar-btn" data-action="zoom-out" title="Zoom Out">-</button>
             <button class="toolbar-btn" data-action="zoom-fit" title="Fit to view">⊡</button>
+          </div>
+
+          <div class="toolbar-separator"></div>
+
+          <div class="toolbar-group beat-grid-group">
+            <button class="toolbar-btn" data-action="toggle-grid" title="Toggle beat grid (G)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="4" y1="4" x2="4" y2="20"></line>
+                <line x1="8" y1="4" x2="8" y2="20"></line>
+                <line x1="12" y1="4" x2="12" y2="20"></line>
+                <line x1="16" y1="4" x2="16" y2="20"></line>
+                <line x1="20" y1="4" x2="20" y2="20"></line>
+              </svg>
+            </button>
+            <button class="toolbar-btn" data-action="toggle-snap" title="Snap to beat grid (S)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3v18M3 12h18M7 7l10 10M17 7l-10 10"></path>
+              </svg>
+            </button>
+            <button class="toolbar-btn" data-action="detect-bpm" title="Auto-detect BPM">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+            </button>
+            <div class="bpm-input-group">
+              <label class="bpm-label">BPM:</label>
+              <input type="number" class="bpm-input" min="20" max="300" value="120" step="1">
+            </div>
+            <select class="subdivision-select" title="Grid subdivision">
+              <option value="1">1/4</option>
+              <option value="2">1/8</option>
+              <option value="4">1/16</option>
+            </select>
           </div>
 
           <div class="toolbar-spacer"></div>
@@ -315,6 +355,9 @@ export class SoundPage extends Page<SoundPageOptions> {
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
 
+    // Setup beat grid
+    this.setupBeatGrid();
+
     // Load session data
     this.loadSession();
   }
@@ -354,6 +397,35 @@ export class SoundPage extends Page<SoundPageOptions> {
     if (zoomFitBtn) zoomFitBtn.addEventListener('click', () => toast.info('Fit to view'));
     if (uploadBtn) uploadBtn.addEventListener('click', () => this.uploadAudio());
     if (refreshBtn) refreshBtn.addEventListener('click', () => this.loadFiles());
+
+    // Beat grid controls
+    const toggleGridBtn = this.$('[data-action="toggle-grid"]');
+    const toggleSnapBtn = this.$('[data-action="toggle-snap"]');
+    const detectBpmBtn = this.$('[data-action="detect-bpm"]');
+    const bpmInput = this.$('.bpm-input') as HTMLInputElement;
+    const subdivisionSelect = this.$('.subdivision-select') as HTMLSelectElement;
+
+    if (toggleGridBtn) toggleGridBtn.addEventListener('click', () => this.toggleBeatGrid());
+    if (toggleSnapBtn) toggleSnapBtn.addEventListener('click', () => this.toggleSnapToBeat());
+    if (detectBpmBtn) detectBpmBtn.addEventListener('click', () => this.detectBpm());
+
+    if (bpmInput) {
+      bpmInput.value = String(this.beatGridSettings.bpm);
+      bpmInput.addEventListener('change', (e) => {
+        const value = parseInt((e.target as HTMLInputElement).value);
+        if (value >= 20 && value <= 300) {
+          beatGridStore.setBpm(value);
+        }
+      });
+    }
+
+    if (subdivisionSelect) {
+      subdivisionSelect.value = String(this.beatGridSettings.subdivisions);
+      subdivisionSelect.addEventListener('change', (e) => {
+        const value = parseInt((e.target as HTMLSelectElement).value);
+        beatGridStore.setSubdivisions(value);
+      });
+    }
   }
 
   private setupTransport(): void {
@@ -494,9 +566,88 @@ export class SoundPage extends Page<SoundPageOptions> {
         this.updateSelectionUI();
         this.renderWaveform();
       }
+
+      // G - Toggle beat grid visibility
+      if (e.key === 'g' || e.key === 'G') {
+        e.preventDefault();
+        this.toggleBeatGrid();
+      }
+
+      // S - Toggle snap to beat
+      if (e.key === 's' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        this.toggleSnapToBeat();
+      }
     };
 
     document.addEventListener('keydown', this.keyboardHandler);
+  }
+
+  private setupBeatGrid(): void {
+    // Subscribe to beat grid settings changes
+    this.unsubscribeBeatGrid = beatGridStore.subscribe((settings) => {
+      this.beatGridSettings = settings;
+      this.updateBeatGridUI();
+      this.renderWaveform();
+    });
+
+    // Initial UI update
+    this.updateBeatGridUI();
+  }
+
+  private updateBeatGridUI(): void {
+    const toggleGridBtn = this.$('[data-action="toggle-grid"]') as HTMLButtonElement;
+    const toggleSnapBtn = this.$('[data-action="toggle-snap"]') as HTMLButtonElement;
+    const bpmInput = this.$('.bpm-input') as HTMLInputElement;
+    const subdivisionSelect = this.$('.subdivision-select') as HTMLSelectElement;
+
+    if (toggleGridBtn) {
+      toggleGridBtn.classList.toggle('active', this.beatGridSettings.gridVisible);
+    }
+
+    if (toggleSnapBtn) {
+      toggleSnapBtn.classList.toggle('active', this.beatGridSettings.snapEnabled);
+    }
+
+    if (bpmInput && bpmInput.value !== String(this.beatGridSettings.bpm)) {
+      bpmInput.value = String(this.beatGridSettings.bpm);
+    }
+
+    if (subdivisionSelect && subdivisionSelect.value !== String(this.beatGridSettings.subdivisions)) {
+      subdivisionSelect.value = String(this.beatGridSettings.subdivisions);
+    }
+  }
+
+  private toggleBeatGrid(): void {
+    beatGridStore.toggleGridVisibility();
+    toast.info(this.beatGridSettings.gridVisible ? 'Beat grid hidden' : 'Beat grid visible');
+  }
+
+  private toggleSnapToBeat(): void {
+    beatGridStore.toggleSnap();
+    toast.info(this.beatGridSettings.snapEnabled ? 'Snap disabled' : 'Snap enabled');
+  }
+
+  private detectBpm(): void {
+    if (!this.audioBuffer) {
+      toast.error('Load an audio file first');
+      return;
+    }
+
+    const detectedBpm = beatGridStore.detectBpm(this.audioBuffer);
+    if (detectedBpm) {
+      beatGridStore.setBpm(detectedBpm);
+      toast.success(`Detected BPM: ${detectedBpm}`);
+    } else {
+      toast.error('Could not detect BPM');
+    }
+  }
+
+  private snapTimeToGrid(time: number): number {
+    if (!this.beatGridSettings.snapEnabled) {
+      return time;
+    }
+    return beatGridStore.snapToGrid(time);
   }
 
   private handleWaveformMouseDown(e: MouseEvent): void {
@@ -504,7 +655,10 @@ export class SoundPage extends Page<SoundPageOptions> {
 
     const rect = this.waveformCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const clickTime = (x / rect.width) * this.duration;
+    let clickTime = (x / rect.width) * this.duration;
+
+    // Apply snap to grid
+    clickTime = this.snapTimeToGrid(clickTime);
 
     if (e.shiftKey) {
       // Start selection
@@ -525,7 +679,10 @@ export class SoundPage extends Page<SoundPageOptions> {
 
     const rect = this.waveformCanvas.getBoundingClientRect();
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    const currentTimePos = (x / rect.width) * this.duration;
+    let currentTimePos = (x / rect.width) * this.duration;
+
+    // Apply snap to grid
+    currentTimePos = this.snapTimeToGrid(currentTimePos);
 
     this.selection = {
       start: Math.min(this.selectionStart, currentTimePos),
@@ -555,13 +712,18 @@ export class SoundPage extends Page<SoundPageOptions> {
 
     if (!this.audioBuffer) return;
 
-    // Draw grid
+    // Draw center line
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, height / 2);
     ctx.lineTo(width, height / 2);
     ctx.stroke();
+
+    // Draw beat grid
+    if (this.beatGridSettings.gridVisible) {
+      this.drawBeatGrid(ctx, width, height);
+    }
 
     // Draw selection
     if (this.selection) {
@@ -615,6 +777,45 @@ export class SoundPage extends Page<SoundPageOptions> {
     ctx.moveTo(playheadX, 0);
     ctx.lineTo(playheadX, height);
     ctx.stroke();
+  }
+
+  private drawBeatGrid(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    const beatPositions = beatGridStore.getBeatPositions(0, this.duration);
+    const { subdivisions } = this.beatGridSettings;
+
+    for (const pos of beatPositions) {
+      const x = (pos.time / this.duration) * width;
+
+      // Determine line style based on beat type
+      const isMainBeat = pos.beatNumber % 1 === 0 && (pos.time - this.beatGridSettings.beatOffset) % beatGridStore.getBeatInterval() < 0.001;
+      const isMeasureStart = pos.isDownbeat;
+
+      if (isMeasureStart) {
+        // Measure start - brightest and thickest
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.6)'; // amber
+        ctx.lineWidth = 2;
+      } else if (isMainBeat || subdivisions === 1) {
+        // Main beat - medium brightness
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.35)';
+        ctx.lineWidth = 1;
+      } else {
+        // Subdivision - dimmest
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.15)';
+        ctx.lineWidth = 1;
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+
+      // Draw measure number at top for downbeats
+      if (isMeasureStart && width > 200) {
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.8)';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(`${pos.measureNumber + 1}`, x + 3, 12);
+      }
+    }
   }
 
   private play(): void {
@@ -1446,6 +1647,11 @@ export class SoundPage extends Page<SoundPageOptions> {
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
       this.unsubscribeOffline = null;
+    }
+
+    if (this.unsubscribeBeatGrid) {
+      this.unsubscribeBeatGrid();
+      this.unsubscribeBeatGrid = null;
     }
 
     if (this.offlineIndicator) {

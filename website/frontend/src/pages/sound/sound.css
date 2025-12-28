@@ -629,3 +629,122 @@
     border-top: 1px solid var(--color-border);
   }
 }
+
+/* Beat Grid Controls */
+.beat-grid-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.bpm-input-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.bpm-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.bpm-input {
+  width: 60px;
+  padding: var(--spacing-xs) var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  text-align: center;
+}
+
+.bpm-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.bpm-input::-webkit-inner-spin-button,
+.bpm-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.bpm-input[type=number] {
+  -moz-appearance: textfield;
+}
+
+.subdivision-select {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.subdivision-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* Active state for beat grid toggle buttons */
+.toolbar-btn.active {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.toolbar-btn.active:hover {
+  background: rgba(251, 191, 36, 0.3);
+}
+
+/* Toolbar separator styling */
+.toolbar-separator {
+  width: 1px;
+  height: 24px;
+  background: var(--color-border);
+  margin: 0 var(--spacing-xs);
+}
+
+/* Toolbar spacer */
+.toolbar-spacer {
+  flex: 1;
+  min-width: var(--spacing-md);
+}
+
+/* Volume group alignment */
+.volume-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.volume-value {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  min-width: 32px;
+  font-family: var(--font-mono);
+}
+
+/* Responsive beat grid controls */
+@media (max-width: 1024px) {
+  .beat-grid-group {
+    flex-wrap: wrap;
+  }
+
+  .bpm-input {
+    width: 50px;
+  }
+}
+
+@media (max-width: 768px) {
+  .beat-grid-group .bpm-input-group,
+  .beat-grid-group .subdivision-select {
+    display: none;
+  }
+}
