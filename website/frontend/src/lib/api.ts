@@ -1289,6 +1289,10 @@ import type {
   TaxonomyTerm,
   ItemTaxonomy,
   TaxonomyWithTerms,
+  Announcement,
+  AnnouncementType,
+  AnnouncementPriority,
+  AnnouncementStatus,
   CloudSave,
   CloudSaveVersion,
   CloudSaveSyncLog,
@@ -1411,6 +1415,99 @@ export const taxonomyApi = {
       `/api/taxonomies/items/by-term/${termId}${queryString ? `?${queryString}` : ''}`
     ).then(r => r.data || []);
   },
+};
+
+// ============================================================================
+// Announcements API (Official platform updates)
+// ============================================================================
+export const announcementsApi = {
+  // Get published announcements (public)
+  list: (options?: {
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    pinned?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.type) params.append('type', options.type);
+    if (options?.priority) params.append('priority', options.priority);
+    if (options?.pinned !== undefined) params.append('pinned', String(options.pinned));
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      announcements: Announcement[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>>(`/api/announcements${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Get single announcement
+  get: (id: string) =>
+    fetchApi<ApiResponse<Announcement>>(`/api/announcements/${id}`).then(r => r.data!),
+
+  // Admin: List all announcements (including drafts and archived)
+  adminList: (options?: {
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.type) params.append('type', options.type);
+    if (options?.priority) params.append('priority', options.priority);
+    if (options?.status) params.append('status', options.status);
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.offset) params.append('offset', String(options.offset));
+    const queryString = params.toString();
+    return fetchApi<ApiResponse<{
+      announcements: Announcement[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>>(`/api/announcements/admin/all${queryString ? `?${queryString}` : ''}`).then(r => r.data!);
+  },
+
+  // Admin: Create announcement
+  create: (data: {
+    title: string;
+    content: string;
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    pinned?: boolean;
+    expiresAt?: string;
+  }) =>
+    fetchApi<ApiResponse<{ announcement: Announcement }>>('/api/announcements', {
+      method: 'POST',
+      body: data,
+    }).then(r => r.data!),
+
+  // Admin: Update announcement
+  update: (id: string, data: {
+    title?: string;
+    content?: string;
+    type?: AnnouncementType;
+    priority?: AnnouncementPriority;
+    status?: AnnouncementStatus;
+    pinned?: boolean;
+    expiresAt?: string | null;
+  }) =>
+    fetchApi<ApiResponse<{ announcement: Announcement }>>(`/api/announcements/${id}`, {
+      method: 'PATCH',
+      body: data,
+    }).then(r => r.data!),
+
+  // Admin: Delete announcement
+  delete: (id: string) =>
+    fetchApi<ApiResponse<{ message: string }>>(`/api/announcements/${id}`, {
+      method: 'DELETE',
+    }),
 };
 
 // ============================================================================
