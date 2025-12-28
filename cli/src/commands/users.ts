@@ -12,11 +12,12 @@ usersCommand
   .command('list')
   .description('List all users')
   .option('-l, --limit <number>', 'Limit number of results', '50')
+  .option('-r, --role <role>', 'Filter by role (user, editor, developer, admin)')
   .action(async (options) => {
     try {
       const limit = parseInt(options.limit, 10);
 
-      const userList = await db
+      let query = db
         .select({
           id: users.id,
           email: users.email,
@@ -30,6 +31,17 @@ usersCommand
         .orderBy(desc(users.createdAt))
         .limit(limit);
 
+      // Filter by role if specified
+      if (options.role) {
+        if (!ROLE_HIERARCHY.includes(options.role)) {
+          console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
+          process.exit(1);
+        }
+        query = query.where(eq(users.role, options.role)) as typeof query;
+      }
+
+      const userList = await query;
+
       if (userList.length === 0) {
         console.log('No users found.');
         return;
@@ -40,9 +52,8 @@ usersCommand
       console.log(
         'ID'.padEnd(38) +
         'Email'.padEnd(30) +
-        'Display Name'.padEnd(20) +
+        'Display Name'.padEnd(18) +
         'Role'.padEnd(12) +
-        'Admin'.padEnd(8) +
         'Provider'.padEnd(12)
       );
       console.log('-'.repeat(120));
@@ -51,9 +62,8 @@ usersCommand
         console.log(
           (user.id || '').padEnd(38) +
           (user.email || '').slice(0, 28).padEnd(30) +
-          (user.displayName || '').slice(0, 18).padEnd(20) +
+          (user.displayName || '').slice(0, 16).padEnd(18) +
           (user.role || 'user').padEnd(12) +
-          (user.isAdmin ? 'Yes' : 'No').padEnd(8) +
           (user.preferredProvider || 'claude').padEnd(12)
         );
       }
@@ -107,12 +117,12 @@ usersCommand
   .description('Create a new user')
   .option('-d, --display-name <name>', 'User display name')
   .option('-a, --admin', 'Make user an admin')
-  .option('-r, --role <role>', `User role (${ROLE_HIERARCHY.join(', ')})`, 'user')
+  .option('-r, --role <role>', 'User role (user, editor, developer, admin)')
   .action(async (email, password, options) => {
     try {
-      // Validate role
+      // Validate role if provided
       if (options.role && !ROLE_HIERARCHY.includes(options.role)) {
-        console.error(`Invalid role: ${options.role}. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
+        console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
         process.exit(1);
       }
 
@@ -130,21 +140,25 @@ usersCommand
       const userId = randomUUID();
       const passwordHash = await bcrypt.hash(password, 10);
 
+      // Determine role - use explicit role, or derive from admin flag
+      const role = (options.role || (options.admin ? 'admin' : 'user')) as UserRole;
+      const isAdmin = options.admin || role === 'admin';
+
       await db.insert(users).values({
         id: userId,
         email,
         passwordHash,
         displayName: options.displayName || null,
-        isAdmin: options.admin || false,
-        role: (options.role as UserRole) || 'user',
+        isAdmin,
+        role,
         preferredProvider: 'claude',
       });
 
       console.log(`\nUser created successfully:`);
       console.log(`  ID:       ${userId}`);
       console.log(`  Email:    ${email}`);
-      console.log(`  Role:     ${options.role || 'user'}`);
-      console.log(`  Admin:    ${options.admin ? 'Yes' : 'No'}`);
+      console.log(`  Role:     ${role}`);
+      console.log(`  Admin:    ${isAdmin ? 'Yes' : 'No'}`);
     } catch (error) {
       console.error('Error creating user:', error);
       process.exit(1);
@@ -169,12 +183,17 @@ usersCommand
         process.exit(1);
       }
 
+      // Sync role with admin status
+      const role = adminStatus ? 'admin' : (user.role === 'admin' ? 'user' : user.role);
+
       await db
         .update(users)
-        .set({ isAdmin: adminStatus })
+        .set({ isAdmin: adminStatus, role })
         .where(eq(users.id, userId));
 
-      console.log(`User ${user.email} admin status updated to '${adminStatus}'.`);
+      console.log(`User ${user.email}:`);
+      console.log(`  Admin status: ${adminStatus}`);
+      console.log(`  Role: ${role}`);
     } catch (error) {
       console.error('Error updating admin status:', error);
       process.exit(1);
@@ -183,12 +202,12 @@ usersCommand
 
 usersCommand
   .command('set-role <userId> <role>')
-  .description(`Set user role (${ROLE_HIERARCHY.join(', ')})`)
+  .description('Set user role (user, editor, developer, admin)')
   .action(async (userId, role) => {
     try {
       // Validate role
       if (!ROLE_HIERARCHY.includes(role)) {
-        console.error(`Invalid role: ${role}. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
+        console.error(`Invalid role. Must be one of: ${ROLE_HIERARCHY.join(', ')}`);
         process.exit(1);
       }
 
@@ -203,12 +222,17 @@ usersCommand
         process.exit(1);
       }
 
+      // Sync isAdmin with role
+      const isAdmin = role === 'admin';
+
       await db
         .update(users)
-        .set({ role: role as UserRole })
+        .set({ role: role as UserRole, isAdmin })
         .where(eq(users.id, userId));
 
-      console.log(`User ${user.email} role updated to '${role}'.`);
+      console.log(`User ${user.email}:`);
+      console.log(`  Role: ${role}`);
+      console.log(`  Admin: ${isAdmin ? 'Yes' : 'No'}`);
     } catch (error) {
       console.error('Error updating role:', error);
       process.exit(1);
