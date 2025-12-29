@@ -609,6 +609,8 @@ export {
   type TransactionContext,
   type TransactionOptions,
   type TransactionResult,
+  type CascadeDeleteResult,
+  type BatchUpdateResult,
 } from './transaction.js';
 
 // Re-export drizzle-orm operators to prevent duplicate package issues in Docker builds

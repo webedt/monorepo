@@ -227,3 +227,23 @@ export function createTransactionHelper(db: NodePgDatabase<typeof schema>) {
     },
   };
 }
+
+/**
+ * Helper type for cascade delete operations.
+ * Used to track what was deleted in multi-table delete operations.
+ */
+export interface CascadeDeleteResult {
+  tablesAffected: string[];
+  rowsDeleted: Record<string, number>;
+  success: boolean;
+}
+
+/**
+ * Helper type for batch update operations.
+ * Used to track what was updated in multi-table update operations.
+ */
+export interface BatchUpdateResult {
+  tablesAffected: string[];
+  rowsUpdated: Record<string, number>;
+  success: boolean;
+}

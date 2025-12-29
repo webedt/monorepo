@@ -11,7 +11,8 @@
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 
-import { db, cloudSaves, cloudSaveVersions, cloudSaveSyncLog, games, eq, and, desc, sql, inArray, or } from '../db/index.js';
+import { db, cloudSaves, cloudSaveVersions, cloudSaveSyncLog, games, eq, and, desc, sql, inArray, or, withTransactionOrThrow } from '../db/index.js';
+import type { TransactionContext } from '../db/index.js';
 import { StorageService, calculateStringSize } from '../storage/StorageService.js';
 
 import type { CloudSave, NewCloudSave, CloudSaveVersion, CloudSaveSyncLog } from '../db/index.js';
@@ -140,31 +141,36 @@ export class CloudSavesService {
 
     let save: CloudSave;
 
+    // Use transaction to ensure save update/insert and storage tracking are atomic
     if (existingSave) {
-      // Create version history before updating
-      await this.createVersion(existingSave);
+      save = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+        // Create version history before updating (uses the transaction)
+        await this.createVersionWithTx(tx, existingSave);
 
-      // Update existing save
-      const [updatedSave] = await db
-        .update(cloudSaves)
-        .set({
-          slotName: slotName ?? existingSave.slotName,
-          saveData,
-          fileSize,
-          checksum,
-          platformData: platformData ?? existingSave.platformData,
-          screenshotUrl: screenshotUrl ?? existingSave.screenshotUrl,
-          playTimeSeconds: playTimeSeconds ?? existingSave.playTimeSeconds,
-          gameProgress: gameProgress ?? existingSave.gameProgress,
-          lastPlayedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(cloudSaves.id, existingSave.id))
-        .returning();
+        // Update existing save
+        const [updatedSave] = await tx
+          .update(cloudSaves)
+          .set({
+            slotName: slotName ?? existingSave.slotName,
+            saveData,
+            fileSize,
+            checksum,
+            platformData: platformData ?? existingSave.platformData,
+            screenshotUrl: screenshotUrl ?? existingSave.screenshotUrl,
+            playTimeSeconds: playTimeSeconds ?? existingSave.playTimeSeconds,
+            gameProgress: gameProgress ?? existingSave.gameProgress,
+            lastPlayedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(cloudSaves.id, existingSave.id))
+          .returning();
 
-      save = updatedSave;
+        return updatedSave;
+      }, {
+        context: { operation: 'uploadSave.update', userId, gameId, slotNumber, sizeDiff },
+      });
 
-      // Update storage usage
+      // Update storage usage after transaction commits
       if (sizeDiff !== 0) {
         if (sizeDiff > 0) {
           await StorageService.addUsage(userId, sizeDiff);
@@ -238,6 +244,34 @@ export class CloudSavesService {
   }
 
   /**
+   * Create a version snapshot using a transaction context
+   */
+  private static async createVersionWithTx(tx: TransactionContext, save: CloudSave): Promise<void> {
+    // Get current version count
+    const versionResult = await tx
+      .select({ maxVersion: sql<number>`COALESCE(MAX(version), 0)` })
+      .from(cloudSaveVersions)
+      .where(eq(cloudSaveVersions.cloudSaveId, save.id));
+
+    const nextVersion = (versionResult[0]?.maxVersion ?? 0) + 1;
+
+    // Insert new version
+    await tx.insert(cloudSaveVersions).values({
+      id: randomUUID(),
+      cloudSaveId: save.id,
+      version: nextVersion,
+      saveData: save.saveData,
+      fileSize: save.fileSize,
+      checksum: save.checksum,
+      platformData: save.platformData,
+      createdAt: new Date(),
+    });
+
+    // Note: Pruning is done separately after transaction commits to avoid
+    // holding the transaction open for storage quota updates
+  }
+
+  /**
    * Remove old versions beyond the retention limit
    */
   private static async pruneVersions(cloudSaveId: string, userId: string): Promise<void> {
@@ -254,10 +288,15 @@ export class CloudSavesService {
       const freedBytes = versionsToDelete.reduce((sum, v) => sum + v.fileSize, 0);
       const versionIds = versionsToDelete.map((v) => v.id);
 
-      // Batch delete all versions at once
-      await db.delete(cloudSaveVersions).where(inArray(cloudSaveVersions.id, versionIds));
+      // Use transaction to ensure batch delete is atomic
+      await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+        // Batch delete all versions at once
+        await tx.delete(cloudSaveVersions).where(inArray(cloudSaveVersions.id, versionIds));
+      }, {
+        context: { operation: 'pruneVersions', cloudSaveId, versionCount: versionIds.length },
+      });
 
-      // Update storage usage
+      // Update storage usage after transaction commits
       if (freedBytes > 0) {
         await StorageService.removeUsage(userId, freedBytes);
       }
@@ -514,19 +553,26 @@ export class CloudSavesService {
       return false;
     }
 
-    // Calculate total storage to free (save + versions)
-    const versionsResult = await db
-      .select({ totalSize: sql<string>`COALESCE(SUM(file_size), 0)` })
-      .from(cloudSaveVersions)
-      .where(eq(cloudSaveVersions.cloudSaveId, save.id));
+    // Use transaction to ensure size calculation and delete are atomic
+    const totalSize = await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+      // Calculate total storage to free (save + versions)
+      const versionsResult = await tx
+        .select({ totalSize: sql<string>`COALESCE(SUM(file_size), 0)` })
+        .from(cloudSaveVersions)
+        .where(eq(cloudSaveVersions.cloudSaveId, save.id));
 
-    const versionsSize = BigInt(versionsResult[0]?.totalSize ?? 0);
-    const totalSize = BigInt(save.fileSize) + versionsSize;
+      const versionsSize = BigInt(versionsResult[0]?.totalSize ?? 0);
+      const calculatedTotalSize = BigInt(save.fileSize) + versionsSize;
 
-    // Delete (cascades to versions)
-    await db.delete(cloudSaves).where(eq(cloudSaves.id, save.id));
+      // Delete (cascades to versions)
+      await tx.delete(cloudSaves).where(eq(cloudSaves.id, save.id));
 
-    // Free storage
+      return calculatedTotalSize;
+    }, {
+      context: { operation: 'deleteSave', userId, gameId, slotNumber, saveId: save.id },
+    });
+
+    // Free storage after transaction commits
     await StorageService.removeUsage(userId, Number(totalSize));
 
     // Log deletion

@@ -1322,30 +1322,35 @@ router.post('/:id/send', requireAuth, validateSessionId, asyncHandler(async (req
     return;
   }
 
-  // Update session status to running
-  await db.update(chatSessions)
-    .set({ status: 'running' })
-    .where(eq(chatSessions.id, sessionId));
+  // Use transaction to ensure status update and event insert are atomic
+  await withTransactionOrThrow(db, async (tx: TransactionContext) => {
+    // Update session status to running
+    await tx.update(chatSessions)
+      .set({ status: 'running' })
+      .where(eq(chatSessions.id, sessionId));
 
-  // Store the user message in the database for the stream to pick up
-  // The actual resume will happen when the client connects to the SSE stream
-  // Use input_preview for consistency with initial execution flow
-  const userMessageEvent = {
-    type: 'input_preview',
-    message: `Request received: ${content.length > 200 ? content.substring(0, 200) + '...' : content}`,
-    source: 'user',
-    timestamp: new Date().toISOString(),
-    data: {
-      preview: content,
-      truncated: content.length > 200,
-      originalLength: content.length,
-    },
-  };
+    // Store the user message in the database for the stream to pick up
+    // The actual resume will happen when the client connects to the SSE stream
+    // Use input_preview for consistency with initial execution flow
+    const userMessageEvent = {
+      type: 'input_preview',
+      message: `Request received: ${content.length > 200 ? content.substring(0, 200) + '...' : content}`,
+      source: 'user',
+      timestamp: new Date().toISOString(),
+      data: {
+        preview: content,
+        truncated: content.length > 200,
+        originalLength: content.length,
+      },
+    };
 
-  await db.insert(events).values({
-    chatSessionId: sessionId,
-    uuid: null, // Local input_preview events don't have UUIDs
-    eventData: userMessageEvent,
+    await tx.insert(events).values({
+      chatSessionId: sessionId,
+      uuid: null, // Local input_preview events don't have UUIDs
+      eventData: userMessageEvent,
+    });
+  }, {
+    context: { operation: 'sendMessage', sessionId, contentLength: content.length },
   });
 
   logger.info(`Queued follow-up message for session ${sessionId}`, {
