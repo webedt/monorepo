@@ -207,14 +207,15 @@ export interface MidiTrack {
   name?: string;
   /** All events in the track */
   events: MidiEvent[];
-  /** Note events only (filtered) */
-  notes: MidiNoteEvent[];
+  /** Parsed notes with duration (filtered) */
+  notes: MidiParsedNote[];
 }
 
 /**
- * Combined note event with duration
+ * Parsed note with duration (combines Note On/Off events)
+ * Named MidiParsedNote to distinguish from raw MIDI event types
  */
-export interface MidiNoteEvent {
+export interface MidiParsedNote {
   /** MIDI note number (0-127) */
   note: number;
   /** Note name (e.g., 'C4', 'A#3') */

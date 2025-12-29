@@ -32,6 +32,8 @@ export class MidiPlayer extends Component {
   private timeCurrentEl: HTMLElement | null = null;
   private progressFillEl: HTMLElement | null = null;
   private progressHandleEl: HTMLElement | null = null;
+  private boundMouseMove: ((e: MouseEvent) => void) | null = null;
+  private boundMouseUp: (() => void) | null = null;
 
   constructor(options: MidiPlayerOptions = {}) {
     super('div', { className: 'midi-player' });
@@ -344,20 +346,33 @@ export class MidiPlayer extends Component {
     this.isDragging = true;
     this.updateProgressFromMouse(e);
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    // Clean up any existing listeners first
+    this.cleanupDragListeners();
+
+    this.boundMouseMove = (moveEvent: MouseEvent) => {
       if (this.isDragging) {
         this.updateProgressFromMouse(moveEvent);
       }
     };
 
-    const handleMouseUp = () => {
+    this.boundMouseUp = () => {
       this.isDragging = false;
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      this.cleanupDragListeners();
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', this.boundMouseMove);
+    document.addEventListener('mouseup', this.boundMouseUp);
+  }
+
+  private cleanupDragListeners(): void {
+    if (this.boundMouseMove) {
+      document.removeEventListener('mousemove', this.boundMouseMove);
+      this.boundMouseMove = null;
+    }
+    if (this.boundMouseUp) {
+      document.removeEventListener('mouseup', this.boundMouseUp);
+      this.boundMouseUp = null;
+    }
   }
 
   private updateProgressFromMouse(e: MouseEvent): void {
@@ -464,6 +479,8 @@ export class MidiPlayer extends Component {
   }
 
   protected onUnmount(): void {
+    // Clean up document event listeners
+    this.cleanupDragListeners();
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;

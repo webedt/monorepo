@@ -7,7 +7,7 @@ import { Component } from '../base';
 import { midiStore } from '../../lib/midi';
 import './midi-piano-roll.css';
 
-import type { MidiNoteEvent } from '@webedt/shared';
+import type { MidiParsedNote } from '@webedt/shared';
 import type { MidiStoreState } from '../../lib/midi';
 
 export interface MidiPianoRollOptions {
@@ -36,7 +36,8 @@ export class MidiPianoRoll extends Component {
   private scrollContainer: HTMLElement | null = null;
   private playheadEl: HTMLElement | null = null;
   private animationFrameId: number | null = null;
-  private notes: { note: MidiNoteEvent; trackIndex: number; color: string }[] = [];
+  private notes: { note: MidiParsedNote; trackIndex: number; color: string }[] = [];
+  private loadedFileName: string | null = null;
 
   // Colors for different tracks
   private trackColors = [
@@ -176,6 +177,8 @@ export class MidiPianoRoll extends Component {
     this.canvas.height = height * dpr;
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
+    // Reset transform before scaling to prevent compounding
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
   }
 
@@ -331,11 +334,24 @@ export class MidiPianoRoll extends Component {
 
   protected onMount(): void {
     this.unsubscribe = midiStore.subscribe((state) => {
-      // Re-render when file changes
-      if (state.isLoaded && this.notes.length === 0) {
+      // Re-render when file changes or a new file is loaded
+      const currentFileName = state.fileInfo?.fileName || null;
+      const needsReload = state.isLoaded && (
+        this.notes.length === 0 ||
+        this.loadedFileName !== currentFileName
+      );
+
+      if (needsReload) {
+        this.loadedFileName = currentFileName;
         this.processNotes(state);
         this.updateCanvasSize(state);
         this.renderNotes();
+      }
+
+      // Clear notes when file is unloaded
+      if (!state.isLoaded && this.notes.length > 0) {
+        this.notes = [];
+        this.loadedFileName = null;
       }
 
       // Update playhead

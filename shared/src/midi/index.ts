@@ -16,7 +16,7 @@ export type { MidiHeader } from './types.js';
 export type { MidiMetaEvent } from './types.js';
 export type { MidiMetaEventSubtype } from './types.js';
 export type { MidiNoteAftertouchEvent } from './types.js';
-export type { MidiNoteEvent } from './types.js';
+export type { MidiParsedNote } from './types.js';
 export type { MidiNoteOffEvent } from './types.js';
 export type { MidiNoteOnEvent } from './types.js';
 export type { MidiParseOptions } from './types.js';

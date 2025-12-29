@@ -9,7 +9,7 @@ import type { MidiFormat } from './types.js';
 import type { MidiHeader } from './types.js';
 import type { MidiMetaEvent } from './types.js';
 import type { MidiMetaEventSubtype } from './types.js';
-import type { MidiNoteEvent } from './types.js';
+import type { MidiParsedNote } from './types.js';
 import type { MidiParseOptions } from './types.js';
 import type { MidiParseResult } from './types.js';
 import type { MidiTempoChange } from './types.js';
@@ -56,7 +56,7 @@ export class MidiParser {
           for (const event of track.events) {
             if (event.type === 'meta') {
               const metaEvent = event as MidiMetaEvent;
-              if (metaEvent.subtype === 'setTempo' && metaEvent.tempo !== undefined) {
+              if (metaEvent.subtype === 'setTempo' && metaEvent.tempo !== undefined && metaEvent.tempo > 0) {
                 tempoChanges.push({
                   time: event.absoluteTime,
                   microsecondsPerQuarterNote: metaEvent.tempo,
@@ -147,11 +147,14 @@ export class MidiParser {
     // Handle time division
     let ticksPerQuarterNote: number;
     if (timeDivision & 0x8000) {
-      // SMPTE format - convert to approximate ticks per quarter note
-      const fps = -((timeDivision >> 8) | 0xffffff00);
+      // SMPTE format - high byte is negative frame rate, low byte is ticks per frame
+      // Extract the signed 8-bit frame rate from the high byte
+      const frameRateByte = (timeDivision >> 8) & 0xff;
+      // Convert to signed by sign-extending from 8 bits
+      const fps = frameRateByte >= 128 ? -(256 - frameRateByte) : -frameRateByte;
       const ticksPerFrame = timeDivision & 0xff;
-      // Approximate at 120 BPM
-      ticksPerQuarterNote = Math.round((fps * ticksPerFrame) / 2);
+      // Approximate at 120 BPM (0.5 seconds per quarter note at 120 BPM)
+      ticksPerQuarterNote = Math.round(Math.abs(fps) * ticksPerFrame / 2);
     } else {
       ticksPerQuarterNote = timeDivision;
     }
@@ -178,8 +181,9 @@ export class MidiParser {
     let trackName: string | undefined;
 
     // Note tracking for duration calculation
-    const activeNotes: Map<string, { event: MidiEvent; startTime: number }> = new Map();
-    const notes: MidiNoteEvent[] = [];
+    // Use an array to handle overlapping notes on the same pitch
+    const activeNotes: Map<string, { event: MidiEvent; startTime: number }[]> = new Map();
+    const notes: MidiParsedNote[] = [];
 
     while (this.position < endPosition) {
       const deltaTime = this.readVariableLengthQuantity();
@@ -198,24 +202,32 @@ export class MidiParser {
         // Track note on/off for duration calculation
         if (event.type === 'noteOn' && event.velocity > 0) {
           const key = `${event.channel}-${event.note}`;
-          activeNotes.set(key, { event, startTime: absoluteTime });
+          const existingNotes = activeNotes.get(key) || [];
+          existingNotes.push({ event, startTime: absoluteTime });
+          activeNotes.set(key, existingNotes);
         } else if (event.type === 'noteOff' || (event.type === 'noteOn' && event.velocity === 0)) {
           const key = `${event.channel}-${event.note}`;
-          const activeNote = activeNotes.get(key);
-          if (activeNote && activeNote.event.type === 'noteOn') {
-            const noteEvent = activeNote.event;
-            const duration = absoluteTime - activeNote.startTime;
-            notes.push({
-              note: noteEvent.note,
-              noteName: this.midiNoteToName(noteEvent.note),
-              velocity: noteEvent.velocity,
-              channel: noteEvent.channel,
-              startTime: activeNote.startTime,
-              duration,
-              startTimeSeconds: 0, // Will be calculated later
-              durationSeconds: 0, // Will be calculated later
-            });
-            activeNotes.delete(key);
+          const existingNotes = activeNotes.get(key);
+          if (existingNotes && existingNotes.length > 0) {
+            // Pop the oldest note (FIFO - first note on gets first note off)
+            const activeNote = existingNotes.shift()!;
+            if (existingNotes.length === 0) {
+              activeNotes.delete(key);
+            }
+            if (activeNote.event.type === 'noteOn') {
+              const noteEvent = activeNote.event;
+              const duration = absoluteTime - activeNote.startTime;
+              notes.push({
+                note: noteEvent.note,
+                noteName: this.midiNoteToName(noteEvent.note),
+                velocity: noteEvent.velocity,
+                channel: noteEvent.channel,
+                startTime: activeNote.startTime,
+                duration,
+                startTimeSeconds: 0, // Will be calculated later
+                durationSeconds: 0, // Will be calculated later
+              });
+            }
           }
         }
 
@@ -515,25 +527,34 @@ export class MidiParser {
   }
 
   /**
-   * Read a single byte
+   * Read a single byte with bounds checking
    */
   private readByte(): number {
+    if (this.position >= this.data.length) {
+      throw new Error(`Unexpected end of file at position ${this.position}`);
+    }
     return this.data[this.position++];
   }
 
   /**
-   * Read a 16-bit unsigned integer (big-endian)
+   * Read a 16-bit unsigned integer (big-endian) with bounds checking
    */
   private readUint16(): number {
+    if (this.position + 2 > this.data.length) {
+      throw new Error(`Unexpected end of file at position ${this.position}, need 2 bytes`);
+    }
     const value = (this.data[this.position] << 8) | this.data[this.position + 1];
     this.position += 2;
     return value;
   }
 
   /**
-   * Read a 32-bit unsigned integer (big-endian)
+   * Read a 32-bit unsigned integer (big-endian) with bounds checking
    */
   private readUint32(): number {
+    if (this.position + 4 > this.data.length) {
+      throw new Error(`Unexpected end of file at position ${this.position}, need 4 bytes`);
+    }
     const value =
       (this.data[this.position] << 24) |
       (this.data[this.position + 1] << 16) |
@@ -544,9 +565,12 @@ export class MidiParser {
   }
 
   /**
-   * Read a string of specified length
+   * Read a string of specified length with bounds checking
    */
   private readString(length: number): string {
+    if (this.position + length > this.data.length) {
+      throw new Error(`Unexpected end of file at position ${this.position}, need ${length} bytes`);
+    }
     let result = '';
     for (let i = 0; i < length; i++) {
       result += String.fromCharCode(this.data[this.position++]);
@@ -561,6 +585,9 @@ export class MidiParser {
     let value = 0;
     let byte: number;
     do {
+      if (this.position >= this.data.length) {
+        throw new Error('Unexpected end of file while reading variable length quantity');
+      }
       byte = this.data[this.position++];
       value = (value << 7) | (byte & 0x7f);
     } while (byte & 0x80);

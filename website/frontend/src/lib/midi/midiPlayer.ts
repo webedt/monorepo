@@ -7,7 +7,7 @@ import { parseMidi, parseMidiFromBase64 } from '@webedt/shared';
 
 import type { MidiFile } from '@webedt/shared';
 import type { MidiFileInfo } from './types';
-import type { MidiNoteEvent } from '@webedt/shared';
+import type { MidiParsedNote } from '@webedt/shared';
 import type { MidiPlayerEvent } from './types';
 import type { MidiPlayerListener } from './types';
 import type { MidiPlayerOptions } from './types';
@@ -15,16 +15,6 @@ import type { MidiPlayerState } from './types';
 import type { MidiTempoChange } from '@webedt/shared';
 import type { MidiTrack } from '@webedt/shared';
 import type { MidiTrackInfo } from './types';
-
-/**
- * Scheduled note for playback (pending scheduling)
- */
-interface ScheduledNote {
-  note: MidiNoteEvent;
-  trackIndex: number;
-  startTime: number;
-  endTime: number;
-}
 
 /**
  * Active oscillator for cleanup
@@ -46,11 +36,14 @@ export class MidiPlayer {
   private state: MidiPlayerState;
   private options: Required<MidiPlayerOptions>;
   private listeners: Set<MidiPlayerListener> = new Set();
-  private scheduledNotes: ScheduledNote[] = [];
   private activeOscillators: ActiveOscillator[] = [];
   private playbackStartTime: number = 0;
   private pauseTime: number = 0;
   private animationFrameId: number | null = null;
+  private schedulerIntervalId: ReturnType<typeof setInterval> | null = null;
+  private lastScheduledTime: number = 0;
+  private static readonly SCHEDULE_AHEAD_TIME = 0.5; // Schedule notes 0.5 seconds ahead
+  private static readonly SCHEDULER_INTERVAL = 100; // Run scheduler every 100ms
 
   constructor(options: MidiPlayerOptions = {}) {
     this.options = {
@@ -203,6 +196,7 @@ export class MidiPlayer {
     if (!this.state.isPlaying || this.state.isPaused) return;
 
     this.pauseTime = this.state.currentTime;
+    this.stopScheduler();
     this.stopAllNotes();
     this.stopTimeUpdate();
     this.updateState({ isPaused: true });
@@ -213,9 +207,11 @@ export class MidiPlayer {
    * Stop playback
    */
   stop(): void {
+    this.stopScheduler();
     this.stopAllNotes();
     this.stopTimeUpdate();
     this.pauseTime = 0;
+    this.lastScheduledTime = 0;
     this.updateState({
       isPlaying: false,
       isPaused: false,
@@ -231,9 +227,9 @@ export class MidiPlayer {
   seek(time: number): void {
     const clampedTime = Math.max(0, Math.min(time, this.state.duration));
 
-    if (this.state.isPlaying && !this.state.isPaused) {
+    if (this.state.isPlaying && !this.state.isPaused && this.audioContext) {
       this.stopAllNotes();
-      this.playbackStartTime = this.audioContext!.currentTime - clampedTime / this.options.speed;
+      this.playbackStartTime = this.audioContext.currentTime - clampedTime / this.options.speed;
       this.scheduleNotes(clampedTime);
     } else {
       this.pauseTime = clampedTime;
@@ -262,11 +258,11 @@ export class MidiPlayer {
    */
   setSpeed(speed: number): void {
     const clampedSpeed = Math.max(0.25, Math.min(4, speed));
-    if (this.state.isPlaying && !this.state.isPaused) {
+    if (this.state.isPlaying && !this.state.isPaused && this.audioContext) {
       const currentTime = this.state.currentTime;
       this.options.speed = clampedSpeed;
       this.stopAllNotes();
-      this.playbackStartTime = this.audioContext!.currentTime - currentTime / this.options.speed;
+      this.playbackStartTime = this.audioContext.currentTime - currentTime / this.options.speed;
       this.scheduleNotes(currentTime);
     } else {
       this.options.speed = clampedSpeed;
@@ -381,6 +377,7 @@ export class MidiPlayer {
    * Dispose of all resources
    */
   dispose(): void {
+    this.stopScheduler();
     this.stop();
     this.unload();
     if (this.masterGain) {
@@ -446,13 +443,56 @@ export class MidiPlayer {
 
   /**
    * Schedule notes for playback from a given start time
+   * Uses incremental scheduling to avoid memory pressure with large files
    */
   private scheduleNotes(startTime: number): void {
     if (!this.midiFile || !this.audioContext || !this.masterGain) return;
 
-    this.scheduledNotes = [];
+    // Set the initial scheduling point
+    this.lastScheduledTime = startTime;
+
+    // Schedule initial batch
+    this.scheduleNextBatch();
+
+    // Start the scheduler for continuous scheduling
+    this.startScheduler();
+  }
+
+  /**
+   * Start the incremental note scheduler
+   */
+  private startScheduler(): void {
+    if (this.schedulerIntervalId !== null) return;
+
+    this.schedulerIntervalId = setInterval(() => {
+      if (this.state.isPlaying && !this.state.isPaused) {
+        this.scheduleNextBatch();
+      }
+    }, MidiPlayer.SCHEDULER_INTERVAL);
+  }
+
+  /**
+   * Stop the incremental note scheduler
+   */
+  private stopScheduler(): void {
+    if (this.schedulerIntervalId !== null) {
+      clearInterval(this.schedulerIntervalId);
+      this.schedulerIntervalId = null;
+    }
+  }
+
+  /**
+   * Schedule the next batch of notes within the look-ahead window
+   */
+  private scheduleNextBatch(): void {
+    if (!this.midiFile || !this.audioContext || !this.masterGain) return;
+
     const now = this.audioContext.currentTime;
-    const lookAhead = 0.5; // Schedule 500ms ahead
+    const currentPlaybackTime = (now - this.playbackStartTime) * this.options.speed;
+    const scheduleEndTime = currentPlaybackTime + MidiPlayer.SCHEDULE_AHEAD_TIME * this.options.speed;
+
+    // Only schedule notes we haven't scheduled yet
+    const scheduleFrom = this.lastScheduledTime;
 
     for (let trackIndex = 0; trackIndex < this.midiFile.tracks.length; trackIndex++) {
       if (this.options.mutedTracks.has(trackIndex)) continue;
@@ -460,33 +500,30 @@ export class MidiPlayer {
       const track = this.midiFile.tracks[trackIndex];
       for (const note of track.notes) {
         if (this.options.mutedChannels.has(note.channel)) continue;
-        if (note.startTimeSeconds < startTime) continue;
+        // Skip notes already scheduled or in the past
+        if (note.startTimeSeconds < scheduleFrom) continue;
+        // Skip notes beyond the look-ahead window
+        if (note.startTimeSeconds > scheduleEndTime) continue;
 
-        const noteStartTime = (note.startTimeSeconds - startTime) / this.options.speed;
+        const noteStartTime = (note.startTimeSeconds - currentPlaybackTime) / this.options.speed;
         const noteDuration = note.durationSeconds / this.options.speed;
 
-        // Only schedule notes within look-ahead window initially
-        // More notes will be scheduled during playback
-        if (noteStartTime <= lookAhead) {
+        // Only schedule if the note start is in the future
+        if (noteStartTime > 0) {
           this.scheduleNote(note, trackIndex, now + noteStartTime, noteDuration);
-        } else {
-          // Store for later scheduling
-          this.scheduledNotes.push({
-            note,
-            trackIndex,
-            startTime: note.startTimeSeconds,
-            endTime: note.startTimeSeconds + note.durationSeconds,
-          });
         }
       }
     }
+
+    // Update the last scheduled time
+    this.lastScheduledTime = scheduleEndTime;
   }
 
   /**
    * Schedule a single note
    */
   private scheduleNote(
-    note: MidiNoteEvent,
+    note: MidiParsedNote,
     _trackIndex: number,
     startTime: number,
     duration: number
@@ -543,9 +580,6 @@ export class MidiPlayer {
       }
     }
     this.activeOscillators = [];
-
-    // Clear pending notes
-    this.scheduledNotes = [];
   }
 
   /**

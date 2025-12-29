@@ -9,7 +9,7 @@ export { midiStore } from './midiStore';
 export type { MidiChannelInfo } from './types';
 export type { MidiFile } from './types';
 export type { MidiFileInfo } from './types';
-export type { MidiNoteEvent } from './types';
+export type { MidiParsedNote } from './types';
 export type { MidiPlayerEvent } from './types';
 export type { MidiPlayerListener } from './types';
 export type { MidiPlayerOptions } from './types';

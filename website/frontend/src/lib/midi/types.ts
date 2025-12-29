@@ -4,7 +4,7 @@
  */
 
 import type { MidiFile } from '@webedt/shared';
-import type { MidiNoteEvent } from '@webedt/shared';
+import type { MidiParsedNote } from '@webedt/shared';
 import type { MidiTrack } from '@webedt/shared';
 
 /**
@@ -41,8 +41,8 @@ export type MidiPlayerEvent =
   | { type: 'seek'; time: number }
   | { type: 'timeUpdate'; time: number; progress: number }
   | { type: 'tempoChange'; bpm: number }
-  | { type: 'noteOn'; note: MidiNoteEvent; track: number }
-  | { type: 'noteOff'; note: MidiNoteEvent; track: number }
+  | { type: 'noteOn'; note: MidiParsedNote; track: number }
+  | { type: 'noteOff'; note: MidiParsedNote; track: number }
   | { type: 'end' };
 
 /**
@@ -123,4 +123,4 @@ export interface MidiFileInfo {
 /**
  * Re-export types from shared for convenience
  */
-export type { MidiFile, MidiTrack, MidiNoteEvent };
+export type { MidiFile, MidiTrack, MidiParsedNote };
