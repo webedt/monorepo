@@ -75,7 +75,7 @@ import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/
 import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
 
 // Import graceful shutdown
-import { registerShutdownHandlers, GracefulShutdownConfig } from './gracefulShutdown.js';
+import { registerShutdownHandlers, setOrphanCleanupInterval, GracefulShutdownConfig } from './gracefulShutdown.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -608,10 +608,11 @@ async function startServer() {
   // Run initial cleanup on startup
   cleanupOrphanedSessions();
 
-  // Schedule periodic cleanup
-  setInterval(() => {
+  // Schedule periodic cleanup and track the interval for graceful shutdown
+  const orphanCleanupInterval = setInterval(() => {
     cleanupOrphanedSessions();
   }, ORPHAN_CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+  setOrphanCleanupInterval(orphanCleanupInterval);
 
   // Start Claude session background sync
   if (CLAUDE_SYNC_ENABLED) {
