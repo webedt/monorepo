@@ -48,6 +48,8 @@ export {
 export type { ClaudeWebClientConfig } from './abstracts/index.js';
 
 // Sensitive data encryption service
+// Note: ClaudeAuthData, CodexAuthData, GeminiAuthData, ImageAiKeysData are exported
+// from db/index.ts (via authTypes.ts) to avoid conflicts
 export {
   SensitiveDataService,
   createSensitiveDataService,
@@ -59,10 +61,6 @@ export {
 } from './sensitiveDataService.js';
 
 export type {
-  ClaudeAuthData,
-  CodexAuthData,
-  GeminiAuthData,
-  ImageAiKeysData,
   SensitiveUserFields,
   EncryptedUserFields,
 } from './sensitiveDataService.js';
