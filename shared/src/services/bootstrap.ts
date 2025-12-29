@@ -30,6 +30,7 @@ import {
   ASessionEventBroadcaster,
   ASessionListBroadcaster,
   ASessionCleanupService,
+  ATrashCleanupService,
   AEventStorageService,
   ASessionQueryService,
   ASessionAuthorizationService,
@@ -51,6 +52,7 @@ import { SessionService } from '../sessions/SessionService.js';
 import { sessionEventBroadcaster } from '../sessions/sessionEventBroadcaster.js';
 import { sessionListBroadcaster } from '../sessions/sessionListBroadcaster.js';
 import { SessionCleanupService } from '../sessions/SessionCleanupService.js';
+import { TrashCleanupService } from '../sessions/TrashCleanupService.js';
 import { EventStorageService } from '../sessions/EventStorageService.js';
 import { SessionQueryService } from '../sessions/SessionQueryService.js';
 import { SessionAuthorizationService } from '../sessions/SessionAuthorizationService.js';
@@ -100,6 +102,7 @@ export async function bootstrapServices(): Promise<void> {
   ServiceProvider.register(ASessionEventBroadcaster, wrapService(sessionEventBroadcaster, 0));
   ServiceProvider.register(ASessionListBroadcaster, wrapService(sessionListBroadcaster, 0));
   ServiceProvider.register(ASessionCleanupService, wrapService(new SessionCleanupService(), 10));
+  ServiceProvider.register(ATrashCleanupService, new TrashCleanupService());  // Has its own initialize/dispose
   ServiceProvider.register(AEventStorageService, wrapService(new EventStorageService(), 0));
   ServiceProvider.register(ASessionQueryService, wrapService(new SessionQueryService(), 0));
   ServiceProvider.register(ASessionAuthorizationService, wrapService(new SessionAuthorizationService(), 0));

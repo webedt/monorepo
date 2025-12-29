@@ -71,11 +71,36 @@ export * from './llm/index.js';
 // Organizations/Studios - Group accounts with multi-user support
 export * from './organizations/index.js';
 
+// Discovery - Task discovery and scanning
+export * from './discovery/index.js';
+
 // Code Analysis - AI-powered code analysis using ClaudeWebClient
 export * from './codeAnalysis/index.js';
 
 // Storage - User storage quota management
 export * from './storage/index.js';
+
+// Payment - Stripe and PayPal payment providers
+export * from './payment/index.js';
+
+// Games - Shared platform libraries for games
+export * from './games/index.js';
+
+// Cloud Saves - Game save synchronization across devices
+export * from './cloudSaves/index.js';
+
+// CRDT - Conflict-free Replicated Data Types for collaborative editing
+// Implements undo as forward operations (applying inverse changes)
+export * from './crdt/index.js';
+
+// Import - Import content from external sources (URLs)
+export * from './import/index.js';
+
+// Autocomplete - AI-powered code completion
+export * from './autocomplete/index.js';
+
+// Geometry - 3D geometry with right-handed coordinate system
+export * from './geometry/index.js';
 
 // =============================================================================
 // SERVICES - Dependency injection and service registry

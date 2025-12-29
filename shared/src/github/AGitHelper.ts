@@ -25,4 +25,12 @@ export abstract class AGitHelper extends AService implements IGitHelperDocumenta
   abstract checkout(branchName: string): Promise<void>;
 
   abstract pull(branch?: string): Promise<void>;
+
+  abstract getDiffAgainstBranch(baseBranch: string): Promise<string>;
+
+  abstract getFileDiffAgainstBranch(baseBranch: string, filePath: string): Promise<string>;
+
+  abstract getChangedFilesAgainstBranch(baseBranch: string): Promise<string[]>;
+
+  abstract getDiffStats(baseBranch: string): Promise<{ additions: number; deletions: number; filesChanged: number }>;
 }

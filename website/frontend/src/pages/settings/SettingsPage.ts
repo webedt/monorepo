@@ -5,7 +5,9 @@
 import { Page, type PageOptions } from '../base/Page';
 import { Card, Button, Input, toast } from '../../components';
 import { authStore } from '../../stores/authStore';
-import { githubApi, userApi } from '../../lib/api';
+import { editorSettingsStore } from '../../stores/editorSettingsStore';
+import { githubApi, userApi, billingApi } from '../../lib/api';
+import { router } from '../../lib/router';
 import type { ClaudeAuth } from '../../types';
 import './settings.css';
 
@@ -18,6 +20,14 @@ export class SettingsPage extends Page<PageOptions> {
   private claudeAuthInput: Input | null = null;
   private cards: Card[] = [];
   private buttons: Button[] = [];
+  private billingData: {
+    tier: string;
+    usedBytes: string;
+    quotaBytes: string;
+    usagePercent: number;
+    usedFormatted: string;
+    quotaFormatted: string;
+  } | null = null;
 
   protected render(): string {
     return `
@@ -34,6 +44,16 @@ export class SettingsPage extends Page<PageOptions> {
           </section>
 
           <section class="settings-section">
+            <h2 class="section-title">Billing & Storage</h2>
+            <div class="section-card billing-card"></div>
+          </section>
+
+          <section class="settings-section">
+            <h2 class="section-title">Editor</h2>
+            <div class="section-card editor-card"></div>
+          </section>
+
+          <section class="settings-section">
             <h2 class="section-title">Connections</h2>
             <div class="section-card connections-card"></div>
           </section>
@@ -47,9 +67,36 @@ export class SettingsPage extends Page<PageOptions> {
     `;
   }
 
+  async load(): Promise<void> {
+    try {
+      const billing = await billingApi.getCurrentPlan();
+      this.billingData = {
+        tier: billing?.tier || 'BASIC',
+        usedBytes: billing?.usedBytes || '0',
+        quotaBytes: billing?.quotaBytes || '5368709120',
+        usagePercent: billing?.usagePercent || 0,
+        usedFormatted: billing?.usedFormatted || '0 B',
+        quotaFormatted: billing?.quotaFormatted || '5 GB',
+      };
+    } catch (error) {
+      console.error('Failed to load billing data:', error);
+      this.billingData = {
+        tier: 'BASIC',
+        usedBytes: '0',
+        quotaBytes: '5368709120',
+        usagePercent: 0,
+        usedFormatted: '0 B',
+        quotaFormatted: '5 GB',
+      };
+    }
+    this.renderBillingSection();
+  }
+
   protected onMount(): void {
     super.onMount();
     this.renderAccountSection();
+    this.renderBillingSection();
+    this.renderEditorSection();
     this.renderConnectionsSection();
     this.renderDangerSection();
   }
@@ -96,6 +143,171 @@ export class SettingsPage extends Page<PageOptions> {
     if (saveBtnContainer) {
       saveBtn.mount(saveBtnContainer);
       this.buttons.push(saveBtn);
+    }
+
+    const card = new Card();
+    const body = card.body();
+    body.getElement().appendChild(content);
+    card.mount(container);
+    this.cards.push(card);
+  }
+
+  private renderBillingSection(): void {
+    const container = this.$('.billing-card') as HTMLElement;
+    if (!container) return;
+
+    // Clear existing content
+    container.innerHTML = '';
+
+    const data = this.billingData;
+    const tierLabel = this.getTierLabel(data?.tier || 'BASIC');
+    const usagePercent = data?.usagePercent || 0;
+    const usedFormatted = data?.usedFormatted || '0 B';
+    const quotaFormatted = data?.quotaFormatted || '5 GB';
+
+    const content = document.createElement('div');
+    content.className = 'billing-content';
+    content.innerHTML = `
+      <div class="billing-overview">
+        <div class="billing-plan">
+          <div class="plan-info">
+            <span class="plan-label">Current Plan</span>
+            <span class="plan-name">${tierLabel}</span>
+          </div>
+          <div class="plan-action"></div>
+        </div>
+
+        <div class="storage-usage">
+          <div class="usage-header">
+            <span class="usage-label">Storage Usage</span>
+            <span class="usage-value">${usedFormatted} / ${quotaFormatted}</span>
+          </div>
+          <div class="usage-bar">
+            <div class="usage-fill" style="width: ${Math.min(usagePercent, 100)}%"></div>
+          </div>
+          <span class="usage-percent">${usagePercent.toFixed(1)}% used</span>
+        </div>
+      </div>
+
+      <div class="billing-actions">
+        <div class="view-pricing-btn"></div>
+      </div>
+    `;
+
+    // Create upgrade/manage button
+    const planAction = content.querySelector('.plan-action') as HTMLElement;
+    if (planAction) {
+      const btn = new Button('Manage Plan', {
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => router.navigate('/pricing'),
+      });
+      btn.mount(planAction);
+      this.buttons.push(btn);
+    }
+
+    // Create view pricing button
+    const viewPricingBtn = content.querySelector('.view-pricing-btn') as HTMLElement;
+    if (viewPricingBtn) {
+      const btn = new Button('View All Plans & Pricing', {
+        variant: 'ghost',
+        onClick: () => router.navigate('/pricing'),
+      });
+      btn.mount(viewPricingBtn);
+      this.buttons.push(btn);
+    }
+
+    const card = new Card();
+    const body = card.body();
+    body.getElement().appendChild(content);
+    card.mount(container);
+    this.cards.push(card);
+  }
+
+  private getTierLabel(tier: string): string {
+    const labels: Record<string, string> = {
+      FREE: 'Free',
+      BASIC: 'Basic',
+      PRO: 'Pro',
+      ENTERPRISE: 'Enterprise',
+    };
+    return labels[tier] || tier;
+  }
+
+  private renderEditorSection(): void {
+    const container = this.$('.editor-card') as HTMLElement;
+    if (!container) return;
+
+    const settings = editorSettingsStore.getSettings();
+
+    const content = document.createElement('div');
+    content.className = 'editor-content';
+    content.innerHTML = `
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Format on Save</span>
+          <span class="setting-description">Automatically format code when saving files</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="format-on-save" ${settings.formatOnSave ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Tab Size</span>
+          <span class="setting-description">Number of spaces for indentation</span>
+        </div>
+        <select id="tab-size" class="setting-select">
+          <option value="2" ${settings.tabSize === 2 ? 'selected' : ''}>2 spaces</option>
+          <option value="4" ${settings.tabSize === 4 ? 'selected' : ''}>4 spaces</option>
+          <option value="8" ${settings.tabSize === 8 ? 'selected' : ''}>8 spaces</option>
+        </select>
+      </div>
+      <div class="editor-setting-item">
+        <div class="setting-info">
+          <span class="setting-name">Indent with Tabs</span>
+          <span class="setting-description">Use tabs instead of spaces for indentation</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="use-tabs" ${settings.useTabs ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="editor-shortcuts">
+        <span class="shortcuts-label">Keyboard Shortcuts:</span>
+        <div class="shortcut-item">
+          <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd> - Format document
+        </div>
+        <div class="shortcut-item">
+          <kbd>${navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'}</kbd> + <kbd>S</kbd> - Save file
+        </div>
+      </div>
+    `;
+
+    // Add event listeners
+    const formatOnSaveCheckbox = content.querySelector('#format-on-save') as HTMLInputElement;
+    if (formatOnSaveCheckbox) {
+      formatOnSaveCheckbox.addEventListener('change', () => {
+        editorSettingsStore.setFormatOnSave(formatOnSaveCheckbox.checked);
+        toast.success('Editor settings saved');
+      });
+    }
+
+    const tabSizeSelect = content.querySelector('#tab-size') as HTMLSelectElement;
+    if (tabSizeSelect) {
+      tabSizeSelect.addEventListener('change', () => {
+        editorSettingsStore.setTabSize(parseInt(tabSizeSelect.value, 10));
+        toast.success('Editor settings saved');
+      });
+    }
+
+    const useTabsCheckbox = content.querySelector('#use-tabs') as HTMLInputElement;
+    if (useTabsCheckbox) {
+      useTabsCheckbox.addEventListener('change', () => {
+        editorSettingsStore.setUseTabs(useTabsCheckbox.checked);
+        toast.success('Editor settings saved');
+      });
     }
 
     const card = new Card();

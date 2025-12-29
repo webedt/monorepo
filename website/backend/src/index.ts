@@ -46,6 +46,18 @@ import libraryRoutes from './api/routes/library.js';
 import purchasesRoutes from './api/routes/purchases.js';
 import communityRoutes from './api/routes/community.js';
 import storageRoutes from './api/routes/storage.js';
+import searchRoutes from './api/routes/search.js';
+import channelsRoutes from './api/routes/channels.js';
+import collectionsRoutes from './api/routes/collections.js';
+import billingRoutes from './api/routes/billing.js';
+import paymentsRoutes from './api/routes/payments.js';
+import taxonomiesRoutes from './api/routes/taxonomies.js';
+import announcementsRoutes from './api/routes/announcements.js';
+import cloudSavesRoutes from './api/routes/cloudSaves.js';
+import importRoutes from './api/routes/import.js';
+import autocompleteRoutes from './api/routes/autocomplete.js';
+import snippetsRoutes from './api/routes/snippets.js';
+import diffsRoutes from './api/routes/diffs.js';
 
 // Import database for orphan cleanup
 import { db, chatSessions, events, checkHealth as checkDbHealth, getConnectionStats, eq, and, lt, sql } from '@webedt/shared';
@@ -322,6 +334,18 @@ app.use('/api/library', libraryRoutes);  // User's game library management
 app.use('/api/purchases', purchasesRoutes);  // Game purchases and refunds
 app.use('/api/community', communityRoutes);  // Community posts, reviews, and discussions
 app.use('/api/storage', storageRoutes);  // User storage quota management
+app.use('/api/search', searchRoutes);  // Universal search across all fields
+app.use('/api/channels', channelsRoutes);  // Community channels and real-time messaging
+app.use('/api/collections', collectionsRoutes);  // User-created organizational folders for sessions
+app.use('/api/billing', billingRoutes);  // Subscription billing and plan management
+app.use('/api/payments', paymentsRoutes);  // Stripe and PayPal payment processing
+app.use('/api/taxonomies', taxonomiesRoutes);  // Admin-configurable taxonomy system
+app.use('/api/announcements', announcementsRoutes);  // Official platform announcements
+app.use('/api/cloud-saves', cloudSavesRoutes);  // Cloud save synchronization
+app.use('/api/import', importRoutes);  // Import files from external URLs
+app.use('/api/autocomplete', autocompleteRoutes);  // AI-powered code completion
+app.use('/api/snippets', snippetsRoutes);  // User code snippets and templates
+app.use('/api/diffs', diffsRoutes);  // Diff visualization comparing branches
 
 // Serve static files from the frontend build
 const frontendDistPath = path.join(__dirname, '../../frontend/dist');

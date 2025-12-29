@@ -1,0 +1,78 @@
+/**
+ * Multi-Cursor Editor Styles
+ */
+
+.multi-cursor-editor {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.multi-cursor-editor .cm-editor {
+  height: 100%;
+  outline: none;
+}
+
+.multi-cursor-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* Ensure the scroller fills available space */
+.multi-cursor-editor .cm-scroller {
+  font-family: var(--font-mono, 'SF Mono', Monaco, 'Cascadia Code', Consolas, 'Liberation Mono', Menlo, monospace);
+}
+
+/* Multi-cursor styling */
+.multi-cursor-editor .cm-cursor-primary {
+  border-left-color: var(--color-primary, #4285f4);
+}
+
+.multi-cursor-editor .cm-cursor-secondary {
+  border-left-color: var(--color-secondary, #888);
+}
+
+/* Selection highlighting */
+.multi-cursor-editor .cm-selectionBackground {
+  background-color: var(--color-selection, rgba(66, 133, 244, 0.3));
+}
+
+.multi-cursor-editor.cm-focused .cm-selectionBackground {
+  background-color: var(--color-selection, rgba(66, 133, 244, 0.3));
+}
+
+/* Search highlights */
+.multi-cursor-editor .cm-selectionMatch {
+  background-color: var(--color-selection-match, rgba(66, 133, 244, 0.15));
+}
+
+/* Line numbers */
+.multi-cursor-editor .cm-lineNumbers {
+  min-width: 48px;
+}
+
+/* Status bar for cursor count (optional, shown via JS) */
+.multi-cursor-status {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.multi-cursor-status.visible {
+  opacity: 1;
+}
+
+/* Dark mode adjustments (auto-detected via CSS variables) */
+@media (prefers-color-scheme: dark) {
+  .multi-cursor-editor .cm-selectionBackground {
+    background-color: var(--color-selection, rgba(100, 150, 255, 0.25));
+  }
+}

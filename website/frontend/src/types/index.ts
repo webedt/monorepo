@@ -82,6 +82,7 @@ export interface Session {
   branch?: string;
   autoCommit?: boolean;
   locked?: boolean;
+  favorite?: boolean;
   createdAt: string;
   completedAt?: string;
   deletedAt?: string;
@@ -380,4 +381,614 @@ export interface CommunityComment {
     id: string;
     displayName?: string;
   };
+}
+
+// Community Channels types
+export interface CommunityChannel {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  gameId?: string;
+  isDefault: boolean;
+  isReadOnly: boolean;
+  sortOrder: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  game?: Game;
+}
+
+export interface ChannelMessage {
+  id: string;
+  channelId: string;
+  userId: string;
+  content: string;
+  replyToId?: string;
+  images?: string[];
+  edited: boolean;
+  status: 'published' | 'removed';
+  createdAt: string;
+  updatedAt: string;
+  author?: {
+    id: string;
+    displayName?: string;
+  };
+  channel?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+}
+
+// Collections types
+export interface Collection {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  sortOrder: number;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  sessionCount?: number;
+}
+
+export interface SessionCollection {
+  id: string;
+  sessionId: string;
+  collectionId: string;
+  addedAt: string;
+}
+
+// Taxonomy types
+export interface Taxonomy {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  slug: string;
+  allowMultiple: boolean;
+  isRequired: boolean;
+  itemTypes: string[];
+  sortOrder: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  terms?: TaxonomyTerm[];
+}
+
+export interface TaxonomyTerm {
+  id: string;
+  taxonomyId: string;
+  name: string;
+  slug: string;
+  description?: string;
+  parentId?: string;
+  color?: string;
+  icon?: string;
+  metadata?: Record<string, unknown>;
+  sortOrder: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ItemTaxonomy {
+  id: string;
+  termId: string;
+  itemType: string;
+  itemId: string;
+  createdAt: string;
+}
+
+export interface TaxonomyWithTerms extends Taxonomy {
+  terms: TaxonomyTerm[];
+}
+
+// Announcements types
+export type AnnouncementType = 'maintenance' | 'feature' | 'alert' | 'general';
+export type AnnouncementPriority = 'low' | 'normal' | 'high' | 'critical';
+export type AnnouncementStatus = 'draft' | 'published' | 'archived';
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  type: AnnouncementType;
+  priority: AnnouncementPriority;
+  status: AnnouncementStatus;
+  authorId: string | null; // Nullable - set to null if author is deleted
+  publishedAt?: string;
+  expiresAt?: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  author?: {
+    id: string;
+    displayName?: string;
+  };
+}
+
+// Cloud Saves types
+export interface CloudSave {
+  id: string;
+  userId: string;
+  gameId: string;
+  slotNumber: number;
+  slotName?: string;
+  saveData?: string;
+  hasData?: boolean;
+  fileSize: number;
+  checksum?: string;
+  platformData?: CloudSavePlatformData;
+  screenshotUrl?: string;
+  playTimeSeconds: number;
+  gameProgress?: CloudSaveGameProgress;
+  lastPlayedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  game?: {
+    id: string;
+    title: string;
+    coverImage?: string;
+  };
+}
+
+export interface CloudSavePlatformData {
+  deviceName?: string;
+  platform?: string;
+  gameVersion?: string;
+  browserInfo?: string;
+}
+
+export interface CloudSaveGameProgress {
+  level?: number;
+  chapter?: string;
+  percentage?: number;
+  customData?: Record<string, unknown>;
+}
+
+export interface CloudSaveVersion {
+  id: string;
+  cloudSaveId: string;
+  version: number;
+  saveData?: string;
+  hasData?: boolean;
+  fileSize: number;
+  checksum?: string;
+  platformData?: CloudSavePlatformData;
+  createdAt: string;
+}
+
+export interface CloudSaveSyncLog {
+  id: string;
+  userId: string;
+  cloudSaveId?: string;
+  operation: 'upload' | 'download' | 'delete' | 'conflict_resolved';
+  deviceInfo?: {
+    deviceName?: string;
+    platform?: string;
+    browserInfo?: string;
+    ipAddress?: string;
+  };
+  status: 'success' | 'failed' | 'conflict';
+  errorMessage?: string;
+  bytesTransferred?: number;
+  createdAt: string;
+}
+
+export interface CloudSaveStats {
+  totalSaves: number;
+  totalSizeBytes: string;
+  gamesWithSaves: number;
+  lastSyncAt?: string;
+}
+
+export interface LocalSaveInfo {
+  gameId: string;
+  slotNumber: number;
+  checksum: string;
+  updatedAt: Date | string;
+}
+
+export interface CloudSaveSyncConflict {
+  localInfo: LocalSaveInfo;
+  remoteSave: CloudSave;
+  conflictType: 'newer_remote' | 'newer_local' | 'both_modified';
+}
+
+// Bone Animation types
+
+/**
+ * 2D Vector for positions and scales
+ */
+export interface Vector2 {
+  x: number;
+  y: number;
+}
+
+/**
+ * Transform data for a bone at a specific keyframe
+ */
+export interface BoneTransform {
+  position: Vector2;
+  rotation: number; // degrees
+  scale: Vector2;
+}
+
+/**
+ * Bone definition in a skeleton hierarchy
+ */
+export interface Bone {
+  name: string;
+  parent: string | null;
+  length: number;
+  localTransform: BoneTransform;
+}
+
+/**
+ * Keyframe containing transforms for all bones at a specific time
+ */
+export interface BoneKeyframe {
+  time: number; // seconds
+  transforms: Record<string, BoneTransform>;
+}
+
+/**
+ * Complete bone animation data
+ */
+export interface BoneAnimation {
+  name: string;
+  type: 'bone';
+  fps: number;
+  duration: number; // seconds
+  bones: Bone[];
+  keyframes: BoneKeyframe[];
+  loop: boolean;
+}
+
+/**
+ * A single frame in a frame-based animation
+ */
+export interface AnimationFrame {
+  /** Frame duration in seconds (or use animation's default if not specified) */
+  duration?: number;
+  /** Image source - can be a URL, data URL, or canvas reference ID */
+  source: string;
+  /** Optional offset for the frame */
+  offset?: Vector2;
+  /** Optional pivot point for rotation/scaling */
+  pivot?: Vector2;
+}
+
+/**
+ * Complete frame-based animation data (sprite sheet / flipbook style)
+ */
+export interface FrameAnimation {
+  name: string;
+  type: 'frame';
+  fps: number;
+  frames: AnimationFrame[];
+  loop: boolean;
+  /** Optional ping-pong mode: play forward then backward */
+  pingPong?: boolean;
+}
+
+/**
+ * Union type for all animation types
+ */
+export type Animation = BoneAnimation | FrameAnimation;
+
+/**
+ * Animation clip reference for use in Animator
+ */
+export interface AnimationClip {
+  name: string;
+  animation: Animation;
+  /** Speed multiplier for this clip */
+  speed?: number;
+  /** Override loop setting for this clip */
+  loop?: boolean;
+}
+
+/**
+ * Skeleton instance with current pose
+ */
+export interface Skeleton {
+  bones: Bone[];
+  pose: Record<string, BoneTransform>;
+}
+
+/**
+ * Easing function types for interpolation
+ */
+export type EasingType = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+
+/**
+ * Animation playback state
+ */
+export interface AnimationPlaybackState {
+  isPlaying: boolean;
+  currentTime: number;
+  speed: number;
+  loop: boolean;
+}
+
+// Snippet types
+export const SNIPPET_LANGUAGES = [
+  'javascript', 'typescript', 'python', 'java', 'csharp', 'cpp', 'c',
+  'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'scala', 'html',
+  'css', 'scss', 'sql', 'bash', 'powershell', 'yaml', 'json', 'xml',
+  'markdown', 'dockerfile', 'terraform', 'graphql', 'other'
+] as const;
+
+export type SnippetLanguage = typeof SNIPPET_LANGUAGES[number];
+
+export const SNIPPET_CATEGORIES = [
+  'function', 'class', 'component', 'hook', 'utility', 'api',
+  'database', 'testing', 'config', 'boilerplate', 'algorithm',
+  'pattern', 'snippet', 'template', 'other'
+] as const;
+
+export type SnippetCategory = typeof SNIPPET_CATEGORIES[number];
+
+export interface SnippetVariable {
+  description?: string;
+  defaultValue?: string;
+  placeholder?: string;
+}
+
+export interface Snippet {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  code: string;
+  language: SnippetLanguage;
+  category: SnippetCategory;
+  tags: string[];
+  variables?: Record<string, SnippetVariable>;
+  usageCount: number;
+  isFavorite: boolean;
+  isPublic: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string;
+  collections?: SnippetCollectionSummary[];
+}
+
+export interface SnippetCollectionSummary {
+  id: string;
+  name: string;
+  color?: string;
+  icon?: string;
+}
+
+export interface SnippetCollection {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  sortOrder: number;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  snippetCount?: number;
+}
+
+export interface CreateSnippetRequest {
+  title: string;
+  description?: string;
+  code: string;
+  language?: SnippetLanguage;
+  category?: SnippetCategory;
+  tags?: string[];
+  variables?: Record<string, SnippetVariable>;
+  isFavorite?: boolean;
+  isPublic?: boolean;
+  collectionIds?: string[];
+}
+
+export interface UpdateSnippetRequest {
+  title?: string;
+  description?: string;
+  code?: string;
+  language?: SnippetLanguage;
+  category?: SnippetCategory;
+  tags?: string[];
+  variables?: Record<string, SnippetVariable>;
+  isFavorite?: boolean;
+  isPublic?: boolean;
+}
+
+export interface SnippetListFilters {
+  language?: SnippetLanguage;
+  category?: SnippetCategory;
+  search?: string;
+  favorite?: boolean;
+  collectionId?: string;
+  sortBy?: 'title' | 'usageCount' | 'lastUsedAt' | 'createdAt' | 'updatedAt';
+  order?: 'asc' | 'desc';
+}
+
+// Custom Component types
+
+/**
+ * Property types that can be exposed on custom components
+ */
+export type CustomPropertyType = 'number' | 'string' | 'boolean' | 'color' | 'select';
+
+/**
+ * Definition of an exposed property on a custom component
+ */
+export interface CustomComponentProperty {
+  name: string;
+  type: CustomPropertyType;
+  label: string;
+  defaultValue: string | number | boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { label: string; value: string }[];
+}
+
+/**
+ * Transform data for custom component definition
+ */
+export interface CustomComponentTransform {
+  x: number;
+  y: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  pivotX: number;
+  pivotY: number;
+}
+
+/**
+ * Child object within a custom component definition
+ */
+export interface CustomComponentChild {
+  id: string;
+  name: string;
+  type: 'sprite' | 'shape' | 'text';
+  shapeType?: 'rectangle' | 'circle' | 'ellipse' | 'polygon' | 'line';
+  transform: CustomComponentTransform;
+  opacity: number;
+  color?: string;
+  text?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  zIndex: number;
+}
+
+/**
+ * Complete definition of a user-defined custom component
+ */
+export interface CustomComponentDefinition {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children: CustomComponentChild[];
+  properties: CustomComponentProperty[];
+  defaultTransform: CustomComponentTransform;
+  thumbnail?: string;
+  isPublic: boolean;
+  usageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Simplified summary for component library listings
+ */
+export interface CustomComponentSummary {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  thumbnail?: string;
+  usageCount: number;
+}
+
+/**
+ * Request to create a new custom component
+ */
+export interface CreateCustomComponentRequest {
+  name: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children: CustomComponentChild[];
+  properties?: CustomComponentProperty[];
+  defaultTransform?: Partial<CustomComponentTransform>;
+  isPublic?: boolean;
+}
+
+/**
+ * Request to update a custom component
+ */
+export interface UpdateCustomComponentRequest {
+  name?: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  tags?: string[];
+  children?: CustomComponentChild[];
+  properties?: CustomComponentProperty[];
+  defaultTransform?: Partial<CustomComponentTransform>;
+  isPublic?: boolean;
+}
+
+/**
+ * Property values for an instance of a custom component
+ */
+export type CustomComponentPropertyValues = Record<string, string | number | boolean>;
+
+/**
+ * Instance of a custom component in a scene
+ */
+export interface CustomComponentInstance {
+  definitionId: string;
+  propertyValues: CustomComponentPropertyValues;
+}
+
+// Audio Source types
+
+/**
+ * Oscillator waveform types for audio generation
+ */
+export type WaveformType = 'sine' | 'square' | 'sawtooth' | 'triangle';
+
+/**
+ * ADSR Envelope configuration for audio sources
+ */
+export interface EnvelopeConfig {
+  /** Attack time in seconds */
+  attack: number;
+  /** Decay time in seconds */
+  decay: number;
+  /** Sustain level (0-1) */
+  sustain: number;
+  /** Release time in seconds */
+  release: number;
+}
+
+/**
+ * Audio source configuration
+ */
+export interface AudioSourceConfig {
+  /** Oscillator waveform type */
+  waveform: WaveformType;
+  /** Base frequency in Hz */
+  frequency: number;
+  /** Volume level (0-1) */
+  volume: number;
+  /** Detune in cents */
+  detune: number;
+  /** ADSR envelope */
+  envelope: EnvelopeConfig;
+}
+
+/**
+ * Audio source playback state
+ */
+export interface AudioSourceState {
+  /** Whether audio is currently playing */
+  isPlaying: boolean;
+  /** Current frequency being played */
+  currentFrequency: number;
+  /** Current volume level */
+  currentVolume: number;
 }

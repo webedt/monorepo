@@ -1,0 +1,84 @@
+/*
+ * New Session Modal Component Styles
+ */
+
+.new-session-modal-body {
+  padding: var(--spacing-6);
+}
+
+.new-session-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-5);
+}
+
+.new-session-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.new-session-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.new-session-optional {
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-tertiary);
+}
+
+.new-session-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+/* Loading state */
+.new-session-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-8);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.new-session-loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Footer adjustments */
+.new-session-modal-footer {
+  gap: var(--spacing-3);
+}
+
+/* SearchableSelect adjustments within modal */
+.new-session-modal-body .searchable-select {
+  width: 100%;
+}
+
+.new-session-modal-body .searchable-select-trigger {
+  width: 100%;
+}
+
+/* TextArea adjustments */
+.new-session-modal-body .textarea {
+  width: 100%;
+  min-height: 100px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .new-session-modal-body {
+    padding: var(--spacing-4);
+  }
+
+  .new-session-form {
+    gap: var(--spacing-4);
+  }
+}

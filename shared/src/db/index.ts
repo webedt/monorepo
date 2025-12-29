@@ -463,6 +463,62 @@ export type {
   NewCommunityVote,
   WishlistItem,
   NewWishlistItem,
+  // Community channels types
+  CommunityChannel,
+  NewCommunityChannel,
+  ChannelMessage,
+  NewChannelMessage,
+  // Collections types
+  Collection,
+  NewCollection,
+  SessionCollection,
+  NewSessionCollection,
+  // Payment types
+  PaymentTransaction,
+  NewPaymentTransaction,
+  PaymentWebhook,
+  NewPaymentWebhook,
+  // Taxonomy system types
+  Taxonomy,
+  NewTaxonomy,
+  TaxonomyTerm,
+  NewTaxonomyTerm,
+  ItemTaxonomy,
+  NewItemTaxonomy,
+  // Game platform library types
+  GamePlatform,
+  NewGamePlatform,
+  GameSystemRequirement,
+  NewGameSystemRequirement,
+  GameBuild,
+  NewGameBuild,
+  GameInstallation,
+  NewGameInstallation,
+  GameAchievement,
+  NewGameAchievement,
+  UserAchievement,
+  NewUserAchievement,
+  GameCloudSave,
+  NewGameCloudSave,
+  // Announcements types
+  Announcement,
+  NewAnnouncement,
+  // Cloud saves types
+  CloudSave,
+  NewCloudSave,
+  CloudSaveVersion,
+  NewCloudSaveVersion,
+  CloudSaveSyncLog,
+  NewCloudSaveSyncLog,
+  // Snippets types
+  Snippet,
+  NewSnippet,
+  SnippetCollection,
+  NewSnippetCollection,
+  SnippetInCollection,
+  NewSnippetInCollection,
+  SnippetLanguage,
+  SnippetCategory,
 } from './schema.js';
 
 // Re-export role constants and utilities from schema
@@ -488,6 +544,39 @@ export {
   communityComments,
   communityVotes,
   wishlists,
+  // Community channels tables
+  communityChannels,
+  channelMessages,
+  // Collections tables
+  collections,
+  sessionCollections,
+  // Payment tables
+  paymentTransactions,
+  paymentWebhooks,
+  // Taxonomy system tables
+  taxonomies,
+  taxonomyTerms,
+  itemTaxonomies,
+  // Game platform library tables
+  gamePlatforms,
+  gameSystemRequirements,
+  gameBuilds,
+  gameInstallations,
+  gameAchievements,
+  userAchievements,
+  gameCloudSaves,
+  // Announcements tables
+  announcements,
+  // Cloud saves tables
+  cloudSaves,
+  cloudSaveVersions,
+  cloudSaveSyncLog,
+  // Snippets tables
+  snippets,
+  snippetCollections,
+  snippetsInCollections,
+  SNIPPET_LANGUAGES,
+  SNIPPET_CATEGORIES,
 } from './schema.js';
 
 // Re-export migration utilities for CLI usage
