@@ -193,3 +193,7 @@ export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
 // SceneTabs
 export { SceneTabs } from './scene-tabs';
 export type { SceneTabsOptions } from './scene-tabs';
+
+// ConstraintEditor
+export { ConstraintEditor } from './constraint-editor';
+export type { ConstraintEditorOptions } from './constraint-editor';
