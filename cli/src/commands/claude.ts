@@ -5,6 +5,65 @@ import { handleCommandError } from '../utils/errorHandler.js';
 import type { ClaudeSessionEvent as SessionEvent } from '@webedt/shared';
 
 /**
+ * Verbose mode utilities for CLI output
+ */
+interface VerboseState {
+  enabled: boolean;
+  startTime: number;
+  operationStack: string[];
+}
+
+const verboseState: VerboseState = {
+  enabled: false,
+  startTime: 0,
+  operationStack: [],
+};
+
+function setVerbose(enabled: boolean): void {
+  verboseState.enabled = enabled;
+  if (enabled) {
+    verboseState.startTime = Date.now();
+    console.log('\n[VERBOSE] Verbose mode enabled - showing detailed output');
+    console.log(`[VERBOSE] Timestamp: ${new Date().toISOString()}`);
+    console.log('[VERBOSE] Process ID:', process.pid);
+    console.log('[VERBOSE] Node version:', process.version);
+    console.log('');
+  }
+}
+
+function verboseElapsed(): string {
+  return `${((Date.now() - verboseState.startTime) / 1000).toFixed(3)}s`;
+}
+
+function verboseLog(...args: unknown[]): void {
+  if (verboseState.enabled) {
+    console.log(`[${verboseElapsed()}]`, ...args);
+  }
+}
+
+function verboseError(...args: unknown[]): void {
+  if (verboseState.enabled) {
+    console.error(`[${verboseElapsed()}] [ERROR]`, ...args);
+  }
+}
+
+function startOperation(name: string): void {
+  if (verboseState.enabled) {
+    verboseState.operationStack.push(name);
+    console.log(`[${verboseElapsed()}] [START] ${name}`);
+  }
+}
+
+function endOperation(name: string, success: boolean = true): void {
+  if (verboseState.enabled) {
+    const status = success ? 'OK' : 'FAIL';
+    console.log(`[${verboseElapsed()}] [END] ${name} [${status}]`);
+    const idx = verboseState.operationStack.indexOf(name);
+    if (idx !== -1) verboseState.operationStack.splice(idx, 1);
+  }
+}
+
+/**
  * Get Claude client configuration with fallback chain for credentials.
  * Uses shared getClaudeCredentials() for token retrieval.
  */
@@ -115,7 +174,14 @@ const webCommand = new Command('web')
   .description('Claude Remote Sessions (cloud-based execution)')
   .option('-t, --token <token>', 'Claude access token (or set CLAUDE_ACCESS_TOKEN env)')
   .option('-e, --environment <id>', 'Claude environment ID (or set CLAUDE_ENVIRONMENT_ID env)')
-  .option('-o, --org <uuid>', 'Organization UUID (or set CLAUDE_ORG_UUID env)');
+  .option('-o, --org <uuid>', 'Organization UUID (or set CLAUDE_ORG_UUID env)')
+  .option('-v, --verbose', 'Enable verbose output with detailed timing and debugging info')
+  .hook('preAction', (thisCommand) => {
+    const opts = thisCommand.opts();
+    if (opts.verbose) {
+      setVerbose(true);
+    }
+  });
 
 webCommand
   .command('list')
@@ -126,17 +192,30 @@ webCommand
   .action(async (options, cmd) => {
     try {
       const parentOpts = cmd.parent?.opts() || {};
+
+      startOperation('list-sessions');
+      verboseLog('Fetching sessions with limit:', options.limit);
+
       const client = await getClient({ ...parentOpts, silent: options.json });
       const limit = parseInt(options.limit, 10);
 
+      const fetchStart = Date.now();
       const response = await client.listSessions(limit);
+      verboseLog('API response time:', Date.now() - fetchStart, 'ms');
+      verboseLog('Sessions returned:', response.data?.length || 0);
+      verboseLog('Has more:', response.has_more);
+
       let sessions = response.data || [];
 
       // Filter to today's sessions if requested
       if (options.today) {
         const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        const beforeFilter = sessions.length;
         sessions = sessions.filter(s => s.created_at?.startsWith(today));
+        verboseLog(`Filtered to today's sessions: ${beforeFilter} -> ${sessions.length}`);
       }
+
+      endOperation('list-sessions');
 
       if (options.json) {
         console.log(JSON.stringify(sessions, null, 2));
@@ -171,7 +250,20 @@ webCommand
 
       console.log('-'.repeat(120));
       console.log(`Total: ${sessions.length} session(s)${response.has_more && !options.today ? ' (more available)' : ''}`);
+
+      // Verbose summary
+      verboseLog('\n[VERBOSE] Session Statistics:');
+      const statusCounts: Record<string, number> = {};
+      for (const s of sessions) {
+        const status = s.session_status || 'unknown';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+      }
+      for (const [status, count] of Object.entries(statusCounts)) {
+        verboseLog(`  ${status}: ${count}`);
+      }
     } catch (error) {
+      endOperation('list-sessions', false);
+      verboseError('Failed to list sessions:', error);
       handleCommandError(error, 'listing sessions', { json: options.json });
     }
   });
@@ -256,15 +348,28 @@ webCommand
       // Suppress console output when --json, --jsonl, or --raw is used
       const log = silent ? () => {} : console.log.bind(console);
 
+      startOperation('get-client');
+      verboseLog('Initializing Claude client...');
+      verboseLog('Options:', JSON.stringify({ ...parentOpts, token: parentOpts.token ? '***' : undefined }, null, 2));
       const client = await getClient({ ...parentOpts, silent });
+      endOperation('get-client');
 
       log(`\nCreating session for: ${gitUrl}`);
       log(`Prompt: ${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}`);
       log('-'.repeat(80));
 
+      verboseLog('Git URL:', gitUrl);
+      verboseLog('Full Prompt Length:', prompt.length, 'characters');
+      verboseLog('Model:', options.model);
+      verboseLog('Branch Prefix:', options.branchPrefix || 'default');
+      verboseLog('Title:', options.title || 'auto-generated');
+
       // Collect the raw result event for --json output
       let rawResultEvent: SessionEvent | null = null;
+      let eventCount = 0;
+      const eventStartTime = Date.now();
 
+      startOperation('execute-session');
       const result = await client.execute(
         {
           prompt,
@@ -274,6 +379,9 @@ webCommand
           title: options.title,
         },
         (event) => {
+          eventCount++;
+          verboseLog(`Event #${eventCount}:`, event.type, event.type === 'tool_use' ? `(${(event as any).name})` : '');
+
           if (options.jsonl) {
             console.log(JSON.stringify(event));
           } else if (!options.quiet && !options.json && !options.raw) {
@@ -289,6 +397,10 @@ webCommand
           onRawMessage: options.raw ? (data: string) => console.log(data) : undefined,
         }
       );
+      endOperation('execute-session');
+
+      verboseLog('Total events received:', eventCount);
+      verboseLog('Event stream duration:', Date.now() - eventStartTime, 'ms');
 
       if (options.jsonl || options.raw) {
         return;
@@ -309,7 +421,15 @@ webCommand
       console.log(`  Cost:       $${result.totalCost?.toFixed(4) || 'N/A'}`);
       console.log(`  Duration:   ${result.durationMs ? Math.round(result.durationMs / 1000) + 's' : 'N/A'}`);
       console.log(`  Web URL:    https://claude.ai/code/${result.sessionId}`);
+
+      // Verbose summary
+      verboseLog('\n[VERBOSE] Execution Summary:');
+      verboseLog('  Input tokens:', (result as any).inputTokens || 'N/A');
+      verboseLog('  Output tokens:', (result as any).outputTokens || 'N/A');
+      verboseLog('  Total events:', eventCount);
+      verboseLog('  Session created at:', (result as any).createdAt || 'N/A');
     } catch (error) {
+      verboseError('Execution failed:', error);
       handleCommandError(error, 'executing session', { json: options.json });
     }
   });

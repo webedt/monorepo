@@ -7,7 +7,7 @@ export interface AuthorizationResult {
   authorized: boolean;
   error?: string;
   statusCode?: number;
-  role?: OrganizationRole | 'owner';
+  role?: OrganizationRole | 'owner' | 'shared';
 }
 
 export interface ValidationResult {
@@ -73,4 +73,13 @@ export abstract class ASessionAuthorizationService extends AService {
     session: ChatSession,
     userId: string
   ): Promise<AuthorizationResult>;
+
+  abstract verifyShareTokenAccess(
+    session: ChatSession | null,
+    shareToken: string
+  ): AuthorizationResult;
+
+  abstract isShareTokenValid(
+    session: ChatSession
+  ): boolean;
 }

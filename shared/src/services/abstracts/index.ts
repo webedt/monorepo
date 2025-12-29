@@ -101,6 +101,10 @@ export {
 export { AClaudeWebClient } from '../../claudeWeb/AClaudeWebClient.js';
 export type { ClaudeWebClientConfig } from '../../claudeWeb/types.js';
 
+// Codex Client (from codex/)
+export { ACodexClient } from '../../codex/ACodexClient.js';
+export type { CodexClientConfig } from '../../codex/types.js';
+
 // Git services (from github/)
 export { AGitHelper } from '../../github/AGitHelper.js';
 export {
