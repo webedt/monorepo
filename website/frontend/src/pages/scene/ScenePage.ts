@@ -70,6 +70,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   private boundHandleMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundHandleMouseUp: (() => void) | null = null;
   private boundHandleWheel: ((e: WheelEvent) => void) | null = null;
+  private boundKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
   // Store subscriptions
   private unsubscribeStore: (() => void) | null = null;
@@ -789,7 +790,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     });
 
     // Keyboard shortcuts for z-order
-    document.addEventListener('keydown', (e: KeyboardEvent) => {
+    this.boundKeydownHandler = (e: KeyboardEvent) => {
       // Only handle if not typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
@@ -819,7 +820,8 @@ export class ScenePage extends Page<ScenePageOptions> {
       if (e.key === 'Delete' && this.selectedObjectId) {
         this.deleteSelected();
       }
-    });
+    };
+    document.addEventListener('keydown', this.boundKeydownHandler);
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -841,7 +843,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     // Find clicked object (highest zIndex first for proper depth picking)
-    const sortedByZ = [...this.objects].sort((a, b) => b.zIndex - a.zIndex);
+    const sortedByZ = this.getObjectsSortedByZ(false);
     let clickedObject: SceneObject | null = null;
     for (const obj of sortedByZ) {
       if (this.isPointInObject(worldPos.x, worldPos.y, obj)) {
@@ -1668,24 +1670,36 @@ export class ScenePage extends Page<ScenePageOptions> {
     return { width: Math.max(maxX - minX, 50), height: Math.max(maxY - minY, 50) };
   }
 
+  // Z-Order helper method to reduce code duplication
+  private getObjectsSortedByZ(ascending = true): SceneObject[] {
+    return [...this.objects].sort((a, b) =>
+      ascending ? a.zIndex - b.zIndex : b.zIndex - a.zIndex
+    );
+  }
+
   // Z-Order manipulation methods
   private bringForward(): void {
     const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+    if (!this.selectedObjectId || !activeScene || this.objects.length < 2) return;
 
     const obj = this.objects.find(o => o.id === this.selectedObjectId);
     if (!obj) return;
 
     // Find the object with the next higher zIndex
-    const sortedByZ = [...this.objects].sort((a, b) => a.zIndex - b.zIndex);
+    const sortedByZ = this.getObjectsSortedByZ(true);
     const currentIdx = sortedByZ.findIndex(o => o.id === obj.id);
 
     if (currentIdx < sortedByZ.length - 1) {
       const nextObj = sortedByZ[currentIdx + 1];
-      // Swap zIndex values
+      // If zIndex values are equal, increment current object's zIndex
+      // Otherwise swap the values
       const updatedObjects = this.objects.map(o => {
-        if (o.id === obj.id) return { ...o, zIndex: nextObj.zIndex };
-        if (o.id === nextObj.id) return { ...o, zIndex: obj.zIndex };
+        if (o.id === obj.id) {
+          return { ...o, zIndex: obj.zIndex === nextObj.zIndex ? obj.zIndex + 1 : nextObj.zIndex };
+        }
+        if (o.id === nextObj.id && obj.zIndex !== nextObj.zIndex) {
+          return { ...o, zIndex: obj.zIndex };
+        }
         return o;
       });
       sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
@@ -1697,21 +1711,26 @@ export class ScenePage extends Page<ScenePageOptions> {
 
   private sendBackward(): void {
     const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+    if (!this.selectedObjectId || !activeScene || this.objects.length < 2) return;
 
     const obj = this.objects.find(o => o.id === this.selectedObjectId);
     if (!obj) return;
 
     // Find the object with the next lower zIndex
-    const sortedByZ = [...this.objects].sort((a, b) => a.zIndex - b.zIndex);
+    const sortedByZ = this.getObjectsSortedByZ(true);
     const currentIdx = sortedByZ.findIndex(o => o.id === obj.id);
 
     if (currentIdx > 0) {
       const prevObj = sortedByZ[currentIdx - 1];
-      // Swap zIndex values
+      // If zIndex values are equal, decrement current object's zIndex
+      // Otherwise swap the values
       const updatedObjects = this.objects.map(o => {
-        if (o.id === obj.id) return { ...o, zIndex: prevObj.zIndex };
-        if (o.id === prevObj.id) return { ...o, zIndex: obj.zIndex };
+        if (o.id === obj.id) {
+          return { ...o, zIndex: obj.zIndex === prevObj.zIndex ? obj.zIndex - 1 : prevObj.zIndex };
+        }
+        if (o.id === prevObj.id && obj.zIndex !== prevObj.zIndex) {
+          return { ...o, zIndex: obj.zIndex };
+        }
         return o;
       });
       sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
@@ -1723,7 +1742,7 @@ export class ScenePage extends Page<ScenePageOptions> {
 
   private bringToFront(): void {
     const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+    if (!this.selectedObjectId || !activeScene || this.objects.length === 0) return;
 
     const obj = this.objects.find(o => o.id === this.selectedObjectId);
     if (!obj) return;
@@ -1731,20 +1750,19 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Find the maximum zIndex
     const maxZ = Math.max(...this.objects.map(o => o.zIndex));
 
-    if (obj.zIndex < maxZ) {
-      const updatedObjects = this.objects.map(o =>
-        o.id === obj.id ? { ...o, zIndex: maxZ + 1 } : o
-      );
-      sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
-      this.updateHierarchy();
-      this.updatePropertiesPanel();
-      this.renderScene();
-    }
+    // Always bring to front (maxZ + 1), even if already at max
+    const updatedObjects = this.objects.map(o =>
+      o.id === obj.id ? { ...o, zIndex: maxZ + 1 } : o
+    );
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.renderScene();
   }
 
   private sendToBack(): void {
     const activeScene = this.activeScene;
-    if (!this.selectedObjectId || !activeScene) return;
+    if (!this.selectedObjectId || !activeScene || this.objects.length === 0) return;
 
     const obj = this.objects.find(o => o.id === this.selectedObjectId);
     if (!obj) return;
@@ -1752,15 +1770,14 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Find the minimum zIndex
     const minZ = Math.min(...this.objects.map(o => o.zIndex));
 
-    if (obj.zIndex > minZ) {
-      const updatedObjects = this.objects.map(o =>
-        o.id === obj.id ? { ...o, zIndex: minZ - 1 } : o
-      );
-      sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
-      this.updateHierarchy();
-      this.updatePropertiesPanel();
-      this.renderScene();
-    }
+    // Always send to back (minZ - 1), even if already at min
+    const updatedObjects = this.objects.map(o =>
+      o.id === obj.id ? { ...o, zIndex: minZ - 1 } : o
+    );
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.renderScene();
   }
 
   private deleteSelected(): void {
@@ -1853,7 +1870,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     this.ctx.scale(1, -1);
 
     // Sort objects by zIndex for proper depth ordering (lower zIndex renders first = behind)
-    const sortedObjects = [...this.objects].sort((a, b) => a.zIndex - b.zIndex);
+    const sortedObjects = this.getObjectsSortedByZ(true);
 
     for (const obj of sortedObjects) {
       if (!obj.visible) continue;
@@ -2485,7 +2502,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     }
 
     // Sort by zIndex in descending order (highest z-index at top of list = front of scene)
-    const sortedObjects = [...this.objects].sort((a, b) => b.zIndex - a.zIndex);
+    const sortedObjects = this.getObjectsSortedByZ(false);
 
     const items = sortedObjects.map(obj => `
       <div class="hierarchy-item ${obj.id === this.selectedObjectId ? 'selected' : ''}" data-id="${obj.id}">
@@ -2983,11 +3000,17 @@ export class ScenePage extends Page<ScenePageOptions> {
       }
     }
 
+    // Remove document-level keyboard listener
+    if (this.boundKeydownHandler) {
+      document.removeEventListener('keydown', this.boundKeydownHandler);
+    }
+
     // Clear bound handler references
     this.boundHandleMouseDown = null;
     this.boundHandleMouseMove = null;
     this.boundHandleMouseUp = null;
     this.boundHandleWheel = null;
+    this.boundKeydownHandler = null;
 
     if (this.unsubscribeOffline) {
       this.unsubscribeOffline();
