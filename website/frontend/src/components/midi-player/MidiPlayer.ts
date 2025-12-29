@@ -442,7 +442,7 @@ export class MidiPlayer extends Component {
    */
   private needsFullRender(state: MidiStoreState): boolean {
     const fileKey = state.fileInfo
-      ? `${state.fileInfo.fileName}-${state.isLoaded}-${state.settings.loop}-${JSON.stringify(state.fileInfo.tracks.map((t) => t.isMuted))}`
+      ? `${state.fileInfo.fileName}-${state.isLoaded}-${state.isPlaying}-${state.isPaused}-${state.settings.loop}-${JSON.stringify(state.fileInfo.tracks.map((t) => t.isMuted))}`
       : 'empty';
 
     if (fileKey !== this.lastRenderedFileInfo) {
