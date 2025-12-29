@@ -2897,10 +2897,10 @@ export class ScenePage extends Page<ScenePageOptions> {
     const sortedObjects = this.getObjectsSortedByZ(false);
 
     const items = sortedObjects.map(obj => `
-      <div class="hierarchy-item ${obj.id === this.selectedObjectId ? 'selected' : ''}" data-id="${obj.id}">
+      <div class="hierarchy-item ${obj.id === this.selectedObjectId ? 'selected' : ''}" data-id="${this.escapeHtml(obj.id)}">
         <span class="hierarchy-visibility">${obj.visible ? '👁' : '👁‍🗨'}</span>
         <span class="hierarchy-icon">${this.getObjectIcon(obj)}</span>
-        <span class="hierarchy-name">${obj.name}</span>
+        <span class="hierarchy-name">${this.escapeHtml(obj.name)}</span>
         <span class="hierarchy-z-index" title="Z-Index: ${obj.zIndex}">[${obj.zIndex}]</span>
         ${obj.locked ? '<span class="hierarchy-locked">🔒</span>' : ''}
       </div>
