@@ -12,6 +12,7 @@ import { ASession } from './ASession.js';
 import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
 import { ClaudeRemoteProvider } from '../execution/providers/claudeRemoteProvider.js';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
+import { extractEventUuid } from '../utils/helpers/eventHelper.js';
 import { normalizeRepoUrl, generateSessionPath } from '../utils/helpers/sessionPathHelper.js';
 import { logger } from '../utils/logging/logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
@@ -153,7 +154,7 @@ export class SessionService extends ASession {
       }
 
       // Store event in database - deduplicate by UUID
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -161,7 +162,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId,
-          uuid: eventUuid || null,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -330,7 +331,7 @@ export class SessionService extends ASession {
         await onEvent(event);
       }
 
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -338,7 +339,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId: sessionId,
-          uuid: eventUuid || null,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -527,7 +528,7 @@ export class SessionService extends ASession {
             await tx.insert(events).values(
               eventsToInsert.map(event => ({
                 chatSessionId: sessionId,
-                uuid: event.uuid || null,
+                uuid: extractEventUuid(event as Record<string, unknown>),
                 eventData: event,
                 timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
               }))

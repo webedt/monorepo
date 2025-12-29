@@ -1,4 +1,5 @@
 import { db, events, eq } from '../db/index.js';
+import { extractEventUuid } from '../utils/helpers/eventHelper.js';
 import { logger } from '../utils/logging/logger.js';
 
 import { AEventStorageService } from './AEventStorageService.js';
@@ -12,11 +13,10 @@ export class EventStorageService extends AEventStorageService {
     timestamp?: Date
   ): Promise<StoreEventResult> {
     try {
-      // Extract UUID from eventData for efficient deduplication queries
-      const uuid = eventData.uuid as string | undefined;
+      const uuid = extractEventUuid(eventData);
       await db.insert(events).values({
         chatSessionId,
-        uuid: uuid || null,
+        uuid,
         eventData,
         timestamp: timestamp || new Date(),
       });
@@ -38,7 +38,7 @@ export class EventStorageService extends AEventStorageService {
     storedUuids: Set<string>,
     timestamp?: Date
   ): Promise<StoreEventResult> {
-    const eventUuid = eventData.uuid as string | undefined;
+    const eventUuid = extractEventUuid(eventData);
 
     if (eventUuid && storedUuids.has(eventUuid)) {
       logger.debug('Skipping duplicate event', {

@@ -30,6 +30,7 @@ import {
   AClaudeWebClient,
   type ClaudeWebClientConfig,
   generateTitle,
+  extractEventUuid,
   type ClaudeSessionEvent as SessionEvent,
   type TitleGenerationEvent,
 } from '@webedt/shared';
@@ -123,11 +124,10 @@ function sendSSE(res: Response, event: Record<string, unknown>): void {
  */
 async function storeEvent(chatSessionId: string, eventData: Record<string, unknown>): Promise<void> {
   try {
-    // Extract UUID from eventData for efficient deduplication queries
-    const eventUuid = eventData.uuid as string | undefined;
+    const eventUuid = extractEventUuid(eventData);
     await db.insert(events).values({
       chatSessionId,
-      uuid: eventUuid || null,
+      uuid: eventUuid,
       eventData,
     });
   } catch (error) {
