@@ -8,6 +8,20 @@ import { db, chatSessions, messages, users, events, eq, desc, inArray, and, asc,
 import type { ChatSession, ClaudeAuth } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
+import {
+  validateSessionId,
+  requireSessionOwnership,
+  setupSSEHeaders,
+  asyncHandler,
+  sendSuccess,
+  sendData,
+  sendSession,
+  sendInternalError,
+  sendNotFound,
+  sendBadRequest,
+  sendForbidden,
+} from '../middleware/sessionMiddleware.js';
+import type { SessionRequest } from '../middleware/sessionMiddleware.js';
 import { getPreviewUrlFromSession, logger, generateSessionPath, fetchEnvironmentIdFromSessions, ServiceProvider, AClaudeWebClient, ASessionCleanupService, AEventStorageService, ASseHelper, ASessionQueryService, ASessionAuthorizationService, ensureValidToken, type ClaudeWebClientConfig } from '@webedt/shared';
 import { publicShareRateLimiter } from '../middleware/rateLimit.js';
 import { sessionEventBroadcaster } from '@webedt/shared';
@@ -247,13 +261,7 @@ router.get('/shared/:token/events/stream', publicShareRateLimiter, async (req: R
     });
 
     // Set up SSE headers
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
-    });
-    res.flushHeaders();
+    setupSSEHeaders(res);
 
     // Replay stored events
     const storedEvents = await db
@@ -500,12 +508,7 @@ router.get('/updates', requireAuth, async (req: Request, res: Response) => {
   });
 
   // Set up SSE headers
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no'
-  });
+  setupSSEHeaders(res);
 
   // Send initial connected event
   res.write(`event: connected\n`);
@@ -599,398 +602,191 @@ router.get('/deleted', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Get specific chat session
-router.get('/:id', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.get('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+  const queryService = ServiceProvider.get(ASessionQueryService);
+  const session = await queryService.getByIdWithPreview(sessionId, authReq.user!.id);
 
-    const queryService = ServiceProvider.get(ASessionQueryService);
-    const session = await queryService.getByIdWithPreview(sessionId, authReq.user!.id);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    res.json({
-      success: true,
-      session
-    });
-  } catch (error) {
-    logger.error('Get session error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to fetch session' });
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
   }
-});
+
+  sendSession(res, session);
+}, { errorMessage: 'Failed to fetch session' }));
 
 // Create an event for a session
-router.post('/:id/events', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-    const { eventData } = req.body;
+router.post('/:id/events', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId, chatSession } = req as SessionRequest;
+  const { eventData } = req.body;
 
-    const authService = ServiceProvider.get(ASessionAuthorizationService);
-    const validation = authService.validateRequiredFields({ sessionId, eventData }, ['sessionId', 'eventData']);
-    if (!validation.valid) {
-      res.status(400).json({ success: false, error: validation.error });
-      return;
-    }
-
-    // Verify session ownership
-    const queryService = ServiceProvider.get(ASessionQueryService);
-    const session = await queryService.getById(sessionId);
-    const authResult = authService.verifyOwnership(session, authReq.user!.id);
-
-    if (!authResult.authorized) {
-      res.status(authResult.statusCode!).json({ success: false, error: authResult.error });
-      return;
-    }
-
-    // Create event
-    const [newEvent] = await db
-      .insert(events)
-      .values({
-        chatSessionId: sessionId,
-        eventData,
-      })
-      .returning();
-
-    res.json({ success: true, data: newEvent });
-  } catch (error) {
-    logger.error('Create event error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to create event' });
+  if (!eventData) {
+    sendBadRequest(res, 'Event data is required');
+    return;
   }
-});
+
+  // Create event
+  const [newEvent] = await db
+    .insert(events)
+    .values({
+      chatSessionId: sessionId,
+      eventData,
+    })
+    .returning();
+
+  sendData(res, newEvent);
+}, { errorMessage: 'Failed to create event' }));
 
 // Create a message for a session
-router.post('/:id/messages', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-    const { type, content } = req.body;
+router.post('/:id/messages', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId } = req as SessionRequest;
+  const { type, content } = req.body;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    if (!type || !content) {
-      res.status(400).json({ success: false, error: 'Type and content are required' });
-      return;
-    }
-
-    // Validate message type
-    const validTypes = ['user', 'assistant', 'system', 'error'];
-    if (!validTypes.includes(type)) {
-      res.status(400).json({ success: false, error: 'Invalid message type' });
-      return;
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Create message
-    const [newMessage] = await db
-      .insert(messages)
-      .values({
-        chatSessionId: sessionId,
-        type,
-        content,
-      })
-      .returning();
-
-    res.json({ success: true, data: newMessage });
-  } catch (error) {
-    logger.error('Create message error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to create message' });
+  if (!type || !content) {
+    sendBadRequest(res, 'Type and content are required');
+    return;
   }
-});
+
+  // Validate message type
+  const validTypes = ['user', 'assistant', 'system', 'error'];
+  if (!validTypes.includes(type)) {
+    sendBadRequest(res, 'Invalid message type');
+    return;
+  }
+
+  // Create message
+  const [newMessage] = await db
+    .insert(messages)
+    .values({
+      chatSessionId: sessionId,
+      type,
+      content,
+    })
+    .returning();
+
+  sendData(res, newMessage);
+}, { errorMessage: 'Failed to create message' }));
 
 // Get messages for a session
-router.get('/:id/messages', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.get('/:id/messages', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+  // Get messages
+  const sessionMessages = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.chatSessionId, sessionId))
+    .orderBy(messages.timestamp);
 
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Get messages
-    const sessionMessages = await db
-      .select()
-      .from(messages)
-      .where(eq(messages.chatSessionId, sessionId))
-      .orderBy(messages.timestamp);
-
-    res.json({
-      success: true,
-      data: {
-        messages: sessionMessages,
-        total: sessionMessages.length,
-      },
-    });
-  } catch (error) {
-    logger.error('Get messages error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to fetch messages' });
-  }
-});
+  sendData(res, {
+    messages: sessionMessages,
+    total: sessionMessages.length,
+  });
+}, { errorMessage: 'Failed to fetch messages' }));
 
 // Get events for a session
-router.get('/:id/events', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.get('/:id/events', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
 
-    logger.info('Getting events for session', {
-      component: 'Sessions',
-      sessionId,
-      userId: authReq.user?.id
-    });
+  logger.info('Getting events for session', {
+    component: 'Sessions',
+    sessionId,
+    userId: authReq.user?.id
+  });
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+  // Get events ordered by timestamp (ascending for replay order)
+  const sessionEvents = await db
+    .select()
+    .from(events)
+    .where(eq(events.chatSessionId, sessionId))
+    .orderBy(asc(events.timestamp));
 
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
+  logger.info('Events fetched for session', {
+    component: 'Sessions',
+    sessionId,
+    eventCount: sessionEvents.length
+  });
 
-    if (!session) {
-      logger.warn('Session not found for events request', {
-        component: 'Sessions',
-        sessionId
-      });
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Get events ordered by timestamp (ascending for replay order)
-    const sessionEvents = await db
-      .select()
-      .from(events)
-      .where(eq(events.chatSessionId, sessionId))
-      .orderBy(asc(events.timestamp));
-
-    logger.info('Events fetched for session', {
-      component: 'Sessions',
-      sessionId,
-      eventCount: sessionEvents.length
-    });
-
-    res.json({
-      success: true,
-      data: {
-        events: sessionEvents,
-        total: sessionEvents.length,
-      },
-    });
-  } catch (error) {
-    logger.error('Get events error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to fetch events' });
-  }
-});
+  sendData(res, {
+    events: sessionEvents,
+    total: sessionEvents.length,
+  });
+}, { errorMessage: 'Failed to fetch events' }));
 
 // Update a chat session
-router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-    const { userRequest, branch } = req.body;
+router.patch('/:id', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId } = req as SessionRequest;
+  const { userRequest, branch } = req.body;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+  // At least one field must be provided
+  const hasUserRequest = userRequest && typeof userRequest === 'string' && userRequest.trim().length > 0;
+  const hasBranch = branch && typeof branch === 'string' && branch.trim().length > 0;
 
-    // At least one field must be provided
-    const hasUserRequest = userRequest && typeof userRequest === 'string' && userRequest.trim().length > 0;
-    const hasBranch = branch && typeof branch === 'string' && branch.trim().length > 0;
-
-    if (!hasUserRequest && !hasBranch) {
-      res.status(400).json({ success: false, error: 'At least one field (userRequest or branch) must be provided' });
-      return;
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Build update object with only provided fields
-    const updateData: { userRequest?: string; branch?: string } = {};
-    if (hasUserRequest) {
-      updateData.userRequest = userRequest.trim();
-    }
-    if (hasBranch) {
-      updateData.branch = branch.trim();
-    }
-
-    // Update session
-    const [updatedSession] = await db
-      .update(chatSessions)
-      .set(updateData)
-      .where(eq(chatSessions.id, sessionId))
-      .returning();
-
-    res.json({ success: true, data: updatedSession });
-  } catch (error) {
-    logger.error('Update session error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to update session' });
+  if (!hasUserRequest && !hasBranch) {
+    sendBadRequest(res, 'At least one field (userRequest or branch) must be provided');
+    return;
   }
-});
+
+  // Build update object with only provided fields
+  const updateData: { userRequest?: string; branch?: string } = {};
+  if (hasUserRequest) {
+    updateData.userRequest = userRequest.trim();
+  }
+  if (hasBranch) {
+    updateData.branch = branch.trim();
+  }
+
+  // Update session
+  const [updatedSession] = await db
+    .update(chatSessions)
+    .set(updateData)
+    .where(eq(chatSessions.id, sessionId))
+    .returning();
+
+  sendData(res, updatedSession);
+}, { errorMessage: 'Failed to update session' }));
 
 // Unlock a chat session
-router.post('/:id/unlock', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.post('/:id/unlock', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+  // Unlock session
+  const [unlockedSession] = await db
+    .update(chatSessions)
+    .set({ locked: false })
+    .where(eq(chatSessions.id, sessionId))
+    .returning();
 
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Unlock session
-    const [unlockedSession] = await db
-      .update(chatSessions)
-      .set({ locked: false })
-      .where(eq(chatSessions.id, sessionId))
-      .returning();
-
-    res.json({ success: true, data: unlockedSession });
-  } catch (error) {
-    logger.error('Unlock session error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to unlock session' });
-  }
-});
+  sendData(res, unlockedSession);
+}, { errorMessage: 'Failed to unlock session' }));
 
 // Toggle favorite status for a chat session
-router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.post('/:id/favorite', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId, chatSession } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+  // Toggle favorite status
+  const newFavoriteStatus = !chatSession.favorite;
+  const [updatedSession] = await db
+    .update(chatSessions)
+    .set({ favorite: newFavoriteStatus })
+    .where(eq(chatSessions.id, sessionId))
+    .returning();
 
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
+  // Notify subscribers of session update
+  sessionListBroadcaster.notifySessionUpdated(authReq.user!.id, updatedSession);
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
+  logger.info(`Session ${sessionId} favorite status toggled to ${newFavoriteStatus}`, {
+    component: 'Sessions',
+    sessionId,
+    favorite: newFavoriteStatus,
+  });
 
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Toggle favorite status
-    const newFavoriteStatus = !session.favorite;
-    const [updatedSession] = await db
-      .update(chatSessions)
-      .set({ favorite: newFavoriteStatus })
-      .where(eq(chatSessions.id, sessionId))
-      .returning();
-
-    // Notify subscribers of session update
-    sessionListBroadcaster.notifySessionUpdated(authReq.user!.id, updatedSession);
-
-    logger.info(`Session ${sessionId} favorite status toggled to ${newFavoriteStatus}`, {
-      component: 'Sessions',
-      sessionId,
-      favorite: newFavoriteStatus,
-    });
-
-    res.json({ success: true, session: updatedSession });
-  } catch (error) {
-    logger.error('Toggle favorite error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to toggle favorite status' });
-  }
-});
+  sendSession(res, updatedSession);
+}, { errorMessage: 'Failed to toggle favorite status' }));
 
 /**
  * POST /api/sessions/:id/share
@@ -998,369 +794,289 @@ router.post('/:id/favorite', requireAuth, async (req: Request, res: Response) =>
  * Optional body: { expiresInDays?: number } - defaults to preserving existing expiration or no expiration
  * Max expiration: 365 days
  */
-router.post('/:id/share', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-    const { expiresInDays } = req.body as { expiresInDays?: number };
+router.post('/:id/share', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
+  const { expiresInDays } = req.body as { expiresInDays?: number };
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
+  // Validate expiresInDays if provided
+  if (expiresInDays !== undefined) {
+    if (typeof expiresInDays !== 'number' || expiresInDays < 1 || expiresInDays > 365) {
+      sendBadRequest(res, 'expiresInDays must be between 1 and 365');
       return;
     }
-
-    // Validate expiresInDays if provided
-    if (expiresInDays !== undefined) {
-      if (typeof expiresInDays !== 'number' || expiresInDays < 1 || expiresInDays > 365) {
-        res.status(400).json({ success: false, error: 'expiresInDays must be between 1 and 365' });
-        return;
-      }
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          isNull(chatSessions.deletedAt)
-        )
-      )
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Generate new share token (or reuse existing if already shared)
-    const shareToken = session.shareToken || uuidv4();
-
-    // Calculate expiration date:
-    // - If expiresInDays is explicitly provided, use it
-    // - Otherwise, preserve existing expiration (or null if never set)
-    let shareExpiresAt: Date | null = session.shareExpiresAt;
-    if (expiresInDays !== undefined) {
-      shareExpiresAt = new Date();
-      shareExpiresAt.setDate(shareExpiresAt.getDate() + expiresInDays);
-    }
-
-    // Update session with share token
-    await db
-      .update(chatSessions)
-      .set({
-        shareToken,
-        shareExpiresAt,
-      })
-      .where(eq(chatSessions.id, sessionId));
-
-    logger.info(`Session ${sessionId} share token generated`, {
-      component: 'Sessions',
-      sessionId,
-      hasExpiration: !!shareExpiresAt,
-      expiresAt: shareExpiresAt?.toISOString(),
-    });
-
-    res.json({
-      success: true,
-      data: {
-        shareToken,
-        shareUrl: `/sessions/shared/${shareToken}`,
-        expiresAt: shareExpiresAt?.toISOString() || null,
-      }
-    });
-  } catch (error) {
-    logger.error('Generate share token error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to generate share token' });
   }
-});
+
+  // Verify session ownership (include deletedAt check for share operations)
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
+  }
+
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
+
+  // Generate new share token (or reuse existing if already shared)
+  const shareToken = session.shareToken || uuidv4();
+
+  // Calculate expiration date:
+  // - If expiresInDays is explicitly provided, use it
+  // - Otherwise, preserve existing expiration (or null if never set)
+  let shareExpiresAt: Date | null = session.shareExpiresAt;
+  if (expiresInDays !== undefined) {
+    shareExpiresAt = new Date();
+    shareExpiresAt.setDate(shareExpiresAt.getDate() + expiresInDays);
+  }
+
+  // Update session with share token
+  await db
+    .update(chatSessions)
+    .set({
+      shareToken,
+      shareExpiresAt,
+    })
+    .where(eq(chatSessions.id, sessionId));
+
+  logger.info(`Session ${sessionId} share token generated`, {
+    component: 'Sessions',
+    sessionId,
+    hasExpiration: !!shareExpiresAt,
+    expiresAt: shareExpiresAt?.toISOString(),
+  });
+
+  sendData(res, {
+    shareToken,
+    shareUrl: `/sessions/shared/${shareToken}`,
+    expiresAt: shareExpiresAt?.toISOString() || null,
+  });
+}, { errorMessage: 'Failed to generate share token' }));
 
 /**
  * DELETE /api/sessions/:id/share
  * Revoke the share token for a session (stop sharing)
  */
-router.delete('/:id/share', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.delete('/:id/share', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          isNull(chatSessions.deletedAt)
-        )
+  // Verify session ownership (include deletedAt check for share operations)
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.deletedAt)
       )
-      .limit(1);
+    )
+    .limit(1);
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    if (!session.shareToken) {
-      res.status(400).json({ success: false, error: 'Session is not currently shared' });
-      return;
-    }
-
-    // Revoke share token
-    await db
-      .update(chatSessions)
-      .set({
-        shareToken: null,
-        shareExpiresAt: null,
-      })
-      .where(eq(chatSessions.id, sessionId));
-
-    logger.info(`Session ${sessionId} share token revoked`, {
-      component: 'Sessions',
-      sessionId,
-    });
-
-    res.json({
-      success: true,
-      message: 'Share link revoked',
-    });
-  } catch (error) {
-    logger.error('Revoke share token error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to revoke share token' });
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
   }
-});
+
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
+
+  if (!session.shareToken) {
+    sendBadRequest(res, 'Session is not currently shared');
+    return;
+  }
+
+  // Revoke share token
+  await db
+    .update(chatSessions)
+    .set({
+      shareToken: null,
+      shareExpiresAt: null,
+    })
+    .where(eq(chatSessions.id, sessionId));
+
+  logger.info(`Session ${sessionId} share token revoked`, {
+    component: 'Sessions',
+    sessionId,
+  });
+
+  sendSuccess(res, { message: 'Share link revoked' });
+}, { errorMessage: 'Failed to revoke share token' }));
 
 /**
  * GET /api/sessions/:id/share
  * Get the current share status for a session
  */
-router.get('/:id/share', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.get('/:id/share', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          isNull(chatSessions.deletedAt)
-        )
+  // Verify session ownership (include deletedAt check for share operations)
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.deletedAt)
       )
-      .limit(1);
+    )
+    .limit(1);
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    const authService = ServiceProvider.get(ASessionAuthorizationService);
-    const isValid = session.shareToken ? authService.isShareTokenValid(session) : false;
-
-    res.json({
-      success: true,
-      data: {
-        isShared: !!session.shareToken,
-        shareToken: session.shareToken || null,
-        shareUrl: session.shareToken ? `/sessions/shared/${session.shareToken}` : null,
-        expiresAt: session.shareExpiresAt?.toISOString() || null,
-        isExpired: session.shareToken ? !isValid : false,
-      }
-    });
-  } catch (error) {
-    logger.error('Get share status error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to get share status' });
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
   }
-});
+
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
+
+  const authService = ServiceProvider.get(ASessionAuthorizationService);
+  const isValid = session.shareToken ? authService.isShareTokenValid(session) : false;
+
+  sendData(res, {
+    isShared: !!session.shareToken,
+    shareToken: session.shareToken || null,
+    shareUrl: session.shareToken ? `/sessions/shared/${session.shareToken}` : null,
+    expiresAt: session.shareExpiresAt?.toISOString() || null,
+    isExpired: session.shareToken ? !isValid : false,
+  });
+}, { errorMessage: 'Failed to get share status' }));
 
 // Abort a running session
-router.post('/:id/abort', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.post('/:id/abort', requireAuth, validateSessionId, requireSessionOwnership, asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
+  // Note: Local AI worker has been removed - sessions are now handled by Claude Remote
+  logger.info(`Session ${sessionId} abort requested`, { component: 'Sessions' });
 
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
+  // Update session status to interrupted
+  await db
+    .update(chatSessions)
+    .set({ status: 'error', completedAt: new Date() })
+    .where(eq(chatSessions.id, sessionId));
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
+  logger.info(`Session ${sessionId} aborted by user`, { component: 'Sessions' });
 
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Note: Local AI worker has been removed - sessions are now handled by Claude Remote
-    logger.info(`Session ${sessionId} abort requested`, { component: 'Sessions' });
-
-    // Update session status to interrupted
-    await db
-      .update(chatSessions)
-      .set({ status: 'error', completedAt: new Date() })
-      .where(eq(chatSessions.id, sessionId));
-
-    logger.info(`Session ${sessionId} aborted by user`, { component: 'Sessions' });
-
-    res.json({
-      success: true,
-      data: {
-        message: 'Session aborted',
-        sessionId: sessionId
-      }
-    });
-  } catch (error) {
-    logger.error('Abort session error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to abort session' });
-  }
-});
+  sendData(res, {
+    message: 'Session aborted',
+    sessionId: sessionId
+  });
+}, { errorMessage: 'Failed to abort session' }));
 
 // Send a follow-up message to an existing session (triggers resume via internal sessions)
-router.post('/:id/send', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
-    const { content } = req.body;
+router.post('/:id/send', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
+  const { content } = req.body;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    if (!content || typeof content !== 'string') {
-      res.status(400).json({ success: false, error: 'Message content is required' });
-      return;
-    }
-
-    // Verify session exists and belongs to user
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          eq(chatSessions.userId, authReq.user!.id),
-          isNull(chatSessions.deletedAt)
-        )
-      )
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (!session.remoteSessionId) {
-      res.status(400).json({ success: false, error: 'Session has no remote session ID - cannot send follow-up message' });
-      return;
-    }
-
-    // Get Claude auth for the user
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, authReq.user!.id))
-      .limit(1);
-
-    if (!user?.claudeAuth) {
-      res.status(401).json({ success: false, error: 'Claude authentication not configured' });
-      return;
-    }
-
-    // Parse Claude auth
-    let claudeAuth: ClaudeAuth;
-    try {
-      claudeAuth = typeof user.claudeAuth === 'string'
-        ? JSON.parse(user.claudeAuth)
-        : user.claudeAuth as ClaudeAuth;
-    } catch {
-      res.status(401).json({ success: false, error: 'Invalid Claude authentication data' });
-      return;
-    }
-
-    // Ensure we have a valid token
-    const validAuth = await ensureValidToken(claudeAuth);
-    if (!validAuth) {
-      res.status(401).json({ success: false, error: 'Claude token expired and could not be refreshed' });
-      return;
-    }
-
-    // Update session status to running
-    await db.update(chatSessions)
-      .set({ status: 'running' })
-      .where(eq(chatSessions.id, sessionId));
-
-    // Store the user message in the database for the stream to pick up
-    // The actual resume will happen when the client connects to the SSE stream
-    // Use input_preview for consistency with initial execution flow
-    const userMessageEvent = {
-      type: 'input_preview',
-      message: `Request received: ${content.length > 200 ? content.substring(0, 200) + '...' : content}`,
-      source: 'user',
-      timestamp: new Date().toISOString(),
-      data: {
-        preview: content,
-        truncated: content.length > 200,
-        originalLength: content.length,
-      },
-    };
-
-    await db.insert(events).values({
-      chatSessionId: sessionId,
-      eventData: userMessageEvent,
-    });
-
-    logger.info(`Queued follow-up message for session ${sessionId}`, {
-      component: 'Sessions',
-      sessionId,
-      contentLength: content.length,
-    });
-
-    // Return success - the client will connect to the SSE stream which handles the actual resume
-    res.json({ success: true });
-  } catch (error) {
-    logger.error('Send message error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to send message' });
+  if (!content || typeof content !== 'string') {
+    sendBadRequest(res, 'Message content is required');
+    return;
   }
-});
+
+  // Verify session exists and belongs to user (with deletedAt check)
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        eq(chatSessions.userId, authReq.user!.id),
+        isNull(chatSessions.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
+  }
+
+  if (!session.remoteSessionId) {
+    sendBadRequest(res, 'Session has no remote session ID - cannot send follow-up message');
+    return;
+  }
+
+  // Get Claude auth for the user
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, authReq.user!.id))
+    .limit(1);
+
+  if (!user?.claudeAuth) {
+    res.status(401).json({ success: false, error: 'Claude authentication not configured' });
+    return;
+  }
+
+  // Parse Claude auth
+  let claudeAuth: ClaudeAuth;
+  try {
+    claudeAuth = typeof user.claudeAuth === 'string'
+      ? JSON.parse(user.claudeAuth)
+      : user.claudeAuth as ClaudeAuth;
+  } catch {
+    res.status(401).json({ success: false, error: 'Invalid Claude authentication data' });
+    return;
+  }
+
+  // Ensure we have a valid token
+  const validAuth = await ensureValidToken(claudeAuth);
+  if (!validAuth) {
+    res.status(401).json({ success: false, error: 'Claude token expired and could not be refreshed' });
+    return;
+  }
+
+  // Update session status to running
+  await db.update(chatSessions)
+    .set({ status: 'running' })
+    .where(eq(chatSessions.id, sessionId));
+
+  // Store the user message in the database for the stream to pick up
+  // The actual resume will happen when the client connects to the SSE stream
+  // Use input_preview for consistency with initial execution flow
+  const userMessageEvent = {
+    type: 'input_preview',
+    message: `Request received: ${content.length > 200 ? content.substring(0, 200) + '...' : content}`,
+    source: 'user',
+    timestamp: new Date().toISOString(),
+    data: {
+      preview: content,
+      truncated: content.length > 200,
+      originalLength: content.length,
+    },
+  };
+
+  await db.insert(events).values({
+    chatSessionId: sessionId,
+    eventData: userMessageEvent,
+  });
+
+  logger.info(`Queued follow-up message for session ${sessionId}`, {
+    component: 'Sessions',
+    sessionId,
+    contentLength: content.length,
+  });
+
+  // Return success - the client will connect to the SSE stream which handles the actual resume
+  sendSuccess(res, {});
+}, { errorMessage: 'Failed to send message' }));
 
 // Bulk delete chat sessions (soft delete with branch cleanup)
 router.post('/bulk-delete', requireAuth, async (req: Request, res: Response) => {
@@ -1617,268 +1333,224 @@ router.post('/bulk-delete-permanent', requireAuth, async (req: Request, res: Res
 });
 
 // Delete a chat session (soft delete with branch cleanup)
-router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.delete('/:id', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          isNull(chatSessions.deletedAt)
-        )
+  // Verify session ownership (include deletedAt check)
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.deletedAt)
       )
-      .limit(1);
+    )
+    .limit(1);
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
+  }
 
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
 
-    const cleanupResults: {
-      branch?: { success: boolean; message: string };
-      remoteSession?: { success: boolean; message: string };
-    } = {};
+  const cleanupResults: {
+    branch?: { success: boolean; message: string };
+    remoteSession?: { success: boolean; message: string };
+  } = {};
 
-    // Log session details for debugging branch deletion
-    logger.info('Session deletion - checking cleanup conditions', {
+  // Log session details for debugging branch deletion
+  logger.info('Session deletion - checking cleanup conditions', {
+    component: 'Sessions',
+    sessionId,
+    branch: session.branch || undefined,
+    repositoryOwner: session.repositoryOwner || undefined,
+    repositoryName: session.repositoryName || undefined,
+    provider: session.provider || undefined,
+    hasGithubToken: !!authReq.user?.githubAccessToken,
+  });
+
+  // Delete GitHub branch if it exists
+  if (authReq.user?.githubAccessToken && session.branch && session.repositoryOwner && session.repositoryName) {
+    logger.info('Attempting to delete GitHub branch', {
       component: 'Sessions',
       sessionId,
-      branch: session.branch || undefined,
-      repositoryOwner: session.repositoryOwner || undefined,
-      repositoryName: session.repositoryName || undefined,
-      provider: session.provider || undefined,
+      branch: session.branch,
+      owner: session.repositoryOwner,
+      repo: session.repositoryName,
+    });
+    cleanupResults.branch = await deleteGitHubBranch(
+      authReq.user.githubAccessToken,
+      session.repositoryOwner,
+      session.repositoryName,
+      session.branch
+    );
+  } else {
+    logger.info('Skipping branch deletion - missing required fields', {
+      component: 'Sessions',
+      sessionId,
+      hasBranch: !!session.branch,
+      hasOwner: !!session.repositoryOwner,
+      hasRepoName: !!session.repositoryName,
       hasGithubToken: !!authReq.user?.githubAccessToken,
     });
+  }
 
-    // Delete GitHub branch if it exists
-    if (authReq.user?.githubAccessToken && session.branch && session.repositoryOwner && session.repositoryName) {
-      logger.info('Attempting to delete GitHub branch', {
-        component: 'Sessions',
-        sessionId,
-        branch: session.branch,
-        owner: session.repositoryOwner,
-        repo: session.repositoryName,
-      });
-      cleanupResults.branch = await deleteGitHubBranch(
-        authReq.user.githubAccessToken,
-        session.repositoryOwner,
-        session.repositoryName,
-        session.branch
-      );
-    } else {
-      logger.info('Skipping branch deletion - missing required fields', {
-        component: 'Sessions',
-        sessionId,
-        hasBranch: !!session.branch,
-        hasOwner: !!session.repositoryOwner,
-        hasRepoName: !!session.repositoryName,
-        hasGithubToken: !!authReq.user?.githubAccessToken,
-      });
-    }
+  // Archive Claude Remote session if it exists
+  const shouldArchive = !!session.remoteSessionId && !!authReq.user?.claudeAuth;
 
-    // Archive Claude Remote session if it exists
-    const shouldArchive = !!session.remoteSessionId && !!authReq.user?.claudeAuth;
+  logger.info('Session deletion - checking Claude Remote archive conditions', {
+    component: 'Sessions',
+    sessionId,
+    provider: session.provider ?? undefined,
+    remoteSessionId: session.remoteSessionId ?? undefined,
+    hasClaudeAuth: !!authReq.user?.claudeAuth,
+    claudeAuthKeys: authReq.user?.claudeAuth ? Object.keys(authReq.user.claudeAuth as object) : [],
+    willArchive: shouldArchive,
+  });
 
-    logger.info('Session deletion - checking Claude Remote archive conditions', {
+  if (shouldArchive) {
+    logger.info('Attempting to archive Claude Remote session', {
       component: 'Sessions',
       sessionId,
-      provider: session.provider ?? undefined,
-      remoteSessionId: session.remoteSessionId ?? undefined,
+      remoteSessionId: session.remoteSessionId,
+    });
+    cleanupResults.remoteSession = await archiveClaudeRemoteSession(
+      session.remoteSessionId!,
+      authReq.user.claudeAuth as ClaudeAuth
+    );
+    logger.info('Claude Remote archive result', {
+      component: 'Sessions',
+      sessionId,
+      remoteSessionId: session.remoteSessionId,
+      result: cleanupResults.remoteSession,
+    });
+  } else {
+    logger.info('Skipping Claude Remote archive - conditions not met', {
+      component: 'Sessions',
+      sessionId,
+      hasRemoteSessionId: !!session.remoteSessionId,
       hasClaudeAuth: !!authReq.user?.claudeAuth,
-      claudeAuthKeys: authReq.user?.claudeAuth ? Object.keys(authReq.user.claudeAuth as object) : [],
-      willArchive: shouldArchive,
     });
-
-    if (shouldArchive) {
-      logger.info('Attempting to archive Claude Remote session', {
-        component: 'Sessions',
-        sessionId,
-        remoteSessionId: session.remoteSessionId,
-      });
-      cleanupResults.remoteSession = await archiveClaudeRemoteSession(
-        session.remoteSessionId!,
-        authReq.user.claudeAuth as ClaudeAuth
-      );
-      logger.info('Claude Remote archive result', {
-        component: 'Sessions',
-        sessionId,
-        remoteSessionId: session.remoteSessionId,
-        result: cleanupResults.remoteSession,
-      });
-    } else {
-      logger.info('Skipping Claude Remote archive - conditions not met', {
-        component: 'Sessions',
-        sessionId,
-        hasRemoteSessionId: !!session.remoteSessionId,
-        hasClaudeAuth: !!authReq.user?.claudeAuth,
-      });
-    }
-
-    // Soft delete session from database
-    await db
-      .update(chatSessions)
-      .set({ deletedAt: new Date() })
-      .where(eq(chatSessions.id, sessionId));
-
-    // Notify subscribers of session deletion
-    sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, sessionId);
-
-    res.json({
-      success: true,
-      data: {
-        message: 'Session deleted',
-        cleanup: cleanupResults
-      }
-    });
-  } catch (error) {
-    logger.error('Delete session error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to delete session' });
   }
-});
+
+  // Soft delete session from database
+  await db
+    .update(chatSessions)
+    .set({ deletedAt: new Date() })
+    .where(eq(chatSessions.id, sessionId));
+
+  // Notify subscribers of session deletion
+  sessionListBroadcaster.notifySessionDeleted(authReq.user!.id, sessionId);
+
+  sendData(res, {
+    message: 'Session deleted',
+    cleanup: cleanupResults
+  });
+}, { errorMessage: 'Failed to delete session' }));
 
 // Restore a chat session
-router.post('/:id/restore', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+router.post('/:id/restore', requireAuth, validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    // Verify session ownership and that it's deleted
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          isNotNull(chatSessions.deletedAt)
-        )
+  // Verify session ownership and that it's deleted
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        isNotNull(chatSessions.deletedAt)
       )
-      .limit(1);
+    )
+    .limit(1);
 
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found in trash' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Restore session
-    await db
-      .update(chatSessions)
-      .set({ deletedAt: null })
-      .where(eq(chatSessions.id, sessionId));
-
-    res.json({
-      success: true,
-      data: {
-        message: 'Session restored'
-      }
-    });
-  } catch (error) {
-    logger.error('Restore session error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to restore session' });
+  if (!session) {
+    sendNotFound(res, 'Session not found in trash');
+    return;
   }
-});
+
+  if (session.userId !== authReq.user!.id) {
+    sendForbidden(res);
+    return;
+  }
+
+  // Restore session
+  await db
+    .update(chatSessions)
+    .set({ deletedAt: null })
+    .where(eq(chatSessions.id, sessionId));
+
+  sendData(res, { message: 'Session restored' });
+}, { errorMessage: 'Failed to restore session' }));
 
 // Worker callback endpoint
-router.post('/:id/worker-status', async (req: Request, res: Response) => {
-  try {
-    const sessionId = req.params.id;
-    const { status, completedAt, workerSecret } = req.body;
+router.post('/:id/worker-status', validateSessionId, asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId } = req as SessionRequest;
+  const { status, completedAt, workerSecret } = req.body;
 
-    // Validate worker secret
-    const expectedSecret = process.env.WORKER_CALLBACK_SECRET;
-    if (!expectedSecret || workerSecret !== expectedSecret) {
-      logger.warn(`Invalid worker secret for session ${sessionId}`, { component: 'Sessions' });
-      res.status(401).json({ success: false, error: 'Invalid worker secret' });
-      return;
-    }
-
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    if (!status || !['completed', 'error'].includes(status)) {
-      res.status(400).json({ success: false, error: 'Invalid status. Must be "completed" or "error"' });
-      return;
-    }
-
-    // Verify session exists
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    // Only update if session is still in 'running' or 'pending' state
-    if (session.status !== 'running' && session.status !== 'pending') {
-      logger.info(`Session ${sessionId} already has status '${session.status}', skipping worker update to '${status}'`, { component: 'Sessions' });
-      res.json({
-        success: true,
-        data: {
-          message: 'Session status already finalized',
-          currentStatus: session.status,
-          requestedStatus: status
-        }
-      });
-      return;
-    }
-
-    // Update session status
-    await db
-      .update(chatSessions)
-      .set({
-        status,
-        completedAt: completedAt ? new Date(completedAt) : new Date()
-      })
-      .where(eq(chatSessions.id, sessionId));
-
-    // Notify subscribers of status change (use session's userId)
-    sessionListBroadcaster.notifyStatusChanged(session.userId, { id: sessionId, status });
-
-    logger.info(`Worker callback updated session ${sessionId} status to '${status}'`, { component: 'Sessions' });
-
-    res.json({
-      success: true,
-      data: {
-        message: 'Session status updated',
-        sessionId,
-        status
-      }
-    });
-  } catch (error) {
-    logger.error('Worker status callback error', error as Error, { component: 'Sessions' });
-    res.status(500).json({ success: false, error: 'Failed to update session status' });
+  // Validate worker secret
+  const expectedSecret = process.env.WORKER_CALLBACK_SECRET;
+  if (!expectedSecret || workerSecret !== expectedSecret) {
+    logger.warn(`Invalid worker secret for session ${sessionId}`, { component: 'Sessions' });
+    res.status(401).json({ success: false, error: 'Invalid worker secret' });
+    return;
   }
-});
+
+  if (!status || !['completed', 'error'].includes(status)) {
+    sendBadRequest(res, 'Invalid status. Must be "completed" or "error"');
+    return;
+  }
+
+  // Verify session exists
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(eq(chatSessions.id, sessionId))
+    .limit(1);
+
+  if (!session) {
+    sendNotFound(res, 'Session not found');
+    return;
+  }
+
+  // Only update if session is still in 'running' or 'pending' state
+  if (session.status !== 'running' && session.status !== 'pending') {
+    logger.info(`Session ${sessionId} already has status '${session.status}', skipping worker update to '${status}'`, { component: 'Sessions' });
+    sendData(res, {
+      message: 'Session status already finalized',
+      currentStatus: session.status,
+      requestedStatus: status
+    });
+    return;
+  }
+
+  // Update session status
+  await db
+    .update(chatSessions)
+    .set({
+      status,
+      completedAt: completedAt ? new Date(completedAt) : new Date()
+    })
+    .where(eq(chatSessions.id, sessionId));
+
+  // Notify subscribers of status change (use session's userId)
+  sessionListBroadcaster.notifyStatusChanged(session.userId, { id: sessionId, status });
+
+  logger.info(`Worker callback updated session ${sessionId} status to '${status}'`, { component: 'Sessions' });
+
+  sendData(res, {
+    message: 'Session status updated',
+    sessionId,
+    status
+  });
+}, { errorMessage: 'Failed to update session status' }));
 
 /**
  * Stream events handler for SSE endpoint
@@ -1894,35 +1566,12 @@ router.post('/:id/worker-status', async (req: Request, res: Response) => {
  * - If session is still running, live events are streamed until completion
  * - If session is completed/error, sends completed event and closes connection
  */
-const streamEventsHandler = async (req: Request, res: Response) => {
-  try {
-    const authReq = req as AuthRequest;
-    const sessionId = req.params.id;
+const streamEventsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { sessionId, chatSession: session } = req as SessionRequest;
 
-    if (!sessionId) {
-      res.status(400).json({ success: false, error: 'Invalid session ID' });
-      return;
-    }
-
-    // Verify session ownership
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
-
-    if (!session) {
-      res.status(404).json({ success: false, error: 'Session not found' });
-      return;
-    }
-
-    if (session.userId !== authReq.user!.id) {
-      res.status(403).json({ success: false, error: 'Access denied' });
-      return;
-    }
-
-    // Check if the session is currently active in broadcaster (for live events)
-    const isActive = sessionEventBroadcaster.isSessionActive(sessionId);
+  // Check if the session is currently active in broadcaster (for live events)
+  const isActive = sessionEventBroadcaster.isSessionActive(sessionId);
 
     // Also check DB-backed activity for running sessions (handles server restart case)
     const workerLastActivity = session.workerLastActivity;
@@ -1938,14 +1587,7 @@ const streamEventsHandler = async (req: Request, res: Response) => {
     });
 
     // Set up SSE headers
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
-    });
-    // Flush headers immediately to establish SSE connection through proxies
-    res.flushHeaders();
+    setupSSEHeaders(res);
 
     // No custom wrapper events - just replay stored events directly
 
@@ -2339,32 +1981,25 @@ const streamEventsHandler = async (req: Request, res: Response) => {
         }
       }
 
-      // No pending messages - session is completed/error, send completion event and close
-      res.write(`event: completed\n`);
-      res.write(`data: ${JSON.stringify({
-        websiteSessionId: sessionId,
-        completed: true,
-        replayed: true,
-        status: session.status
-      })}\n\n`);
-      res.end();
-    }
-
-  } catch (error) {
-    logger.error('Session stream error', error as Error, { component: 'Sessions' });
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: 'Failed to stream session events' });
-    }
+    // No pending messages - session is completed/error, send completion event and close
+    res.write(`event: completed\n`);
+    res.write(`data: ${JSON.stringify({
+      websiteSessionId: sessionId,
+      completed: true,
+      replayed: true,
+      status: session.status
+    })}\n\n`);
+    res.end();
   }
-};
+}, { errorMessage: 'Failed to stream session events' });
 
 // Register the stream events endpoint
 // Primary: GET /api/sessions/:id/events/stream (aligns with Claude's /v1/sessions/:id/events pattern)
-router.get('/:id/events/stream', requireAuth, streamEventsHandler);
+router.get('/:id/events/stream', requireAuth, validateSessionId, requireSessionOwnership, streamEventsHandler);
 
 // Backwards compatibility: GET /api/sessions/:id/stream
 // DEPRECATED: Use /api/sessions/:id/events/stream instead
-router.get('/:id/stream', requireAuth, streamEventsHandler);
+router.get('/:id/stream', requireAuth, validateSessionId, requireSessionOwnership, streamEventsHandler);
 
 /**
  * POST /api/sessions/sync
