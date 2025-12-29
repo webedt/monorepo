@@ -14,6 +14,7 @@ import {
   asc,
   desc,
   inArray,
+  logger,
 } from '@webedt/shared';
 import type {
   Taxonomy,
@@ -59,7 +60,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     res.json({ success: true, data: allTaxonomies });
   } catch (error) {
-    console.error('Error fetching taxonomies:', error);
+    logger.error('Error fetching taxonomies', error, { component: 'taxonomies', operation: 'list' });
     res.status(500).json({ success: false, error: 'Failed to fetch taxonomies' });
   }
 });
@@ -90,7 +91,7 @@ router.get('/by-slug/:slug', requireAuth, async (req, res) => {
 
     res.json({ success: true, data: { ...taxonomy, terms } });
   } catch (error) {
-    console.error('Error fetching taxonomy by slug:', error);
+    logger.error('Error fetching taxonomy by slug', error, { component: 'taxonomies', operation: 'getBySlug' });
     res.status(500).json({ success: false, error: 'Failed to fetch taxonomy' });
   }
 });
@@ -120,7 +121,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 
     res.json({ success: true, data: { ...taxonomy, terms } });
   } catch (error) {
-    console.error('Error fetching taxonomy:', error);
+    logger.error('Error fetching taxonomy', error, { component: 'taxonomies', operation: 'getById' });
     res.status(500).json({ success: false, error: 'Failed to fetch taxonomy' });
   }
 });
@@ -167,7 +168,7 @@ router.post('/', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: newTaxonomy });
   } catch (error) {
-    console.error('Error creating taxonomy:', error);
+    logger.error('Error creating taxonomy', error, { component: 'taxonomies', operation: 'create' });
     res.status(500).json({ success: false, error: 'Failed to create taxonomy' });
   }
 });
@@ -211,7 +212,7 @@ router.patch('/:id', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: updated });
   } catch (error) {
-    console.error('Error updating taxonomy:', error);
+    logger.error('Error updating taxonomy', error, { component: 'taxonomies', operation: 'update' });
     res.status(500).json({ success: false, error: 'Failed to update taxonomy' });
   }
 });
@@ -233,7 +234,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: { id: deleted.id } });
   } catch (error) {
-    console.error('Error deleting taxonomy:', error);
+    logger.error('Error deleting taxonomy', error, { component: 'taxonomies', operation: 'delete' });
     res.status(500).json({ success: false, error: 'Failed to delete taxonomy' });
   }
 });
@@ -263,7 +264,7 @@ router.get('/terms/:termId', requireAuth, async (req, res) => {
 
     res.json({ success: true, data: term });
   } catch (error) {
-    console.error('Error fetching term:', error);
+    logger.error('Error fetching term', error, { component: 'taxonomies', operation: 'getTerm' });
     res.status(500).json({ success: false, error: 'Failed to fetch term' });
   }
 });
@@ -313,7 +314,7 @@ router.patch('/terms/:termId', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: updated });
   } catch (error) {
-    console.error('Error updating term:', error);
+    logger.error('Error updating term', error, { component: 'taxonomies', operation: 'updateTerm' });
     res.status(500).json({ success: false, error: 'Failed to update term' });
   }
 });
@@ -335,7 +336,7 @@ router.delete('/terms/:termId', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: { id: deleted.id } });
   } catch (error) {
-    console.error('Error deleting term:', error);
+    logger.error('Error deleting term', error, { component: 'taxonomies', operation: 'deleteTerm' });
     res.status(500).json({ success: false, error: 'Failed to delete term' });
   }
 });
@@ -353,7 +354,7 @@ router.get('/:taxonomyId/terms', requireAuth, async (req, res) => {
 
     res.json({ success: true, data: terms });
   } catch (error) {
-    console.error('Error fetching taxonomy terms:', error);
+    logger.error('Error fetching taxonomy terms', error, { component: 'taxonomies', operation: 'getTerms' });
     res.status(500).json({ success: false, error: 'Failed to fetch terms' });
   }
 });
@@ -420,7 +421,7 @@ router.post('/:taxonomyId/terms', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: newTerm });
   } catch (error) {
-    console.error('Error creating term:', error);
+    logger.error('Error creating term', error, { component: 'taxonomies', operation: 'createTerm' });
     res.status(500).json({ success: false, error: 'Failed to create term' });
   }
 });
@@ -454,7 +455,7 @@ router.get('/items/by-term/:termId', requireAuth, async (req, res) => {
 
     res.json({ success: true, data: items });
   } catch (error) {
-    console.error('Error fetching items by term:', error);
+    logger.error('Error fetching items by term', error, { component: 'taxonomies', operation: 'getItemsByTerm' });
     res.status(500).json({ success: false, error: 'Failed to fetch items' });
   }
 });
@@ -487,7 +488,7 @@ router.get('/items/:itemType/:itemId', requireAuth, async (req, res) => {
 
     res.json({ success: true, data: Object.values(grouped) });
   } catch (error) {
-    console.error('Error fetching item taxonomies:', error);
+    logger.error('Error fetching item taxonomies', error, { component: 'taxonomies', operation: 'getItemTaxonomies' });
     res.status(500).json({ success: false, error: 'Failed to fetch item taxonomies' });
   }
 });
@@ -581,7 +582,7 @@ router.post('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req, 
 
     res.json({ success: true, data: assignment });
   } catch (error) {
-    console.error('Error assigning term to item:', error);
+    logger.error('Error assigning term to item', error, { component: 'taxonomies', operation: 'assignTerm' });
     res.status(500).json({ success: false, error: 'Failed to assign term' });
   }
 });
@@ -609,7 +610,7 @@ router.delete('/items/:itemType/:itemId/terms/:termId', requireAdmin, async (req
 
     res.json({ success: true, data: { id: deleted.id } });
   } catch (error) {
-    console.error('Error removing term from item:', error);
+    logger.error('Error removing term from item', error, { component: 'taxonomies', operation: 'removeTerm' });
     res.status(500).json({ success: false, error: 'Failed to remove term' });
   }
 });
@@ -663,7 +664,7 @@ router.put('/items/:itemType/:itemId', requireAdmin, async (req, res) => {
 
     res.json({ success: true, data: assignments });
   } catch (error) {
-    console.error('Error bulk updating item terms:', error);
+    logger.error('Error bulk updating item terms', error, { component: 'taxonomies', operation: 'bulkUpdateTerms' });
     res.status(500).json({ success: false, error: 'Failed to update item terms' });
   }
 });

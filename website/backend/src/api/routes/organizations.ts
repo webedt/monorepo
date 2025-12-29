@@ -3,7 +3,7 @@
  */
 
 import { Router } from 'express';
-import { organizationService } from '@webedt/shared';
+import { organizationService, logger } from '@webedt/shared';
 import { AuthRequest, requireAuth } from '../middleware/auth.js';
 
 import type { Request, Response } from 'express';
@@ -48,7 +48,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error('Error fetching organizations:', error);
+    logger.error('Error fetching organizations', error, { component: 'organizations', operation: 'list' });
     res.status(500).json({ success: false, error: 'Failed to fetch organizations' });
   }
 });
@@ -98,7 +98,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, data: organization });
   } catch (error: unknown) {
-    console.error('Error creating organization:', error);
+    logger.error('Error creating organization', error, { component: 'organizations', operation: 'create' });
     // Handle race condition where slug was taken between check and create
     if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'Slug is already taken' });
@@ -123,7 +123,7 @@ router.get('/slug-available/:slug', requireAuth, async (req: Request, res: Respo
     const available = await organizationService.isSlugAvailable(slug);
     res.json({ success: true, data: { available, reason: available ? null : 'taken' } });
   } catch (error) {
-    console.error('Error checking slug availability:', error);
+    logger.error('Error checking slug availability', error, { component: 'organizations', operation: 'checkSlug' });
     res.status(500).json({ success: false, error: 'Failed to check slug availability' });
   }
 });
@@ -155,7 +155,7 @@ router.get('/slug/:slug', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Error fetching organization:', error);
+    logger.error('Error fetching organization', error, { component: 'organizations', operation: 'getBySlug' });
     res.status(500).json({ success: false, error: 'Failed to fetch organization' });
   }
 });
@@ -200,7 +200,7 @@ router.post('/invitations/:token/accept', requireAuth, async (req: Request, res:
       },
     });
   } catch (error) {
-    console.error('Error accepting invitation:', error);
+    logger.error('Error accepting invitation', error, { component: 'organizations', operation: 'acceptInvitation' });
     res.status(500).json({ success: false, error: 'Failed to accept invitation' });
   }
 });
@@ -237,7 +237,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Error fetching organization:', error);
+    logger.error('Error fetching organization', error, { component: 'organizations', operation: 'getById' });
     res.status(500).json({ success: false, error: 'Failed to fetch organization' });
   }
 });
@@ -284,7 +284,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ success: true, data: organization });
   } catch (error) {
-    console.error('Error updating organization:', error);
+    logger.error('Error updating organization', error, { component: 'organizations', operation: 'update' });
     res.status(500).json({ success: false, error: 'Failed to update organization' });
   }
 });
@@ -310,7 +310,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ success: true, data: { id } });
   } catch (error) {
-    console.error('Error deleting organization:', error);
+    logger.error('Error deleting organization', error, { component: 'organizations', operation: 'delete' });
     res.status(500).json({ success: false, error: 'Failed to delete organization' });
   }
 });
@@ -331,7 +331,7 @@ router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
     const members = await organizationService.getMembers(id);
     res.json({ success: true, data: members });
   } catch (error) {
-    console.error('Error fetching members:', error);
+    logger.error('Error fetching members', error, { component: 'organizations', operation: 'getMembers' });
     res.status(500).json({ success: false, error: 'Failed to fetch members' });
   }
 });
@@ -369,7 +369,7 @@ router.post('/:id/members', requireAuth, async (req: Request, res: Response) => 
     const member = await organizationService.addMember(id, newMemberId, role as OrganizationRole, userId);
     res.status(201).json({ success: true, data: member });
   } catch (error) {
-    console.error('Error adding member:', error);
+    logger.error('Error adding member', error, { component: 'organizations', operation: 'addMember' });
     res.status(500).json({ success: false, error: 'Failed to add member' });
   }
 });
@@ -406,7 +406,7 @@ router.patch('/:id/members/:userId', requireAuth, async (req: Request, res: Resp
 
     res.json({ success: true, data: member });
   } catch (error) {
-    console.error('Error updating member role:', error);
+    logger.error('Error updating member role', error, { component: 'organizations', operation: 'updateMemberRole' });
     res.status(500).json({ success: false, error: 'Failed to update member role' });
   }
 });
@@ -443,7 +443,7 @@ router.delete('/:id/members/:userId', requireAuth, async (req: Request, res: Res
 
     res.json({ success: true, data: { userId: targetUserId } });
   } catch (error) {
-    console.error('Error removing member:', error);
+    logger.error('Error removing member', error, { component: 'organizations', operation: 'removeMember' });
     res.status(500).json({ success: false, error: 'Failed to remove member' });
   }
 });
@@ -476,7 +476,7 @@ router.post('/:id/leave', requireAuth, async (req: Request, res: Response) => {
     await organizationService.removeMember(id, userId);
     res.json({ success: true, data: { message: 'Left organization' } });
   } catch (error) {
-    console.error('Error leaving organization:', error);
+    logger.error('Error leaving organization', error, { component: 'organizations', operation: 'leave' });
     res.status(500).json({ success: false, error: 'Failed to leave organization' });
   }
 });
@@ -497,7 +497,7 @@ router.get('/:id/repositories', requireAuth, async (req: Request, res: Response)
     const repositories = await organizationService.getRepositories(id);
     res.json({ success: true, data: repositories });
   } catch (error) {
-    console.error('Error fetching repositories:', error);
+    logger.error('Error fetching repositories', error, { component: 'organizations', operation: 'getRepositories' });
     res.status(500).json({ success: false, error: 'Failed to fetch repositories' });
   }
 });
@@ -531,7 +531,7 @@ router.post('/:id/repositories', requireAuth, async (req: Request, res: Response
 
     res.status(201).json({ success: true, data: repository });
   } catch (error: unknown) {
-    console.error('Error adding repository:', error);
+    logger.error('Error adding repository', error, { component: 'organizations', operation: 'addRepository' });
     if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'This repository is already added to the organization' });
       return;
@@ -561,7 +561,7 @@ router.delete('/:id/repositories/:owner/:repo', requireAuth, async (req: Request
 
     res.json({ success: true, data: { owner, repo } });
   } catch (error) {
-    console.error('Error removing repository:', error);
+    logger.error('Error removing repository', error, { component: 'organizations', operation: 'removeRepository' });
     res.status(500).json({ success: false, error: 'Failed to remove repository' });
   }
 });
@@ -587,7 +587,7 @@ router.post('/:id/repositories/:owner/:repo/default', requireAuth, async (req: R
 
     res.json({ success: true, data: { owner, repo, isDefault: true } });
   } catch (error) {
-    console.error('Error setting default repository:', error);
+    logger.error('Error setting default repository', error, { component: 'organizations', operation: 'setDefaultRepository' });
     res.status(500).json({ success: false, error: 'Failed to set default repository' });
   }
 });
@@ -631,7 +631,7 @@ router.post('/:id/invitations', requireAuth, async (req: Request, res: Response)
 
     res.status(201).json({ success: true, data: invitation });
   } catch (error: unknown) {
-    console.error('Error creating invitation:', error);
+    logger.error('Error creating invitation', error, { component: 'organizations', operation: 'createInvitation' });
     if (isUniqueConstraintError(error)) {
       res.status(409).json({ success: false, error: 'An invitation for this email already exists' });
       return;
@@ -656,7 +656,7 @@ router.get('/:id/invitations', requireAuth, async (req: Request, res: Response) 
     const invitations = await organizationService.getPendingInvitations(id);
     res.json({ success: true, data: invitations });
   } catch (error) {
-    console.error('Error fetching invitations:', error);
+    logger.error('Error fetching invitations', error, { component: 'organizations', operation: 'getPendingInvitations' });
     res.status(500).json({ success: false, error: 'Failed to fetch invitations' });
   }
 });
@@ -685,7 +685,7 @@ router.delete('/:id/invitations/:invitationId', requireAuth, async (req: Request
 
     res.json({ success: true, data: { invitationId } });
   } catch (error) {
-    console.error('Error revoking invitation:', error);
+    logger.error('Error revoking invitation', error, { component: 'organizations', operation: 'revokeInvitation' });
     res.status(500).json({ success: false, error: 'Failed to revoke invitation' });
   }
 });

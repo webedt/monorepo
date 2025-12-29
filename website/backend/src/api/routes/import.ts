@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import { fetchFromUrl, validateUrl, WORKSPACE_DIR, db, chatSessions, eq, and } from '@webedt/shared';
+import { fetchFromUrl, validateUrl, WORKSPACE_DIR, db, chatSessions, eq, and, logger } from '@webedt/shared';
 import type { AuthRequest } from '../middleware/auth.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -64,7 +64,7 @@ router.post('/validate', requireAuth, async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    console.error('URL validation error:', error);
+    logger.error('URL validation error', error, { component: 'import', operation: 'validateUrl' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Validation failed',
@@ -159,7 +159,7 @@ router.post('/url', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('URL import error:', error);
+    logger.error('URL import error', error, { component: 'import', operation: 'importFromUrl' });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Import failed',

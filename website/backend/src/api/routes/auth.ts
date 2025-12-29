@@ -91,7 +91,7 @@ router.post('/register', async (req: Request, res: Response) => {
         },
       });
   } catch (error) {
-    console.error('Registration error:', error);
+    logger.error('Registration error', error, { component: 'auth', operation: 'register' });
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
@@ -166,7 +166,7 @@ router.post('/login', async (req: Request, res: Response) => {
         },
       });
   } catch (error) {
-    console.error('Login error:', error);
+    logger.error('Login error', error, { component: 'auth', operation: 'login' });
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
@@ -188,7 +188,7 @@ router.post('/logout', async (req: Request, res: Response) => {
       .appendHeader('Set-Cookie', blankCookie.serialize())
       .json({ success: true, data: { message: 'Logged out successfully' } });
   } catch (error) {
-    console.error('Logout error:', error);
+    logger.error('Logout error', error, { component: 'auth', operation: 'logout' });
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
@@ -292,7 +292,7 @@ router.get('/session', async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Session error:', error);
+    logger.error('Session error', error, { component: 'auth', operation: 'session' });
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

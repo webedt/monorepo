@@ -43,7 +43,7 @@ router.post('/claude-auth', requireAuth, async (req: Request, res: Response) => 
       data: { message: 'Claude authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Claude auth error:', error);
+    logger.error('Update Claude auth error', error, { component: 'user', operation: 'updateClaudeAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Claude authentication' });
   }
 });
@@ -63,7 +63,7 @@ router.delete('/claude-auth', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Claude authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Claude auth error:', error);
+    logger.error('Remove Claude auth error', error, { component: 'user', operation: 'removeClaudeAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Claude authentication' });
   }
 });
@@ -225,7 +225,7 @@ router.post('/codex-auth', requireAuth, async (req: Request, res: Response) => {
       data: { message: 'Codex authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Codex auth error:', error);
+    logger.error('Update Codex auth error', error, { component: 'user', operation: 'updateCodexAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Codex authentication' });
   }
 });
@@ -245,7 +245,7 @@ router.delete('/codex-auth', requireAuth, async (req: Request, res: Response) =>
       data: { message: 'Codex authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Codex auth error:', error);
+    logger.error('Remove Codex auth error', error, { component: 'user', operation: 'removeCodexAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Codex authentication' });
   }
 });
@@ -290,7 +290,7 @@ router.post('/gemini-auth', requireAuth, async (req: Request, res: Response) => 
       data: { message: 'Gemini OAuth authentication updated successfully' },
     });
   } catch (error) {
-    console.error('Update Gemini auth error:', error);
+    logger.error('Update Gemini auth error', error, { component: 'user', operation: 'updateGeminiAuth' });
     res.status(500).json({ success: false, error: 'Failed to update Gemini authentication' });
   }
 });
@@ -310,7 +310,7 @@ router.delete('/gemini-auth', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Gemini authentication removed' },
     });
   } catch (error) {
-    console.error('Remove Gemini auth error:', error);
+    logger.error('Remove Gemini auth error', error, { component: 'user', operation: 'removeGeminiAuth' });
     res.status(500).json({ success: false, error: 'Failed to remove Gemini authentication' });
   }
 });
@@ -341,7 +341,7 @@ router.post('/preferred-provider', requireAuth, async (req: Request, res: Respon
       data: { message: 'Preferred provider updated successfully' },
     });
   } catch (error) {
-    console.error('Update preferred provider error:', error);
+    logger.error('Update preferred provider error', error, { component: 'user', operation: 'updatePreferredProvider' });
     res.status(500).json({ success: false, error: 'Failed to update preferred provider' });
   }
 });
@@ -372,7 +372,7 @@ router.post('/image-resize-setting', requireAuth, async (req: Request, res: Resp
       data: { message: 'Image resize setting updated successfully' },
     });
   } catch (error) {
-    console.error('Update image resize setting error:', error);
+    logger.error('Update image resize setting error', error, { component: 'user', operation: 'updateImageResizeSetting' });
     res.status(500).json({ success: false, error: 'Failed to update image resize setting' });
   }
 });
@@ -415,7 +415,7 @@ router.post('/display-name', requireAuth, async (req: Request, res: Response) =>
       data: { message: 'Display name updated successfully' },
     });
   } catch (error) {
-    console.error('Update display name error:', error);
+    logger.error('Update display name error', error, { component: 'user', operation: 'updateDisplayName' });
     res.status(500).json({ success: false, error: 'Failed to update display name' });
   }
 });
@@ -462,7 +462,7 @@ router.post('/voice-command-keywords', requireAuth, async (req: Request, res: Re
       data: { message: 'Voice command keywords updated successfully', keywords: uniqueKeywords },
     });
   } catch (error) {
-    console.error('Update voice command keywords error:', error);
+    logger.error('Update voice command keywords error', error, { component: 'user', operation: 'updateVoiceCommandKeywords' });
     res.status(500).json({ success: false, error: 'Failed to update voice command keywords' });
   }
 });
@@ -492,7 +492,7 @@ router.post('/stop-listening-after-submit', requireAuth, async (req: Request, re
       data: { message: 'Stop listening after submit preference updated successfully' },
     });
   } catch (error) {
-    console.error('Update stop listening after submit error:', error);
+    logger.error('Update stop listening after submit error', error, { component: 'user', operation: 'updateStopListeningAfterSubmit' });
     res.status(500).json({ success: false, error: 'Failed to update stop listening after submit preference' });
   }
 });
@@ -523,7 +523,7 @@ router.post('/default-landing-page', requireAuth, async (req: Request, res: Resp
       data: { message: 'Default landing page updated successfully' },
     });
   } catch (error) {
-    console.error('Update default landing page error:', error);
+    logger.error('Update default landing page error', error, { component: 'user', operation: 'updateDefaultLandingPage' });
     res.status(500).json({ success: false, error: 'Failed to update default landing page' });
   }
 });
@@ -557,7 +557,7 @@ router.post('/preferred-model', requireAuth, async (req: Request, res: Response)
       data: { message: 'Preferred model updated successfully' },
     });
   } catch (error) {
-    console.error('Update preferred model error:', error);
+    logger.error('Update preferred model error', error, { component: 'user', operation: 'updatePreferredModel' });
     res.status(500).json({ success: false, error: 'Failed to update preferred model' });
   }
 });
@@ -588,7 +588,7 @@ router.post('/chat-verbosity', requireAuth, async (req: Request, res: Response) 
       data: { message: 'Chat verbosity level updated successfully' },
     });
   } catch (error) {
-    console.error('Update chat verbosity level error:', error);
+    logger.error('Update chat verbosity level error', error, { component: 'user', operation: 'updateChatVerbosity' });
     res.status(500).json({ success: false, error: 'Failed to update chat verbosity level' });
   }
 });
@@ -626,7 +626,7 @@ router.post('/openrouter-api-key', requireAuth, async (req: Request, res: Respon
       data: { message: 'OpenRouter API key updated successfully' },
     });
   } catch (error) {
-    console.error('Update OpenRouter API key error:', error);
+    logger.error('Update OpenRouter API key error', error, { component: 'user', operation: 'updateOpenRouterApiKey' });
     res.status(500).json({ success: false, error: 'Failed to update OpenRouter API key' });
   }
 });
@@ -646,7 +646,7 @@ router.delete('/openrouter-api-key', requireAuth, async (req: Request, res: Resp
       data: { message: 'OpenRouter API key removed' },
     });
   } catch (error) {
-    console.error('Remove OpenRouter API key error:', error);
+    logger.error('Remove OpenRouter API key error', error, { component: 'user', operation: 'removeOpenRouterApiKey' });
     res.status(500).json({ success: false, error: 'Failed to remove OpenRouter API key' });
   }
 });
@@ -699,7 +699,7 @@ router.post('/autocomplete-settings', requireAuth, async (req: Request, res: Res
       data: { message: 'Autocomplete settings updated successfully' },
     });
   } catch (error) {
-    console.error('Update autocomplete settings error:', error);
+    logger.error('Update autocomplete settings error', error, { component: 'user', operation: 'updateAutocompleteSettings' });
     res.status(500).json({ success: false, error: 'Failed to update autocomplete settings' });
   }
 });
@@ -738,7 +738,7 @@ router.post('/image-ai-keys', requireAuth, async (req: Request, res: Response) =
       data: { message: 'Image AI keys updated successfully' },
     });
   } catch (error) {
-    console.error('Update image AI keys error:', error);
+    logger.error('Update image AI keys error', error, { component: 'user', operation: 'updateImageAiKeys' });
     res.status(500).json({ success: false, error: 'Failed to update image AI keys' });
   }
 });
@@ -768,7 +768,7 @@ router.post('/image-ai-provider', requireAuth, async (req: Request, res: Respons
       data: { message: 'Image AI provider updated successfully' },
     });
   } catch (error) {
-    console.error('Update image AI provider error:', error);
+    logger.error('Update image AI provider error', error, { component: 'user', operation: 'updateImageAiProvider' });
     res.status(500).json({ success: false, error: 'Failed to update image AI provider' });
   }
 });
@@ -798,7 +798,7 @@ router.post('/image-ai-model', requireAuth, async (req: Request, res: Response) 
       data: { message: 'Image AI model updated successfully' },
     });
   } catch (error) {
-    console.error('Update image AI model error:', error);
+    logger.error('Update image AI model error', error, { component: 'user', operation: 'updateImageAiModel' });
     res.status(500).json({ success: false, error: 'Failed to update image AI model' });
   }
 });
@@ -848,7 +848,7 @@ router.get('/spending-limits', requireAuth, async (req: Request, res: Response) 
       },
     });
   } catch (error) {
-    console.error('Get spending limits error:', error);
+    logger.error('Get spending limits error', error, { component: 'user', operation: 'getSpendingLimits' });
     res.status(500).json({ success: false, error: 'Failed to get spending limits' });
   }
 });
@@ -942,7 +942,7 @@ router.post('/spending-limits', requireAuth, async (req: Request, res: Response)
       data: { message: 'Spending limits updated successfully' },
     });
   } catch (error) {
-    console.error('Update spending limits error:', error);
+    logger.error('Update spending limits error', error, { component: 'user', operation: 'updateSpendingLimits' });
     res.status(500).json({ success: false, error: 'Failed to update spending limits' });
   }
 });
@@ -965,7 +965,7 @@ router.post('/spending-limits/reset', requireAuth, async (req: Request, res: Res
       data: { message: 'Monthly spending reset successfully' },
     });
   } catch (error) {
-    console.error('Reset spending error:', error);
+    logger.error('Reset spending error', error, { component: 'user', operation: 'resetSpending' });
     res.status(500).json({ success: false, error: 'Failed to reset spending' });
   }
 });
