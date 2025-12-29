@@ -72,6 +72,10 @@ import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/mi
 import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
 import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
+import { connectionTrackerMiddleware, connectionTracker } from './api/middleware/connectionTracker.js';
+
+// Import graceful shutdown
+import { registerShutdownHandlers, GracefulShutdownConfig } from './gracefulShutdown.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -303,6 +307,10 @@ app.use(csrfTokenMiddleware);
 // SSE endpoints, webhooks, and health checks are exempt
 app.use(csrfValidationMiddleware);
 
+// Connection tracker middleware for graceful shutdown
+// Tracks active HTTP connections and rejects new requests during shutdown
+app.use(connectionTrackerMiddleware);
+
 // Apply standard rate limiting to all API routes
 // This provides defense-in-depth alongside infrastructure-level limits
 // Note: Auth and public share endpoints have stricter limits applied at the route level
@@ -507,12 +515,19 @@ app.use(
   }
 );
 
+// Graceful shutdown configuration
+const shutdownConfig: GracefulShutdownConfig = {
+  shutdownTimeoutMs: parseInt(process.env.SHUTDOWN_TIMEOUT_MS || '30000', 10),
+  loadBalancerDrainDelayMs: parseInt(process.env.LB_DRAIN_DELAY_MS || '2000', 10),
+  exitProcess: true,
+};
+
 // Start server
 async function startServer() {
   // Bootstrap all services (registers singletons with ServiceProvider)
   await bootstrapServices();
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
   console.log('='.repeat(60));
   console.log('WebEDT Backend Server');
   console.log('='.repeat(60));
@@ -575,6 +590,19 @@ async function startServer() {
   } else {
     logger.info('Claude session sync is disabled');
   }
+
+  // Register graceful shutdown handlers
+  // These handle SIGTERM, SIGINT, uncaughtException, and unhandledRejection
+  registerShutdownHandlers(server, shutdownConfig);
+
+  // Log current connection tracking status
+  const connStats = connectionTracker.getStats();
+  logger.info('Connection tracking initialized', {
+    component: 'Startup',
+    activeRequests: connStats.activeRequests,
+    activeSSEConnections: connStats.activeSSEConnections,
+    shutdownTimeoutMs: shutdownConfig.shutdownTimeoutMs,
+  });
   });
 }
 
@@ -582,19 +610,4 @@ async function startServer() {
 startServer().catch((error) => {
   logger.error('Failed to start server', error);
   process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully...');
-  healthMonitor.stopPeriodicChecks();
-  stopBackgroundSync();
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully...');
-  healthMonitor.stopPeriodicChecks();
-  stopBackgroundSync();
-  process.exit(0);
 });
