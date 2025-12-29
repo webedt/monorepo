@@ -9,7 +9,7 @@ import { editorSettingsStore } from '../../stores/editorSettingsStore';
 import { debugStore } from '../../stores/debugStore';
 import { githubApi, userApi, billingApi } from '../../lib/api';
 import { router } from '../../lib/router';
-import type { ClaudeAuth } from '../../types';
+import type { ClaudeAuth, CodexAuth, GeminiAuth } from '../../types';
 import './settings.css';
 
 export class SettingsPage extends Page<PageOptions> {
@@ -19,6 +19,8 @@ export class SettingsPage extends Page<PageOptions> {
 
   private displayNameInput: Input | null = null;
   private claudeAuthInput: Input | null = null;
+  private codexAuthInput: Input | null = null;
+  private geminiAuthInput: Input | null = null;
   private cards: Card[] = [];
   private buttons: Button[] = [];
   private billingData: {
@@ -642,6 +644,8 @@ export class SettingsPage extends Page<PageOptions> {
     const user = authStore.getUser();
     const isGitHubConnected = !!user?.githubId;
     const isClaudeConnected = !!user?.claudeAuth;
+    const isCodexConnected = !!(user?.codexAuth?.apiKey || user?.codexAuth?.accessToken);
+    const isGeminiConnected = !!user?.geminiAuth?.accessToken;
 
     const content = document.createElement('div');
     content.className = 'connections-content';
@@ -649,28 +653,62 @@ export class SettingsPage extends Page<PageOptions> {
       <div class="connection-item">
         <div class="connection-info">
           <span class="connection-name">GitHub</span>
+          <span class="connection-description">Required for repository operations</span>
           <span class="connection-status ${isGitHubConnected ? 'connected' : 'disconnected'}">
             ${isGitHubConnected ? 'Connected' : 'Not connected'}
           </span>
-          <span class="connection-description">Required for repo operations</span>
         </div>
         <div class="connection-action github-action"></div>
       </div>
       <div class="connection-item">
         <div class="connection-info">
           <span class="connection-name">Claude</span>
+          <span class="connection-description">AI assistant for chat and code</span>
           <span class="connection-status ${isClaudeConnected ? 'connected' : 'disconnected'}">
             ${isClaudeConnected ? 'Connected' : 'Not connected'}
           </span>
-          <span class="connection-description">AI functionality</span>
         </div>
         <div class="connection-action claude-action"></div>
       </div>
       ${!isClaudeConnected ? `
-      <div class="claude-auth-form">
+      <div class="auth-form claude-auth-form">
         <p class="connection-help">Paste your Claude auth JSON to connect:</p>
         <div class="claude-auth-input"></div>
         <div class="claude-auth-submit"></div>
+      </div>
+      ` : ''}
+      <div class="connection-item">
+        <div class="connection-info">
+          <span class="connection-name">Codex (OpenAI)</span>
+          <span class="connection-description">AI functionality via OpenAI API</span>
+          <span class="connection-status ${isCodexConnected ? 'connected' : 'disconnected'}">
+            ${isCodexConnected ? 'Connected' : 'Not connected'}
+          </span>
+        </div>
+        <div class="connection-action codex-action"></div>
+      </div>
+      ${!isCodexConnected ? `
+      <div class="auth-form codex-auth-form">
+        <p class="connection-help">Enter your OpenAI API key:</p>
+        <div class="codex-auth-input"></div>
+        <div class="codex-auth-submit"></div>
+      </div>
+      ` : ''}
+      <div class="connection-item">
+        <div class="connection-info">
+          <span class="connection-name">Gemini</span>
+          <span class="connection-description">AI functionality via Google Gemini</span>
+          <span class="connection-status ${isGeminiConnected ? 'connected' : 'disconnected'}">
+            ${isGeminiConnected ? 'Connected' : 'Not connected'}
+          </span>
+        </div>
+        <div class="connection-action gemini-action"></div>
+      </div>
+      ${!isGeminiConnected ? `
+      <div class="auth-form gemini-auth-form">
+        <p class="connection-help">Paste contents of ~/.gemini/oauth_creds.json (run <code>gemini auth login</code> first):</p>
+        <div class="gemini-auth-input"></div>
+        <div class="gemini-auth-submit"></div>
       </div>
       ` : ''}
     `;
@@ -702,7 +740,7 @@ export class SettingsPage extends Page<PageOptions> {
       const claudeAuthInputContainer = content.querySelector('.claude-auth-input') as HTMLElement;
       if (claudeAuthInputContainer) {
         this.claudeAuthInput = new Input({
-          type: 'text',
+          type: 'password',
           placeholder: '{"claudeAiOauth":{"accessToken":"...","refreshToken":"..."}}',
         });
         this.claudeAuthInput.mount(claudeAuthInputContainer);
@@ -715,6 +753,72 @@ export class SettingsPage extends Page<PageOptions> {
           onClick: () => this.handleClaudeAuthSubmit(),
         });
         submitBtn.mount(claudeAuthSubmit);
+        this.buttons.push(submitBtn);
+      }
+    }
+
+    // Create Codex connect/disconnect button
+    const codexAction = content.querySelector('.codex-action') as HTMLElement;
+    if (codexAction) {
+      const btn = new Button(isCodexConnected ? 'Disconnect' : 'Add API Key', {
+        variant: isCodexConnected ? 'secondary' : 'primary',
+        onClick: () => this.handleCodexAction(isCodexConnected),
+      });
+      btn.mount(codexAction);
+      this.buttons.push(btn);
+    }
+
+    // Create Codex auth input and submit button if not connected
+    if (!isCodexConnected) {
+      const codexAuthInputContainer = content.querySelector('.codex-auth-input') as HTMLElement;
+      if (codexAuthInputContainer) {
+        this.codexAuthInput = new Input({
+          type: 'password',
+          placeholder: 'sk-...',
+        });
+        this.codexAuthInput.mount(codexAuthInputContainer);
+      }
+
+      const codexAuthSubmit = content.querySelector('.codex-auth-submit') as HTMLElement;
+      if (codexAuthSubmit) {
+        const submitBtn = new Button('Save Codex API Key', {
+          variant: 'primary',
+          onClick: () => this.handleCodexAuthSubmit(),
+        });
+        submitBtn.mount(codexAuthSubmit);
+        this.buttons.push(submitBtn);
+      }
+    }
+
+    // Create Gemini connect/disconnect button
+    const geminiAction = content.querySelector('.gemini-action') as HTMLElement;
+    if (geminiAction) {
+      const btn = new Button(isGeminiConnected ? 'Disconnect' : 'Add Auth', {
+        variant: isGeminiConnected ? 'secondary' : 'primary',
+        onClick: () => this.handleGeminiAction(isGeminiConnected),
+      });
+      btn.mount(geminiAction);
+      this.buttons.push(btn);
+    }
+
+    // Create Gemini auth input and submit button if not connected
+    if (!isGeminiConnected) {
+      const geminiAuthInputContainer = content.querySelector('.gemini-auth-input') as HTMLElement;
+      if (geminiAuthInputContainer) {
+        this.geminiAuthInput = new Input({
+          type: 'password',
+          placeholder: '{"access_token":"...","refresh_token":"...","expiry_date":...}',
+        });
+        this.geminiAuthInput.mount(geminiAuthInputContainer);
+      }
+
+      const geminiAuthSubmit = content.querySelector('.gemini-auth-submit') as HTMLElement;
+      if (geminiAuthSubmit) {
+        const submitBtn = new Button('Save Gemini Auth', {
+          variant: 'primary',
+          onClick: () => this.handleGeminiAuthSubmit(),
+        });
+        submitBtn.mount(geminiAuthSubmit);
         this.buttons.push(submitBtn);
       }
     }
@@ -825,6 +929,87 @@ export class SettingsPage extends Page<PageOptions> {
     }
   }
 
+  private async handleCodexAction(isConnected: boolean): Promise<void> {
+    if (isConnected) {
+      try {
+        await userApi.removeCodexAuth();
+        authStore.updateUser({ codexAuth: undefined });
+        toast.success('Codex disconnected');
+        this.update({});
+      } catch (error) {
+        toast.error('Failed to disconnect Codex');
+      }
+    }
+    // If not connected, the form is already shown
+  }
+
+  private async handleCodexAuthSubmit(): Promise<void> {
+    const apiKey = this.codexAuthInput?.getValue() || '';
+    if (!apiKey.trim()) {
+      toast.error('Please enter your OpenAI API key');
+      return;
+    }
+
+    try {
+      await userApi.updateCodexAuth({ apiKey });
+
+      // Update local user state
+      authStore.updateUser({ codexAuth: { apiKey } as CodexAuth });
+      toast.success('Codex API key saved');
+      this.update({});
+    } catch (error) {
+      toast.error('Failed to save Codex API key');
+    }
+  }
+
+  private async handleGeminiAction(isConnected: boolean): Promise<void> {
+    if (isConnected) {
+      try {
+        await userApi.removeGeminiAuth();
+        authStore.updateUser({ geminiAuth: undefined });
+        toast.success('Gemini disconnected');
+        this.update({});
+      } catch (error) {
+        toast.error('Failed to disconnect Gemini');
+      }
+    }
+    // If not connected, the form is already shown
+  }
+
+  private async handleGeminiAuthSubmit(): Promise<void> {
+    const authJson = this.geminiAuthInput?.getValue() || '';
+    if (!authJson.trim()) {
+      toast.error('Please paste your Gemini auth JSON');
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(authJson);
+
+      // Transform snake_case keys from ~/.gemini/oauth_creds.json to camelCase
+      const geminiAuth: GeminiAuth = {
+        accessToken: parsed.access_token || parsed.accessToken,
+        refreshToken: parsed.refresh_token || parsed.refreshToken,
+        expiresAt: parsed.expiry_date || parsed.expiresAt,
+        tokenType: parsed.token_type || parsed.tokenType,
+        scope: parsed.scope,
+      };
+
+      await userApi.updateGeminiAuth(geminiAuth);
+
+      // Update local user state
+      authStore.updateUser({ geminiAuth });
+      toast.success('Gemini authentication saved');
+      this.update({});
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        toast.error('Invalid JSON format');
+      } else {
+        toast.error('Failed to save Gemini authentication');
+      }
+    }
+  }
+
   private async handleLogout(): Promise<void> {
     try {
       await authStore.logout();
@@ -837,6 +1022,8 @@ export class SettingsPage extends Page<PageOptions> {
   protected onUnmount(): void {
     this.displayNameInput?.unmount();
     this.claudeAuthInput?.unmount();
+    this.codexAuthInput?.unmount();
+    this.geminiAuthInput?.unmount();
     for (const card of this.cards) {
       card.unmount();
     }
