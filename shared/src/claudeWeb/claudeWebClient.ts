@@ -584,43 +584,63 @@ export class ClaudeWebClient extends AClaudeWebClient {
     let branch: string | undefined;
     let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
     let cleanedUp = false;
-
-    // Centralized cleanup function to prevent memory leaks
-    const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-
-      // Clear the keep-alive interval
-      if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-        keepAliveInterval = null;
-      }
-
-      // Remove abort signal listener
-      if (abortSignal) {
-        abortSignal.removeEventListener('abort', abortHandler);
-      }
-
-      // Remove all WebSocket listeners to prevent memory leaks
-      ws.removeAllListeners('message');
-      ws.removeAllListeners('error');
-      ws.removeAllListeners('close');
-
-      // Close the WebSocket if still open
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-      }
-    };
-
-    const abortHandler = () => {
-      cleanup();
-    };
+    let settled = false; // Prevents multiple resolve/reject calls
 
     return new Promise((resolve, reject) => {
+      // Use mutable reference to break circular dependency between cleanup and abortHandler
+      let abortHandler: (() => void) | null = null;
+
+      // Centralized cleanup function to prevent memory leaks
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+
+        // Clear the keep-alive interval
+        if (keepAliveInterval) {
+          clearInterval(keepAliveInterval);
+          keepAliveInterval = null;
+        }
+
+        // Remove abort signal listener
+        if (abortSignal && abortHandler) {
+          abortSignal.removeEventListener('abort', abortHandler);
+        }
+
+        // Remove all WebSocket listeners to prevent memory leaks
+        ws.removeAllListeners('message');
+        ws.removeAllListeners('error');
+        ws.removeAllListeners('close');
+
+        // Close the WebSocket if still open
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+      };
+
+      // Safe resolve that prevents multiple settlements
+      const safeResolve = (result: SessionResult) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+
+      // Safe reject that prevents multiple settlements
+      const safeReject = (error: ClaudeRemoteError) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
+      // Now define abortHandler after safeReject is available
+      abortHandler = () => {
+        safeReject(new ClaudeRemoteError('Streaming aborted by signal'));
+      };
+
       if (abortSignal) {
         if (abortSignal.aborted) {
-          cleanup();
-          reject(new ClaudeRemoteError('Streaming aborted by signal'));
+          safeReject(new ClaudeRemoteError('Streaming aborted by signal'));
           return;
         }
         abortSignal.addEventListener('abort', abortHandler, { once: true });
@@ -648,8 +668,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
               }
 
               if (event.type === 'result') {
-                cleanup();
-                resolve({
+                safeResolve({
                   sessionId,
                   status: 'completed',
                   title: title || '',
@@ -674,8 +693,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
               }
 
               if (event.type === 'result') {
-                cleanup();
-                resolve({
+                safeResolve({
                   sessionId,
                   status: 'completed',
                   title: title || '',
@@ -691,8 +709,7 @@ export class ClaudeWebClient extends AClaudeWebClient {
 
           if (message.type === 'session_status') {
             if (message.status === 'completed' || message.status === 'failed') {
-              cleanup();
-              resolve({
+              safeResolve({
                 sessionId,
                 status: message.status,
                 title: title || '',
@@ -706,21 +723,21 @@ export class ClaudeWebClient extends AClaudeWebClient {
       };
 
       const errorHandler = (error: Error) => {
-        cleanup();
-        reject(new ClaudeRemoteError(
+        safeReject(new ClaudeRemoteError(
           `WebSocket error during streaming: ${error.message}`,
           500
         ));
       };
 
       const closeHandler = (code: number) => {
-        cleanup();
         if (code !== 1000 && code !== 1001) {
-          reject(new ClaudeRemoteError(
+          safeReject(new ClaudeRemoteError(
             `WebSocket closed unexpectedly with code ${code}`,
             500
           ));
         }
+        // For normal close codes, just cleanup without rejecting
+        cleanup();
       };
 
       // Register WebSocket event handlers

@@ -7,12 +7,17 @@
  * - Ordered shutdown based on priority
  * - Prevention of duplicate signal handling
  *
+ * Note: The backend uses a more specialized gracefulShutdown.ts that handles
+ * HTTP server-specific concerns (connection draining, health check coordination).
+ * This registry is a general-purpose utility for other services or CLI tools
+ * that need simpler shutdown coordination.
+ *
  * Usage:
  * ```typescript
  * // Register a shutdown handler
  * shutdownRegistry.register('database', async () => {
  *   await db.close();
- * }, { priority: 10 }); // Higher priority runs first
+ * }, { priority: 10, timeoutMs: 15000 }); // Higher priority runs first
  *
  * // Initialize signal handlers (call once at startup)
  * shutdownRegistry.initialize();
@@ -23,15 +28,21 @@ import { logger } from '../logging/logger.js';
 
 type ShutdownHandler = () => void | Promise<void>;
 
+/** Default timeout for shutdown handlers in milliseconds */
+const DEFAULT_HANDLER_TIMEOUT_MS = 10000;
+
 interface RegisteredHandler {
   name: string;
   handler: ShutdownHandler;
   priority: number;
+  timeoutMs: number;
 }
 
 interface RegisterOptions {
   /** Higher priority handlers run first (default: 0) */
   priority?: number;
+  /** Timeout for this handler in milliseconds (default: 10000) */
+  timeoutMs?: number;
 }
 
 /**
@@ -52,6 +63,9 @@ export interface IShutdownRegistry {
 
   /** Get registered handler names */
   getHandlerNames(): string[];
+
+  /** Reset the registry state (for testing) */
+  reset(): void;
 }
 
 /**
@@ -66,17 +80,17 @@ class ShutdownRegistry implements IShutdownRegistry {
    * Register a shutdown handler
    */
   register(name: string, handler: ShutdownHandler, options: RegisterOptions = {}): void {
-    const { priority = 0 } = options;
+    const { priority = 0, timeoutMs = DEFAULT_HANDLER_TIMEOUT_MS } = options;
 
     // Remove existing handler with same name if present
     this.unregister(name);
 
-    this.handlers.push({ name, handler, priority });
+    this.handlers.push({ name, handler, priority, timeoutMs });
 
     // Sort by priority (higher first)
     this.handlers.sort((a, b) => b.priority - a.priority);
 
-    logger.debug(`Registered shutdown handler: ${name} (priority: ${priority})`, {
+    logger.debug(`Registered shutdown handler: ${name} (priority: ${priority}, timeout: ${timeoutMs}ms)`, {
       component: 'ShutdownRegistry',
     });
   }
@@ -151,15 +165,15 @@ class ShutdownRegistry implements IShutdownRegistry {
 
     const startTime = Date.now();
 
-    for (const { name, handler } of this.handlers) {
+    for (const { name, handler, timeoutMs } of this.handlers) {
       try {
-        logger.debug(`Running shutdown handler: ${name}`, { component: 'ShutdownRegistry' });
+        logger.debug(`Running shutdown handler: ${name} (timeout: ${timeoutMs}ms)`, { component: 'ShutdownRegistry' });
         const handlerStart = Date.now();
 
         await Promise.race([
           Promise.resolve(handler()),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Handler timeout')), 10000)
+            setTimeout(() => reject(new Error(`Handler timeout after ${timeoutMs}ms`)), timeoutMs)
           ),
         ]);
 
