@@ -20,13 +20,15 @@ import assert from 'node:assert';
 import { randomUUID } from 'crypto';
 import {
   createMockUser,
-  createMockLuciaSession,
   createMockGitHubOAuthState,
   createMockGitHubTokenResponse,
   createMockGitHubUser,
 } from './fixtures.js';
 
-// Re-export for convenience
+/**
+ * Local mock helper for Lucia sessions
+ * Creates a mock session object for testing OAuth flows
+ */
 function createMockLuciaSession(userId: string = 'test-user-id'): { id: string; userId: string; expiresAt: Date } {
   return {
     id: `lucia-session-${randomUUID()}`,

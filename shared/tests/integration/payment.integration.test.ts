@@ -131,7 +131,9 @@ class MockStripeProvider {
   }
 
   verifyWebhook(payload: string, signature: string): MockWebhookVerification {
-    // Simple mock verification - check if signature contains expected format
+    // MOCK ONLY: Simplified signature check for testing purposes.
+    // Real Stripe webhook verification uses HMAC-SHA256 with the webhook signing secret.
+    // See: https://stripe.com/docs/webhooks/signatures
     if (!signature.includes('t=') || !signature.includes('v1=')) {
       return { isValid: false, error: 'Invalid signature format' };
     }
@@ -254,7 +256,10 @@ class MockPayPalProvider {
   }
 
   verifyWebhook(payload: string, signature: string): MockWebhookVerification {
-    // Check PayPal signature format (pipe-separated)
+    // MOCK ONLY: Simplified signature check for testing purposes.
+    // Real PayPal webhook verification requires validating the transmission signature
+    // using PayPal's public certificates and the PAYPAL-TRANSMISSION-SIG header.
+    // See: https://developer.paypal.com/docs/api-basics/notifications/webhooks/notification-messages/
     const parts = signature.split('|');
     if (parts.length < 5) {
       return { isValid: false, error: 'Invalid signature format - expected 5 parts' };

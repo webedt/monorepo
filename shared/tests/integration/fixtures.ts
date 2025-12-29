@@ -116,7 +116,7 @@ export function createMockUser(overrides: Partial<MockUser> = {}): MockUser {
     id: `user-${randomUUID()}`,
     email: `test-${randomUUID().slice(0, 8)}@example.com`,
     displayName: 'Test User',
-    passwordHash: '$2b$10$testhashedpassword',
+    passwordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234',
     isAdmin: false,
     createdAt: new Date(),
     githubId: null,
