@@ -6,7 +6,7 @@
  */
 
 import { Page, type PageOptions } from '../base/Page';
-import { Button, Spinner, toast, OfflineIndicator, TransformEditor, SceneTabs } from '../../components';
+import { Button, Spinner, toast, OfflineIndicator, TransformEditor, SceneTabs, EditModeToolbar } from '../../components';
 import type { Transform } from '../../components';
 import { sessionsApi } from '../../lib/api';
 import { offlineManager, isOffline } from '../../lib/offline';
@@ -14,6 +14,7 @@ import { offlineStorage } from '../../lib/offlineStorage';
 import { SpriteRenderer } from '../../lib/sprite';
 import { Viewport } from '../../lib/viewport';
 import { sceneStore } from '../../stores/sceneStore';
+import { editModeStore } from '../../stores/editModeStore';
 import { customComponentsStore } from '../../stores';
 import type {
   Session,
@@ -22,7 +23,9 @@ import type {
   CustomComponentPropertyValues,
 } from '../../types';
 import type { SceneObject, ShapeType, Scene } from '../../stores/sceneStore';
+import type { EditMode } from '../../stores/editModeStore';
 import './scene.css';
+import '../../components/edit-mode-toolbar/edit-mode-toolbar.css';
 
 interface ScenePageOptions extends PageOptions {
   params?: {
@@ -42,6 +45,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   private isOfflineMode = false;
   private transformEditor: TransformEditor | null = null;
   private sceneTabs: SceneTabs | null = null;
+  private editModeToolbar: EditModeToolbar | null = null;
 
   // Scene state - now using sceneStore for multi-scene support
   private sceneCanvas: HTMLCanvasElement | null = null;
@@ -74,6 +78,7 @@ export class ScenePage extends Page<ScenePageOptions> {
   // Store subscriptions
   private unsubscribeStore: (() => void) | null = null;
   private unsubscribeComponents: (() => void) | null = null;
+  private unsubscribeEditMode: (() => void) | null = null;
 
   // Helper methods to access active scene data
   private get activeScene(): Scene | null {
@@ -136,6 +141,11 @@ export class ScenePage extends Page<ScenePageOptions> {
         <div class="scene-tabs-container-wrapper"></div>
 
         <div class="scene-toolbar">
+          <!-- Edit Mode Toolbar -->
+          <div class="edit-mode-toolbar-container"></div>
+
+          <div class="toolbar-separator"></div>
+
           <div class="toolbar-group">
             <button class="toolbar-btn" data-action="add-sprite" title="Add Sprite">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -422,12 +432,35 @@ export class ScenePage extends Page<ScenePageOptions> {
       this.sceneTabs.mount(sceneTabsContainer);
     }
 
+    // Setup edit mode toolbar
+    const editModeContainer = this.$('.edit-mode-toolbar-container') as HTMLElement;
+    if (editModeContainer) {
+      this.editModeToolbar = new EditModeToolbar({
+        initialMode: 'select',
+        showExtendedTools: true,
+        onModeChange: (mode: EditMode) => this.handleEditModeChange(mode),
+        onClearSelection: () => this.clearSelection(),
+        onDelete: () => this.deleteSelected(),
+        onCopy: () => this.copySelected(),
+        onPaste: () => this.pasteFromClipboard(),
+        onDuplicate: () => this.duplicateSelected(),
+        onSelectAll: () => this.selectAll(),
+      });
+      this.editModeToolbar.mount(editModeContainer);
+    }
+
     // Subscribe to store changes
     this.unsubscribeStore = sceneStore.subscribe(() => {
       this.updateHierarchy();
       this.updateStatusBar();
       this.updateToolbarState();
       this.renderScene();
+    });
+
+    // Subscribe to edit mode changes
+    this.unsubscribeEditMode = editModeStore.subscribe(() => {
+      this.updateCursor();
+      this.editModeToolbar?.update();
     });
 
     // Subscribe to offline status changes
@@ -757,39 +790,99 @@ export class ScenePage extends Page<ScenePageOptions> {
     // Convert to world coordinates (center-origin, Y+ up)
     const worldPos = this.viewport.screenToWorld(screenX, screenY);
 
-    // Middle mouse button or shift+click for panning
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    // Get current edit mode
+    const currentMode = editModeStore.getMode();
+
+    // Middle mouse button or shift+click for panning, or pan mode
+    if (e.button === 1 || (e.button === 0 && e.shiftKey) || currentMode === 'pan') {
       this.isPanning = true;
       this.panStart = { x: screenX, y: screenY };
+      if (this.sceneCanvas) {
+        this.sceneCanvas.style.cursor = 'grabbing';
+      }
       e.preventDefault();
       return;
     }
 
-    // Find clicked object (reverse order for top-most first)
-    let clickedObject: SceneObject | null = null;
-    for (let i = this.objects.length - 1; i >= 0; i--) {
-      const obj = this.objects[i];
-      if (this.isPointInObject(worldPos.x, worldPos.y, obj)) {
-        clickedObject = obj;
-        break;
-      }
+    // Handle draw modes
+    if (currentMode.startsWith('draw-') && e.button === 0) {
+      this.handleDrawModeClick(worldPos, currentMode);
+      return;
     }
 
-    if (clickedObject && !clickedObject.locked) {
-      this.selectedObjectId = clickedObject.id;
-      this.isDragging = true;
-      this.dragStart = {
-        x: worldPos.x - clickedObject.transform.x,
-        y: worldPos.y - clickedObject.transform.y,
-      };
-    } else {
-      this.selectedObjectId = null;
+    // Select mode: find clicked object (reverse order for top-most first)
+    if (currentMode === 'select') {
+      let clickedObject: SceneObject | null = null;
+      for (let i = this.objects.length - 1; i >= 0; i--) {
+        const obj = this.objects[i];
+        if (this.isPointInObject(worldPos.x, worldPos.y, obj)) {
+          clickedObject = obj;
+          break;
+        }
+      }
+
+      // Multi-select with Ctrl/Cmd
+      const isMultiSelect = e.ctrlKey || e.metaKey;
+
+      if (clickedObject && !clickedObject.locked) {
+        if (isMultiSelect) {
+          editModeStore.toggleObjectSelection(clickedObject.id);
+          // Keep first selected as the properties panel target
+          if (!this.selectedObjectId || editModeStore.isObjectSelected(clickedObject.id)) {
+            this.selectedObjectId = clickedObject.id;
+          }
+        } else {
+          this.selectedObjectId = clickedObject.id;
+          editModeStore.selectObject(clickedObject.id);
+        }
+        this.isDragging = true;
+        this.dragStart = {
+          x: worldPos.x - clickedObject.transform.x,
+          y: worldPos.y - clickedObject.transform.y,
+        };
+      } else {
+        if (!isMultiSelect) {
+          this.selectedObjectId = null;
+          editModeStore.clearSelection();
+        }
+      }
     }
 
     this.updatePropertiesPanel();
     this.updateHierarchy();
     this.updateStatusBar();
     this.renderScene();
+  }
+
+  private handleDrawModeClick(worldPos: { x: number; y: number }, mode: EditMode): void {
+    const activeScene = this.activeScene;
+    if (!activeScene) {
+      toast.error('Please create or open a scene first');
+      return;
+    }
+
+    // Snap position if enabled
+    let x = worldPos.x;
+    let y = worldPos.y;
+    if (this.snapToGrid) {
+      x = Math.round(x / this.gridSize) * this.gridSize;
+      y = Math.round(y / this.gridSize) * this.gridSize;
+    }
+
+    switch (mode) {
+      case 'draw-rectangle':
+        this.addShape('rectangle', { x, y });
+        break;
+      case 'draw-circle':
+        this.addShape('circle', { x, y });
+        break;
+      case 'draw-text':
+        this.addText({ x, y });
+        break;
+    }
+
+    // After drawing, switch back to select mode
+    editModeStore.setMode('select');
   }
 
   private handleMouseMove(e: MouseEvent): void {
@@ -847,6 +940,8 @@ export class ScenePage extends Page<ScenePageOptions> {
   private handleMouseUp(): void {
     this.isDragging = false;
     this.isPanning = false;
+    // Reset cursor based on current mode
+    this.updateCursor();
   }
 
   private handleWheel(e: WheelEvent): void {
@@ -1165,7 +1260,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     urlInput.focus();
   }
 
-  private addShape(shapeType: ShapeType): void {
+  private addShape(shapeType: ShapeType, position?: { x: number; y: number }): void {
     const activeScene = this.activeScene;
     if (!activeScene) {
       toast.error('Please create or open a scene first');
@@ -1180,8 +1275,10 @@ export class ScenePage extends Page<ScenePageOptions> {
       line: '#f39c12',
     };
 
-    // Place new objects near origin (0, 0) in center-origin coordinates
+    // Place new objects at specified position or near origin
     const offset = this.objects.length * 20;
+    const x = position?.x ?? (-50 + offset);
+    const y = position?.y ?? (-40 + offset);
     const obj: SceneObject = {
       id: `shape-${Date.now()}`,
       name: `${shapeType.charAt(0).toUpperCase() + shapeType.slice(1)} ${this.objects.length + 1}`,
@@ -1189,35 +1286,38 @@ export class ScenePage extends Page<ScenePageOptions> {
       shapeType,
       visible: true,
       locked: false,
-      transform: { x: -50 + offset, y: -40 + offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      transform: { x, y, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       color: colors[shapeType],
     };
     sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
     this.selectedObjectId = obj.id;
+    editModeStore.selectObject(obj.id);
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
     this.renderScene();
   }
 
-  private addText(): void {
+  private addText(position?: { x: number; y: number }): void {
     const activeScene = this.activeScene;
     if (!activeScene) {
       toast.error('Please create or open a scene first');
       return;
     }
 
-    // Place new objects near origin (0, 0) in center-origin coordinates
+    // Place new objects at specified position or near origin
     const offset = this.objects.length * 20;
+    const x = position?.x ?? (-50 + offset);
+    const y = position?.y ?? offset;
     const obj: SceneObject = {
       id: `text-${Date.now()}`,
       name: `Text ${this.objects.length + 1}`,
       type: 'text',
       visible: true,
       locked: false,
-      transform: { x: -50 + offset, y: offset, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
+      transform: { x, y, rotation: 0, scaleX: 1, scaleY: 1, pivotX: 0.5, pivotY: 0.5 },
       zIndex: this.objects.length,
       opacity: 1,
       text: 'Sample Text',
@@ -1227,6 +1327,7 @@ export class ScenePage extends Page<ScenePageOptions> {
     };
     sceneStore.updateSceneObjects(activeScene.id, [...this.objects, obj]);
     this.selectedObjectId = obj.id;
+    editModeStore.selectObject(obj.id);
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
@@ -1686,10 +1787,161 @@ export class ScenePage extends Page<ScenePageOptions> {
     const newObjects = this.objects.filter(o => o.id !== this.selectedObjectId);
     sceneStore.updateSceneObjects(activeScene.id, newObjects);
     this.selectedObjectId = null;
+    editModeStore.clearSelection();
     this.updateHierarchy();
     this.updatePropertiesPanel();
     this.updateStatusBar();
     this.renderScene();
+  }
+
+  private clearSelection(): void {
+    this.selectedObjectId = null;
+    editModeStore.clearSelection();
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+  }
+
+  private copySelected(): void {
+    if (!this.selectedObjectId) return;
+    editModeStore.copyToClipboard([this.selectedObjectId]);
+    toast.success('Object copied to clipboard');
+  }
+
+  private pasteFromClipboard(): void {
+    const activeScene = this.activeScene;
+    if (!activeScene) return;
+
+    const clipboard = editModeStore.getClipboard();
+    if (clipboard.length === 0) return;
+
+    // Find the objects to paste
+    const objectsToPaste = this.objects.filter(o => clipboard.includes(o.id));
+    if (objectsToPaste.length === 0) return;
+
+    // Create new copies with new IDs and offset positions
+    const newObjects = objectsToPaste.map(obj => {
+      const newId = `obj-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      return {
+        ...JSON.parse(JSON.stringify(obj)),
+        id: newId,
+        name: `${obj.name} (Copy)`,
+        transform: {
+          ...obj.transform,
+          x: obj.transform.x + 20,
+          y: obj.transform.y - 20,
+        },
+      };
+    });
+
+    const updatedObjects = [...this.objects, ...newObjects];
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+
+    // Select the newly pasted object(s)
+    if (newObjects.length === 1) {
+      this.selectedObjectId = newObjects[0].id;
+      editModeStore.selectObject(newObjects[0].id);
+    }
+
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.success(`Pasted ${newObjects.length} object(s)`);
+  }
+
+  private duplicateSelected(): void {
+    const activeScene = this.activeScene;
+    if (!this.selectedObjectId || !activeScene) return;
+
+    const obj = this.objects.find(o => o.id === this.selectedObjectId);
+    if (!obj) return;
+
+    // Create a duplicate with new ID and offset position
+    const newId = `obj-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const duplicate: SceneObject = {
+      ...JSON.parse(JSON.stringify(obj)),
+      id: newId,
+      name: `${obj.name} (Copy)`,
+      transform: {
+        ...obj.transform,
+        x: obj.transform.x + 20,
+        y: obj.transform.y - 20,
+      },
+    };
+
+    const updatedObjects = [...this.objects, duplicate];
+    sceneStore.updateSceneObjects(activeScene.id, updatedObjects);
+
+    // Select the duplicate
+    this.selectedObjectId = duplicate.id;
+    editModeStore.selectObject(duplicate.id);
+
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.success('Object duplicated');
+  }
+
+  private selectAll(): void {
+    const activeScene = this.activeScene;
+    if (!activeScene || this.objects.length === 0) return;
+
+    const allIds = this.objects.map(o => o.id);
+    editModeStore.selectObjects(allIds);
+
+    // For now, select the first object for the properties panel
+    if (allIds.length > 0) {
+      this.selectedObjectId = allIds[0];
+    }
+
+    this.updateHierarchy();
+    this.updatePropertiesPanel();
+    this.updateStatusBar();
+    this.renderScene();
+    toast.info(`Selected ${allIds.length} object(s)`);
+  }
+
+  private handleEditModeChange(mode: EditMode): void {
+    // Update cursor based on mode
+    this.updateCursor();
+
+    // Clear any in-progress operations
+    this.isDragging = false;
+    this.isPanning = false;
+
+    // If switching to a draw mode, deselect current object
+    if (mode.startsWith('draw-')) {
+      this.selectedObjectId = null;
+      editModeStore.clearSelection();
+      this.updatePropertiesPanel();
+    }
+
+    this.renderScene();
+  }
+
+  private updateCursor(): void {
+    if (!this.sceneCanvas) return;
+
+    const mode = editModeStore.getMode();
+
+    switch (mode) {
+      case 'select':
+        this.sceneCanvas.style.cursor = 'default';
+        break;
+      case 'pan':
+        this.sceneCanvas.style.cursor = 'grab';
+        break;
+      case 'draw-rectangle':
+      case 'draw-circle':
+      case 'draw-text':
+        this.sceneCanvas.style.cursor = 'crosshair';
+        break;
+      default:
+        this.sceneCanvas.style.cursor = 'default';
+    }
   }
 
   private getObjectDimensions(obj: SceneObject): { width: number; height: number } {
@@ -2902,6 +3154,16 @@ export class ScenePage extends Page<ScenePageOptions> {
     if (this.unsubscribeComponents) {
       this.unsubscribeComponents();
       this.unsubscribeComponents = null;
+    }
+
+    if (this.unsubscribeEditMode) {
+      this.unsubscribeEditMode();
+      this.unsubscribeEditMode = null;
+    }
+
+    if (this.editModeToolbar) {
+      this.editModeToolbar.unmount();
+      this.editModeToolbar = null;
     }
 
     if (this.offlineIndicator) {

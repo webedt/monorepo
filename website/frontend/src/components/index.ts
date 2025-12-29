@@ -193,3 +193,7 @@ export type { LayersPanelOptions, LayerItemOptions } from './layers-panel';
 // SceneTabs
 export { SceneTabs } from './scene-tabs';
 export type { SceneTabsOptions } from './scene-tabs';
+
+// EditModeToolbar
+export { EditModeToolbar } from './edit-mode-toolbar';
+export type { EditModeToolbarOptions } from './edit-mode-toolbar';
