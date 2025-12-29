@@ -1,4 +1,5 @@
 import { Component, ComponentOptions } from '../base';
+import { ArrayStorage } from '../../lib/typedStorage';
 import './universal-search.css';
 
 export type UniversalSearchSize = 'sm' | 'md' | 'lg';
@@ -48,6 +49,7 @@ export class UniversalSearch extends Component<HTMLDivElement> {
   private focusedIndex = -1;
   private currentResults: SearchResultItem[] = [];
   private recentSearches: string[] = [];
+  private recentSearchesStorage: ArrayStorage<string> | null = null;
   private debounceTimer: number | null = null;
   private currentQuery = '';
 
@@ -101,6 +103,18 @@ export class UniversalSearch extends Component<HTMLDivElement> {
       <span>Searching...</span>
     `;
 
+    // Initialize typed storage for recent searches if key is provided
+    if (this.options.recentSearchesKey) {
+      this.recentSearchesStorage = new ArrayStorage<string>(
+        this.options.recentSearchesKey,
+        [],
+        {
+          maxItems: this.options.maxRecentSearches ?? 5,
+          itemValidator: (item): item is string => typeof item === 'string',
+        }
+      );
+    }
+
     this.loadRecentSearches();
     this.buildStructure();
     this.applyOptions();
@@ -118,45 +132,28 @@ export class UniversalSearch extends Component<HTMLDivElement> {
   }
 
   private loadRecentSearches(): void {
-    if (!this.options.showRecentSearches || !this.options.recentSearchesKey) return;
-    try {
-      const stored = localStorage.getItem(this.options.recentSearchesKey);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          this.recentSearches = parsed.slice(0, this.options.maxRecentSearches);
-        }
-      }
-    } catch {
-      // Ignore parse errors
-    }
+    if (!this.options.showRecentSearches || !this.recentSearchesStorage) return;
+    this.recentSearches = this.recentSearchesStorage.get();
   }
 
   private saveRecentSearch(query: string): void {
-    if (!this.options.showRecentSearches || !this.options.recentSearchesKey) return;
-    const normalizedQuery = query.trim().toLowerCase();
+    if (!this.options.showRecentSearches || !this.recentSearchesStorage) return;
+    const normalizedQuery = query.trim();
     if (!normalizedQuery) return;
 
-    this.recentSearches = this.recentSearches.filter(s => s.toLowerCase() !== normalizedQuery);
-    this.recentSearches.unshift(query.trim());
+    // Remove duplicates (case-insensitive) and add to front
+    this.recentSearches = this.recentSearches.filter(
+      s => s.toLowerCase() !== normalizedQuery.toLowerCase()
+    );
+    this.recentSearches.unshift(normalizedQuery);
     this.recentSearches = this.recentSearches.slice(0, this.options.maxRecentSearches);
 
-    try {
-      localStorage.setItem(this.options.recentSearchesKey, JSON.stringify(this.recentSearches));
-    } catch {
-      // Ignore storage errors
-    }
+    this.recentSearchesStorage.set(this.recentSearches);
   }
 
   private clearRecentSearches(): void {
     this.recentSearches = [];
-    if (this.options.recentSearchesKey) {
-      try {
-        localStorage.removeItem(this.options.recentSearchesKey);
-      } catch {
-        // Ignore storage errors
-      }
-    }
+    this.recentSearchesStorage?.remove();
     this.renderRecentSearches();
   }
 

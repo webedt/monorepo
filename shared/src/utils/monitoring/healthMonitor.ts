@@ -1,11 +1,13 @@
 import { AHealthMonitor } from './AHealthMonitor.js';
+import { logger } from '../logging/logger.js';
+import { metrics } from './metrics.js';
+import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
+import { TIMEOUTS, INTERVALS } from '../../config/constants.js';
+
 import type { HealthCheckResult } from './AHealthMonitor.js';
 import type { ServiceHealth } from './AHealthMonitor.js';
 import type { DetailedHealthStatus } from './AHealthMonitor.js';
 import type { HealthCheckFunction } from './AHealthMonitor.js';
-import { logger } from '../logging/logger.js';
-import { metrics } from './metrics.js';
-import { circuitBreakerRegistry } from '../resilience/circuitBreaker.js';
 
 export type { HealthCheckResult, ServiceHealth, DetailedHealthStatus, HealthCheckFunction } from './AHealthMonitor.js';
 
@@ -45,7 +47,7 @@ class HealthMonitor extends AHealthMonitor {
       const result = await Promise.race([
         checkFn(),
         new Promise<HealthCheckResult>((_, reject) =>
-          setTimeout(() => reject(new Error('Health check timeout')), 5000)
+          setTimeout(() => reject(new Error('Health check timeout')), TIMEOUTS.HTTP.HEALTH_CHECK)
         ),
       ]);
 
@@ -163,7 +165,7 @@ class HealthMonitor extends AHealthMonitor {
     };
   }
 
-  startPeriodicChecks(intervalMs: number = 30000): void {
+  startPeriodicChecks(intervalMs: number = INTERVALS.HEALTH.CHECK): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
     }

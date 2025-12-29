@@ -10,6 +10,8 @@
 
 import pg from 'pg';
 
+import { TIMEOUTS, LIMITS, RETRY, INTERVALS, CONTEXT_RETRY } from '../config/constants.js';
+
 const { Pool } = pg;
 
 export interface ConnectionConfig {
@@ -68,14 +70,14 @@ export class DatabaseConnection {
   constructor(config: ConnectionConfig) {
     this.config = {
       connectionString: config.connectionString,
-      maxConnections: config.maxConnections ?? 20,
-      minConnections: config.minConnections ?? 2,
-      idleTimeoutMillis: config.idleTimeoutMillis ?? 30000,
-      connectionTimeoutMillis: config.connectionTimeoutMillis ?? 5000,
-      statementTimeoutMs: config.statementTimeoutMs ?? 30000,
-      maxRetries: config.maxRetries ?? 5,
-      baseRetryDelayMs: config.baseRetryDelayMs ?? 1000,
-      maxRetryDelayMs: config.maxRetryDelayMs ?? 30000,
+      maxConnections: config.maxConnections ?? LIMITS.DATABASE.MAX_CONNECTIONS,
+      minConnections: config.minConnections ?? LIMITS.DATABASE.MIN_CONNECTIONS,
+      idleTimeoutMillis: config.idleTimeoutMillis ?? TIMEOUTS.DATABASE.IDLE,
+      connectionTimeoutMillis: config.connectionTimeoutMillis ?? TIMEOUTS.DATABASE.CONNECTION,
+      statementTimeoutMs: config.statementTimeoutMs ?? TIMEOUTS.DATABASE.STATEMENT,
+      maxRetries: config.maxRetries ?? CONTEXT_RETRY.DB_CONNECTION.MAX_RETRIES,
+      baseRetryDelayMs: config.baseRetryDelayMs ?? RETRY.DEFAULT.BASE_DELAY_MS,
+      maxRetryDelayMs: config.maxRetryDelayMs ?? RETRY.DEFAULT.MAX_DELAY_MS,
     };
 
     this.stats = {
@@ -321,7 +323,7 @@ export class DatabaseConnection {
   /**
    * Start periodic health checks
    */
-  startHealthChecks(intervalMs: number = 30000): void {
+  startHealthChecks(intervalMs: number = INTERVALS.HEALTH.DATABASE): void {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
     }
