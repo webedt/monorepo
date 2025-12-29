@@ -4,7 +4,6 @@
  */
 
 import { parseMidi, parseMidiFromBase64 } from '@webedt/shared';
-import { AudioSource } from '../audio/audioSource';
 
 import type { MidiFile } from '@webedt/shared';
 import type { MidiFileInfo } from './types';
@@ -18,15 +17,22 @@ import type { MidiTrack } from '@webedt/shared';
 import type { MidiTrackInfo } from './types';
 
 /**
- * Scheduled note for playback
+ * Scheduled note for playback (pending scheduling)
  */
 interface ScheduledNote {
   note: MidiNoteEvent;
   trackIndex: number;
   startTime: number;
   endTime: number;
-  oscillator: OscillatorNode | null;
-  gainNode: GainNode | null;
+}
+
+/**
+ * Active oscillator for cleanup
+ */
+interface ActiveOscillator {
+  oscillator: OscillatorNode;
+  gainNode: GainNode;
+  endTime: number;
 }
 
 /**
@@ -41,10 +47,10 @@ export class MidiPlayer {
   private options: Required<MidiPlayerOptions>;
   private listeners: Set<MidiPlayerListener> = new Set();
   private scheduledNotes: ScheduledNote[] = [];
+  private activeOscillators: ActiveOscillator[] = [];
   private playbackStartTime: number = 0;
   private pauseTime: number = 0;
   private animationFrameId: number | null = null;
-  private audioSource: AudioSource;
 
   constructor(options: MidiPlayerOptions = {}) {
     this.options = {
@@ -65,17 +71,6 @@ export class MidiPlayer {
       isLoaded: false,
       fileName: null,
     };
-
-    this.audioSource = new AudioSource({
-      waveform: 'triangle',
-      volume: this.options.volume,
-      envelope: {
-        attack: 0.02,
-        decay: 0.1,
-        sustain: 0.6,
-        release: 0.2,
-      },
-    });
   }
 
   /**
@@ -87,7 +82,6 @@ export class MidiPlayer {
       this.masterGain = this.audioContext.createGain();
       this.masterGain.connect(this.audioContext.destination);
       this.masterGain.gain.value = this.options.volume;
-      this.audioSource.init(this.audioContext);
     }
   }
 
@@ -280,6 +274,13 @@ export class MidiPlayer {
   }
 
   /**
+   * Set loop mode
+   */
+  setLoop(loop: boolean): void {
+    this.options.loop = loop;
+  }
+
+  /**
    * Toggle track mute
    */
   toggleTrackMute(trackIndex: number): void {
@@ -306,6 +307,13 @@ export class MidiPlayer {
    */
   getState(): MidiPlayerState {
     return { ...this.state };
+  }
+
+  /**
+   * Get the parsed MIDI file (for visualization components)
+   */
+  getMidiFile(): MidiFile | null {
+    return this.midiFile;
   }
 
   /**
@@ -375,7 +383,6 @@ export class MidiPlayer {
   dispose(): void {
     this.stop();
     this.unload();
-    this.audioSource.dispose();
     if (this.masterGain) {
       this.masterGain.disconnect();
       this.masterGain = null;
@@ -469,8 +476,6 @@ export class MidiPlayer {
             trackIndex,
             startTime: note.startTimeSeconds,
             endTime: note.startTimeSeconds + note.durationSeconds,
-            oscillator: null,
-            gainNode: null,
           });
         }
       }
@@ -505,6 +510,18 @@ export class MidiPlayer {
 
     oscillator.start(startTime);
     oscillator.stop(startTime + duration + 0.01);
+
+    // Track active oscillator for cleanup
+    const endTime = startTime + duration + 0.01;
+    this.activeOscillators.push({ oscillator, gainNode, endTime });
+
+    // Auto-cleanup when oscillator ends
+    oscillator.onended = () => {
+      const index = this.activeOscillators.findIndex((o) => o.oscillator === oscillator);
+      if (index !== -1) {
+        this.activeOscillators.splice(index, 1);
+      }
+    };
   }
 
   /**
@@ -514,17 +531,20 @@ export class MidiPlayer {
     if (!this.audioContext) return;
 
     const now = this.audioContext.currentTime;
-    for (const scheduled of this.scheduledNotes) {
-      if (scheduled.oscillator) {
-        try {
-          scheduled.gainNode?.gain.cancelScheduledValues(now);
-          scheduled.gainNode?.gain.setValueAtTime(0, now);
-          scheduled.oscillator.stop(now + 0.01);
-        } catch {
-          // Oscillator may already be stopped
-        }
+
+    // Stop all active oscillators
+    for (const active of this.activeOscillators) {
+      try {
+        active.gainNode.gain.cancelScheduledValues(now);
+        active.gainNode.gain.setValueAtTime(0, now);
+        active.oscillator.stop(now + 0.01);
+      } catch {
+        // Oscillator may already be stopped
       }
     }
+    this.activeOscillators = [];
+
+    // Clear pending notes
     this.scheduledNotes = [];
   }
 
