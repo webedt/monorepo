@@ -5,6 +5,14 @@
  * - auth check - Check Claude authentication status
  * - auth refresh - Refresh Claude access token
  * - auth ensure - Ensure token is valid (refresh if needed)
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands import from @webedt/shared which makes external
+ * API calls. Full integration testing would require ESM module mocking
+ * infrastructure. These tests focus on:
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -16,13 +24,14 @@ import {
   createMockProcessExit,
 } from '../helpers/mocks.js';
 
+import { authCommand } from '../../src/commands/auth.js';
+
 // ============================================================================
 // MOCK SETUP
 // ============================================================================
 
 // Mock the shared package functions
 const mockGetClaudeCredentials = mock.fn<() => Promise<ReturnType<typeof createMockClaudeAuth> | null>>();
-const mockShouldRefreshClaudeToken = mock.fn<(auth: unknown) => boolean>();
 const mockRefreshClaudeToken = mock.fn<(auth: unknown) => Promise<ReturnType<typeof createMockClaudeAuth>>>();
 const mockEnsureValidToken = mock.fn<(auth: unknown) => Promise<ReturnType<typeof createMockClaudeAuth>>>();
 
@@ -58,10 +67,52 @@ function teardownMocks() {
 }
 
 // ============================================================================
-// TESTS: AUTH CHECK COMMAND
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('Auth Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(authCommand.name(), 'auth');
+    });
+
+    it('should have a description', () => {
+      assert.ok(authCommand.description().length > 0);
+    });
+
+    it('should have check, refresh, and ensure subcommands', () => {
+      const subcommands = authCommand.commands.map(cmd => cmd.name());
+      assert.ok(subcommands.includes('check'), 'Missing check subcommand');
+      assert.ok(subcommands.includes('refresh'), 'Missing refresh subcommand');
+      assert.ok(subcommands.includes('ensure'), 'Missing ensure subcommand');
+    });
+
+    it('should have --json option on check subcommand', () => {
+      const checkCmd = authCommand.commands.find(cmd => cmd.name() === 'check');
+      assert.ok(checkCmd, 'check subcommand not found');
+      const options = checkCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--json'), 'Missing --json option');
+    });
+
+    it('should have --json option on refresh subcommand', () => {
+      const refreshCmd = authCommand.commands.find(cmd => cmd.name() === 'refresh');
+      assert.ok(refreshCmd, 'refresh subcommand not found');
+      const options = refreshCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--json'), 'Missing --json option');
+    });
+
+    it('should have --json option on ensure subcommand', () => {
+      const ensureCmd = authCommand.commands.find(cmd => cmd.name() === 'ensure');
+      assert.ok(ensureCmd, 'ensure subcommand not found');
+      const options = ensureCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--json'), 'Missing --json option');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: AUTH CHECK COMMAND
+  // ============================================================================
+
   describe('auth check', () => {
     beforeEach(() => {
       setupMocks();

@@ -7,6 +7,14 @@
  * - users create - Create a new user
  * - users set-admin - Set user admin status
  * - users delete - Delete a user
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands connect to databases. Full integration
+ * testing would require database mocking infrastructure. These tests focus on:
+ * - Command structure verification
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -18,6 +26,8 @@ import {
   createMockConsole,
   createMockProcessExit,
 } from '../helpers/mocks.js';
+
+import { usersCommand } from '../../src/commands/users.js';
 
 // ============================================================================
 // MOCK SETUP
@@ -58,10 +68,54 @@ function teardownMocks() {
 }
 
 // ============================================================================
-// TESTS: USERS LIST COMMAND
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('Users Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(usersCommand.name(), 'users');
+    });
+
+    it('should have a description', () => {
+      assert.ok(usersCommand.description().length > 0);
+    });
+
+    it('should have required subcommands', () => {
+      const subcommands = usersCommand.commands.map(cmd => cmd.name());
+      const requiredCommands = ['list', 'get', 'create', 'set-admin', 'delete'];
+
+      for (const cmd of requiredCommands) {
+        assert.ok(subcommands.includes(cmd), `Missing ${cmd} subcommand`);
+      }
+    });
+
+    it('should have --limit option on list subcommand', () => {
+      const listCmd = usersCommand.commands.find(cmd => cmd.name() === 'list');
+      assert.ok(listCmd, 'list subcommand not found');
+      const options = listCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--limit'), 'Missing --limit option');
+    });
+
+    it('should have --force option on delete subcommand', () => {
+      const deleteCmd = usersCommand.commands.find(cmd => cmd.name() === 'delete');
+      assert.ok(deleteCmd, 'delete subcommand not found');
+      const options = deleteCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--force'), 'Missing --force option');
+    });
+
+    it('should have --admin option on create subcommand', () => {
+      const createCmd = usersCommand.commands.find(cmd => cmd.name() === 'create');
+      assert.ok(createCmd, 'create subcommand not found');
+      const options = createCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--admin'), 'Missing --admin option');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: USERS LIST COMMAND
+  // ============================================================================
+
   describe('users list', () => {
     beforeEach(() => {
       setupMocks();

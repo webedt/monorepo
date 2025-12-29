@@ -3,6 +3,14 @@
  *
  * Tests the LLM operations:
  * - llm execute - Execute a one-off LLM request
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands make LLM API calls. Full integration
+ * testing would require API mocking infrastructure. These tests focus on:
+ * - Command structure verification
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -12,6 +20,8 @@ import {
   createMockConsole,
   createMockProcessExit,
 } from '../helpers/mocks.js';
+
+import { llmCommand } from '../../src/commands/llm.js';
 
 // ============================================================================
 // MOCK TYPES
@@ -72,10 +82,37 @@ function createMockLlmResult(overrides: Partial<LlmResult> = {}): LlmResult {
 }
 
 // ============================================================================
-// TESTS: LLM EXECUTE COMMAND
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('LLM Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(llmCommand.name(), 'llm');
+    });
+
+    it('should have a description', () => {
+      assert.ok(llmCommand.description().length > 0);
+    });
+
+    it('should have execute subcommand', () => {
+      const subcommands = llmCommand.commands.map(cmd => cmd.name());
+      assert.ok(subcommands.includes('execute'), 'Missing execute subcommand');
+    });
+
+    it('should have required arguments on execute subcommand', () => {
+      const executeCmd = llmCommand.commands.find(cmd => cmd.name() === 'execute');
+      assert.ok(executeCmd, 'execute subcommand not found');
+      // Commander stores required arguments in registeredArguments
+      const args = executeCmd.registeredArguments || [];
+      assert.ok(args.length > 0, 'Missing prompt argument');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: LLM EXECUTE COMMAND
+  // ============================================================================
+
   describe('llm execute', () => {
     beforeEach(() => {
       setupMocks();

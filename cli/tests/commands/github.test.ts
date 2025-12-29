@@ -8,6 +8,14 @@
  * - github branches delete - Delete a branch
  * - github pr create - Create a pull request
  * - github pr list - List pull requests
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands make GitHub API calls. Full integration
+ * testing would require API mocking infrastructure. These tests focus on:
+ * - Command structure verification
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -20,6 +28,8 @@ import {
   createMockConsole,
   createMockProcessExit,
 } from '../helpers/mocks.js';
+
+import { githubCommand } from '../../src/commands/github.js';
 
 // ============================================================================
 // MOCK SETUP
@@ -59,10 +69,60 @@ function teardownMocks() {
 }
 
 // ============================================================================
-// TESTS: CREDENTIAL RESOLUTION
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('GitHub Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(githubCommand.name(), 'github');
+    });
+
+    it('should have a description', () => {
+      assert.ok(githubCommand.description().length > 0);
+    });
+
+    it('should have repos, branches, and pr subcommands', () => {
+      const subcommands = githubCommand.commands.map(cmd => cmd.name());
+      assert.ok(subcommands.includes('repos'), 'Missing repos subcommand');
+      assert.ok(subcommands.includes('branches'), 'Missing branches subcommand');
+      assert.ok(subcommands.includes('pr'), 'Missing pr subcommand');
+    });
+
+    it('should have list subcommand under repos', () => {
+      const reposCmd = githubCommand.commands.find(cmd => cmd.name() === 'repos');
+      assert.ok(reposCmd, 'repos subcommand not found');
+      const subcommands = reposCmd.commands.map(cmd => cmd.name());
+      assert.ok(subcommands.includes('list'), 'Missing list subcommand under repos');
+    });
+
+    it('should have list, create, delete subcommands under branches', () => {
+      const branchesCmd = githubCommand.commands.find(cmd => cmd.name() === 'branches');
+      assert.ok(branchesCmd, 'branches subcommand not found');
+      const subcommands = branchesCmd.commands.map(cmd => cmd.name());
+      assert.ok(subcommands.includes('list'), 'Missing list subcommand under branches');
+      assert.ok(subcommands.includes('create'), 'Missing create subcommand under branches');
+      assert.ok(subcommands.includes('delete'), 'Missing delete subcommand under branches');
+    });
+
+    it('should have create and list subcommands under pr', () => {
+      const prCmd = githubCommand.commands.find(cmd => cmd.name() === 'pr');
+      assert.ok(prCmd, 'pr subcommand not found');
+      const subcommands = prCmd.commands.map(cmd => cmd.name());
+      assert.ok(subcommands.includes('create'), 'Missing create subcommand under pr');
+      assert.ok(subcommands.includes('list'), 'Missing list subcommand under pr');
+    });
+
+    it('should have --token option on github command', () => {
+      const options = githubCommand.options.map(opt => opt.long);
+      assert.ok(options.includes('--token'), 'Missing --token option');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: CREDENTIAL RESOLUTION
+  // ============================================================================
+
   describe('Credential Resolution', () => {
     beforeEach(() => {
       setupMocks();

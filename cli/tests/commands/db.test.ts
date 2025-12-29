@@ -3,6 +3,14 @@
  *
  * Tests the database operations command:
  * - db check - Check database connection status
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands connect to real databases. Full integration
+ * testing would require database mocking infrastructure. These tests focus on:
+ * - Command structure verification
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -14,6 +22,8 @@ import {
   createMockConsole,
   createMockProcessExit,
 } from '../helpers/mocks.js';
+
+import { dbCommand } from '../../src/commands/db.js';
 
 // ============================================================================
 // MOCK SETUP
@@ -54,10 +64,36 @@ function teardownMocks() {
 }
 
 // ============================================================================
-// TESTS: DB CHECK COMMAND
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('DB Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(dbCommand.name(), 'db');
+    });
+
+    it('should have a description', () => {
+      assert.ok(dbCommand.description().length > 0);
+    });
+
+    it('should have check subcommand', () => {
+      const subcommands = dbCommand.commands.map(cmd => cmd.name());
+      assert.ok(subcommands.includes('check'), 'Missing check subcommand');
+    });
+
+    it('should have --json option on check subcommand', () => {
+      const checkCmd = dbCommand.commands.find(cmd => cmd.name() === 'check');
+      assert.ok(checkCmd, 'check subcommand not found');
+      const options = checkCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--json'), 'Missing --json option');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: DB CHECK COMMAND
+  // ============================================================================
+
   describe('db check', () => {
     beforeEach(() => {
       setupMocks();

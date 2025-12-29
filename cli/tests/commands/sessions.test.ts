@@ -10,6 +10,14 @@
  * - sessions events - List events for a session
  * - sessions execute - Execute a task
  * - sessions resume - Resume a session with a follow-up message
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands connect to databases and external APIs. Full
+ * integration testing would require mocking infrastructure. These tests focus on:
+ * - Command structure verification
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -23,6 +31,8 @@ import {
   createMockConsole,
   createMockProcessExit,
 } from '../helpers/mocks.js';
+
+import { sessionsCommand } from '../../src/commands/sessions.js';
 
 // ============================================================================
 // MOCK SETUP
@@ -60,10 +70,54 @@ function teardownMocks() {
 }
 
 // ============================================================================
-// TESTS: SESSIONS LIST COMMAND
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('Sessions Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(sessionsCommand.name(), 'sessions');
+    });
+
+    it('should have a description', () => {
+      assert.ok(sessionsCommand.description().length > 0);
+    });
+
+    it('should have required subcommands', () => {
+      const subcommands = sessionsCommand.commands.map(cmd => cmd.name());
+      const requiredCommands = ['list', 'get', 'delete', 'delete-bulk', 'cleanup', 'events', 'execute', 'resume'];
+
+      for (const cmd of requiredCommands) {
+        assert.ok(subcommands.includes(cmd), `Missing ${cmd} subcommand`);
+      }
+    });
+
+    it('should have --user option on list subcommand', () => {
+      const listCmd = sessionsCommand.commands.find(cmd => cmd.name() === 'list');
+      assert.ok(listCmd, 'list subcommand not found');
+      const options = listCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--user'), 'Missing --user option');
+    });
+
+    it('should have --force option on delete subcommand', () => {
+      const deleteCmd = sessionsCommand.commands.find(cmd => cmd.name() === 'delete');
+      assert.ok(deleteCmd, 'delete subcommand not found');
+      const options = deleteCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--force'), 'Missing --force option');
+    });
+
+    it('should have --dry-run option on cleanup subcommand', () => {
+      const cleanupCmd = sessionsCommand.commands.find(cmd => cmd.name() === 'cleanup');
+      assert.ok(cleanupCmd, 'cleanup subcommand not found');
+      const options = cleanupCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--dry-run'), 'Missing --dry-run option');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: SESSIONS LIST COMMAND
+  // ============================================================================
+
   describe('sessions list', () => {
     beforeEach(() => {
       setupMocks();

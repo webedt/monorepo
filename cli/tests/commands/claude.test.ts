@@ -16,6 +16,15 @@
  * - claude web set-permission - Set permission mode
  * - claude web discover-env - Auto-discover environment ID
  * - claude web test - Test scenarios
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands import from @webedt/shared which makes external
+ * API calls. Full integration testing would require ESM module mocking
+ * infrastructure. These tests focus on:
+ * - Command structure verification
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -28,6 +37,8 @@ import {
   createMockConsole,
   createMockProcessExit,
 } from '../helpers/mocks.js';
+
+import { claudeCommand } from '../../src/commands/claude.js';
 
 // ============================================================================
 // MOCK TYPES
@@ -123,10 +134,63 @@ function createMockResumeResult(overrides: Partial<ResumeResult> = {}): ResumeRe
 }
 
 // ============================================================================
-// TESTS: CREDENTIAL RESOLUTION
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('Claude Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(claudeCommand.name(), 'claude');
+    });
+
+    it('should have a description', () => {
+      assert.ok(claudeCommand.description().length > 0);
+    });
+
+    it('should have a web subcommand', () => {
+      const webCmd = claudeCommand.commands.find(cmd => cmd.name() === 'web');
+      assert.ok(webCmd, 'Missing web subcommand');
+    });
+
+    it('should have required subcommands under web', () => {
+      const webCmd = claudeCommand.commands.find(cmd => cmd.name() === 'web');
+      assert.ok(webCmd, 'web subcommand not found');
+
+      const subcommands = webCmd.commands.map(cmd => cmd.name());
+      const requiredCommands = [
+        'list', 'get', 'events', 'execute', 'resume',
+        'archive', 'rename', 'interrupt', 'can-resume',
+        'is-complete', 'send', 'set-permission', 'discover-env'
+      ];
+
+      for (const cmd of requiredCommands) {
+        assert.ok(subcommands.includes(cmd), `Missing ${cmd} subcommand`);
+      }
+    });
+
+    it('should have global options on web command', () => {
+      const webCmd = claudeCommand.commands.find(cmd => cmd.name() === 'web');
+      assert.ok(webCmd, 'web subcommand not found');
+
+      const optionNames = webCmd.options.map(opt => opt.long);
+      assert.ok(optionNames.includes('--token'), 'Missing --token option');
+      assert.ok(optionNames.includes('--environment'), 'Missing --environment option');
+      assert.ok(optionNames.includes('--org'), 'Missing --org option');
+    });
+
+    it('should have test subcommand under web', () => {
+      const webCmd = claudeCommand.commands.find(cmd => cmd.name() === 'web');
+      assert.ok(webCmd, 'web subcommand not found');
+
+      const testCmd = webCmd.commands.find(cmd => cmd.name() === 'test');
+      assert.ok(testCmd, 'Missing test subcommand');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: CREDENTIAL RESOLUTION
+  // ============================================================================
+
   describe('Credential Resolution', () => {
     beforeEach(() => {
       setupMocks();
@@ -994,105 +1058,3 @@ describe('Claude Command Edge Cases', () => {
   });
 });
 
-// ============================================================================
-// TEST SCENARIOS
-// ============================================================================
-
-describe('Claude Test Scenarios', () => {
-  beforeEach(() => {
-    setupMocks();
-  });
-
-  afterEach(() => {
-    teardownMocks();
-  });
-
-  it('scenario1: Execute + Wait + Resume', () => {
-    // Simulate scenario 1 steps
-    const steps = [
-      'Create session',
-      'Execute prompt',
-      'Wait for completion',
-      'Resume with follow-up',
-    ];
-
-    assert.strictEqual(steps.length, 4);
-  });
-
-  it('scenario2: Execute + Early Terminate + Interrupt', () => {
-    const steps = [
-      'Create session',
-      'Execute prompt',
-      'Terminate early',
-      'Interrupt session',
-    ];
-
-    assert.strictEqual(steps.length, 4);
-  });
-
-  it('scenario3: Execute + Terminate + Queue Resume', () => {
-    const steps = [
-      'Create session',
-      'Execute prompt',
-      'Terminate early',
-      'Queue resume message',
-    ];
-
-    assert.strictEqual(steps.length, 4);
-  });
-
-  it('scenario4: Execute + Terminate + Interrupt + Resume', () => {
-    const steps = [
-      'Create session',
-      'Execute prompt',
-      'Terminate early',
-      'Interrupt session',
-      'Resume with follow-up',
-    ];
-
-    assert.strictEqual(steps.length, 5);
-  });
-
-  it('scenario5: Double-Queue test', () => {
-    const steps = [
-      'Create session',
-      'Queue first message',
-      'Queue second message',
-      'Verify both processed',
-    ];
-
-    assert.strictEqual(steps.length, 4);
-  });
-
-  it('scenario6: Execute + Rename', () => {
-    const steps = [
-      'Create session',
-      'Execute prompt',
-      'Rename session',
-    ];
-
-    assert.strictEqual(steps.length, 3);
-  });
-
-  it('scenario7: Execute + Complete + Archive', () => {
-    const steps = [
-      'Create session',
-      'Execute prompt',
-      'Wait for completion',
-      'Archive session',
-    ];
-
-    assert.strictEqual(steps.length, 4);
-  });
-
-  it('scenario8: WebSocket Streaming', () => {
-    const steps = [
-      'Establish WebSocket connection',
-      'Send prompt',
-      'Stream events',
-      'Handle completion',
-    ];
-
-    assert.strictEqual(steps.length, 4);
-  });
-});

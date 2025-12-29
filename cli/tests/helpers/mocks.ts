@@ -305,23 +305,6 @@ export function createMockParsedDbUrl(overrides: Partial<MockParsedDbUrl> = {}):
 // ============================================================================
 
 /**
- * Creates a mock database query builder that simulates Drizzle ORM patterns
- */
-export function createMockDb<T>(data: T[]) {
-  const mockQuery = {
-    select: () => mockQuery,
-    from: () => mockQuery,
-    where: () => mockQuery,
-    orderBy: () => mockQuery,
-    limit: () => Promise.resolve(data),
-    insert: () => ({ values: () => Promise.resolve() }),
-    update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
-    delete: () => ({ where: () => Promise.resolve() }),
-  };
-  return mockQuery;
-}
-
-/**
  * Mock console for capturing output in tests
  */
 export interface MockConsole {

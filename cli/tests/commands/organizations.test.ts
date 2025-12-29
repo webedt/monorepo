@@ -13,6 +13,14 @@
  * - organizations repos - List organization repositories
  * - organizations add-repo - Add a repository to an organization
  * - organizations remove-repo - Remove a repository from an organization
+ *
+ * NOTE: These tests verify expected data structures and output formats.
+ * The actual CLI commands connect to databases. Full integration
+ * testing would require database mocking infrastructure. These tests focus on:
+ * - Command structure verification
+ * - Mock factory validation
+ * - Expected output format verification
+ * - Data structure correctness
  */
 
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
@@ -26,6 +34,8 @@ import {
   createMockConsole,
   createMockProcessExit,
 } from '../helpers/mocks.js';
+
+import { organizationsCommand } from '../../src/commands/organizations.js';
 
 // ============================================================================
 // MOCK SETUP
@@ -63,10 +73,58 @@ function teardownMocks() {
 }
 
 // ============================================================================
-// TESTS: ORGANIZATIONS LIST COMMAND
+// TESTS: COMMAND STRUCTURE
 // ============================================================================
 
 describe('Organizations Command', () => {
+  describe('Command Structure', () => {
+    it('should have the correct command name', () => {
+      assert.strictEqual(organizationsCommand.name(), 'organizations');
+    });
+
+    it('should have a description', () => {
+      assert.ok(organizationsCommand.description().length > 0);
+    });
+
+    it('should have required subcommands', () => {
+      const subcommands = organizationsCommand.commands.map(cmd => cmd.name());
+      const requiredCommands = [
+        'list', 'get', 'create', 'delete', 'members',
+        'add-member', 'remove-member', 'set-role', 'repos',
+        'add-repo', 'remove-repo'
+      ];
+
+      for (const cmd of requiredCommands) {
+        assert.ok(subcommands.includes(cmd), `Missing ${cmd} subcommand`);
+      }
+    });
+
+    it('should have --user option on list subcommand', () => {
+      const listCmd = organizationsCommand.commands.find(cmd => cmd.name() === 'list');
+      assert.ok(listCmd, 'list subcommand not found');
+      const options = listCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--user'), 'Missing --user option');
+    });
+
+    it('should have --force option on delete subcommand', () => {
+      const deleteCmd = organizationsCommand.commands.find(cmd => cmd.name() === 'delete');
+      assert.ok(deleteCmd, 'delete subcommand not found');
+      const options = deleteCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--force'), 'Missing --force option');
+    });
+
+    it('should have --role option on add-member subcommand', () => {
+      const addMemberCmd = organizationsCommand.commands.find(cmd => cmd.name() === 'add-member');
+      assert.ok(addMemberCmd, 'add-member subcommand not found');
+      const options = addMemberCmd.options.map(opt => opt.long);
+      assert.ok(options.includes('--role'), 'Missing --role option');
+    });
+  });
+
+  // ============================================================================
+  // TESTS: ORGANIZATIONS LIST COMMAND
+  // ============================================================================
+
   describe('organizations list', () => {
     beforeEach(() => {
       setupMocks();
