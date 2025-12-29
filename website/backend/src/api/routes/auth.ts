@@ -23,6 +23,7 @@ import {
   ApiErrorCode,
 } from '@webedt/shared';
 import { authRateLimiter } from '../middleware/rateLimit.js';
+import { getCsrfToken, CSRF_CONSTANTS } from '../middleware/csrf.js';
 
 // Validation schemas
 const registerSchema = {
@@ -509,6 +510,54 @@ router.get('/session', async (req: Request, res: Response) => {
     console.error('Session error:', error);
     sendInternalError(res);
   }
+});
+
+/**
+ * @openapi
+ * /auth/csrf-token:
+ *   get:
+ *     tags:
+ *       - Auth
+ *     summary: Get CSRF token
+ *     description: Returns the current CSRF token. The token is also set in a cookie. Frontend should include this token in the X-CSRF-Token header for all state-changing requests (POST, PUT, DELETE, PATCH).
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: CSRF token retrieved successfully
+ *         headers:
+ *           Set-Cookie:
+ *             description: CSRF token cookie (if not already set)
+ *             schema:
+ *               type: string
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     csrfToken:
+ *                       type: string
+ *                       description: The CSRF token to include in X-CSRF-Token header
+ *                     headerName:
+ *                       type: string
+ *                       example: x-csrf-token
+ *                       description: The header name to use when sending the token
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ */
+// Get CSRF token - allows frontend to fetch token for state-changing requests
+router.get('/csrf-token', (req: Request, res: Response) => {
+  const token = getCsrfToken(req, res);
+  sendSuccess(res, {
+    csrfToken: token,
+    headerName: CSRF_CONSTANTS.HEADER_NAME,
+  });
 });
 
 export default router;

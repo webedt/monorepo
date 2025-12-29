@@ -71,6 +71,7 @@ import { authMiddleware } from './api/middleware/auth.js';
 import { verboseLoggingMiddleware, slowRequestLoggingMiddleware } from './api/middleware/verboseLogging.js';
 import { correlationIdMiddleware } from './api/middleware/correlationId.js';
 import { standardRateLimiter, logRateLimitConfig } from './api/middleware/rateLimit.js';
+import { csrfTokenMiddleware, csrfValidationMiddleware } from './api/middleware/csrf.js';
 
 // Import health monitoring and metrics utilities
 import {
@@ -294,6 +295,13 @@ app.use(slowRequestLoggingMiddleware(2000)); // Log requests taking more than 2 
 
 // Add auth middleware
 app.use(authMiddleware);
+
+// CSRF protection middleware
+// Token generation: Ensures a CSRF token cookie exists for all responses
+app.use(csrfTokenMiddleware);
+// Token validation: Validates CSRF tokens on state-changing requests (POST, PUT, DELETE, PATCH)
+// SSE endpoints, webhooks, and health checks are exempt
+app.use(csrfValidationMiddleware);
 
 // Apply standard rate limiting to all API routes
 // This provides defense-in-depth alongside infrastructure-level limits
