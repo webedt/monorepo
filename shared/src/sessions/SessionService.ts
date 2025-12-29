@@ -12,6 +12,7 @@ import { ASession } from './ASession.js';
 import { db, chatSessions, events, messages, withTransactionOrThrow } from '../db/index.js';
 import { ClaudeRemoteProvider } from '../execution/providers/claudeRemoteProvider.js';
 import { ClaudeWebClient } from '../claudeWeb/index.js';
+import { extractEventUuid } from '../utils/helpers/eventHelper.js';
 import { normalizeRepoUrl, generateSessionPath } from '../utils/helpers/sessionPathHelper.js';
 import { logger } from '../utils/logging/logger.js';
 import { ensureValidToken } from '../auth/claudeAuth.js';
@@ -153,7 +154,7 @@ export class SessionService extends ASession {
       }
 
       // Store event in database - deduplicate by UUID
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -161,6 +162,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -329,7 +331,7 @@ export class SessionService extends ASession {
         await onEvent(event);
       }
 
-      const eventUuid = (event as { uuid?: string }).uuid;
+      const eventUuid = extractEventUuid(event as Record<string, unknown>);
       if (eventUuid && storedEventUuids.has(eventUuid)) {
         return;
       }
@@ -337,6 +339,7 @@ export class SessionService extends ASession {
       try {
         await db.insert(events).values({
           chatSessionId: sessionId,
+          uuid: eventUuid,
           eventData: event,
         });
         if (eventUuid) {
@@ -455,17 +458,14 @@ export class SessionService extends ASession {
       const eventsResponse = await client.getEvents(session.remoteSessionId);
       const remoteEvents = eventsResponse.data || [];
 
-      // Get existing event UUIDs for this session
-      // TODO(perf): Currently fetches all eventData to extract UUIDs. For sessions with
-      // many events, this can be slow. Consider adding a dedicated 'uuid' column to the
-      // events table with an index for more efficient deduplication queries.
+      // Get existing event UUIDs for this session using the indexed uuid column
       const existingEvents = await db
-        .select({ eventData: events.eventData })
+        .select({ uuid: events.uuid })
         .from(events)
         .where(eq(events.chatSessionId, sessionId));
 
       const existingUuids = new Set(
-        existingEvents.map(e => (e.eventData as { uuid?: string })?.uuid).filter(Boolean)
+        existingEvents.map(e => e.uuid).filter((uuid): uuid is string => uuid !== null)
       );
 
       // Filter to only new events
@@ -528,6 +528,7 @@ export class SessionService extends ASession {
             await tx.insert(events).values(
               eventsToInsert.map(event => ({
                 chatSessionId: sessionId,
+                uuid: extractEventUuid(event as Record<string, unknown>),
                 eventData: event,
                 timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
               }))
