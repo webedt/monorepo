@@ -657,7 +657,6 @@ export class SettingsPage extends Page<PageOptions> {
           <span class="connection-status ${isGitHubConnected ? 'connected' : 'disconnected'}">
             ${isGitHubConnected ? 'Connected' : 'Not connected'}
           </span>
-          <span class="connection-description">Required for repo operations</span>
         </div>
         <div class="connection-action github-action"></div>
       </div>
@@ -668,7 +667,6 @@ export class SettingsPage extends Page<PageOptions> {
           <span class="connection-status ${isClaudeConnected ? 'connected' : 'disconnected'}">
             ${isClaudeConnected ? 'Connected' : 'Not connected'}
           </span>
-          <span class="connection-description">AI functionality</span>
         </div>
         <div class="connection-action claude-action"></div>
       </div>
