@@ -178,6 +178,9 @@ export class CloudSavesService {
           await StorageService.removeUsage(userId, Math.abs(sizeDiff));
         }
       }
+
+      // Prune old versions after transaction commits
+      await this.pruneVersions(save.id, userId);
     } else {
       // Create new save
       const newSave: NewCloudSave = {
@@ -288,15 +291,10 @@ export class CloudSavesService {
       const freedBytes = versionsToDelete.reduce((sum, v) => sum + v.fileSize, 0);
       const versionIds = versionsToDelete.map((v) => v.id);
 
-      // Use transaction to ensure batch delete is atomic
-      await withTransactionOrThrow(db, async (tx: TransactionContext) => {
-        // Batch delete all versions at once
-        await tx.delete(cloudSaveVersions).where(inArray(cloudSaveVersions.id, versionIds));
-      }, {
-        context: { operation: 'pruneVersions', cloudSaveId, versionCount: versionIds.length },
-      });
+      // Single DELETE is already atomic, no transaction needed
+      await db.delete(cloudSaveVersions).where(inArray(cloudSaveVersions.id, versionIds));
 
-      // Update storage usage after transaction commits
+      // Update storage usage
       if (freedBytes > 0) {
         await StorageService.removeUsage(userId, freedBytes);
       }
