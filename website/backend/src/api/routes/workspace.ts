@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db, workspacePresence, workspaceEvents, users, eq, and, gt, desc } from '@webedt/shared';
 import { requireAuth } from '../middleware/auth.js';
+import { collaborationRateLimiter } from '../middleware/rateLimit.js';
 import { logger } from '@webedt/shared';
 
 const router = Router();
@@ -15,8 +16,9 @@ const OFFLINE_THRESHOLD_MS = 30 * 1000;
 /**
  * PUT /api/workspace/presence
  * Update presence for the current user on a branch
+ * Rate limited to prevent presence spam (60/min per user)
  */
-router.put('/presence', async (req: Request, res: Response) => {
+router.put('/presence', collaborationRateLimiter, async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const { owner, repo, branch, page, cursorX, cursorY, selection } = req.body;
@@ -158,8 +160,9 @@ router.delete('/presence/:owner/:repo/:branch', async (req: Request, res: Respon
 /**
  * POST /api/workspace/events
  * Log a workspace event
+ * Rate limited to prevent event spam (60/min per user)
  */
-router.post('/events', async (req: Request, res: Response) => {
+router.post('/events', collaborationRateLimiter, async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const { owner, repo, branch, eventType, page, path, payload } = req.body;
