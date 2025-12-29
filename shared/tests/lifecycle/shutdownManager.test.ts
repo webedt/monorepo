@@ -18,8 +18,6 @@ import {
   ShutdownPriority,
 } from '../../src/lifecycle/index.js';
 
-import type { IShutdownHandler } from '../../src/lifecycle/index.js';
-
 describe('ShutdownManager', () => {
   beforeEach(() => {
     // Reset the shutdown manager before each test
@@ -71,6 +69,30 @@ describe('ShutdownManager', () => {
       const removed = shutdownManager.unregister('non-existent');
 
       assert.strictEqual(removed, false);
+    });
+
+    it('should return true when registration succeeds', () => {
+      const handler = createShutdownHandler('test', () => {});
+
+      const result = shutdownManager.register(handler);
+
+      assert.strictEqual(result, true);
+    });
+
+    it('should return false when registering during shutdown', async () => {
+      shutdownManager.register(createShutdownHandler('existing', async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }));
+
+      // Start shutdown
+      const shutdownPromise = shutdownManager.shutdown('test');
+
+      // Try to register during shutdown
+      const result = shutdownManager.register(createShutdownHandler('new', () => {}));
+
+      await shutdownPromise;
+
+      assert.strictEqual(result, false);
     });
   });
 
