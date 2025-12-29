@@ -610,20 +610,7 @@ export class SessionService extends ASession {
       return null;
     }
 
-    return {
-      id: session.id,
-      userId: session.userId,
-      status: session.status as 'pending' | 'running' | 'completed' | 'error',
-      userRequest: session.userRequest || undefined,
-      repositoryOwner: session.repositoryOwner || undefined,
-      repositoryName: session.repositoryName || undefined,
-      branch: session.branch || undefined,
-      remoteSessionId: session.remoteSessionId || undefined,
-      remoteWebUrl: session.remoteWebUrl || undefined,
-      totalCost: session.totalCost || undefined,
-      createdAt: session.createdAt || undefined,
-      completedAt: session.completedAt || undefined,
-    };
+    return this.mapSessionToInfo(session);
   }
 
   async list(userId: string, limit: number = 20): Promise<SessionInfo[]> {
@@ -634,20 +621,7 @@ export class SessionService extends ASession {
       .orderBy(desc(chatSessions.createdAt))
       .limit(limit);
 
-    return sessions.map(session => ({
-      id: session.id,
-      userId: session.userId,
-      status: session.status as 'pending' | 'running' | 'completed' | 'error',
-      userRequest: session.userRequest || undefined,
-      repositoryOwner: session.repositoryOwner || undefined,
-      repositoryName: session.repositoryName || undefined,
-      branch: session.branch || undefined,
-      remoteSessionId: session.remoteSessionId || undefined,
-      remoteWebUrl: session.remoteWebUrl || undefined,
-      totalCost: session.totalCost || undefined,
-      createdAt: session.createdAt || undefined,
-      completedAt: session.completedAt || undefined,
-    }));
+    return sessions.map(session => this.mapSessionToInfo(session));
   }
 
   async delete(sessionId: string): Promise<void> {
