@@ -7,8 +7,9 @@ import './styles/index.css';
 import { router } from './lib/router';
 import { theme, THEMES, THEME_META } from './lib/theme';
 import type { Theme } from './lib/theme';
-import { IconButton, Button } from './components';
+import { IconButton, Button, DebugOutputPanel } from './components';
 import { authStore } from './stores/authStore';
+import { debugStore } from './stores/debugStore';
 import { TAGLINES } from './constants/taglines';
 import { getVersion, getVersionSHA, getVersionTimestamp, GITHUB_REPO_URL } from './version';
 import {
@@ -275,6 +276,48 @@ function createThemeDropdown(): HTMLElement {
 }
 
 /**
+ * Create the debug console toggle button
+ */
+function createDebugToggle(): HTMLElement {
+  const container = document.createElement('div');
+  container.className = 'debug-toggle-btn';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'theme-dropdown-trigger';
+  button.setAttribute('aria-label', 'Toggle debug console');
+  button.title = 'Debug Console';
+  button.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="4 17 10 11 4 5"/>
+      <line x1="12" y1="19" x2="20" y2="19"/>
+    </svg>
+  `;
+
+  // Error badge
+  const badge = document.createElement('span');
+  badge.className = 'debug-error-badge';
+  container.appendChild(button);
+  container.appendChild(badge);
+
+  // Update badge on store changes
+  const updateBadge = () => {
+    const counts = debugStore.getCounts();
+    const errorCount = counts.error + counts.warn;
+    badge.textContent = errorCount > 0 ? String(errorCount > 99 ? '99+' : errorCount) : '';
+  };
+
+  debugStore.subscribe(updateBadge);
+  updateBadge();
+
+  button.addEventListener('click', () => {
+    debugStore.toggle();
+  });
+
+  return container;
+}
+
+/**
  * Update the header based on auth state
  */
 function updateHeader(): void {
@@ -353,6 +396,10 @@ function updateHeader(): void {
     });
     actions.appendChild(settingsBtn.getElement());
   }
+
+  // Debug console toggle
+  const debugToggle = createDebugToggle();
+  actions.appendChild(debugToggle);
 
   // Theme dropdown
   const themeDropdown = createThemeDropdown();
@@ -746,6 +793,13 @@ async function init(): Promise<void> {
   // Create and mount layout
   const layout = createLayout();
   appElement.appendChild(layout);
+
+  // Initialize debug console capture
+  debugStore.initialize();
+
+  // Create and mount debug panel
+  const debugPanel = new DebugOutputPanel({ position: 'bottom' });
+  debugPanel.mount(document.body);
 
   // Initialize auth
   await authStore.initialize();

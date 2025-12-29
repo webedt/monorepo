@@ -1,0 +1,386 @@
+/*
+ * Debug Output Panel Styles
+ */
+
+.debug-output-panel {
+  position: fixed;
+  z-index: var(--z-modal);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+}
+
+.debug-output-panel[hidden] {
+  display: none;
+}
+
+/* Bottom position */
+.debug-output-panel--bottom {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom: none;
+}
+
+/* Right position */
+.debug-output-panel--right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  border-right: none;
+}
+
+/* Resize handle */
+.debug-output-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+  cursor: ns-resize;
+  background: transparent;
+  transition: background-color var(--transition-fast);
+}
+
+.debug-output-resize-handle:hover,
+.debug-output-panel.resizing .debug-output-resize-handle {
+  background-color: var(--color-primary-500);
+}
+
+.debug-output-panel--right .debug-output-resize-handle {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  width: 4px;
+  height: auto;
+  cursor: ew-resize;
+}
+
+/* Header */
+.debug-output-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 40px;
+}
+
+/* Title */
+.debug-output-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-sans);
+}
+
+.debug-output-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-secondary);
+}
+
+/* Filter tabs */
+.debug-output-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  margin-left: var(--spacing-2);
+}
+
+.debug-output-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.debug-output-filter:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.debug-output-filter.active {
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
+.debug-output-count {
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  font-size: 10px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.debug-output-filter.active .debug-output-count {
+  background: var(--color-primary-100);
+}
+
+/* Filter for warn level */
+.debug-output-filter[data-level="warn"] .debug-output-count {
+  color: var(--color-warning-600);
+}
+
+/* Filter for error level */
+.debug-output-filter[data-level="error"] .debug-output-count {
+  color: var(--color-error-600);
+}
+
+/* Search */
+.debug-output-search {
+  flex: 1;
+  max-width: 200px;
+}
+
+.debug-output-search-input {
+  width: 100%;
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-family-sans);
+  transition: border-color var(--transition-fast);
+}
+
+.debug-output-search-input:focus {
+  outline: none;
+  border-color: var(--color-primary-500);
+}
+
+.debug-output-search-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* Actions */
+.debug-output-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  margin-left: auto;
+}
+
+.debug-output-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.debug-output-action:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.debug-output-action.success {
+  color: var(--color-success-500);
+}
+
+.debug-output-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.debug-output-close:hover {
+  color: var(--color-error-500);
+}
+
+/* Entries container */
+.debug-output-entries {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--spacing-1) 0;
+}
+
+/* Empty state */
+.debug-output-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-sm);
+}
+
+/* Entry row */
+.debug-output-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background-color var(--transition-fast);
+}
+
+.debug-output-entry:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.debug-output-entry:last-child {
+  border-bottom: none;
+}
+
+/* Entry timestamp */
+.debug-output-time {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  min-width: 65px;
+}
+
+/* Entry icon */
+.debug-output-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.debug-output-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Level colors */
+.debug-output-entry--log .debug-output-icon {
+  color: var(--color-text-secondary);
+}
+
+.debug-output-entry--info .debug-output-icon {
+  color: var(--color-info-500);
+}
+
+.debug-output-entry--warn {
+  background-color: var(--color-warning-50);
+}
+
+.debug-output-entry--warn .debug-output-icon {
+  color: var(--color-warning-500);
+}
+
+.debug-output-entry--error {
+  background-color: var(--color-error-50);
+}
+
+.debug-output-entry--error .debug-output-icon {
+  color: var(--color-error-500);
+}
+
+.debug-output-entry--debug .debug-output-icon {
+  color: var(--color-text-tertiary);
+}
+
+/* Category badge */
+.debug-output-category {
+  flex-shrink: 0;
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+}
+
+/* Message */
+.debug-output-message {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  white-space: pre-wrap;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+/* Dark mode adjustments */
+:root[data-theme="dark"] .debug-output-entry--warn {
+  background-color: rgba(234, 179, 8, 0.1);
+}
+
+:root[data-theme="dark"] .debug-output-entry--error {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+:root[data-theme="dark"] .debug-output-category {
+  background: var(--color-primary-900);
+  color: var(--color-primary-300);
+}
+
+/* Scrollbar styling */
+.debug-output-entries::-webkit-scrollbar {
+  width: 8px;
+}
+
+.debug-output-entries::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.debug-output-entries::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+.debug-output-entries::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+/* Toggle button (used in header) */
+.debug-toggle-btn {
+  position: relative;
+}
+
+.debug-toggle-btn .debug-error-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--color-error-500);
+  color: white;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.debug-toggle-btn .debug-error-badge:empty {
+  display: none;
+}

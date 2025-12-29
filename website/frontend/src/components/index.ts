@@ -197,3 +197,7 @@ export type { SceneTabsOptions } from './scene-tabs';
 // EditModeToolbar
 export { EditModeToolbar } from './edit-mode-toolbar';
 export type { EditModeToolbarOptions } from './edit-mode-toolbar';
+
+// DebugOutputPanel
+export { DebugOutputPanel } from './debug-output';
+export type { DebugOutputPanelOptions } from './debug-output';
